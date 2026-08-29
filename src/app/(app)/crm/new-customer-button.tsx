@@ -26,8 +26,6 @@ export function NewCustomerButton() {
   const [prefill, setPrefill] = useState(EMPTY);
   const [formKey, setFormKey] = useState(0);
   const [importMsg, setImportMsg] = useState<string | null>(null);
-  const [coach, setCoach] = useState<string | null>(null);
-  const [dragging, setDragging] = useState(false);
 
   const [hasPicker, setHasPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -64,7 +62,6 @@ export function NewCustomerButton() {
     setState("");
     setZip("");
     setImportMsg(null);
-    setCoach(null);
     setError(null);
     // Remount the defaultValue fields ONLY when a previous session left content behind —
     // remounting on every open raced Safari's form scan (see the form-level note below).
@@ -173,34 +170,12 @@ export function NewCustomerButton() {
             />
           }
         >
-          <div
-            className={`space-y-4 rounded-xl transition-shadow ${dragging ? "ring-2 ring-brand ring-offset-2" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(e) => {
-              /* CONTACTS.APP IS THE PICKER. On the Mac, dragging a person out of Contacts drags a
-                 .vcf — ⌘Space their name, drag the card here, the whole form fills. Deterministic
-                 where Safari's autofill matcher is moody, zero setup, one contact at a time, and
-                 nothing personal ever stored — the answer to the synced-book idea Erik rightly
-                 killed ("nobody wants all of their contacts in their business folder"). */
-              e.preventDefault();
-              setDragging(false);
-              const f = e.dataTransfer.files?.[0];
-              if (f && /\.vcf$|vcard/i.test(f.name + f.type)) {
-                f.text().then((t) => {
-                  const rows = parseVCards(t);
-                  if (rows[0]) { applyContact(rows[0]); setImportMsg("Filled from the card — review and save."); }
-                  else setImportMsg("Couldn't read that card.");
-                });
-                return;
-              }
-              const txt = e.dataTransfer.getData("text/vcard") || e.dataTransfer.getData("text/plain");
-              if (txt && /BEGIN:VCARD/i.test(txt)) {
-                const rows = parseVCards(txt);
-                if (rows[0]) { applyContact(rows[0]); setImportMsg("Filled from the card — review and save."); }
-              }
-            }}
-          >
+          {/* KISS (Erik, after the drag-drop froze Safari solid): no drop targets, no
+              coaching machinery, no wrestling the browser. The declared fields quietly power
+              whatever autofill each platform natively offers; the picker button appears only
+              where the real Contact Picker API exists; the full native-sheet experience waits
+              for the native shell, where CNContactPicker does it properly. */}
+          <div className="space-y-4">
             {/* THE PHONE'S OWN CONTACTS, by whichever door this platform actually opens.
                 Erik, on the old dashed box: "archaic ... it should be a contact picker."
                 · Where the Contact Picker API exists (Android Chrome; Safari the browser), the
@@ -209,63 +184,23 @@ export function NewCustomerButton() {
                   with the fields declared (autocomplete name/tel/email), focusing Name or Phone
                   puts the person's contact right on the QuickType bar. So there, the guidance IS
                   the feature, one quiet line — not a dashed ritual box explaining a .vcf safari. */}
-            {/* ONE OBVIOUS BUTTON, whichever door this platform opens. Erik found the iOS
-                keyboard flow himself (AutoFill Contact → Other Contact… → the full native picker,
-                per-field checkboxes and all, INSIDE the installed app) — "but it wasnt obvious."
-                A grey hint line is not a feature. The button is:
-                  · real Contact Picker API (Android Chrome, Safari the browser) → opens it
-                  · iPhone/iPad installed app → focuses Name and points at the AutoFill Contact
-                    bar now sitting one inch away above the keyboard
-                  · Mac → focuses Name and says the Mac's gesture: type the name, matching
-                    contacts drop down ("it doesnt do that on the computer" — different door,
-                    same book). */}
-            <div className="space-y-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setImportMsg(null);
-                    if (hasPicker) { importContact(); return; }
-                    /* NO programmatic focus — Safari arms its contact matching most reliably off
-                       the user's OWN click into the field, and stealing that click was part of
-                       why the Mac flow that "worked that one time" stopped working. */
-                    setCoach(
-                      navigator.maxTouchPoints > 0
-                        ? "Now tap “AutoFill Contact” above the keyboard → “Other Contact…” and pick them."
-                        : /* THE MAC'S REAL MECHANISM, decoded by Erik: "something was telling
-                             that little blue button to catch what was being typed." Exactly —
-                             Safari matches the letters typed in Name against Contacts and
-                             re-targets the blue card to THAT person; that is what worked the one
-                             time. It is also moody under a 2,000-contact book (it served S-names
-                             for "Jeff"), so the deterministic door is the drag: Contacts.app IS
-                             the picker, and this form catches the card. */
-                          /* DRAG LEADS on the Mac. The typed-match works but rides Safari's own
-                             matcher, which doubles rows and freezes on a big book (two providers —
-                             Contacts and form history — answering at once, their merge, their
-                             stall; our input does zero work per keystroke). The drag involves no
-                             matcher at all: Contacts.app is the picker, this form is the catch. */
-                          /* Erik reproduced the full flow (Sherri Taylor's card, per-field
-                             toggles) and then "it disappeared when i clicked away" — the panel is
-                             a focus-anchored popover and ANY outside click dismisses it, by
-                             Safari's design. The last inch is the blue AutoFill button ON the
-                             panel. Say so. */
-                          "Type their name in Name and pick them — then press the blue AutoFill button ON the panel (clicking anywhere else closes it). Or drag their card here from Contacts (⌘Space their name) — the drag never stalls.",
-                    );
-                  }}
-                >
+            <div className="flex flex-wrap items-center gap-2">
+              {hasPicker && (
+                <Button type="button" size="sm" variant="outline" onClick={importContact}>
                   <Contact className="h-4 w-4 shrink-0" /> Add from my Contacts
                 </Button>
-                <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] text-slate-400 underline-offset-2 hover:text-brand hover:underline">
-                  or import a .vcf
-                </button>
-              </div>
-              {coach && (
-                <p className="rounded-lg bg-brand-light/50 px-2.5 py-1.5 text-xs font-medium text-brand">{coach}</p>
               )}
-              {importMsg && <p className="text-[11px] font-medium text-emerald-600">{importMsg}</p>}
+              <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] text-slate-400 underline-offset-2 hover:text-brand hover:underline">
+                import a .vcf
+              </button>
+              {importMsg && <span className="text-[11px] font-medium text-emerald-600">{importMsg}</span>}
             </div>
+            {/* One line, no machinery — Erik reached the full card panel twice by typing, so the
+                gesture is real; it just needed saying once. */}
+            <p className="text-[11px] leading-snug text-slate-400">
+              Tip: type the person&apos;s name and pick them when your browser offers the card —
+              then press <span className="font-medium text-slate-500">AutoFill</span> on the card itself.
+            </p>
             <input
               ref={fileRef}
               type="file"
