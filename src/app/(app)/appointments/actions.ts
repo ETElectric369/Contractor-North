@@ -1083,3 +1083,92 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
   revalidatePath(`/appointments/${id}`);
   return { ok: true };
 }
+
+/**
+ * THE INSPECTOR, FROM THE JOB — an access point, not a wall.
+ *
+ * Erik: "on the job page we need to have a button for the inspection which open the inspector at
+ * any moment referring to any and all data input there from any entrance point so an access point
+ * not a wall."
+ *
+ * The Inspector (field notes, photos, the typed sheet, the customer's intake answers) lives on an
+ * appointment record — which was fine while every piece of work passed through an appointment, and
+ * became a wall the day sold work started going straight to a job. The data is often already there
+ * from an earlier entrance (the walk-through, the lead's intake); this finds it rather than
+ * starting a blank one.
+ *
+ * Resolution order — most data first:
+ *   1. a visit already linked to THIS job (newest, not cancelled)
+ *   2. a visit on the job's LEAD — the walk-through that sold it, capture and all
+ *   3. nothing anywhere → create one now, seeded from the lead when there is one (intake answers
+ *      and plan brief carry, via the same one-tap door the lead row uses), linked to the job.
+ */
+export async function openJobInspector(jobId: string): Promise<Result & { redirect?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, name, inquiry_id, customer_id, address, city, state, zip")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "Job not found." };
+
+  const { data: own } = await supabase
+    .from("appointments")
+    .select("id")
+    .eq("job_id", jobId)
+    .neq("status", "cancelled")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (own) return { ok: true, id: own.id, redirect: `/appointments/${own.id}` };
+
+  if (job.inquiry_id) {
+    const { data: fromLead } = await supabase
+      .from("appointments")
+      .select("id")
+      .eq("inquiry_id", job.inquiry_id)
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fromLead) {
+      // Adopt it: the job is this work's durable record, and linking makes the calendar draw ONE
+      // thing and every later "where are the notes?" resolve here first.
+      await supabase.from("appointments").update({ job_id: jobId }).eq("id", fromLead.id);
+      return { ok: true, id: fromLead.id, redirect: `/appointments/${fromLead.id}` };
+    }
+    // Seeded from the lead — intake answers and the plan brief carry, same as the lead-row door.
+    const made = await createInspectionNow({ inquiryId: job.inquiry_id });
+    if (made.ok && made.id) {
+      await supabase.from("appointments").update({ job_id: jobId }).eq("id", made.id);
+      return { ok: true, id: made.id, redirect: `/appointments/${made.id}` };
+    }
+    return made;
+  }
+
+  // A lead-less job still gets its notes surface — seeded from the job itself.
+  const { data: appt, error } = await supabase
+    .from("appointments")
+    .insert({
+      type: "other",
+      title: `Site notes — ${job.name}`,
+      starts_at: new Date().toISOString(),
+      status: "scheduled",
+      location: job.address ?? null,
+      city: job.city ?? null,
+      state: job.state ?? null,
+      zip: job.zip ?? null,
+      customer_id: job.customer_id ?? null,
+      job_id: jobId,
+      assigned_to: ctx.userId,
+      created_by: ctx.userId,
+    })
+    .select("id")
+    .single();
+  if (error || !appt) return { ok: false, error: dbError(error) };
+  revalidatePath(`/jobs/${jobId}`);
+  return { ok: true, id: appt.id, redirect: `/appointments/${appt.id}` };
+}

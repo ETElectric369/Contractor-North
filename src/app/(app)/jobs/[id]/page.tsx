@@ -1,5 +1,6 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { SettleUpButton } from "@/components/settle-up-button";
+import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
@@ -1042,6 +1043,9 @@ export default async function JobDetailPage({
           {viewerIsStaff && j.status !== "cancelled" && (
             <SettleUpButton source="job" id={j.id} compact />
           )}
+          {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
+              away. An access point, not a wall. */}
+          {viewerIsStaff && <OpenInspectorButton jobId={j.id} />}
           {/* Provenance backlink — where this job came from (the lead it was converted from). */}
           {(j as any).inquiry && (
             <Link href={`/leads?focus=${(j as any).inquiry.id}`} className="text-brand hover:underline">
