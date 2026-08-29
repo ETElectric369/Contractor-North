@@ -427,6 +427,29 @@ export async function convertInquiry(
       return { ok: true, token: res.token, phone: inq.phone ?? null };
     }
 
+    /* A SERVICE CALL IS A JOB. Erik, after paying Nora out through an appointment page: "nora is
+       set as a service call which means im in and out and all the inspection estimate and all that
+       stuff in the way... i dont need a pay now button on the inspection page i need a job page
+       for the job that was done with a pay button."
+       So a lead tagged JOB or SERVICE, given a firm day, doesn't book a visit at all — it BECOMES
+       the job, placed on that day (multi-day spans and the start time included), with the job
+       page's Done and Pay now waiting at the end. The inspection machinery never enters the
+       picture, because nothing is being inspected: the work is sold and somebody is going to go do
+       it. "Let them pick" keeps the appointment shape — a job can't be placed on an unchosen day. */
+    const declaredKind = String((inq as { work_kind?: string | null }).work_kind ?? "");
+    if ((declaredKind === "job" || declaredKind === "service") && opts.startDate) {
+      const conv = await convertInquiry(id, "job", {});
+      const jobId = conv.ok ? /^\/jobs\/(.+)$/.exec(conv.redirect ?? "")?.[1] : undefined;
+      if (!conv.ok || !jobId) {
+        return conv.ok ? { ok: false, error: "Couldn't turn this into a job." } : conv;
+      }
+      const placed = await placeJobOnDay(jobId, opts.startDate, opts.startTime);
+      if (!placed.ok) {
+        return { ok: false, error: placed.error ?? "The job was created but didn't land on the day — place it from the board." };
+      }
+      return { ok: true, redirect: `/jobs/${jobId}` };
+    }
+
     // "Book it": a firm 9 AM slot — built in the ORG timezone (the old
     // `new Date(date+"T00:00:00"); setHours(9)` parsed as SERVER-local UTC,
     // landing the inspection at 2 AM Pacific).
@@ -782,31 +805,8 @@ export async function scheduleLeadsOnDay(
       failures.push({ id: ids[i], error: "This one already has a visit booked — move that one instead." });
       continue;
     }
-    /* THE DESIGNATION DOES THE CONVERTING — inside the flow, not behind a button.
-       Erik killed the "Make it a job" verb on sight: "that is part of the flow as you already
-       know." A lead he marked JOB, tapped onto a day, becomes a REAL JOB on that day — customer
-       minted with dedup, lead stamped won, the job page's Done button waiting at the end — not an
-       appointment wearing a job costume that later needs a second conversion. Every other kind
-       still books as the visit it is. */
-    const { data: tag } = await ctx.supabase
-      .from("inquiries")
-      .select("work_kind")
-      .eq("id", ids[i])
-      .maybeSingle();
-    if ((tag as { work_kind?: string | null } | null)?.work_kind === "job") {
-      const conv = await convertInquiry(ids[i], "job", {});
-      // convertInquiry's `id` is the CUSTOMER (its customer-target contract); the job travels in
-      // the redirect. Parsed rather than restructuring a return shape other callers rely on.
-      const jobId = conv.ok ? /^\/jobs\/(.+)$/.exec(conv.redirect ?? "")?.[1] : undefined;
-      if (conv.ok && jobId) {
-        const placed = await placeJobOnDay(jobId, date, times[i]);
-        if (placed.ok) booked++;
-        else failures.push({ id: ids[i], error: placed.error ?? "The job was created but didn't land on the day — place it from the board." });
-      } else {
-        failures.push({ id: ids[i], error: conv.error ?? "Couldn't convert this one." });
-      }
-      continue;
-    }
+    // The job/service fork lives INSIDE convertInquiry's firm-booking branch now — one fork,
+    // every door (this rail, the lead modal's "Book it") behaves identically.
     const res = await convertInquiry(ids[i], "inspection", { startDate: date, startTime: times[i] });
     if (res.ok) booked++;
     else failures.push({ id: ids[i], error: res.error ?? "Couldn't book this one." });
