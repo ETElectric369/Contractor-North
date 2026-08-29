@@ -65,6 +65,8 @@ export type Placeable = {
   /** Parked (jobs.status = 'on_hold'). It may still carry a stale date; placing it takes it off
    *  hold, because giving something a day is the opposite of parking it. */
   onHold?: boolean;
+  /** WHY it's parked (0234) — "waiting on the permit". The reason is the next action. */
+  holdReason?: string | null;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
   type?: string | null;
   /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred

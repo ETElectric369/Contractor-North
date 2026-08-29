@@ -718,3 +718,51 @@ export async function planDayTimes(
   });
   return { ok: true, times: starts.map((m) => (m === PINNED_TO_TOP ? fromHHMM : minutesToHm(m))) };
 }
+
+/**
+ * PARK A JOB WITH ITS REASON, OR WAKE IT — from the board itself.
+ *
+ * Erik: "the tanager job requires a permit so im thinking that any On Hold job should have a
+ * reason and therefore needs an action... with the tanager ln and others ive had to click out to
+ * jobs and find it and change the dropdown to on hold from there."
+ *
+ * The round trip (rail → Jobs → find it → dropdown → back) is exactly the leaving-page-and-back
+ * churn the planner exists to kill. And a hold WITHOUT a reason is a shrug: "on hold — waiting on
+ * the permit" is an action wearing a status, so the reason is asked for at the moment of parking,
+ * the only moment anybody remembers it.
+ */
+export async function setJobHold(jobId: string, reason: string | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+
+  if (reason !== null) {
+    const { data, error } = await ctx.supabase
+      .from("jobs")
+      .update({ status: "on_hold", hold_reason: reason.trim() || null, updated_at: new Date().toISOString() })
+      .eq("id", jobId)
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (!data?.length) return { ok: false, error: "That job isn't available." };
+  } else {
+    // Waking up: back to where its date says it belongs — scheduled if it has one, the waiting
+    // room if it doesn't. The reason clears with the hold; a stale reason is a false alarm.
+    const { data: j } = await ctx.supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
+    const { data, error } = await ctx.supabase
+      .from("jobs")
+      .update({
+        status: j?.scheduled_start ? "scheduled" : "to_be_scheduled",
+        hold_reason: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", jobId)
+      .eq("status", "on_hold")
+      .select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (!data?.length) return { ok: false, error: "That job isn't on hold." };
+  }
+  revalidatePath("/schedule");
+  revalidatePath("/jobs");
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/planner");
+  return { ok: true };
+}

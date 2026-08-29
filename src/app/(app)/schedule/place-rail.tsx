@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MapPin, Phone, Check } from "lucide-react";
+import Link from "next/link";
+import { MapPin, Phone, Mail, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
-import { sizeLead } from "../leads/actions";
-import { sizeAppointment, sizeJob } from "./actions";
+import { setLeadContact, sizeLead } from "../leads/actions";
+import { setJobHold, sizeAppointment, sizeJob } from "./actions";
 import { usePlacement } from "./placement-context";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
@@ -74,6 +75,31 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
   );
   const load = dayLoad(chosen);
   const jobs = chosen.filter((i) => i.kind === "job");
+
+  /** Which job is typing its hold reason. */
+  const [holdFor, setHoldFor] = useState<string | null>(null);
+  const [holdReason, setHoldReason] = useState("");
+
+  /** The driveway entry — a phone heard out loud goes straight in. Blank never erases. */
+  function contact(id: string, patch: { phone?: string; email?: string }) {
+    if (!String(patch.phone ?? patch.email ?? "").trim()) return;
+    start(async () => {
+      const res = await setLeadContact(id, patch);
+      if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
+      router.refresh();
+    });
+  }
+
+  /** Park with a reason, or wake. */
+  function hold(id: string, reason: string | null) {
+    start(async () => {
+      const res = await setJobHold(id, reason);
+      if (!res.ok) { toast(res.error ?? "Couldn't change that.", "error"); return; }
+      setHoldFor(null);
+      setHoldReason("");
+      router.refresh();
+    });
+  }
 
   /** ONE CONTROL, THREE TABLES. A floater's size lives on `jobs`, a lead's on `inquiries`, an
    *  already-booked visit's on `appointments`. The card doesn't make him care which — but the
@@ -160,24 +186,41 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             {durationLabel(i.planned_minutes)}
                           </span>
                           {i.urgent && <Badge tone="amber">overdue</Badge>}
-                          {i.onHold && <Badge tone="slate">on hold</Badge>}
+                          {i.onHold && (
+                            <Badge tone="slate">
+                              {/* THE REASON IS THE ACTION. "on hold" alone is a shrug; "on hold —
+                                  waiting on the permit" tells you what wakes it. */}
+                              on hold{i.holdReason ? ` — ${i.holdReason}` : ""}
+                            </Badge>
+                          )}
                         </span>
                         {i.address && (
                           <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                             <MapPin className="h-3 w-3 shrink-0" /> {i.address}
                           </span>
                         )}
-                        {/* THE GAP, QUIET UNTIL IT IS IN THE WAY. A warning on nine of twelve cards
-                            is wallpaper; this speaks up in full only once the card is picked, which
-                            is the moment the missing piece actually stands in the way. */}
-                        {miss !== "nothing" && (
-                          <span
-                            className={`mt-0.5 flex items-center gap-1 text-xs ${
-                              on ? "font-medium text-amber-700" : "text-slate-400"
-                            }`}
-                          >
-                            {miss === "place" && <Phone className="h-3 w-3 shrink-0" />}
-                            {on ? nextAction(miss) : miss === "place" ? "no address yet" : "no phone or email"}
+                        {/* THE SPOT, NOT THE SERMON. Erik: "i dont like the red letters telling
+                            me to go look it up lets make it a spot that just says Phone that i can
+                            enter one on the spot same with email and in the same spot it should be
+                            displayed once entered." He also caught the inversion: the card
+                            announced a missing phone and said NOTHING about one it had. One line,
+                            both jobs: shows the value when there is one, shows a quiet dash when
+                            there isn't — and picking the card turns the dashes into inputs. */}
+                        {i.kind === "lead" && (
+                          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                            <span className="inline-flex items-center gap-1">
+                              <Phone className="h-3 w-3 shrink-0" />
+                              {i.phone || <span className="text-slate-300">—</span>}
+                            </span>
+                            <span className="inline-flex items-center gap-1">
+                              <Mail className="h-3 w-3 shrink-0" />
+                              {i.email || <span className="text-slate-300">—</span>}
+                            </span>
+                          </span>
+                        )}
+                        {miss === "place" && (
+                          <span className={`mt-0.5 flex items-center gap-1 text-xs ${on ? "font-medium text-amber-700" : "text-slate-400"}`}>
+                            {on ? nextAction(miss) : "no address yet"}
                           </span>
                         )}
                       </span>
@@ -188,15 +231,98 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                         edit and come back is the round trip he says costs the most. A sibling of
                         the tap target now, not a descendant. */}
                     {on && (
-                      <div className="mt-1.5 pl-6">
-                        {/* THE SAME control the lead row carries — see work-shape-controls. */}
-                        <WorkShapeControls
-                          workKind={i.workKind ?? null}
-                          plannedMinutes={i.planned_minutes ?? null}
-                          showKind={i.kind !== "job"}
-                          disabled={pending}
-                          onPatch={(patch) => size(i, patch)}
-                        />
+                      <div className="mt-1.5 space-y-1.5 pl-6">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {/* THE SAME control the lead row carries — see work-shape-controls. */}
+                          <WorkShapeControls
+                            workKind={i.workKind ?? null}
+                            plannedMinutes={i.planned_minutes ?? null}
+                            showKind={i.kind !== "job"}
+                            disabled={pending}
+                            onPatch={(patch) => size(i, patch)}
+                          />
+                          {/* THE RECORD, ONE TAP AWAY — Erik: "it would be great to access the job
+                              or appt". The board edits the common things in place; the record page
+                              holds everything else. */}
+                          <Link
+                            href={i.kind === "job" ? `/jobs/${i.id}` : i.kind === "appointment" ? `/appointments/${i.id}` : `/leads?focus=${i.id}`}
+                            className="text-xs font-medium text-brand hover:underline"
+                          >
+                            Open →
+                          </Link>
+                        </div>
+
+                        {/* Enter the phone/email ON THE SPOT — the driveway moment. Saves on Enter
+                            or when the field loses focus; blank never erases. */}
+                        {i.kind === "lead" && (!i.phone || !i.email) && (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {!i.phone && (
+                              <input
+                                inputMode="tel"
+                                placeholder="Phone"
+                                aria-label="Phone — enter it on the spot"
+                                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                onBlur={(e) => contact(i.id, { phone: e.target.value })}
+                                className="h-7 w-32 rounded-md border border-slate-200 px-1.5 text-xs"
+                              />
+                            )}
+                            {!i.email && (
+                              <input
+                                inputMode="email"
+                                placeholder="Email"
+                                aria-label="Email — enter it on the spot"
+                                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                                onBlur={(e) => contact(i.id, { email: e.target.value })}
+                                className="h-7 w-40 rounded-md border border-slate-200 px-1.5 text-xs"
+                              />
+                            )}
+                          </div>
+                        )}
+
+                        {/* PARK IT OR WAKE IT, from right here — with the reason, because "on hold"
+                            alone is a shrug and the reason is what tells you what un-parks it. */}
+                        {i.kind === "job" &&
+                          (i.onHold ? (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => hold(i.id, null)}
+                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                              Take off hold
+                            </button>
+                          ) : holdFor === i.id ? (
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <input
+                                autoFocus
+                                value={holdReason}
+                                onChange={(e) => setHoldReason(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") { e.preventDefault(); hold(i.id, holdReason); }
+                                  if (e.key === "Escape") setHoldFor(null);
+                                }}
+                                placeholder="Why? — waiting on the permit"
+                                aria-label="Why is this on hold"
+                                className="h-7 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => hold(i.id, holdReason)}
+                                className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+                              >
+                                Hold it
+                              </button>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => { setHoldFor(i.id); setHoldReason(""); }}
+                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                            >
+                              Put on hold…
+                            </button>
+                          ))}
                       </div>
                     )}
                   </div>

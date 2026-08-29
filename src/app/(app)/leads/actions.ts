@@ -857,3 +857,41 @@ export async function sizeLead(
   revalidatePath("/schedule");
   return { ok: true };
 }
+
+/**
+ * A PHONE TYPED WHERE THE GAP IS.
+ *
+ * Erik: "i dont like the red letters telling me to go look it up lets make it a spot that just
+ * says Phone that i can enter one on the spot same with email and in the same spot it should be
+ * displayed once entered."
+ *
+ * The red sentence described the gap and offered nothing — a wall wearing a warning. The spot IS
+ * the fix: it shows the value when there is one and takes the value when there isn't, and the
+ * moment he hears a number in a driveway it goes in right there.
+ *
+ * Only non-empty values write. A blank input means "nothing to add", never "erase what's there" —
+ * clearing a phone on purpose is a lead-form edit, not a board-side slip.
+ */
+export async function setLeadContact(
+  id: string,
+  patch: { phone?: string; email?: string },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const clean: Record<string, string> = {};
+  const phone = String(patch.phone ?? "").trim();
+  const email = String(patch.email ?? "").trim();
+  if (phone) clean.phone = phone;
+  if (email) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That email doesn't look right." };
+    clean.email = email;
+  }
+  if (!Object.keys(clean).length) return { ok: true };
+  clean.updated_at = new Date().toISOString();
+  const { data, error } = await ctx.supabase.from("inquiries").update(clean).eq("id", id).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  revalidatePath("/leads");
+  revalidatePath("/schedule");
+  return { ok: true };
+}

@@ -122,7 +122,7 @@ export default async function SchedulePage({
       .from("jobs")
       // `status` is read below to badge a parked job — THE PROJECTION LAW: the column the
       // decision turns on has to be in the select list.
-      .select("id, job_number, name, address, city, planned_minutes, status")
+      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason")
       .in("status", ACTIVE_JOB_STATUSES)
       /* EVERYTHING ON HOLD, DATED OR NOT. Erik: "we need everything on hold to pop up on that
          list." A parked job that still carries a date is the worst of both — the calendar draws it
@@ -213,6 +213,7 @@ export default async function SchedulePage({
       // Why it's here when it may already have a date — said out loud on the card rather than left
       // as a thing he has to work out.
       onHold: r.status === "on_hold",
+      holdReason: r.hold_reason ?? null,
     })),
     // ── THE BOOKED-BUT-UNPLANNED WALK-THROUGHS. Erik: "we have to roll in the 'to be scheduled'
     //    stuff somehow for example i have a couple inspections that already link to the leads i
