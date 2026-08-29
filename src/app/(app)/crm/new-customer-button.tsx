@@ -26,6 +26,7 @@ export function NewCustomerButton() {
   const [prefill, setPrefill] = useState(EMPTY);
   const [formKey, setFormKey] = useState(0);
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  const [coach, setCoach] = useState<string | null>(null);
   const [hasPicker, setHasPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -60,6 +61,7 @@ export function NewCustomerButton() {
     setState("");
     setZip("");
     setImportMsg(null);
+    setCoach(null);
     setError(null);
     setFormKey((k) => k + 1);
     setOpen(true);
@@ -168,37 +170,44 @@ export function NewCustomerButton() {
                   with the fields declared (autocomplete name/tel/email), focusing Name or Phone
                   puts the person's contact right on the QuickType bar. So there, the guidance IS
                   the feature, one quiet line — not a dashed ritual box explaining a .vcf safari. */}
-            {hasPicker ? (
-              <div>
-                <button
+            {/* ONE OBVIOUS BUTTON, whichever door this platform opens. Erik found the iOS
+                keyboard flow himself (AutoFill Contact → Other Contact… → the full native picker,
+                per-field checkboxes and all, INSIDE the installed app) — "but it wasnt obvious."
+                A grey hint line is not a feature. The button is:
+                  · real Contact Picker API (Android Chrome, Safari the browser) → opens it
+                  · iPhone/iPad installed app → focuses Name and points at the AutoFill Contact
+                    bar now sitting one inch away above the keyboard
+                  · Mac → focuses Name and says the Mac's gesture: type the name, matching
+                    contacts drop down ("it doesnt do that on the computer" — different door,
+                    same book). */}
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
                   type="button"
-                  onClick={importContact}
-                  className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-dark"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setImportMsg(null);
+                    if (hasPicker) { importContact(); return; }
+                    document.getElementById("name")?.focus();
+                    setCoach(
+                      navigator.maxTouchPoints > 0
+                        ? "Now tap “AutoFill Contact” above the keyboard → “Other Contact…” and pick them."
+                        : "Now start typing their name — matching contacts appear right under the field.",
+                    );
+                  }}
                 >
-                  <Contact className="h-4 w-4 shrink-0" /> Pick from my contacts
+                  <Contact className="h-4 w-4 shrink-0" /> Add from my Contacts
+                </Button>
+                <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] text-slate-400 underline-offset-2 hover:text-brand hover:underline">
+                  or import a .vcf
                 </button>
-                {importMsg && <p className="mt-1 text-[11px] font-medium text-emerald-600">{importMsg}</p>}
               </div>
-            ) : (
-              /* THE GESTURE, NOT THE FEATURE NAME. An empty Name field makes AutoFill offer
-                 YOUR OWN card (that is what Erik's screenshot showed — "Erik Taylor – Work");
-                 TYPING filters the menu to everyone in Contacts, which is the person who just
-                 texted you. Same Contacts app on iPhone and Mac (iCloud keeps them one book), so
-                 this is the Tradify feature without the go-find-your-phone step — and without
-                 their split-app problem, because North IS the same app on every screen. The full
-                 native picker sheet (his screenshot) appears where Apple exposes the API: Safari
-                 the browser today, the native wrapper when it lands; the installed web app is the
-                 one place Apple withholds it. */
-              <p className="text-[11px] leading-snug text-slate-400">
-                Start typing the person&apos;s name in{" "}
-                <span className="font-medium text-slate-500">Name</span> — your Contacts appear
-                right there, and picking one fills their number and email too.{" "}
-                <button type="button" onClick={importContact} className="text-brand underline-offset-2 hover:underline">
-                  Or import a .vcf
-                </button>
-                {importMsg && <span className="ml-1 font-medium text-emerald-600">{importMsg}</span>}
-              </p>
-            )}
+              {coach && (
+                <p className="rounded-lg bg-brand-light/50 px-2.5 py-1.5 text-xs font-medium text-brand">{coach}</p>
+              )}
+              {importMsg && <p className="text-[11px] font-medium text-emerald-600">{importMsg}</p>}
+            </div>
             <input
               ref={fileRef}
               type="file"
