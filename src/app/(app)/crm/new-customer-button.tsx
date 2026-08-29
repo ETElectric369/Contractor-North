@@ -241,7 +241,17 @@ export function NewCustomerButton() {
                              time. It is also moody under a 2,000-contact book (it served S-names
                              for "Jeff"), so the deterministic door is the drag: Contacts.app IS
                              the picker, and this form catches the card. */
-                          "Click into Name and type the first letters of THEIR name — when their card pops up, choose it. Or open Contacts and drag their card anywhere onto this form.",
+                          /* DRAG LEADS on the Mac. The typed-match works but rides Safari's own
+                             matcher, which doubles rows and freezes on a big book (two providers —
+                             Contacts and form history — answering at once, their merge, their
+                             stall; our input does zero work per keystroke). The drag involves no
+                             matcher at all: Contacts.app is the picker, this form is the catch. */
+                          /* Erik reproduced the full flow (Sherri Taylor's card, per-field
+                             toggles) and then "it disappeared when i clicked away" — the panel is
+                             a focus-anchored popover and ANY outside click dismisses it, by
+                             Safari's design. The last inch is the blue AutoFill button ON the
+                             panel. Say so. */
+                          "Type their name in Name and pick them — then press the blue AutoFill button ON the panel (clicking anywhere else closes it). Or drag their card here from Contacts (⌘Space their name) — the drag never stalls.",
                     );
                   }}
                 >
