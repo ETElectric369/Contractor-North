@@ -248,7 +248,8 @@ export default async function SchedulePage({
           </h2>
           <PlaceRail items={waiting} />
         </aside>
-        <div className="min-w-0">
+        {/* The id is the landing pad for the rail's "tap the day" jump on phones — see place-rail. */}
+        <div id="schedule-calendar" className="min-w-0 scroll-mt-4">
           <CalendarPanel />
         </div>
       </div>

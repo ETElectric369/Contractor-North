@@ -387,8 +387,13 @@ export async function convertInquiry(
     if (slots.length) {
       const carry = await carryForInquiry(supabase, inq);
       const res = await createProposalCore(supabase, {
-        type: "inspection",
-        title: `Site inspection: ${inq.name}`,
+        // The SAME kind rule as "Book it" — which booking door the office pressed must never
+        // change what the calendar says the visit is.
+        type: appointmentTypeFor((inq as { work_kind?: string | null }).work_kind),
+        title: bookingTitle(
+          workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }),
+          String(inq.name ?? ""),
+        ),
         slots,
         timeNote: opts.timeNote ?? null,
         inquiryId: id,

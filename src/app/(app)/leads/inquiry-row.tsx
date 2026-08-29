@@ -270,7 +270,7 @@ export function InquiryRow({
           phone / email / note happened to precede them — every row put them somewhere different
           and the eye had to re-find them on each one. On their own row they land in the same place
           all the way down the list, which is what makes a list of 32 scannable. ── */}
-      <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} />
+      <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} customers={customers} />
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old
           row's height. The full text, the customer's files and the workflow controls all live one

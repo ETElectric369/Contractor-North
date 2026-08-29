@@ -1,4 +1,5 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
+import { SettleUpButton } from "@/components/settle-up-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
@@ -1035,6 +1036,12 @@ export default async function JobDetailPage({
         <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-400">
           <span>{j.job_number}</span>
           <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
+          {/* Done & paid — the critical path's last step, on the record itself. Staff only, and
+              not on a job already settled by draws (settleUp re-checks server-side; hiding it
+              here just spares the tap that would be refused). */}
+          {viewerIsStaff && j.status !== "cancelled" && (
+            <SettleUpButton source="job" id={j.id} compact />
+          )}
           {/* Provenance backlink — where this job came from (the lead it was converted from). */}
           {(j as any).inquiry && (
             <Link href={`/leads?focus=${(j as any).inquiry.id}`} className="text-brand hover:underline">

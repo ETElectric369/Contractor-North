@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { SettleUpButton } from "@/components/settle-up-button";
+import { UnscheduleButton } from "../unschedule-button";
 import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
 import { MapPin } from "lucide-react";
 import { BackLink } from "@/components/back-link";
@@ -138,6 +140,11 @@ export default async function AppointmentCapturePage({
           {a.status === "cancelled" && <Badge tone="slate">cancelled</Badge>}
           {/* Status affordance: flips scheduled/proposed → completed so the Inspections
               tab's buckets work (a captured walk-through stops reading as "upcoming"). */}
+          {/* THE MONEY DOOR, FIRST. The Nora finding: an hour of work, $150 cash in hand, and
+              this page's only forward path was inspection → estimate → hunt for the invoice →
+              payment. He gave up. Done & paid settles the whole chain in one motion — invoice,
+              line, payment, visit completed, lead won — through the one billing path. */}
+          {a.status !== "cancelled" && <SettleUpButton source="appointment" id={a.id} />}
           {(a.status === "scheduled" || a.status === "proposed") && (
             <MarkCompleteButton
               id={a.id}
@@ -160,6 +167,11 @@ export default async function AppointmentCapturePage({
               already existed and was wired up on the calendar row only; it belongs here too. */}
           {(a.status === "scheduled" || a.status === "proposed") && (
             <ApptQuickActions id={a.id} status={a.status} title={a.title ?? "this appointment"} />
+          )}
+          {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
+              everything else kept. Only shown while a date exists to clear. */}
+          {(a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
+            <UnscheduleButton id={a.id} />
           )}
           {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
               "need a way to edit inspection/appointment details"). */}

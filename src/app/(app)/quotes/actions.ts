@@ -1,6 +1,6 @@
 "use server";
 import { reportError } from "@/lib/observe";
-import { customerAddressFrom } from "@/lib/inquiries/lead-address";
+import { customerForInquiry } from "@/lib/actions/win-customer";
 import { dbError } from "@/lib/db-error";
 import { parseAiJson } from "@/lib/ai-json";
 import { statedLaborRate } from "@/lib/estimate/stated-rate";
@@ -31,7 +31,6 @@ import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
 import { sendSms } from "@/lib/sms";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
-import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import type { QuoteCircuit } from "@/lib/types";
@@ -856,51 +855,12 @@ async function materializeQuoteCustomer(
   if (q.customer_id) return q.customer_id; // already has a contact
   if (!q.inquiry_id) return null; // standalone estimate, nothing to materialize from
 
-  const { data: inq } = await supabase.from("inquiries").select("*").eq("id", q.inquiry_id).maybeSingle();
-  if (!inq) return null;
-
-  // Crosscheck the book first — link an existing customer if this lead is already one (same
-  // phone / email / normalized name), using the exact keys the CRM's duplicate finder uses.
-  const { data: book } = await supabase
-    .from("customers")
-    .select("id, name, company_name, email, phone");
-  let customerId = findMatchingCustomerId(
-    { name: inq.name, email: inq.email, phone: inq.phone },
-    (book ?? []) as DupCustomer[],
-  );
-
-  if (!customerId) {
-    // Genuinely new → auto-fill a Contact from the estimate's lead.
-    const { data: cust, error: cErr } = await supabase
-      .from("customers")
-      .insert({
-        name: inq.name,
-        company_name: inq.company_name,
-        type: inq.type ?? "residential",
-        status: "active", // a won estimate = a real, active customer
-        email: inq.email,
-        phone: inq.phone,
-        // WHERE THE PERSON IS, not where the work is (audit 6). `inq.address` is THE SITE — 0189
-        // said so out loud — and writing it here made a lead who lives at 12 Elm St into a
-        // customer who lives on the bare lot they are building on. customerAddressFrom is the one
-        // rule, shared with the lead-conversion path and with the SQL twin in migration 0192, so
-        // the three cannot drift into disagreeing about which address a customer record holds.
-        ...customerAddressFrom(inq),
-        notes: inq.message ? `From inquiry: ${inq.message}` : inq.notes,
-        created_by: userId,
-      })
-      .select("id")
-      .single();
-    if (cErr || !cust) return null; // best-effort: the job still gets created customer-less
-    customerId = cust.id;
-  }
+  // The ONE win-mints-the-customer rule (lib/actions/win-customer) — shared with settleUp so an
+  // accepted estimate and cash-in-hand cannot disagree about dedup, the address rule, or the stamp.
+  const customerId = await customerForInquiry(supabase, q.inquiry_id, userId);
+  if (!customerId) return null;
 
   await supabase.from("quotes").update({ customer_id: customerId }).eq("id", q.id);
-  // Stamp the lead as won + attach the contact (idempotent — leaves the open leads list either way).
-  await supabase
-    .from("inquiries")
-    .update({ customer_id: customerId, status: "won", converted_at: inq.converted_at ?? new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq("id", q.inquiry_id);
   return customerId;
 }
 

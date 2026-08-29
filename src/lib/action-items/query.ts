@@ -79,7 +79,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, settledR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -268,6 +268,36 @@ export async function getActionItems(ctx: {
     // work in progress, not a decision.
     isStaff
       ? supabase.from("invoices").select("job_id").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
+      : empty,
+    // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE ──
+    // A completed inspection has the write-up feeder above; a completed SERVICE CALL had nothing:
+    // mark it complete and no surface would ever again say the work was unbilled. The one visit
+    // type whose whole point is same-day money was the one type the money machinery ignored.
+    isStaff
+      ? supabase
+          .from("appointments")
+          .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)")
+          .in("type", ["service_call", "job"])
+          .eq("status", "completed")
+          .gte("starts_at", daysAgoStr(todayStr, 60))
+          .limit(100)
+      : empty,
+    // The settled signal: an invoice anchored to its visit (0233 — settleUp writes it).
+    isStaff
+      ? supabase.from("invoices").select("appointment_id").not("appointment_id", "is", null).neq("status", "void").limit(2000)
+      : empty,
+    // ── Estimates started and never sent ─────────────────────────────────────────
+    // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off
+    // every list with it — the exact DB state the Nora ringer left behind. Older than 2 days:
+    // a draft he's actively building today isn't nagging material yet.
+    isStaff
+      ? supabase
+          .from("quotes")
+          .select("id, quote_number, title, total, created_at, customer_name_snapshot:customers(name), inquiries(name)")
+          .eq("status", "draft")
+          .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString())
+          .order("created_at", { ascending: true })
+          .limit(50)
       : empty,
   ]);
 
@@ -496,6 +526,56 @@ export async function getActionItems(ctx: {
       done: false,
       href: `/billing/${d.id}`,
       affordances: AFFORDANCES.invoice_draft,
+    });
+  }
+
+  // ── WORK DONE, NO BILL (the Nora hole). A completed service call or job-day with no invoice
+  //    anchored to it and no billing on its job is money already earned and not yet asked for.
+  //    NOTHING SILENT: this is the row that would have caught the $150 had it not been cash.
+  {
+    const settled = new Set(
+      ((settledR.data ?? []) as { appointment_id: string | null }[]).map((r) => String(r.appointment_id)),
+    );
+    const billedJobs = new Set(
+      ((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean),
+    );
+    for (const a of (doneWorkR.data ?? []) as any[]) {
+      if (settled.has(String(a.id))) continue;
+      if (a.job_id && billedJobs.has(a.job_id)) continue;
+      const who = a.customers?.name ?? a.inquiries?.name ?? null;
+      items.push({
+        id: `unbilled-${a.id}`,
+        kind: "visit_unbilled",
+        title: `${a.title || "Work done"} — no bill yet`,
+        subtitle: who,
+        who: null,
+        when: a.starts_at ?? null,
+        urgency: 1, // earned and unasked-for ages worse than a draft
+        done: false,
+        // Straight to the record that carries the Done & paid button.
+        href: `/appointments/${a.id}`,
+        affordances: AFFORDANCES.visit_unbilled,
+      });
+    }
+  }
+
+  // ── ESTIMATES STARTED, NEVER SENT. The first autosave stamps the lead converted, so an
+  //    abandoned draft is a lead that will never resurface anywhere — it reads as handled and is
+  //    in fact abandoned. Sent, accepted, and draft INVOICES all had feeders; draft quotes had
+  //    none, which is why the Nora trail (a $150 draft, a 'quoted' lead, no money) was invisible.
+  for (const q of (draftQuoteR.data ?? []) as any[]) {
+    const who = (q as any).customer_name_snapshot?.name ?? (q as any).inquiries?.name ?? null;
+    items.push({
+      id: `qdraft-${q.id}`,
+      kind: "quote_draft",
+      title: `Estimate ${q.quote_number || ""} started, never sent`.trim(),
+      subtitle: who ?? (q.title || null),
+      who: null,
+      when: q.created_at ?? null,
+      urgency: 0,
+      done: false,
+      href: `/quotes/${q.id}`,
+      affordances: AFFORDANCES.quote_draft,
     });
   }
 

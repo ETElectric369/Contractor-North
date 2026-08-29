@@ -31,6 +31,8 @@ export type ActionKind =
   | "quote_awaiting" // a sent quote/estimate gone quiet or nearing its valid-until
   | "quote_accepted" // an estimate the customer just ACCEPTED — schedule the job now (the win)
   | "invoice_draft" // a draft invoice never sent (billed-up money sitting in limbo)
+  | "visit_unbilled" // a service call / job-day that HAPPENED and has no invoice — the Nora hole
+  | "quote_draft" // an estimate started and never sent — the lead it converted is invisible behind it
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
   | "bug_report" // an open bug reported from the field (owner watch)
@@ -74,6 +76,8 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   quote_awaiting: "money",
   quote_accepted: "money", // a won deal is the freshest money event — renders at the very top
   invoice_draft: "money",
+  visit_unbilled: "money",
+  quote_draft: "money",
   lien_deadline: "waiting", // compliance clock — legal, not A/R
   contract_unsigned: "waiting",
   bug_report: "waiting",
@@ -115,6 +119,8 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   inquiry: { label: "Lead", tone: "green" },
   appointment: { label: "Appointment", tone: "blue" },
   inspection_writeup: { label: "Write up the estimate", tone: "green" },
+  visit_unbilled: { label: "Done & paid?", tone: "green" },
+  quote_draft: { label: "Finish or send it", tone: "green" },
   organize: { label: "To file", tone: "slate" },
   invoice_overdue: { label: "Overdue invoice", tone: "amber" },
   quote_awaiting: { label: "Awaiting reply", tone: "green" },
@@ -159,6 +165,8 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // (which self-clears this item). A dedicated "schedule" verb comes with the funnel wave.
   quote_accepted: ["open"],
   invoice_draft: ["open"],
+  visit_unbilled: ["open", "dismiss"],
+  quote_draft: ["open", "dismiss"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
   bug_report: ["open"], // triage on the Bug watch page

@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind } from "@/lib/schedule/work-shape";
 
 import { revalidatePath } from "next/cache";
 import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
@@ -176,7 +177,9 @@ export async function createInspectionNow(
   if (opts.inquiryId) {
     const { data } = await supabase
       .from("inquiries")
-      .select("id, name, address, city, state, zip, message, notes, customer_id, intake")
+      // work_kind rides along (PROJECTION LAW): the tag the office picked on the lead must reach
+      // the insert below, or this door quietly refiles a service call as an inspection.
+      .select("id, name, address, city, state, zip, message, notes, customer_id, intake, work_kind")
       .eq("id", opts.inquiryId)
       .maybeSingle();
     if (!data) return { ok: false, error: "Lead not found." };
@@ -194,8 +197,13 @@ export async function createInspectionNow(
   const { data: appt, error } = await supabase
     .from("appointments")
     .insert({
-      type: "inspection",
-      title: inq ? `Site inspection: ${inq.name}` : "Site inspection",
+      /* WHAT HE TOLD THE APP BEATS THE BUTTON'S NAME. Erik tagged Nora 'service' on the lead,
+         tapped the row's one-tap door, and got "Site inspection" — the third booking door off one
+         lead, and the only one still discarding the declared kind. All three obey it now. */
+      type: appointmentTypeFor((inq as { work_kind?: string | null } | null)?.work_kind),
+      title: inq
+        ? bookingTitle(workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }), inq.name)
+        : "Site inspection",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
       status: "scheduled", // NOT completed: the capture (or "Mark inspection complete") finishes it
       // The WHOLE address, not just the street line — and the parts alongside it, so nothing
@@ -996,6 +1004,23 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     .single();
   if (error) return { ok: false, error: dbError(error) };
 
+  /* A THREE-DAY VISIT CONVERTS TO A THREE-DAY JOB. scheduled_end above is clamped to one working
+     day (it is a wall-clock pair), so without segments a Mon–Wed visit became a Monday job — and
+     Tuesday and Wednesday, which the appointment had rightly marked busy, sprang free the moment
+     it was deduped behind the job. Same day-expansion rule the rail's placement uses. */
+  const sizedDays = daysNeeded(sized);
+  if (sizedDays > 1 && appt.starts_at) {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+    const firstDay = todayStrInTz(tz, new Date(appt.starts_at));
+    const run = workingDaysFrom(firstDay, sizedDays);
+    if (run.length) {
+      await supabase.from("job_schedule_segments").insert(
+        run.map((d) => ({ job_id: job.id, start_date: d, end_date: d })),
+      );
+    }
+  }
+
   await supabase.from("appointments").update({ job_id: job.id }).eq("id", appointmentId);
   // The visit is now represented by the job on the calendar (they draw as one — see gridDataFor),
   // so nothing is lost by leaving the appointment in place: it keeps its capture, its answers and
@@ -1018,5 +1043,43 @@ export async function deleteAppointment(id: string): Promise<Result> {
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
+  return { ok: true };
+}
+
+/**
+ * BACK TO "WAITING FOR A DAY".
+ *
+ * The customer calls: "not sure when — we'll get back to you." The rail was built for exactly this
+ * state (a booking with no start shows under Waiting for a day, placeable with one tap) and yet no
+ * door LED there: the edit form's date is required, rescheduleAppointment rejects an empty start,
+ * and the only other exits were cancel (a lie — nobody cancelled) or leaving a stale date on the
+ * calendar to mislead the week it sits in. Postponed-indefinitely was a dead end.
+ *
+ * Clears the WHEN and nothing else: capture, photos, provenance, status all stay. The pick-a-time
+ * withdrawal mirrors rescheduleAppointment — a stale link the customer taps later must not
+ * resurrect a date the office just cleared.
+ */
+export async function unscheduleAppointment(id: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data, error } = await supabase
+    .from("appointments")
+    .update({ starts_at: null, ends_at: null, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .in("status", ["scheduled", "proposed"]) // a completed/cancelled visit's date is history, not a plan
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "Only a scheduled visit can go back to waiting." };
+  await supabase
+    .from("schedule_proposals")
+    .update({ status: "cancelled" })
+    .eq("appointment_id", id)
+    .eq("status", "pending");
+  await pushCalendarItem("appointment", id); // unscheduled = a Google delete (gcal-map's rule)
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
   return { ok: true };
 }

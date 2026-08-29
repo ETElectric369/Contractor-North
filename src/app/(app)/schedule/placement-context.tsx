@@ -132,7 +132,10 @@ export function PlacementProvider({
          nothing doubles up with itself; planDayTimes then slides the whole run past whatever is
          already booked. A phone call is marked pinned — it goes to the top of the day and takes no
          room, so it never pushes a real visit later. */
-      const visits = [...appts, ...leads];
+      /* Jobs ride at the END of the fitted sequence: two floaters placed on one afternoon used
+         to both get times[0] — the same-slot collision, re-created for jobs a version after it
+         was fixed for visits. */
+      const visits = [...appts, ...leads, ...jobs];
       const firstAt = /^\d{2}:\d{2}$/.test(startAt) ? startAt : half === "am" ? halfTimes.am : halfTimes.pm;
 
       start(async () => {
@@ -162,7 +165,11 @@ export function PlacementProvider({
           // The half he chose, honoured. placeJobOnDay took no time at all, so a floater — which by
           // definition carries no prior time — fell through to the org's all-day window and landed
           // at 8am while both the rail and the armed strip said "afternoon".
-          jobs.map((j) => placeJobOnDay(j.id, dateISO, startHHMM).catch(() => ({ ok: false as const }))),
+          jobs.map((j, i) =>
+            placeJobOnDay(j.id, dateISO, times[appts.length + leads.length + i] ?? startHHMM).catch(
+              () => ({ ok: false as const }),
+            ),
+          ),
         );
         const jobsFailed = jobResults.filter((r) => !r.ok).length;
 

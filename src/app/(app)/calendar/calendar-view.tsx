@@ -654,8 +654,13 @@ export function CalendarView({
    */
   /* ONE HOOK, TWO STACKS — the week's and the month's — so a fix to the scroll can only be made
      once. Keyed on the anchor, so pressing Today collapses the span back to where he is. */
-  const weekStack = useEndlessStack(anchorK);
-  const monthStack = useEndlessStack(anchorK, 24, 24);
+  /* CAPPED AT THE DATA'S EDGE. CalendarPanel preloads −120..+400 days and paging never refetches
+     — so a stack allowed to grow past that window rendered real-looking weeks and months that were
+     silently EMPTY, which reads as "nothing scheduled" rather than "nothing loaded". The caps now
+     mirror the fetch window: ~17 weeks / ~4 months back, ~52 weeks / ~13 months forward. Scrolling
+     further is a real ask (widen the panel window), never a quiet lie. */
+  const weekStack = useEndlessStack(anchorK, 17, 52);
+  const monthStack = useEndlessStack(anchorK, 3, 12);
 
   const stackWeeks = useMemo(() => {
     const out: Date[][] = [];
@@ -693,8 +698,12 @@ export function CalendarView({
     for (const j of jobs ?? []) {
       const city = String((j as { city?: string | null }).city ?? "").trim();
       if (!city) continue;
-      const from = (j.scheduled_start ?? "").slice(0, 10);
-      const to = (j.scheduled_end ?? j.scheduled_start ?? "").slice(0, 10);
+      /* ORG-TZ DAYS, like the pills right beside this label. Raw UTC slices put the town one day
+         late: scheduled_end mirrors the org work-day end (17:00 Pacific = 00:00Z TOMORROW), so a
+         job's town appeared on the day after it finished and missed its real last day. */
+      const from = j.scheduled_start ? dayOf(j.scheduled_start) : "";
+      const rawTo = j.scheduled_end ? dayOf(j.scheduled_end) : from;
+      const to = rawTo && from && rawTo < from ? from : rawTo;
       if (from && dayStr >= from && dayStr <= (to || from)) towns.add(city);
     }
     return towns.size ? [...towns].sort().join(" · ") : undefined;
@@ -867,7 +876,11 @@ export function CalendarView({
         <div className="sticky top-0 z-30 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-brand/40 bg-brand-light/90 px-3 py-2 text-sm backdrop-blur">
           <span className="font-semibold text-brand">{dayTargetLabel(target.pl.armedCount)}</span>
           <span className="text-xs font-medium uppercase tracking-wide text-brand/70">
-            {target.pl.half === "am" ? "morning" : "afternoon"}
+            {/* An exact time beats the half — the strip must not read "morning" while the write is
+                about to book 3pm. Same precedence as the rail's footer and the write itself. */}
+            {/^\d{2}:\d{2}$/.test(target.pl.startAt)
+              ? `at ${target.pl.startAt}`
+              : target.pl.half === "am" ? "morning" : "afternoon"}
           </span>
           <span className="text-xs text-slate-600">Tap any day below.</span>
           {target.pl.pending && <span className="text-xs font-medium text-brand">Placing…</span>}
@@ -888,7 +901,7 @@ export function CalendarView({
         <div
           ref={monthStack.scrollRef}
           onScroll={monthStack.onScroll}
-          className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain"
+          className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
         >
           {stackMonths.map((m) => {
             const isNow = m.getFullYear() === anchor.getFullYear() && m.getMonth() === anchor.getMonth();
@@ -923,7 +936,7 @@ export function CalendarView({
         <div
           ref={weekStack.scrollRef}
           onScroll={weekStack.onScroll}
-          className="max-h-[calc(100dvh-14rem)] space-y-3 overflow-y-auto overscroll-contain"
+          className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
         >
           {stackWeeks.map((wk) => {
             const days = wk.map((d) => {
@@ -1066,8 +1079,9 @@ const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", s
 };
 
 /** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
-function monthPills(data: DayData | undefined, tz: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
+function monthPills(data: DayData | undefined, tz: string, dayK?: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
   if (!data) return [];
+  const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso)); // org-tz, same rule as the grid
   const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
   for (const { job, pos } of data.jobs) {
     const t = job.scheduled_start ? new Date(job.scheduled_start).getTime() : Number.MAX_SAFE_INTEGER;
@@ -1083,15 +1097,21 @@ function monthPills(data: DayData | undefined, tz: string): { label: string; ton
     if (a.job_id && data.jobs.some((x) => x.job.id === a.job_id)) continue;
 
     const who = a.customers?.name || a.jobs?.name || a.title;
+    /* A SPAN'S START TIME BELONGS TO ITS FIRST DAY ONLY. A Mon-9am three-day booking used to read
+       "9a Karen" on Wednesday too — asserting a 9am visit on a day the week view correctly draws
+       as a full working day. Mid-span days carry the name alone and sort to the top like all-day
+       work. */
+    const firstDay = !dayK || dayOf(a.starts_at) === dayK;
     /* A CALL HAS NO TIME WORTH PRINTING. It is pinned to the top of the day in the week view
        because it is made from wherever you already are; stamping "9:00" on it in the month would
        re-assert exactly the slot the week view stopped pretending it occupies. */
     const isCall = a.type === "call";
     out.push({
-      label: isCall ? `☎ ${who}` : `${pillTime(a.starts_at, tz)} ${who}`,
+      label: isCall ? `☎ ${who}` : firstDay ? `${pillTime(a.starts_at, tz)} ${who}` : who,
       tone: a.status === "proposed" ? "apptProposed" : "appt",
-      // Calls sort to the top of the cell, which is where the week view puts them too.
-      sort: isCall ? -1 : new Date(a.starts_at).getTime(),
+      // Calls sort to the top of the cell, which is where the week view puts them too; a mid-span
+      // day sorts like all-day work rather than by a start instant it doesn't own.
+      sort: isCall ? -1 : firstDay ? new Date(a.starts_at).getTime() : 0,
     });
   }
   for (const t of data.tasks) out.push({ label: t.title, tone: "task", sort: Number.MAX_SAFE_INTEGER });
@@ -1144,7 +1164,7 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          const pills = monthPills(data, tz);
+          const pills = monthPills(data, tz, k);
           return (
             <button
               key={i}

@@ -55,16 +55,23 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
-    const goingUp = el.scrollTop < lastTopRef.current;
-    lastTopRef.current = el.scrollTop;
+    /* iOS RUBBER-BAND IS NOT A GESTURE. During the bounce, scrollTop goes NEGATIVE — which reads
+       as "going up" AND "at the top", so a bare tug at rest fired a prepend, and the layout
+       effect's scrollTop restore then fought WebKit's own bounce animation. That fight, repeated,
+       is the freeze Erik hit on his phone. An overscrolled frame is ignored entirely — not even
+       recorded as the last position, or the settle back to 0 would read as an upward gesture. */
+    if (el.scrollTop < 0) return;
+    const top = el.scrollTop;
+    const goingUp = top < lastTopRef.current;
+    lastTopRef.current = top;
     if (growingRef.current) return;
-    if (goingUp && el.scrollTop < 120 && back < maxBack) {
+    if (goingUp && top < 120 && back < maxBack) {
       growingRef.current = true;
       anchorRef.current = el.scrollHeight;
       setBack((b) => b + 1);
       return;
     }
-    if (!goingUp && el.scrollHeight - el.scrollTop - el.clientHeight < 240 && fwd < maxFwd) {
+    if (!goingUp && el.scrollHeight - top - el.clientHeight < 240 && fwd < maxFwd) {
       growingRef.current = true;
       setFwd((f) => f + 1);
     }

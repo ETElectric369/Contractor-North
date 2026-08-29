@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { customerForInquiry } from "@/lib/actions/win-customer";
 import { changeOrderLines, noChangeOrdersReason, type ChangeOrderRow } from "@/lib/change-order-billing";
 
 import { revalidatePath } from "next/cache";
@@ -1773,3 +1774,185 @@ export async function setInvoiceCustomerJob(
 /* recalcInvoice now lives in @/lib/invoice-recalc (imported above) — the Stripe webhook
  * is a route handler and can't import a private helper out of a "use server" module, so
  * it carried a second, credit-blind copy of the amount_paid math. One definition now. */
+
+/**
+ * DONE & PAID — the whole critical path in one motion.
+ *
+ * Erik, the finding this exists for: "Nora & Fermin, i was there for an hour and some change they
+ * paid me 150 cash and i was out — and from the lead or calendar i had to go through the ringer of
+ * step to even get to anything useful and i gave up... i had to fill out the inspection to then
+ * have to fill out the estimate to then find the invoice somewhere to then mark done and then
+ * input the payment."
+ *
+ * Five artifacts demanded for a job that was ALREADY DONE with cash ALREADY IN HAND. Every one of
+ * those stages exists for work that hasn't happened yet — an inspection informs an estimate, an
+ * estimate seeks a yes — and the yes was in his pocket. Forcing the pipeline backwards through
+ * finished work is exactly "the way the rest of the softwares are", the thing this app exists not
+ * to be.
+ *
+ * So: one action, from the record he is already looking at. It composes the EXISTING writers
+ * rather than inventing a parallel money path (ONE BILLING PATH):
+ *
+ *   invoice (the same shape createBlankInvoice writes)
+ *   → one line for the work
+ *   → recalcInvoice        (totals from the one math)
+ *   → status "sent"        (paidStatus REFUSES to advance a draft — deliberate, Erik 7/24; this
+ *                           invoice has genuinely left draft: the work is delivered and settled)
+ *   → recordPayment        (the exported action — balance cap, org check, cash-in push, recalc
+ *                           to "paid" — all inherited, not copied)
+ *   → the visit marked completed, the lead stamped WON via the same customer-minting rule the
+ *     accepted-estimate path uses. Cash in hand is the hardest possible win.
+ *
+ * Partial failure is reported honestly: once the invoice exists, later stumbles return its id and
+ * say exactly what is left to do — never a bare error that hides the money record it created.
+ */
+export async function settleUp(input: {
+  source: "appointment" | "job";
+  id: string;
+  amount: number;
+  method: string; // cash | check | card | other
+  note?: string;
+}): Promise<Result & { invoiceId?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const amount = Number(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter what they paid." };
+  if (amount > 9_999_999) return { ok: false, error: "That amount is too large." };
+
+  // ── What was the work, and who pays for it ─────────────────────────────────────────────────
+  let title = "";
+  let jobId: string | null = null;
+  let customerId: string | null = null;
+  let inquiryId: string | null = null;
+  let apptId: string | null = null;
+
+  if (input.source === "appointment") {
+    const { data: a } = await supabase
+      .from("appointments")
+      .select("id, title, status, customer_id, inquiry_id, job_id")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (!a) return { ok: false, error: "That visit isn't available." };
+    if (a.status === "cancelled") return { ok: false, error: "This visit was cancelled — un-cancel it first." };
+    apptId = a.id;
+    title = String(a.title ?? "Work completed");
+    jobId = a.job_id ?? null;
+    customerId = a.customer_id ?? null;
+    inquiryId = a.inquiry_id ?? null;
+  } else {
+    const { data: j } = await supabase
+      .from("jobs")
+      .select("id, name, job_number, customer_id, inquiry_id")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (!j) return { ok: false, error: "That job isn't available." };
+    jobId = j.id;
+    title = String(j.name ?? j.job_number ?? "Work completed");
+    customerId = j.customer_id ?? null;
+    inquiryId = j.inquiry_id ?? null;
+  }
+
+  /* TAPPED TWICE IS SETTLED ONCE. This button lives on flaky truck LTE — the exact conditions
+     where a tap looks failed and gets tapped again, and both writes land. A visit that already has
+     a live invoice hands it straight back (0233's partial unique index is the DB-level backstop
+     behind this check). A job can carry many legitimate invoices, so its guard is narrower: an
+     identical amount within the last few minutes reads as the same tap, not a second bill. */
+  if (apptId) {
+    const { data: existing } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("appointment_id", apptId)
+      .neq("status", "void")
+      .limit(1)
+      .maybeSingle();
+    if (existing) return { ok: true, invoiceId: existing.id };
+  } else if (jobId) {
+    const { data: recent } = await supabase
+      .from("invoices")
+      .select("id, created_at")
+      .eq("job_id", jobId)
+      .eq("total", amount)
+      .neq("status", "void")
+      .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (recent) return { ok: true, invoiceId: recent.id };
+  }
+
+  // A job on the draw path is billed by draws — same guard as every standard-invoice creator.
+  const drawBlock = await blockStandardCreateOnDrawJob(supabase, jobId);
+  if (drawBlock) return drawBlock;
+
+  // Getting PAID is the win, so the lead's contact materializes here — through the ONE rule the
+  // accepted-estimate path uses (dedup by the CRM's keys, the person's address not the site's,
+  // lead stamped won). Best-effort: a contact-less invoice still records the money.
+  if (!customerId && inquiryId) {
+    customerId = await customerForInquiry(supabase, inquiryId, ctx.userId);
+  }
+
+  // ── The invoice, its one line, its real totals ─────────────────────────────────────────────
+  const { data: inv, error: invErr } = await supabase
+    .from("invoices")
+    .insert({
+      customer_id: customerId,
+      job_id: jobId,
+      title,
+      description: input.note?.trim() || null,
+      tax_rate: 0, // a flat settled amount — what they paid is what the record says
+      appointment_id: apptId, // 0233: the anchor — idempotency AND "was this visit billed?"
+      due_date: await defaultDueDateIso(supabase),
+      status: "draft",
+      created_by: ctx.userId,
+    })
+    .select("id, invoice_number")
+    .single();
+  if (invErr || !inv) return { ok: false, error: dbError(invErr) };
+
+  const { error: itemErr } = await supabase.from("invoice_items").insert({
+    invoice_id: inv.id,
+    description: title,
+    quantity: 1,
+    unit: "EA",
+    unit_price: amount,
+    sort_order: 0,
+  });
+  if (itemErr) {
+    return { ok: false, invoiceId: inv.id, error: `The invoice was created but its line didn't save — open it and add one. (${dbError(itemErr)})` };
+  }
+  await recalcInvoice(supabase, inv.id);
+
+  // Sent, not draft: paidStatus deliberately never advances a DRAFT (a prepayment must not lock
+  // an unsent bill's lines) — but this bill has left draft in the real world: delivered, settled,
+  // on the doorstep. Without this step the payment below would record and the invoice would sit
+  // "draft" forever, never reading as paid anywhere.
+  await supabase.from("invoices").update({ status: "sent" }).eq("id", inv.id);
+
+  // The one payment path — balance cap, org check, recalc-to-paid, cash-in push all inherited.
+  const paid = await recordPayment({
+    invoice_id: inv.id,
+    amount,
+    method: input.method || "cash",
+    note: input.note?.trim() || "",
+  });
+  if (!paid.ok) {
+    return { ok: false, invoiceId: inv.id, error: `The invoice was created but the payment didn't record — ${paid.error ?? "try it from the invoice."}` };
+  }
+
+  // The deed happened; the calendar should say so. Guarded to live statuses so a completed visit
+  // isn't re-stamped and a cancelled one can't be resurrected by a money write.
+  if (apptId) {
+    await supabase
+      .from("appointments")
+      .update({ status: "completed", updated_at: new Date().toISOString() })
+      .eq("id", apptId)
+      .in("status", ["scheduled", "proposed"]);
+    revalidatePath("/schedule");
+    revalidatePath("/planner");
+    revalidatePath("/inspections");
+    revalidatePath(`/appointments/${apptId}`);
+  }
+  revalidateMoney(inv.id);
+  revalidateMoney();
+  return { ok: true, invoiceId: inv.id };
+}

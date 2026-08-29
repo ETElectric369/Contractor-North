@@ -680,21 +680,30 @@ export async function planDayTimes(
 
   // Everything already holding time on this day. A CALL is excluded — it is pinned to the top and
   // costs the route nothing, so it must not push a real visit later.
+  /* OVERLAP, NOT A POINT TEST. A three-day service call booked Monday OCCUPIES Tuesday, but a
+     starts_at-within-the-day filter could not see it — so the fitter read Tuesday as empty and
+     booked a walk-through at 9am inside a day the calendar draws as full. Anything that STARTS
+     before the day ends and ENDS after it starts is busy here; rows with no end are caught by the
+     second arm (they start within the day and occupy their drawn hour). */
   const { data: appts } = await ctx.supabase
     .from("appointments")
     .select("starts_at, ends_at, type, status") // PROJECTION LAW: all four are read below
-    .gte("starts_at", dayStart.toISOString())
     .lt("starts_at", dayEnd.toISOString())
+    .or(`ends_at.gte.${dayStart.toISOString()},and(ends_at.is.null,starts_at.gte.${dayStart.toISOString()})`)
     .limit(200);
 
   const busy: Busy[] = [];
   for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null }[]) {
     if (a.status === "cancelled" || a.type === "call") continue;
-    const startMin = tzMinutesOfDay(a.starts_at, tz);
+    // CLAMPED TO THIS DAY: a span that started yesterday is busy from midnight; one that runs on
+    // past tonight is busy to midnight. Only the middle of a multi-day booking reads as full.
+    const startsToday = new Date(a.starts_at) >= dayStart;
+    const startMin = startsToday ? tzMinutesOfDay(a.starts_at, tz) : 0;
     // An appointment with no end is drawn as an hour, so it occupies an hour. Reading it as a point
     // would let the next visit land inside a block he can see on his screen.
+    const endsToday = a.ends_at ? new Date(a.ends_at) < dayEnd : true;
     const endMin = a.ends_at && new Date(a.ends_at) > new Date(a.starts_at)
-      ? Math.min(24 * 60, tzMinutesOfDay(a.ends_at, tz) || 24 * 60)
+      ? endsToday ? Math.min(24 * 60, tzMinutesOfDay(a.ends_at, tz) || 24 * 60) : 24 * 60
       : startMin + 60;
     busy.push({ startMin, endMin: Math.max(startMin + 15, endMin) });
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { TimeGrid, type TimeGridEvent } from "@/components/time-grid";
 import { useEndlessStack } from "@/components/use-endless-stack";
@@ -11,6 +11,13 @@ import {
   periodOpeningIn,
   type PaySchedule,
 } from "@/lib/schedule/pay-period-stack";
+
+type WeekData = {
+  days: { dayStr: string; label: string; isToday: boolean; heavyStart: boolean }[];
+  events: TimeGridEvent[];
+  weekHours: number;
+  mark: ReturnType<typeof periodOpeningIn>;
+};
 
 /**
  * THE WEEKS, RUNNING, WITH THE PAY PERIODS MARKED.
@@ -99,25 +106,65 @@ export function TimecardStack({
     [entries],
   );
 
+  /* STABLE PROPS PER WEEK, or the memo on TimeGrid is decoration. Every growth re-renders this
+     component and `weeks` is a fresh array — but a week's days/events/mark only actually change
+     when the DATA changes, so they're built once per (week, data) and handed back by reference.
+     That's what lets 25 already-mounted grids bail out while the 26th mounts. */
+  /* The cache lives in a ref so it SURVIVES growths — `weeks` is a fresh array every time the
+     stack grows, and a plain useMemo keyed on it would rebuild every entry and churn every
+     reference, leaving the memo on TimeGrid with nothing to bail out on. Only a change in the
+     DATA empties it; a growth merely fills in the one new week. */
+  const cacheRef = useRef(new Map<string, WeekData>());
+  const cacheKeyRef = useRef<unknown[]>([]);
+  const weekData = useMemo(() => {
+    const key = [byDay, paySchedule, payAnchor, todayStr];
+    if (key.some((v, i) => v !== cacheKeyRef.current[i])) {
+      cacheRef.current = new Map();
+      cacheKeyRef.current = key;
+    }
+    const cache = cacheRef.current;
+    for (const days of weeks) {
+      if (cache.has(days[0])) continue;
+      const mark = periodOpeningIn(days, paySchedule, payAnchor);
+      const events: TimeGridEvent[] = [];
+      let weekHours = 0;
+      for (const d of days) {
+        for (const e of byDay.get(d) ?? []) {
+          events.push(e);
+          weekHours += e.hours;
+        }
+      }
+      cache.set(days[0], {
+        days: days.map((ds) => ({
+          dayStr: ds,
+          label: labelFor(ds),
+          isToday: ds === todayStr,
+          heavyStart: !!mark && mark.start === ds,
+        })),
+        events,
+        weekHours: Math.round(weekHours * 100) / 100,
+        mark,
+      });
+    }
+    return cache;
+  }, [weeks, byDay, paySchedule, payAnchor, todayStr]);
+
   if (!weeks.length) return null;
 
   return (
     <div
       ref={stack.scrollRef}
       onScroll={stack.onScroll}
-      className="max-h-[calc(100dvh-20rem)] space-y-3 overflow-y-auto overscroll-contain"
+      /* No overscroll-contain: with it, a thumb landing on this scroller could ONLY scroll the
+         stack — and since the stack grows as you near its bottom, the page below it was
+         unreachable by normal scrolling. At the edges the gesture chains to the page now, which is
+         the escape. And the height floors at 70dvh everywhere: the old sm: calc left a 55px slit
+         on a landscape phone (640px wide IS sm:, but only ~375px tall). */
+      className="max-h-[70dvh] space-y-3 overflow-y-auto sm:max-h-[max(70dvh,calc(100dvh-20rem))]"
     >
       {weeks.map((days) => {
-        const mark = periodOpeningIn(days, paySchedule, payAnchor);
-        const events: TimeGridEvent[] = [];
-        let weekHours = 0;
-        for (const d of days) {
-          for (const e of byDay.get(d) ?? []) {
-            events.push(e);
-            weekHours += e.hours;
-          }
-        }
-        weekHours = Math.round(weekHours * 100) / 100;
+        const wd = weekData.get(days[0])!;
+        const { mark, events, weekHours } = wd;
         const hasToday = days.includes(todayStr);
 
         return (
@@ -162,21 +209,58 @@ export function TimecardStack({
                   {weekHours.toFixed(2)} h
                 </span>
               </div>
-              <TimeGrid
-                days={days.map((ds) => ({
-                  dayStr: ds,
-                  label: labelFor(ds),
-                  isToday: ds === todayStr,
-                  // The heavy divider stays: it marks the exact DAY a period starts, which the
-                  // break line above the week cannot do on a mid-week boundary.
-                  heavyStart: !!mark && mark.start === ds,
-                }))}
-                events={events}
-                workStartMin={workStartMin}
-                workEndMin={workEndMin}
-                tz={tz}
-                initialNow={{ dayStr: todayStr, min: nowMin }}
-              />
+              {/* THE GRID IS A DESKTOP INSTRUMENT. Erik: "timecard scroll on my phone froze up
+                  and doesnt show me the calendar so we may need a better layout for small
+                  devices." On a 375px screen each week is seven columns scrolling SIDEWAYS inside
+                  a stack scrolling DOWN — nested opposing scrollers that iOS handles badly, for a
+                  grid where each column is 50px of unreadable slivers anyway. A phone gets the
+                  answers as a list: who, when, how long, tap to fix. Same data, same links. */}
+              <div className="sm:hidden">
+                {days
+                  .filter((ds) => (byDay.get(ds) ?? []).length > 0)
+                  .map((ds) => (
+                    <div key={ds} className="border-b border-slate-100 last:border-b-0">
+                      <div className={`flex items-baseline justify-between px-3 pt-2 text-xs font-semibold ${ds === todayStr ? "text-brand" : "text-slate-500"}`}>
+                        <span>
+                          {labelFor(ds)}
+                          {!!mark && mark.start === ds && (
+                            <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-brand">new pay period</span>
+                          )}
+                        </span>
+                        <span className="font-mono tabular-nums text-slate-400">
+                          {(Math.round((byDay.get(ds) ?? []).reduce((t, e) => t + e.hours, 0) * 100) / 100).toFixed(2)} h
+                        </span>
+                      </div>
+                      <ul>
+                        {(byDay.get(ds) ?? []).map((e) => (
+                          <li key={e.id}>
+                            <a href={e.href} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50">
+                              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${e.color.split(" ")[0]}`} aria-hidden />
+                              <span className="min-w-0 flex-1 truncate text-slate-800">{e.label}</span>
+                              <span className="shrink-0 text-xs text-slate-500">{e.sub}</span>
+                              <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-slate-600">
+                                {e.hours.toFixed(2)}
+                              </span>
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                {events.length === 0 && (
+                  <p className="px-3 py-4 text-center text-xs text-slate-400">No hours this week.</p>
+                )}
+              </div>
+              <div className="hidden sm:block">
+                <TimeGrid
+                  days={wd.days}
+                  events={events}
+                  workStartMin={workStartMin}
+                  workEndMin={workEndMin}
+                  tz={tz}
+                  initialNow={{ dayStr: todayStr, min: nowMin }}
+                />
+              </div>
             </Card>
           </div>
         );

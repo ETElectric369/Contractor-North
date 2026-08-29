@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 
 import { useEffect, useRef, useState } from "react";
@@ -117,7 +118,7 @@ const hourLabel = (h: number) => {
   return `${hh} ${h < 12 || h === 24 ? "AM" : "PM"}`;
 };
 
-export function TimeGrid({
+function TimeGridInner({
   days,
   events,
   allDay = [],
@@ -334,8 +335,8 @@ export function TimeGrid({
               >
                 {/* THE WHOLE COLUMN IS THE TARGET while armed — a 12px header strip is a hard
                     thing to hit with a thumb, and the column is the shape he is aiming at anyway.
-                    Rendered BEFORE the pills so it sits underneath them: empty space places, and a
-                    tap on an existing job still opens that job rather than being swallowed. */}
+                    The pills above it place too (see below): while armed, every tap on the day
+                    means the day. */}
                 {placement && (
                   <button
                     type="button"
@@ -366,7 +367,23 @@ export function TimeGrid({
                   };
                   const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${e.color}`;
                   const title = e.sub ? `${e.label} · ${e.sub}` : e.label;
-                  return e.href ? (
+                  /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
+                     so the natural tap landed on a Link, navigated to that job, unmounted the
+                     provider and silently threw away every pick and the AM/PM choice — the worst
+                     possible answer to the exact tap the mode invites. While armed, the whole
+                     column means one thing. */
+                  return placement ? (
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => placement.onPlace(d.dayStr)}
+                      style={style}
+                      title={`${placement.label} — ${d.label}`}
+                      className={`${cls} text-left opacity-60`}
+                    >
+                      {pillBody(e.label, e.sub)}
+                    </button>
+                  ) : e.href ? (
                     <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
                       {pillBody(e.label, e.sub)}
                     </Link>
@@ -396,3 +413,13 @@ export function TimeGrid({
     </div>
   );
 }
+
+
+/**
+ * Memoized: the endless stacks mount one of these per week/month, and every growth of the stack
+ * re-renders the parent — without memo, all N mounted grids reconciled on every single growth
+ * (O(N²) over a scroll-back), which on a phone is the difference between scrolling and freezing.
+ * Callers keep per-week props referentially stable (see timecard-stack's weekData cache) so the
+ * bailout actually fires.
+ */
+export const TimeGrid = React.memo(TimeGridInner);

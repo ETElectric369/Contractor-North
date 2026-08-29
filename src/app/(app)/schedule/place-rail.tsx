@@ -340,6 +340,18 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
 
           <p className="text-sm font-medium text-brand">{armedInstruction(chosen.length)}</p>
 
+          {/* ON A PHONE THE CALENDAR IS BELOW EVERY WAITING CARD — thousands of pixels of rail
+              between the first tap and the second. "Tap the day" is not a gesture if the days are
+              off-screen; this jump makes the second tap one tap away on any screen. Hidden on lg,
+              where the calendar is already beside the rail. */}
+          <button
+            type="button"
+            onClick={() => document.getElementById("schedule-calendar")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="w-full rounded-lg border-2 border-dashed border-brand/50 bg-brand-light/30 px-3 py-2 text-sm font-semibold text-brand lg:hidden"
+          >
+            Jump to the calendar ↓
+          </button>
+
           <div className="flex flex-wrap items-center gap-2">
             {/* A HALF OR A TIME — never both lit at once.
                 They answer the same question, so a screen showing AM selected AND 12:30 PM entered

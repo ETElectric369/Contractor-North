@@ -273,7 +273,12 @@ export default async function TimecardsPage({
     .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_id, profiles:profile_id(full_name), job:job_id(job_number, name)")
     .gte("clock_in", stackFrom)
     .lt("clock_in", stackTo)
-    .order("clock_in", { ascending: true })
+    /* DESCENDING, because LIMIT applies after ORDER. Ascending kept the OLDEST 4000 rows, so the
+       moment an org crossed the cap the CURRENT week — the page's anchor and default view — went
+       blank while six-month-old weeks rendered fine. Overflow now eats the far end of the scroll,
+       which the "Six months back" notice already marks as bounded. Render order is irrelevant:
+       the stack groups by day and the grid positions by minutes. */
+    .order("clock_in", { ascending: false })
     .limit(4000);
   const stackEntries = ((stackRows ?? []) as any[]).map((e) => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
