@@ -160,22 +160,36 @@ export function NewCustomerButton() {
           }
         >
           <div className="space-y-4">
-            {/* Import ONE contact from the phone, right into the form. */}
-            <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
-              <button
-                type="button"
-                onClick={importContact}
-                className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-dark"
-              >
-                <Contact className="h-4 w-4 shrink-0" /> Import 1 Contact From My Phone
-              </button>
-              <p className="mt-1 text-[11px] leading-snug text-slate-400">
-                {hasPicker
-                  ? "Pick one contact — we'll fill in the form below, you review and save."
-                  : "iPhone: open a contact → Share → Save to Files, then pick the .vcf here. We'll fill in the form below."}
+            {/* THE PHONE'S OWN CONTACTS, by whichever door this platform actually opens.
+                Erik, on the old dashed box: "archaic ... it should be a contact picker."
+                · Where the Contact Picker API exists (Android Chrome; Safari the browser), the
+                  button opens the real address book.
+                · Inside an INSTALLED iOS web app, Apple hides that API — but the keyboard doesn't:
+                  with the fields declared (autocomplete name/tel/email), focusing Name or Phone
+                  puts the person's contact right on the QuickType bar. So there, the guidance IS
+                  the feature, one quiet line — not a dashed ritual box explaining a .vcf safari. */}
+            {hasPicker ? (
+              <div>
+                <button
+                  type="button"
+                  onClick={importContact}
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-brand hover:text-brand-dark"
+                >
+                  <Contact className="h-4 w-4 shrink-0" /> Pick from my contacts
+                </button>
+                {importMsg && <p className="mt-1 text-[11px] font-medium text-emerald-600">{importMsg}</p>}
+              </div>
+            ) : (
+              <p className="text-[11px] leading-snug text-slate-400">
+                Tap <span className="font-medium text-slate-500">Name</span> or{" "}
+                <span className="font-medium text-slate-500">Phone</span> — AutoFill offers your
+                saved contacts and fills the card.{" "}
+                <button type="button" onClick={importContact} className="text-brand underline-offset-2 hover:underline">
+                  Or import a shared .vcf
+                </button>
+                {importMsg && <span className="ml-1 font-medium text-emerald-600">{importMsg}</span>}
               </p>
-              {importMsg && <p className="mt-1 text-[11px] font-medium text-emerald-600">{importMsg}</p>}
-            </div>
+            )}
             <input
               ref={fileRef}
               type="file"

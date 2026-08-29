@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Upload } from "lucide-react";
+import { BookUser, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Select } from "@/components/ui/input";
@@ -50,6 +50,16 @@ const FIELDS: { key: keyof CustomerImportRow; label: string; match: RegExp }[] =
 
 /** Import for the customer book. `csv` mode (Settings) takes a CSV with column
  *  mapping or a vCard; otherwise (CRM) it's a single-contact vCard import. */
+/** The phone's own address book, where the platform offers it (iOS Safari / Android Chrome).
+ *  Non-standard API, so everything is feature-detected and cast — absence just means the CSV
+ *  door stays primary, which is right for a desktop anyway. */
+type PickedContact = {
+  name?: string[];
+  tel?: string[];
+  email?: string[];
+  address?: { addressLine?: string[]; city?: string; region?: string; postalCode?: string }[];
+};
+
 export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; label?: string }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -120,6 +130,59 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
     reader.readAsText(f);
   }
 
+  /* A CONTACT PICKER, NOT A SPREADSHEET RITUAL. Erik, on his phone: "it still has that archaic
+     import from csv big box... it should be a contact picker." On iOS Safari and Android Chrome
+     the platform HAS one — navigator.contacts.select opens the phone's real address book, he taps
+     the people, and they land as customers through the same bulk importer (dedupe included). CSV
+     stays for the desktop and the platforms without the API. */
+  const [hasPicker, setHasPicker] = useState(false);
+  useEffect(() => {
+    const nav = navigator as unknown as { contacts?: { select?: unknown } };
+    setHasPicker(!!nav.contacts && typeof nav.contacts.select === "function");
+  }, []);
+
+  function pickFromPhone() {
+    start(async () => {
+      setMsg(null);
+      let picked: PickedContact[] = [];
+      try {
+        const nav = navigator as unknown as {
+          contacts: { select: (props: string[], opts: { multiple: boolean }) => Promise<PickedContact[]> };
+        };
+        // `address` isn't supported everywhere — ask for it, fall back without it.
+        try {
+          picked = await nav.contacts.select(["name", "tel", "email", "address"], { multiple: true });
+        } catch {
+          picked = await nav.contacts.select(["name", "tel", "email"], { multiple: true });
+        }
+      } catch {
+        return; // he closed the sheet — not an error, nothing to say
+      }
+      if (!picked.length) return;
+      const rows: CustomerImportRow[] = picked
+        .map((c) => {
+          const adr = c.address?.[0];
+          return {
+            name: c.name?.[0] ?? "",
+            company_name: "",
+            email: c.email?.[0] ?? "",
+            phone: c.tel?.[0] ?? "",
+            address: adr?.addressLine?.join(" ") ?? "",
+            city: adr?.city ?? "",
+            state: adr?.region ?? "",
+            zip: adr?.postalCode ?? "",
+            notes: "",
+          };
+        })
+        .filter((r) => r.name || r.phone);
+      if (!rows.length) { setMsg("Those contacts had no name or number to import."); return; }
+      const res = await bulkImportCustomers(rows);
+      if (!res.ok) return setMsg(res.error ?? "Import failed.");
+      setMsg(`Added ${res.imported} from your contacts${res.skipped ? ` (${res.skipped} already in the book)` : ""}.`);
+      router.refresh();
+    });
+  }
+
   function runImport() {
     if (mapping.name === undefined) {
       setMsg("Map the Name column first.");
@@ -151,8 +214,16 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
   return (
     <>
       <span className="inline-flex flex-col gap-1">
+        {/* On a phone with the real picker, the address book IS the import — the CSV door demotes
+            to a small secondary. On desktop the CSV door stays primary, as it should. */}
+        {hasPicker && (
+          <Button onClick={pickFromPhone} disabled={pending}>
+            <BookUser className="h-4 w-4" /> {pending ? "Adding…" : "Add from Contacts"}
+          </Button>
+        )}
         <Button
           variant="outline"
+          size={hasPicker ? "sm" : "md"}
           onClick={() => fileRef.current?.click()}
           title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
         >
