@@ -32,6 +32,7 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
   const growingRef = useRef(false);
   const anchorRef = useRef(0);
   const lastTopRef = useRef(0);
+  const lastGrowRef = useRef(0);
 
   useEffect(() => {
     setBack(0);
@@ -73,14 +74,23 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
     const goingUp = top < lastTopRef.current;
     lastTopRef.current = top;
     if (growingRef.current) return;
+    /* ONE GROWTH PER BEAT. iOS momentum keeps delivering scroll events after the finger lifts,
+       and each restore re-arms the latch — so a single hard flick could chain prepends all the
+       way to the cap (Erik's phone landed on a week in April). A gesture reaches an edge at
+       most a couple of times a second; anything faster is physics, not intent. */
+    const now = Date.now();
+    if (now - lastGrowRef.current < 350) return;
+
     if (goingUp && top < 120 && back < maxBack) {
       growingRef.current = true;
+      lastGrowRef.current = now;
       anchorRef.current = el.scrollHeight;
       setBack((b) => b + 1);
       return;
     }
     if (!goingUp && el.scrollHeight - top - el.clientHeight < 240 && fwd < maxFwd) {
       growingRef.current = true;
+      lastGrowRef.current = now;
       setFwd((f) => f + 1);
     }
   }

@@ -1,4 +1,5 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
+import { storyForJob } from "@/lib/story";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
@@ -356,6 +357,9 @@ export default async function JobDetailPage({
   );
   const navTarget = directionsTarget(jobAddress, customerAddress, j.name);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
+
+  // The activity log — assembled from the rows themselves, see lib/story.
+  const story = await storyForJob(supabase, j.id);
   // The org's all-day work window (Settings → Scheduling) — the same resolver the
   // schedule writers use, threaded into the schedule/edit controls so their "blank
   // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
@@ -502,6 +506,34 @@ export default async function JobDetailPage({
       label: "Overview",
       content: (
         <div className="space-y-4">
+          {/* THE STORY — Erik's activity log. Every chapter this work has lived, assembled from
+              the rows themselves (lib/story): came in, tagged, booked, became this job, billed,
+              paid. The "from lead" arrow lands here now instead of resurrecting the lead on the
+              leads page — a lead that isn't a lead anymore doesn't go back. */}
+          {story.length > 0 && (
+            <Card id="activity" className="scroll-mt-24">
+              <CardContent className="py-5">
+                <h3 className="mb-3 text-sm font-semibold text-slate-900">The story so far</h3>
+                <ol className="space-y-2">
+                  {story.map((ev, i) => (
+                    <li key={i} className="flex items-baseline gap-2 text-sm">
+                      <span className="w-20 shrink-0 font-mono text-xs tabular-nums text-slate-400">
+                        {formatDateTz(ev.at, tz)}
+                      </span>
+                      <span className="h-1.5 w-1.5 shrink-0 translate-y-[-2px] rounded-full bg-brand/50" aria-hidden />
+                      {ev.href ? (
+                        <Link href={ev.href} className="min-w-0 text-slate-700 hover:text-brand">
+                          {ev.text}
+                        </Link>
+                      ) : (
+                        <span className="min-w-0 text-slate-700">{ev.text}</span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          )}
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1046,9 +1078,11 @@ export default async function JobDetailPage({
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
               away. An access point, not a wall. */}
           {viewerIsStaff && <OpenInspectorButton jobId={j.id} />}
-          {/* Provenance backlink — where this job came from (the lead it was converted from). */}
+          {/* Provenance backlink → THE STORY, not /leads?focus= — that door resurrected the lead
+              as a lead, live convert menu and all. Erik: "a lead not being a lead anymore doesnt
+              include putting it back." The origin lives on in the first chapter below. */}
           {(j as any).inquiry && (
-            <Link href={`/leads?focus=${(j as any).inquiry.id}`} className="text-brand hover:underline">
+            <Link href={`/jobs/${j.id}?tab=job#activity`} className="text-brand hover:underline">
               ← from lead: {(j as any).inquiry.name}
             </Link>
           )}
