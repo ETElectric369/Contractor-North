@@ -122,7 +122,7 @@ export default async function SchedulePage({
       .from("jobs")
       // `status` is read below to badge a parked job — THE PROJECTION LAW: the column the
       // decision turns on has to be in the select list.
-      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(phone, email)")
+      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(name, phone, email)")
       .in("status", ACTIVE_JOB_STATUSES)
       /* EVERYTHING ON HOLD, DATED OR NOT. Erik: "we need everything on hold to pop up on that
          list." A parked job that still carries a date is the worst of both — the calendar draws it
@@ -206,7 +206,15 @@ export default async function SchedulePage({
     ...((dateless ?? []) as unknown as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       kind: "job" as const,
-      name: `${r.job_number ? `${r.job_number} · ` : ""}${r.name ?? "Job"}`,
+      /* THE PERSON, NOT THE FILING NUMBER. Erik: "the job number taking up valuable real estate
+         ... have the guy's number right there but cant remember his name to give him a call."
+         J-048 is how the office files it; the person is who you call. The job's own name rides
+         as the small line when it says something the customer's name doesn't. */
+      name: String((r as unknown as { customers?: { name?: string | null } }).customers?.name ?? r.name ?? "Job"),
+      note: (r as unknown as { customers?: { name?: string | null } }).customers?.name && r.name
+        ? String(r.name)
+        : null,
+      status: r.status ?? null,
       address: r.address ?? null,
       city: r.city ?? null,
       planned_minutes: r.planned_minutes == null ? null : Number(r.planned_minutes),

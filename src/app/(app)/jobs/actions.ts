@@ -158,7 +158,14 @@ export async function setJobStatus(id: string, status: string): Promise<{ ok: bo
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { data, error } = await supabase.from("jobs").update({ status }).eq("id", id).select("id");
+  // The hold reason lives and dies WITH the hold (0234): any status that isn't on_hold clears it,
+  // whichever control moved the status — a stale "waiting on the permit" on an active job is a
+  // false alarm every reader would believe.
+  const { data, error } = await supabase
+    .from("jobs")
+    .update({ status, ...(status !== "on_hold" ? { hold_reason: null } : {}) })
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data || !data.length) return { ok: false, error: "Job not found." };
   // Google reconcile (fire-safe): leaving the active set deletes the event,

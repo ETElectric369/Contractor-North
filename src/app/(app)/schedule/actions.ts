@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { formatPhone } from "@/lib/utils";
 
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
@@ -764,5 +765,71 @@ export async function setJobHold(jobId: string, reason: string | null): Promise<
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/planner");
+  return { ok: true };
+}
+
+/**
+ * A PHONE FOR A JOB, TYPED WHERE THE GAP IS.
+ *
+ * Erik, on Rhineland: "im not seeing any phone or email or editable spot." A job's contact lives
+ * on its CUSTOMER — and Rhineland has no customer at all (born from a walk-in inspection). So:
+ *
+ *   customer exists, field empty → fill the gap. FILLED IS NEVER OVERWRITTEN from the board — a
+ *     customer's number is shared by every job they have, and correcting it belongs on their card
+ *     where the change is seen in context. The refusal says so (nothing silent).
+ *   no customer at all → the phone IS the fragment that starts one (fragment-first: never demand
+ *     the rest first). A minimal card named after the job, linked, growable later.
+ */
+export async function setJobContact(
+  jobId: string,
+  patch: { phone?: string; email?: string },
+): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const phone = formatPhone(String(patch.phone ?? "").trim());
+  const email = String(patch.email ?? "").trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That email doesn't look right." };
+  if (!phone && !email) return { ok: true };
+
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("id, name, customer_id, created_by")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "That job isn't available." };
+
+  if (job.customer_id) {
+    const { data: cust } = await supabase
+      .from("customers")
+      .select("id, phone, email") // PROJECTION LAW: the fill-only rule reads both below
+      .eq("id", job.customer_id)
+      .maybeSingle();
+    if (!cust) return { ok: false, error: "This job's customer isn't available." };
+    const fill: Record<string, string> = {};
+    if (phone && !String(cust.phone ?? "").trim()) fill.phone = phone;
+    if (email && !String(cust.email ?? "").trim()) fill.email = email;
+    if (!Object.keys(fill).length) {
+      return { ok: false, error: "This customer already has that on file — change it on their card, where every job sees it." };
+    }
+    const { error } = await supabase.from("customers").update({ ...fill, updated_at: new Date().toISOString() }).eq("id", cust.id);
+    if (error) return { ok: false, error: dbError(error) };
+  } else {
+    const { data: cust, error } = await supabase
+      .from("customers")
+      .insert({
+        name: job.name || "Customer",
+        status: "active",
+        phone: phone || null,
+        email: email || null,
+        created_by: ctx.userId,
+      })
+      .select("id")
+      .single();
+    if (error || !cust) return { ok: false, error: dbError(error) };
+    await supabase.from("jobs").update({ customer_id: cust.id, updated_at: new Date().toISOString() }).eq("id", jobId);
+  }
+  revalidatePath("/schedule");
+  revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

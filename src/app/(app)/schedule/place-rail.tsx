@@ -9,7 +9,9 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { formatPhone } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { setLeadContact, sizeLead } from "../leads/actions";
-import { setJobHold, sizeAppointment, sizeJob } from "./actions";
+import { setJobStatus } from "../jobs/actions";
+import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { setJobContact, setJobHold, sizeAppointment, sizeJob } from "./actions";
 import { usePlacement } from "./placement-context";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
@@ -47,6 +49,18 @@ import {
  * Mike Scrivano has no address but a phone and a real note, so his next move is a call, not the
  * bottom of the list. See lib/schedule/place-by-town.
  */
+/** "14161 Tanager Ln." the job and "14161 Tanager Lane" the address are the same fact — showing
+ *  both said the address twice on one card. Compared on bare alphanumerics so punctuation and
+ *  abbreviation ("Ln." vs "Lane") don't fake a difference. */
+function sameishPlace(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (v: string | null | undefined) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return false;
+  const head = (v: string) => v.slice(0, 12);
+  return x.startsWith(head(y)) || y.startsWith(head(x));
+}
+
 /** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
  *  speaks the second one. */
 function prettyTime(hm: string): string {
@@ -88,11 +102,12 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
   const [holdFor, setHoldFor] = useState<string | null>(null);
   const [holdReason, setHoldReason] = useState("");
 
-  /** The driveway entry — a phone heard out loud goes straight in. Blank never erases. */
-  function contact(id: string, patch: { phone?: string; email?: string }) {
+  /** The driveway entry — a phone heard out loud goes straight in. Blank never erases. A lead's
+   *  contact is its own; a job's rides its customer (setJobContact's fill-only rule). */
+  function contact(i: Placeable, patch: { phone?: string; email?: string }) {
     if (!String(patch.phone ?? patch.email ?? "").trim()) return;
     start(async () => {
-      const res = await setLeadContact(id, patch);
+      const res = i.kind === "job" ? await setJobContact(i.id, patch) : await setLeadContact(i.id, patch);
       if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
       router.refresh();
     });
@@ -190,6 +205,12 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="text-sm font-medium text-slate-900">{i.name}</span>
+                          {/* The job's own name — but only when it adds something. When the job is
+                              named after its address (most are), showing both said the address
+                              twice on one card (Erik). */}
+                          {i.kind === "job" && i.note && !sameishPlace(i.note, i.address) && (
+                            <span className="text-xs text-slate-400">{i.note}</span>
+                          )}
                           {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
                               inspection/walk through, or office … and how much time they are going
                               to take". Between them a day is plannable by eye. */}
@@ -223,25 +244,6 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             announced a missing phone and said NOTHING about one it had. One line,
                             both jobs: shows the value when there is one, shows a quiet dash when
                             there isn't — and picking the card turns the dashes into inputs. */}
-                        {/* Every kind shows the contact it HAS (a job's rides its customer);
-                            only a lead shows dashes for the gaps, because only a lead's contact
-                            is entered here — a job's belongs to the customer record. */}
-                        {(i.kind === "lead" || i.phone || i.email) && (
-                          <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                            {(i.kind === "lead" || i.phone) && (
-                              <span className="inline-flex items-center gap-1">
-                                <Phone className="h-3 w-3 shrink-0" />
-                                {i.phone ? formatPhone(i.phone) : <span className="text-slate-300">—</span>}
-                              </span>
-                            )}
-                            {(i.kind === "lead" || i.email) && (
-                              <span className="inline-flex items-center gap-1">
-                                <Mail className="h-3 w-3 shrink-0" />
-                                {i.email || <span className="text-slate-300">—</span>}
-                              </span>
-                            )}
-                          </span>
-                        )}
                         {miss === "place" && (
                           <span className={`mt-0.5 flex items-center gap-1 text-xs ${on ? "font-medium text-amber-700" : "text-slate-400"}`}>
                             {on ? nextAction(miss) : "no address yet"}
@@ -250,6 +252,39 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                       </span>
                       </button>
                     </div>
+
+                    {/* THE CONTACT LINE — a SIBLING of the body button, because the phone is a
+                        LINK now (Erik: "give him a call from a tap" — tel:/mailto: dial from the
+                        browser and the PWA alike) and a link inside a button is the Karen lesson.
+                        Every kind shows what it has; leads and jobs show dashes for the gaps,
+                        because both can take a number here (a lead's own, a job's via its
+                        customer). Appointments display-only. */}
+                    {(i.kind !== "appointment" || i.phone || i.email) && (
+                      <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-7 text-xs text-slate-500">
+                        {(i.kind !== "appointment" || i.phone) && (
+                          <span className="inline-flex items-center gap-1">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            {i.phone ? (
+                              <a href={`tel:${i.phone.replace(/[^\d+]/g, "")}`} className="hover:text-brand hover:underline">
+                                {formatPhone(i.phone)}
+                              </a>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </span>
+                        )}
+                        {(i.kind !== "appointment" || i.email) && (
+                          <span className="inline-flex items-center gap-1">
+                            <Mail className="h-3 w-3 shrink-0" />
+                            {i.email ? (
+                              <a href={`mailto:${i.email}`} className="hover:text-brand hover:underline">{i.email}</a>
+                            ) : (
+                              <span className="text-slate-300">—</span>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    )}
 
                     {/* SIZE IT RIGHT HERE. Erik: "editable on the schedule page". The moment you
                         NEED the number is while filling a day; making him leave, find the lead,
@@ -278,8 +313,10 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                         </div>
 
                         {/* Enter the phone/email ON THE SPOT — the driveway moment. Saves on Enter
-                            or when the field loses focus; blank never erases. */}
-                        {i.kind === "lead" && (!i.phone || !i.email) && (
+                            or when the field loses focus; blank never erases. A JOB's entry rides
+                            its customer (fill-the-gap only; a customer-less job mints a minimal
+                            card from the fragment — see setJobContact). */}
+                        {(i.kind === "lead" || i.kind === "job") && (!i.phone || !i.email) && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {!i.phone && (
                               /* The app's ONE phone control — formats "(530) 933-6686" as you
@@ -289,7 +326,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 placeholder="Phone"
                                 aria-label="Phone — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                onBlur={(e) => contact(i.id, { phone: e.target.value })}
+                                onBlur={(e) => contact(i, { phone: e.target.value })}
                                 className="h-7 w-36 rounded-md px-1.5 text-xs"
                               />
                             )}
@@ -299,22 +336,72 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 placeholder="Email"
                                 aria-label="Email — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                onBlur={(e) => contact(i.id, { email: e.target.value })}
+                                onBlur={(e) => contact(i, { email: e.target.value })}
                                 className="h-7 w-40 rounded-md border border-slate-200 px-1.5 text-xs"
                               />
                             )}
                           </div>
                         )}
 
-                        {/* PARK IT OR WAKE IT, from right here — with the reason, because "on hold"
-                            alone is a shrug and the reason is what tells you what un-parks it. */}
-                        {i.kind === "job" &&
-                          (i.onHold ? (
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              {/* THE REASON, EDITABLE WHERE IT LIVES. Erik: "the already on hold
-                                  job isnt editable in place" — a pre-0234 hold (no reason) had no
-                                  way to gain one without waking and re-parking. Type it, Enter or
-                                  blur saves; blank leaves it alone. */}
+                        {/* STATUS, IN THE SAME GRAMMAR AS EVERYTHING ELSE. Erik: "this put on
+                            hold button is weird it should be the same kind picker flow as
+                            everything else: continuity is our friend." One more small select —
+                            the job-status spine, same as the job page's dropdown. Picking On hold
+                            opens the why-input (a hold has a reason, 0234); any other pick moves
+                            the status and the reason dies with the hold (setJobStatus clears it). */}
+                        {i.kind === "job" && (
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            <select
+                              value={holdFor === i.id ? "on_hold" : (i.status ?? "to_be_scheduled")}
+                              disabled={pending}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (v === "on_hold" && !i.onHold) {
+                                  setHoldFor(i.id);
+                                  setHoldReason(i.holdReason ?? "");
+                                  return;
+                                }
+                                setHoldFor(null);
+                                start(async () => {
+                                  const res = await setJobStatus(i.id, v);
+                                  if (!res.ok) { toast(res.error ?? "Couldn't change that.", "error"); return; }
+                                  router.refresh();
+                                });
+                              }}
+                              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+                              aria-label="Job status"
+                            >
+                              {JOB_STATUSES.map((st) => (
+                                <option key={st} value={st}>
+                                  {jobStatusLabel(st).replace(/^\w/, (c: string) => c.toUpperCase())}
+                                </option>
+                              ))}
+                            </select>
+                            {holdFor === i.id && (
+                              <>
+                                <input
+                                  autoFocus
+                                  value={holdReason}
+                                  onChange={(e) => setHoldReason(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") { e.preventDefault(); hold(i.id, holdReason); }
+                                    if (e.key === "Escape") setHoldFor(null);
+                                  }}
+                                  placeholder="Why? — waiting on the permit"
+                                  aria-label="Why is this on hold"
+                                  className="h-7 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => hold(i.id, holdReason)}
+                                  className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+                                >
+                                  Hold it
+                                </button>
+                              </>
+                            )}
+                            {/* An already-held job edits its reason right here. */}
+                            {i.onHold && holdFor !== i.id && (
                               <input
                                 defaultValue={i.holdReason ?? ""}
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -326,47 +413,9 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 aria-label="Why is this on hold"
                                 className="h-7 w-56 rounded-md border border-slate-200 px-1.5 text-xs"
                               />
-                              <button
-                                type="button"
-                                disabled={pending}
-                                onClick={() => hold(i.id, null)}
-                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                              >
-                                Take off hold
-                              </button>
-                            </span>
-                          ) : holdFor === i.id ? (
-                            <span className="flex flex-wrap items-center gap-1.5">
-                              <input
-                                autoFocus
-                                value={holdReason}
-                                onChange={(e) => setHoldReason(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") { e.preventDefault(); hold(i.id, holdReason); }
-                                  if (e.key === "Escape") setHoldFor(null);
-                                }}
-                                placeholder="Why? — waiting on the permit"
-                                aria-label="Why is this on hold"
-                                className="h-7 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => hold(i.id, holdReason)}
-                                className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
-                              >
-                                Hold it
-                              </button>
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              disabled={pending}
-                              onClick={() => { setHoldFor(i.id); setHoldReason(""); }}
-                              className="rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
-                            >
-                              Put on hold…
-                            </button>
-                          ))}
+                            )}
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>

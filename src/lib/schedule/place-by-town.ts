@@ -67,6 +67,8 @@ export type Placeable = {
   onHold?: boolean;
   /** WHY it's parked (0234) — "waiting on the permit". The reason is the next action. */
   holdReason?: string | null;
+  /** A job's status (the spine), so the card's status control shows where it stands. */
+  status?: string | null;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */
   type?: string | null;
   /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred
