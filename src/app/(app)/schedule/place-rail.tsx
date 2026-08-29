@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { MapPin, Phone, Mail, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PhoneInput } from "@/components/ui/phone-input";
+import { formatPhone } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { setLeadContact, sizeLead } from "../leads/actions";
 import { setJobHold, sizeAppointment, sizeJob } from "./actions";
@@ -75,6 +77,12 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
   );
   const load = dayLoad(chosen);
   const jobs = chosen.filter((i) => i.kind === "job");
+
+  /** Which card is unfolded for editing — SEPARATE from the pick. Erik: "when i click on the
+   *  card it checks the checkbox automatically, lets make it so i have to check the check box to
+   *  check the check box." Tapping the body now opens the card's controls without arming the
+   *  calendar; only the box picks. Editing and placing are different intents, one card. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   /** Which job is typing its hold reason. */
   const [holdFor, setHoldFor] = useState<string | null>(null);
@@ -157,19 +165,28 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                       on ? "border-brand bg-brand-light/40" : "border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggle(i.id)}
-                      aria-pressed={on}
-                      className="flex w-full items-start gap-2 text-left"
-                    >
-                      <span
-                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-                          on ? "border-brand bg-brand text-white" : "border-slate-300"
+                    <div className="flex w-full items-start gap-2">
+                      {/* THE BOX PICKS. Its own control, a sibling of the body tap — never nested
+                          (the Karen lesson), and sized for a thumb. */}
+                      <button
+                        type="button"
+                        onClick={() => toggle(i.id)}
+                        aria-pressed={on}
+                        aria-label={on ? `Unpick ${i.name}` : `Pick ${i.name} to place on a day`}
+                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
+                          on ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand/60"
                         }`}
                       >
-                        {on && <Check className="h-3 w-3" />}
-                      </span>
+                        {on && <Check className="h-3.5 w-3.5" />}
+                      </button>
+                      {/* THE BODY OPENS. Editing and placing are different intents: a tap here
+                          unfolds the in-place controls without arming the calendar. */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedId(expandedId === i.id ? null : i.id)}
+                        aria-expanded={on || expandedId === i.id}
+                        className="min-w-0 flex-1 text-left"
+                      >
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="text-sm font-medium text-slate-900">{i.name}</span>
@@ -214,7 +231,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             {(i.kind === "lead" || i.phone) && (
                               <span className="inline-flex items-center gap-1">
                                 <Phone className="h-3 w-3 shrink-0" />
-                                {i.phone || <span className="text-slate-300">—</span>}
+                                {i.phone ? formatPhone(i.phone) : <span className="text-slate-300">—</span>}
                               </span>
                             )}
                             {(i.kind === "lead" || i.email) && (
@@ -231,13 +248,14 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                           </span>
                         )}
                       </span>
-                    </button>
+                      </button>
+                    </div>
 
                     {/* SIZE IT RIGHT HERE. Erik: "editable on the schedule page". The moment you
                         NEED the number is while filling a day; making him leave, find the lead,
                         edit and come back is the round trip he says costs the most. A sibling of
                         the tap target now, not a descendant. */}
-                    {on && (
+                    {(on || expandedId === i.id) && (
                       <div className="mt-1.5 space-y-1.5 pl-6">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {/* THE SAME control the lead row carries — see work-shape-controls. */}
@@ -264,13 +282,15 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                         {i.kind === "lead" && (!i.phone || !i.email) && (
                           <div className="flex flex-wrap items-center gap-1.5">
                             {!i.phone && (
-                              <input
-                                inputMode="tel"
+                              /* The app's ONE phone control — formats "(530) 933-6686" as you
+                                 type. A bare input here stored 4153703682 beside formatted
+                                 numbers: the hand-copied-control bug, caught by Erik in a day. */
+                              <PhoneInput
                                 placeholder="Phone"
                                 aria-label="Phone — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i.id, { phone: e.target.value })}
-                                className="h-7 w-32 rounded-md border border-slate-200 px-1.5 text-xs"
+                                className="h-7 w-36 rounded-md px-1.5 text-xs"
                               />
                             )}
                             {!i.email && (

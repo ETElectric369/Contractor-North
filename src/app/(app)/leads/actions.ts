@@ -879,7 +879,10 @@ export async function setLeadContact(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const clean: Record<string, string> = {};
-  const phone = String(patch.phone ?? "").trim();
+  // ONE SHAPE IN THE COLUMN. Erik typed 4153703682 and it stayed raw next to Mike's
+  // "(530) 606-0045" — two formats for one fact. formatPhone is the app's ONE formatter
+  // (PhoneInput uses it as-you-type); normalizing at the write means every entrance agrees.
+  const phone = formatPhone(String(patch.phone ?? "").trim());
   const email = String(patch.email ?? "").trim();
   if (phone) clean.phone = phone;
   if (email) {
