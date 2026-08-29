@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { formatPhone } from "@/lib/utils";
 import { Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,8 +60,13 @@ export function NewCustomerInline({
   return (
     <div className={`space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2 ${className ?? ""}`}>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Input placeholder="Name *" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <Input placeholder="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
+        {/* DECLARED FIELDS, so the Mac's own Contacts can fill them. Erik watched Safari's
+            AutoFill-from-Contacts offer the guy's real number here EXACTLY ONCE and never again:
+            with no autocomplete/name/type, the browser has to GUESS which box is a phone, and it
+            guesses inconsistently. Declared, the offer is reliable — no plugin, nothing to pay
+            for; it's built into Safari (Settings → AutoFill → "info from my contacts"). */}
+        <Input name="name" autoComplete="name" placeholder="Name *" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <Input name="phone" type="tel" autoComplete="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" />
       </div>
       {err && <p className="text-sm text-rose-600">{err}</p>}
       <div className="flex items-center gap-2">

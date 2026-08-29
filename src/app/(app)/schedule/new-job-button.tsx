@@ -302,6 +302,8 @@ export function NewJobButton({
                 <Input
                   id="new_customer_phone"
                   name="new_customer_phone"
+                  type="tel"
+                  autoComplete="tel"
                   placeholder="(optional)"
                   value={form.new_customer_phone}
                   onChange={(e) => patch({ new_customer_phone: e.target.value })}
@@ -313,6 +315,7 @@ export function NewJobButton({
                   id="new_customer_email"
                   name="new_customer_email"
                   type="email"
+                  autoComplete="email"
                   placeholder="(optional)"
                   value={form.new_customer_email}
                   onChange={(e) => patch({ new_customer_email: e.target.value })}

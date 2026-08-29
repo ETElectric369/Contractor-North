@@ -114,7 +114,7 @@ export function InquiryFields({
       </div>
       <div>
         <Label htmlFor="email">Email</Label>
-        <Input id="email" name="email" type="email" value={value.email} onChange={(e) => onChange({ email: e.target.value })} />
+        <Input id="email" name="email" type="email" autoComplete="email" value={value.email} onChange={(e) => onChange({ email: e.target.value })} />
       </div>
       <div className="col-span-2">
         <Label htmlFor="phone">Phone</Label>
@@ -122,6 +122,7 @@ export function InquiryFields({
         <PhoneInput
           id="phone"
           name="phone"
+          autoComplete="tel"
           defaultValue={value.phone}
           onInput={(e) => onChange({ phone: (e.target as HTMLInputElement).value })}
         />

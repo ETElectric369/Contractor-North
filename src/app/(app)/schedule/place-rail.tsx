@@ -323,6 +323,8 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                  type. A bare input here stored 4153703682 beside formatted
                                  numbers: the hand-copied-control bug, caught by Erik in a day. */
                               <PhoneInput
+                                name="phone"
+                                autoComplete="tel"
                                 placeholder="Phone"
                                 aria-label="Phone — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
@@ -332,6 +334,9 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             )}
                             {!i.email && (
                               <input
+                                name="email"
+                                type="email"
+                                autoComplete="email"
                                 inputMode="email"
                                 placeholder="Email"
                                 aria-label="Email — enter it on the spot"
