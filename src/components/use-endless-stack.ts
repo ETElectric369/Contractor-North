@@ -55,7 +55,17 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
     const el = scrollRef.current;
     if (!el || !growingRef.current) return;
     if (anchorRef.current) {
+      /* KILL THE MOMENTUM FIRST. iOS ignores scrollTop writes while a momentum scroll is live, so
+         the restore below silently failed mid-flick and the view stayed on the freshly PREPENDED
+         week — one week back per beat for as long as the glide lasted ("scroll keeps jumping me
+         way back", and every rescue tap only stopped the lurch instead of clicking). Toggling
+         overflow is the one reliable way to stop a glide: hidden ends it, the write lands, auto
+         resumes. One flick now opens exactly one week and stops — a page turn, not a slot machine. */
+      const prevOverflow = el.style.overflow;
+      el.style.overflow = "hidden";
       el.scrollTop += el.scrollHeight - anchorRef.current;
+      void el.offsetHeight; // flush so the write is applied before overflow returns
+      el.style.overflow = prevOverflow;
       anchorRef.current = 0;
       lastTopRef.current = el.scrollTop;
     }
@@ -95,5 +105,7 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
     }
   }
 
-  return { back, fwd, scrollRef, onScroll };
+  // The caps ride back out so consumers can say "this is the edge" without hand-copying the
+  // number — the timecards notice had its own literal 26, one retune away from lying.
+  return { back, fwd, scrollRef, onScroll, maxBack, maxFwd, atBackCap: back >= maxBack, atFwdCap: fwd >= maxFwd };
 }

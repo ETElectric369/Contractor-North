@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { INSPECTION_TYPES } from "@/lib/statuses";
+import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { lienStatus } from "@/lib/lien-math";
@@ -79,7 +79,7 @@ export async function getActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, settledR, draftQuoteR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -255,7 +255,7 @@ export async function getActionItems(ctx: {
           .from("appointments")
           .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)")
           .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
-          .in("type", [...INSPECTION_TYPES])
+          .in("type", [...ESTIMATE_VISIT_TYPES])
           .gte("starts_at", daysAgoStr(todayStr, 60))
           .lte("starts_at", endOfToday)
           .order("starts_at", { ascending: false })
@@ -282,12 +282,6 @@ export async function getActionItems(ctx: {
           .eq("status", "completed")
           .gte("starts_at", daysAgoStr(todayStr, 60))
           .limit(100)
-      : empty,
-    // The settled signal: an invoice anchored to its visit (0233 — settleUp writes it).
-    // amount_paid rides along because ANCHORED IS NOT PAID — "collect later" anchors a bill
-    // with zero collected, and treating that as settled re-opened the Nora hole one door down.
-    isStaff
-      ? supabase.from("invoices").select("id, appointment_id, amount_paid").not("appointment_id", "is", null).neq("status", "void").limit(2000)
       : empty,
     // ── Estimates started and never sent ─────────────────────────────────────────
     // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off
@@ -536,6 +530,22 @@ export async function getActionItems(ctx: {
   //    anchored to it and no billing on its job is money already earned and not yet asked for.
   //    NOTHING SILENT: this is the row that would have caught the $150 had it not been cash.
   {
+    // The settled signal: an invoice anchored to its visit (0233 — settleUp writes it).
+    // amount_paid rides along because ANCHORED IS NOT PAID — "collect later" anchors a bill
+    // with zero collected, and treating that as settled re-opened the Nora hole one door down.
+    // Scoped to the done-visit ids (≤100, the 60-day window) instead of the old org-wide
+    // limit(2000), which silently truncated once an org out-earned it and made settled visits
+    // re-nag as unbilled. Runs AFTER the Promise.all because it needs the ids (0233's partial
+    // index on appointment_id backs the .in()).
+    const doneVisitIds = ((doneWorkR.data ?? []) as { id: string }[]).map((a) => String(a.id));
+    const settledR = doneVisitIds.length && isStaff
+      ? await supabase
+          .from("invoices")
+          .select("id, appointment_id, amount_paid")
+          .in("appointment_id", doneVisitIds)
+          .neq("status", "void")
+          .limit(200)
+      : { data: [] as { id: string; appointment_id: string | null; amount_paid: number | null }[] };
     // Two different endings share the anchor: money landed (settled — the item clears) and
     // billed-but-unpaid ("collect later" — the item stays, retitled, and opens the INVOICE,
     // because the next move is collecting, not re-billing).

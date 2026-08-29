@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry } from "./actions";
+import { workKind } from "@/lib/schedule/work-shape";
 
 /** A sensible default inspection date: 2 days out. */
 function defaultInspectDate(): string {
@@ -47,11 +48,20 @@ function defaultSlots(): { date: string; time: string }[] {
 export function ConvertMenu({
   inquiryId,
   inquiryName,
+  workKind: workKindProp = null,
 }: {
   inquiryId: string;
   inquiryName: string;
   customers?: { id: string; name: string }[];
+  /** The lead's declared Kind? tag. THE COPY MUST TELL THE TRUTH IT ACTS: a job/service lead with
+   *  a firm date books NO inspection — the server converts it into a real placed JOB (leads/
+   *  actions firm-booking fork), the lead graduates, and Done/Pay now wait on the job page. The
+   *  modal used to promise "an amber inspection… the lead stays open" for exactly that tap. */
+  workKind?: string | null;
 }) {
+  const kind = workKind({ kind: "lead", workKind: workKindProp });
+  const isWork = kind === "job" || kind === "service";
+  const workNoun = kind === "job" ? "job" : "service call";
   const router = useRouter();
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectDate, setInspectDate] = useState(defaultInspectDate());
@@ -144,7 +154,13 @@ export function ConvertMenu({
             screen and is distracting". The word "inspection" was doing no work on a LEAD row,
             where a site visit is the only thing there is to schedule; the modal it opens says
             "Book a site inspection" in its title, which is where that word belongs. */}
-        <Button size="sm" variant="outline" onClick={openInspect} disabled={busy !== null} title="Book a site visit — the lead stays open">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={openInspect}
+          disabled={busy !== null}
+          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book a site visit — the lead stays open"}
+        >
           <CalendarPlus className="h-4 w-4" /> Schedule
         </Button>
         <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
@@ -161,7 +177,14 @@ export function ConvertMenu({
       <Modal
         open={inspectOpen}
         onClose={closeInspect}
-        title={link ? "Text them these times" : "Book a site inspection"}
+        title={
+          link ? "Text them these times"
+          // Pick mode books a PROPOSAL for every kind — a job can't be placed on an unchosen
+          // day, so the work-flavored title would promise a conversion pick mode never does.
+          : isWork && mode === "book" ? (kind === "job" ? "Schedule the job" : "Book the service call")
+          : isWork ? "Offer times for the visit"
+          : "Book a site inspection"
+        }
         size="sm"
         footer={
           link ? (
@@ -171,7 +194,7 @@ export function ConvertMenu({
               onCancel={closeInspect}
               onSave={() => run("inspection")}
               saving={busy === "inspection"}
-              saveLabel={mode === "pick" ? "Create Link" : "Book inspection"}
+              saveLabel={mode === "pick" ? "Create Link" : isWork ? (kind === "job" ? "Schedule job" : "Book service call") : "Book inspection"}
             />
           )
         }
@@ -179,7 +202,7 @@ export function ConvertMenu({
         {link ? (
           <div className="space-y-3">
             <div className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              Link ready — text it to <strong>{inquiryName}</strong>. The inspection confirms onto your
+              Link ready — text it to <strong>{inquiryName}</strong>. The visit confirms onto your
               calendar the moment they tap a time, and the lead stays open for the estimate.
             </div>
             <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
@@ -200,10 +223,17 @@ export function ConvertMenu({
           </div>
         ) : (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              Books a site inspection for <strong>{inquiryName}</strong> onto your Schedule (an amber inspection you can move or
-              reassign). The lead stays open, so you can create the estimate after the visit.
-            </p>
+            {isWork && mode === "book" ? (
+              <p className="text-sm text-slate-600">
+                Puts <strong>{inquiryName}</strong> on your Schedule as the {workNoun} itself — the lead
+                becomes a real job on that day, and Done / Pay now wait on its job page.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-600">
+                Books a site visit for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
+                reassign). The lead stays open, so you can create the estimate after the visit.
+              </p>
+            )}
 
             <SegmentedControl
               stretch
@@ -217,7 +247,7 @@ export function ConvertMenu({
 
             {mode === "book" ? (
               <div>
-                <Label htmlFor="inspect-date">Inspection date</Label>
+                <Label htmlFor="inspect-date">{isWork ? "Start date" : "Inspection date"}</Label>
                 <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => setInspectDate(e.target.value)} />
                 <p className="mt-1 text-xs text-slate-400">Defaults to 9:00 AM — fine-tune the time on the Schedule.</p>
               </div>

@@ -49,7 +49,7 @@ export async function storyForJob(
       : Promise.resolve({ data: null }),
     supabase
       .from("appointments")
-      .select("id, title, type, status, starts_at, created_at, updated_at")
+      .select("id, title, type, status, starts_at, ends_at, created_at, updated_at")
       .or(`job_id.eq.${jobId}${job.inquiry_id ? `,inquiry_id.eq.${job.inquiry_id}` : ""}`)
       .neq("status", "cancelled")
       .order("created_at")
@@ -96,7 +96,7 @@ export async function storyForJob(
     });
   }
 
-  for (const a of (apptR.data ?? []) as { id: string; title: string; status: string; starts_at: string | null; created_at: string; updated_at: string | null }[]) {
+  for (const a of (apptR.data ?? []) as { id: string; title: string; status: string; starts_at: string | null; ends_at: string | null; created_at: string; updated_at: string | null }[]) {
     out.push({
       at: a.created_at,
       text: a.starts_at
@@ -105,7 +105,10 @@ export async function storyForJob(
       href: `/appointments/${a.id}`,
     });
     if (a.status === "completed") {
-      out.push({ at: a.updated_at ?? a.created_at, text: `Visit completed — ${a.title}`, href: `/appointments/${a.id}` });
+      // No column remembers the completion click — the visit's own end is the stamped moment
+      // closest to it. updated_at drifts with every later edit (a Wednesday typo fix was
+      // re-dating Monday's completion past the estimate it produced).
+      out.push({ at: a.ends_at ?? a.starts_at ?? a.updated_at ?? a.created_at, text: `Visit completed — ${a.title}`, href: `/appointments/${a.id}` });
     }
   }
 

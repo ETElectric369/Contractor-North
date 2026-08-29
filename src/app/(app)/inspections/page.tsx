@@ -10,7 +10,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { INSPECTION_TYPES, appointmentTypeLabel } from "@/lib/statuses";
+import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 import { bucketInspections, hasCaptureData } from "@/lib/inspections";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
@@ -52,7 +52,7 @@ export default async function InspectionsPage({
       .select(
         "id, type, title, status, starts_at, location, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)",
       )
-      .in("type", [...INSPECTION_TYPES])
+      .in("type", [...ESTIMATE_VISIT_TYPES])
       .order("starts_at", { ascending: false })
       .limit(500),
     // Which inquiries/jobs already have an estimate — the "written up" signal. Ids too:

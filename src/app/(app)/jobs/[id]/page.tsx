@@ -1073,7 +1073,13 @@ export default async function JobDetailPage({
               not on a job already settled by draws (settleUp re-checks server-side; hiding it
               here just spares the tap that would be refused). */}
           {viewerIsStaff && j.status !== "cancelled" && (
-            <SettleUpButton source="job" id={j.id} compact />
+            <SettleUpButton
+              source="job"
+              id={j.id}
+              compact
+              methods={getOrgSettings((org as any)?.settings).payment_methods}
+              venmoConfigured={Boolean(getOrgSettings((org as any)?.settings).venmo_handle?.trim())}
+            />
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
               away. An access point, not a wall. */}

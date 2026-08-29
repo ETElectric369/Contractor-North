@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef } from "react";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { TimeGrid, type TimeGridEvent } from "@/components/time-grid";
 import { useEndlessStack } from "@/components/use-endless-stack";
@@ -234,14 +235,17 @@ export function TimecardStack({
                       <ul>
                         {(byDay.get(ds) ?? []).map((e) => (
                           <li key={e.id}>
-                            <a href={e.href} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50">
+                            {/* Link, not <a>: a full reload threw the scroll position away and
+                                re-anchored the page, so tapping an old entry FELT like nothing
+                                opened. Client nav keeps the stack where he left it. */}
+                            <Link href={e.href} scroll={false} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50">
                               <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${e.color.split(" ")[0]}`} aria-hidden />
                               <span className="min-w-0 flex-1 truncate text-slate-800">{e.label}</span>
                               <span className="shrink-0 text-xs text-slate-500">{e.sub}</span>
                               <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-slate-600">
                                 {e.hours.toFixed(2)}
                               </span>
-                            </a>
+                            </Link>
                           </li>
                         ))}
                       </ul>
@@ -266,7 +270,7 @@ export function TimecardStack({
         );
       })}
       {/* NOTHING SILENT: say where the scroll stops rather than just refusing to grow. */}
-      {stack.back >= 26 && (
+      {stack.atBackCap && (
         <p className="py-2 text-center text-xs text-slate-400">
           Six months back. Use the arrows above to jump further.
         </p>

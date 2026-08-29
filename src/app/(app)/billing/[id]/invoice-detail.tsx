@@ -871,7 +871,7 @@ export function InvoiceDetail({
                   already moved; this one MOVES it: card → the customer scans a QR into Stripe
                   checkout on their phone, Venmo → the org's QR with the amount filled in. */}
               {balance > 0.005 && (
-                <SettleUpButton source="invoice" invoiceId={invoice.id} balance={balance} compact />
+                <SettleUpButton source="invoice" invoiceId={invoice.id} balance={balance} compact methods={paymentMethods} />
               )}
             </div>
             {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments

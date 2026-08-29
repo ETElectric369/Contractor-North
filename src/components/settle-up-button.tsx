@@ -42,16 +42,33 @@ type QrState = {
   amount: number;
 };
 
-export function SettleUpButton(props: Mode & { compact?: boolean; label?: string }) {
+export function SettleUpButton(props: Mode & {
+  compact?: boolean;
+  label?: string;
+  /** The org's Settings → Payment methods list. Pay now IS the record-in-the-field surface that
+   *  screen promises to govern — it was the one payment surface still hardcoding its chips, so a
+   *  Zelle org's tech tapped "other" and the ledger lost the method. Fallback preserves the old
+   *  chips for any mount that doesn't pass it (same idiom as invoice-detail). */
+  methods?: string[];
+  /** false = org has no Venmo handle: the venmo tap dead-ends BEFORE minting a sent invoice. */
+  venmoConfigured?: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(props.source === "invoice" ? String(props.balance || "") : "");
-  const [method, setMethod] = useState("cash");
+  const chips = props.methods?.length ? props.methods : ["Card", "Cash", "Check", "Venmo", "Other"];
+  // Default to the first cash-like chip — never the literal "cash", which an org that removed
+  // Cash from its list would silently record anyway.
+  const [method, setMethod] = useState(chips.find((m) => !["card", "venmo"].includes(m.toLowerCase())) ?? chips[0]);
   const [qr, setQr] = useState<QrState | null>(null);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
+  /* THE LOAD-BEARING NORMALIZATION: org labels are capitalized ("Venmo"), and the venmo/card
+     forks key on lowercase. Without this, "Venmo" falls into the cash-like branch and records a
+     payment that never happened — the exact phantom this component exists to prevent. */
+  const key = method.toLowerCase();
 
   /** The invoice this collection runs against — created on the spot for a visit/job source. */
   async function ensureInvoice(m: string, collect: "record" | "later"): Promise<string | null> {
@@ -79,14 +96,20 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
       toast("Enter what they're paying.", "error");
       return;
     }
+    if (key === "venmo" && props.venmoConfigured === false) {
+      // Pre-flight, NOT a hidden chip: the list governs presence, the toast explains the dead
+      // end — and no invoice gets minted and sent on a tap that can only fail.
+      toast("Add your Venmo username in Settings → Payment methods first.", "error");
+      return;
+    }
     start(async () => {
-      if (method === "venmo" || method === "card") {
+      if (key === "venmo" || key === "card") {
         // Build the bill, leave the balance open, and put the door in front of the customer.
         const invoiceId = await ensureInvoice(method, "later");
         if (!invoiceId) return;
         const art = await collectArtifacts(invoiceId, amt());
         if (!art.ok) { toast(art.error ?? "Couldn't build the payment code.", "error"); return; }
-        if (method === "venmo") {
+        if (key === "venmo") {
           if (!art.venmoQr) {
             toast("Add your Venmo username in Settings → Payment methods first.", "error");
             router.push(`/billing/${invoiceId}`);
@@ -192,7 +215,7 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
         className="h-9 w-24 rounded-lg border border-slate-200 px-2 text-sm"
       />
       <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
-        {(["card", "cash", "check", "venmo", "other"] as const).map((m) => (
+        {chips.map((m) => (
           <button
             key={m}
             type="button"
@@ -206,7 +229,7 @@ export function SettleUpButton(props: Mode & { compact?: boolean; label?: string
         ))}
       </span>
       <Button size="sm" onClick={go} disabled={pending}>
-        {pending ? "Working…" : method === "venmo" ? "Show QR" : method === "card" ? "Charge" : "Record it"}
+        {pending ? "Working…" : key === "venmo" ? "Show QR" : key === "card" ? "Charge" : "Record it"}
       </Button>
       <button
         type="button"

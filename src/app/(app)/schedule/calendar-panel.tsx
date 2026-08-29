@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
@@ -21,8 +22,9 @@ export async function CalendarPanel() {
   const now = Date.now();
   // A WIDE window so far-future bookings and long in-flight jobs don't silently
   // vanish when you page the calendar forward (the client handles slicing).
-  const jobFrom = new Date(now - 120 * 86400_000).toISOString();
-  const jobTo = new Date(now + 400 * 86400_000).toISOString();
+  // The constants are shared with the view's clamps — see lib/schedule/cal-window.
+  const jobFrom = new Date(now - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString();
+  const jobTo = new Date(now + CAL_WINDOW_FWD_DAYS * 86400_000).toISOString();
 
   const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
     await Promise.all([

@@ -1953,7 +1953,25 @@ export async function settleUp(input: {
     })
     .select("id, invoice_number")
     .single();
-  if (invErr || !inv) return { ok: false, error: dbError(invErr) };
+  if (invErr || !inv) {
+    /* THE 0233 INDEX DID ITS JOB. Two taps on flaky truck LTE both pass the existence check
+       above; the loser's insert trips invoices_one_per_appointment — and the loser is holding
+       the SAME cash. Reroute it onto the winner's bill instead of surfacing "something with
+       that value already exists", which points at a user mistake that doesn't exist.
+       apptId-only: a 23505 on the job path is a number collision, and dbError's retry
+       sentence is already right for that. */
+    if ((invErr as { code?: string } | null)?.code === "23505" && apptId) {
+      const { data: won } = await supabase
+        .from("invoices")
+        .select("id, total, amount_paid")
+        .eq("appointment_id", apptId)
+        .neq("status", "void")
+        .limit(1)
+        .maybeSingle();
+      if (won) return settleExisting(won.id, Number(won.total ?? 0), Number(won.amount_paid ?? 0));
+    }
+    return { ok: false, error: dbError(invErr) };
+  }
 
   const { error: itemErr } = await supabase.from("invoice_items").insert({
     invoice_id: inv.id,

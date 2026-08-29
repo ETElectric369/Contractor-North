@@ -64,6 +64,13 @@ export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 /** The inspection-shaped subset — what the Sales → Inspections tab shows. */
 export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
 
+/** Visits whose PRODUCT is an estimate — the write-up-nag set: the walk-throughs plus the
+ *  explicit "quote" booking ("you are going out to price it" — lib/schedule/work-shape).
+ *  A completed quote visit used to leave every surface at once: not an inspection (write-up
+ *  feeder passed it by), not billable work (visit_unbilled is service_call/job only) — priced
+ *  it and vanished. INSPECTION_TYPES itself stays narrow: it gates walk-through-only UI. */
+export const ESTIMATE_VISIT_TYPES = [...INSPECTION_TYPES, "quote"] as const;
+
 /** The squeeze-it-in work — what the job board is for. Erik: "these are the ones that would go to
  *  the board becuase i dont know at what moment ill be able to squeeze them in… and its ready for
  *  an invoice." Deliberately its own predicate rather than a === so the board and the calendar can

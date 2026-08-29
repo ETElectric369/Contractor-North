@@ -619,6 +619,7 @@ export async function convertInquiry(
 
   let redirect = `/crm/${customerId}`;
   let newStatus = "won";
+  let mintedJobId: string | null = null;
 
   if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
@@ -646,6 +647,7 @@ export async function convertInquiry(
       .select("id")
       .single();
     if (jErr) return { ok: false, error: jErr.message };
+    mintedJobId = job.id;
     redirect = `/jobs/${job.id}`;
   }
 
@@ -665,7 +667,16 @@ export async function convertInquiry(
    *     at which point the card is just a person you know, which is what a contact book is for.
    */
   const isContactOnly = target === "customer";
-  const { error: uErr } = await supabase
+  /* THE STAMP IS THE IDEMPOTENCY KEY — compare-and-set, not read-then-write. The guard at the
+     top reads converted_at, but two concurrent taps (a second device, a stale board, a re-fired
+     placement) both read null before either stamps; several round trips sit between the read and
+     here. Postgres serializes the two UPDATEs on the row lock and exactly one matches
+     `converted_at IS NULL` — the loser deletes the seconds-old job it just minted (nothing
+     references it; this call returns !ok so the fork never places it) and gets the same refusal
+     the serial guard gives. A unique index on jobs(inquiry_id) would be WRONG: inspection→job
+     then quote→job legitimately shares one lead. Contact-only stays unconditional — opening a
+     card is not minting. */
+  const stampQuery = supabase
     .from("inquiries")
     .update({
       customer_id: customerId,
@@ -675,7 +686,20 @@ export async function convertInquiry(
         : { converted_to: target, converted_at: new Date().toISOString(), status: newStatus }),
     })
     .eq("id", id);
+  const { data: stamped, error: uErr } = isContactOnly
+    ? await stampQuery.select("id")
+    : await stampQuery.is("converted_at", null).select("id");
   if (uErr) return { ok: false, error: uErr.message };
+  if (!isContactOnly && !stamped?.length) {
+    if (mintedJobId) {
+      const { error: cleanupErr } = await supabase.from("jobs").delete().eq("id", mintedJobId);
+      if (cleanupErr) {
+        // NOTHING SILENT: a leftover twin job is worse unnamed than named.
+        return { ok: false, error: `This lead was already converted, and the duplicate job it minted couldn't be removed — delete job ${mintedJobId} by hand.` };
+      }
+    }
+    return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
+  }
 
   revalidatePath("/leads");
   revalidatePath("/crm");
@@ -784,17 +808,24 @@ export async function scheduleLeadsOnDay(
      Belt to the rail's braces — the schedule page already drops booked leads from the board, but a
      filter at one read path is a convention; refusing the write is the boundary. And it is a
      refusal with a reason, not a silent skip: he is told the visit already exists. */
-  const { data: existing } = await ctx.supabase
-    .from("appointments")
-    .select("inquiry_id")
-    .in("inquiry_id", ids)
-    // Any non-cancelled booking counts — a lead placed as a job (0231) is just as booked as one
-    // placed as a walk-through.
-    .neq("status", "cancelled")
-    .limit(500);
-  const alreadyBooked = new Set(
-    ((existing ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
-  );
+  const [{ data: existing }, { data: existingJobs }] = await Promise.all([
+    ctx.supabase
+      .from("appointments")
+      .select("inquiry_id")
+      .in("inquiry_id", ids)
+      // Any non-cancelled booking counts — a lead placed as a job (0231) is just as booked as one
+      // placed as a walk-through.
+      .neq("status", "cancelled")
+      .limit(500),
+    // …and the job fork writes NO appointment (it mints a jobs row + segments), so a stale
+    // board's re-submit of a job-kind lead sailed past an appointments-only check straight into
+    // the conversion race. A lead whose job already exists is booked, full stop.
+    ctx.supabase.from("jobs").select("inquiry_id").in("inquiry_id", ids).limit(500),
+  ]);
+  const alreadyBooked = new Set([
+    ...((existing ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
+    ...((existingJobs ?? []) as { inquiry_id: string | null }[]).map((r) => String(r.inquiry_id)),
+  ]);
 
   /* THE FITTED TIMES SURVIVE. planDayTimes walks each lead around what the day already holds,
      sized durations and all — and this function used to throw that plan away and re-spread at a

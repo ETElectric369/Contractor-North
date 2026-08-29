@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { scheduleLeadsOnDay } from "../leads/actions";
@@ -91,6 +91,34 @@ export function PlacementProvider({
      supply house opens, or a 10:30 the customer asked for, is a real thing he already knows and
      had nowhere to put. Empty means the half still decides. */
   const [startAt, setStartAt] = useState("");
+  /* PICKS SURVIVE THE 60MPH JAUNT. Armed picks were plain state, and everything that leaves this
+     page mid-placement wiped them silently: the crew/map view icons (their branches render without
+     this provider), an "Open →" drill into a record, and — the field case — tapping a customer's
+     tel: link, where iOS jettisons the PWA page and the return is a fresh reload. sessionStorage,
+     not localStorage: a dead tab must never resurrect week-old picks. Restore AFTER mount (the
+     server HTML renders unpicked; a storage-reading initializer would mismatch hydration), and
+     restore is safe by existing design — `chosen` intersects with the live board, so an id placed
+     elsewhere meanwhile can't resurrect into a booking. */
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("schedule.placement");
+      const saved: unknown = raw ? JSON.parse(raw) : null;
+      if (saved && typeof saved === "object") {
+        const o = saved as { picked?: unknown; half?: unknown; startAt?: unknown };
+        if (Array.isArray(o.picked) && o.picked.length) {
+          setPicked(new Set(o.picked.filter((x): x is string => typeof x === "string")));
+        }
+        if (o.half === "am" || o.half === "pm") setHalf(o.half);
+        if (typeof o.startAt === "string") setStartAt(o.startAt);
+      }
+    } catch { /* storage blocked — picks stay per-render */ }
+  }, []);
+  useEffect(() => {
+    try {
+      if (picked.size) sessionStorage.setItem("schedule.placement", JSON.stringify({ picked: [...picked], half, startAt }));
+      else sessionStorage.removeItem("schedule.placement");
+    } catch { /* ignore */ }
+  }, [picked, half, startAt]);
   const halfTimes = useMemo(() => halves(workDay.start, workDay.end), [workDay.start, workDay.end]);
 
   const toggle = useCallback((id: string) => {

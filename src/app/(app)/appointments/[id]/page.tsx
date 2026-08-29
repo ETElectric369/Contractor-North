@@ -82,7 +82,8 @@ export default async function AppointmentCapturePage({
   ]);
   if (!appt) notFound();
 
-  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  const tz = orgSettings.timezone;
   const a = appt as any;
   const capture = (a.capture ?? {}) as {
     notes?: string;
@@ -146,7 +147,12 @@ export default async function AppointmentCapturePage({
               spot (a legacy service_call/job appointment — new ones become real jobs at booking,
               and pay from the job page). */}
           {a.status !== "cancelled" && !isInspectionType(a.type) && (
-            <SettleUpButton source="appointment" id={a.id} />
+            <SettleUpButton
+              source="appointment"
+              id={a.id}
+              methods={orgSettings.payment_methods}
+              venmoConfigured={Boolean(orgSettings.venmo_handle?.trim())}
+            />
           )}
           {(a.status === "scheduled" || a.status === "proposed") && (
             <MarkCompleteButton

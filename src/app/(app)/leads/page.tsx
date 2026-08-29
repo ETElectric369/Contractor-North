@@ -32,7 +32,12 @@ export default async function InquiriesPage({
       // manually-added leads are all priority 0, so they tie here and keep the original
       // follow-up-due → newest ordering below — an org with no triaged leads is unaffected.
       .order("priority", { ascending: false })
-      .order("next_follow_up_at", { ascending: true, nullsFirst: false })
+      /* nullsFirst — a lead with NO follow-up date is an UNTOUCHED lead, and hiding it at the
+         bottom of the pile is how "the new lead i just added isnt showing up" happened: he added
+         it, scrolled the top, and concluded the save failed. Fresh and untouched belongs at the
+         top ("new leads should be listed at the top of the page"); dated follow-ups sort below,
+         soonest first, and the Due-today tile carries the due story. */
+      .order("next_follow_up_at", { ascending: true, nullsFirst: true })
       .order("created_at", { ascending: false }),
     listCustomerOptions(supabase),
   ]);

@@ -280,6 +280,16 @@ export default async function TimecardsPage({
        the stack groups by day and the grid positions by minutes. */
     .order("clock_in", { ascending: false })
     .limit(4000);
+  /* The deep link names the ENTRY'S OWN WEEK. The stack shows 26 weeks but this page anchors on
+     ?week=, so a link stamped with the PAGE's offset pointed a two-weeks-ago entry at the current
+     week — the editor still opened (the fallback fetch), but a refresh or share of that URL lost
+     the week it belonged to. Pure day-string arithmetic against the anchor week's first day. */
+  const anchorStartMs = Date.parse(`${weekDayStrs[0]}T00:00:00Z`);
+  const weekOf = (dayStr: string): number => {
+    const ms = Date.parse(`${dayStr}T00:00:00Z`);
+    if (!Number.isFinite(ms) || !Number.isFinite(anchorStartMs)) return offset;
+    return Math.max(0, offset - Math.floor((ms - anchorStartMs) / (7 * 86_400_000)));
+  };
   const stackEntries = ((stackRows ?? []) as any[]).map((e) => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
     // The paid hours, lunch already deducted by the same rule the rest of the app uses — a total
@@ -295,7 +305,7 @@ export default async function TimecardsPage({
       label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
       sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
       color: pillColorForPerson(e.profile_id).pill,
-      href: `/timecards?week=${offset}&entry=${e.id}`,
+      href: `/timecards?week=${weekOf(dayStr)}&entry=${e.id}`,
     };
   });
 

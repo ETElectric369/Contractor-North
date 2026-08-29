@@ -31,6 +31,7 @@ import { JobScheduleCard } from "../schedule/job-schedule-card";
 import { jobLabel } from "@/lib/schedule-options";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { allDayEventDays } from "@/lib/gcal-map";
+import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
 
 // THE one forward-looking time map. WHEN-DID (clocked hours) lives on
 // /timeclock + /timecards only — the old "Clocked time" layer, day-view
@@ -288,10 +289,26 @@ export function CalendarView({
     // 2weeks folded INTO week — it IS the week view now, so an old link still lands somewhere real.
     rawView === "day" || rawView === "month" ? rawView : "week";
   const dateParam = searchParams.get("date");
-  const anchor = useMemo(
-    () => new Date(`${isYmd(dateParam) ? dateParam : todayK}T00:00:00`),
-    [dateParam, todayK],
-  );
+  /* THE ANCHOR STAYS INSIDE THE LOADED WINDOW. The panel fetches −120..+400 days around today and
+     paging never refetches — an anchor past the edge (14 Next taps, a stale bookmark) rendered a
+     fully drawn month that was silently empty. Clamped here so every derived surface (grids,
+     stacks, drill) inherits the bound. All YMD-string arithmetic at local noon — never raw
+     instants (timezone law). */
+  const winFrom = useMemo(() => {
+    const d = new Date(`${todayK}T12:00:00`);
+    d.setDate(d.getDate() - CAL_WINDOW_BACK_DAYS);
+    return dayKey(d);
+  }, [todayK]);
+  const winTo = useMemo(() => {
+    const d = new Date(`${todayK}T12:00:00`);
+    d.setDate(d.getDate() + CAL_WINDOW_FWD_DAYS);
+    return dayKey(d);
+  }, [todayK]);
+  const anchor = useMemo(() => {
+    const raw = isYmd(dateParam) ? dateParam! : todayK;
+    const clamped = raw < winFrom ? winFrom : raw > winTo ? winTo : raw;
+    return new Date(`${clamped}T00:00:00`);
+  }, [dateParam, todayK, winFrom, winTo]);
   const anchorK = dayKey(anchor);
 
   /** Shallow url-sync: replace for paging/zoom, push for the day drill (so
@@ -307,7 +324,14 @@ export function CalendarView({
     if (view === "month") d.setMonth(d.getMonth() + dir);
     else if (view === "week") d.setDate(d.getDate() + 7 * dir);
     else d.setDate(d.getDate() + dir);
-    nav(view, dayKey(d));
+    let ymd = dayKey(d);
+    // NOTHING SILENT: the edge of the loaded window is announced, never rendered as empty days.
+    if (ymd > winTo || ymd < winFrom) {
+      ymd = ymd > winTo ? winTo : winFrom;
+      toast(ymd === winTo ? "That's the edge of the loaded schedule — about 13 months out." : "That's the edge of the loaded schedule — about 4 months back.");
+      if (ymd === anchorK) return;
+    }
+    nav(view, ymd);
   }
 
   // "To schedule" tray: a collapsed one-line chip by default — the calendar
@@ -673,13 +697,31 @@ export function CalendarView({
    */
   /* ONE HOOK, TWO STACKS — the week's and the month's — so a fix to the scroll can only be made
      once. Keyed on the anchor, so pressing Today collapses the span back to where he is. */
-  /* CAPPED AT THE DATA'S EDGE. CalendarPanel preloads −120..+400 days and paging never refetches
-     — so a stack allowed to grow past that window rendered real-looking weeks and months that were
-     silently EMPTY, which reads as "nothing scheduled" rather than "nothing loaded". The caps now
-     mirror the fetch window: ~17 weeks / ~4 months back, ~52 weeks / ~13 months forward. Scrolling
-     further is a real ask (widen the panel window), never a quiet lie. */
-  const weekStack = useEndlessStack(anchorK, 17, 52);
-  const monthStack = useEndlessStack(anchorK, 3, 12);
+  /* CAPPED AT THE DATA'S EDGE — derived from the anchor's real distance to the shared window
+     bounds, not hand-mirrored literals. The old fixed 17/52 and 3/12 were right only when the
+     anchor WAS today: chevron ten weeks out first and the scroll could still overrun the fetch
+     window, rendering real-looking weeks that were silently empty. Scrolling further is a real
+     ask (widen cal-window), never a quiet lie. */
+  const daysBetween = (a: string, z: string) =>
+    Math.round((new Date(`${z}T12:00:00`).getTime() - new Date(`${a}T12:00:00`).getTime()) / 86_400_000);
+  const monthsBetween = (a: string, z: string) =>
+    (Number(z.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + (Number(z.slice(5, 7)) - Number(a.slice(5, 7)));
+  /* EVERY DAY OF THE OUTERMOST ROW MUST BE LOADED — the rows are calendar-aligned but the window
+     is an instant span, so each cap measures from the row's own EDGE day, not the anchor: a week
+     row's first day ≥ winFrom going back, its LAST day (start+6) ≤ winTo going forward, and a
+     month counts only when winFrom sits on its 1st (mirroring the forward −1) — otherwise the
+     window month's early days would draw as real-looking empty cells. */
+  const weekStartK = dayKey(weekDays[0] ?? anchor);
+  const weekStack = useEndlessStack(
+    anchorK,
+    Math.max(0, Math.floor(daysBetween(winFrom, weekStartK) / 7)),
+    Math.max(1, Math.floor((daysBetween(weekStartK, winTo) - 6) / 7)),
+  );
+  const monthStack = useEndlessStack(
+    anchorK,
+    Math.max(0, monthsBetween(winFrom, anchorK) - (winFrom.slice(8, 10) === "01" ? 0 : 1)),
+    Math.max(1, monthsBetween(anchorK, winTo) - 1),
+  );
 
   const stackWeeks = useMemo(() => {
     const out: Date[][] = [];
@@ -711,12 +753,32 @@ export function CalendarView({
 
   /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
    *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
-   *  anchor anyway — his ride-along case is "a walk through near a JOB that day". */
+   *  anchor anyway — his ride-along case is "a walk through near a JOB that day".
+   *  THE SAME PLACEMENT RULE AS THE PILLS: segments-first, person-filtered. This used to read only
+   *  the scheduled_start/_end mirror, so a segmented Fri+Mon+Tue job drew pills on Monday with no
+   *  town under them, a two-range job advertised its town on the empty gap week, and another
+   *  tech's job steered ride-along placement while the person filter hid its pill. */
+  const townSegs = useMemo(() => {
+    const m2 = new Map<string, CalSegment[]>();
+    for (const sg of segments) {
+      if (!m2.has(sg.job_id)) m2.set(sg.job_id, []);
+      m2.get(sg.job_id)!.push(sg);
+    }
+    return m2;
+  }, [segments]);
   const townFor = (dayStr: string): string | undefined => {
     const towns = new Set<string>();
     for (const j of jobs ?? []) {
+      if (personFilter && !(j.assigned_to ?? []).includes(personFilter)) continue;
       const city = String((j as { city?: string | null }).city ?? "").trim();
       if (!city) continue;
+      const segs = townSegs.get(j.id);
+      if (segs?.length) {
+        // Date columns compare as YMD words (timezone law). Segments-first means the mirror
+        // window below must NOT also apply — that else-if is the load-bearing shape.
+        if (segs.some((sg) => dayStr >= sg.start_date && dayStr <= sg.end_date)) towns.add(city);
+        continue;
+      }
       /* ORG-TZ DAYS, like the pills right beside this label. Raw UTC slices put the town one day
          late: scheduled_end mirrors the org work-day end (17:00 Pacific = 00:00Z TOMORROW), so a
          job's town appeared on the day after it finished and missed its real last day. */
@@ -727,7 +789,6 @@ export function CalendarView({
     }
     return towns.size ? [...towns].sort().join(" · ") : undefined;
   };
-  const withTowns = (ds: typeof weekGridDays) => ds.map((d) => ({ ...d, sublabel: townFor(d.dayStr) }));
 
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
 
