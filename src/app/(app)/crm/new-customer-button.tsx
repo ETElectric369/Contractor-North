@@ -10,8 +10,6 @@ import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
 import { parseVCards, type VCardContact } from "@/lib/vcard";
-import { MyContactsPicker } from "@/components/my-contacts-picker";
-import { cardDavStatus } from "../settings/carddav-actions";
 import { createCustomer } from "./actions";
 
 const EMPTY = { name: "", company_name: "", email: "", phone: "", address: "" };
@@ -29,17 +27,13 @@ export function NewCustomerButton() {
   const [formKey, setFormKey] = useState(0);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [coach, setCoach] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [myBook, setMyBook] = useState(false);
+  const [dragging, setDragging] = useState(false);
+
   const [hasPicker, setHasPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
-
-  useEffect(() => {
-    cardDavStatus().then((st) => setMyBook(st.connected && (st.count ?? 0) > 0)).catch(() => {});
-  }, []);
 
   // The native Contact Picker (Android/Chrome mobile) lets you tap one contact; iOS Safari
   // doesn't support it, so there we fall back to a shared .vcf card. Detect client-side.
@@ -63,6 +57,7 @@ export function NewCustomerButton() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const hadContent = useRef(false);
   function openFresh() {
     setPrefill(EMPTY);
     setCity("");
@@ -71,11 +66,15 @@ export function NewCustomerButton() {
     setImportMsg(null);
     setCoach(null);
     setError(null);
-    setFormKey((k) => k + 1);
+    // Remount the defaultValue fields ONLY when a previous session left content behind —
+    // remounting on every open raced Safari's form scan (see the form-level note below).
+    if (hadContent.current) setFormKey((k) => k + 1);
+    hadContent.current = false;
     setOpen(true);
   }
 
   function applyContact(c: Partial<VCardContact>) {
+    hadContent.current = true;
     setPrefill({
       name: c.name ?? "",
       company_name: c.company_name ?? "",
@@ -155,7 +154,12 @@ export function NewCustomerButton() {
         <Plus className="h-4 w-4" /> New Customer
       </Button>
 
-      <form action={onSubmit}>
+      {/* autoComplete="on" declared on the FORM: Safari's contact matching keys off the form's
+          declared shape, and the modal's fields remounting mid-scan (formKey) is the likeliest
+          culprit for weeks of "glitchy popup" — the blue button attaching to a half-scanned form,
+          occasionally winning the race ("worked that one time"). The remount now happens only
+          when a card actually fills the fields, never on plain open. */}
+      <form action={onSubmit} autoComplete="on">
         <Modal
           open={open}
           onClose={() => setOpen(false)}
@@ -169,7 +173,34 @@ export function NewCustomerButton() {
             />
           }
         >
-          <div className="space-y-4">
+          <div
+            className={`space-y-4 rounded-xl transition-shadow ${dragging ? "ring-2 ring-brand ring-offset-2" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              /* CONTACTS.APP IS THE PICKER. On the Mac, dragging a person out of Contacts drags a
+                 .vcf — ⌘Space their name, drag the card here, the whole form fills. Deterministic
+                 where Safari's autofill matcher is moody, zero setup, one contact at a time, and
+                 nothing personal ever stored — the answer to the synced-book idea Erik rightly
+                 killed ("nobody wants all of their contacts in their business folder"). */
+              e.preventDefault();
+              setDragging(false);
+              const f = e.dataTransfer.files?.[0];
+              if (f && /\.vcf$|vcard/i.test(f.name + f.type)) {
+                f.text().then((t) => {
+                  const rows = parseVCards(t);
+                  if (rows[0]) { applyContact(rows[0]); setImportMsg("Filled from the card — review and save."); }
+                  else setImportMsg("Couldn't read that card.");
+                });
+                return;
+              }
+              const txt = e.dataTransfer.getData("text/vcard") || e.dataTransfer.getData("text/plain");
+              if (txt && /BEGIN:VCARD/i.test(txt)) {
+                const rows = parseVCards(txt);
+                if (rows[0]) { applyContact(rows[0]); setImportMsg("Filled from the card — review and save."); }
+              }
+            }}
+          >
             {/* THE PHONE'S OWN CONTACTS, by whichever door this platform actually opens.
                 Erik, on the old dashed box: "archaic ... it should be a contact picker."
                 · Where the Contact Picker API exists (Android Chrome; Safari the browser), the
@@ -196,23 +227,21 @@ export function NewCustomerButton() {
                   variant="outline"
                   onClick={() => {
                     setImportMsg(null);
-                    /* NORTH'S OWN PICKER FIRST — once iCloud is connected it is the same sheet on
-                       every screen and Safari's chrome never enters the picture. The platform
-                       doors stay as fallbacks for the unconnected. */
-                    if (myBook) { setPickerOpen(true); return; }
                     if (hasPicker) { importContact(); return; }
-                    document.getElementById("name")?.focus();
+                    /* NO programmatic focus — Safari arms its contact matching most reliably off
+                       the user's OWN click into the field, and stealing that click was part of
+                       why the Mac flow that "worked that one time" stopped working. */
                     setCoach(
                       navigator.maxTouchPoints > 0
                         ? "Now tap “AutoFill Contact” above the keyboard → “Other Contact…” and pick them."
-                        : /* THE BLUE ICON IS THE DOOR on the Mac — Erik: "the little blue contact
-                             box on the right is where it accidentally worked the first time...
-                             i think the key was in the link between the blue button on the right
-                             and the top add from my contacts button." The typed name-dropdown
-                             fills the NAME ONLY (which read as broken); the field's blue contact
-                             icon fills the whole card. We can't press Safari's button for him —
-                             but we can point at it from one inch away. */
-                          "Now click the little blue contact icon at the right end of the Name field — pick the person and their whole card fills.",
+                        : /* THE MAC'S REAL MECHANISM, decoded by Erik: "something was telling
+                             that little blue button to catch what was being typed." Exactly —
+                             Safari matches the letters typed in Name against Contacts and
+                             re-targets the blue card to THAT person; that is what worked the one
+                             time. It is also moody under a 2,000-contact book (it served S-names
+                             for "Jeff"), so the deterministic door is the drag: Contacts.app IS
+                             the picker, and this form catches the card. */
+                          "Click into Name and type the first letters of THEIR name — when their card pops up, choose it. Or open Contacts and drag their card anywhere onto this form.",
                     );
                   }}
                 >
@@ -234,25 +263,6 @@ export function NewCustomerButton() {
               className="hidden"
               onChange={onVcfFile}
             />
-            {pickerOpen && (
-              <MyContactsPicker
-                onClose={() => setPickerOpen(false)}
-                onPick={(c) => {
-                  applyContact({
-                    name: c.name,
-                    company_name: c.company ?? "",
-                    phone: c.phone ?? "",
-                    email: c.email ?? "",
-                    address: c.address ?? "",
-                    city: c.city ?? "",
-                    state: c.state ?? "",
-                    zip: c.zip ?? "",
-                  });
-                  setPickerOpen(false);
-                  setImportMsg(`Filled from your contacts — review and save.`);
-                }}
-              />
-            )}
 
             {error && (
               <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

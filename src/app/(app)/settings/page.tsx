@@ -60,8 +60,6 @@ import { asRegister, clampHumor } from "@/lib/nort/tone";
 import { listPasskeys } from "./passkey-actions";
 import { gcalConfigured, connectionNeedsReauth } from "@/lib/google-calendar";
 import { GcalCard } from "./gcal-card";
-import { CardDavCard } from "./carddav-card";
-import { cardDavStatus } from "./carddav-actions";
 import QRCode from "qrcode";
 import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
@@ -106,7 +104,6 @@ export default async function SettingsPage({
 }) {
   const { billing, billing_error, qbo, gcal, tab } = await searchParams;
   const supabase = await createClient();
-  const cardDav = await cardDavStatus();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -754,11 +751,6 @@ export default async function SettingsPage({
                     <p className="mt-2 text-xs text-slate-400">Sync customers and invoices to QuickBooks Online.</p>
                   </div>
                 )}
-              </Section>
-              <Section title="iCloud Contacts">
-                {/* North's own contact picker, fed by the user's real book over CardDAV — built
-                    after a day of Safari's autofill chrome half-working on every platform. */}
-                <CardDavCard {...cardDav} />
               </Section>
               <Section title="Google Calendar">
                 <GcalCard
