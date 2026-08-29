@@ -180,12 +180,21 @@ export function NewCustomerButton() {
                 {importMsg && <p className="mt-1 text-[11px] font-medium text-emerald-600">{importMsg}</p>}
               </div>
             ) : (
+              /* THE GESTURE, NOT THE FEATURE NAME. An empty Name field makes AutoFill offer
+                 YOUR OWN card (that is what Erik's screenshot showed — "Erik Taylor – Work");
+                 TYPING filters the menu to everyone in Contacts, which is the person who just
+                 texted you. Same Contacts app on iPhone and Mac (iCloud keeps them one book), so
+                 this is the Tradify feature without the go-find-your-phone step — and without
+                 their split-app problem, because North IS the same app on every screen. The full
+                 native picker sheet (his screenshot) appears where Apple exposes the API: Safari
+                 the browser today, the native wrapper when it lands; the installed web app is the
+                 one place Apple withholds it. */
               <p className="text-[11px] leading-snug text-slate-400">
-                Tap <span className="font-medium text-slate-500">Name</span> or{" "}
-                <span className="font-medium text-slate-500">Phone</span> — AutoFill offers your
-                saved contacts and fills the card.{" "}
+                Start typing the person&apos;s name in{" "}
+                <span className="font-medium text-slate-500">Name</span> — your Contacts appear
+                right there, and picking one fills their number and email too.{" "}
                 <button type="button" onClick={importContact} className="text-brand underline-offset-2 hover:underline">
-                  Or import a shared .vcf
+                  Or import a .vcf
                 </button>
                 {importMsg && <span className="ml-1 font-medium text-emerald-600">{importMsg}</span>}
               </p>
