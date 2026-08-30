@@ -479,7 +479,7 @@ export function OrganizeManager({
             <Button onClick={takePhoto} disabled={busy}>
               <Camera className="h-4 w-4" /> Take Photo
             </Button>
-            <DropTarget onFiles={(files) => void processFiles(files)} accept="image/*,application/pdf" label="Drop receipts">
+            <DropTarget onFiles={(files) => void processFiles(files)} accept="image/*,application/pdf">
               <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
                 <Upload className="h-4 w-4" /> Upload
               </Button>

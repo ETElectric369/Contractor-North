@@ -81,7 +81,7 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           Take Photo
         </Button>
-        <DropTarget onFiles={(files) => void upload(files)} accept="image/*" label="Drop photos">
+        <DropTarget onFiles={(files) => void upload(files)} accept="image/*">
           <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
             <Upload className="h-4 w-4" /> Upload
           </Button>

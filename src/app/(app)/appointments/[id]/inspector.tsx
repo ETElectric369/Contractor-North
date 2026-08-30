@@ -843,7 +843,7 @@ export function Inspector({
         }
       };
       return (
-        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the plans here" className="rounded-lg border border-dashed border-slate-300 p-2">
+        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} className="rounded-lg border border-dashed border-slate-300 p-2">
           <input
             type="file"
             multiple={n.slot.multi !== false}
@@ -1302,7 +1302,7 @@ export function Inspector({
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop photos or PDFs" className="shrink-0">
+            <DropTarget onFiles={upload} accept="image/*,application/pdf" className="shrink-0">
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
@@ -1333,10 +1333,32 @@ export function Inspector({
                       )}
                     </button>
                   ) : (
-                    <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer"
-                       className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
-                      <FileText className="h-6 w-6 shrink-0 text-slate-400" />
-                      <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
+                    /* A PDF SHOWS ITS FACE (Erik: "i cant see an image of the pdf"). The browser's
+                       own renderer paints page one right in the tile — zero dependencies — and the
+                       icon tile is the <object>'s literal fallback wherever it can't. Tap opens
+                       the full document. */
+                    <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="relative flex h-full w-full">
+                      {p.url && /\.pdf($|\?)/i.test(p.path) ? (
+                        <>
+                          <object
+                            data={`${p.url}#toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                            type="application/pdf"
+                            className="pointer-events-none h-full w-full"
+                            aria-label={fileLabel(p.path)}
+                          >
+                            <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                              <FileText className="h-6 w-6 shrink-0 text-slate-400" />
+                              <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
+                            </span>
+                          </object>
+                          <span className="pointer-events-none absolute bottom-1 left-1 rounded bg-black/55 px-1 py-0.5 text-[9px] font-bold text-white">PDF</span>
+                        </>
+                      ) : (
+                        <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                          <FileText className="h-6 w-6 shrink-0 text-slate-400" />
+                          <span className="line-clamp-2 break-all text-[10px] leading-tight text-slate-500">{fileLabel(p.path)}</span>
+                        </span>
+                      )}
                     </a>
                   )}
                   <button

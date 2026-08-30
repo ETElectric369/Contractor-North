@@ -2,6 +2,18 @@
 
 import { useRef, useState, useSyncExternalStore } from "react";
 
+/* The zone's interior is a PATTERN, not words (Erik: "how about a pattern — or nothing"): the
+   classic diagonal-stripe drop texture, keyed to the brand color, faint at reveal and solid-er
+   under the cursor. Old school, instant read, zero copy. */
+const STRIPES_IDLE = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, transparent 0 10px, color-mix(in srgb, var(--color-brand) 7%, transparent) 10px 20px)",
+} as const;
+const STRIPES_OVER = {
+  backgroundImage:
+    "repeating-linear-gradient(45deg, transparent 0 10px, color-mix(in srgb, var(--color-brand) 16%, transparent) 10px 20px)",
+} as const;
+
 /**
  * FILE DRAG-AND-DROP, ONE PRIMITIVE (Erik: "we should have it app wide for where it makes sense
  * like on the inspector, plans, all that jazz, the button area could be the shadow drag and drop
@@ -97,7 +109,7 @@ export function DropTarget({
   accept,
   multiple = true,
   disabled = false,
-  label = "Drop files here",
+  label,
   className,
   children,
 }: {
@@ -107,6 +119,9 @@ export function DropTarget({
   accept?: string;
   multiple?: boolean;
   disabled?: boolean;
+  /** OPT-IN, and mostly unnecessary: the dashed box IS the signal (Erik: "is there a reason to
+   *  have text there at all"). Pass one only where TWO zones sit adjacent and a drop could land
+   *  on the wrong door — then the word is load-bearing disambiguation, not decoration. */
   label?: string;
   className?: string;
   children: React.ReactNode;
@@ -156,15 +171,23 @@ export function DropTarget({
       {children}
       {(active || refused) && (
         <div
-          className={`pointer-events-none absolute -inset-1 z-10 flex items-center justify-center rounded-xl border-2 border-dashed text-xs font-semibold backdrop-blur-[1px] transition-colors ${
+          // OPAQUE, not frosted — a translucent cover let the buttons' own labels ghost through
+          // ("see the text hiding behind the drag box?"). The white ground replaces what it
+          // covers while a drag is live; the stripes say "drop here" without a word.
+          className={`pointer-events-none absolute -inset-1 z-10 flex items-center justify-center rounded-xl border-2 border-dashed text-xs font-semibold transition-colors ${
             refused
-              ? "border-red-400 bg-red-50/90 text-red-600"
+              ? "border-red-400 bg-red-50 text-red-600"
               : over
-                ? "border-brand bg-brand-light/80 text-brand"
-                : "border-brand/40 bg-white/75 text-brand/80"
+                ? "border-brand bg-white text-brand"
+                : "border-brand/50 bg-white text-brand/90"
           }`}
+          style={refused ? undefined : over ? STRIPES_OVER : STRIPES_IDLE}
         >
-          {refused ? "That file type doesn't go here" : label}
+          {refused ? (
+            "That file type doesn't go here"
+          ) : label ? (
+            <span className="rounded-full bg-white/95 px-2 py-0.5">{label}</span>
+          ) : null}
         </div>
       )}
     </div>
