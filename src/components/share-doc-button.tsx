@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Share2, Loader2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 
@@ -24,17 +25,30 @@ export function ShareDocButton({
   load,
   label = "Share",
 }: {
-  load: () => Promise<{ ok: boolean; error?: string; title?: string; text?: string; url?: string }>;
+  load: (opts?: { sendIt?: boolean }) => Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }>;
   label?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const router = useRouter();
 
   async function go() {
     if (busy) return;
     setBusy(true);
+    let flipped = false;
     try {
-      const res = await load();
+      let res = await load();
+      /* A DRAFT ASKS, THEN GOES. The old refusal ("send it first") was a dead end for the exact
+         person this button exists for — no email, no number, just a share sheet. Sharing IS
+         sending, so one plain-words yes marks it sent and opens the sheet in the same motion. */
+      if (!res.ok && res.needsSend) {
+        const yes = confirm(`${res.error ?? "This is still a draft."}
+
+Mark it sent and share the link now?`);
+        if (!yes) return;
+        res = await load({ sendIt: true });
+        flipped = res.ok; // the page must show Sent, not yesterday's Draft
+      }
       if (!res.ok || !res.url) {
         toast(res.error ?? "Couldn't build the link.", "error");
         return;
@@ -56,6 +70,7 @@ export function ShareDocButton({
       toast("Couldn't share that — try Email instead.", "error");
     } finally {
       setBusy(false);
+      if (flipped) router.refresh();
     }
   }
 

@@ -123,9 +123,12 @@ export function InvoiceDocument({
           <thead>
             <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 font-semibold">Description</th>
-              <th className="py-2 text-right font-semibold">Qty</th>
-              <th className="py-2 text-right font-semibold">Price</th>
-              <th className="py-2 text-right font-semibold">Amount</th>
+              {/* Breathing room: the numeric columns auto-shrank to their content and printed
+                  shoulder-to-shoulder while the description hoarded the width — fixed minimums
+                  + a left gutter spread them into the space that was sitting empty. */}
+              <th className="w-20 py-2 pl-6 text-right font-semibold">Qty</th>
+              <th className="w-28 py-2 pl-6 text-right font-semibold">Price</th>
+              <th className="w-32 py-2 pl-6 text-right font-semibold">Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -134,9 +137,9 @@ export function InvoiceDocument({
                 <td className="py-2 pr-2 text-slate-800">
                   <LineItemText description={it.description ?? ""} />
                 </td>
-                <td className="py-2 text-right text-slate-600">{it.quantity} {it.unit}</td>
-                <td className="py-2 text-right text-slate-600">{formatCurrency(it.unit_price)}</td>
-                <td className="py-2 text-right font-medium text-slate-900">{formatCurrency(it.line_total)}</td>
+                <td className="whitespace-nowrap py-2 pl-6 text-right text-slate-600">{it.quantity} {it.unit}</td>
+                <td className="whitespace-nowrap py-2 pl-6 text-right text-slate-600">{formatCurrency(it.unit_price)}</td>
+                <td className="whitespace-nowrap py-2 pl-6 text-right font-medium text-slate-900">{formatCurrency(it.line_total)}</td>
               </tr>
             ))}
           </tbody>

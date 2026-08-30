@@ -120,7 +120,8 @@ async function publicInvoiceLink(
  */
 export async function invoiceShareText(
   id: string,
-): Promise<{ ok: boolean; error?: string; title?: string; text?: string; url?: string }> {
+  opts?: { sendIt?: boolean },
+): Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data: invoice } = await ctx.supabase
@@ -140,12 +141,25 @@ export async function invoiceShareText(
   // deliverInvoiceEmail. The share sheet has no send step to hang that on, so it was the one
   // egress that handed out a link to a page the customer cannot open.
   //
-  // It refuses instead of silently sending, because the failure is invisible from this side: the
-  // OS share sheet reports success, the text goes, and the first anyone hears is a customer
-  // saying the link is broken. It does NOT flip the status by itself — sharing is not sending,
-  // and a status change nobody asked for is how an unfinished price becomes a debt.
-  if (String((invoice as { status?: string | null }).status ?? "") === "draft")
-    return { ok: false, error: "This invoice is still a draft — send it first, then share the link." };
+  // The refusal was the only egress with no way through — Erik, holding a customer with no email
+  // and no number on file: "i hit the share button and it said it couldnt do it until i sent it
+  // ... so that didnt work." STAMP FOLLOWS DEED: handing the customer their link IS sending, the
+  // same deed textInvoice and emailInvoice stamp on the way out. But NOTHING SILENT still holds —
+  // the flip happens only on the caller's explicit yes (needsSend → the button asks in plain
+  // words), never as a side effect nobody chose.
+  if (String((invoice as { status?: string | null }).status ?? "") === "draft") {
+    if (!opts?.sendIt) {
+      return {
+        ok: false,
+        needsSend: true,
+        error: `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`,
+      };
+    }
+    await ctx.supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
+    await recalcInvoice(ctx.supabase, id);
+    revalidateMoney(id);
+  }
 
   const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
