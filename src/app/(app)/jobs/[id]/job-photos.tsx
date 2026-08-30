@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import { Camera, Upload, Trash2, Loader2, ImageOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,9 +81,11 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
           Take Photo
         </Button>
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-          <Upload className="h-4 w-4" /> Upload
-        </Button>
+        <DropTarget onFiles={(files) => void upload(files)} accept="image/*" label="Drop photos">
+          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+            <Upload className="h-4 w-4" /> Upload
+          </Button>
+        </DropTarget>
       </div>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 

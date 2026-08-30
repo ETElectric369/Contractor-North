@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import {
   Upload,
@@ -478,9 +479,11 @@ export function OrganizeManager({
             <Button onClick={takePhoto} disabled={busy}>
               <Camera className="h-4 w-4" /> Take Photo
             </Button>
-            <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-              <Upload className="h-4 w-4" /> Upload
-            </Button>
+            <DropTarget onFiles={(files) => void processFiles(files)} accept="image/*,application/pdf" label="Drop receipts">
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+                <Upload className="h-4 w-4" /> Upload
+              </Button>
+            </DropTarget>
             <Button variant={listening ? "destructive" : "outline"} onClick={voiceNote}>
               <Mic className="h-4 w-4" /> {listening ? "Stop & Save" : "Voice Note"}
             </Button>

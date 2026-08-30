@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import { Wallet, DollarSign, Camera, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -335,6 +336,17 @@ export function QuickCostButton({
                 setReceipt(f);
               }}
             />
+            <DropTarget
+              onFiles={(files) => {
+                const f = files[0];
+                if (f.size > MAX_PHOTO) { setError("That file is over 15 MB — attach a smaller one."); setReceipt(null); return; }
+                setError(null);
+                setReceipt(f);
+              }}
+              accept="image/*,application/pdf,.pdf"
+              multiple={false}
+              label="Drop the receipt"
+            >
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -346,6 +358,7 @@ export function QuickCostButton({
                 <><Camera className="h-4 w-4" /> Add receipt — photo or PDF</>
               )}
             </button>
+            </DropTarget>
             {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt with it.</p>}
           </div>
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}

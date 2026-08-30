@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -217,10 +218,12 @@ export function JobDocuments({
         </Select>
         <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
         <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
-        <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          Upload File
-        </Button>
+        <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop files">
+          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            Upload File
+          </Button>
+        </DropTarget>
         <Button variant="outline" type="button" onClick={takePhoto} disabled={busy}>
           <Camera className="h-4 w-4" /> Take Photo
         </Button>

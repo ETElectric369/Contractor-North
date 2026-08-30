@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Plus, Trash2, Upload, Camera, Loader2, FileText, Pencil } from "lucide-react";
@@ -383,9 +384,11 @@ export function BillsReceipts({
               </Select>
             </div>
             <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
-            <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Upload
-            </Button>
+            <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop the bill">
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Upload
+              </Button>
+            </DropTarget>
             <Button variant="outline" type="button" onClick={() => setShowCamera(true)} disabled={busy}>
               <Camera className="h-4 w-4" /> Photo
             </Button>

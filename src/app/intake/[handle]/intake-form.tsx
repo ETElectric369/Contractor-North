@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { mirrorAnswers, mirrorValue, siteAddressWhens } from "@/lib/playbook/address-mirror";
 import { Check, Loader2 } from "lucide-react";
@@ -288,7 +289,13 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
               {mv.trim() ? mv : <span className="text-slate-400">Fills in from the address above</span>}
             </p>
           ) : n.slot?.type === "file" ? (
-            <div className="rounded-lg border border-dashed border-slate-300 p-3">
+            <DropTarget
+              onFiles={(files) => void addFiles(n.key, files)}
+              accept={uploadAccept(n.slot.accept).attr}
+              multiple={n.slot.multi !== false}
+              label="Drop your plans here"
+              className="rounded-lg border border-dashed border-slate-300 p-3"
+            >
               <input
                 type="file"
                 multiple={n.slot.multi !== false}
@@ -319,7 +326,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
                   ))}
                 </ul>
               )}
-            </div>
+            </DropTarget>
           ) : n.slot?.type === "select" ? (
             n.slot.multi ? (
               // PICK SEVERAL — AND SAY THE THING NOBODY LISTED (cn-v698).

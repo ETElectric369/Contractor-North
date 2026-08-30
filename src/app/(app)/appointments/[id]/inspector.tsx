@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Camera, Check, ClipboardList, CloudOff, FileText, Loader2, Plus, Trash2, Upload } from "lucide-react";
@@ -817,37 +818,41 @@ export function Inspector({
     // PATHS, matching the public side.
     if (n.slot.type === "file") {
       const have = Array.isArray(v) ? (v as string[]) : [];
+      // ONE road for both doors (picker + drop) — the same File[] body the input always ran.
+      const uploadSlotFiles = async (files: File[]) => {
+        if (!files.length) return;
+        setUploading(true);
+        setError(null);
+        try {
+          const supabase = createClient();
+          const added: string[] = [];
+          for (const raw of files) {
+            if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
+            const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
+            const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+            const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
+            const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
+            if (upErr) throw upErr;
+            added.push(path);
+          }
+          setAnswer(n.key, [...have, ...added]);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Upload failed.");
+        } finally {
+          setUploading(false);
+        }
+      };
       return (
-        <div className="rounded-lg border border-dashed border-slate-300 p-2">
+        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the plans here" className="rounded-lg border border-dashed border-slate-300 p-2">
           <input
             type="file"
             multiple={n.slot.multi !== false}
             accept={ACCEPT_ATTR}
             disabled={uploading}
-            onChange={async (e) => {
+            onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               e.target.value = "";
-              if (!files.length) return;
-              setUploading(true);
-              setError(null);
-              try {
-                const supabase = createClient();
-                const added: string[] = [];
-                for (const raw of files) {
-                  if (!isAllowedUpload(raw.name)) throw new Error(`${raw.name} isn't a file type we accept.`);
-                  const file = raw.type.startsWith("image/") ? await prepareImageForUpload(raw) : raw;
-                  const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-                  const path = `${orgId}/appointments/${appointmentId}/${Date.now()}-${safe}`;
-                  const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
-                  if (upErr) throw upErr;
-                  added.push(path);
-                }
-                setAnswer(n.key, [...have, ...added]);
-              } catch (err) {
-                setError(err instanceof Error ? err.message : "Upload failed.");
-              } finally {
-                setUploading(false);
-              }
+              void uploadSlotFiles(files);
             }}
             className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-white"
           />
@@ -867,7 +872,7 @@ export function Inspector({
               ))}
             </ul>
           )}
-        </div>
+        </DropTarget>
       );
     }
 
@@ -1297,14 +1302,16 @@ export function Inspector({
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
-                {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
-              </Button>
-              <Button type="button" variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
-                <Upload className="h-4 w-4" /> Add
-              </Button>
-            </div>
+            <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop photos or PDFs" className="shrink-0">
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
+                  {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
+                </Button>
+                <Button type="button" variant="secondary" disabled={uploading} onClick={() => fileRef.current?.click()}>
+                  <Upload className="h-4 w-4" /> Add
+                </Button>
+              </div>
+            </DropTarget>
           </div>
           <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden"
                  onChange={(e) => { upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
