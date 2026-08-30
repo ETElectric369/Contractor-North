@@ -28,7 +28,6 @@ import { SettingsSubnav } from "./settings-subnav";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { renderReadyBlocks } from "@/lib/public-pages";
 import { OrgSettingsForm } from "./org-settings-form";
-import { DocumentDesigner } from "./document-designer";
 import { PriceListCard } from "./price-list-card";
 import { UNIT_STARTS_WITH_LETTER } from "@/lib/pricing/import-damage";
 import { LogoUpload } from "./logo-upload";
@@ -36,7 +35,6 @@ import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
 import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
-import { DocumentLayoutSettings } from "./document-layout";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
@@ -465,17 +463,23 @@ export default async function SettingsPage({
               <Section title="Numbering">
                 <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
               </Section>
-              <Section title="Document designer">
-                <DocumentDesigner
-                  templates={(org as Organization).doc_templates || {}}
-                  fallback={(org as Organization).doc_template || "classic"}
-                  brand={accentHex(settings.glass_tint)}
-                />
-              </Section>
-              {/* The dial-it-in knobs — column gap, density, logo size, margins, closing lines.
-                  Born of three column-spacing rounds done by code change (cn-v888..v890). */}
-              <Section title="Document layout">
-                <DocumentLayoutSettings initial={settings.doc_style} />
+              {/* The designer + layout cards MOLDED into one surface (Erik: "mold the document
+                  layout and designer that are there into one smart thing like we did with the
+                  design studio") — the studio renders the REAL components and the layout is
+                  grabbed directly on the page. Same door pattern as the Design studio card. */}
+              <Section title="Document studio">
+                <p className="text-sm text-slate-500">
+                  Templates, margins, column spacing, logo size, closing lines — tuned on the real
+                  page itself: drag the bars, click the logo, watch the actual document restyle.
+                  Changes save themselves and apply to every estimate, invoice, PDF, and customer
+                  link.
+                </p>
+                <Link
+                  href="/doc-studio"
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+                >
+                  Open the Document studio →
+                </Link>
               </Section>
             </div>
           ),
