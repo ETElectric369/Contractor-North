@@ -84,7 +84,7 @@ export function RecordPaymentButton({
       <Modal
         open={open}
         onClose={close}
-        title="Record payment"
+        title="Record Payment"
         dirty={dirty}
         footer={
           <ModalActions
@@ -92,7 +92,7 @@ export function RecordPaymentButton({
             onSave={save}
             saving={pending}
             disabled={!invoiceId || amount <= 0}
-            saveLabel="Record payment"
+            saveLabel="Record Payment"
           />
         }
       >

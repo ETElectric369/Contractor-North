@@ -455,7 +455,7 @@ export default async function SettingsPage({
         // my payment terms" and "change my tax rate" are different errands.
         {
           id: "docs",
-          label: "Estimates & invoices",
+          label: "Estimates & Invoices",
           icon: FileText,
           content: (
             <div className="space-y-6">
@@ -478,7 +478,7 @@ export default async function SettingsPage({
                   href="/doc-studio"
                   className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark"
                 >
-                  Open the Document studio →
+                  Open the Document Studio →
                 </Link>
               </Section>
             </div>
@@ -489,7 +489,7 @@ export default async function SettingsPage({
         // cluster apart; both are things somebody goes looking for by name.
         {
           id: "getpaid",
-          label: "Getting paid",
+          label: "Getting Paid",
           icon: CreditCard,
           content: (
             <div className="space-y-6">
@@ -509,11 +509,11 @@ export default async function SettingsPage({
                         <div className="mt-4 flex flex-wrap gap-2">
                           {canAcceptPayments(st) ? (
                             <form action={openPayoutsDashboard}>
-                              <Button variant="outline">View payouts</Button>
+                              <Button variant="outline">View Payouts</Button>
                             </form>
                           ) : (
                             <form action={connectPayments}>
-                              <Button>{st.accountId ? "Finish setup" : "Set up card payments"}</Button>
+                              <Button>{st.accountId ? "Finish Setup" : "Set Up Card Payments"}</Button>
                             </form>
                           )}
                         </div>
@@ -565,7 +565,7 @@ export default async function SettingsPage({
         // reminders, which were never about the crew.
         {
           id: "crew",
-          label: "Crew & time",
+          label: "Crew & Time",
           icon: CalendarDays,
           content: (
             <div className="space-y-6">
@@ -676,7 +676,7 @@ export default async function SettingsPage({
                   href="/site-studio"
                   className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                 >
-                  Open the design studio
+                  Open the Design Studio
                 </Link>
               </Section>
               <Section title="Homepage">
@@ -699,7 +699,7 @@ export default async function SettingsPage({
         // have to scroll past it.
         {
           id: "content",
-          label: "Photos & pages",
+          label: "Photos & Pages",
           icon: Images,
           content: (
             <div className="space-y-6">

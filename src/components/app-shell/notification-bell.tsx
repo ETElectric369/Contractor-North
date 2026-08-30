@@ -69,7 +69,7 @@ export function NotificationBell() {
               <span className="text-sm font-semibold text-slate-800">Notifications</span>
               {unread > 0 && (
                 <button onClick={markAll} className="text-xs font-medium text-brand hover:underline">
-                  Mark all read
+                  Mark All Read
                 </button>
               )}
             </div>

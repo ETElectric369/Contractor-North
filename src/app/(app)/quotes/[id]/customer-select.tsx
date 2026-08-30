@@ -142,7 +142,7 @@ export function CustomerSelect({
           onClick={() => { setCreating(true); setError(null); }}
           className="text-xs font-medium text-brand underline-offset-2 hover:underline"
         >
-          + New customer
+          + New Customer
         </button>
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>

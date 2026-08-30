@@ -130,8 +130,8 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
       <Button type="button" variant="outline" size="sm" onClick={openNew}><Plus className="h-4 w-4" /> New page</Button>
 
       {/* The save button promises only what the Published checkbox will deliver. */}
-      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit page" : "New page"} size="xl"
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel={editing && !editing.published ? "Save draft" : editing?.id ? "Save page" : "Publish page"} />}>
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit page" : "New Page"} size="xl"
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel={editing && !editing.published ? "Save Draft" : editing?.id ? "Save Page" : "Publish Page"} />}>
         {editing && (
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">

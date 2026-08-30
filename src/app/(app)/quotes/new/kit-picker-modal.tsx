@@ -127,7 +127,7 @@ export function KitPickerModal({
                 disabled={sqft <= 0 && linearFt <= 0}
                 className="h-10 rounded-lg bg-brand px-3 text-sm font-medium text-white disabled:opacity-40"
               >
-                Size to job
+                Size to Job
               </button>
             </div>
           </div>

@@ -44,7 +44,7 @@ export function PriceListCard({
           href="/price-list"
           className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white hover:opacity-90"
         >
-          <Tags className="h-4 w-4" /> Open the price list
+          <Tags className="h-4 w-4" /> Open the Price List
           <ArrowUpRight className="h-4 w-4 opacity-70" />
         </Link>
         <span className="text-sm text-slate-500">

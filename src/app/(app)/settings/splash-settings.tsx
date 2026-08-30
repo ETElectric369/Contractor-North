@@ -90,7 +90,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onHeroFile} />
           <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            {uploading ? "Uploading…" : "Upload hero"}
+            {uploading ? "Uploading…" : "Upload Hero"}
           </Button>
           {bg && (
             <Button type="button" variant="outline" size="sm" onClick={() => setBg("")} className="text-slate-500">
@@ -155,7 +155,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={save} disabled={pending || uploading}>{pending ? "Saving…" : "Save top banner"}</Button>
+        <Button size="sm" onClick={save} disabled={pending || uploading}>{pending ? "Saving…" : "Save Top Banner"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

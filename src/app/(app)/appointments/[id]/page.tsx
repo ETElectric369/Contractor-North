@@ -175,7 +175,12 @@ export default async function AppointmentCapturePage({
               happened) and Delete (which destroys the capture and photos with it). The verb
               already existed and was wired up on the calendar row only; it belongs here too. */}
           {(a.status === "scheduled" || a.status === "proposed") && (
-            <ApptQuickActions id={a.id} status={a.status} title={a.title ?? "this appointment"} />
+            <ApptQuickActions
+              id={a.id}
+              status={a.status}
+              title={a.title ?? "this appointment"}
+              boxClassName="flex h-8 w-8 items-center justify-center rounded-lg"
+            />
           )}
           {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
               everything else kept. Only shown while a date exists to clear. */}

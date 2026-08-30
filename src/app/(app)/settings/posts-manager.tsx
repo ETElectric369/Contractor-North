@@ -175,7 +175,7 @@ export function PostsManager({
                   className="inline-flex items-center gap-1 rounded-md p-1.5 text-xs font-medium text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                   title="Preview the draft at its web address — only you can see it"
                 >
-                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview draft</span>
+                  <Eye className="h-4 w-4" /> <span className="hidden sm:inline">Preview Draft</span>
                 </a>
               )}
               <button
@@ -206,14 +206,14 @@ export function PostsManager({
       <Modal
         open={!!editing}
         onClose={() => setEditing(null)}
-        title={editing?.id ? "Edit article" : "New article"}
+        title={editing?.id ? "Edit article" : "New Article"}
         footer={
           <ModalActions
             onCancel={() => setEditing(null)}
             onSave={save}
             saving={pending}
             // The button promises only what the Published checkbox will deliver.
-            saveLabel={editing && !editing.published ? "Save draft" : editing?.id ? "Save article" : "Publish article"}
+            saveLabel={editing && !editing.published ? "Save Draft" : editing?.id ? "Save Article" : "Publish Article"}
           />
         }
       >

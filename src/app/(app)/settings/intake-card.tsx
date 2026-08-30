@@ -70,7 +70,7 @@ export function IntakeCard({
           <div className="flex flex-wrap items-center gap-2">
             <code className="max-w-full overflow-x-auto rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{url}</code>
             <Button type="button" size="sm" variant="secondary" onClick={() => copy(url, "link")}>
-              <Copy className="h-4 w-4" /> {copied === "link" ? "Copied" : "Copy link"}
+              <Copy className="h-4 w-4" /> {copied === "link" ? "Copied" : "Copy Link"}
             </Button>
           </div>
           {/* THE EMBED — paste into Wix (Add → Embed → Embed a site) or any site builder's HTML
@@ -78,7 +78,7 @@ export function IntakeCard({
           <div className="flex flex-wrap items-center gap-2">
             <code className="max-w-full overflow-x-auto whitespace-nowrap rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{embedSnippet(url)}</code>
             <Button type="button" size="sm" variant="secondary" onClick={() => copy(embedSnippet(url), "embed")}>
-              <Copy className="h-4 w-4" /> {copied === "embed" ? "Copied" : "Copy embed code"}
+              <Copy className="h-4 w-4" /> {copied === "embed" ? "Copied" : "Copy Embed Code"}
             </Button>
           </div>
           <p className="text-xs text-slate-500">
@@ -106,7 +106,7 @@ export function IntakeCard({
             })
           }
         >
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : on ? "Turn it off" : "Turn it on"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : on ? "Turn It Off" : "Turn It On"}
         </Button>
         {err && <span className="text-sm text-rose-600">{err}</span>}
       </div>

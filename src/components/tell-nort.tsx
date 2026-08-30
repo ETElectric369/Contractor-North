@@ -192,7 +192,7 @@ export function TellNort({
           )}
         </Button>
         <Button type="button" disabled={!text.trim() || pending || recording} onClick={fill}>
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Filling…</> : "Fill it in"}
+          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Filling…</> : "Fill It In"}
         </Button>
         {recording && <span className="text-xs text-rose-600">Listening — press Stop when you&rsquo;re done.</span>}
         {err && <span className="text-xs text-rose-600">{err}</span>}

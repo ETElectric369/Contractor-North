@@ -281,7 +281,7 @@ export function ActionList({
           <ModalActions
             onCancel={() => setDismissing(null)}
             onSave={confirmDismiss}
-            saveLabel={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Mark it lost" : "Delete"}
+            saveLabel={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Mark It Lost" : "Delete"}
             destructive
           />
         }

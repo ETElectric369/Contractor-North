@@ -219,7 +219,7 @@ export function DeckGeneratorPanel({
               <span className="font-semibold text-slate-900">{formatCurrency(est.total)}</span>
             </div>
             <Button type="button" onClick={drop} disabled={est.lines.length === 0}>
-              Drop into estimate
+              Drop into Estimate
             </Button>
           </div>
           {est.assumptions.length > 0 && (

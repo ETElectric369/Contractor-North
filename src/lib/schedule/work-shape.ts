@@ -99,10 +99,10 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
 export const KIND_LABEL: Record<WorkKind, string> = {
   job: "Job",
   walkthrough: "Walk-through",
-  service: "Service call",
+  service: "Service Call",
   office: "Office",
   quote: "Quote",
-  call: "Phone call",
+  call: "Phone Call",
   other: "Other",
 };
 

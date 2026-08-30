@@ -200,7 +200,7 @@ export function NewTaskBox({
     <Card className="mb-4">
       <div className="space-y-2 p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
             ref={titleRef}
             value={title}
@@ -306,7 +306,7 @@ function TaskEditModal({
       open={open}
       onClose={onClose}
       title="Edit task"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save changes" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Changes" />}
     >
       <div className="space-y-4">
         {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -740,8 +740,8 @@ export function TasksView({
       {!category && (
         <div className="mb-4 flex items-center gap-1.5">
           {([
-            { on: false, label: "By when" },
-            { on: true, label: "By category" },
+            { on: false, label: "By When" },
+            { on: true, label: "By Category" },
           ] as const).map((p) => (
             <Link
               key={p.label}

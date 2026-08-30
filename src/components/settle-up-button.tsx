@@ -45,7 +45,7 @@ type QrState = {
 export function SettleUpButton(props: Mode & {
   compact?: boolean;
   label?: string;
-  /** The org's Settings → Payment methods list. Pay now IS the record-in-the-field surface that
+  /** The org's Settings → Payment methods list. Pay Now IS the record-in-the-field surface that
    *  screen promises to govern — it was the one payment surface still hardcoding its chips, so a
    *  Zelle org's tech tapped "other" and the ledger lost the method. Fallback preserves the old
    *  chips for any mount that doesn't pass it (same idiom as invoice-detail). */
@@ -194,7 +194,7 @@ export function SettleUpButton(props: Mode & {
           setOpen(true);
         }}
       >
-        <BadgeDollarSign className="h-4 w-4" /> {props.label ?? "Pay now"}
+        <BadgeDollarSign className="h-4 w-4" /> {props.label ?? "Pay Now"}
       </Button>
     );
   }
@@ -212,7 +212,7 @@ export function SettleUpButton(props: Mode & {
         }}
         placeholder="$ amount"
         aria-label="What they're paying"
-        className="h-9 w-24 rounded-lg border border-slate-200 px-2 text-sm"
+        className="h-8 w-24 rounded-lg border border-slate-200 px-2 text-sm"
       />
       <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
         {chips.map((m) => (
@@ -220,7 +220,7 @@ export function SettleUpButton(props: Mode & {
             key={m}
             type="button"
             onClick={() => setMethod(m)}
-            className={`px-2 py-1.5 text-xs font-semibold capitalize ${
+            className={`inline-flex h-8 items-center px-2 text-xs font-semibold capitalize ${
               method === m ? "bg-brand text-white" : "bg-white text-slate-500 hover:bg-slate-50"
             }`}
           >
@@ -229,7 +229,7 @@ export function SettleUpButton(props: Mode & {
         ))}
       </span>
       <Button size="sm" onClick={go} disabled={pending}>
-        {pending ? "Working…" : key === "venmo" ? "Show QR" : key === "card" ? "Charge" : "Record it"}
+        {pending ? "Working…" : key === "venmo" ? "Show QR" : key === "card" ? "Charge" : "Record It"}
       </Button>
       <button
         type="button"

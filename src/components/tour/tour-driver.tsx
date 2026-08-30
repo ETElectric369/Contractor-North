@@ -414,7 +414,7 @@ export function TourDriver({
                 value={typed}
                 onChange={(e) => setTyped(e.target.value)}
               />
-              <Button type="submit" variant="secondary" disabled={!typed.trim() || busy}>Use it</Button>
+              <Button type="submit" variant="secondary" disabled={!typed.trim() || busy}>Use It</Button>
             </form>
           ) : (
             <button

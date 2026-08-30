@@ -194,7 +194,7 @@ export function WebsiteSettings({
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
-        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save website"}</Button>
+        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Website"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

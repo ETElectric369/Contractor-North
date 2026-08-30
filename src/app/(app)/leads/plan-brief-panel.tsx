@@ -44,7 +44,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
       type="button"
       disabled={pending}
       onClick={run}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
     >
       {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
       {pending ? "Reading the plans…" : label}

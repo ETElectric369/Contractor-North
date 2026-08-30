@@ -74,7 +74,7 @@ export function CreditButton({
         title="Credit / refund"
         portal
         footer={
-          <ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!(amount > 0)} saveLabel="Post credit" />
+          <ModalActions onCancel={() => setOpen(false)} onSave={save} saving={pending} disabled={!(amount > 0)} saveLabel="Post Credit" />
         }
       >
         <div className="space-y-4">

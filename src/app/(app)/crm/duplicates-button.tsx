@@ -62,8 +62,8 @@ export function DuplicatesButton() {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={scan}>
-        <CopyCheck className="h-4 w-4" /> Find duplicates
+      <Button variant="outline" onClick={scan}>
+        <CopyCheck className="h-4 w-4" /> Find Duplicates
       </Button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Find & merge duplicate contacts">

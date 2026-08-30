@@ -53,7 +53,7 @@ export function NewCustomerInline({
         onClick={() => setOpen(true)}
         className={`inline-flex items-center gap-1 text-sm font-medium text-brand underline-offset-2 hover:underline ${className ?? ""}`}
       >
-        <Plus className="h-3.5 w-3.5" /> New customer
+        <Plus className="h-3.5 w-3.5" /> New Customer
       </button>
     );
 
@@ -89,7 +89,7 @@ export function NewCustomerInline({
             })
           }
         >
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save customer"}
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Customer"}
         </Button>
         <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500 hover:underline">
           Cancel

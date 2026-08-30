@@ -151,7 +151,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
           className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {routing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Route className="h-4 w-4" />}
-          {hasHome ? "Route from home" : "Suggest route"}
+          {hasHome ? "Route from Home" : "Suggest Route"}
         </button>
       </div>
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}

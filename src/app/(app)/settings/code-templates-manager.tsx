@@ -80,7 +80,7 @@ export function CodeTemplatesManager({ templates, codes }: { templates: Template
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={editing && editing !== "new" ? "Edit template" : "New template"}
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save template" disabled={!name.trim() || !selected.length} />}
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save Template" disabled={!name.trim() || !selected.length} />}
       >
         <div className="space-y-4">
           <div>
@@ -96,7 +96,7 @@ export function CodeTemplatesManager({ templates, codes }: { templates: Template
                   onClick={() => setSelected(selected.length === codes.length ? [] : codes.map((c) => c.code))}
                   className="text-xs font-medium text-brand hover:underline"
                 >
-                  {selected.length === codes.length ? "Clear all" : "Select all"}
+                  {selected.length === codes.length ? "Clear All" : "Select All"}
                 </button>
               )}
             </div>

@@ -260,7 +260,7 @@ export function SiteStudio({
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-4 w-4" /> Design it
+                    <Sparkles className="h-4 w-4" /> Design It
                   </>
                 )}
               </Button>
@@ -270,7 +270,7 @@ export function SiteStudio({
                     <Loader2 className="h-4 w-4 animate-spin" /> Designing 4…
                   </>
                 ) : (
-                  "4 layouts"
+                  "4 Layouts"
                 )}
               </Button>
               <button
@@ -334,7 +334,7 @@ export function SiteStudio({
                 disabled={pendingUi}
                 className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
               >
-                <Camera className="h-3.5 w-3.5" /> Capture live site
+                <Camera className="h-3.5 w-3.5" /> Capture Live Site
               </button>
             </div>
             {liveDrift.length > 0 && (
@@ -410,7 +410,7 @@ export function SiteStudio({
               href={`/site/${handle}`}
               className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:underline"
             >
-              <ExternalLink className="h-3.5 w-3.5" /> View live
+              <ExternalLink className="h-3.5 w-3.5" /> View Live
             </a>
             {selected && selected.status !== "published" && (
               <Button onClick={runPublish} disabled={pendingUi} size="sm">
@@ -469,7 +469,7 @@ export function SiteStudio({
                     </p>
                     <div className="flex items-center gap-2">
                       <Button size="sm" onClick={saveHandBlocks} disabled={handSaving || pendingUi}>
-                        {handSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save arrangement"}
+                        {handSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Arrangement"}
                       </Button>
                       <button
                         type="button"

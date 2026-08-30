@@ -37,7 +37,7 @@ export default async function TasksPage({
       >
         <Link href={`/tasks?${addParams.toString()}`}>
           <Button>
-            <Plus className="h-4 w-4" /> Add task
+            <Plus className="h-4 w-4" /> Add Task
           </Button>
         </Link>
       </PageHeader>

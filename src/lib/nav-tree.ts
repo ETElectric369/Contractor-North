@@ -61,7 +61,7 @@ export function invoiceSectionTree(
 ): NavTree {
   const nodes: TreeNode[] = [];
   if (rel.jobId) nodes.push({ id: "i-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
-  nodes.push(deleteNode("i-del", "Delete invoice", del, "/billing"));
+  nodes.push(deleteNode("i-del", "Delete Invoice", del, "/billing"));
   return { center: { label, icon: "receipt" }, nodes };
 }
 
@@ -74,8 +74,8 @@ export function workOrderSectionTree(
   del: DeleteVerb,
 ): NavTree {
   const nodes: TreeNode[] = [];
-  if (rel.quoteId) nodes.push({ id: "w-quote", label: "Source estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
-  nodes.push(deleteNode("w-del", "Delete work order", del, "/work-orders"));
+  if (rel.quoteId) nodes.push({ id: "w-quote", label: "Source Estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  nodes.push(deleteNode("w-del", "Delete Work Order", del, "/work-orders"));
   return { center: { label, icon: "clipboardCheck" }, nodes };
 }
 
@@ -87,8 +87,8 @@ export function materialListSectionTree(
   del: DeleteVerb,
 ): NavTree {
   const nodes: TreeNode[] = [];
-  if (rel.quoteId) nodes.push({ id: "ml-quote", label: "Source estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
-  nodes.push(deleteNode("ml-del", "Delete list", del, "/materials"));
+  if (rel.quoteId) nodes.push({ id: "ml-quote", label: "Source Estimate", icon: "fileText", href: `/quotes/${rel.quoteId}` });
+  nodes.push(deleteNode("ml-del", "Delete List", del, "/materials"));
   return { center: { label, icon: "boxes" }, nodes };
 }
 
@@ -99,7 +99,7 @@ export function purchaseOrderSectionTree(label: string, del: DeleteVerb): NavTre
   return { center: { label, icon: "wallet" }, nodes: [deleteNode("po-del", "Delete PO", del, "/bills")] };
 }
 
-/** The customer ⋯ — "New invoice" rides the /billing ?new=1 contract (opens the
+/** The customer ⋯ — "New Invoice" rides the /billing ?new=1 contract (opens the
  *  real create modal) and carries ?customer= so THIS customer arrives preset.
  *  The old New job / New estimate tab-jumps were dropped:
  *  the header owns the real flows, and the tabs they landed on have no create
@@ -110,12 +110,12 @@ export function customerSectionTree(label: string, del: DeleteVerb, customerId?:
     nodes: [
       {
         id: "c-newinv",
-        label: "New invoice",
+        label: "New Invoice",
         icon: "receipt",
         href: customerId ? `/billing?new=1&customer=${customerId}` : "/billing?new=1",
         staffOnly: true,
       },
-      { ...deleteNode("c-del", "Delete customer", del, "/crm"), staffOnly: true },
+      { ...deleteNode("c-del", "Delete Customer", del, "/crm"), staffOnly: true },
     ],
   };
 }

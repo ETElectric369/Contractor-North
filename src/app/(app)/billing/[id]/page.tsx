@@ -135,7 +135,7 @@ export default async function InvoicePage({
               href={`/api/pay/${(inv as any).public_token}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 h-11 px-4 text-sm font-medium text-white hover:bg-green-700"
             >
               <CreditCard className="h-4 w-4" /> Collect Payment
             </a>
@@ -157,14 +157,14 @@ export default async function InvoicePage({
           {!isDraft && (
             <a
               href="#record-payment"
-              className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+              className="inline-flex items-center gap-2 rounded-lg bg-brand h-11 px-4 text-sm font-medium text-white hover:bg-brand-dark"
             >
               <Banknote className="h-4 w-4" /> Record Payment
             </a>
           )}
           <Link
             href={`/print/pdf-preview?doc=invoice&id=${inv.id}&back=/billing/${inv.id}`}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white h-11 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50"
           >
             <Printer className="h-4 w-4" /> Preview / Print
           </Link>

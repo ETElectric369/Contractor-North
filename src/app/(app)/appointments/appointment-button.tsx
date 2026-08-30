@@ -104,11 +104,14 @@ export function AppointmentButton({
   compact = false,
   editLabel,
   afterDeleteHref,
+  triggerClassName,
 }: {
   jobs: Opt[];
   customers: Opt[];
   staff: Opt[];
   appointment?: ApptValue;
+  /** Override for the bare-pencil edit trigger — lets a verb ROW size the pencil to its box. */
+  triggerClassName?: string;
   defaultDate?: string;
   /** Preselect a customer in create mode (e.g. mounted on that customer's page). */
   defaultCustomerId?: string;
@@ -340,7 +343,13 @@ export function AppointmentButton({
             <Pencil className="h-4 w-4" /> {editLabel}
           </Button>
         ) : (
-          <button onClick={openModal} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit">
+          <button
+            onClick={openModal}
+            // Sized by the ROW it sits in: My Day's verb cluster passes its h-9 box so the pencil
+            // isn't the one small target in the set; the calendar drill keeps the quiet default.
+            className={triggerClassName ?? "rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"}
+            title="Edit"
+          >
             <Pencil className="h-4 w-4" />
           </button>
         )

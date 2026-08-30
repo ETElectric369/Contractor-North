@@ -59,7 +59,7 @@ export function PaymentMethods({ settings }: { settings: OrgSettings }) {
             })
           }
         >
-          Save handle
+          Save Handle
         </Button>
       </div>
       <div className="flex flex-wrap gap-2">

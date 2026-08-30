@@ -111,7 +111,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
             ))}
           </Select>
           <Button type="button" variant="outline" size="sm" onClick={runImport} disabled={pending}>
-            <Download className="h-4 w-4" /> Import codes
+            <Download className="h-4 w-4" /> Import Codes
           </Button>
           {importMsg && <span className="text-xs font-medium text-slate-600">{importMsg}</span>}
         </div>
@@ -151,7 +151,7 @@ export function JobCodesManager({ jobCodes }: { jobCodes: JobCode[] }) {
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={editing && editing !== "new" ? "Edit job code" : "New job code"}
-        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save code" disabled={!code.trim() || !description.trim()} />}
+        footer={<ModalActions onCancel={() => setEditing(null)} onSave={save} saving={pending} saveLabel="Save Code" disabled={!code.trim() || !description.trim()} />}
       >
         <div className="space-y-4">
           <div className="flex gap-3">

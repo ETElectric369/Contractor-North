@@ -803,7 +803,7 @@ export function CalendarView({
         ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6])
         : dayLabel(anchor);
 
-  const iconBtn = "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg";
+  const iconBtn = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg";
 
   return (
     <div className="space-y-3">

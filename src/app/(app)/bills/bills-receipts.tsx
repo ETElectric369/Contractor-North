@@ -483,7 +483,7 @@ function BillEditModal({
       open
       onClose={onClose}
       title="Edit bill"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save changes" />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save Changes" />}
     >
       <div className="space-y-3">
         {error && <p className="text-sm text-red-600">{error}</p>}

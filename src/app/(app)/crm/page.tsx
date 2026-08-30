@@ -39,7 +39,7 @@ export default async function CrmPage({
   return (
     <div>
       <PageHeader title="Contacts" description="Everyone you work with — clients and contacts, all linkable to jobs and quotes. New leads live in the Leads tab.">
-        <div className="flex flex-wrap items-start gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <NewCustomerButton />
           {/* Bulk import (CSV/vCard) — the deliberate, infrequent SEEK door for the whole
               customer book, moved here from Settings > Company (import belongs to Contacts). */}

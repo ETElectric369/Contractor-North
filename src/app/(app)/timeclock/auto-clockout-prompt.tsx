@@ -182,7 +182,7 @@ export function AutoClockoutPrompt({
                   <NumberInput value={a.minutes} onValueChange={(n) => update(i, { minutes: n })} className="h-9 w-12 text-center" placeholder="m" />
                   <span className="text-xs text-slate-400">m</span>
                 </div>
-                <button type="button" onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))} className="text-slate-400 hover:text-red-600" aria-label="Remove">
+                <button type="button" onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove">
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>

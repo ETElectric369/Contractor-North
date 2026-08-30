@@ -548,7 +548,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               grammar app-wide. Techs keep plain rows — the actions are
               staff-gated server-side. */}
           {isStaff && i.appt && (
-            <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} appointment={i.appt} />
+            <AppointmentButton
+              jobs={jobOpts}
+              customers={custOpts}
+              staff={staffOpts}
+              appointment={i.appt}
+              triggerClassName="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand"
+            />
           )}
           {isStaff && i.appt && <ApptDoneButton id={i.appt.id} title={i.appt.title ?? "appointment"} />}
           {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} />}

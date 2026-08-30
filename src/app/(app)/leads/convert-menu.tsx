@@ -258,8 +258,8 @@ export function ConvertMenu({
               activeId={mode}
               onSelect={(id) => setMode(id as typeof mode)}
               items={[
-                { id: "book", label: "Book it" },
-                { id: "pick", label: "Let them pick" },
+                { id: "book", label: "Book It" },
+                { id: "pick", label: "Let Them Pick" },
               ]}
             />
 

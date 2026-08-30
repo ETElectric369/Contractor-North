@@ -615,7 +615,7 @@ export function TimeclockPanel({
                     aria-expanded={showTools}
                     className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
                   >
-                    More options
+                    More Options
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
                   </button>
                   {showTools && (
@@ -824,7 +824,7 @@ export function TimeclockPanel({
               <MapPin className="h-4 w-4 text-slate-400" /> Miles
             </Label>
             <div className="flex items-center gap-2">
-              <NumberInput value={miles} onValueChange={setMiles} className="h-9 w-24" />
+              <NumberInput value={miles} onValueChange={setMiles} className="h-8 w-24" />
               <span className="text-xs text-slate-400">round trip</span>
               {!!(homeAddress && jobAddressForMiles() && process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY) && (
                 <Button type="button" size="sm" variant="outline" onClick={autoMiles} disabled={calcingMiles} title="Round trip: home ↔ job">
@@ -939,7 +939,7 @@ export function TimeclockPanel({
               aria-expanded={showTools}
               className="flex w-full items-center justify-center gap-1 py-1 text-xs font-medium text-slate-400 hover:text-slate-600"
             >
-              More options
+              More Options
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showTools ? "rotate-180" : ""}`} />
             </button>
             {showTools && (

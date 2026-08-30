@@ -400,7 +400,7 @@ export default async function TimecardsPage({
           />
           <Link
             href={`/timecards?week=${offset + 1}`}
-            className="rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50"
+            className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
             title="Previous week"
           >
             <ChevronLeft className="h-4 w-4" />

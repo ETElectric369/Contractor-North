@@ -63,19 +63,19 @@ export function TimeOffButton({
   return (
     <>
       <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-        <CalendarOff className="h-4 w-4" /> Time off
+        <CalendarOff className="h-4 w-4" /> Time Off
       </Button>
       {open && (
         <Modal
           open
           onClose={() => setOpen(false)}
-          title="Time off"
+          title="Time Off"
           size="md"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
               onSave={save}
-              saveLabel="Mark off"
+              saveLabel="Mark Off"
               saving={pending}
               disabled={!ready}
             />

@@ -57,7 +57,7 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="outline" onClick={generate} disabled={generating || saving}>
-            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Sparkles className="h-4 w-4" /> {rows.length ? "Regenerate" : "Generate from line items"}</>}
+            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Sparkles className="h-4 w-4" /> {rows.length ? "Regenerate" : "Generate from Line Items"}</>}
           </Button>
           {dirty && (
             <Button size="sm" onClick={save} disabled={saving || generating}>
@@ -106,7 +106,7 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
 
       <div className="border-t border-slate-100 px-5 py-3">
         <Button size="sm" variant="outline" onClick={addRow} disabled={generating}>
-          <Plus className="h-4 w-4" /> Add circuit
+          <Plus className="h-4 w-4" /> Add Circuit
         </Button>
       </div>
     </Card>

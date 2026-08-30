@@ -55,7 +55,7 @@ export function BlockEditor({
         <span className="text-sm font-medium text-slate-700">Sections</span>
         {blocks.length > 0 && (
           <button type="button" onClick={() => setPreview((v) => !v)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50">
-            {preview ? <><Pencil className="h-3.5 w-3.5" /> Back to editing</> : <><Eye className="h-3.5 w-3.5" /> Preview</>}
+            {preview ? <><Pencil className="h-3.5 w-3.5" /> Back to Editing</> : <><Eye className="h-3.5 w-3.5" /> Preview</>}
           </button>
         )}
       </div>
@@ -166,14 +166,14 @@ function BlockFields({ block, orgId, onChange }: { block: Block; orgId?: string;
         <Textarea rows={4} value={block.props.html} onChange={(e) => onChange({ html: e.target.value })} placeholder="The copy beside the image — plain text or HTML." />
         <div className="flex items-center gap-1.5 text-xs">
           <span className="text-slate-400">Image side</span>
-          {(["left", "right"] as const).map((side) => (
+          {(["left", "Right"] as const).map((side) => (
             <button
               key={side}
               type="button"
               onClick={() => onChange({ imageSide: side })}
               className={`rounded px-2 py-0.5 font-medium ${(block.props.imageSide ?? "left") === side ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
             >
-              {side}
+              {side === "left" ? "Left" : "Right"}
             </button>
           ))}
         </div>
@@ -264,7 +264,7 @@ function GalleryFields({ images, orgId, onChange }: { images: GalleryImage[]; or
           <>
             <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
             <button type="button" onClick={() => ref.current?.click()} disabled={busy} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-200 disabled:opacity-50">
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload photos
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload Photos
             </button>
           </>
         )}

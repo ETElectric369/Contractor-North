@@ -17,7 +17,7 @@ export function DuplicateQuoteButton({ id }: { id: string }) {
     <>
       <Button
         variant="outline"
-        size="sm"
+       
         disabled={pending}
         onClick={() =>
           start(async () => {

@@ -25,7 +25,7 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
     <Select
       value={shown}
       disabled={pending}
-      className="w-40"
+      className="h-11 w-40"
       onChange={(e) => {
         const next = e.target.value;
         const prev = shown;

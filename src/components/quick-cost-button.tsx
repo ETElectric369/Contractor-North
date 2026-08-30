@@ -269,7 +269,7 @@ export function QuickCostButton({
         onClose={closeModal}
         title="Add a cost"
         portal
-        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry receipt" : "Save cost"} />}
+        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry Receipt" : "Save Cost"} />}
       >
         <div className="space-y-4">
           <div>

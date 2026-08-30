@@ -178,7 +178,7 @@ export function NewInvoiceButton({
             onSave={onCreate}
             saving={pending}
             disabled={mode === "quote" && !quoteId}
-            saveLabel="Create invoice"
+            saveLabel="Create Invoice"
           />
         }
       >

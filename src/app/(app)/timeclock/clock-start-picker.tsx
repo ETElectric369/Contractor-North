@@ -129,7 +129,7 @@ export function ClockStartPicker({
             }}
             className="text-xs font-medium text-slate-400 hover:text-slate-700"
           >
-            Use now
+            Use Now
           </button>
         )}
       </div>

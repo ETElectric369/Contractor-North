@@ -87,7 +87,7 @@ export function Topbar({
         <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} /></span>
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
-          className="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"
+          className="flex items-center gap-2 rounded-lg border border-slate-200 h-11 px-2.5 sm:px-3 text-slate-500 hover:bg-slate-50 sm:px-3"
           data-tour="search"
           title="Search & commands (⌘K)"
           aria-label="Search and commands"

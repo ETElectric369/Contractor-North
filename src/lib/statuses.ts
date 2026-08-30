@@ -81,12 +81,12 @@ export const isInspectionType = (t: string | null | undefined): boolean =>
 
 const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
   inspection: "Inspection",
-  final_inspection: "Final inspection",
-  service_call: "Service call",
+  final_inspection: "Final Inspection",
+  service_call: "Service Call",
   job: "Job",
-  call: "Phone call",
-  quote: "Quote / estimate",
-  meeting: "Client meeting",
+  call: "Phone Call",
+  quote: "Quote / Estimate",
+  meeting: "Client Meeting",
   appointment: "Appointment",
   other: "Other",
 };

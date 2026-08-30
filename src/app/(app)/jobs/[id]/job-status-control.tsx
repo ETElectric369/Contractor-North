@@ -97,7 +97,7 @@ export function JobStatusControl({
             disabled={pending}
             className="h-9 rounded-lg bg-brand px-2.5 text-sm font-semibold text-white"
           >
-            Hold it
+            Hold It
           </button>
         </>
       )}

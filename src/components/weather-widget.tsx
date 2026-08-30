@@ -294,7 +294,7 @@ export function WeatherWidget({
                           onClick={locate}
                           className="inline-flex items-center gap-0.5 font-medium text-sky-600 hover:text-sky-700"
                         >
-                          <MapPin className="h-3 w-3" /> Use my location
+                          <MapPin className="h-3 w-3" /> Use My Location
                         </button>
                       )}
                     </>

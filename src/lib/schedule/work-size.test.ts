@@ -144,7 +144,7 @@ describe("every kind the app offers survives the round trip", () => {
   it("includes the phone call that started this", () => {
     expect(WORK_KINDS).toContain("call");
     expect(appointmentTypeFor("call")).toBe("call");
-    expect(KIND_LABEL.call).toBe("Phone call");
+    expect(KIND_LABEL.call).toBe("Phone Call");
     expect(bookingTitle("call", "Mike Scrivano")).toBe("Call Mike Scrivano");
   });
 });

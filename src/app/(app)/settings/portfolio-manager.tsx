@@ -88,7 +88,7 @@ export function PortfolioManager({ orgId, initial }: { orgId: string; initial: P
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={onFiles} />
         <Button type="button" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-          {busy ? "Uploading…" : "Add photos"}
+          {busy ? "Uploading…" : "Add Photos"}
         </Button>
         <span className="text-sm text-slate-400">{photos.length} photo{photos.length === 1 ? "" : "s"}</span>
         {savedTick && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}

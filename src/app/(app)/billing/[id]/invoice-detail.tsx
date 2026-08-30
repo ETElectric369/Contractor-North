@@ -651,11 +651,11 @@ export function InvoiceDetail({
             {invoice.job_id && (
               <>
                 <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length, "labor")} disabled={pending}>
-                  Labor From Timecards
+                  Labor from Timecards
                 </Button>
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length, "costs")} disabled={pending}>
-                    Materials From Costs
+                    Materials from Costs
                   </Button>
                   <span onBlur={applyMarkup} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLElement).blur(); }}>
                     <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
@@ -695,7 +695,7 @@ export function InvoiceDetail({
                   }}
                   className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
                 >
-                  Start it over
+                  Start It Over
                 </button>
               </span>
             )}
@@ -744,7 +744,7 @@ export function InvoiceDetail({
                         disabled={pending || items[0]?.id === it.id}
                         className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsUp className="h-3.5 w-3.5" /> Move to top
+                        <ChevronsUp className="h-3.5 w-3.5" /> Move to Top
                       </button>
                       <button
                         type="button"
@@ -752,7 +752,7 @@ export function InvoiceDetail({
                         disabled={pending || items[items.length - 1]?.id === it.id}
                         className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsDown className="h-3.5 w-3.5" /> Move to bottom
+                        <ChevronsDown className="h-3.5 w-3.5" /> Move to Bottom
                       </button>
                     </div>
                   )}
@@ -830,7 +830,7 @@ export function InvoiceDetail({
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                 title="Labor first, then materials — lines you added by hand stay where you put them"
               >
-                <Layers className="h-3.5 w-3.5" /> Group materials & labor
+                <Layers className="h-3.5 w-3.5" /> Group Materials & Labor
               </button>
             </div>
           )}
@@ -1144,7 +1144,7 @@ export function InvoiceDetail({
           onCancel={() => setLinkOpen(false)}
           onSave={saveLink}
           saving={pending}
-          saveLabel="Save link"
+          saveLabel="Save Link"
         />
       </Modal>
     </div>

@@ -10,7 +10,7 @@ describe("workKind — the tag, from what already exists", () => {
   it("maps the appointment types he named to his words", () => {
     expect(KIND_LABEL[workKind({ type: "inspection" })]).toBe("Walk-through");
     expect(KIND_LABEL[workKind({ type: "final_inspection" })]).toBe("Walk-through");
-    expect(KIND_LABEL[workKind({ type: "service_call" })]).toBe("Service call");
+    expect(KIND_LABEL[workKind({ type: "service_call" })]).toBe("Service Call");
     expect(KIND_LABEL[workKind({ type: "meeting" })]).toBe("Office");
     expect(KIND_LABEL[workKind({ kind: "job" })]).toBe("Job");
   });

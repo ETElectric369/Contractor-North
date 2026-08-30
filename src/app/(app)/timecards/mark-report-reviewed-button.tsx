@@ -25,7 +25,7 @@ export function MarkReportReviewedButton({ id }: { id: string }) {
       disabled={pending}
       className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
     >
-      <CheckCircle2 className="h-3.5 w-3.5" /> Mark reviewed
+      <CheckCircle2 className="h-3.5 w-3.5" /> Mark Reviewed
     </button>
   );
 }

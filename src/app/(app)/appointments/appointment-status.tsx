@@ -7,7 +7,9 @@ import { setAppointmentStatus } from "./actions";
 import { useToast } from "@/components/toast";
 
 /** Quick "mark done" / "cancel" controls for an appointment row. */
-export function ApptQuickActions({ id, status, title }: { id: string; status: string; title: string }) {
+export function ApptQuickActions({ id, status, title, boxClassName }: { id: string; status: string; title: string;
+  /** Box for the icon verbs — a row of h-8 buttons passes its size so ✓/✗ join the set. */
+  boxClassName?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -61,7 +63,7 @@ export function ApptQuickActions({ id, status, title }: { id: string; status: st
         </button>
       )}
       {status !== "completed" && (
-        <button onClick={() => set("completed")} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-green-50 hover:text-green-600" title="Mark done">
+        <button onClick={() => set("completed")} disabled={pending} className={`${boxClassName ?? "rounded-md p-1"} text-slate-400 hover:bg-green-50 hover:text-green-600`} title="Mark done">
           <Check className="h-4 w-4" />
         </button>
       )}
@@ -78,7 +80,7 @@ export function ApptQuickActions({ id, status, title }: { id: string; status: st
           set("cancelled", { undoable: true });
         }}
         disabled={pending}
-        className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+        className={`${boxClassName ?? "rounded-md p-1"} text-slate-400 hover:bg-red-50 hover:text-red-600`}
         title="Cancel"
       >
         <X className="h-4 w-4" />

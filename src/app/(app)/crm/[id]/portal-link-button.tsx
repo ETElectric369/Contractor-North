@@ -70,20 +70,20 @@ export function PortalLinkButton({
         Their own page — estimates, invoices, contracts
       </span>
       <div className="flex flex-wrap justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={preview} disabled={pending} title="Open it exactly as the customer sees it">
-          <ExternalLink className="h-4 w-4" /> See what they see
+        <Button variant="outline" onClick={preview} disabled={pending} title="Open it exactly as the customer sees it">
+          <ExternalLink className="h-4 w-4" /> See What They See
         </Button>
-        <Button variant="outline" size="sm" onClick={copyIt} disabled={pending}>
-          <Copy className="h-4 w-4" /> Copy the link
+        <Button variant="outline" onClick={copyIt} disabled={pending}>
+          <Copy className="h-4 w-4" /> Copy the Link
         </Button>
         <Button
           variant="outline"
-          size="sm"
+         
           onClick={emailIt}
           disabled={pending || !hasEmail}
           title={hasEmail ? "Email them the link to that page" : "Add an email to this customer first"}
         >
-          <Mail className="h-4 w-4" /> {pending ? "Sending…" : "Email it to them"}
+          <Mail className="h-4 w-4" /> {pending ? "Sending…" : "Email It to Them"}
         </Button>
       </div>
       {msg && <span className="text-xs text-slate-500">{msg}</span>}

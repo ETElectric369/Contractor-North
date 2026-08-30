@@ -803,7 +803,7 @@ export function QuoteBuilder({
                 />
               </label>
               <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white/60 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
-                <FileUp className="h-4 w-4" /> Supplier quote
+                <FileUp className="h-4 w-4" /> Supplier Quote
                 <input
                   type="file"
                   accept="application/pdf,text/csv,.csv,.txt"

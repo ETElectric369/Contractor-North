@@ -64,8 +64,8 @@ export function ReviewsManager({ initial, orgId }: { initial: Review[]; orgId?: 
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" size="sm" onClick={add}><Plus className="h-4 w-4" /> Add review</Button>
-        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save reviews"}</Button>
+        <Button type="button" variant="outline" size="sm" onClick={add}><Plus className="h-4 w-4" /> Add Review</Button>
+        <Button size="sm" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Reviews"}</Button>
         {done && <span className="flex items-center gap-1 text-sm font-medium text-green-600"><Check className="h-4 w-4" /> Saved</span>}
       </div>
     </div>

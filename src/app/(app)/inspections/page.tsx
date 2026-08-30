@@ -225,7 +225,7 @@ function InspectionRow({ a, tz, writeUp }: { a: any; tz: string; writeUp: boolea
       {writeUp && (
         <Link href={estimateHref} className="shrink-0">
           <Button size="sm">
-            <FileText className="h-4 w-4" /> Create estimate
+            <FileText className="h-4 w-4" /> Create Estimate
           </Button>
         </Link>
       )}

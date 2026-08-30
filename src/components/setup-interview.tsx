@@ -390,7 +390,7 @@ export function SetupInterview({
               {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> …</> : <><Check className="h-4 w-4" /> Got it</>}
             </Button>
             <button type="button" onClick={() => setStep(1)} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-              Start over
+              Start Over
             </button>
             {err && <span className="text-sm text-rose-600">{err}</span>}
             {msg && !err && <span className="text-sm font-medium text-emerald-700">{msg}</span>}

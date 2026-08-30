@@ -121,7 +121,7 @@ export function CrewWeekGrid({
             type="button"
             onClick={() => goWeek(-1)}
             aria-label="Previous week"
-            className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -132,7 +132,7 @@ export function CrewWeekGrid({
             type="button"
             onClick={() => goWeek(1)}
             aria-label="Next week"
-            className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50"
           >
             <ChevronRight className="h-4 w-4" />
           </button>

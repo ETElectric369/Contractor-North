@@ -174,7 +174,7 @@ export function GcalCard({
             )}
             <Button size="sm" onClick={syncNow} disabled={pending}>
               <RefreshCw className={`h-3.5 w-3.5 ${pending ? "animate-spin" : ""}`} />
-              Sync now
+              Sync Now
             </Button>
             <Button size="sm" variant="outline" onClick={sync} disabled={pending}>
               Push Schedule to Google
@@ -227,7 +227,7 @@ export function GcalCard({
                     </ul>
                     <div className="mt-3 flex items-center gap-2">
                       <Button size="sm" onClick={savePicker} disabled={pending}>
-                        Save calendars
+                        Save Calendars
                       </Button>
                       <span className="text-xs text-slate-400">
                         Their events show read-only on the schedule; syncs every 15 minutes.

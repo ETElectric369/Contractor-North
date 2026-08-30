@@ -147,7 +147,7 @@ describe("apptEventBody", () => {
     expect(apptEventBody({ ...appt, type: "appointment" }).summary).toBe("Rough-in walk");
     // Same label the app renders (appointmentTypeLabel) — pushed events must not drift
     // into "[final inspection]" while the app says "Final inspection".
-    expect(apptEventBody({ ...appt, type: "final_inspection" }).summary).toBe("[Final inspection] Rough-in walk");
+    expect(apptEventBody({ ...appt, type: "final_inspection" }).summary).toBe("[Final Inspection] Rough-in walk");
   });
 
   it("keeps a real end when it's after the start", () => {

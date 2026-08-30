@@ -33,7 +33,7 @@ export function NewInvoiceButton({ jobId }: { jobId: string }) {
 
   return (
     <Button variant="outline" onClick={go} disabled={pending}>
-      <FileText className="h-4 w-4" /> {pending ? "Opening…" : "New invoice"}
+      <FileText className="h-4 w-4" /> {pending ? "Opening…" : "New Invoice"}
     </Button>
   );
 }

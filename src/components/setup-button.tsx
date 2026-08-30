@@ -150,7 +150,7 @@ export function SetupButton({
               }}
               className="block w-full rounded-lg px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
             >
-              Take the setup again
+              Take the Setup Again
             </button>
           </div>
         </div>

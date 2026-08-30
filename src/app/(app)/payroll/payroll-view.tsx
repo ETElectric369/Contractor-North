@@ -285,7 +285,7 @@ export function PayrollView({
                         </Button>
                       ) : (
                         <Button size="sm" onClick={() => armConfirm(r.profileId)} disabled={busy}>
-                          <Check className="h-4 w-4" /> Mark paid
+                          <Check className="h-4 w-4" /> Mark Paid
                         </Button>
                       ))}
                     {r.paidHours > 0 && (
@@ -296,7 +296,7 @@ export function PayrollView({
                         onClick={() => run(() => unmarkPeriodPaid({ profileId: r.profileId, periodStart: period.start, periodEnd: period.end }), r.profileId)}
                         disabled={busy}
                       >
-                        <Undo2 className="h-4 w-4" /> Undo base
+                        <Undo2 className="h-4 w-4" /> Undo Base
                       </Button>
                     )}
                     {r.heldMiles > 0 && (
@@ -309,7 +309,7 @@ export function PayrollView({
                         }}
                         disabled={busy}
                       >
-                        Settle mileage…
+                        Settle Mileage…
                       </Button>
                     )}
                     {hasSettled && (
@@ -320,7 +320,7 @@ export function PayrollView({
                         onClick={() => run(() => unsettleMileage({ profileId: r.profileId, periodStart: period.start, periodEnd: period.end }), r.profileId)}
                         disabled={busy}
                       >
-                        <Undo2 className="h-4 w-4" /> Undo mileage
+                        <Undo2 className="h-4 w-4" /> Undo Mileage
                       </Button>
                     )}
                   </div>

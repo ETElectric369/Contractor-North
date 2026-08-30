@@ -67,7 +67,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
             setPaperName("");
             setPaperDate("");
           }}
-          saveLabel="Record it"
+          saveLabel="Record It"
         />
       }
     >
@@ -134,7 +134,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               {/* SIGNED ON PAPER — the normal case in this trade, and until now the only way to
                   record it was Void, which says the agreement doesn't exist (audit R3). */}
               <Button variant="outline" size="sm" onClick={() => setPaperFor(c.id)} disabled={pending}>
-                Signed on paper
+                Signed on Paper
               </Button>
               <Button variant="ghost" size="sm" onClick={() => run(() => voidContract(c.id))} disabled={pending}>
                 Void

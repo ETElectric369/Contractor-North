@@ -329,7 +329,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 aria-label="Phone — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { phone: e.target.value })}
-                                className="h-7 w-36 rounded-md px-1.5 text-xs"
+                                className="h-8 w-36 rounded-md px-1.5 text-xs"
                               />
                             )}
                             {!i.email && (
@@ -342,7 +342,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 aria-label="Email — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { email: e.target.value })}
-                                className="h-7 w-40 rounded-md border border-slate-200 px-1.5 text-xs"
+                                className="h-8 w-40 rounded-md border border-slate-200 px-1.5 text-xs"
                               />
                             )}
                           </div>
@@ -373,7 +373,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                   router.refresh();
                                 });
                               }}
-                              className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+                              className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
                               aria-label="Job status"
                             >
                               {JOB_STATUSES.map((st) => (
@@ -394,12 +394,12 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                   }}
                                   placeholder="Why? — waiting on the permit"
                                   aria-label="Why is this on hold"
-                                  className="h-7 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
+                                  className="h-8 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
                                 />
                                 <button
                                   type="button"
                                   onClick={() => hold(i.id, holdReason)}
-                                  className="h-7 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+                                  className="h-8 rounded-md bg-brand px-2 text-xs font-semibold text-white"
                                 >
                                   Hold it
                                 </button>
@@ -416,7 +416,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 }}
                                 placeholder="Why? — waiting on the permit"
                                 aria-label="Why is this on hold"
-                                className="h-7 w-56 rounded-md border border-slate-200 px-1.5 text-xs"
+                                className="h-8 w-56 rounded-md border border-slate-200 px-1.5 text-xs"
                               />
                             )}
                           </span>
@@ -485,7 +485,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                   key={h}
                   type="button"
                   onClick={() => { setHalf(h); setStartAt(""); }}
-                  className={`px-3 py-1.5 text-xs font-semibold uppercase ${
+                  className={`inline-flex h-8 items-center px-3 text-xs font-semibold uppercase ${
                     half === h && !startAt
                       ? "bg-brand text-white"
                       : "bg-white text-slate-500 hover:bg-slate-50"
