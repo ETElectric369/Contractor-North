@@ -354,12 +354,15 @@ export function InvoiceDetail({
    * by hand. It is one button, and the arrows still win afterwards.
    */
   function groupByKind() {
+    // LABOR LEADS. Erik: "it sent all the labor down to the bottom when it should all go to the
+    // top" — the story of an invoice starts with the work done, then what it took; credits stay
+    // last. Order inside each group is untouched.
     const rank = (it: (typeof items)[number]) => {
       const src = (it as { import_source?: string | null }).import_source;
       const d = it.description ?? "";
       if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
-      if (src === "labor" || /^labor — /i.test(d)) return 1;
-      if (src === "costs" || /^materials — /i.test(d)) return 0;
+      if (src === "labor" || /^labor — /i.test(d)) return 0;
+      if (src === "costs" || /^materials — /i.test(d)) return 1;
       return 2;
     };
     const ids = items
@@ -369,7 +372,7 @@ export function InvoiceDetail({
     start(async () => {
       const res = await reorderInvoiceItems(invoice.id, ids);
       if (!res?.ok) { toast(res?.error ?? "Couldn't group the lines — try again.", "error"); return; }
-      toast("Grouped — materials, then labor", "success");
+      toast("Grouped — labor first, then materials", "success");
       refresh();
     });
   }
@@ -767,7 +770,7 @@ export function InvoiceDetail({
                 onClick={groupByKind}
                 disabled={pending}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                title="Materials together, then labor — keeps the order you set inside each group"
+                title="Labor first, then materials — keeps the order you set inside each group"
               >
                 <Layers className="h-3.5 w-3.5" /> Group materials & labor
               </button>
