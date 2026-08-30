@@ -952,8 +952,13 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   // lump path bills, computeJobProgress reports, and livePurchaseOrders' PO-supersede math
   // subtracts. Itemization changes PRESENTATION, never the total. Mechanically:
   //  • line sell = round(signed line AMOUNT × (1+m)) — never per-unit rounding × qty
-  //    (a 1000-count $25 line billed $30 that way); qty×unit renders only when it
-  //    reproduces the exact sell, else the qty folds into the description.
+  //    (a 1000-count $25 line billed $30 that way). qty×unit renders whenever the rounded
+  //    unit lands within pennies of the sell — the per-bill remainder row (which exists to
+  //    absorb tax + rounding) trues up the cents, so the INVARIANT still holds while the
+  //    customer sees "6 ea × $43.54" instead of a count buried in the description. Erik was
+  //    hand-splitting "(N ea)" bundles line by line ("no per item price which is exactly
+  //    what i need"); only a pathological split (drift past the cap, or a sub-cent unit)
+  //    still folds the qty into the description.
   //  • negatives (discounts/returns) stay negative rows — dropping or abs()ing them
   //    overbilled above the bill's net.
   //  • receipt tax lines aren't itemized as fake marked-up "Sales Tax" rows; they land in
@@ -978,9 +983,13 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
       if (!sell) continue;
       const desc = String(l.description || "Materials").slice(0, 300);
       const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;
-      if (qty > 0 && Number.isInteger(qty) && Math.round(unitExact * qty * 100) / 100 === sell) {
+      // What qty × rounded-unit actually bills — within pennies of the sell it's the honest
+      // presentation and the remainder row eats the difference; past the cap (huge counts of
+      // sub-cent parts) the qty still folds into the description to protect the total.
+      const split = Math.round(unitExact * qty * 100) / 100;
+      if (qty > 0 && Number.isInteger(qty) && unitExact !== 0 && Math.abs(split - sell) <= 0.5) {
         billRows.push({ import_key: `bli:${l.id}`, description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
-        emitted = Math.round((emitted + unitExact * qty) * 100) / 100;
+        emitted = Math.round((emitted + split) * 100) / 100;
       } else {
         billRows.push({ import_key: `bli:${l.id}`, description: qty > 1 ? `${desc} (${qty} ea)` : desc, quantity: 1, unit: "ea", unit_price: sell });
         emitted = Math.round((emitted + sell) * 100) / 100;
