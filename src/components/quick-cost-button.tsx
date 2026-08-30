@@ -345,6 +345,7 @@ export function QuickCostButton({
               }}
               accept="image/*,application/pdf,.pdf"
               multiple={false}
+              label="Drop the Receipt"
             >
             <button
               type="button"

@@ -109,7 +109,7 @@ export function DropTarget({
   accept,
   multiple = true,
   disabled = false,
-  label,
+  label = "Drop Files Here",
   className,
   children,
 }: {
@@ -119,9 +119,8 @@ export function DropTarget({
   accept?: string;
   multiple?: boolean;
   disabled?: boolean;
-  /** OPT-IN, and mostly unnecessary: the dashed box IS the signal (Erik: "is there a reason to
-   *  have text there at all"). Pass one only where TWO zones sit adjacent and a drop could land
-   *  on the wrong door — then the word is load-bearing disambiguation, not decoration. */
+  /** Title Case, rendered as a small pill over the stripes (Erik settled it: pattern AND "some
+   *  text overlay Title Case"). Say what THIS door takes — specific beats generic. */
   label?: string;
   className?: string;
   children: React.ReactNode;

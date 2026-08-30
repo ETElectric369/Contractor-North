@@ -785,7 +785,7 @@ export function QuoteBuilder({
                 the drawing) into the same price-book-priced lines + review questions. */}
             <div className="flex items-center gap-3 pt-1">
               <span className="text-xs font-medium uppercase tracking-wide text-slate-400">or</span>
-              <DropTarget onFiles={(files) => onUploadPlan(files[0])} accept="application/pdf" multiple={false} label="Drop the plan PDF" disabled={uploading || generating}>
+              <DropTarget onFiles={(files) => onUploadPlan(files[0])} accept="application/pdf" multiple={false} label="Drop the Plan PDF" disabled={uploading || generating}>
               <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-brand/40 bg-white/60 px-3 py-2 text-sm font-medium text-brand hover:bg-brand-light/40 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
                 {uploading ? (
                   <><Loader2 className="h-4 w-4 animate-spin" /> Reading plan…</>
@@ -805,7 +805,7 @@ export function QuoteBuilder({
                 />
               </label>
               </DropTarget>
-              <DropTarget onFiles={(files) => onUploadSupplier(files[0])} accept="application/pdf,text/csv,.csv,.txt" multiple={false} label="Drop the supplier quote" disabled={uploading || generating}>
+              <DropTarget onFiles={(files) => onUploadSupplier(files[0])} accept="application/pdf,text/csv,.csv,.txt" multiple={false} label="Drop the Supplier Quote" disabled={uploading || generating}>
               <label className={`inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white/60 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
                 <FileUp className="h-4 w-4" /> Supplier Quote
                 <input

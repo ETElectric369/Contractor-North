@@ -290,7 +290,7 @@ export function IntakeForm({ handle, needs, orgName }: { handle: string; needs: 
             </p>
           ) : n.slot?.type === "file" ? (
             <DropTarget
-              onFiles={(files) => void addFiles(n.key, files)}
+              onFiles={(files) => void addFiles(n.key, files)} label="Drop Your Plans"
               accept={uploadAccept(n.slot.accept).attr}
               multiple={n.slot.multi !== false}
               className="rounded-lg border border-dashed border-slate-300 p-3"

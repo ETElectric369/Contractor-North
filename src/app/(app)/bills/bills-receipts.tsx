@@ -384,7 +384,7 @@ export function BillsReceipts({
               </Select>
             </div>
             <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
-            <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf">
+            <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop the Bill">
               <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Upload
               </Button>

@@ -843,7 +843,7 @@ export function Inspector({
         }
       };
       return (
-        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} className="rounded-lg border border-dashed border-slate-300 p-2">
+        <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the Plans" className="rounded-lg border border-dashed border-slate-300 p-2">
           <input
             type="file"
             multiple={n.slot.multi !== false}
@@ -1302,7 +1302,7 @@ export function Inspector({
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            <DropTarget onFiles={upload} accept="image/*,application/pdf" className="shrink-0">
+            <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos or PDFs" className="shrink-0">
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
