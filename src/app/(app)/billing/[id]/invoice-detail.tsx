@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { SettleUpButton } from "@/components/settle-up-button";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, Layers } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -187,6 +187,18 @@ export function InvoiceDetail({
   /** A draft deliberately waiting — leaves Needs action until this date (0206). */
   const [hold, setHold] = useState<string>((invoice as { hold_until?: string | null }).hold_until ?? "");
   const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
+  /* ON-THE-SPOT AGAIN — safely this time. The old debounced auto-reprice was removed because the
+     import was a delete-and-rebuild that silently wiped hand edits (the "force feeding"). Since
+     0175 it's an UPSERT that never touches an edited line, so committing a new number here
+     (Enter, or leaving the box) re-prices only the machine-priced cost lines and the toast says
+     exactly what happened. Nothing fires while typing, and an unchanged number is a no-op. */
+  const appliedMarkupRef = useRef(materialMarkup);
+  function applyMarkup() {
+    if (pending || markup === appliedMarkupRef.current) return;
+    appliedMarkupRef.current = markup;
+    if (!items.some((i) => (i as { import_source?: string | null }).import_source === "costs")) return;
+    runImport((id) => importCostsIntoInvoice(id, markup), "Materials", 0, "costs", false);
+  }
   // The % now applies ONLY when an import button is deliberately tapped — see the block below
   // where the auto-reapply used to live. It seeds from the customer's pricing level, or the org
   // default when they have none, which is NOT necessarily what this invoice's existing lines
@@ -207,13 +219,16 @@ export function InvoiceDetail({
     label: string,
     replacing = 0,
     sourceKey: "labor" | "costs" | "quote" | "change_orders" | null = null,
+    askFirst = true,
   ) {
-    if (replacing > 0) {
+    if (replacing > 0 && askFirst) {
+      // Truthful since 0175 (imports became additive): hand-edited lines are NEVER overwritten —
+      // the old text threatened exactly that and scared people off a safe refresh.
       const ok = confirm(
         `Re-import ${label.toLowerCase()}?\n\n` +
-          `This REPLACES the ${replacing} ${label.toLowerCase()} line${replacing === 1 ? "" : "s"} ` +
-          `already on ${invoice.invoice_number} with whatever the job holds right now — ` +
-          `any price you edited by hand is overwritten, and anything added to the job since is pulled in.\n\n` +
+          `This refreshes the ${replacing} ${label.toLowerCase()} line${replacing === 1 ? "" : "s"} ` +
+          `already on ${invoice.invoice_number} from whatever the job holds right now. ` +
+          `Lines you edited by hand are kept exactly as you set them; anything added to the job since is pulled in.\n\n` +
           `Current total: ${formatCurrency(Number(invoice.total))}`,
       );
       if (!ok) return;
@@ -332,6 +347,21 @@ export function InvoiceDetail({
    * MOVE ONE LINE (Erik: "just like the playbook"). The whole sequence is written every time —
    * one atomic order rather than two rows swapping numbers and racing.
    */
+  /* ONE TAP TO THE EDGE. Erik added a referral line, wanted it first, and the only road was the
+     single-step chevron — "without having to hit the arrow and follow it 65 times or whatever."
+     Same one-call reorder grammar as groupByKind: compute the whole order, send it once. */
+  function moveToEdge(id: string, edge: "top" | "bottom") {
+    const rest = items.map((i) => i.id).filter((x) => x !== id);
+    const ids = edge === "top" ? [id, ...rest] : [...rest, id];
+    start(async () => {
+      const res = await reorderInvoiceItems(invoice.id, ids);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't move that line — try again.", "error"); return; }
+      setEditId(null);
+      toast(edge === "top" ? "Moved to the top" : "Moved to the bottom", "success");
+      refresh();
+    });
+  }
+
   function moveItem(id: string, dir: -1 | 1) {
     const ids = items.map((i) => i.id);
     const at = ids.indexOf(id);
@@ -365,10 +395,16 @@ export function InvoiceDetail({
       if (src === "costs" || /^materials — /i.test(d)) return 1;
       return 2;
     };
-    const ids = items
-      .map((it, i) => ({ it, i }))
-      .sort((a, b) => rank(a.it) - rank(b.it) || a.i - b.i)
-      .map(({ it }) => it.id);
+    /* HAND-ADDED LINES STAY WHERE THE HAND PUT THEM. Grouping is about the imported piles;
+       a line a person typed and placed (a referral he moved to the top) must not get re-sunk
+       to "everything else" every time the button is pressed. Pinned = no import_source. */
+    const entries = items.map((it, i) => ({ it, i }));
+    const pinned = (e: (typeof entries)[number]) => !(e.it as { import_source?: string | null }).import_source;
+    const movable = entries.filter((e) => !pinned(e)).sort((a, b) => rank(a.it) - rank(b.it) || a.i - b.i);
+    const ids: string[] = new Array(items.length);
+    for (const e of entries) if (pinned(e)) ids[e.i] = e.it.id;
+    let mi = 0;
+    for (let i = 0; i < ids.length; i++) if (!ids[i]) ids[i] = movable[mi++].it.id;
     start(async () => {
       const res = await reorderInvoiceItems(invoice.id, ids);
       if (!res?.ok) { toast(res?.error ?? "Couldn't group the lines — try again.", "error"); return; }
@@ -621,7 +657,9 @@ export function InvoiceDetail({
                   <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length, "costs")} disabled={pending}>
                     Materials From Costs
                   </Button>
-                  <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+                  <span onBlur={applyMarkup} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLElement).blur(); }}>
+                    <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+                  </span>
                   <span className="text-xs text-slate-400">% markup</span>
                 </div>
                 {/* APPROVED EXTRAS. Until now a change order's amount was read by nothing in the
@@ -698,6 +736,26 @@ export function InvoiceDetail({
                       <X className="h-4 w-4" />
                     </button>
                   </div>
+                  {items.length > 2 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => moveToEdge(it.id, "top")}
+                        disabled={pending || items[0]?.id === it.id}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <ChevronsUp className="h-3.5 w-3.5" /> Move to top
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveToEdge(it.id, "bottom")}
+                        disabled={pending || items[items.length - 1]?.id === it.id}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                      >
+                        <ChevronsDown className="h-3.5 w-3.5" /> Move to bottom
+                      </button>
+                    </div>
+                  )}
                 </li>
               ) : (
                 <li key={it.id} className="group flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-slate-50">
@@ -770,7 +828,7 @@ export function InvoiceDetail({
                 onClick={groupByKind}
                 disabled={pending}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                title="Labor first, then materials — keeps the order you set inside each group"
+                title="Labor first, then materials — lines you added by hand stay where you put them"
               >
                 <Layers className="h-3.5 w-3.5" /> Group materials & labor
               </button>
