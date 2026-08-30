@@ -83,7 +83,9 @@ export async function getActionItems(ctx: {
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
-    // surface (this feeder is also the calendar tray's source of truth).
+    // surface. (The schedule rail's "Waiting for a day" runs its OWN queries with the
+    // same definition — rail and inbox deliberately differ only on on_hold, which the
+    // rail shows for placing and this feeder skips as paused-not-actionable.)
     isStaff
       ? supabase
           .from("jobs")
@@ -108,7 +110,7 @@ export async function getActionItems(ctx: {
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-    // Appointments that have started but aren't completed yet.
+    // Appointments from PAST days that nobody ever closed out.
     //
     // WITH A FLOOR. This had no lower bound, so a booking nobody ever closed out nagged forever:
     // 11 stale rows in TAHOE DECK, oldest from Jul 8, and 4 in ET Electric — a permanent count on
@@ -116,12 +118,20 @@ export async function getActionItems(ctx: {
     // forbids (types.ts): no count may be the length of an unbounded set. Two weeks is the window
     // in which "you didn't mark this done" is still a useful nudge; past that it is furniture, and
     // the appointment is still findable on the schedule and in /inspections.
+    //
+    // AND A CEILING AT MIDNIGHT: today's visits are the AGENDA's rows, two cards up — this feeder
+    // carried them too, so a 3 PM visit sat in "Needs action" all morning saying nothing the plan
+    // above it didn't. The flow reading: an appointment needs ACTION only once its day has passed
+    // without it being closed out. absorbed=false (0237): a booking that became a job is the
+    // job's business now — its ghost sat here "awaiting completion" forever, since finishing the
+    // job never touches the appointment row.
     supabase
       .from("appointments")
       .select("id, type, title, starts_at, status, job_id, assigned_to")
       .eq("status", "scheduled")
+      .eq("absorbed", false)
       .gte("starts_at", `${daysAgoStr(todayStr, 14)}T00:00:00`)
-      .lte("starts_at", endOfToday)
+      .lt("starts_at", `${todayStr}T00:00:00`)
       .order("starts_at", { ascending: true })
       .limit(50),
     // Captures awaiting a filing decision — staff only.
@@ -452,6 +462,7 @@ export async function getActionItems(ctx: {
   // due date OR simply old (created INVOICE_STALE_DAYS+ ago), so an unpaid invoice
   // reaches the inbox by AGE even before a due_date is entered.
   const todayMs = Date.parse(todayStr);
+  const overdueEmitted = new Set<string>(); // one balance, ONE money row — the visit block checks this
   for (const inv of (invR.data ?? []) as any[]) {
     const balance = invoiceBalance(inv.total, inv.amount_paid);
     if (balance < 0.005) continue; // effectively paid; status just lagging
@@ -480,6 +491,7 @@ export async function getActionItems(ctx: {
       href: `/billing/${inv.id}`,
       affordances: AFFORDANCES.invoice_overdue,
     });
+    overdueEmitted.add(String(inv.id));
   }
 
   // Sent quotes/estimates gone quiet — surfaced once the customer has had it
@@ -564,6 +576,9 @@ export async function getActionItems(ctx: {
       if (a.job_id && billedJobs.has(a.job_id)) continue;
       const who = a.customers?.name ?? a.inquiries?.name ?? null;
       const openInvoice = billedUnpaid.get(String(a.id));
+      // ONE balance, ONE row: once the anchored invoice ages into invoice_overdue, the visit's
+      // "billed, no money yet" would be the same dollars nagging twice from two rows.
+      if (openInvoice && overdueEmitted.has(openInvoice)) continue;
       items.push({
         id: `unbilled-${a.id}`,
         kind: "visit_unbilled",
@@ -577,6 +592,38 @@ export async function getActionItems(ctx: {
         href: openInvoice ? `/billing/${openInvoice}` : `/appointments/${a.id}`,
         affordances: AFFORDANCES.visit_unbilled,
       });
+    }
+
+    /* THE JOB-SHAPED NORA HOLE. "A service call is a job" means the flow's main line now mints
+       JOBS with no appointment row at all — so a job flipped to complete through the status
+       dropdown (finishJob bills atomically; the dropdown doesn't) earned money the appointment
+       feeder above can never see. That state lived ONLY on /billing's done-not-invoiced lane,
+       which nothing counts. Same kind, same question, same Pay now on the other end — the job
+       page's. detectUnbilledWork defers this exact state here-ward (leak-detectors "the billing
+       pipeline owns it"), so this is the one projection, not a second. */
+    if (isStaff) {
+      const { data: doneJobs } = await supabase
+        .from("jobs")
+        .select("id, job_number, name, status, updated_at, customers(name)")
+        .eq("status", "complete")
+        .gte("updated_at", new Date(todayMs - 30 * 86_400_000).toISOString())
+        .order("updated_at", { ascending: false })
+        .limit(50);
+      for (const j of (doneJobs ?? []) as any[]) {
+        if (billedJobs.has(j.id)) continue; // any real (non-draft, non-void) invoice settles it
+        items.push({
+          id: `jdone-${j.id}`,
+          kind: "visit_unbilled",
+          title: `${jobLabel(j)} — done, no bill yet`,
+          subtitle: j.customers?.name ?? null,
+          who: null,
+          when: j.updated_at ?? null,
+          urgency: 1,
+          done: false,
+          href: `/jobs/${j.id}`, // Pay now lives on the job page
+          affordances: AFFORDANCES.visit_unbilled,
+        });
+      }
     }
   }
 
@@ -732,6 +779,7 @@ export async function getActionItems(ctx: {
         .from("appointments")
         .select("job_id")
         .in("job_id", jobIds)
+        .eq("absorbed", false) // parity with eod-sweep — the job's own segments carry an absorbed visit (0237)
         .eq("status", "scheduled")
         .gte("starts_at", todayStr)
         .limit(200),

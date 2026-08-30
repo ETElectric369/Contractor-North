@@ -145,7 +145,10 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   task: ["do", "schedule", "assign", "snooze", "dismiss", "open"],
   work_order: ["do", "schedule", "assign", "dismiss", "open"],
   job_to_schedule: ["schedule", "assign", "open"],
-  inquiry: ["do", "schedule", "convert", "snooze", "dismiss", "open"],
+  // NO convert verb: that sheet was the pre-0230 five-target grammar, and for a JOB-tagged lead
+  // it booked a job-TYPED APPOINTMENT (bypassing the designation-does-the-converting law, which
+  // only day-carrying doors reach). The lead row and the rail carry the real flow; open lands there.
+  inquiry: ["do", "schedule", "snooze", "dismiss", "open"],
   appointment: ["do", "dismiss", "open"],
   // The href opens the estimate builder prefilled with the walk-through — still the main road.
   // "dismiss" is now the OTHER honest ending (0205): most bids lose, and until this verb existed

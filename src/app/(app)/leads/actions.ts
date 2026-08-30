@@ -1,6 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
-import { placeJobOnDay } from "../schedule/actions";
+import { placeJobOnDay, planDayTimes } from "../schedule/actions";
 
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
@@ -22,7 +22,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
-import { INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
+import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, intakePaths, isOwnIntakePath } from "@/lib/playbook/uploads";
@@ -512,13 +512,16 @@ export async function convertInquiry(
       created_by: ctx.userId,
     });
     if (aErr) return { ok: false, error: aErr.message };
-    // Engaged, not closed: mark contacted and resurface the lead around the inspection date.
+    // Engaged, not closed: mark contacted and resurface the lead AFTER the visit — a follow-up
+    // stamped ON the visit date made the lead nag "Follow up" the very morning its own visit sat
+    // on the agenda (three rows for one piece of work). The day after is when "how did it go /
+    // write the estimate" is a real question — and the write-up feeder carries that too.
     await supabase
       .from("inquiries")
       .update({
         status: "contacted",
         last_contacted_at: new Date().toISOString(),
-        next_follow_up_at: startDate,
+        next_follow_up_at: ymdAddDays(startDate, 1),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id);
@@ -939,3 +942,91 @@ export async function setLeadContact(
   revalidatePath("/schedule");
   return { ok: true };
 }
+
+/**
+ * RIDE-ALONG SLOTS — the calendar fills itself in, grouped by day and town.
+ *
+ * Erik: "if certain days are already set for walk-through/inspections then the lead could be
+ * auto-prompted with the days set and time slots still available to choose from … potentially
+ * even grouped somewhat by region."
+ *
+ * "Let them pick" used to offer three blind next-weekdays at 9 AM — a fresh trip minted per lead,
+ * scattering walk-throughs across the week. These suggestions come FROM the calendar instead:
+ * days in the next two weeks that already hold an estimate visit, each offered at a time
+ * planDayTimes actually fits around what the day holds (jobs included), days in the lead's own
+ * town first. The customer still chooses; the office still edits; this only changes which three
+ * days get offered — clustering is the default instead of the exception.
+ *
+ * Pure suggestion, zero writes. Empty slots = no visit days on the books; callers fall back to
+ * the blind defaults rather than inventing clusters that don't exist.
+ */
+export async function suggestVisitSlots(
+  inquiryId: string,
+): Promise<{ ok: boolean; slots: { date: string; time: string }[]; note?: string; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, slots: [], error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: inq } = await supabase
+    .from("inquiries")
+    .select("id, city, planned_minutes")
+    .eq("id", inquiryId)
+    .maybeSingle();
+  if (!inq) return { ok: false, slots: [], error: "Lead not found." };
+  const leadTown = String((inq as { city?: string | null }).city ?? "").trim().toLowerCase();
+  const minutes = Number((inq as { planned_minutes?: number | null }).planned_minutes ?? 0) || 90;
+
+  // The window: tomorrow through two weeks out. Existing estimate visits mark the days that are
+  // already "walk-through days" — absorbed rows are jobs now and don't count as visit days.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const from = new Date(Date.now() + 12 * 3600_000).toISOString();
+  const to = new Date(Date.now() + 15 * 86_400_000).toISOString();
+  const { data: visits } = await supabase
+    .from("appointments")
+    .select("starts_at, city, type, status, absorbed")
+    .gte("starts_at", from)
+    .lt("starts_at", to)
+    .in("type", [...ESTIMATE_VISIT_TYPES])
+    .not("status", "in", "(cancelled,completed)")
+    .eq("absorbed", false)
+    .limit(200);
+
+  const todayYmd = todayStrInTz(tz);
+  const dayTowns = new Map<string, Set<string>>();
+  for (const v of (visits ?? []) as { starts_at: string | null; city: string | null }[]) {
+    if (!v.starts_at) continue;
+    const day = todayStrInTz(tz, new Date(v.starts_at));
+    if (day <= todayYmd) continue; // today is already in motion — offer tomorrow onward
+    if (!dayTowns.has(day)) dayTowns.set(day, new Set());
+    const town = String(v.city ?? "").trim().toLowerCase();
+    if (town) dayTowns.get(day)!.add(town);
+  }
+  if (!dayTowns.size) return { ok: true, slots: [] };
+
+  // Town-matched days first, then soonest — and each day's offered time is what actually FITS
+  // around everything the day already holds (planDayTimes sees jobs and visits alike).
+  const days = [...dayTowns.keys()].sort();
+  const ranked = [
+    ...days.filter((d) => leadTown && dayTowns.get(d)!.has(leadTown)),
+    ...days.filter((d) => !(leadTown && dayTowns.get(d)!.has(leadTown))),
+  ].slice(0, 5);
+
+  const slots: { date: string; time: string }[] = [];
+  for (const day of ranked) {
+    if (slots.length >= 3) break;
+    const plan = await planDayTimes(day, [{ minutes }], "");
+    if (plan.ok && plan.times[0]) slots.push({ date: day, time: plan.times[0] });
+  }
+  if (!slots.length) return { ok: true, slots: [] };
+
+  const matched = leadTown && ranked.some((d) => dayTowns.get(d)!.has(leadTown));
+  return {
+    ok: true,
+    slots,
+    note: matched
+      ? "These ride along with visits already booked near them."
+      : "These ride along with days that already have visits booked.",
+  };
+}
+

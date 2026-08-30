@@ -44,6 +44,14 @@ export function DatePicker({
       const { error: rpcErr } = await supabase.rpc("choose_schedule_slot", { p_token: token, p_index: i });
       if (rpcErr) throw rpcErr;
       setPickedLabel(label(slots[i]));
+      // Tell the boss (fire-and-forget): the RPC is pure SQL from THIS browser, so no server
+      // code saw the booking happen — this hop rings the office bell + push. Best-effort by
+      // design; the booking above already stands either way.
+      fetch("/api/pick/confirmed", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      }).catch(() => {});
     } catch (e: any) {
       setError(e?.message ?? "Something went wrong — try again.");
     } finally {

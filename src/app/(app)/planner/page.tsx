@@ -3,7 +3,7 @@ import { splitAgenda } from "@/lib/agenda-split";
 import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navigation } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navigation, MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -58,10 +58,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsRes,
   ] = await Promise.all([
-    supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
+    supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name, phone)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
-    supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name))").lte("start_date", todayStr).gte("end_date", todayStr),
-    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").eq("absorbed", false).order("starts_at"),
+    supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name, phone))").lte("start_date", todayStr).gte("end_date", todayStr),
+    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address), customers(phone), inquiries(phone)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").eq("absorbed", false).order("starts_at"),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
@@ -321,6 +321,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // move; jobs carry just what their move contract needs.
     appt?: ApptValue;
     jobId?: string;
+    /** The person waiting — powers the running-late one-tap text on the NEXT visit. */
+    phone?: string | null;
   };
   const agenda: Agenda[] = [
     ...todayJobs
@@ -335,6 +337,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         href: `/jobs/${j.id}`,
         status: j.status,
         jobId: j.id as string,
+        phone: j.customers?.phone ?? null,
       })),
     ...(appts ?? []).map((a: any) => ({
       key: `a-${a.id}`,
@@ -352,6 +355,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       // hub: capture, photos, the question sheet, navigate, start estimate.
       href: `/appointments/${a.id}`,
       apptType: a.type,
+      // A pre-sale visit's person lives on the LEAD; a sold one's on the customer card.
+      phone: a.customers?.phone ?? a.inquiries?.phone ?? null,
       appt: {
         id: a.id,
         type: a.type,
@@ -373,6 +378,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     next: nextAgenda,
     later: laterAgenda,
   } = splitAgenda(agenda, new Date());
+
+  /* RUNNING LATE? TEXT THEM — Andrew's co-pilot idea, the honest v1. When the NEXT visit is
+     inside twenty minutes (or already started) and the person waiting has a phone, the row grows
+     a one-tap prefilled text. No geolocation, no background tracking, nothing automatic — the
+     app can't know traffic, but it CAN make the two-second courtesy text a single tap at a red
+     light. "Communication is better than none." The ETA-aware version (am I far enough away to
+     BE late?) needs address geocoding + background location — native-shell territory. */
+  const lateNudge = (() => {
+    const nx = nextAgenda[0] as Agenda | undefined;
+    if (!nx?.phone || !nx.time) return null;
+    const mins = (new Date(nx.time).getTime() - Date.now()) / 60_000;
+    return mins < 20 ? nx.key : null;
+  })();
 
   // Week view (techs only — staff were redirected above): the agenda widened to a
   // week (Sun–Sat), grouped by day, paged via ?week=. Sunday-start is the DISPLAY
@@ -408,6 +426,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .gte("starts_at", weekStartUtc.toISOString())
         .lt("starts_at", weekEndUtc.toISOString())
         .neq("status", "cancelled")
+        .eq("absorbed", false) // 0237: a booking absorbed into its job must not draw beside it
         .order("starts_at"),
       // Multi-range jobs whose segment overlaps this week — so a Mon–Thu job shows on
       // every covered day (the day view does this too; without it the week view put
@@ -510,6 +529,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             row's text at 375px. Wrapping keeps every verb reachable and the words readable; below
             sm the Navigate label drops to the icon so the common case never wraps at all. */}
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+          {i.key === lateNudge && i.phone && (
+            <a
+              href={`sms:${i.phone}&body=${encodeURIComponent("On my way — running a few minutes behind. See you soon.")}`}
+              className={navBtnCls}
+              title="Running late? One tap sends them a heads-up"
+            >
+              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running late?</span>
+            </a>
+          )}
           {i.address && (
             <NavLink address={i.address} className={navBtnCls}>
               <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>

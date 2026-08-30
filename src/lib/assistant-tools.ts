@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -305,7 +306,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inquiries",
     description:
-      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, and when it was last contacted. Use for 'who are my open leads', 'any new leads', 'who needs a follow-up'. Pass the id to contact or convert a lead.",
+      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. Use for 'who are my open leads', 'any new leads', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to Truckee'. Pass the id to contact or convert a lead.",
     input_schema: {
       type: "object",
       properties: {
@@ -313,6 +314,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
       },
     },
+  },
+  {
+    name: "visit_days_ahead",
+    description:
+      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (inspections / quote visits), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the Truckee day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
+    input_schema: { type: "object", properties: {} },
   },
   {
     name: "list_payments",
@@ -1245,7 +1252,7 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 20);
         let q = supabase
           .from("inquiries")
-          .select("id, name, company_name, phone, status, last_contacted_at, created_at")
+          .select("id, name, company_name, phone, status, city, work_kind, planned_minutes, last_contacted_at, created_at")
           .order("created_at", { ascending: false })
           .limit(lim);
         const st = sanitize(input.status);
@@ -1260,8 +1267,42 @@ export async function runDataTool(
             company: i.company_name,
             phone: i.phone,
             status: i.status,
+            town: i.city,
+            work_kind: i.work_kind, // null = untagged — the flow's stage-0 blocker
+            planned_minutes: i.planned_minutes,
             last_contacted: i.last_contacted_at,
           })),
+        });
+      }
+
+      case "visit_days_ahead": {
+        // Same shape the ride-along slot suggester reads (suggestVisitSlots): estimate visits,
+        // absorbed excluded (0237 — those are jobs now), grouped by ORG-tz day.
+        const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+        const { data: rows } = await supabase
+          .from("appointments")
+          .select("starts_at, city, type, status, absorbed, title")
+          .gte("starts_at", new Date().toISOString())
+          .lt("starts_at", new Date(Date.now() + 15 * 86_400_000).toISOString())
+          .in("type", [...ESTIMATE_VISIT_TYPES])
+          .not("status", "in", "(cancelled,completed)")
+          .eq("absorbed", false)
+          .limit(200);
+        const byDay = new Map<string, { towns: Set<string>; count: number }>();
+        for (const r of (rows ?? []) as { starts_at: string | null; city: string | null }[]) {
+          if (!r.starts_at) continue;
+          const day = todayStrInTz(tz, new Date(r.starts_at));
+          const rec = byDay.get(day) ?? { towns: new Set<string>(), count: 0 };
+          rec.count += 1;
+          const town = String(r.city ?? "").trim();
+          if (town) rec.towns.add(town);
+          byDay.set(day, rec);
+        }
+        return JSON.stringify({
+          days: [...byDay.entries()]
+            .sort(([a], [z]) => a.localeCompare(z))
+            .map(([day, rec]) => ({ day, visits: rec.count, towns: [...rec.towns].sort() })),
         });
       }
 

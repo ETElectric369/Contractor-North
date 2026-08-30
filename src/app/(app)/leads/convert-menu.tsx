@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Check, Copy, FileText, MessageSquare } from "lucide-react";
@@ -9,7 +9,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
-import { convertInquiry } from "./actions";
+import { convertInquiry, suggestVisitSlots } from "./actions";
 import { workKind } from "@/lib/schedule/work-shape";
 
 /** A sensible default inspection date: 2 days out. */
@@ -72,6 +72,12 @@ export function ConvertMenu({
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState<null | "estimate" | "inspection" | "job" | "contact">(null);
   const [error, setError] = useState<string | null>(null);
+  /* RIDE-ALONG SLOTS. The modal opens INSTANTLY on the blind defaults (60mph law), then the
+     calendar's own suggestion lands async: days already holding walk-throughs, at times that fit
+     around them, the lead's town first. touchedRef is the not-annoying guard — the moment he
+     edits a date by hand, a late-arriving suggestion must NOT yank the form out from under him. */
+  const [slotNote, setSlotNote] = useState<string | null>(null);
+  const touchedRef = useRef(false);
 
   async function run(target: "estimate" | "inspection" | "job") {
     setBusy(target);
@@ -106,7 +112,19 @@ export function ConvertMenu({
     setLink(null);
     setError(null);
     setMode("book");
+    setSlotNote(null);
+    touchedRef.current = false;
     setInspectOpen(true);
+    suggestVisitSlots(inquiryId)
+      .then((r) => {
+        if (!r.ok || !r.slots.length || touchedRef.current) return;
+        // Clustered days first, blind defaults padding out to three options.
+        const pad = defaultSlots().filter((d) => !r.slots.some((x) => x.date === d.date));
+        setSlots([...r.slots, ...pad].slice(0, 3));
+        setInspectDate(r.slots[0].date);
+        setSlotNote(r.note ?? null);
+      })
+      .catch(() => { /* suggestion only — the defaults already stand */ });
   }
 
   function closeInspect() {
@@ -248,24 +266,26 @@ export function ConvertMenu({
             {mode === "book" ? (
               <div>
                 <Label htmlFor="inspect-date">{isWork ? "Start date" : "Inspection date"}</Label>
-                <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => setInspectDate(e.target.value)} />
+                <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => { touchedRef.current = true; setSlotNote(null); setInspectDate(e.target.value); }} />
+                {slotNote && <p className="mt-1 text-xs text-brand">{slotNote}</p>}
                 <p className="mt-1 text-xs text-slate-400">Defaults to 9:00 AM — fine-tune the time on the Schedule.</p>
               </div>
             ) : (
               <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-light/20 p-3">
                 <Label>Offer up to 3 times — they tap one and it books itself</Label>
+                {slotNote && <p className="text-xs text-brand">{slotNote}</p>}
                 {slots.map((sl, i) => (
                   <div key={i} className="grid grid-cols-2 gap-2">
                     <Input
                       type="date"
                       value={sl.date}
-                      onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x)))}
+                      onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, date: ev.target.value } : x))); }}
                       aria-label={`Option ${i + 1} date`}
                     />
                     <Input
                       type="time"
                       value={sl.time}
-                      onChange={(ev) => setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x)))}
+                      onChange={(ev) => { touchedRef.current = true; setSlots((a) => a.map((x, xi) => (xi === i ? { ...x, time: ev.target.value } : x))); }}
                       aria-label={`Option ${i + 1} time`}
                     />
                   </div>

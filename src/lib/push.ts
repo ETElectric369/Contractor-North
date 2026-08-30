@@ -46,7 +46,8 @@ export type PushKind =
   | "invoice_paid"
   | "day_ahead"
   | "clock_out"
-  | "daily_report";
+  | "daily_report"
+  | "booked"; // a customer picked a time on their /pick link — the work self-scheduled
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -61,6 +62,8 @@ const DEFAULTS: Record<PushKind, boolean> = {
   clock_out: true,
   // A crew lead's end-of-day debrief was filed — staff-facing, like quote_accepted.
   daily_report: true,
+  // Work booking ITSELF is exactly the moment the boss asked to hear about.
+  booked: true,
 };
 
 /**
