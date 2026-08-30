@@ -85,6 +85,7 @@ export default async function PublicInvoicePage({
       )}
 
       <InvoiceDocument
+        docStyle={(data.org as { doc_style?: unknown } | null)?.doc_style}
         site={pickSite([
           ...((data as { site_candidates?: never[] }).site_candidates ?? []),
           { source: "customer", parts: (data as { customer?: never }).customer },

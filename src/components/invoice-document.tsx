@@ -1,6 +1,7 @@
 import { formatCurrency, formatDate } from "@/lib/utils";
 import type { ResolvedSite } from "@/lib/site-address";
 import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
+import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
@@ -44,6 +45,7 @@ export function InvoiceDocument({
   terms,
   documentFooter,
   progress,
+  docStyle,
 }: {
   co: any;
   template: any;
@@ -67,14 +69,20 @@ export function InvoiceDocument({
   terms?: string | null;
   documentFooter?: string | null;
   progress?: { estimate: number; workToDate: number; received: number; thisAmount: number; billingType: any } | null;
+  /** Org doc_style, raw — normalized HERE (sanitize on read; public RPC hands it over untyped). */
+  docStyle?: unknown;
 }) {
   const c = customer;
   const balance = invoiceBalance(total, amountPaid); // floored at 0 — never a negative "Please remit"
+  const ds = normalizeDocStyle(docStyle);
+  const coSized = { ...co, logoSize: ds.logo_size };
+  const rowPad = DENSITY_ROW[ds.density];
+  const gap = { paddingLeft: ds.col_gap };
 
   return (
-    <div className="print-page mx-auto bg-white shadow-sm">
+    <div className="print-page mx-auto bg-white shadow-sm" style={sheetStyleVars(ds) as React.CSSProperties}>
       <DocHeader
-        co={co}
+        co={coSized}
         template={template}
         meta={{
           docType: "Invoice",
@@ -128,20 +136,20 @@ export function InvoiceDocument({
                   every remaining inch — long material names wrapping is what makes "the pages go
                   on and on". Fixed widths over-spread on wide paper; content width + a constant
                   gap holds its shape at every size. */}
-              <th className="w-px whitespace-nowrap py-2 pl-5 text-right font-semibold">Qty</th>
-              <th className="w-px whitespace-nowrap py-2 pl-5 text-right font-semibold">Price</th>
-              <th className="w-px whitespace-nowrap py-2 pl-5 text-right font-semibold">Amount</th>
+              <th className="w-px whitespace-nowrap py-2 text-right font-semibold" style={gap}>Qty</th>
+              <th className="w-px whitespace-nowrap py-2 text-right font-semibold" style={gap}>Price</th>
+              <th className="w-px whitespace-nowrap py-2 text-right font-semibold" style={gap}>Amount</th>
             </tr>
           </thead>
           <tbody>
             {items.map((it, i) => (
               <tr key={it.id ?? i} className="border-b border-slate-100">
-                <td className="py-2 pr-2 text-slate-800">
+                <td className={`${rowPad} pr-2 text-slate-800`}>
                   <LineItemText description={it.description ?? ""} />
                 </td>
-                <td className="whitespace-nowrap py-2 pl-5 text-right text-slate-600">{it.quantity} {it.unit}</td>
-                <td className="whitespace-nowrap py-2 pl-5 text-right text-slate-600">{formatCurrency(it.unit_price)}</td>
-                <td className="whitespace-nowrap py-2 pl-5 text-right font-medium text-slate-900">{formatCurrency(it.line_total)}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{it.quantity} {it.unit}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{formatCurrency(it.unit_price)}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right font-medium text-slate-900`} style={gap}>{formatCurrency(it.line_total)}</td>
               </tr>
             ))}
           </tbody>
@@ -151,9 +159,11 @@ export function InvoiceDocument({
       {/* Labor / Materials breakdown + totals paginate as ONE unit (totals-group): if a
           page break would land between them, both jump to the next page together. */}
       <div className="totals-group">
-        <div className="mt-4 flex justify-end">
-          <CostBreakdown items={items} className="w-64" />
-        </div>
+        {ds.show_breakdown && (
+          <div className="mt-4 flex justify-end">
+            <CostBreakdown items={items} className="w-64" />
+          </div>
+        )}
 
         {/* Totals — invoice passes balance, so Paid + Balance-due render and Balance is the bold line. */}
         <DocTotals subtotal={subtotal} taxRate={taxRate} tax={tax} total={total} amountPaid={amountPaid} balance={balance} />
@@ -192,9 +202,11 @@ export function InvoiceDocument({
       {terms && <DocNote label="Terms" text={terms} />}
 
       <div className="mt-10 text-center text-xs text-slate-400">
-        {balance > 0
-          ? `Please remit ${formatCurrency(balance)}. Thank you for your business.`
-          : "Paid in full — thank you for your business."}
+        {ds.closing_invoice.trim()
+          ? ds.closing_invoice
+          : balance > 0
+            ? `Please remit ${formatCurrency(balance)}. Thank you for your business.`
+            : "Paid in full — thank you for your business."}
       </div>
       {documentFooter && (
         <div className="mt-3 whitespace-pre-wrap text-center text-xs text-slate-400">{documentFooter}</div>

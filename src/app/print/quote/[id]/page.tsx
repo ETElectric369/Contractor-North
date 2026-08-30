@@ -90,6 +90,7 @@ export default async function QuotePrintPage({
         notes={q.notes}
         terms={settings.quote_terms}
         documentFooter={settings.document_footer}
+        docStyle={settings.doc_style}
       />
     </div>
   );

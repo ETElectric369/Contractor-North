@@ -1,6 +1,15 @@
 import type { ReactNode } from "react";
 import type { ResolvedSite } from "@/lib/site-address";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import type { CSSProperties } from "react";
+import { normalizeDocStyle, sheetStyleVars, type DocStyle } from "@/lib/doc-style";
+
+// The quote table's rhythm is a step tighter than the invoice's at every density.
+const QUOTE_DENSITY_ROW: Record<DocStyle["density"], string> = {
+  compact: "py-0.5",
+  default: "py-1",
+  airy: "py-2",
+};
 import { DocHeader, DocParty, DocSite, DocTotals, DocNote, DocDescription, type DocPartyCustomer } from "@/components/doc-templates";
 import { lineItemParts } from "@/components/line-item-text";
 import type { QuoteCircuit } from "@/lib/types";
@@ -51,6 +60,7 @@ export function QuoteDocument({
   circuits,
   acceptSlot,
   showContact = false,
+  docStyle,
 }: {
   co: any;
   template: any;
@@ -78,15 +88,21 @@ export function QuoteDocument({
   acceptSlot?: ReactNode;
   /** Show the closing "Questions? Contact …" row — public surface only. */
   showContact?: boolean;
+  /** Org doc_style, raw — normalized HERE (sanitize on read; public RPC hands it over untyped). */
+  docStyle?: unknown;
 }) {
+  const ds = normalizeDocStyle(docStyle);
+  const coSized = { ...co, logoSize: ds.logo_size };
+  const rowPad = QUOTE_DENSITY_ROW[ds.density];
+  const gap = { paddingLeft: ds.col_gap };
   const c = customer;
   const circuitRows = (circuits ?? []).filter((r) => r && (r.description?.trim() || r.ckt || r.breaker || r.wire));
 
   return (
     <>
-    <div className="print-page mx-auto bg-white shadow-sm">
+    <div className="print-page mx-auto bg-white shadow-sm" style={sheetStyleVars(ds) as CSSProperties}>
       <DocHeader
-        co={co}
+        co={coSized}
         template={template}
         meta={{
           docType: docLabel,
@@ -132,10 +148,12 @@ export function QuoteDocument({
         <thead>
           <tr className="border-b border-slate-300 text-left text-[11px] uppercase tracking-wide text-slate-500">
             <th className="py-1.5 font-semibold">Description</th>
-            <th className="w-12 py-1.5 text-right font-semibold">Qty</th>
-            <th className="w-12 py-1.5 text-right font-semibold">Unit</th>
-            <th className="w-20 py-1.5 text-right font-semibold">Price</th>
-            <th className="w-24 py-1.5 text-right font-semibold">Amount</th>
+            {/* SAME column rule as the invoice (one scheme, one knob): numeric columns take
+                exactly their content + the org's gap; the description gets the rest. */}
+            <th className="w-px whitespace-nowrap py-1.5 text-right font-semibold" style={gap}>Qty</th>
+            <th className="w-px whitespace-nowrap py-1.5 text-right font-semibold" style={gap}>Unit</th>
+            <th className="w-px whitespace-nowrap py-1.5 text-right font-semibold" style={gap}>Price</th>
+            <th className="w-px whitespace-nowrap py-1.5 text-right font-semibold" style={gap}>Amount</th>
           </tr>
         </thead>
         <tbody>
@@ -149,7 +167,7 @@ export function QuoteDocument({
             const subs = head ? parts.slice(1) : parts.length > 1 ? parts : [];
             return (
               <tr key={it.id ?? i} className="border-b border-slate-100 align-top [break-inside:avoid]">
-                <td className="py-1 pr-2 text-slate-800">
+                <td className={`${rowPad} pr-2 text-slate-800`}>
                   {head && <div>{head}</div>}
                   {subs.length > 0 && (
                     <ul className="ml-3 mt-0.5 list-disc text-[11px] text-slate-500 marker:text-slate-300">
@@ -159,10 +177,10 @@ export function QuoteDocument({
                     </ul>
                   )}
                 </td>
-                <td className="py-1 text-right text-slate-600">{it.quantity}</td>
-                <td className="py-1 text-right text-slate-500">{it.unit}</td>
-                <td className="py-1 text-right text-slate-600">{formatCurrency(it.unit_price)}</td>
-                <td className="py-1 text-right font-medium text-slate-900">{formatCurrency(it.line_total)}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{it.quantity}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-500`} style={gap}>{it.unit}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{formatCurrency(it.unit_price)}</td>
+                <td className={`whitespace-nowrap ${rowPad} text-right font-medium text-slate-900`} style={gap}>{formatCurrency(it.line_total)}</td>
               </tr>
             );
           })}
@@ -185,7 +203,7 @@ export function QuoteDocument({
       )}
 
       <div className="mt-6 whitespace-pre-wrap text-center text-xs text-slate-400">
-        {documentFooter || "Thank you for the opportunity to earn your business."}
+        {ds.closing_quote.trim() || documentFooter || "Thank you for the opportunity to earn your business."}
       </div>
     </div>
 

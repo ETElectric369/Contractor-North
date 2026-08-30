@@ -90,6 +90,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         notes={inv.notes}
         terms={settings.invoice_terms}
         documentFooter={settings.document_footer}
+        docStyle={settings.doc_style}
         progress={
           fin
             ? {

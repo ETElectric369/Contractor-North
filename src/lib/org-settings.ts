@@ -19,6 +19,10 @@ export interface OrgSettings {
   invoice_terms: string;
   contract_terms: string;
   document_footer: string;
+  /** Document LAYOUT knobs (column gap, density, logo size, margins, closing lines) — a nested
+   *  object so ONE whitelisted key can ride the public_* RPCs (never to_jsonb). Raw here; every
+   *  renderer normalizes via lib/doc-style (sanitize on read). */
+  doc_style: Record<string, unknown>;
   deposit_percent: number;
   /** Per-org document number PREFIX, keyed by the trigger's doc_type ("job","quote",
    *  "invoice","wo","co","po","contract"). The counter/next-number lives server-side in
@@ -281,6 +285,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   contract_terms:
     "1. Payment is due per the schedule above. 2. Any change to the scope of work will be handled by a written change order. 3. Contractor warrants workmanship for one (1) year from completion. 4. Either party may cancel in writing before work begins; deposits cover materials and scheduling already committed. 5. This agreement is governed by the laws of the state where the work is performed.",
   document_footer: "",
+  doc_style: {},
   deposit_percent: 0,
   doc_prefixes: { job: "J-", quote: "Q-", invoice: "INV-", wo: "WO-", co: "CO-", po: "PO-", contract: "C-" },
   default_labor_rate: 0,

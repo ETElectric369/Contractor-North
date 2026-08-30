@@ -62,6 +62,7 @@ export default async function PublicQuotePage({
           precedence in SQL, so there is exactly one implementation of "which address wins" and
           these two surfaces — which render the identical QuoteDocument — cannot drift. */}
       <QuoteDocument
+        docStyle={(data.org as { doc_style?: unknown } | null)?.doc_style}
         co={co}
         site={pickSite([
           ...(data.site_candidates ?? []),

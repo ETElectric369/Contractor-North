@@ -36,6 +36,7 @@ import { LanguageToggle } from "./language-toggle";
 import { MapsProviderToggle } from "./maps-provider-toggle";
 import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
+import { DocumentLayoutSettings } from "./document-layout";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
@@ -470,6 +471,11 @@ export default async function SettingsPage({
                   fallback={(org as Organization).doc_template || "classic"}
                   brand={accentHex(settings.glass_tint)}
                 />
+              </Section>
+              {/* The dial-it-in knobs — column gap, density, logo size, margins, closing lines.
+                  Born of three column-spacing rounds done by code change (cn-v888..v890). */}
+              <Section title="Document layout">
+                <DocumentLayoutSettings initial={settings.doc_style} />
               </Section>
             </div>
           ),

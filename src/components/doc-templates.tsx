@@ -1,4 +1,5 @@
 import { Zap } from "lucide-react";
+import { LOGO_SIZE } from "@/lib/doc-style";
 import { addressHasCityStateZipTail, siteLines, type ResolvedSite } from "@/lib/site-address";
 import { unitLine } from "@/lib/utils";
 import type { CompanyInfo } from "./doc-letterhead";
@@ -46,7 +47,8 @@ function Mark({ co, onColor = false }: { co: CompanyInfo; onColor?: boolean }) {
       <img
         src={co.logo}
         alt={co.name}
-        className={`h-12 w-auto max-w-[180px] object-contain ${
+        // Size is an org knob (doc_style.logo_size) riding co.logoSize; "m" = the original look.
+        className={`${LOGO_SIZE[(co as { logoSize?: "s" | "m" | "l" }).logoSize ?? "m"]} w-auto object-contain ${
           onColor ? "rounded bg-white p-1" : ""
         }`}
       />

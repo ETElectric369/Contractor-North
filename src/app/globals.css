@@ -271,7 +271,9 @@ body.modal-open .app-bottom-nav {
   width: 8.5in;
   max-width: 100%;
   min-height: 11in;
-  padding: 0.6in 0.75in;
+  /* Margins are org-tunable (Settings → Estimates & invoices → Document layout): the sheet
+     sets --doc-my/--doc-mx via lib/doc-style; the fallbacks ARE the pre-knob values. */
+  padding: var(--doc-my, 0.6in) var(--doc-mx, 0.75in);
 }
 
 
@@ -299,7 +301,7 @@ body.modal-open .app-bottom-nav {
        a clean border without the browser stamping a URL/date/page-number header+footer.
        (In Safari the "Print headers & footers" checkbox can still override this — uncheck
        it there.) SAME inches as the on-screen sheet — the preview IS the printed page. */
-    padding: 0.6in 0.75in !important;
+    padding: var(--doc-my, 0.6in) var(--doc-mx, 0.75in) !important;
   }
   @page {
     margin: 0;
