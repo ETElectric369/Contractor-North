@@ -5,7 +5,7 @@ import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPage } from "@/lib/public-pages";
 import { BlockRenderer } from "./block-renderer";
-import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
+import { getSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
 import { defaultSocialImage, orgIcons } from "./site-base";
 import { socialImage } from "@/lib/site-image";
 
@@ -49,8 +49,8 @@ function firstImageInBlocks(blocks: PublicPage["blocks"]): string | null {
   return null;
 }
 
-export function CustomPageView({ org, page, base, nav }: { org: PublicOrg; page: PublicPage; base: string; nav: SiteNav }) {
-  const chrome = deriveSiteChrome(org, { base, onHomepage: false });
+export async function CustomPageView({ org, page, base, nav }: { org: PublicOrg; page: PublicPage; base: string; nav: SiteNav }) {
+  const chrome = await getSiteChrome(org, { base, onHomepage: false });
   const baseUrl = orgPublicBaseUrl(org.settings);
   // Breadcrumb trail (Home → this page) — SERP breadcrumbs + structure signal.
   const breadcrumbs = {

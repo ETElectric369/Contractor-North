@@ -7,7 +7,7 @@ import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { PublicOrg } from "@/lib/public-org";
 import type { PublicPost } from "@/lib/public-posts";
-import { deriveSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
+import { getSiteChrome, SiteHeader, SiteFooter, type SiteNav } from "./site-chrome";
 import { defaultSocialImage, orgIcons } from "./site-base";
 import { imageSrcSet, sizedImage, socialImage } from "@/lib/site-image";
 
@@ -68,8 +68,8 @@ export function articleMetadata(org: PublicOrg, post: PublicPost): Metadata {
   };
 }
 
-export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: PublicPost[]; base: string; nav: SiteNav }) {
-  const chrome = deriveSiteChrome(org, { base, onHomepage: false });
+export async function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: PublicPost[]; base: string; nav: SiteNav }) {
+  const chrome = await getSiteChrome(org, { base, onHomepage: false });
   const brand = chrome.brand;
   return (
     <div className="site-shell min-h-screen bg-slate-50 text-slate-900">
@@ -124,8 +124,8 @@ export function BlogIndex({ org, posts, base, nav }: { org: PublicOrg; posts: Pu
   );
 }
 
-export function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: PublicPost; base: string; nav: SiteNav }) {
-  const chrome = deriveSiteChrome(org, { base, onHomepage: false });
+export async function ArticlePage({ org, post, base, nav }: { org: PublicOrg; post: PublicPost; base: string; nav: SiteNav }) {
+  const chrome = await getSiteChrome(org, { base, onHomepage: false });
   const brand = chrome.brand;
   const pageUrl = `${orgPublicBaseUrl(org.settings)}/${post.path}`;
   const jsonLd = {

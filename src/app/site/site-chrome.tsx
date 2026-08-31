@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Phone, Mail, MapPin, ArrowRight, Instagram, Star, Menu, ChevronDown } from "lucide-react";
 import { siteAccentHex } from "@/lib/org-settings";
-import type { PublicOrg } from "@/lib/public-org";
+import { orgHasPublicIntake, type PublicOrg } from "@/lib/public-org";
 import { navPageLinks, pageSlugFromHref, sectionAnchor, type SiteNavLink } from "@/lib/site-nav";
 import { renderReadyBlocks, getNavPages } from "@/lib/public-pages";
 import { getPublicPosts } from "@/lib/public-posts";
@@ -46,7 +46,13 @@ export async function getSiteNav(orgId: string, base: string): Promise<SiteNav> 
 
 export type SiteChrome = ReturnType<typeof deriveSiteChrome>;
 
-export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false }: { base?: string; onHomepage?: boolean }) {
+/** THE entry for routes: derives the chrome with the intake door's LIVE state folded in, so a
+ *  page can't forget the lookup. deriveSiteChrome below stays pure (and unit-testable). */
+export async function getSiteChrome(org: PublicOrg, opts: { base?: string; onHomepage?: boolean }): Promise<SiteChrome> {
+  return deriveSiteChrome(org, { ...opts, intakeOn: await orgHasPublicIntake(org.id) });
+}
+
+export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false, intakeOn = false }: { base?: string; onHomepage?: boolean; intakeOn?: boolean }) {
   const s = org.settings;
   // The studio's accent wins when set (validated hex); otherwise the pre-studio derivation.
   const brand = siteAccentHex(s);
@@ -77,12 +83,20 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
   const showWorkLink = portfolio.length > 0 && (!hasBlocks || blockSections.has("portfolio"));
   const showServicesLink = services.length > 0 && (!hasBlocks || blockSections.has("services"));
   const showReviewsLink = reviews.length > 0 && (!hasBlocks || blockSections.has("reviews"));
-  // Primary CTA: orgs that price from a catalog get the instant configurator; everyone else routes
-  // to the homepage contact form (or the footer when a block homepage carries no contact-form
-  // section — never a dead anchor). Off the homepage, the anchors travel home via anchorBase.
+  // Primary CTA, three tiers: orgs that price from a catalog get the instant configurator; orgs
+  // with the public intake door switched ON get the estimator (/intake/<handle> — the full
+  // request-an-estimate form, which until now only external websites ever linked to); everyone
+  // else routes to the homepage contact form (or the footer when a block homepage carries no
+  // contact-form section — never a dead anchor). Off the homepage, anchors travel via anchorBase.
   const hasConfigurator = s.estimating_mode === "catalog" && !!s.public_handle;
+  const hasIntake = !hasConfigurator && intakeOn && !!s.public_handle;
+  const hasEstimateDoor = hasConfigurator || hasIntake;
   const contactAnchor: `#${string}` = !hasBlocks || blockSections.has("contact") ? "#contact-form" : "#contact";
-  const estimateHref = hasConfigurator ? `/estimate/${s.public_handle}` : sectionAnchor(anchorBase, contactAnchor);
+  const estimateHref = hasConfigurator
+    ? `/estimate/${s.public_handle}`
+    : hasIntake
+      ? `/intake/${s.public_handle}`
+      : sectionAnchor(anchorBase, contactAnchor);
   // The owner's own wording wins everywhere the estimate CTA renders (the studio's lever);
   // empty keeps the built-in pair. shortCta is the compact header/footer variant.
   // typeof-guarded: settings jsonb is spread-merged raw, so a stored non-string here would
@@ -95,7 +109,7 @@ export function deriveSiteChrome(org: PublicOrg, { base = "", onHomepage = false
     portfolio, services, creds, reviews, area, ig, gbpUrl, reviewUrl,
     homeBlocks, hasBlocks, blockSections,
     showWorkLink, showServicesLink, showReviewsLink,
-    hasConfigurator, estimateHref, ctaLabel,
+    hasConfigurator, hasIntake, hasEstimateDoor, estimateHref, ctaLabel,
   };
 }
 

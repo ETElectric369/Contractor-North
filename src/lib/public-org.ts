@@ -52,6 +52,17 @@ export const getPublicOrgByHandle = cache(async (handle: string): Promise<Public
   return toPublicOrg(data);
 });
 
+/** Is the org's public intake door (/intake/<handle>) switched ON? The switch is the forms
+ *  table's is_public_intake flag (one per org, 0185), not a settings key — so the site chrome
+ *  reads it LIVE: flip the door off in Settings and every estimate CTA on the hosted site falls
+ *  back to the contact form on the next render, never a 404 (no dead ends). cache()d, so the
+ *  header + footer + bands of one request share a single query. */
+export const orgHasPublicIntake = cache(async (orgId: string): Promise<boolean> => {
+  const supabase = createServiceClient();
+  const { data } = await supabase.from("forms").select("id").eq("org_id", orgId).eq("is_public_intake", true).limit(1).maybeSingle();
+  return !!data;
+});
+
 /** Resolve an org by a custom domain it has pointed at us (settings.custom_domain). Host is
  *  normalized (lowercased, port + a leading www. stripped) so www.example.com and example.com
  *  both match a stored "example.com". Used by the by-domain public route. */

@@ -12,7 +12,7 @@ import { orgIcons } from "./site-base";
 import { jsonLdSafe } from "@/lib/jsonld";
 import type { Block } from "@/lib/site-blocks";
 import { BlockRenderer } from "./block-renderer";
-import { deriveSiteChrome, seaGlassVars, SiteHeader, SiteFooter } from "./site-chrome";
+import { getSiteChrome, seaGlassVars, SiteHeader, SiteFooter } from "./site-chrome";
 import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
@@ -309,13 +309,13 @@ function Hero({
   );
 }
 
-export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[]; appHost?: boolean }) {
+export async function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: { org: PublicOrg; articlesHref?: string | null; pageLinks?: { href: string; label: string }[]; appHost?: boolean }) {
   const s = org.settings;
   const handle = s.public_handle;
   // ONE derivation of the shared header/footer inputs (brand, nav visibility, estimate CTA) —
   // the same call builder pages and articles make, so the chrome can't drift per-surface.
-  const chrome = deriveSiteChrome(org, { onHomepage: true });
-  const { brand, showName, portfolio, services, creds, reviews, area, gbpUrl, reviewUrl, ig, homeBlocks, hasBlocks, showWorkLink, hasConfigurator, estimateHref, ctaLabel } = chrome;
+  const chrome = await getSiteChrome(org, { onHomepage: true });
+  const { brand, showName, portfolio, services, creds, reviews, area, gbpUrl, reviewUrl, ig, homeBlocks, hasBlocks, showWorkLink, hasConfigurator, hasIntake, hasEstimateDoor, estimateHref, ctaLabel } = chrome;
   const hero = s.splash_bg_url || portfolio[0]?.url || "";
   // The banner (hero + trust band) always tops the page — template AND block homepages. Natural
   // opt-out: no hero image (none set, no portfolio fallback) and no headline → no banner at all.
@@ -449,7 +449,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
             <div className="mx-auto grid max-w-6xl grid-cols-2 gap-6 px-4 py-8 sm:grid-cols-4">
               {[
                 { icon: ShieldCheck, label: org.license || "Licensed & insured" },
-                { icon: Zap, label: hasConfigurator ? "Instant online estimates" : "Free estimates" },
+                { icon: Zap, label: hasConfigurator ? "Instant online estimates" : hasIntake ? "Free online estimates" : "Free estimates" },
                 { icon: MapPin, label: area || "Serving your area" },
                 { icon: Clock, label: "Free consultation" },
               ].map((f, i) => {
@@ -482,6 +482,7 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
           estimateHref={estimateHref}
           ctaLabel={ctaLabel}
           hasConfigurator={hasConfigurator}
+          hasIntake={hasIntake}
           gbpUrl={gbpUrl}
           portfolioPageHref={portfolioPageHref}
           contactPageHref={contactPageHref}
@@ -500,8 +501,8 @@ export function OrgSite({ org, articlesHref, pageLinks = [], appHost = false }: 
 
           <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />
           <ReviewsBand reviews={reviews} brand={brand} gbpUrl={reviewUrl} appHostExt={appHost} />
-          <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
-          <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />
+          <EstimateBand hasConfigurator={hasConfigurator} hasIntake={hasIntake} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />
+          <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasEstimateDoor} pageHref={contactPageHref} />
         </>
       )}
 
@@ -565,13 +566,17 @@ function ReviewsBand({ reviews, brand, gbpUrl, appHostExt = false }: { reviews: 
   );
 }
 
-function EstimateBand({ hasConfigurator, estimateHref, ctaLabel, brand }: { hasConfigurator: boolean; estimateHref: string; ctaLabel: string; brand: string }) {
+function EstimateBand({ hasConfigurator, hasIntake, estimateHref, ctaLabel, brand }: { hasConfigurator: boolean; hasIntake: boolean; estimateHref: string; ctaLabel: string; brand: string }) {
   return (
     <section className="px-4 py-20" style={{ background: `linear-gradient(160deg, ${brand}12, transparent 70%)` }}>
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl">{hasConfigurator ? "Know your number in two minutes" : "Ready to get started?"}</h2>
         <p className="mx-auto mt-3 max-w-xl text-lg text-slate-600">
-          {hasConfigurator ? "Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback." : "Tell us about your project and we'll get right back to you with a free estimate."}
+          {hasConfigurator
+            ? "Answer a few quick questions and get a real ballpark instantly — no waiting days for a callback."
+            : hasIntake
+              ? "Tell us about your project — a few questions, a couple of minutes, photos and plans welcome — and we'll get back to you with a free estimate."
+              : "Tell us about your project and we'll get right back to you with a free estimate."}
         </p>
         <Link href={estimateHref} className="mt-8 inline-flex items-center gap-2 rounded-lg px-7 py-4 text-base font-semibold text-white shadow-lg" style={{ backgroundColor: brand }}>
           {ctaLabel} <ArrowRight className="h-5 w-5" />
@@ -581,10 +586,12 @@ function EstimateBand({ hasConfigurator, estimateHref, ctaLabel, brand }: { hasC
   );
 }
 
-function ContactBand({ orgId, brand, hasConfigurator, pageHref }: { orgId: string; brand: string; hasConfigurator: boolean; pageHref?: string | null }) {
+function ContactBand({ orgId, brand, hasEstimateDoor, pageHref }: { orgId: string; brand: string; hasEstimateDoor: boolean; pageHref?: string | null }) {
   return (
     <section id="contact-form" className="border-t border-slate-100 bg-slate-50 px-4 py-16">
-      <ContactForm orgId={orgId} brand={brand} heading={hasConfigurator ? "Prefer to just message us?" : "Request a free estimate"} />
+      {/* When a real estimate door exists (configurator OR intake), this band steps back into the
+          "quick message" role so the page doesn't claim two estimate paths. */}
+      <ContactForm orgId={orgId} brand={brand} heading={hasEstimateDoor ? "Prefer to just message us?" : "Request a free estimate"} />
       {/* Teaser to the full builder "contact" page, when the org has published one. */}
       {pageHref && (
         <p className="mt-6 text-center">
@@ -623,7 +630,7 @@ function ServicesBand({ services, brand }: { services: string[]; brand: string }
 }
 
 function HomeBlockRenderer({
-  blocks, org, brand, portfolio, reviews, services, estimateHref, ctaLabel, hasConfigurator, gbpUrl, portfolioPageHref, contactPageHref,
+  blocks, org, brand, portfolio, reviews, services, estimateHref, ctaLabel, hasConfigurator, hasIntake, gbpUrl, portfolioPageHref, contactPageHref,
 }: {
   blocks: Block[];
   org: PublicOrg;
@@ -634,6 +641,7 @@ function HomeBlockRenderer({
   estimateHref: string;
   ctaLabel: string;
   hasConfigurator: boolean;
+  hasIntake: boolean;
   gbpUrl?: string;
   portfolioPageHref?: string | null;
   contactPageHref?: string | null;
@@ -665,8 +673,8 @@ function HomeBlockRenderer({
       const pad = b.style?.pad;
       if (b.props.key === "portfolio") out.push(padWrap(k, pad, <PortfolioBand portfolio={portfolio} brand={brand} orgName={org.name} moreHref={portfolioPageHref} />));
       else if (b.props.key === "reviews") out.push(padWrap(k, pad, <ReviewsBand reviews={reviews} brand={brand} gbpUrl={gbpUrl} />));
-      else if (b.props.key === "contact") out.push(padWrap(k, pad, <ContactBand orgId={org.id} brand={brand} hasConfigurator={hasConfigurator} pageHref={contactPageHref} />));
-      else if (b.props.key === "estimate") out.push(padWrap(k, pad, <EstimateBand hasConfigurator={hasConfigurator} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />));
+      else if (b.props.key === "contact") out.push(padWrap(k, pad, <ContactBand orgId={org.id} brand={brand} hasEstimateDoor={hasConfigurator || hasIntake} pageHref={contactPageHref} />));
+      else if (b.props.key === "estimate") out.push(padWrap(k, pad, <EstimateBand hasConfigurator={hasConfigurator} hasIntake={hasIntake} estimateHref={estimateHref} ctaLabel={ctaLabel} brand={brand} />));
       else if (b.props.key === "services") out.push(padWrap(k, pad, <ServicesBand services={services} brand={brand} />));
       else if (b.props.key === "specialty")
         out.push(

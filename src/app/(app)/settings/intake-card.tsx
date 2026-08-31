@@ -44,7 +44,8 @@ export function IntakeCard({
         A public &ldquo;request an estimate&rdquo; page — put the link on your website or a QR code.
         Customers answer a few questions you control and land on your Leads board with everything
         they said. The questions live in the <strong className="font-medium">Customer intake</strong>{" "}
-        form under Playbook once it&rsquo;s on.
+        form under Playbook once it&rsquo;s on. While it&rsquo;s on, the estimate buttons on your
+        hosted website send people here too; switch it off and they fall back to the contact form.
       </p>
       {on && url ? (
         <div className="space-y-2">
@@ -83,7 +84,8 @@ export function IntakeCard({
           </div>
           <p className="text-xs text-slate-500">
             The first is a plain link for a button or QR. The second embeds the form inside a page
-            on your own site — in Wix: Add &rarr; Embed &rarr; Embed a site, paste the code.
+            on your own site — in Wix: Add &rarr; Embed &rarr; Embed a site; in Squarespace: edit a
+            page &rarr; Add Block &rarr; Code — then paste the code.
           </p>
         </div>
       ) : null}
