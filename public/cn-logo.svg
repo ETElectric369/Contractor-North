@@ -1,5 +1,144 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Contractor North mark: clean white N on a dark circle -->
-  <circle cx="32" cy="32" r="30" fill="#171c26"/>
-  <path d="M22 45 V19 L42 45 V19" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="52 6 896 1012" width="896" height="1012">
+<defs>
+<radialGradient id="bgDark" cx="0.5" cy="0.44" r="0.85">
+  <stop offset="0" stop-color="#141B1F"/>
+  <stop offset="1" stop-color="#06080A"/>
+</radialGradient>
+<radialGradient id="halo" gradientUnits="userSpaceOnUse" cx="470" cy="510" r="540">
+  <stop offset="0" stop-color="#2E4049" stop-opacity="0.55"/>
+  <stop offset="0.7" stop-color="#1C282E" stop-opacity="0.22"/>
+  <stop offset="1" stop-color="#1C282E" stop-opacity="0"/>
+</radialGradient>
+<radialGradient id="dome" gradientUnits="userSpaceOnUse" cx="390" cy="410" r="700">
+  <stop offset="0" stop-color="#6E7B84"/>
+  <stop offset="0.28" stop-color="#333E45"/>
+  <stop offset="0.55" stop-color="#171D21"/>
+  <stop offset="1" stop-color="#05070A"/>
+</radialGradient>
+<linearGradient id="sweep" gradientUnits="userSpaceOnUse"
+  x1="110" y1="180" x2="890" y2="960">
+  <stop offset="0.19" stop-color="#FFFFFF" stop-opacity="0"/>
+  <stop offset="0.33" stop-color="#EAF2F5" stop-opacity="0.07"/>
+  <stop offset="0.43" stop-color="#F2F8FA" stop-opacity="0.16"/>
+  <stop offset="0.46" stop-color="#F8FBFC" stop-opacity="0.20"/>
+  <stop offset="0.50" stop-color="#FFFFFF" stop-opacity="0.41"/>
+  <stop offset="0.54" stop-color="#F8FBFC" stop-opacity="0.20"/>
+  <stop offset="0.57" stop-color="#F2F8FA" stop-opacity="0.16"/>
+  <stop offset="0.67" stop-color="#EAF2F5" stop-opacity="0.07"/>
+  <stop offset="0.81" stop-color="#FFFFFF" stop-opacity="0"/>
+</linearGradient>
+<clipPath id="discClip"><circle cx="500" cy="570" r="142.0"/></clipPath>
+<g id="matB">
+<circle cx="500" cy="570" r="292" fill="none" stroke="currentColor" stroke-width="8"/>
+<circle cx="500" cy="570" r="330" fill="none" stroke="currentColor" stroke-width="16"/>
+<circle cx="500" cy="570" r="168" fill="none" stroke="currentColor" stroke-width="20"/>
+<polygon points="924.00,570.00 668.00,530.00 668.00,570.00 668.00,610.00" fill="currentColor"/>
+<polygon points="500.00,994.00 540.00,738.00 500.00,738.00 460.00,738.00" fill="currentColor"/>
+<polygon points="76.00,570.00 332.00,610.00 332.00,570.00 332.00,530.00" fill="currentColor"/>
+<polygon points="748.90,321.10 593.34,425.75 618.79,451.21 644.25,476.66" fill="currentColor"/>
+<polygon points="748.90,818.90 644.25,663.34 618.79,688.79 593.34,714.25" fill="currentColor"/>
+<polygon points="251.10,818.90 406.66,714.25 381.21,688.79 355.75,663.34" fill="currentColor"/>
+<polygon points="251.10,321.10 355.75,476.66 381.21,451.21 406.66,425.75" fill="currentColor"/>
+<path d="M 500,30 Q 487.40,150.00 458,270 Q 491.60,336.00 500,402 Z" fill="currentColor"/>
+<path d="M 500,30 Q 512.60,150.00 542,270 Q 508.40,336.00 500,402 Z" fill="currentColor"/>
+</g>
+<g id="matL">
+<path d="M 493.00,428.17 A 142.00 142.00 0 0 0 493.00,711.83 L 493.00,667.75 A 98.00 98.00 0 0 1 493.00,472.25 Z" fill="currentColor"/>
+<g clip-path="url(#discClip)"><path d="M 507.00,420.00 L 545.00,420.00 L 579.00,561.67 L 579.00,420.00 L 617.00,420.00 L 617.00,720.00 L 579.00,720.00 L 545.00,578.33 L 545.00,720.00 L 507.00,720.00 Z" fill="currentColor"/></g>
+</g>
+<mask id="frontMask">
+  <rect x="-48" y="-94" width="1096" height="1212" fill="black"/>
+  <use href="#matB" color="white"/>
+  <use href="#matL" color="white"/>
+</mask>
+</defs>
+
+<use href="#matB" color="#040506" transform="translate(47.000,52.000) scale(0.9000)"/>
+<use href="#matB" color="#050607" transform="translate(45.694,50.556) scale(0.9028)"/>
+<use href="#matB" color="#060708" transform="translate(44.389,49.111) scale(0.9056)"/>
+<use href="#matB" color="#070809" transform="translate(43.083,47.667) scale(0.9083)"/>
+<use href="#matB" color="#08090B" transform="translate(41.778,46.222) scale(0.9111)"/>
+<use href="#matB" color="#080A0C" transform="translate(40.472,44.778) scale(0.9139)"/>
+<use href="#matB" color="#090B0D" transform="translate(39.167,43.333) scale(0.9167)"/>
+<use href="#matB" color="#0A0C0E" transform="translate(37.861,41.889) scale(0.9194)"/>
+<use href="#matB" color="#0B0D0F" transform="translate(36.556,40.444) scale(0.9222)"/>
+<use href="#matB" color="#0C0F10" transform="translate(35.250,39.000) scale(0.9250)"/>
+<use href="#matB" color="#0D1011" transform="translate(33.944,37.556) scale(0.9278)"/>
+<use href="#matB" color="#0E1113" transform="translate(32.639,36.111) scale(0.9306)"/>
+<use href="#matB" color="#0F1214" transform="translate(31.333,34.667) scale(0.9333)"/>
+<use href="#matB" color="#101315" transform="translate(30.028,33.222) scale(0.9361)"/>
+<use href="#matB" color="#101416" transform="translate(28.722,31.778) scale(0.9389)"/>
+<use href="#matB" color="#111517" transform="translate(27.417,30.333) scale(0.9417)"/>
+<use href="#matB" color="#121618" transform="translate(26.111,28.889) scale(0.9444)"/>
+<use href="#matB" color="#131719" transform="translate(24.806,27.444) scale(0.9472)"/>
+<use href="#matB" color="#14181B" transform="translate(23.500,26.000) scale(0.9500)"/>
+<use href="#matB" color="#15191C" transform="translate(22.194,24.556) scale(0.9528)"/>
+<use href="#matB" color="#161A1D" transform="translate(20.889,23.111) scale(0.9556)"/>
+<use href="#matB" color="#171B1E" transform="translate(19.583,21.667) scale(0.9583)"/>
+<use href="#matB" color="#171C1F" transform="translate(18.278,20.222) scale(0.9611)"/>
+<use href="#matB" color="#181D20" transform="translate(16.972,18.778) scale(0.9639)"/>
+<use href="#matB" color="#191E21" transform="translate(15.667,17.333) scale(0.9667)"/>
+<use href="#matB" color="#1A1F23" transform="translate(14.361,15.889) scale(0.9694)"/>
+<use href="#matB" color="#1B2024" transform="translate(13.056,14.444) scale(0.9722)"/>
+<use href="#matB" color="#1C2225" transform="translate(11.750,13.000) scale(0.9750)"/>
+<use href="#matB" color="#1D2326" transform="translate(10.444,11.556) scale(0.9778)"/>
+<use href="#matB" color="#1E2427" transform="translate(9.139,10.111) scale(0.9806)"/>
+<use href="#matB" color="#1F2528" transform="translate(7.833,8.667) scale(0.9833)"/>
+<use href="#matB" color="#1F2629" transform="translate(6.528,7.222) scale(0.9861)"/>
+<use href="#matB" color="#20272B" transform="translate(5.222,5.778) scale(0.9889)"/>
+<use href="#matB" color="#21282C" transform="translate(3.917,4.333) scale(0.9917)"/>
+<use href="#matB" color="#22292D" transform="translate(2.611,2.889) scale(0.9944)"/>
+<use href="#matB" color="#232A2E" transform="translate(1.306,1.444) scale(0.9972)"/>
+<use href="#matL" color="#040506" transform="translate(103.400,114.400) scale(0.7800)"/>
+<use href="#matL" color="#050607" transform="translate(100.528,111.222) scale(0.7861)"/>
+<use href="#matL" color="#060708" transform="translate(97.656,108.044) scale(0.7922)"/>
+<use href="#matL" color="#070809" transform="translate(94.783,104.867) scale(0.7983)"/>
+<use href="#matL" color="#08090B" transform="translate(91.911,101.689) scale(0.8044)"/>
+<use href="#matL" color="#080A0C" transform="translate(89.039,98.511) scale(0.8106)"/>
+<use href="#matL" color="#090B0D" transform="translate(86.167,95.333) scale(0.8167)"/>
+<use href="#matL" color="#0A0C0E" transform="translate(83.294,92.156) scale(0.8228)"/>
+<use href="#matL" color="#0B0D0F" transform="translate(80.422,88.978) scale(0.8289)"/>
+<use href="#matL" color="#0C0F10" transform="translate(77.550,85.800) scale(0.8350)"/>
+<use href="#matL" color="#0D1011" transform="translate(74.678,82.622) scale(0.8411)"/>
+<use href="#matL" color="#0E1113" transform="translate(71.806,79.444) scale(0.8472)"/>
+<use href="#matL" color="#0F1214" transform="translate(68.933,76.267) scale(0.8533)"/>
+<use href="#matL" color="#101315" transform="translate(66.061,73.089) scale(0.8594)"/>
+<use href="#matL" color="#101416" transform="translate(63.189,69.911) scale(0.8656)"/>
+<use href="#matL" color="#111517" transform="translate(60.317,66.733) scale(0.8717)"/>
+<use href="#matL" color="#121618" transform="translate(57.444,63.556) scale(0.8778)"/>
+<use href="#matL" color="#131719" transform="translate(54.572,60.378) scale(0.8839)"/>
+<use href="#matL" color="#14181B" transform="translate(51.700,57.200) scale(0.8900)"/>
+<use href="#matL" color="#15191C" transform="translate(48.828,54.022) scale(0.8961)"/>
+<use href="#matL" color="#161A1D" transform="translate(45.956,50.844) scale(0.9022)"/>
+<use href="#matL" color="#171B1E" transform="translate(43.083,47.667) scale(0.9083)"/>
+<use href="#matL" color="#171C1F" transform="translate(40.211,44.489) scale(0.9144)"/>
+<use href="#matL" color="#181D20" transform="translate(37.339,41.311) scale(0.9206)"/>
+<use href="#matL" color="#191E21" transform="translate(34.467,38.133) scale(0.9267)"/>
+<use href="#matL" color="#1A1F23" transform="translate(31.594,34.956) scale(0.9328)"/>
+<use href="#matL" color="#1B2024" transform="translate(28.722,31.778) scale(0.9389)"/>
+<use href="#matL" color="#1C2225" transform="translate(25.850,28.600) scale(0.9450)"/>
+<use href="#matL" color="#1D2326" transform="translate(22.978,25.422) scale(0.9511)"/>
+<use href="#matL" color="#1E2427" transform="translate(20.106,22.244) scale(0.9572)"/>
+<use href="#matL" color="#1F2528" transform="translate(17.233,19.067) scale(0.9633)"/>
+<use href="#matL" color="#1F2629" transform="translate(14.361,15.889) scale(0.9694)"/>
+<use href="#matL" color="#20272B" transform="translate(11.489,12.711) scale(0.9756)"/>
+<use href="#matL" color="#21282C" transform="translate(8.617,9.533) scale(0.9817)"/>
+<use href="#matL" color="#22292D" transform="translate(5.744,6.356) scale(0.9878)"/>
+<use href="#matL" color="#232A2E" transform="translate(2.872,3.178) scale(0.9939)"/>
+<circle cx="500" cy="570" r="292" fill="none" stroke="url(#dome)" stroke-width="8"/>
+<circle cx="500" cy="570" r="330" fill="none" stroke="url(#dome)" stroke-width="16"/>
+<circle cx="500" cy="570" r="168" fill="none" stroke="url(#dome)" stroke-width="20"/>
+<polygon points="924.00,570.00 668.00,530.00 668.00,570.00 668.00,610.00" fill="url(#dome)"/>
+<polygon points="500.00,994.00 540.00,738.00 500.00,738.00 460.00,738.00" fill="url(#dome)"/>
+<polygon points="76.00,570.00 332.00,610.00 332.00,570.00 332.00,530.00" fill="url(#dome)"/>
+<polygon points="748.90,321.10 593.34,425.75 618.79,451.21 644.25,476.66" fill="url(#dome)"/>
+<polygon points="748.90,818.90 644.25,663.34 618.79,688.79 593.34,714.25" fill="url(#dome)"/>
+<polygon points="251.10,818.90 406.66,714.25 381.21,688.79 355.75,663.34" fill="url(#dome)"/>
+<polygon points="251.10,321.10 355.75,476.66 381.21,451.21 406.66,425.75" fill="url(#dome)"/>
+<path d="M 500,30 Q 487.40,150.00 458,270 Q 491.60,336.00 500,402 Z" fill="url(#dome)"/>
+<path d="M 500,30 Q 512.60,150.00 542,270 Q 508.40,336.00 500,402 Z" fill="url(#dome)"/>
+<path d="M 493.00,428.17 A 142.00 142.00 0 0 0 493.00,711.83 L 493.00,667.75 A 98.00 98.00 0 0 1 493.00,472.25 Z" fill="url(#dome)"/>
+<g clip-path="url(#discClip)"><path d="M 507.00,420.00 L 545.00,420.00 L 579.00,561.67 L 579.00,420.00 L 617.00,420.00 L 617.00,720.00 L 579.00,720.00 L 545.00,578.33 L 545.00,720.00 L 507.00,720.00 Z" fill="url(#dome)"/></g>
+<line x1="501.5" y1="140" x2="501.5" y2="335" stroke="#4A555C" stroke-width="2" stroke-opacity="0.6"/><line x1="499" y1="140" x2="499" y2="335" stroke="#030405" stroke-width="3.5"/>
+<g mask="url(#frontMask)"><rect x="52" y="6" width="896" height="1012" fill="url(#sweep)"/></g>
 </svg>
