@@ -38,7 +38,12 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-white p-1.5 shadow-lg">
+          {/* The dome sits in its own dark panel — same radial backdrop the app icon bakes in
+              (#141B1F → #06080A, weighted a touch high), so tile and home-screen icon match. */}
+          <div
+            className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ring-1 ring-white/15"
+            style={{ background: "radial-gradient(85% 85% at 50% 44%, #141B1F 0%, #06080A 100%)" }}
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/cn-logo.svg" alt="Contractor North" className="h-full w-full" />
           </div>
