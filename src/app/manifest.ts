@@ -9,7 +9,9 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#ffffff",
+    // The launch splash paints this behind the icon — the icon's own black ground, so the
+    // tile doesn't sit on a white flash.
+    background_color: "#0b0f12",
     theme_color: "#0b57c4",
     icons: [
       { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },

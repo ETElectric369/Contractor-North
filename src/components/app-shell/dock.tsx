@@ -64,8 +64,10 @@ function DockInner({ branding, role, badges }: DockProps) {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logo} alt="" className="h-10 w-10 rounded-xl object-contain" />
             ) : (
+              // The app icon itself (white rose on its black ground), as a tile like the org-logo
+              // branch above — same asset the home screen and login tile wear.
               // eslint-disable-next-line @next/next/no-img-element
-              <img src="/cn-logo.svg" alt="" className="h-9 w-9" />
+              <img src="/icon-192.png" alt="" className="h-10 w-10 rounded-xl" />
             )}
           </Link>
           <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto">

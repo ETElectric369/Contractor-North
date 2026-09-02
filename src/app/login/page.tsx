@@ -38,17 +38,11 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          {/* THE LAKE BACKDROP, dusk cut (Erik picked the lake off a Preview roll-over; the dusk
-              dim + SILVER mark is the iOS-tinted-mode lesson — icons are re-rendered by
-              luminance, so the mark must be the bright thing). Same wash the app icons bake
-              in, so tile and home-screen icon match. */}
-          <div
-            className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ring-1 ring-white/15"
-            style={{ background: "linear-gradient(180deg, #081320 0%, #162A3E 34%, #2A3F4F 55%, #253133 72%, #262E1F 86%, #191E13 100%)" }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/cn-logo-silver.png" alt="Contractor North" className="h-full w-full object-contain" />
-          </div>
+          {/* The tile IS the app icon — Erik's white-rose-on-black export, one asset shared with
+              the home screen and the dock (the iOS tinted-mode lesson: the mark must be the
+              bright thing on a dark ground). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon-192.png" alt="Contractor North" className="mx-auto mb-3 h-16 w-16 rounded-2xl shadow-lg ring-1 ring-white/15" />
           <h1 className="text-2xl font-bold tracking-tight">Contractor North</h1>
           <p className="mt-1 text-sm text-white/80">The all-in-one platform for contractors</p>
           <p className="mt-2 text-[11px] font-medium tracking-wider text-white/40">{APP_VERSION}</p>
