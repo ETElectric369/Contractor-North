@@ -38,15 +38,16 @@ export default async function LoginPage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          {/* THE LAKE BACKDROP (Erik picked it off a Preview roll-over): deep sky → hazy horizon
-              → lake blue → olive shore — the same wash the app icons bake in, so tile and
-              home-screen icon match. */}
+          {/* THE LAKE BACKDROP, dusk cut (Erik picked the lake off a Preview roll-over; the dusk
+              dim + SILVER mark is the iOS-tinted-mode lesson — icons are re-rendered by
+              luminance, so the mark must be the bright thing). Same wash the app icons bake
+              in, so tile and home-screen icon match. */}
           <div
             className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl shadow-lg ring-1 ring-white/15"
-            style={{ background: "linear-gradient(180deg, #0F243B 0%, #2B5077 34%, #517897 55%, #465F62 72%, #49583C 86%, #2F3A24 100%)" }}
+            style={{ background: "linear-gradient(180deg, #081320 0%, #162A3E 34%, #2A3F4F 55%, #253133 72%, #262E1F 86%, #191E13 100%)" }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/cn-logo.svg" alt="Contractor North" className="h-full w-full" />
+            <img src="/cn-logo-silver.png" alt="Contractor North" className="h-full w-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Contractor North</h1>
           <p className="mt-1 text-sm text-white/80">The all-in-one platform for contractors</p>
