@@ -12,12 +12,19 @@ export const runtime = "nodejs";
 
 /**
  * Stripe webhook: keeps organizations.subscription_status / plan in sync.
- * Configure the endpoint URL in Stripe → Developers → Webhooks, and set
- * STRIPE_WEBHOOK_SECRET. Listens for subscription + checkout events.
+ * Configure TWO endpoints at this URL in Stripe → Developers → Webhooks — "your account" (secret →
+ * STRIPE_WEBHOOK_SECRET) and "connected accounts" (secret → STRIPE_CONNECT_WEBHOOK_SECRET).
+ * Listens for subscription + checkout events on ours, invoice payments + account.updated on theirs.
  */
 export async function POST(req: Request) {
-  const secret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!secret) {
+  // TWO SIGNING SECRETS. Stripe issues one per endpoint, and Connect needs two endpoints at this
+  // same URL: one for OUR account's events (subscriptions, our checkout) and one that "listens to
+  // events on connected accounts" (a contractor's customer paying an invoice, account.updated).
+  // Each event verifies against whichever secret signed it; a body that matches neither is refused.
+  const secrets = [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET].filter(
+    (s): s is string => !!s,
+  );
+  if (secrets.length === 0) {
     return new Response("STRIPE_WEBHOOK_SECRET not configured", { status: 503 });
   }
 
@@ -25,11 +32,18 @@ export async function POST(req: Request) {
   if (!sig) return new Response("Missing signature", { status: 400 });
 
   const body = await req.text();
-  let event: Stripe.Event;
-  try {
-    event = getStripe().webhooks.constructEvent(body, sig, secret);
-  } catch (e: any) {
-    return new Response(`Webhook signature failed: ${e?.message}`, { status: 400 });
+  let event: Stripe.Event | null = null;
+  let lastErr = "";
+  for (const secret of secrets) {
+    try {
+      event = getStripe().webhooks.constructEvent(body, sig, secret);
+      break;
+    } catch (e: any) {
+      lastErr = e?.message ?? "invalid signature";
+    }
+  }
+  if (!event) {
+    return new Response(`Webhook signature failed: ${lastErr}`, { status: 400 });
   }
 
   let supabase: ReturnType<typeof createServiceClient>;
