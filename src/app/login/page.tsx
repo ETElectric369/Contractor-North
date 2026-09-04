@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { headers } from "next/headers";
+import { shellFromUserAgent } from "@/lib/native-shell";
 import { NO_INDEX } from "@/lib/no-index";
 import { login, signup, sendLoginCode, verifyLoginCode } from "./actions";
 import { APP_VERSION } from "@/lib/version";
@@ -13,7 +15,10 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; message?: string; mode?: string; email?: string; sent?: string; next?: string }>;
 }) {
   const { error, message, mode, email, sent, next } = await searchParams;
-  const isSignup = mode === "signup";
+  // Inside the native shell there is no signup door: accounts come from an org's invite (0125), and
+  // the app must not offer account creation to Apple's reviewer (4.2 / 3.1.1). Web keeps it.
+  const inShell = shellFromUserAgent((await headers()).get("user-agent")).native;
+  const isSignup = mode === "signup" && !inShell;
   const isCode = mode === "code";
   const codeSent = isCode && sent === "1";
   // Collaborator invite links arrive as /login?mode=signup&email=…&next=/content — keep `next`
@@ -35,7 +40,7 @@ export default async function LoginPage({
       {/* Nobody is signed in on this screen, so the offline page cache — which holds rendered
           org data — gets cleared here. A handed-down crew phone can't be paged back into. */}
       <PurgePageCache />
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4 pt-[var(--sat,0px)]">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
           {/* The tile IS the app icon — Erik's white-rose-on-black export, one asset shared with
@@ -138,7 +143,13 @@ export default async function LoginPage({
           )}
 
           <p className="mt-6 text-center text-sm text-slate-500">
-            {isSignup ? (
+            {inShell && mode === "signup" ? (
+              // An invite link opened INSIDE the shell: say why there's no create-account form here
+              // instead of silently showing Sign in (NOTHING SILENT / NO DEAD ENDS).
+              <>Accounts are created from your invite email in Safari. Open the invite there, create your account, then sign in here.</>
+            ) : inShell ? (
+              <>Got an invite email? Open it in your browser to create your account, then sign in here.</>
+            ) : isSignup ? (
               <>Already have an account? <Link href={withNext("/login")} className="font-medium text-brand hover:underline">Sign In</Link></>
             ) : (
               <>Need an account? <Link href={withNext("/login?mode=signup")} className="font-medium text-brand hover:underline">Sign up</Link></>

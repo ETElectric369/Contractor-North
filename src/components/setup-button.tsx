@@ -123,7 +123,7 @@ export function SetupButton({
       </button>
 
       {menuOpen && mode === null && !lessonKey && (
-        <div className="fixed inset-x-3 top-16 z-[60] rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-72">
+        <div className="fixed inset-x-3 top-[calc(4rem+var(--sat,0px))] z-[60] rounded-xl border border-slate-200 bg-white p-2 shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-72">
           <p className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Lessons</p>
           {LESSONS.map((l) => (
             <button

@@ -29,7 +29,7 @@ export function MediaLightbox({
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-black/90">
-      <div className="flex items-center justify-between gap-2 px-4 py-3 text-white">
+      <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-[max(0.75rem,var(--sat,0px))] text-white">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
         <a href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg p-2 hover:bg-white/10" title="Open in new tab">
           <ExternalLink className="h-5 w-5" />

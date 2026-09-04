@@ -238,7 +238,7 @@ export function Modal({
           downOnBackdrop.current = false;
           if (startedHere && e.target === e.currentTarget) requestClose();
         }}
-        className="relative flex min-h-full items-start justify-center p-3 sm:items-center"
+        className="relative flex min-h-full items-start justify-center px-3 pb-3 pt-[max(0.75rem,var(--sat,0px))] sm:items-center"
       >
         {/* Cap the panel to the viewport: the HEADER and FOOTER are fixed (shrink-0)
             and only the middle BODY scrolls, so the action row is always reachable

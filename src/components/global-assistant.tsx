@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { safeAreaTop } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
@@ -74,7 +75,7 @@ export function GlobalAssistant() {
   // Default dock: centered horizontally, just under the topbar.
   function centeredPos() {
     const w = Math.min(PANEL_W, window.innerWidth - 16);
-    return { x: Math.round((window.innerWidth - w) / 2), y: 68 };
+    return { x: Math.round((window.innerWidth - w) / 2), y: 68 + safeAreaTop() };
   }
 
   function launch() {
@@ -183,7 +184,7 @@ export function GlobalAssistant() {
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch {}
   }
 
-  const p = pos ?? { x: 8, y: 68 };
+  const p = pos ?? { x: 8, y: 68 + safeAreaTop() };
 
   return (
     <>

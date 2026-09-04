@@ -115,9 +115,9 @@ export function AccountMenu({
           data-tour="account-menu"
           style={{
             position: "fixed",
-            top: "4.5rem",
+            top: "calc(4.5rem + var(--sat, 0px))",
             right: "0.5rem",
-            maxHeight: "calc(100dvh - 9.5rem)",
+            maxHeight: "calc(100dvh - 9.5rem - var(--sat, 0px))",
             overflowY: "auto",
           }}
           className={`${GLASS_MENU_CLASS} w-60`}

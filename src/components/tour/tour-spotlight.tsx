@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useState } from "react";
+import { safeAreaTop } from "@/lib/native-shell";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -126,7 +127,7 @@ export function TourSpotlight({
     : Math.max(12, vw / 2 - cardW / 2);
   const cardStyle: React.CSSProperties =
     place === "center"
-      ? { left: cardLeft, top: Math.max(24, vh / 2 - 180), width: cardW }
+      ? { left: cardLeft, top: Math.max(24 + safeAreaTop(), vh / 2 - 180), width: cardW }
       : place === "below"
         ? { left: cardLeft, top: below, width: cardW }
         : { left: cardLeft, bottom: vh - rect!.top + GAP, width: cardW };

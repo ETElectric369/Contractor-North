@@ -15,6 +15,14 @@ export function shellFromUserAgent(ua: string | null | undefined): ShellInfo {
   return { native: true, platform: m[2].toLowerCase() as "ios" | "android", version: Number(m[1]) || null };
 }
 
+/** The top safe area in px (the --sat CSS var: 0 in browsers/PWA, the notch/island height in the
+ *  full-bleed shell). For overlays positioned in pixels; CSS should use var(--sat) directly. */
+export function safeAreaTop(): number {
+  if (typeof document === "undefined") return 0;
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--sat"));
+  return Number.isFinite(v) ? v : 0;
+}
+
 /** Browser-side: true inside the shell. Safe to call during SSR (false). */
 export function isNativeShell(): boolean {
   if (typeof navigator === "undefined") return false;

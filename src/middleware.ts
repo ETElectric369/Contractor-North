@@ -3,6 +3,7 @@ import { updateSession } from "@/lib/supabase/middleware";
 import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 import { pageSlugFromPath, isLegacyCmsPath, isReservedSlug, legacyAliasTarget } from "@/lib/site-reserved";
 import { isDeadReservedHost } from "@/lib/public-host";
+import { shellFromUserAgent } from "@/lib/native-shell";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -41,6 +42,9 @@ function isAppHost(host: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true; // bare IPv4 (health checks, origin probes)
   if (host.endsWith(".vercel.app")) return true; // deploy + preview URLs
   if (host === SITES_DOMAIN || host === `www.${SITES_DOMAIN}`) return true;
+  // app.<domain> IS the app host with or without APP_HOSTS (public-host.ts already says so; this copy
+  // silently depended on the env var, and the shell-root redirect below rides on it).
+  if (host === `app.${SITES_DOMAIN}`) return true;
   return EXTRA_APP_HOSTS.has(host);
 }
 
@@ -210,6 +214,17 @@ export async function middleware(request: NextRequest) {
     url.pathname = "/";
     url.search = "";
     return NextResponse.redirect(url, 301);
+  }
+
+  // NATIVE SHELL ROOT (Phase 0, 2026-09-04): the iOS/Android shell opens at "/" of the app host
+  // (capacitor.config.ts server.url), which is the MARKETING landing — "Get Started Free", pricing,
+  // signup. A native app must never show that (Apple 4.2 / 3.1.1, and it's invite-only anyway):
+  // send the shell into the app. The auth guard turns a signed-out visit into /login as usual.
+  if (request.nextUrl.pathname === "/" && !onOrgSite && shellFromUserAgent(request.headers.get("user-agent")).native) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/planner";
+    url.search = "";
+    return NextResponse.redirect(url, 307);
   }
 
   // Only the ROOT of an org's public site is rewritten to /site content. Deeper paths

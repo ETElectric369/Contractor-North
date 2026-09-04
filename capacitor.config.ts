@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
     allowNavigation: ["app.contractornorth.com", "*.contractornorth.com", "*.supabase.co", "js.stripe.com", "checkout.stripe.com", "billing.stripe.com"],
   },
   ios: {
-    contentInset: "automatic",
+    contentInset: "never",
     appendUserAgent: "CNShell/1 (iOS)",
     backgroundColor: "#0b0f12",
   },

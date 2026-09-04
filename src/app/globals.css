@@ -42,6 +42,10 @@
 }
 
 :root {
+  /* Top safe area — 0 in browsers and the installed PWA (status bar is opaque there); the notch /
+     Dynamic Island height inside the native shell, whose WebView paints edge to edge (contentInset never).
+     Every fixed overlay that hangs from the top reads THIS, never a hard-coded 4rem. */
+  --sat: env(safe-area-inset-top, 0px);
   --background: #f8fafc;
   --foreground: #0f172a;
 }
