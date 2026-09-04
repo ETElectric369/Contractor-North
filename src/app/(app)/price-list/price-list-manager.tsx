@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import { createPriceItem, deletePriceItem, bulkImportPriceItems, type PriceItemInput } from "./actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
 import { parseCSV } from "@/lib/csv";
+import { PRICE_CSV_FIELDS, autoMapPriceHeaders } from "@/lib/pricing/csv-map";
 import { unitLooksShifted } from "@/lib/pricing/import-damage";
 
 interface PriceItem {
@@ -28,14 +29,9 @@ interface PriceItem {
 
 const sell = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
-const FIELDS: { key: keyof PriceItemInput; label: string; match: RegExp }[] = [
-  { key: "code", label: "Item code", match: /code|item|part|sku|catalog|number|#/i },
-  { key: "description", label: "Description", match: /desc|name|product|detail/i },
-  { key: "category", label: "Category", match: /categ|group|class|type/i },
-  { key: "supplier", label: "Supplier", match: /supplier|vendor|manufactur|brand|mfg/i },
-  { key: "buy_price", label: "Buy price", match: /price|cost|buy|net|amount|each/i },
-  { key: "markup_pct", label: "Markup %", match: /markup|margin/i },
-];
+// Header heuristics live in src/lib/pricing/csv-map.ts (pure, tested): one column never feeds
+// two fields, code is tried before cost, and unit is finally a mapped field.
+const FIELDS = PRICE_CSV_FIELDS;
 
 export function PriceListManager({ items }: { items: PriceItem[] }) {
   const router = useRouter();
@@ -93,13 +89,8 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
       const hdr = rows[0].map((h) => h.trim());
       setHeaders(hdr);
       setDataRows(rows.slice(1));
-      // auto-map by header heuristics
-      const map: Record<string, number> = {};
-      for (const f of FIELDS) {
-        const idx = hdr.findIndex((h) => f.match.test(h));
-        if (idx >= 0) map[f.key as string] = idx;
-      }
-      setMapping(map);
+      // auto-map by header heuristics — a column claimed once is never claimed again
+      setMapping(autoMapPriceHeaders(hdr) as Record<string, number>);
     });
   }
 
@@ -115,6 +106,7 @@ export function PriceListManager({ items }: { items: PriceItem[] }) {
       description: r[descIdx] ?? "",
       category: mapping["category"] !== undefined ? r[mapping["category"]] : "",
       supplier: mapping["supplier"] !== undefined ? r[mapping["supplier"]] : "",
+      unit: mapping["unit"] !== undefined ? (r[mapping["unit"]] ?? "").trim() : "",
       buy_price: mapping["buy_price"] !== undefined ? num(r[mapping["buy_price"]]) : 0,
       markup_pct: mapping["markup_pct"] !== undefined ? num(r[mapping["markup_pct"]]) : 0,
     }));
