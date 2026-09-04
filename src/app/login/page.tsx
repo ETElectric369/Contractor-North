@@ -96,7 +96,7 @@ export default async function LoginPage({
               <form className="space-y-4">
                 <div>
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" name="email" type="email" placeholder="you@company.com" defaultValue={email ?? ""} required autoFocus />
+                  <Input id="email" name="email" type="email" autoComplete="username" placeholder="you@company.com" defaultValue={email ?? ""} required autoFocus />
                 </div>
                 <FormSubmit className="w-full" size="lg" formAction={sendLoginCode}>
                   Email me a code
@@ -118,14 +118,14 @@ export default async function LoginPage({
               )}
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" placeholder="you@company.com" defaultValue={email ?? ""} required />
+                <Input id="email" name="email" type="email" autoComplete="username" placeholder="you@company.com" defaultValue={email ?? ""} required />
               </div>
               <div>
                 <div className="mb-1.5 flex items-center justify-between">
                   <Label htmlFor="password" className="mb-0">Password</Label>
                   {!isSignup && <Link href="/forgot" className="text-xs font-medium text-brand hover:underline">Forgot Password?</Link>}
                 </div>
-                <PasswordInput id="password" name="password" placeholder="••••••••" required minLength={6} />
+                <PasswordInput id="password" name="password" autoComplete={isSignup ? "new-password" : "current-password"} placeholder="••••••••" required minLength={6} />
               </div>
 
               <FormSubmit className="w-full" size="lg" formAction={isSignup ? signup : login}>

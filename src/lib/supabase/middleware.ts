@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isReservedSlug } from "@/lib/site-reserved";
 
 const PUBLIC_PATHS = [
+  "/.well-known", // apple-app-site-association (and friends): fetched by Apple's CDN, never signed in
   "/login",
   "/forgot",
   "/auth",
