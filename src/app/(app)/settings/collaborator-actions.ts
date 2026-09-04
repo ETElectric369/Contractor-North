@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail } from "@/lib/email";
 import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
+import { createServiceClient } from "@/lib/supabase/server";
 
 /**
  * External site/content collaborators — an org's staff invite an outside SEO/content pro to manage
@@ -114,6 +115,28 @@ export async function revokeSiteCollaborator(id: string): Promise<Result> {
       revoked_by: ctx.userId,
     });
     if (tErr) reportError("revokeSiteCollaborator.tombstone", tErr, { collaboratorId: id });
+  }
+
+  // REVOKE THE LOGIN TOO. Deleting the seat closed the content workspace, but the person could
+  // still sign in: org-less and seat-less, the (app) layout sends them to /onboarding — where
+  // they can create an org (Jill/Owen, 2026-09-03). When this was their only access, deactivate
+  // the profile (service client: it lives outside the caller's org), so the next request lands
+  // on /account-deactivated, signed out. Best-effort AFTER the delete — access is already gone.
+  if (grant?.user_id) {
+    try {
+      const svc = createServiceClient();
+      const { data: who } = await svc.from("profiles").select("org_id, active").eq("id", grant.user_id).maybeSingle();
+      const { count: seatsLeft } = await svc
+        .from("site_collaborators")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", grant.user_id);
+      if (who && !who.org_id && !(seatsLeft ?? 0) && who.active !== false) {
+        const { data: off, error: offErr } = await svc.from("profiles").update({ active: false }).eq("id", grant.user_id).select("id");
+        if (offErr || !off?.length) reportError("revokeSiteCollaborator.deactivate", offErr ?? new Error("zero rows"), { userId: grant.user_id });
+      }
+    } catch (e) {
+      reportError("revokeSiteCollaborator.deactivate", e, { userId: grant.user_id });
+    }
   }
 
   revalidatePath("/settings");
