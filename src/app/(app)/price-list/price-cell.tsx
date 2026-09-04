@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { UNIT_SUGGESTIONS } from "@/lib/pricing/units";
 
 /**
  * A CLICK-TO-EDIT CELL. Click (or focus + Enter) opens an input seeded with `value`; Enter or
@@ -29,7 +30,8 @@ export function PriceCell({
   display: ReactNode;
   /** Called with the raw typed text on Enter/blur when it differs from `value`. */
   onCommit: (raw: string) => void | Promise<void>;
-  kind?: "money" | "pct" | "text";
+  /** "unit" edits as a DROPDOWN of the shared vocabulary (plus the current value if it is custom). */
+  kind?: "money" | "pct" | "text" | "unit";
   /** A <datalist> id (the unit vocabulary). */
   list?: string;
   disabled?: boolean;
@@ -99,6 +101,34 @@ export function PriceCell({
   }
 
   const alignCls = align === "right" ? "text-right" : "text-left";
+
+  if (editing && kind === "unit") {
+    const opts = (UNIT_SUGGESTIONS as readonly string[]).includes(text) ? [...UNIT_SUGGESTIONS] : [text, ...UNIT_SUGGESTIONS];
+    return (
+      <select
+        autoFocus
+        value={text}
+        aria-label={title}
+        onChange={(e) => {
+          setText(e.target.value);
+          // A dropdown pick IS the decision — commit on change, no Enter needed.
+          if (done.current) return;
+          done.current = true;
+          setEditing(false);
+          if (e.target.value !== value.trim()) void onCommit(e.target.value);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); cancel(); } }}
+        className={`h-8 w-full min-w-[4.5rem] rounded-md border border-brand bg-white px-1 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand ${className}`}
+      >
+        {opts.map((u) => (
+          <option key={u} value={u}>
+            {u}
+          </option>
+        ))}
+      </select>
+    );
+  }
 
   if (editing) {
     return (

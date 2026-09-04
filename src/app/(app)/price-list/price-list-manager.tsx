@@ -11,7 +11,7 @@ import { useToast } from "@/components/toast";
 import { SortFilterBar, useSortFilter } from "@/components/sort-filter-bar";
 import { applyFilters, groupRows, searchRows, sortRows, type FilterChip, type SortOption } from "@/lib/sort-filter";
 import { formatCurrency } from "@/lib/utils";
-import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
+import { UnitSelect } from "@/components/unit-select";
 import { unitLooksShifted } from "@/lib/pricing/import-damage";
 import { archivePriceItem, createPriceItem, deletePriceItem, updatePriceItem } from "./actions";
 import { addItemsToKit } from "./kit-actions";
@@ -303,7 +303,7 @@ export function PriceListManager({
           <div><Label htmlFor="pl-code">Code</Label><Input id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
           <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter") void add(); }} /></div>
           <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
-          <div><Label htmlFor="pl-unit">Unit</Label><Input id="pl-unit" value={unit} list={UNIT_DATALIST_ID} onChange={(e) => setUnit(e.target.value)} placeholder="ea" /></div>
+          <div><Label htmlFor="pl-unit">Unit</Label><UnitSelect id="pl-unit" value={unit} onChange={setUnit} /></div>
           <div><Label htmlFor="pl-buy">Cost $</Label><NumberInput id="pl-buy" value={buy} onValueChange={setBuy} /></div>
           <div><Label htmlFor="pl-mk">Markup %</Label><NumberInput id="pl-mk" value={markup} onValueChange={setMarkup} placeholder={defaultMarkupPct > 0 ? `default ${defaultMarkupPct}` : undefined} /></div>
         </div>
@@ -446,9 +446,8 @@ export function PriceListManager({
                         <td className={`${td} text-slate-500`}>{r.category ?? "—"}</td>
                         <td className={td}>
                           <PriceCell
-                            kind="text"
+                            kind="unit"
                             align="left"
-                            list={UNIT_DATALIST_ID}
                             value={r.unit}
                             display={<span className={isShifted ? "font-mono text-xs text-red-700" : "text-slate-600"}>{r.unit}</span>}
                             onCommit={(raw) => saveInline(r, "unit", raw)}

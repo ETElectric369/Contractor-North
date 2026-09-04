@@ -7,7 +7,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { useToast } from "@/components/toast";
-import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
+import { UnitSelect } from "@/components/unit-select";
 import { updatePriceItem, type PriceItemInput } from "./actions";
 import type { PriceItem } from "./price-list-math";
 import { formulaSentence } from "./price-list-math";
@@ -141,7 +141,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
             </div>
             <div>
               <Label htmlFor="epi-unit">Unit</Label>
-              <Input id="epi-unit" value={unit} list={UNIT_DATALIST_ID} onChange={(e) => setUnit(e.target.value)} placeholder="ea" />
+              <UnitSelect id="epi-unit" value={unit} onChange={setUnit} />
             </div>
             <div />
             <div>
@@ -168,18 +168,45 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
                 blank and you type the quantity yourself.
               </p>
               <p className="mt-1 text-xs font-medium text-slate-700">{formulaSentence({ perSqft, perLf, qtyMin, rounding })}</p>
+              {/* ONE choice first (Erik: "these labels make no sense at all and don't apply to the item" —
+                  a conduit strap has nothing to do with square feet). Fixed Quantity shows nothing else;
+                  the coefficient, floor and rounding appear only for a rule that needs them. */}
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <div><Label htmlFor="epi-sqft">Per sq ft of the job</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
-                <div><Label htmlFor="epi-lf">Per linear ft of the job</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
-                <div><Label htmlFor="epi-min">Never fewer than</Label><NumberInput id="epi-min" placeholder="—" value={qtyMin} onValueChange={setQtyMin} /></div>
-                <div>
-                  <Label htmlFor="epi-round">Round</Label>
-                  <Select id="epi-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
-                    <option value="up">Round up (whole units)</option>
-                    <option value="nearest">Nearest</option>
-                    <option value="none">Exact — no rounding</option>
+                <div className="col-span-2">
+                  <Label htmlFor="epi-mode">How It&rsquo;s Counted</Label>
+                  <Select
+                    id="epi-mode"
+                    value={perSqft > 0 ? "sqft" : perLf > 0 ? "lf" : "fixed"}
+                    onChange={(e) => {
+                      const m = e.target.value;
+                      setPerSqft(m === "sqft" ? perSqft || 1 : 0);
+                      setPerLf(m === "lf" ? perLf || 1 : 0);
+                    }}
+                  >
+                    <option value="fixed">Fixed Quantity — typed on the estimate</option>
+                    <option value="sqft">Per Sq Ft of the Job</option>
+                    <option value="lf">Per Linear Ft of the Job</option>
                   </Select>
                 </div>
+                {perSqft > 0 && (
+                  <div><Label htmlFor="epi-sqft">How many per sq ft</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
+                )}
+                {perLf > 0 && (
+                  <div><Label htmlFor="epi-lf">How many per linear ft</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
+                )}
+                {(perSqft > 0 || perLf > 0) && (
+                  <>
+                    <div><Label htmlFor="epi-min">Never fewer than</Label><NumberInput id="epi-min" placeholder="—" value={qtyMin} onValueChange={setQtyMin} /></div>
+                    <div>
+                      <Label htmlFor="epi-round">Round</Label>
+                      <Select id="epi-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
+                        <option value="up">Round up (whole units)</option>
+                        <option value="nearest">Nearest</option>
+                        <option value="none">Exact — no rounding</option>
+                      </Select>
+                    </div>
+                  </>
+                )}
               </div>
             </details>
           )}

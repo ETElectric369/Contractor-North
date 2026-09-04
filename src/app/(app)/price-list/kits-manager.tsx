@@ -12,7 +12,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import { formulaSentence } from "./price-list-math";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
-import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
+import { UnitSelect } from "@/components/unit-select";
 import { kitLineView, lineDisplayName, linkedItemOf, type KitLineRaw, type KitSizing } from "@/lib/kit-line";
 import {
   createKit, updateKit, deleteKit, addKitItem, updateKitItem, deleteKitItem, linkKitItem, setItemSizing,
@@ -137,7 +137,7 @@ function AddItemRow({ kitId, priceItems, orgDefaultPct, onDone }: { kitId: strin
         <div className="grid grid-cols-12 gap-2">
           <div className="col-span-5"><Input placeholder="Or type a line not in the book" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
           <div className="col-span-2"><NumberInput placeholder="Qty" value={qty} onValueChange={setQty} aria-label="Quantity" /></div>
-          <div className="col-span-1"><Input placeholder="ea" value={unit} onChange={(e) => setUnit(e.target.value)} list={UNIT_DATALIST_ID} aria-label="Unit" /></div>
+          <div className="col-span-1"><UnitSelect value={unit} onChange={setUnit} aria-label="Unit" /></div>
           <div className="col-span-2"><NumberInput placeholder="$" value={price} onValueChange={setPrice} aria-label="Unit price" /></div>
           <div className="col-span-2"><Button size="sm" onClick={save} disabled={pending || !canSave} className="w-full"><Plus className="h-3.5 w-3.5" /> Add Line</Button></div>
         </div>
@@ -216,22 +216,49 @@ function LinkItemModal({ item, priceItems, orgDefaultPct, onClose }: { item: Kit
 }
 
 function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onChange: (s: SizingDraft) => void; idPrefix: string }) {
+  const sq = Number(sizing.perSqft) || 0;
+  const lf = Number(sizing.perLf) || 0;
+  const mode = sq > 0 ? "sqft" : lf > 0 ? "lf" : "fixed";
   return (
     <>
-    <p className="mt-2 text-xs font-medium text-slate-700">{formulaSentence(sizing)}</p>
-    <div className="mt-2 grid grid-cols-2 gap-2">
-      <div><Label htmlFor={`${idPrefix}-sqft`}>Per sq ft of the job</Label><NumberInput id={`${idPrefix}-sqft`} placeholder="e.g. 1" value={sizing.perSqft === "" ? 0 : sizing.perSqft} onValueChange={(n) => onChange({ ...sizing, perSqft: n })} /></div>
-      <div><Label htmlFor={`${idPrefix}-lf`}>Per linear ft of the job</Label><NumberInput id={`${idPrefix}-lf`} placeholder="e.g. 3" value={sizing.perLf === "" ? 0 : sizing.perLf} onValueChange={(n) => onChange({ ...sizing, perLf: n })} /></div>
-      <div><Label htmlFor={`${idPrefix}-min`}>Never fewer than</Label><NumberInput id={`${idPrefix}-min`} placeholder="—" value={sizing.qtyMin === "" ? 0 : sizing.qtyMin} onValueChange={(n) => onChange({ ...sizing, qtyMin: n })} /></div>
-      <div>
-        <Label htmlFor={`${idPrefix}-round`}>Round</Label>
-        <Select id={`${idPrefix}-round`} value={sizing.rounding} onChange={(e) => onChange({ ...sizing, rounding: e.target.value })}>
-          <option value="up">Round up (whole units)</option>
-          <option value="nearest">Nearest</option>
-          <option value="none">Exact — no rounding</option>
-        </Select>
+      <p className="mt-2 text-xs font-medium text-slate-700">{formulaSentence(sizing)}</p>
+      {/* ONE choice first; the numbers appear only for a rule that needs them (a strap is a fixed count). */}
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <Label htmlFor={`${idPrefix}-mode`}>How It&rsquo;s Counted</Label>
+          <Select
+            id={`${idPrefix}-mode`}
+            value={mode}
+            onChange={(e) => {
+              const m = e.target.value;
+              onChange({ ...sizing, perSqft: m === "sqft" ? sq || 1 : "", perLf: m === "lf" ? lf || 1 : "" });
+            }}
+          >
+            <option value="fixed">Fixed Quantity — typed on the estimate</option>
+            <option value="sqft">Per Sq Ft of the Job</option>
+            <option value="lf">Per Linear Ft of the Job</option>
+          </Select>
+        </div>
+        {mode === "sqft" && (
+          <div><Label htmlFor={`${idPrefix}-sqft`}>How many per sq ft</Label><NumberInput id={`${idPrefix}-sqft`} placeholder="e.g. 1" value={sq} onValueChange={(n) => onChange({ ...sizing, perSqft: n })} /></div>
+        )}
+        {mode === "lf" && (
+          <div><Label htmlFor={`${idPrefix}-lf`}>How many per linear ft</Label><NumberInput id={`${idPrefix}-lf`} placeholder="e.g. 3" value={lf} onValueChange={(n) => onChange({ ...sizing, perLf: n })} /></div>
+        )}
+        {mode !== "fixed" && (
+          <>
+            <div><Label htmlFor={`${idPrefix}-min`}>Never fewer than</Label><NumberInput id={`${idPrefix}-min`} placeholder="—" value={sizing.qtyMin === "" ? 0 : sizing.qtyMin} onValueChange={(n) => onChange({ ...sizing, qtyMin: n })} /></div>
+            <div>
+              <Label htmlFor={`${idPrefix}-round`}>Round</Label>
+              <Select id={`${idPrefix}-round`} value={sizing.rounding} onChange={(e) => onChange({ ...sizing, rounding: e.target.value })}>
+                <option value="up">Round up (whole units)</option>
+                <option value="nearest">Nearest</option>
+                <option value="none">Exact — no rounding</option>
+              </Select>
+            </div>
+          </>
+        )}
       </div>
-    </div>
     </>
   );
 }
@@ -341,7 +368,7 @@ function EditItemModal({ item, orgDefaultPct, onClose }: { item: KitItem; orgDef
           <div><Label htmlFor="ei-qty">Qty</Label><NumberInput id="ei-qty" placeholder="Qty" value={qty} onValueChange={setQty} /></div>
           {!view.linked && (
             <>
-              <div><Label htmlFor="ei-unit">Unit</Label><Input id="ei-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="ea" list={UNIT_DATALIST_ID} /></div>
+              <div><Label htmlFor="ei-unit">Unit</Label><UnitSelect id="ei-unit" value={unit} onChange={setUnit} /></div>
               <div><Label htmlFor="ei-price">Unit price</Label><NumberInput id="ei-price" placeholder="$" value={price} onValueChange={setPrice} /></div>
             </>
           )}
@@ -354,7 +381,7 @@ function EditItemModal({ item, orgDefaultPct, onClose }: { item: KitItem; orgDef
             rule belongs to the ITEM (0240) — every kit that lists it sizes the same way. */}
         <details className="rounded-lg border border-slate-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-slate-700">
-            Size this line from the job
+            Item Formula
             {(sizing.perSqft !== "" || sizing.perLf !== "") && <span className="ml-2 text-xs font-normal text-brand">on</span>}
           </summary>
           <p className="mt-2 text-xs text-slate-500">
