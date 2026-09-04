@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Search, AlertTriangle, Archive, ArchiveRestore, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
@@ -14,6 +14,7 @@ import { formatCurrency } from "@/lib/utils";
 import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
 import { unitLooksShifted } from "@/lib/pricing/import-damage";
 import { archivePriceItem, createPriceItem, deletePriceItem, updatePriceItem } from "./actions";
+import { addItemsToKit } from "./kit-actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
 import { ImportCsvModal } from "./import-preview";
 import { PriceCell } from "./price-cell";
@@ -77,6 +78,7 @@ export function PriceListManager({
   items,
   defaultMarkupPct = 0,
   kitsByItem = {},
+  kits = [],
   sizingAvailable = false,
 }: {
   items: PriceItem[];
@@ -84,6 +86,8 @@ export function PriceListManager({
   defaultMarkupPct?: number;
   /** itemId → names of the kits that link to it (0240 price_list_item_id). */
   kitsByItem?: Record<string, string[]>;
+  /** The org's kits — targets for "Add to Kit" from the checkboxes. */
+  kits?: { id: string; name: string }[];
   /** True when the 0240 sizing columns came back from the DB — gates the sizing fields. */
   sizingAvailable?: boolean;
 }) {
@@ -108,6 +112,11 @@ export function PriceListManager({
   const [markup, setMarkup] = useState(0);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // KIT BUILDING FROM THE LIST (Erik): tick rows, name a kit (or pick one), Add to Kit.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [kitTarget, setKitTarget] = useState("");
+  const [newKitName, setNewKitName] = useState("");
+  const [addingToKit, setAddingToKit] = useState(false);
 
   const rows: Row[] = useMemo(
     () =>
@@ -248,6 +257,37 @@ export function PriceListManager({
     startRefresh(() => router.refresh());
   }
 
+  const visibleIds = groups.flatMap((g) => g.rows.map((r) => r.id));
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  function toggleAllVisible() {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (allVisibleSelected) visibleIds.forEach((id) => n.delete(id));
+      else visibleIds.forEach((id) => n.add(id));
+      return n;
+    });
+  }
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  async function addSelectedToKit() {
+    if (!selected.size) return;
+    setAddingToKit(true);
+    const res = await addItemsToKit({ kitId: kitTarget || null, newKitName: kitTarget ? null : newKitName, itemIds: [...selected] });
+    setAddingToKit(false);
+    if (!res.ok) return toast(res.error ?? "Couldn't add to the kit.", "error");
+    const skipped = res.skipped ? ` · ${res.skipped} already in it` : "";
+    toast(`Added ${res.added ?? 0} to ${res.kitName ?? "the kit"}${skipped} — quantities and formulas live on the Kits tab`, "success");
+    setSelected(new Set());
+    setNewKitName("");
+    startRefresh(() => router.refresh());
+  }
+
   /* ── render ─────────────────────────────────────────────────────────────────────────────── */
 
   const th = "px-3 py-3 text-left";
@@ -259,7 +299,7 @@ export function PriceListManager({
       {/* Add + import */}
       <Card className="p-4">
         {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
           <div><Label htmlFor="pl-code">Code</Label><Input id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
           <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter") void add(); }} /></div>
           <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
@@ -317,6 +357,37 @@ export function PriceListManager({
         <SortFilterBar sortOptions={SORT_OPTIONS} groupOptions={GROUP_OPTIONS} chips={chipDefs} prefs={prefs} onChange={update} className="lg:flex-1" />
       </div>
 
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand/30 bg-brand-light px-4 py-2 text-sm">
+          <Package className="h-4 w-4 text-brand" />
+          <span className="font-medium text-slate-800">{selected.size} selected</span>
+          <Select aria-label="Kit" className="h-9 w-auto text-sm" value={kitTarget} onChange={(e) => setKitTarget(e.target.value)}>
+            <option value="">New kit…</option>
+            {kits.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+              </option>
+            ))}
+          </Select>
+          {!kitTarget && (
+            <Input
+              aria-label="New kit name"
+              className="h-9 w-56"
+              placeholder="New kit name"
+              value={newKitName}
+              onChange={(e) => setNewKitName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void addSelectedToKit(); }}
+            />
+          )}
+          <Button size="sm" onClick={() => void addSelectedToKit()} disabled={addingToKit || (!kitTarget && !newKitName.trim())}>
+            <Plus className="h-3.5 w-3.5" /> Add to Kit
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
+
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
           <span>
@@ -336,6 +407,9 @@ export function PriceListManager({
             <table className="w-full min-w-[1080px] text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
                 <tr>
+                  <th className="w-8 px-3 py-3">
+                    <input type="checkbox" aria-label="Select all shown" checked={allVisibleSelected} onChange={toggleAllVisible} className="h-4 w-4 accent-[var(--color-brand)]" />
+                  </th>
                   <th className={`${th} w-[9%]`}>Code</th>
                   <th className={`${th} w-[24%]`}>Description</th>
                   <th className={`${th} w-[9%]`}>Category</th>
@@ -353,7 +427,7 @@ export function PriceListManager({
                 <tbody key={`${g.label}-${gi}`} className="divide-y divide-slate-100 border-t border-slate-100">
                   {g.label && (
                     <tr className="bg-slate-50/70">
-                      <td colSpan={11} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
+                      <td colSpan={12} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
                         {prefs.group === "kit" && g.label !== "Not in a kit" && <Package className="mr-1 inline h-3.5 w-3.5 text-slate-400" />}
                         {g.label} <span className="font-normal text-slate-400">· {g.rows.length}</span>
                       </td>
@@ -363,7 +437,10 @@ export function PriceListManager({
                     const isShifted = unitLooksShifted(r.unit);
                     const busy = saving.has(r.id);
                     return (
-                      <tr key={prefs.group === "kit" ? `${r.id}:${r.kit}` : r.id} className={`hover:bg-slate-50/60 ${r.archived ? "text-slate-400" : ""}`}>
+                      <tr key={prefs.group === "kit" ? `${r.id}:${r.kit}` : r.id} className={`hover:bg-slate-50/60 ${r.archived ? "text-slate-400" : ""} ${selected.has(r.id) ? "bg-brand-light/40" : ""}`}>
+                        <td className="px-3 py-1.5 align-middle">
+                          <input type="checkbox" aria-label={`Select ${r.description}`} checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} disabled={r.archived} className="h-4 w-4 accent-[var(--color-brand)]" />
+                        </td>
                         <td className={`${td} font-mono text-xs text-slate-500`}>{r.code ?? "—"}</td>
                         <td className={`${td} font-medium text-slate-900`}>{r.description}</td>
                         <td className={`${td} text-slate-500`}>{r.category ?? "—"}</td>

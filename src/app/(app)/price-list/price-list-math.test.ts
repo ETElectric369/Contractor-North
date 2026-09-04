@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapExtraHeaders, mappedFields, parseCellNumber, patchForEdit, rowThroughMapping, rowView, undoPatch } from "./price-list-math";
+import { mapExtraHeaders, mappedFields, parseCellNumber, patchForEdit, rowThroughMapping, rowView, undoPatch, formulaSentence } from "./price-list-math";
 
 const item = { buy_price: 38, markup_pct: 35, unit: "ea" };
 
@@ -92,5 +92,17 @@ describe("CSV mapping extras", () => {
   });
   it("reports which price fields the sheet carried", () => {
     expect(mappedFields({ code: 0, description: 1, kit: 2, buy_price: 4 })).toEqual(["code", "description", "buy_price"]);
+  });
+});
+
+describe("formulaSentence — the sizing rule in words", () => {
+  it("reads a flat item as a fixed quantity", () => {
+    expect(formulaSentence({ perSqft: 0, perLf: "", qtyMin: null, rounding: "up" })).toBe("Fixed quantity — you type the number on the estimate.");
+  });
+  it("spells out the deck-footings rule", () => {
+    expect(formulaSentence({ perSqft: 1 / 60, perLf: 0, qtyMin: 4, rounding: "up" })).toBe("Counts 0.0167 per sq ft of the job, never fewer than 4, rounded up to whole units.");
+  });
+  it("combines area and length and honors the rounding choice", () => {
+    expect(formulaSentence({ perSqft: 1, perLf: 3, qtyMin: 0, rounding: "none" })).toBe("Counts 1 per sq ft of the job plus 3 per linear ft of the job, exact.");
   });
 });

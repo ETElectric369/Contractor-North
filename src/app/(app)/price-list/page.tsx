@@ -82,6 +82,7 @@ export default async function PriceListPage() {
                 items={allItems}
                 defaultMarkupPct={defaultMarkupPct}
                 kitsByItem={kitsByItem}
+                kits={kits.map((k) => ({ id: k.id, name: k.name }))}
                 sizingAvailable={itemsRes.sizingAvailable}
               />
             ),

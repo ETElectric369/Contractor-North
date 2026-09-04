@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
 import { updatePriceItem, type PriceItemInput } from "./actions";
 import type { PriceItem } from "./price-list-math";
+import { formulaSentence } from "./price-list-math";
 
 /**
  * The words of an item — code, description, category, supplier — plus unit and the 0240 sizing
@@ -159,19 +160,20 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
           {sizingAvailable && (
             <details className="rounded-lg border border-slate-200 p-3" open={sized}>
               <summary className="cursor-pointer text-sm font-medium text-slate-700">
-                Sized by the job
+                Item Formula
                 {sized && <span className="ml-2 text-xs font-normal text-brand">on</span>}
               </summary>
               <p className="mt-2 text-xs text-slate-500">
-                Leave blank for a fixed quantity. Fill one in and any kit using this item works out its own
-                quantity from the measurements taken on the walk-through.
+                How many of this item a job needs, worked out from the walk-through measurements. Leave it all
+                blank and you type the quantity yourself.
               </p>
+              <p className="mt-1 text-xs font-medium text-slate-700">{formulaSentence({ perSqft, perLf, qtyMin, rounding })}</p>
               <div className="mt-2 grid grid-cols-2 gap-2">
-                <div><Label htmlFor="epi-sqft">Per square foot</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
-                <div><Label htmlFor="epi-lf">Per linear foot</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
+                <div><Label htmlFor="epi-sqft">Per sq ft of the job</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
+                <div><Label htmlFor="epi-lf">Per linear ft of the job</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
                 <div><Label htmlFor="epi-min">Never fewer than</Label><NumberInput id="epi-min" placeholder="—" value={qtyMin} onValueChange={setQtyMin} /></div>
                 <div>
-                  <Label htmlFor="epi-round">Rounding</Label>
+                  <Label htmlFor="epi-round">Round</Label>
                   <Select id="epi-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
                     <option value="up">Round up (whole units)</option>
                     <option value="nearest">Nearest</option>

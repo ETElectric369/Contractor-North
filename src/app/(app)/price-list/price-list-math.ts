@@ -167,3 +167,25 @@ export function rowThroughMapping(r: string[], m: CsvMapping): MappedRow {
 export function mappedFields(m: CsvMapping): Exclude<CsvField, "kit" | "quantity">[] {
   return (["code", "description", "category", "supplier", "unit", "buy_price", "markup_pct"] as const).filter((f) => m[f] !== undefined);
 }
+
+/** THE FORMULA, IN WORDS. The four sizing numbers were unreadable as a form ("Per square foot: 1,
+ *  Never fewer than: 4, Rounding: up" — Erik: "hard to understand what's going on from a human
+ *  perspective"). One sentence says what the item will do on an estimate. */
+export function formulaSentence(f: { perSqft: number | "" | null | undefined; perLf: number | "" | null | undefined; qtyMin: number | "" | null | undefined; rounding: string | null | undefined }): string {
+  const n = (v: unknown) => {
+    const x = Number(v);
+    return Number.isFinite(x) && x > 0 ? x : 0;
+  };
+  const fmt = (x: number) => (Number.isInteger(x) ? String(x) : String(Math.round(x * 10000) / 10000));
+  const sq = n(f.perSqft);
+  const lf = n(f.perLf);
+  const min = n(f.qtyMin);
+  const parts: string[] = [];
+  if (sq > 0) parts.push(`${fmt(sq)} per sq ft of the job`);
+  if (lf > 0) parts.push(`${fmt(lf)} per linear ft of the job`);
+  if (!parts.length) return "Fixed quantity — you type the number on the estimate.";
+  let s = `Counts ${parts.join(" plus ")}`;
+  if (min > 0) s += `, never fewer than ${fmt(min)}`;
+  s += f.rounding === "nearest" ? ", rounded to the nearest whole one." : f.rounding === "none" ? ", exact." : ", rounded up to whole units.";
+  return s;
+}

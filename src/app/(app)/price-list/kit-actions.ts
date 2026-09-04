@@ -512,3 +512,65 @@ export async function deleteKitItem(id: string): Promise<Result> {
   revalidatePath("/price-list");
   return { ok: true };
 }
+
+/**
+ * BUILD A KIT FROM THE LIST (Erik: "be able to build kits right on the price list page"). The
+ * page's checkboxes hand over item ids; this adds each as a LINKED line (quantity 1) to an
+ * existing kit or a new one, skipping items the kit already holds. The Kits tab is still where
+ * quantities and formulas get edited — this is the fast way in.
+ */
+export async function addItemsToKit(input: {
+  kitId?: string | null;
+  newKitName?: string | null;
+  itemIds: string[];
+}): Promise<Result & { kitName?: string; added?: number; skipped?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const ids = [...new Set((input.itemIds ?? []).filter(Boolean))].slice(0, 500);
+  if (!ids.length) return { ok: false, error: "Pick at least one item." };
+
+  let kitId = input.kitId || null;
+  let kitName = "";
+  if (!kitId) {
+    const name = (input.newKitName ?? "").trim();
+    if (!name) return { ok: false, error: "Name the kit." };
+    const { data, error } = await supabase.from("kits").insert({ name }).select("id, name").single();
+    if (error || !data) return { ok: false, error: dbError(error ?? "Could not create the kit.") };
+    kitId = data.id;
+    kitName = data.name;
+  } else {
+    // Org-safe: RLS scopes the kit to the caller's org — a hidden/foreign id reads as absent.
+    const { data: kit } = await supabase.from("kits").select("id, name").eq("id", kitId).maybeSingle();
+    if (!kit) return { ok: false, error: "Kit not found." };
+    kitName = kit.name;
+  }
+
+  const base = "id, code, description, unit, buy_price, markup_pct";
+  const r = await firstThatWorks(
+    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
+      (cols) => () => supabase.from("price_list_items").select(cols).in("id", ids).eq("archived", false),
+    ),
+  );
+  // A dynamic select string types the rows as a string-error union; the shape is BookItem's.
+  const items = (r.data ?? []) as unknown as BookItem[];
+  if (!items.length) return { ok: false, error: "None of those items are in your book (or they're archived)." };
+
+  const { data: existing } = await supabase.from("kit_items").select("price_list_item_id").eq("kit_id", kitId).in("price_list_item_id", items.map((i) => i.id));
+  const have = new Set(((existing ?? []) as { price_list_item_id: string | null }[]).map((e) => e.price_list_item_id));
+  const fresh = items.filter((i) => !have.has(i.id));
+
+  const { data: last } = await supabase.from("kit_items").select("sort_order").eq("kit_id", kitId).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  let so = (Number(last?.sort_order) || 0) + 1;
+  const orgDefaultPct = await orgDefaultMarkup(supabase);
+  const rows = fresh.map((i) => ({ kit_id: kitId as string, ...snapshotOf(i, orgDefaultPct), quantity: 1, sort_order: so++, price_list_item_id: i.id }));
+
+  let added = 0;
+  if (rows.length) {
+    const ins = await supabase.from("kit_items").insert(rows).select("id");
+    if (ins.error) return { ok: false, error: dbError(ins.error) };
+    added = ins.data?.length ?? 0;
+  }
+  revalidatePath("/price-list");
+  return { ok: true, id: kitId ?? undefined, kitName, added, skipped: ids.length - added };
+}

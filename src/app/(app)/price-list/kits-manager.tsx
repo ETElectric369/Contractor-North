@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
+import { formulaSentence } from "./price-list-math";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
 import { kitLineView, lineDisplayName, linkedItemOf, type KitLineRaw, type KitSizing } from "@/lib/kit-line";
@@ -216,12 +217,14 @@ function LinkItemModal({ item, priceItems, orgDefaultPct, onClose }: { item: Kit
 
 function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onChange: (s: SizingDraft) => void; idPrefix: string }) {
   return (
+    <>
+    <p className="mt-2 text-xs font-medium text-slate-700">{formulaSentence(sizing)}</p>
     <div className="mt-2 grid grid-cols-2 gap-2">
-      <div><Label htmlFor={`${idPrefix}-sqft`}>Per square foot</Label><NumberInput id={`${idPrefix}-sqft`} placeholder="e.g. 1" value={sizing.perSqft === "" ? 0 : sizing.perSqft} onValueChange={(n) => onChange({ ...sizing, perSqft: n })} /></div>
-      <div><Label htmlFor={`${idPrefix}-lf`}>Per linear foot</Label><NumberInput id={`${idPrefix}-lf`} placeholder="e.g. 3" value={sizing.perLf === "" ? 0 : sizing.perLf} onValueChange={(n) => onChange({ ...sizing, perLf: n })} /></div>
+      <div><Label htmlFor={`${idPrefix}-sqft`}>Per sq ft of the job</Label><NumberInput id={`${idPrefix}-sqft`} placeholder="e.g. 1" value={sizing.perSqft === "" ? 0 : sizing.perSqft} onValueChange={(n) => onChange({ ...sizing, perSqft: n })} /></div>
+      <div><Label htmlFor={`${idPrefix}-lf`}>Per linear ft of the job</Label><NumberInput id={`${idPrefix}-lf`} placeholder="e.g. 3" value={sizing.perLf === "" ? 0 : sizing.perLf} onValueChange={(n) => onChange({ ...sizing, perLf: n })} /></div>
       <div><Label htmlFor={`${idPrefix}-min`}>Never fewer than</Label><NumberInput id={`${idPrefix}-min`} placeholder="—" value={sizing.qtyMin === "" ? 0 : sizing.qtyMin} onValueChange={(n) => onChange({ ...sizing, qtyMin: n })} /></div>
       <div>
-        <Label htmlFor={`${idPrefix}-round`}>Rounding</Label>
+        <Label htmlFor={`${idPrefix}-round`}>Round</Label>
         <Select id={`${idPrefix}-round`} value={sizing.rounding} onChange={(e) => onChange({ ...sizing, rounding: e.target.value })}>
           <option value="up">Round up (whole units)</option>
           <option value="nearest">Nearest</option>
@@ -229,6 +232,7 @@ function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onC
         </Select>
       </div>
     </div>
+    </>
   );
 }
 
