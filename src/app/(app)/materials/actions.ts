@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { firstThatWorks, kitsSelectRungs, kitLineCost, linkedItemOf } from "@/lib/kit-line";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -395,23 +396,28 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   // return above), so re-running never duplicates the groups. RLS scopes kits to this org.
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   if (getOrgSettings((orgRow as any)?.settings).estimating_mode === "catalog") {
-    const { data: matKits } = await supabase
-      .from("kits")
-      .select("name, kit_items(description, quantity, unit, unit_price, sort_order)")
-      .not("name", "in", '("Decks","Remodels")')
-      .order("name");
+    // THE SHARED SELECT SHAPE (kit-line.ts), tolerant of 0166/0240 not having landed. A LINKED
+    // line (0240) puts the ITEM on the order sheet: its description, catalog #, unit, vendor and
+    // — the whole point — its BUY price as est_cost, not a sell price to back a markup out of.
+    // A frozen line keeps today's behaviour (its unit_price as the estimate).
+    const { data: matKits } = await firstThatWorks(
+      kitsSelectRungs("name").map(
+        (sel) => () => supabase.from("kits").select(sel).not("name", "in", '("Decks","Remodels")').order("name"),
+      ),
+    );
     let so = rows.length;
     for (const k of (matKits ?? []) as any[]) {
       const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       for (const it of kitItems) {
+        const item = linkedItemOf(it);
         rows.push({
           list_id: list.id,
-          description: `${k.name} — ${it.description}`,
-          part_number: null,
+          description: `${k.name} — ${item ? item.description : it.description}`,
+          part_number: item?.code ?? null,
           quantity: Number(it.quantity) || 1,
-          unit: it.unit || "ea",
-          vendor: null,
-          est_cost: it.unit_price != null ? Number(it.unit_price) : null,
+          unit: item ? item.unit || "ea" : it.unit || "ea",
+          vendor: item?.supplier ?? null,
+          est_cost: item ? kitLineCost(it) : it.unit_price != null ? Number(it.unit_price) : null,
           sort_order: so++,
         });
       }

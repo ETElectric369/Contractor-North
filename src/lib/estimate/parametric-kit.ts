@@ -17,21 +17,23 @@
  * majority underneath them, which is where the per-trade duplication actually lives.
  */
 
+import { kitLineSizing, type KitLineRaw, type KitSizing } from "@/lib/kit-line";
+
 export type QtyRound = "up" | "nearest" | "none";
 
-/** A kit line that may carry coefficients. Superset of the flat kit_items row. */
-export type ParametricKitItem = {
-  description: string;
-  /** The flat quantity — used when no coefficient applies. Unchanged meaning from before 0166. */
-  quantity: number | string | null;
-  unit?: string | null;
-  unit_price?: number | string | null;
-  sort_order?: number | string | null;
-  qty_per_sqft?: number | string | null;
-  qty_per_lf?: number | string | null;
-  qty_min?: number | string | null;
-  qty_round?: string | null;
-};
+/** A kit line that may carry coefficients. Superset of the flat kit_items row — and, since 0240,
+ *  possibly LINKED to a price-list item that carries the coefficients instead (see sizingOf). */
+export type ParametricKitItem = KitLineRaw;
+
+/**
+ * WHERE THE COEFFICIENTS LIVE (0240). A linked line sizes from its ITEM — the rule "footings:
+ * 1 per 60 sq ft, minimum 4" belongs to the footing, not to one kit that happens to list it, so
+ * every kit that links the same item sizes the same way and an edit lands once. An unlinked line
+ * keeps sizing from its own columns, exactly as 0166 shipped it.
+ */
+export function sizingOf(item: ParametricKitItem): KitSizing {
+  return kitLineSizing(item);
+}
 
 /** The job's measurements. Everything optional — an unmeasured dimension must not silently be 0. */
 export type JobDimensions = {
@@ -79,8 +81,9 @@ export function kitItemQuantity(item: ParametricKitItem, dims: JobDimensions): C
   const flatRaw = num(item.quantity);
   const flat = flatRaw === null ? 1 : flatRaw;
 
-  const perSqft = num(item.qty_per_sqft);
-  const perLf = num(item.qty_per_lf);
+  const sizing = sizingOf(item);
+  const perSqft = sizing.qty_per_sqft;
+  const perLf = sizing.qty_per_lf;
   const sqft = num(dims.sqft);
   const linearFt = num(dims.linearFt);
 
@@ -114,9 +117,9 @@ export function kitItemQuantity(item: ParametricKitItem, dims: JobDimensions): C
     parts.push(`${perLf} × ${linearFt} lf`);
   }
 
-  const min = num(item.qty_min);
+  const min = sizing.qty_min;
   const floored = min !== null && raw < min ? min : raw;
-  const how = (item.qty_round === "nearest" || item.qty_round === "none" ? item.qty_round : "up") as QtyRound;
+  const how = (sizing.qty_round === "nearest" || sizing.qty_round === "none" ? sizing.qty_round : "up") as QtyRound;
   const quantity = applyRound(floored, how);
 
   const basis =
@@ -141,5 +144,8 @@ export function kitQuantities(
 /** True when any line of this kit is driven by measurements — the picker uses it to decide
  *  whether to ask for dimensions at all. */
 export function kitIsParametric(items: ParametricKitItem[]): boolean {
-  return (items ?? []).some((i) => (num(i.qty_per_sqft) ?? 0) > 0 || (num(i.qty_per_lf) ?? 0) > 0);
+  return (items ?? []).some((i) => {
+    const s = sizingOf(i);
+    return (s.qty_per_sqft ?? 0) > 0 || (s.qty_per_lf ?? 0) > 0;
+  });
 }

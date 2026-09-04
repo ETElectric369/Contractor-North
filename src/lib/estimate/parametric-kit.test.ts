@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { kitItemQuantity, kitQuantities, kitIsParametric, type ParametricKitItem } from "./parametric-kit";
+import { kitItemQuantity, kitQuantities, kitIsParametric, sizingOf, type ParametricKitItem } from "./parametric-kit";
 
 const item = (over: Partial<ParametricKitItem> = {}): ParametricKitItem => ({
   description: "Item",
@@ -105,5 +105,49 @@ describe("whole-kit helpers", () => {
   it("PostgREST numeric-as-string values are handled", () => {
     const r = kitItemQuantity(item({ quantity: "4", qty_per_sqft: "0.5", qty_min: "2" }), { sqft: 10 });
     expect(r.quantity).toBe(5);
+  });
+});
+
+describe("a LINKED line sizes from its ITEM (0240)", () => {
+  const linkedTo = (itemSizing: Record<string, unknown>, lineOver: Partial<ParametricKitItem> = {}): ParametricKitItem =>
+    item({
+      quantity: 6,
+      price_list_item_id: "pli",
+      price_list_items: { id: "pli", description: "Footing", unit: "ea", buy_price: 30, markup_pct: 0, ...itemSizing },
+      ...lineOver,
+    });
+
+  it("sizingOf reads the item's coefficients when linked, the line's when not", () => {
+    expect(sizingOf(linkedTo({ qty_per_sqft: 1 / 60, qty_min: 4, qty_round: "up" }))).toEqual({
+      qty_per_sqft: 1 / 60, qty_per_lf: null, qty_min: 4, qty_round: "up",
+    });
+    expect(sizingOf(item({ qty_per_lf: 3 }))).toEqual({ qty_per_sqft: null, qty_per_lf: 3, qty_min: null, qty_round: null });
+  });
+
+  it("the item's rule drives the quantity; the line's stale coefficients are ignored", () => {
+    // The line still carries a pre-0240 rule that would give 300 × 1 = 300; the item says
+    // footings: 1 per 60 sq ft, min 4 — the item wins, because the rule belongs to the footing.
+    const r = kitItemQuantity(linkedTo({ qty_per_sqft: 1 / 60, qty_min: 4, qty_round: "up" }, { qty_per_sqft: 1 }), { sqft: 300 });
+    expect(r.quantity).toBe(5);
+    expect(r.parametric).toBe(true);
+  });
+
+  it("a linked item with NO rule is a flat line — the line's stale coefficients do not resurrect it", () => {
+    const r = kitItemQuantity(linkedTo({}, { qty_per_sqft: 1 }), { sqft: 300 });
+    expect(r.quantity).toBe(6);
+    expect(r.parametric).toBe(false);
+  });
+
+  it("quantity stays the LINE's when the item's rule can't size (dimension unmeasured)", () => {
+    const r = kitItemQuantity(linkedTo({ qty_per_sqft: 0.5 }), { sqft: null });
+    expect(r.quantity).toBe(6);
+    expect(r.basis).toMatch(/not measured/i);
+  });
+
+  it("kitIsParametric and kitQuantities see through the link", () => {
+    expect(kitIsParametric([linkedTo({ qty_per_lf: 3 })])).toBe(true);
+    expect(kitIsParametric([linkedTo({})])).toBe(false);
+    const rows = kitQuantities([linkedTo({ qty_per_lf: 3 }, { sort_order: 1 }), item({ description: "flat", sort_order: 0 })], { linearFt: 10 });
+    expect(rows.map((r) => r.quantity)).toEqual([1, 30]);
   });
 });

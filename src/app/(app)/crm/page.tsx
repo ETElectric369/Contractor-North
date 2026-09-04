@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
 import { ImportCustomersButton } from "./import-customers-button";
 import { DuplicatesButton } from "./duplicates-button";
+import { SortControl } from "./sort-control";
 import { sanitizeSearch } from "@/lib/utils";
+import { crmOrderColumn, formatCrmSort, parseCrmSort } from "@/lib/crm-order";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -16,15 +18,21 @@ export const dynamic = "force-dynamic";
 export default async function CrmPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; sort?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, sort } = await searchParams;
   const supabase = await createClient();
 
+  // Andrew: "Sorting ABCD or otherwise." ?sort= drives the query (A→Z by name when absent); the
+  // bar next to the search box writes it. Name is the tie-break under any other column so a
+  // company's contacts read alphabetically inside their group instead of in insertion order.
+  const spec = parseCrmSort(sort);
+  const order = crmOrderColumn(spec);
   let query = supabase
     .from("customers")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order(order.column, { ascending: order.ascending, nullsFirst: order.nullsFirst });
+  if (order.column !== "name") query = query.order("name", { ascending: true });
 
   const term = sanitizeSearch(q);
   if (term) {
@@ -48,17 +56,23 @@ export default async function CrmPage({
         </div>
       </PageHeader>
 
-      <form className="mb-4">
-        <div className="relative max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input
-            name="q"
-            defaultValue={q}
-            placeholder="Search customers…"
-            className="pl-9"
-          />
-        </div>
-      </form>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <form className="w-full max-w-md">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              name="q"
+              defaultValue={q}
+              placeholder="Search customers…"
+              className="pl-9"
+            />
+            {/* A GET submit rebuilds the URL from the form alone — carry the chosen order across
+                so searching doesn't silently reset the list to A→Z. */}
+            {sort && <input type="hidden" name="sort" value={formatCrmSort(spec)} />}
+          </div>
+        </form>
+        <SortControl />
+      </div>
 
       {customers.length === 0 ? (
         <EmptyState

@@ -3,10 +3,16 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
 
 type ToastKind = "success" | "error" | "info";
-type ToastItem = { id: number; message: string; kind: ToastKind };
+/** An optional button inside the toast — THE undo trail for inline edits (the price list's
+ *  click-to-edit cells save on blur, so "Saved · Undo" is the only save game they need). */
+export type ToastAction = { label: string; onClick: () => void };
+type ToastItem = { id: number; message: string; kind: ToastKind; action?: ToastAction };
 
-/** Call to show a toast: `const toast = useToast(); toast("Saved", "success")`. */
-const ToastCtx = createContext<(message: string, kind?: ToastKind) => void>(() => {});
+type ToastFn = (message: string, kind?: ToastKind, action?: ToastAction) => void;
+
+/** Call to show a toast: `const toast = useToast(); toast("Saved", "success")`.
+ *  With an action: `toast("Saved", "success", { label: "Undo", onClick })` — stays 6s. */
+const ToastCtx = createContext<ToastFn>(() => {});
 export function useToast() {
   return useContext(ToastCtx);
 }
@@ -20,12 +26,18 @@ let _id = 0;
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const toast = useCallback((message: string, kind: ToastKind = "info") => {
-    if (!message) return;
-    const id = ++_id;
-    setToasts((t) => [...t, { id, message, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === "error" ? 5000 : 2800);
-  }, []);
+  const dismiss = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
+  const toast = useCallback<ToastFn>(
+    (message, kind = "info", action) => {
+      if (!message) return;
+      const id = ++_id;
+      setToasts((t) => [...t, { id, message, kind, action }]);
+      // An action toast lingers long enough to be tapped; an error long enough to be read.
+      const ttl = action ? 6000 : kind === "error" ? 5000 : 2800;
+      setTimeout(() => dismiss(id), ttl);
+    },
+    [dismiss],
+  );
 
   return (
     <ToastCtx.Provider value={toast}>
@@ -36,11 +48,23 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto max-w-sm animate-in fade-in slide-in-from-bottom-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg ${
+            className={`pointer-events-auto flex max-w-sm items-center gap-3 animate-in fade-in slide-in-from-bottom-2 rounded-lg px-4 py-2.5 text-sm font-medium text-white shadow-lg ${
               t.kind === "error" ? "bg-red-600" : t.kind === "success" ? "bg-emerald-600" : "bg-slate-800"
             }`}
           >
-            {t.message}
+            <span>{t.message}</span>
+            {t.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  dismiss(t.id);
+                  t.action?.onClick();
+                }}
+                className="shrink-0 rounded-md border border-white/40 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide hover:bg-white/15"
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -4,23 +4,22 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { updatePriceItem } from "./actions";
+import { useToast } from "@/components/toast";
+import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
+import { updatePriceItem, type PriceItemInput } from "./actions";
+import type { PriceItem } from "./price-list-math";
 
-interface PriceItem {
-  id: string;
-  code: string | null;
-  description: string;
-  category: string | null;
-  supplier: string | null;
-  unit: string;
-  buy_price: number;
-  markup_pct: number;
-}
-
-export function EditPriceItemButton({ item }: { item: PriceItem }) {
+/**
+ * The words of an item — code, description, category, supplier — plus unit and the 0240 sizing
+ * rule. Numbers (cost, markup) edit inline in the table; they are here too so a person who opened
+ * the modal isn't sent back out to change one. Saves report through the toast with an Undo that
+ * writes the previous values back.
+ */
+export function EditPriceItemButton({ item, sizingAvailable = false }: { item: PriceItem; sizingAvailable?: boolean }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -29,8 +28,14 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
   const [desc, setDesc] = useState(item.description);
   const [category, setCategory] = useState(item.category ?? "");
   const [supplier, setSupplier] = useState(item.supplier ?? "");
-  const [buy, setBuy] = useState(item.buy_price);
-  const [markup, setMarkup] = useState(item.markup_pct);
+  const [unit, setUnit] = useState(item.unit ?? "ea");
+  const [buy, setBuy] = useState(Number(item.buy_price) || 0);
+  const [markup, setMarkup] = useState(Number(item.markup_pct) || 0);
+  // SIZING (0240). 0/blank = no coefficient — a flat quantity wherever this item lands in a kit.
+  const [perSqft, setPerSqft] = useState(Number(item.qty_per_sqft) || 0);
+  const [perLf, setPerLf] = useState(Number(item.qty_per_lf) || 0);
+  const [qtyMin, setQtyMin] = useState(Number(item.qty_min) || 0);
+  const [rounding, setRounding] = useState(item.qty_round ?? "up");
 
   function openModal() {
     // reset to the item's current values each time it opens
@@ -38,29 +43,57 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
     setDesc(item.description);
     setCategory(item.category ?? "");
     setSupplier(item.supplier ?? "");
-    setBuy(item.buy_price);
-    setMarkup(item.markup_pct);
+    setUnit(item.unit ?? "ea");
+    setBuy(Number(item.buy_price) || 0);
+    setMarkup(Number(item.markup_pct) || 0);
+    setPerSqft(Number(item.qty_per_sqft) || 0);
+    setPerLf(Number(item.qty_per_lf) || 0);
+    setQtyMin(Number(item.qty_min) || 0);
+    setRounding(item.qty_round ?? "up");
     setError(null);
     setOpen(true);
   }
 
+  const dirty =
+    code !== (item.code ?? "") || desc !== item.description || category !== (item.category ?? "") ||
+    supplier !== (item.supplier ?? "") || unit !== (item.unit ?? "ea") || buy !== (Number(item.buy_price) || 0) ||
+    markup !== (Number(item.markup_pct) || 0) || perSqft !== (Number(item.qty_per_sqft) || 0) ||
+    perLf !== (Number(item.qty_per_lf) || 0) || qtyMin !== (Number(item.qty_min) || 0) || rounding !== (item.qty_round ?? "up");
+
   function save() {
     setError(null);
     if (!desc.trim()) return setError("Description is required.");
-    start(async () => {
-      const res = await updatePriceItem(item.id, {
-        code,
-        description: desc,
-        category,
-        supplier,
-        buy_price: buy,
-        markup_pct: markup,
+    const patch: PriceItemInput = { code, description: desc, category, supplier, unit, buy_price: buy, markup_pct: markup };
+    const before: PriceItemInput = {
+      code: item.code ?? "", description: item.description, category: item.category ?? "", supplier: item.supplier ?? "",
+      unit: item.unit ?? "ea", buy_price: Number(item.buy_price) || 0, markup_pct: Number(item.markup_pct) || 0,
+    };
+    // Sizing rides only when the columns exist — a deploy can land before its migration, and a
+    // write naming an absent column would fail the whole save, not just the sizing.
+    if (sizingAvailable) {
+      Object.assign(patch, { qty_per_sqft: perSqft || null, qty_per_lf: perLf || null, qty_min: qtyMin || null, qty_round: rounding || null });
+      Object.assign(before, {
+        qty_per_sqft: item.qty_per_sqft ?? null, qty_per_lf: item.qty_per_lf ?? null, qty_min: item.qty_min ?? null, qty_round: item.qty_round ?? null,
       });
+    }
+    start(async () => {
+      const res = await updatePriceItem(item.id, patch);
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
+      toast("Saved", "success", {
+        label: "Undo",
+        onClick: () => {
+          updatePriceItem(item.id, before).then((r) => {
+            toast(r.ok ? "Undone" : r.error ?? "Couldn't undo.", r.ok ? "success" : "error");
+            router.refresh();
+          });
+        },
+      });
       router.refresh();
     });
   }
+
+  const sized = perSqft > 0 || perLf > 0 || qtyMin > 0;
 
   return (
     <>
@@ -75,13 +108,14 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit price item"
+        title="Edit Price Item"
+        dirty={dirty}
         footer={
           <ModalActions
             onCancel={() => setOpen(false)}
             onSave={save}
             saving={pending}
-            saveLabel="Save changes"
+            saveLabel="Save Changes"
           />
         }
       >
@@ -105,7 +139,12 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
               <Input id="epi-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="epi-buy">Buy $</Label>
+              <Label htmlFor="epi-unit">Unit</Label>
+              <Input id="epi-unit" value={unit} list={UNIT_DATALIST_ID} onChange={(e) => setUnit(e.target.value)} placeholder="ea" />
+            </div>
+            <div />
+            <div>
+              <Label htmlFor="epi-buy">Cost $</Label>
               <NumberInput id="epi-buy" value={buy} onValueChange={setBuy} />
             </div>
             <div>
@@ -113,6 +152,35 @@ export function EditPriceItemButton({ item }: { item: PriceItem }) {
               <NumberInput id="epi-mk" value={markup} onValueChange={setMarkup} />
             </div>
           </div>
+
+          {/* SIZED BY THE JOB (0240) — the kit magic, living on the item. An item that knows it
+              needs so-much per square foot fills its own quantity in wherever a kit uses it,
+              from the walk-through measurements. Blank = a flat quantity, as today. */}
+          {sizingAvailable && (
+            <details className="rounded-lg border border-slate-200 p-3" open={sized}>
+              <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                Sized by the job
+                {sized && <span className="ml-2 text-xs font-normal text-brand">on</span>}
+              </summary>
+              <p className="mt-2 text-xs text-slate-500">
+                Leave blank for a fixed quantity. Fill one in and any kit using this item works out its own
+                quantity from the measurements taken on the walk-through.
+              </p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div><Label htmlFor="epi-sqft">Per square foot</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
+                <div><Label htmlFor="epi-lf">Per linear foot</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
+                <div><Label htmlFor="epi-min">Never fewer than</Label><NumberInput id="epi-min" placeholder="—" value={qtyMin} onValueChange={setQtyMin} /></div>
+                <div>
+                  <Label htmlFor="epi-round">Rounding</Label>
+                  <Select id="epi-round" value={rounding} onChange={(e) => setRounding(e.target.value)}>
+                    <option value="up">Round up (whole units)</option>
+                    <option value="nearest">Nearest</option>
+                    <option value="none">Exact — no rounding</option>
+                  </Select>
+                </div>
+              </div>
+            </details>
+          )}
         </div>
       </Modal>
     </>

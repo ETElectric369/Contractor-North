@@ -65,6 +65,66 @@ describe("kitItemsToPickerRows", () => {
     }
   });
 
+  it("a LINKED line opens LIVE from the book, marked up for THIS customer (0240)", () => {
+    // The gap this closes: a kit line was a frozen copy, so it ignored the customer's pricing
+    // level and quoted whatever price was current when the kit was authored.
+    const linked = {
+      id: "l",
+      description: "STALE — snapshot",
+      quantity: 2,
+      unit: "box",
+      unit_price: 999,
+      sort_order: 0,
+      price_list_item_id: "pli",
+      price_list_items: { id: "pli", code: "RACO 936", description: "4-inch box", unit: "EA", buy_price: 2.5, markup_pct: 0 },
+    };
+    // No level: item markup (0) → org default.
+    const [a] = kitItemsToPickerRows([linked], { orgDefaultPct: 40 });
+    expect(a.linked).toBe(true);
+    expect(a.description).toBe("RACO 936 — 4-inch box");
+    expect(a.unit).toBe("ea");
+    expect(a.unit_price).toBe(3.5);
+    expect(a.cost).toBe(2.5);
+    expect(a.code).toBe("RACO 936");
+    expect(a.price_list_item_id).toBe("pli");
+    expect(a.quantity).toBe(2); // quantity stays the LINE's
+    expect(a.checked).toBe(false); // the opt-in rule is untouched
+    // A level re-prices it — even a 0% level.
+    expect(kitItemsToPickerRows([linked], { orgDefaultPct: 40, levelPct: 10 })[0].unit_price).toBe(2.75);
+    expect(kitItemsToPickerRows([linked], { orgDefaultPct: 40, levelPct: 0 })[0].unit_price).toBe(2.5);
+    // No pricing context at all: still live, item markup → 0 — never the stale snapshot.
+    expect(kitItemsToPickerRows([linked])[0].unit_price).toBe(2.5);
+  });
+
+  it("a caller that owns THE rule as a function (AddLineItems' markupFor) wins for linked lines", () => {
+    const linked = {
+      id: "l",
+      description: "x",
+      quantity: 1,
+      unit: "ea",
+      unit_price: 0,
+      sort_order: 0,
+      price_list_item_id: "pli",
+      price_list_items: { id: "pli", code: null, description: "Wire", unit: "ft", buy_price: 1, markup_pct: 25 },
+    };
+    const [r] = kitItemsToPickerRows([linked], { orgDefaultPct: 40, levelPct: 10, markupFor: () => 50 });
+    expect(r.unit_price).toBe(1.5);
+    // …and is ignored for a frozen line, which keeps its own price.
+    const [f] = kitItemsToPickerRows(
+      [{ id: "f", description: "Frozen", quantity: 1, unit: "ea", unit_price: 7, sort_order: 0 }],
+      { orgDefaultPct: 40, levelPct: 10, markupFor: () => 50 },
+    );
+    expect(f.unit_price).toBe(7);
+    expect(f.linked).toBe(false);
+  });
+
+  it("an UNLINKED line keeps its frozen price whatever the customer's level", () => {
+    const frozen = { id: "f", description: "Frozen", quantity: 1, unit: "ea", unit_price: 7, sort_order: 0 };
+    expect(kitItemsToPickerRows([frozen], { orgDefaultPct: 40, levelPct: 10 })[0].unit_price).toBe(7);
+    expect(kitItemsToPickerRows([frozen], { orgDefaultPct: 40, levelPct: 0 })[0].unit_price).toBe(7);
+    expect(kitItemsToPickerRows([frozen])[0].cost).toBeNull();
+  });
+
   it("keeps an explicit qty 0 at 0 (and, like every row, opens unchecked)", () => {
     // The write path (kit-actions updateKitItems/addKitItem) persists 0 as a legal template
     // value; re-inflating it to 1 here silently re-billed the line on the next estimate.

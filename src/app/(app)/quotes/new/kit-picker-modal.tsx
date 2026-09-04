@@ -11,7 +11,9 @@ import {
   kitSelectionSubtotal,
   type KitPickerRow,
   type KitItemRaw,
+  type KitPickerPricing,
 } from "@/lib/kit-picker";
+import { BookOpen } from "lucide-react";
 import { kitIsParametric, kitQuantities, type ParametricKitItem } from "@/lib/estimate/parametric-kit";
 import type { DraftLineItem } from "../actions";
 
@@ -31,15 +33,21 @@ export function KitPickerModal({
   onClose,
   onAdd,
   measured,
+  pricing,
 }: {
   kit: KitForPicker;
   /** What the walk-through already measured — prefilled so the sizing boxes open with the real
    *  numbers rather than zeros. Typing a measurement a second time is how the two copies drift. */
   measured?: { sqft?: number | null; linearFt?: number | null };
+  /** 0240: how a LINKED kit line prices for THIS customer — the org default plus the selected
+   *  customer's level (or the caller's own markupFor). Before this, a kit line was a frozen copy
+   *  and ignored the customer's level entirely. */
+  pricing?: KitPickerPricing;
   onClose: () => void;
   onAdd: (lines: DraftLineItem[]) => void;
 }) {
-  const [rows, setRows] = useState<KitPickerRow[]>(() => kitItemsToPickerRows(kit.kit_items));
+  const [rows, setRows] = useState<KitPickerRow[]>(() => kitItemsToPickerRows(kit.kit_items, pricing));
+  const linkedCount = rows.filter((r) => r.linked).length;
   const [err] = useState<string | null>(null);
 
   /**
@@ -102,6 +110,13 @@ export function KitPickerModal({
         <p className="text-xs text-slate-500">
           Tick the lines this estimate needs. Qty and price edits apply to THIS estimate only —
           the kit itself is unchanged.
+          {linkedCount > 0 && (
+            <>
+              {" "}
+              <BookOpen className="inline h-3 w-3 text-brand" /> lines are priced from the Price List for this
+              customer.
+            </>
+          )}
         </p>
 
         {parametric && (
@@ -161,7 +176,8 @@ export function KitPickerModal({
                   aria-label={`Include ${r.description}`}
                 />
               </div>
-              <div className="col-span-11 sm:col-span-5">
+              <div className="col-span-11 flex items-center gap-1.5 sm:col-span-5">
+                {r.linked && <BookOpen className="h-3.5 w-3.5 shrink-0 text-brand" aria-label="Priced from the Price List" />}
                 <Input
                   value={r.description}
                   onChange={(e) => patchRow(idx, { description: e.target.value })}

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -71,15 +72,9 @@ export default async function QuoteDetailPage({
       .eq("archived", false)
       .order("description")
       .limit(2000),
-    (async () => {
-      const base = "id, description, quantity, unit, unit_price, sort_order";
-      const withSizing = await supabase
-        .from("kits")
-        .select(`id, name, kit_items(${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
-        .order("name");
-      if (!withSizing.error) return withSizing;
-      return supabase.from("kits").select(`id, name, kit_items(${base})`).order("name");
-    })(),
+    // THE SHARED SELECT SHAPE (kit-line.ts) — sizing + the 0240 price-list link, tolerant of
+    // either migration not having landed yet, so a linked kit line prices live for this customer.
+    firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
 

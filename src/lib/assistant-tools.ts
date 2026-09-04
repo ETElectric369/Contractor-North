@@ -1776,7 +1776,9 @@ export async function runDataTool(
           const lvl = (cust as any)?.pricing_levels;
           const row = Array.isArray(lvl) ? lvl[0] : lvl;
           const pct = Number(row?.markup_pct);
-          if (Number.isFinite(pct) && pct > 0) levelPct = pct;
+          // A 0% level is a REAL level (bill-at-cost customers) — the builder honors it via
+          // effectiveMarkupPct; Nort used to drop it and quote item/org markup instead.
+          if (Number.isFinite(pct) && pct >= 0) levelPct = pct;
         }
         const priced = await priceMaterial(supabase as any, {
           description: String(input.description ?? ""),

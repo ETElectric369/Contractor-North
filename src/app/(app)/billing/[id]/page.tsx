@@ -6,6 +6,7 @@ import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
+import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
@@ -63,15 +64,10 @@ export default async function InvoicePage({
         .limit(2000),
       // Kits too — the invoice editor never offered them, so a line that exists as a saved list
       // had to be typed by hand here.
-      (async () => {
-        const base = "id, description, quantity, unit, unit_price, sort_order";
-        const withSizing = await supabase
-          .from("kits")
-          .select(`id, name, kit_items(${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
-          .order("name");
-        if (!withSizing.error) return withSizing;
-        return supabase.from("kits").select(`id, name, kit_items(${base})`).order("name");
-      })(),
+      // THE SHARED SELECT SHAPE (kit-line.ts): sizing + the 0240 price-list link, tolerant of
+      // either migration not having landed — so a linked kit line prices live for this customer
+      // here exactly as it does in the quote composer, never from its frozen snapshot.
+      firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
       isDraft

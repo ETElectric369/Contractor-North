@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -226,19 +227,12 @@ export default async function NewQuotePage({
         .order("description")
         .limit(2000),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
-      // kit_items ids ride along so the Kit Picker can write edits back to the kit. The 0166
-      // coefficient columns are requested FIRST and the query retried without them if they aren't
-      // there yet — a deploy precedes its migration, and naming an absent column fails the whole
-      // query rather than degrading, which would empty the kit picker until the migration landed.
-      (async () => {
-        const cols = "id, description, quantity, unit, unit_price, sort_order";
-        const withCoeffs = await supabase
-          .from("kits")
-          .select(`id, name, kit_items(${cols}, qty_per_sqft, qty_per_lf, qty_min, qty_round)`)
-          .order("name");
-        if (!withCoeffs.error) return withCoeffs;
-        return supabase.from("kits").select(`id, name, kit_items(${cols})`).order("name");
-      })(),
+      // THE SHARED SELECT SHAPE (kit-line.ts): kit lines with their 0166 sizing and, since 0240,
+      // their price-list link + the item embed, so a linked line prices LIVE for this customer in
+      // the picker. Three rungs, most capable first — a deploy precedes its migration, and naming
+      // an absent column fails the whole query rather than degrading, which would empty the kit
+      // picker until the migration landed.
+      firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
   // THE WALK-THROUGH'S PICKS, AS REAL LINES. Descriptions and units come from the org's own book

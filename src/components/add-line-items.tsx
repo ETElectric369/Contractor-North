@@ -4,7 +4,10 @@ import { useMemo, useState } from "react";
 import { ListPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
+import { sellPrice } from "@/lib/pricing/markup";
 import { KitPickerModal, type KitForPicker } from "@/app/(app)/quotes/new/kit-picker-modal";
+import type { KitPickerPricing } from "@/lib/kit-picker";
+import type { KitLinkedItem } from "@/lib/kit-line";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 
 /**
@@ -49,14 +52,14 @@ export type PriceItemLite = {
   markup_pct: number;
 };
 
-const sell = (buy: number, markupPct: number) => buy * (1 + (markupPct || 0) / 100);
-
 export function AddLineItems({
   priceItems = [],
   kits = [],
   /** The effective markup for a book item — the caller owns THE markup rule (customer level →
    *  item → org default), because only it knows which customer is selected. */
   markupFor,
+  orgDefaultPct,
+  levelPct,
   /** Measurements from the walk-through, so a self-sizing kit opens with real numbers. */
   measured,
   onAdd,
@@ -65,6 +68,10 @@ export function AddLineItems({
   priceItems?: PriceItemLite[];
   kits?: KitForPicker[];
   markupFor?: (p: PriceItemLite) => number;
+  /** Optional plain numbers for the kit picker's linked lines (0240); when `markupFor` is given
+   *  it wins, so a caller that already owns THE rule need not pass these. */
+  orgDefaultPct?: number;
+  levelPct?: number | null;
   measured?: { sqft?: number | null; linearFt?: number | null };
   onAdd: (lines: DraftLineItem[]) => void;
   className?: string;
@@ -74,6 +81,27 @@ export function AddLineItems({
   const [pickerKit, setPickerKit] = useState<KitForPicker | null>(null);
 
   const markup = (p: PriceItemLite) => (markupFor ? markupFor(p) : p.markup_pct || 0);
+
+  // KITS PRICE THE WAY THE TYPEAHEAD DOES (0240). A linked kit line is a price-list item, so it
+  // runs through the SAME markupFor the book picker above uses — the two "add" doors on one page
+  // cannot quote the same item at two prices. This is the gap kits had: a frozen copy that
+  // ignored the customer's pricing level.
+  const kitPricing: KitPickerPricing = {
+    orgDefaultPct: orgDefaultPct ?? 0,
+    levelPct: levelPct ?? null,
+    markupFor: markupFor
+      ? (item: KitLinkedItem) =>
+          markupFor({
+            id: item.id,
+            code: item.code ?? null,
+            description: item.description,
+            category: item.category ?? null,
+            unit: item.unit ?? "ea",
+            buy_price: Number(item.buy_price) || 0,
+            markup_pct: Number(item.markup_pct) || 0,
+          })
+      : undefined,
+  };
 
   // BROWSE ON EMPTY. Tapping the box with nothing typed shows the book rather than an empty
   // dropdown — you cannot search a catalog you have never seen. This was the fix that only ever
@@ -92,7 +120,7 @@ export function AddLineItems({
         description: p.code ? `${p.code} — ${p.description}` : p.description,
         quantity: 1,
         unit: p.unit || "ea",
-        unit_price: Math.round(sell(p.buy_price, markup(p)) * 100) / 100,
+        unit_price: sellPrice(p.buy_price, markup(p)),
       },
     ]);
     setQuery("");
@@ -130,7 +158,7 @@ export function AddLineItems({
                       {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
                       {p.description}
                     </span>
-                    <span className="shrink-0 text-slate-600">{formatCurrency(sell(p.buy_price, markup(p)))}</span>
+                    <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, markup(p)))}</span>
                   </button>
                 </li>
               ))}
@@ -177,6 +205,7 @@ export function AddLineItems({
         <KitPickerModal
           kit={pickerKit}
           measured={measured}
+          pricing={kitPricing}
           onClose={() => setPickerKit(null)}
           onAdd={(lines) => {
             onAdd(lines);

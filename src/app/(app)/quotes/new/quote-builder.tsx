@@ -15,7 +15,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
@@ -72,8 +72,6 @@ const blankItem = (): DraftLineItem => ({
   unit: "ea",
   unit_price: 0,
 });
-
-const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
 
 /** SWAP A LINE AGAINST THE BOOK (Andrew, live-testing the plan take-off: "we ended up going
  *  with a metal roof ... had that been a drop down, I would have just dropped it in there —
@@ -260,8 +258,8 @@ export function QuoteBuilder({
   const levelRate = selectedCust?.level_rate;
   const markupFor = (p: PriceItemLite) =>
     effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
-  // The one sell-price rule, shared with the Add picker: buy × (1 + markup%) rounded to cents.
-  const priced = (p: PriceItemLite) => Math.round(p.buy_price * (1 + (markupFor(p) || 0) / 100) * 100) / 100;
+  // The one sell-price rule, shared with the Add picker: sellPrice (lib/pricing/markup.ts), cents.
+  const priced = (p: PriceItemLite) => sellPrice(p.buy_price, markupFor(p));
 
   // Deck generator rates through the SAME rule as markupFor — D-code lines honor the selected
   // customer's level + the org default exactly like a hand-picked line, and re-price when the

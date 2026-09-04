@@ -45,10 +45,6 @@ interface TaxRateLite { id: string; name: string; rate: number; is_default: bool
 interface CustomerLite { id: string; name: string; }
 interface JobLite { id: string; name: string | null; job_number: string | null; customer_id: string | null; }
 
-// Markup is resolved through effectiveMarkupPct (level → item → org default) at both
-// call sites, so the invoice picker prices like the quote builder — never raw net cost.
-const sellPrice = (buy: number, markup: number) => buy * (1 + (markup || 0) / 100);
-
 /** ISO timestamp → "YYYY-MM-DD" in local time, for a <input type=date>. */
 const toDateInput = (iso?: string | null) => {
   if (!iso) return "";

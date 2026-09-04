@@ -1,4 +1,4 @@
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 
 /**
  * TURNING THE ESTIMATOR'S JSON INTO PRICED LINES — the last place a model's number can become a
@@ -86,8 +86,6 @@ export type LineMapContext = {
   laddered?: Map<string, LadderPrice>;
 };
 
-const sell = (cost: number, pct: number) => Math.round(cost * (1 + pct / 100) * 100) / 100;
-
 export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): DraftLineItem {
   const kind = i.kind === "labor" ? "labor" : "material";
 
@@ -156,7 +154,7 @@ export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): Draf
     description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the order sheet resolves them
     quantity: Number(i.quantity) || 1,
     unit: bookUnit || modelUnit || "ea",
-    unit_price: sell(cost, pct),
+    unit_price: sellPrice(cost, pct),
     flag: pl
       ? unitMismatch
         ? `priced per ${bookUnit} — quantity was given in ${modelUnit}; check it`

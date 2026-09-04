@@ -131,7 +131,7 @@ export async function priceMaterial(
 }
 
 function markupBasis(levelPct: number | null, itemPct: number): string {
-  if (levelPct != null && levelPct > 0) return "the customer's pricing level";
+  if (levelPct != null && levelPct >= 0) return "the customer's pricing level"; // a 0% level is a real level
   if (itemPct > 0) return "this item's own book markup";
   return "the org default markup";
 }

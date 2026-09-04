@@ -33,3 +33,38 @@ export function effectiveMarkupPct({
   if (Number.isFinite(def) && def > 0) return def;
   return 0;
 }
+
+/* ── THE SELL ARITHMETIC, ONCE. Ten call sites each carried their own `buy * (1 + pct/100)` with
+   different rounding (none / toFixed(2) / Math.round). These are the only four functions that
+   should ever turn cost into sell and back. Cents everywhere; markup to the column's two
+   decimals (markup_pct is numeric(7,2)) so a typed sell comes back as typed; margin — display
+   only — to one. ── */
+
+/** Sell price from cost and markup %, rounded to cents. */
+export function sellPrice(buy: number, markupPct: number): number {
+  const b = Number(buy) || 0;
+  const p = Number(markupPct) || 0;
+  return Math.round(b * (1 + p / 100) * 100) / 100;
+}
+
+/** Markup % implied by a cost and a sell price (the back-solve when someone types the sell). */
+export function markupFromSell(buy: number, sell: number): number {
+  const b = Number(buy) || 0;
+  const s = Number(sell) || 0;
+  if (b <= 0) return 0;
+  return Math.round(((s / b) - 1) * 10000) / 100;
+}
+
+/** Margin % (profit over SELL) for a given markup % — a 25% markup is a 20% margin. */
+export function marginFromMarkup(markupPct: number): number {
+  const p = Number(markupPct) || 0;
+  if (p <= -100) return 0;
+  return Math.round((p / (100 + p)) * 1000) / 10;
+}
+
+/** Markup % for a target margin % — the other direction of the same identity. */
+export function markupFromMargin(marginPct: number): number {
+  const m = Number(marginPct) || 0;
+  if (m >= 100) return 0;
+  return Math.round((m / (100 - m)) * 10000) / 100;
+}
