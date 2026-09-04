@@ -72,7 +72,7 @@ export function AddLineItems({
    *  it wins, so a caller that already owns THE rule need not pass these. */
   orgDefaultPct?: number;
   levelPct?: number | null;
-  measured?: { sqft?: number | null; linearFt?: number | null };
+  measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   onAdd: (lines: DraftLineItem[]) => void;
   className?: string;
 }) {

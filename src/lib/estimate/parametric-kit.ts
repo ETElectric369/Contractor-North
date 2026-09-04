@@ -39,7 +39,16 @@ export function sizingOf(item: ParametricKitItem): KitSizing {
 export type JobDimensions = {
   sqft?: number | null;
   linearFt?: number | null;
+  /** 0241: every measured walk-through number by its need key (plus area_sqft / length_lf). */
+  byKey?: Record<string, number | null | undefined> | null;
 };
+
+/** The measurement an item is counted per — a built-in dimension or a walk-through need's value. */
+export function measurementValue(dims: JobDimensions, key: string): number | null {
+  if (key === "area_sqft") return num(dims.sqft);
+  if (key === "length_lf") return num(dims.linearFt);
+  return num(dims.byKey?.[key]);
+}
 
 const num = (x: unknown): number | null => {
   if (x === null || x === undefined || x === "") return null;
@@ -82,6 +91,23 @@ export function kitItemQuantity(item: ParametricKitItem, dims: JobDimensions): C
   const flat = flatRaw === null ? 1 : flatRaw;
 
   const sizing = sizingOf(item);
+  // 0241 — counted per ONE measurement. Wins over the legacy pair when set.
+  if (sizing.sized_by && sizing.qty_per !== null && sizing.qty_per > 0) {
+    const v = measurementValue(dims, sizing.sized_by);
+    if (v === null || v <= 0) {
+      return { quantity: flat, basis: `needs ${sizing.sized_by.replace(/_/g, " ")} — not measured, using the kit quantity`, parametric: false };
+    }
+    const raw = sizing.qty_per * v;
+    const min = sizing.qty_min;
+    const floored = min !== null && raw < min ? min : raw;
+    const how = (sizing.qty_round === "nearest" || sizing.qty_round === "none" ? sizing.qty_round : "up") as QtyRound;
+    const quantity = applyRound(floored, how);
+    const basis =
+      `${sizing.qty_per} × ${v} ${sizing.sized_by.replace(/_/g, " ")}` +
+      (min !== null && raw < min ? `, raised to the minimum of ${min}` : "") +
+      (how === "up" ? ", rounded up" : how === "nearest" ? ", rounded" : "");
+    return { quantity, basis, parametric: true };
+  }
   const perSqft = sizing.qty_per_sqft;
   const perLf = sizing.qty_per_lf;
   const sqft = num(dims.sqft);

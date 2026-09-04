@@ -12,6 +12,7 @@ import { SortFilterBar, useSortFilter } from "@/components/sort-filter-bar";
 import { applyFilters, groupRows, searchRows, sortRows, type FilterChip, type SortOption } from "@/lib/sort-filter";
 import { formatCurrency } from "@/lib/utils";
 import { UnitSelect } from "@/components/unit-select";
+import type { MeasurementOption } from "@/lib/playbook/measurements";
 import { unitLooksShifted } from "@/lib/pricing/import-damage";
 import { archivePriceItem, createPriceItem, deletePriceItem, updatePriceItem } from "./actions";
 import { addItemsToKit } from "./kit-actions";
@@ -79,6 +80,7 @@ export function PriceListManager({
   defaultMarkupPct = 0,
   kitsByItem = {},
   kits = [],
+  measurements = [],
   sizingAvailable = false,
 }: {
   items: PriceItem[];
@@ -88,6 +90,8 @@ export function PriceListManager({
   kitsByItem?: Record<string, string[]>;
   /** The org's kits — targets for "Add to Kit" from the checkboxes. */
   kits?: { id: string; name: string }[];
+  /** 0241: what this org can count an item by (built-ins + its measured walk-through needs). */
+  measurements?: MeasurementOption[];
   /** True when the 0240 sizing columns came back from the DB — gates the sizing fields. */
   sizingAvailable?: boolean;
 }) {
@@ -539,7 +543,7 @@ export function PriceListManager({
                               </button>
                             ) : (
                               <>
-                                <EditPriceItemButton item={r} sizingAvailable={sizingAvailable} />
+                                <EditPriceItemButton item={r} sizingAvailable={sizingAvailable} measurements={measurements} />
                                 <button
                                   onClick={() => void setArchived(r, true)}
                                   disabled={busy}

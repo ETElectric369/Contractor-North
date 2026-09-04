@@ -45,7 +45,7 @@ describe("kitLineView — a frozen line is untouched", () => {
     expect(v.unit_price).toBe(9.99); // the org default and the level do NOT touch a frozen price
     expect(v.cost).toBeNull();
     expect(v.code).toBeNull();
-    expect(v.sizing).toEqual({ qty_per_sqft: null, qty_per_lf: null, qty_min: null, qty_round: null });
+    expect(v.sizing).toEqual({ sized_by: null, qty_per: null, qty_per_sqft: null, qty_per_lf: null, qty_min: null, qty_round: null });
   });
 
   it("a stale price_list_item_id with no embed is frozen, not broken", () => {
@@ -113,12 +113,12 @@ describe("kitLineView — a linked line is LIVE from the item", () => {
 describe("sizing lives with the line's source of truth", () => {
   it("a frozen line sizes from its own coefficients", () => {
     const s = kitLineSizing(frozen({ qty_per_sqft: "0.5", qty_min: 4, qty_round: "up" }));
-    expect(s).toEqual({ qty_per_sqft: 0.5, qty_per_lf: null, qty_min: 4, qty_round: "up" });
+    expect(s).toEqual({ sized_by: null, qty_per: null, qty_per_sqft: 0.5, qty_per_lf: null, qty_min: 4, qty_round: "up" });
   });
 
   it("a linked line sizes from the ITEM, and the line's stale coefficients are ignored", () => {
     const line = linked({ qty_per_lf: 3, qty_round: "nearest" }, { qty_per_sqft: 99, qty_min: 99 });
-    expect(kitLineSizing(line)).toEqual({ qty_per_sqft: null, qty_per_lf: 3, qty_min: null, qty_round: "nearest" });
+    expect(kitLineSizing(line)).toEqual({ sized_by: null, qty_per: null, qty_per_sqft: null, qty_per_lf: 3, qty_min: null, qty_round: "nearest" });
     expect(kitLineView(line, { orgDefaultPct: 0 }).sizing.qty_per_lf).toBe(3);
   });
 });
@@ -137,14 +137,16 @@ describe("helpers", () => {
     expect(kitLineCost(null)).toBeNull();
   });
 
-  it("kitsSelectRungs: three rungs, most capable first, all carrying the kit columns", () => {
+  it("kitsSelectRungs: four rungs, most capable first, all carrying the kit columns", () => {
     const rungs = kitsSelectRungs("id, name, category");
-    expect(rungs).toHaveLength(3);
+    expect(rungs).toHaveLength(4);
     expect(rungs[0]).toContain("price_list_items(");
-    expect(rungs[0]).toContain("qty_per_sqft");
-    expect(rungs[1]).not.toContain("price_list_item");
-    expect(rungs[1]).toContain("qty_per_sqft");
-    expect(rungs[2]).not.toContain("qty_per_sqft");
+    expect(rungs[0]).toContain("sized_by"); // 0241 generic pair
+    expect(rungs[1]).toContain("price_list_items(");
+    expect(rungs[1]).not.toContain("sized_by"); // 0240 link, pre-0241
+    expect(rungs[2]).not.toContain("price_list_item");
+    expect(rungs[2]).toContain("qty_per_sqft");
+    expect(rungs[3]).not.toContain("qty_per_sqft");
     expect(rungs.every((r) => r.startsWith("id, name, category, kit_items("))).toBe(true);
   });
 

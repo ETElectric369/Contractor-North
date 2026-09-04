@@ -11,6 +11,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import { formulaSentence } from "./price-list-math";
+import { measurementLabel, type MeasurementOption } from "@/lib/playbook/measurements";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { UnitSelect } from "@/components/unit-select";
 import { kitLineView, lineDisplayName, linkedItemOf, type KitLineRaw, type KitSizing } from "@/lib/kit-line";
@@ -215,13 +216,14 @@ function LinkItemModal({ item, priceItems, orgDefaultPct, onClose }: { item: Kit
   );
 }
 
-function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onChange: (s: SizingDraft) => void; idPrefix: string }) {
+function SizingFields({ sizing, onChange, idPrefix, measurements = [] }: { sizing: SizingDraft; onChange: (s: SizingDraft) => void; idPrefix: string; measurements?: MeasurementOption[] }) {
   const sq = Number(sizing.perSqft) || 0;
   const lf = Number(sizing.perLf) || 0;
-  const mode = sq > 0 ? "sqft" : lf > 0 ? "lf" : "fixed";
+  const per = Number(sizing.qtyPer) || 0;
+  const mode = sizing.sizedBy && per > 0 ? `m:${sizing.sizedBy}` : sq > 0 ? "sqft" : lf > 0 ? "lf" : "fixed";
   return (
     <>
-      <p className="mt-2 text-xs font-medium text-slate-700">{formulaSentence(sizing)}</p>
+      <p className="mt-2 text-xs font-medium text-slate-700">{formulaSentence({ ...sizing, measurementLabel: measurementLabel(sizing.sizedBy, measurements) })}</p>
       {/* ONE choice first; the numbers appear only for a rule that needs them (a strap is a fixed count). */}
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="col-span-2">
@@ -231,14 +233,26 @@ function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onC
             value={mode}
             onChange={(e) => {
               const m = e.target.value;
-              onChange({ ...sizing, perSqft: m === "sqft" ? sq || 1 : "", perLf: m === "lf" ? lf || 1 : "" });
+              if (m.startsWith("m:")) {
+                onChange({ ...sizing, sizedBy: m.slice(2), qtyPer: per || 1, perSqft: "", perLf: "" });
+                return;
+              }
+              onChange({ ...sizing, sizedBy: "", qtyPer: "", perSqft: m === "sqft" ? sq || 1 : "", perLf: m === "lf" ? lf || 1 : "" });
             }}
           >
             <option value="fixed">Fixed Quantity — typed on the estimate</option>
             <option value="sqft">Per Sq Ft of the Job</option>
             <option value="lf">Per Linear Ft of the Job</option>
+            {measurements.filter((m) => !m.builtIn).map((m) => (
+              <option key={m.key} value={`m:${m.key}`}>
+                Per {m.label}{m.unit ? ` (${m.unit})` : ""}
+              </option>
+            ))}
           </Select>
         </div>
+        {mode.startsWith("m:") && (
+          <div><Label htmlFor={`${idPrefix}-per`}>How many per {measurementLabel(sizing.sizedBy, measurements)}</Label><NumberInput id={`${idPrefix}-per`} placeholder="e.g. 1" value={per} onValueChange={(n) => onChange({ ...sizing, qtyPer: n })} /></div>
+        )}
         {mode === "sqft" && (
           <div><Label htmlFor={`${idPrefix}-sqft`}>How many per sq ft</Label><NumberInput id={`${idPrefix}-sqft`} placeholder="e.g. 1" value={sq} onValueChange={(n) => onChange({ ...sizing, perSqft: n })} /></div>
         )}
@@ -263,11 +277,14 @@ function SizingFields({ sizing, onChange, idPrefix }: { sizing: SizingDraft; onC
   );
 }
 
-type SizingDraft = { perSqft: number | ""; perLf: number | ""; qtyMin: number | ""; rounding: string };
+type SizingDraft = { perSqft: number | ""; perLf: number | ""; qtyMin: number | ""; rounding: string; sizedBy: string; qtyPer: number | "" };
 const draftOf = (s: KitSizing): SizingDraft => ({
   perSqft: s.qty_per_sqft ?? "", perLf: s.qty_per_lf ?? "", qtyMin: s.qty_min ?? "", rounding: s.qty_round ?? "up",
+  sizedBy: s.sized_by ?? "", qtyPer: s.qty_per ?? "",
 });
 const sizingOfDraft = (d: SizingDraft): KitSizing => ({
+  sized_by: d.sizedBy || null,
+  qty_per: !d.sizedBy || d.qtyPer === "" || d.qtyPer === 0 ? null : Number(d.qtyPer),
   qty_per_sqft: d.perSqft === "" || d.perSqft === 0 ? null : Number(d.perSqft),
   qty_per_lf: d.perLf === "" || d.perLf === 0 ? null : Number(d.perLf),
   qty_min: d.qtyMin === "" || d.qtyMin === 0 ? null : Number(d.qtyMin),
@@ -275,12 +292,14 @@ const sizingOfDraft = (d: SizingDraft): KitSizing => ({
 });
 /** The same rule? A NULL rounding behaves as "up" (0240's column comment), so the two read equal. */
 const sameSizing = (a: KitSizing, b: KitSizing) =>
+  (a.sized_by ?? null) === (b.sized_by ?? null) &&
+  (a.qty_per ?? null) === (b.qty_per ?? null) &&
   (a.qty_per_sqft ?? null) === (b.qty_per_sqft ?? null) &&
   (a.qty_per_lf ?? null) === (b.qty_per_lf ?? null) &&
   (a.qty_min ?? null) === (b.qty_min ?? null) &&
   (a.qty_round ?? "up") === (b.qty_round ?? "up");
 
-function EditItemModal({ item, orgDefaultPct, onClose }: { item: KitItem; orgDefaultPct: number; onClose: () => void }) {
+function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { item: KitItem; orgDefaultPct: number; measurements?: MeasurementOption[]; onClose: () => void }) {
   const router = useRouter();
   const toast = useToast();
   const view = kitLineView(item, { orgDefaultPct });
@@ -389,7 +408,7 @@ function EditItemModal({ item, orgDefaultPct, onClose }: { item: KitItem; orgDef
               ? "This rule is saved on the price-list item, so every kit that uses it sizes the same way."
               : "Leave blank for a fixed quantity. Fill one in and this line works out its own quantity from the measurements taken on the walk-through."}
           </p>
-          <SizingFields sizing={sizing} onChange={setSizing} idPrefix="ei" />
+          <SizingFields sizing={sizing} onChange={setSizing} idPrefix="ei" measurements={measurements} />
         </details>
 
         {err && <p className="text-sm text-red-600">{err}</p>}
@@ -398,7 +417,7 @@ function EditItemModal({ item, orgDefaultPct, onClose }: { item: KitItem; orgDef
   );
 }
 
-export function KitsManager({ kits, priceItems, defaultMarkupPct = 0 }: { kits: Kit[]; priceItems: PriceItem[]; defaultMarkupPct?: number }) {
+export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measurements = [] }: { kits: Kit[]; priceItems: PriceItem[]; defaultMarkupPct?: number; measurements?: MeasurementOption[] }) {
   const router = useRouter();
   const toast = useToast();
   const [name, setName] = useState("");
@@ -520,7 +539,7 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0 }: { kits: 
       )}
 
       {editingKit && <EditKitModal kit={editingKit} onClose={() => setEditingKit(null)} />}
-      {editingItem && <EditItemModal item={editingItem} orgDefaultPct={defaultMarkupPct} onClose={() => setEditingItem(null)} />}
+      {editingItem && <EditItemModal item={editingItem} orgDefaultPct={defaultMarkupPct} measurements={measurements} onClose={() => setEditingItem(null)} />}
       {linkingItem && <LinkItemModal item={linkingItem} priceItems={priceItems} orgDefaultPct={defaultMarkupPct} onClose={() => setLinkingItem(null)} />}
     </div>
   );

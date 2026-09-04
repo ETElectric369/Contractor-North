@@ -106,3 +106,11 @@ describe("formulaSentence — the sizing rule in words", () => {
     expect(formulaSentence({ perSqft: 1, perLf: 3, qtyMin: 0, rounding: "none" })).toBe("Counts 1 per sq ft of the job plus 3 per linear ft of the job, exact.");
   });
 });
+
+describe("formulaSentence — counted per a measurement (0241)", () => {
+  it("names the measurement the item is counted per", () => {
+    expect(formulaSentence({ perSqft: 0, perLf: 0, qtyMin: 2, rounding: "up", sizedBy: "run_ft", qtyPer: 0.1, measurementLabel: "Conduit run (ft)" })).toBe(
+      "Counts 0.1 per Conduit run (ft), never fewer than 2, rounded up to whole units.",
+    );
+  });
+});

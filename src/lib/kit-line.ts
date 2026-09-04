@@ -22,8 +22,12 @@
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { normalizeUnit } from "@/lib/pricing/units";
 
-/** The 0166 sizing rule — on the item when linked, on the line when not. */
+/** The sizing rule — on the item when linked, on the line when not. 0241 made it generic: an item
+ *  is counted per ONE measurement (`sized_by` = a walk-through need key, or the built-ins area_sqft /
+ *  length_lf), `qty_per` of it per unit; qty_per_sqft / qty_per_lf are the 0166 legacy pair. */
 export type KitSizing = {
+  sized_by: string | null;
+  qty_per: number | null;
   qty_per_sqft: number | null;
   qty_per_lf: number | null;
   qty_min: number | null;
@@ -45,6 +49,8 @@ export type KitLinkedItem = {
   qty_per_lf?: number | string | null;
   qty_min?: number | string | null;
   qty_round?: string | null;
+  sized_by?: string | null;
+  qty_per?: number | string | null;
 };
 
 /** A kit_items row as the pages select it. Every 0166/0240 column is optional because the query
@@ -121,7 +127,10 @@ export function kitLineCost(line: KitLineRaw | null | undefined): number | null 
 /** The sizing rule this line sizes by: the item's when linked, the line's when not. */
 export function kitLineSizing(line: KitLineRaw | null | undefined): KitSizing {
   const src: Partial<KitLinkedItem & KitLineRaw> = linkedItemOf(line) ?? line ?? {};
+  const sizedBy = typeof (src as { sized_by?: unknown }).sized_by === "string" && (src as { sized_by?: string }).sized_by ? (src as { sized_by: string }).sized_by : null;
   return {
+    sized_by: sizedBy,
+    qty_per: num((src as { qty_per?: unknown }).qty_per),
     qty_per_sqft: num(src.qty_per_sqft),
     qty_per_lf: num(src.qty_per_lf),
     qty_min: num(src.qty_min),
@@ -177,9 +186,13 @@ export const KIT_ITEM_BASE_COLS = "id, description, quantity, unit, unit_price, 
 export const KIT_ITEM_SIZING_COLS = "qty_per_sqft, qty_per_lf, qty_min, qty_round";
 export const KIT_ITEM_LINK_COLS =
   "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, qty_per_sqft, qty_per_lf, qty_min, qty_round)";
+/** 0241: the item embed with the generic sizing pair. Tried FIRST; falls to KIT_ITEM_LINK_COLS pre-migration. */
+export const KIT_ITEM_LINK_COLS_V2 =
+  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per)";
 
 /** The kit_items(...) column lists, most capable first. */
 export const KIT_ITEM_SELECT_RUNGS = [
+  `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}, ${KIT_ITEM_LINK_COLS_V2}`,
   `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}, ${KIT_ITEM_LINK_COLS}`,
   `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}`,
   KIT_ITEM_BASE_COLS,

@@ -312,7 +312,7 @@ export function answersForEstimator(fields: InspectionField[], answers: Inspecti
 export function measurementsFromAnswers(
   fields: InspectionField[],
   answers: InspectionAnswers,
-): { sqft: number | null; linearFt: number | null } {
+): { sqft: number | null; linearFt: number | null; byKey: Record<string, number | null> } {
   fields = visibleFields(fields, answers); // never size a kit off a question that no longer applies
   const num = (key: string): number | null => {
     const v = answers[key];
@@ -342,5 +342,10 @@ export function measurementsFromAnswers(
   // Fall back to the footprint's perimeter, which is what railing actually runs along.
   const linearFt = explicitLf ?? (length !== null && width !== null ? 2 * (length + width) : null);
 
-  return { sqft, linearFt };
+  // 0241: EVERY measured number by its own key, so an item can be counted per conduit run,
+  // device count, ceiling height — whatever this org's walk-through asks — not just the
+  // deck's two dimensions. The built-ins ride along under their fixed keys.
+  const byKey: Record<string, number | null> = { area_sqft: sqft, length_lf: linearFt };
+  for (const f of fields) if (f.type === "number") byKey[f.key] = num(f.key);
+  return { sqft, linearFt, byKey };
 }

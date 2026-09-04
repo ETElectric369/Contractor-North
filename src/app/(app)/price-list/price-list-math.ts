@@ -23,6 +23,8 @@ export interface PriceItem {
   qty_per_lf?: number | null;
   qty_min?: number | null;
   qty_round?: string | null;
+  sized_by?: string | null;
+  qty_per?: number | null;
 }
 
 /** What one row shows. `usesDefault` = the item's own pct is 0 and the org default is filling
@@ -171,7 +173,17 @@ export function mappedFields(m: CsvMapping): Exclude<CsvField, "kit" | "quantity
 /** THE FORMULA, IN WORDS. The four sizing numbers were unreadable as a form ("Per square foot: 1,
  *  Never fewer than: 4, Rounding: up" — Erik: "hard to understand what's going on from a human
  *  perspective"). One sentence says what the item will do on an estimate. */
-export function formulaSentence(f: { perSqft: number | "" | null | undefined; perLf: number | "" | null | undefined; qtyMin: number | "" | null | undefined; rounding: string | null | undefined }): string {
+export function formulaSentence(f: {
+  perSqft: number | "" | null | undefined;
+  perLf: number | "" | null | undefined;
+  qtyMin: number | "" | null | undefined;
+  rounding: string | null | undefined;
+  /** 0241: counted per ONE measurement — wins over the legacy pair when set. */
+  sizedBy?: string | null;
+  qtyPer?: number | "" | null;
+  /** What to call that measurement (from measurementLabel); falls back to the key. */
+  measurementLabel?: string | null;
+}): string {
   const n = (v: unknown) => {
     const x = Number(v);
     return Number.isFinite(x) && x > 0 ? x : 0;
@@ -181,8 +193,12 @@ export function formulaSentence(f: { perSqft: number | "" | null | undefined; pe
   const lf = n(f.perLf);
   const min = n(f.qtyMin);
   const parts: string[] = [];
-  if (sq > 0) parts.push(`${fmt(sq)} per sq ft of the job`);
-  if (lf > 0) parts.push(`${fmt(lf)} per linear ft of the job`);
+  const per = n(f.qtyPer);
+  if (f.sizedBy && per > 0) parts.push(`${fmt(per)} per ${f.measurementLabel || f.sizedBy.replace(/_/g, " ")}`);
+  else {
+    if (sq > 0) parts.push(`${fmt(sq)} per sq ft of the job`);
+    if (lf > 0) parts.push(`${fmt(lf)} per linear ft of the job`);
+  }
   if (!parts.length) return "Fixed quantity — you type the number on the estimate.";
   let s = `Counts ${parts.join(" plus ")}`;
   if (min > 0) s += `, never fewer than ${fmt(min)}`;

@@ -11,6 +11,7 @@ import { UnitSelect } from "@/components/unit-select";
 import { updatePriceItem, type PriceItemInput } from "./actions";
 import type { PriceItem } from "./price-list-math";
 import { formulaSentence } from "./price-list-math";
+import { measurementLabel, type MeasurementOption } from "@/lib/playbook/measurements";
 
 /**
  * The words of an item — code, description, category, supplier — plus unit and the 0240 sizing
@@ -18,7 +19,7 @@ import { formulaSentence } from "./price-list-math";
  * the modal isn't sent back out to change one. Saves report through the toast with an Undo that
  * writes the previous values back.
  */
-export function EditPriceItemButton({ item, sizingAvailable = false }: { item: PriceItem; sizingAvailable?: boolean }) {
+export function EditPriceItemButton({ item, sizingAvailable = false, measurements = [] }: { item: PriceItem; sizingAvailable?: boolean; measurements?: MeasurementOption[] }) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -37,6 +38,9 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
   const [perLf, setPerLf] = useState(Number(item.qty_per_lf) || 0);
   const [qtyMin, setQtyMin] = useState(Number(item.qty_min) || 0);
   const [rounding, setRounding] = useState(item.qty_round ?? "up");
+  // 0241: counted per ONE of the org's measurements (wins over the legacy pair when set).
+  const [sizedBy, setSizedBy] = useState(item.sized_by ?? "");
+  const [qtyPer, setQtyPer] = useState(Number(item.qty_per) || 0);
 
   function openModal() {
     // reset to the item's current values each time it opens
@@ -51,6 +55,8 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
     setPerLf(Number(item.qty_per_lf) || 0);
     setQtyMin(Number(item.qty_min) || 0);
     setRounding(item.qty_round ?? "up");
+    setSizedBy(item.sized_by ?? "");
+    setQtyPer(Number(item.qty_per) || 0);
     setError(null);
     setOpen(true);
   }
@@ -59,7 +65,8 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
     code !== (item.code ?? "") || desc !== item.description || category !== (item.category ?? "") ||
     supplier !== (item.supplier ?? "") || unit !== (item.unit ?? "ea") || buy !== (Number(item.buy_price) || 0) ||
     markup !== (Number(item.markup_pct) || 0) || perSqft !== (Number(item.qty_per_sqft) || 0) ||
-    perLf !== (Number(item.qty_per_lf) || 0) || qtyMin !== (Number(item.qty_min) || 0) || rounding !== (item.qty_round ?? "up");
+    perLf !== (Number(item.qty_per_lf) || 0) || qtyMin !== (Number(item.qty_min) || 0) || rounding !== (item.qty_round ?? "up") ||
+    sizedBy !== (item.sized_by ?? "") || qtyPer !== (Number(item.qty_per) || 0);
 
   function save() {
     setError(null);
@@ -72,9 +79,13 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
     // Sizing rides only when the columns exist — a deploy can land before its migration, and a
     // write naming an absent column would fail the whole save, not just the sizing.
     if (sizingAvailable) {
-      Object.assign(patch, { qty_per_sqft: perSqft || null, qty_per_lf: perLf || null, qty_min: qtyMin || null, qty_round: rounding || null });
+      Object.assign(patch, {
+        qty_per_sqft: perSqft || null, qty_per_lf: perLf || null, qty_min: qtyMin || null, qty_round: rounding || null,
+        sized_by: sizedBy || null, qty_per: sizedBy ? qtyPer || null : null,
+      });
       Object.assign(before, {
         qty_per_sqft: item.qty_per_sqft ?? null, qty_per_lf: item.qty_per_lf ?? null, qty_min: item.qty_min ?? null, qty_round: item.qty_round ?? null,
+        sized_by: item.sized_by ?? null, qty_per: item.qty_per ?? null,
       });
     }
     start(async () => {
@@ -94,7 +105,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
     });
   }
 
-  const sized = perSqft > 0 || perLf > 0 || qtyMin > 0;
+  const sized = perSqft > 0 || perLf > 0 || qtyMin > 0 || (!!sizedBy && qtyPer > 0);
 
   return (
     <>
@@ -167,7 +178,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
                 How many of this item a job needs, worked out from the walk-through measurements. Leave it all
                 blank and you type the quantity yourself.
               </p>
-              <p className="mt-1 text-xs font-medium text-slate-700">{formulaSentence({ perSqft, perLf, qtyMin, rounding })}</p>
+              <p className="mt-1 text-xs font-medium text-slate-700">{formulaSentence({ perSqft, perLf, qtyMin, rounding, sizedBy, qtyPer, measurementLabel: measurementLabel(sizedBy, measurements) })}</p>
               {/* ONE choice first (Erik: "these labels make no sense at all and don't apply to the item" —
                   a conduit strap has nothing to do with square feet). Fixed Quantity shows nothing else;
                   the coefficient, floor and rounding appear only for a rule that needs them. */}
@@ -176,9 +187,19 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
                   <Label htmlFor="epi-mode">How It&rsquo;s Counted</Label>
                   <Select
                     id="epi-mode"
-                    value={perSqft > 0 ? "sqft" : perLf > 0 ? "lf" : "fixed"}
+                    value={sizedBy && qtyPer > 0 ? `m:${sizedBy}` : perSqft > 0 ? "sqft" : perLf > 0 ? "lf" : "fixed"}
                     onChange={(e) => {
                       const m = e.target.value;
+                      if (m.startsWith("m:")) {
+                        // Counted per one of THIS company's measurements — the legacy pair steps aside.
+                        setSizedBy(m.slice(2));
+                        setQtyPer(qtyPer || 1);
+                        setPerSqft(0);
+                        setPerLf(0);
+                        return;
+                      }
+                      setSizedBy("");
+                      setQtyPer(0);
                       setPerSqft(m === "sqft" ? perSqft || 1 : 0);
                       setPerLf(m === "lf" ? perLf || 1 : 0);
                     }}
@@ -186,15 +207,23 @@ export function EditPriceItemButton({ item, sizingAvailable = false }: { item: P
                     <option value="fixed">Fixed Quantity — typed on the estimate</option>
                     <option value="sqft">Per Sq Ft of the Job</option>
                     <option value="lf">Per Linear Ft of the Job</option>
+                    {measurements.filter((m) => !m.builtIn).map((m) => (
+                      <option key={m.key} value={`m:${m.key}`}>
+                        Per {m.label}{m.unit ? ` (${m.unit})` : ""}
+                      </option>
+                    ))}
                   </Select>
                 </div>
+                {sizedBy && qtyPer > 0 && (
+                  <div><Label htmlFor="epi-per">How many per {measurementLabel(sizedBy, measurements)}</Label><NumberInput id="epi-per" placeholder="e.g. 1" value={qtyPer} onValueChange={setQtyPer} /></div>
+                )}
                 {perSqft > 0 && (
                   <div><Label htmlFor="epi-sqft">How many per sq ft</Label><NumberInput id="epi-sqft" placeholder="e.g. 1" value={perSqft} onValueChange={setPerSqft} /></div>
                 )}
                 {perLf > 0 && (
                   <div><Label htmlFor="epi-lf">How many per linear ft</Label><NumberInput id="epi-lf" placeholder="e.g. 3" value={perLf} onValueChange={setPerLf} /></div>
                 )}
-                {(perSqft > 0 || perLf > 0) && (
+                {(perSqft > 0 || perLf > 0 || (sizedBy && qtyPer > 0)) && (
                   <>
                     <div><Label htmlFor="epi-min">Never fewer than</Label><NumberInput id="epi-min" placeholder="—" value={qtyMin} onValueChange={setQtyMin} /></div>
                     <div>

@@ -34,6 +34,9 @@ export interface PriceItemInput {
   qty_per_lf?: number | null;
   qty_min?: number | null;
   qty_round?: string | null;
+  /** 0241: counted per this walk-through measurement (need key, or area_sqft / length_lf), so many per. */
+  sized_by?: string | null;
+  qty_per?: number | null;
 }
 
 const QTY_ROUND = new Set(["up", "nearest", "none"]);
@@ -95,11 +98,16 @@ export async function updatePriceItem(id: string, patch: PriceItemInput): Promis
     if (n <= -100) return { ok: false, error: "A markup below -100% would sell for less than nothing." };
     clean.markup_pct = Math.round(n * 100) / 100;
   }
-  for (const k of ["qty_per_sqft", "qty_per_lf", "qty_min"] as const) {
+  for (const k of ["qty_per_sqft", "qty_per_lf", "qty_min", "qty_per"] as const) {
     if (patch[k] === undefined) continue;
     const c = coeff(patch[k]);
     if (c === "bad") return { ok: false, error: "Sizing numbers must be zero or more." };
     clean[k] = c;
+  }
+  if (patch.sized_by !== undefined) {
+    const key = (patch.sized_by ?? "").trim();
+    if (key.length > 64) return { ok: false, error: "That measurement name is too long." };
+    clean.sized_by = key || null;
   }
   if (patch.qty_round !== undefined) {
     const r = patch.qty_round?.trim().toLowerCase() || null;

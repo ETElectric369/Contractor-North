@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Tabs } from "@/components/tabs";
 import { getOrgSettings } from "@/lib/org-settings";
+import { measurementOptions } from "@/lib/playbook/measurements";
+import { playbookForForm } from "@/lib/playbook/parse";
 import { UNIT_DATALIST_ID, UNIT_SUGGESTIONS } from "@/lib/pricing/units";
 import { firstThatWorks, kitsSelectRungs, type KitLineRaw } from "@/lib/kit-line";
 import type { PriceItem } from "./price-list-math";
@@ -16,6 +18,8 @@ export const dynamic = "force-dynamic";
 // which would empty the page until the migration ran. Same pattern the kits query used for 0166.
 const ITEM_BASE = "id, code, description, category, supplier, unit, buy_price, markup_pct, updated_at, archived";
 const ITEM_SIZING = "qty_per_sqft, qty_per_lf, qty_min, qty_round";
+// 0241: the generic "counted per" pair — tried first, retried without.
+const ITEM_SIZING_V2 = `${ITEM_SIZING}, sized_by, qty_per`;
 
 /** A kit as THE SHARED SELECT SHAPE (lib/kit-line.ts) hands it over — the same three-rung select
  *  the quote pages run, so a kit line prices identically here and on an estimate. */
@@ -26,6 +30,13 @@ export default async function PriceListPage() {
   const [itemsRes, kitsRes, { data: org }] = await Promise.all([
     (async () => {
       // Active rows first so the cap trims archived ones, never live ones.
+      const withV2 = await supabase
+        .from("price_list_items")
+        .select(`${ITEM_BASE}, ${ITEM_SIZING_V2}`)
+        .order("archived")
+        .order("description")
+        .limit(2000);
+      if (!withV2.error) return { data: withV2.data, sizingAvailable: true };
       const withSizing = await supabase
         .from("price_list_items")
         .select(`${ITEM_BASE}, ${ITEM_SIZING}`)
@@ -42,6 +53,10 @@ export default async function PriceListPage() {
     // price through THE markup rule (item → org default), not the item's raw markup alone.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
+  // 0241: what THIS company can count an item by — every form's playbook, measured number needs.
+  // Best-effort: no forms (or a pre-playbook org) just means the two built-in dimensions.
+  const { data: formRows } = await supabase.from("forms").select("schema, playbook").limit(20);
+  const measurements = measurementOptions(((formRows ?? []) as { schema?: unknown; playbook?: unknown }[]).map((f) => playbookForForm(f)));
   const defaultMarkupPct = getOrgSettings((org as { settings?: unknown } | null)?.settings).default_markup_pct;
 
   const allItems = ((itemsRes.data ?? []) as unknown) as PriceItem[];
@@ -83,6 +98,7 @@ export default async function PriceListPage() {
                 defaultMarkupPct={defaultMarkupPct}
                 kitsByItem={kitsByItem}
                 kits={kits.map((k) => ({ id: k.id, name: k.name }))}
+                measurements={measurements}
                 sizingAvailable={itemsRes.sizingAvailable}
               />
             ),
@@ -91,7 +107,7 @@ export default async function PriceListPage() {
             id: "kits",
             label: "Kits",
             count: kits.length,
-            content: <KitsManager kits={kits} priceItems={activeItems} defaultMarkupPct={defaultMarkupPct} />,
+            content: <KitsManager kits={kits} priceItems={activeItems} defaultMarkupPct={defaultMarkupPct} measurements={measurements} />,
           },
           {
             id: "paid",

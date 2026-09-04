@@ -88,7 +88,7 @@ export default async function NewQuotePage({
   let initialScope: string | undefined;
   // Square/linear feet from the walk-through, handed to the kit picker so its sizing boxes open
   // with the numbers the inspector already took.
-  let measured: { sqft: number | null; linearFt: number | null } | undefined;
+  let measured: { sqft: number | null; linearFt: number | null; byKey?: Record<string, number | null> } | undefined;
   const pickedScopes: { label: string; picks: ScopePick[] }[] = [];
   let captureInquiryId: string | undefined;
   let captureApptId: string | undefined; // verified appointment id — saveQuote stamps the write-up backlink on it

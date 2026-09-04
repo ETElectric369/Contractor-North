@@ -44,6 +44,8 @@ type BookItem = {
   qty_per_lf?: number | string | null;
   qty_min?: number | string | null;
   qty_round?: string | null;
+  sized_by?: string | null;
+  qty_per?: number | string | null;
 };
 
 type LineRow = {
@@ -74,7 +76,7 @@ const finite = (v: unknown): number | null => {
 async function loadBookItem(supabase: Db, id: string): Promise<BookItem | null> {
   const base = "id, code, description, unit, buy_price, markup_pct";
   const r = await firstThatWorks(
-    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
+    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per`, `${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
       (cols) => () => supabase.from("price_list_items").select(cols).eq("id", id).eq("archived", false).maybeSingle(),
     ),
   );
@@ -109,10 +111,12 @@ function snapshotOf(item: BookItem, orgDefaultPct: number) {
   };
 }
 
-const hasSizing = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?: unknown; qty_round?: unknown }) =>
-  finite(s.qty_per_sqft) !== null || finite(s.qty_per_lf) !== null || finite(s.qty_min) !== null || !!s.qty_round;
+const hasSizing = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?: unknown; qty_round?: unknown; sized_by?: unknown; qty_per?: unknown }) =>
+  finite(s.qty_per_sqft) !== null || finite(s.qty_per_lf) !== null || finite(s.qty_min) !== null || !!s.qty_round || !!s.sized_by;
 
-const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?: unknown; qty_round?: unknown }): KitSizing => ({
+const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?: unknown; qty_round?: unknown; sized_by?: unknown; qty_per?: unknown }): KitSizing => ({
+  sized_by: typeof s.sized_by === "string" && s.sized_by ? s.sized_by : null,
+  qty_per: finite(s.qty_per),
   qty_per_sqft: finite(s.qty_per_sqft),
   qty_per_lf: finite(s.qty_per_lf),
   qty_min: finite(s.qty_min),
@@ -122,11 +126,16 @@ const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?
 /** Validate + shape a sizing patch for either table. `undefined` = leave alone; null/"" = clear. */
 function sizingPatch(sizing: Partial<KitSizing>): { patch: Record<string, unknown>; error?: string } {
   const patch: Record<string, unknown> = {};
-  for (const k of ["qty_per_sqft", "qty_per_lf", "qty_min"] as const) {
+  for (const k of ["qty_per_sqft", "qty_per_lf", "qty_min", "qty_per"] as const) {
     if (sizing[k] === undefined) continue;
     const n = finite(sizing[k]);
     if (n !== null && n < 0) return { patch, error: "A sizing number can't be negative." };
     patch[k] = n && n > 0 ? n : null;
+  }
+  if (sizing.sized_by !== undefined) {
+    const key = (sizing.sized_by ?? "").trim();
+    if (key.length > 64) return { patch, error: "That measurement name is too long." };
+    patch.sized_by = key || null;
   }
   if (sizing.qty_round !== undefined) {
     const r = sizing.qty_round || null;

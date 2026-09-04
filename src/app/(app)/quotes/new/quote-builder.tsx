@@ -168,7 +168,7 @@ export function QuoteBuilder({
   /** Measurements the inspector already took on the walk-through (?capture=). They prefill the
    *  kit picker's sizing boxes, so nobody types a number twice — which is the whole reason the
    *  inspection sheet asks for them as NUMBERS instead of prose. */
-  measured?: { sqft?: number | null; linearFt?: number | null };
+  measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   preselected?: string;
   /** When launched from a job, the quote attaches to it. */
   jobId?: string;

@@ -119,9 +119,9 @@ describe("a LINKED line sizes from its ITEM (0240)", () => {
 
   it("sizingOf reads the item's coefficients when linked, the line's when not", () => {
     expect(sizingOf(linkedTo({ qty_per_sqft: 1 / 60, qty_min: 4, qty_round: "up" }))).toEqual({
-      qty_per_sqft: 1 / 60, qty_per_lf: null, qty_min: 4, qty_round: "up",
+      sized_by: null, qty_per: null, qty_per_sqft: 1 / 60, qty_per_lf: null, qty_min: 4, qty_round: "up",
     });
-    expect(sizingOf(item({ qty_per_lf: 3 }))).toEqual({ qty_per_sqft: null, qty_per_lf: 3, qty_min: null, qty_round: null });
+    expect(sizingOf(item({ qty_per_lf: 3 }))).toEqual({ sized_by: null, qty_per: null, qty_per_sqft: null, qty_per_lf: 3, qty_min: null, qty_round: null });
   });
 
   it("the item's rule drives the quantity; the line's stale coefficients are ignored", () => {
