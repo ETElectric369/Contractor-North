@@ -1,3 +1,4 @@
+import { voiceGate } from "@/lib/voice-gate";
 // Neural text-to-speech so Claude speaks with a real, intelligence-grade voice instead of
 // the OS robot. ElevenLabs is preferred (best quality + supports a cloned voice — Erik's
 // "hero's voice"); OpenAI is the simpler fallback. Returns mp3 audio. 503 if neither key
@@ -10,6 +11,8 @@ export const maxDuration = 30;
  *  Tells us which provider is configured and whether a real test call actually works, so a
  *  "still robotic" report is server-vs-client decidable without log spelunking. */
 export async function GET(req: Request) {
+  const gate = await voiceGate("tts", 120);
+  if (gate) return gate;
   const url = new URL(req.url);
   if (url.searchParams.get("diag") !== "1") {
     return new Response("POST text here, or GET ?diag=1 to check config.", { status: 200 });
@@ -59,6 +62,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const gate = await voiceGate("tts", 120);
+  if (gate) return gate;
   let text = "";
   try {
     text = String((await req.json())?.text ?? "");

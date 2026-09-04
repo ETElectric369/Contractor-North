@@ -16,11 +16,14 @@ describe("advance — recurring next-date math", () => {
     expect(advance("2026-12-15", "monthly")).toBe("2027-01-15");
     expect(advance("2026-11-20", "quarterly")).toBe("2027-02-20");
   });
-  // Documents the JS Date month rollover: monthly on the 31st overflows into the
-  // following month (Feb has no 31st). Locked here so a future change is intentional.
-  it("rolls a month-end date forward the way JS Date does (known edge)", () => {
-    expect(advance("2026-01-31", "monthly")).toBe("2026-03-03");
-    expect(advance("2024-02-29", "yearly")).toBe("2025-03-01");
+  // Month-end anchors CLAMP instead of rolling over — the rollover skipped a whole cycle
+  // (Jan 31 → Mar 3 meant February was never billed).
+  it("clamps a month-end date to the target month's last day", () => {
+    expect(advance("2026-01-31", "monthly")).toBe("2026-02-28");
+    expect(advance("2026-03-31", "monthly")).toBe("2026-04-30");
+    expect(advance("2026-01-30", "monthly")).toBe("2026-02-28");
+    expect(advance("2026-11-30", "quarterly")).toBe("2027-02-28");
+    expect(advance("2024-02-29", "yearly")).toBe("2025-02-28");
   });
 });
 

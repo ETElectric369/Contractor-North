@@ -25,17 +25,36 @@ function dedupKey(s: string): string {
  */
 export function reportError(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
-    console.error(`[${where}]`, e instanceof Error ? e.message : e, extra ?? "");
+    console.error(`[${where}]`, errorMessage(e), extra ?? "");
     logToDb(where, e, extra);
   } catch {
     /* never let reporting throw */
   }
 }
 
+/** The message of ANYTHING thrown. postgrest-js hands back errors as PLAIN OBJECTS (PostgrestError
+ *  is only thrown under throwOnError), so `String(e)` logged every Supabase failure as
+ *  "[object Object]" — and, because the dedup key is where::message, every distinct DB error at
+ *  one call site collapsed into ONE row. Now: message · details · hint · code, else JSON. */
+export function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const parts = [o.message, o.details, o.hint, o.code].filter((x): x is string => typeof x === "string" && x.length > 0);
+    if (parts.length) return parts.join(" · ");
+    try {
+      return JSON.stringify(e).slice(0, 500);
+    } catch {
+      /* circular — fall through */
+    }
+  }
+  return String(e ?? "");
+}
+
 /** Fire-and-forget upsert into error_events, deduped by a hash of where+message. */
 function logToDb(where: string, e: unknown, extra?: Record<string, unknown>): void {
   try {
-    const message = (e instanceof Error ? e.message : String(e ?? "")).slice(0, 500);
+    const message = errorMessage(e).slice(0, 500);
     const key = dedupKey(`${where}::${message}`);
     const sb = createServiceClient();
     void sb

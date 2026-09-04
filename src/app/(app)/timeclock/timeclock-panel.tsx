@@ -23,6 +23,7 @@ import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
 import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { translator } from "@/lib/i18n";
+import { useDictation } from "@/lib/use-dictation";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
@@ -248,38 +249,16 @@ export function TimeclockPanel({
     ]);
   }, [openEntry, openAllocations]);
 
-  // voice dictation (Web Speech API — Chrome/Safari)
-  const [listening, setListening] = useState(false);
-  const recogRef = useRef<any>(null);
-  const speechSupported =
-    typeof window !== "undefined" &&
-    (("webkitSpeechRecognition" in window) || ("SpeechRecognition" in window));
-
+  // Voice dictation — the shared press-to-talk turn (MediaRecorder → /api/transcribe), the same
+  // door /organize, the inspector and the tour use. This ran on raw webkitSpeechRecognition with
+  // no onerror and no fallback, so on an iPhone the button simply did nothing (Jason, 07-28) —
+  // the exact class cn-v740 moved /organize off, applied at one path and not this one.
+  const dictation = useDictation((text) => setNotes((prev) => (prev ? prev + " " : "") + text.trim()));
+  const listening = dictation.recording;
+  const speechSupported = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
   function toggleDictation() {
-    if (listening) {
-      recogRef.current?.stop();
-      setListening(false);
-      return;
-    }
-    const SR =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-    if (!SR) return;
-    const r = new SR();
-    r.continuous = true;
-    r.interimResults = false;
-    r.lang = "en-US"; // talk + transcribe; translation can post-process server-side
-    r.onresult = (e: any) => {
-      let text = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        text += e.results[i][0].transcript;
-      }
-      setNotes((prev) => (prev ? prev + " " : "") + text.trim());
-    };
-    r.onend = () => setListening(false);
-    r.start();
-    recogRef.current = r;
-    setListening(true);
+    if (dictation.recording) dictation.stop();
+    else void dictation.start();
   }
 
   function doClockIn() {
@@ -853,12 +832,13 @@ export function TimeclockPanel({
                     </>
                   ) : (
                     <>
-                      <Mic className="h-4 w-4 shrink-0" /> {t("tc_dictate")}
+                      <Mic className="h-4 w-4 shrink-0" /> {dictation.transcribing ? "…" : t("tc_dictate")}
                     </>
                   )}
                 </button>
               )}
             </div>
+            {dictation.error && <p className="mb-1 text-xs text-red-600">{dictation.error}</p>}
             <Textarea
               rows={3}
               placeholder={t("tc_summarize")}

@@ -584,6 +584,13 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: don't re-bill quoted scope onto a standard invoice on a draw job
+    // The same second-standard-invoice guard labor/costs/change orders already carry (GAP B): a
+    // job's quoted scope must not land on TWO standard invoices. Draws are exempt — they re-itemize
+    // and net via a credit line. This importer was the only one of the four without it.
+    if (!isDrawKind((inv as any).invoice_kind)) {
+      const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "quote");
+      if (clash) return { ok: false, error: `This job's quoted scope is already billed on ${clash}. Edit that invoice, or bill extra work as a progress payment.` };
+    }
   }
 
   let quoteId = inv.quote_id;
@@ -698,7 +705,7 @@ async function billedOnAnotherStandardInvoice(
   supabase: any,
   jobId: string,
   thisInvoiceId: string,
-  source: "labor" | "costs" | "change_orders",
+  source: "labor" | "costs" | "change_orders" | "quote",
 ): Promise<string | null> {
   const { data } = await supabase
     .from("invoices")

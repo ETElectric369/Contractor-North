@@ -100,7 +100,9 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
           if (attempt < 2) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
         }
       }
-      const res = await createBugReport({
+      let res: Awaited<ReturnType<typeof createBugReport>>;
+      try {
+        res = await createBugReport({
         page: pathname + (typeof window !== "undefined" ? window.location.search : ""),
         note: n,
         console: getLogs(),
@@ -108,7 +110,12 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
         viewport: typeof window !== "undefined" ? `${window.innerWidth}x${window.innerHeight}` : "",
         screenshotPath,
         orgId: collaborator ? orgId : undefined,
-      });
+        });
+      } catch {
+        // A dropped connection here used to throw out of the transition and take the WHOLE shell
+        // down to the root boundary (the "Load failed" rows in the error log). It's a retry, not a crash.
+        return setError("Couldn't send — check your connection and try again.");
+      }
       if (!res.ok) return setError(res.error ?? "Could not send.");
       shotRef.current = null;
       setSent(true);

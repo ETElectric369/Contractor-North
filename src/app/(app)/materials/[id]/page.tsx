@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { jobSiteLabel } from "@/lib/schedule-options";
 import { Briefcase, ListChecks } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
@@ -23,7 +24,7 @@ export default async function MaterialListPage({
 
   const { data: list } = await supabase
     .from("material_lists")
-    .select("*, jobs(id, job_number, name)")
+    .select("*, jobs(id, job_number, name, address, customers(name))")
     .eq("id", id)
     .maybeSingle();
 
@@ -53,10 +54,12 @@ export default async function MaterialListPage({
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-1.5">
-            <h1 className="text-2xl font-bold text-slate-900">{l.name}</h1>
+            {/* customer · address as the headline (cn-v829); the derived list name steps down to the meta row. */}
+            <h1 className="text-2xl font-bold text-slate-900">{l.jobs ? jobSiteLabel({ ...l.jobs, customer_name: l.jobs.customers?.name ?? null }) : l.name}</h1>
             <RenameListButton listId={l.id} name={l.name} jobId={l.jobs?.id ?? l.job_id ?? null} jobs={jobs ?? []} />
           </div>
           <div className="mt-1 flex items-center gap-3 text-sm text-slate-400">
+            {l.jobs && <span className="text-slate-500">{l.name}</span>}
             <span>Created {formatDate(l.created_at)}</span>
             {l.jobs && (
               <Link

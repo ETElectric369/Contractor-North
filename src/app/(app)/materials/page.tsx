@@ -5,7 +5,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
 import { NewListButton } from "./new-list-button";
-import { jobLabel } from "@/lib/schedule-options";
+import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export default async function MaterialsPage({
 
   let listQuery = supabase
     .from("material_lists")
-    .select("*, jobs(job_number, name), material_list_items(id)")
+    .select("*, jobs(job_number, name, address, customers(name)), material_list_items(id)")
     .order("created_at", { ascending: false });
   if (jobFilter) listQuery = listQuery.eq("job_id", jobFilter);
 
@@ -70,8 +70,11 @@ export default async function MaterialsPage({
                     <ListChecks className="h-5 w-5 text-brand" />
                   </div>
                   <div className="min-w-0">
+                    {/* THE ADDRESS IS THE HEADLINE (cn-v829): customer · address, never the job number
+                        (Erik, 09-01: "job number in the way, no address"). The list's own name is derived
+                        from the number and says nothing a person recognizes. */}
                     <div className="truncate font-medium text-slate-900">
-                      {l.name}
+                      {l.jobs ? jobSiteLabel({ ...l.jobs, customer_name: l.jobs.customers?.name ?? null }) : l.name}
                     </div>
                     <div className="mt-0.5 text-xs text-slate-400">
                       {l.material_list_items?.length ?? 0} items ·{" "}

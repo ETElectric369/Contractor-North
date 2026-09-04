@@ -148,13 +148,18 @@ export async function unmarkPeriodPaid(input: {
     .lt("clock_in", endIso);
   if (error) return { ok: false, error: dbError(error) };
 
-  await supabase
+  // THE SILENT-WRITE LAW on a money record: this delete's result was discarded, so a failed
+  // delete left the run row standing while the entries were already un-paid — and re-paying
+  // then doubled the accountant's gross. Read the result; say so if it didn't land.
+  const { error: runErr } = await supabase
     .from("payroll_runs")
     .delete()
     .eq("profile_id", input.profileId)
     .eq("period_start", input.periodStart)
     .eq("period_end", input.periodEnd)
-    .eq("kind", "base");
+    .eq("kind", "base")
+    .select("id");
+  if (runErr) return { ok: false, error: dbError(runErr) };
 
   revalidatePath("/payroll");
   revalidatePath("/timecards");
@@ -266,13 +271,18 @@ export async function unsettleMileage(input: {
     .lt("clock_in", endIso);
   if (error) return { ok: false, error: dbError(error) };
 
-  await supabase
+  // THE SILENT-WRITE LAW on a money record: this delete's result was discarded, so a failed
+  // delete left the run row standing while the entries were already un-paid — and re-paying
+  // then doubled the accountant's gross. Read the result; say so if it didn't land.
+  const { error: runErr } = await supabase
     .from("payroll_runs")
     .delete()
     .eq("profile_id", input.profileId)
     .eq("period_start", input.periodStart)
     .eq("period_end", input.periodEnd)
-    .eq("kind", "mileage");
+    .eq("kind", "mileage")
+    .select("id");
+  if (runErr) return { ok: false, error: dbError(runErr) };
 
   revalidatePath("/payroll");
   revalidatePath("/timecards");

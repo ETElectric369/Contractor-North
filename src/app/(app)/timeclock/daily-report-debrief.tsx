@@ -5,6 +5,7 @@ import { AudioLines, CheckCircle2, Mic, MicOff } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Textarea } from "@/components/ui/input";
 import { formatDuration } from "@/lib/utils";
+import { useDictation } from "@/lib/use-dictation";
 import { fileDailyReport, type DailyReportSummary } from "./actions";
 
 type Field = "did" | "mats";
@@ -31,40 +32,25 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
   const [error, setError] = useState<string | null>(null);
   const [filed, setFiled] = useState<DailyReportSummary | null>(null);
 
-  // Web Speech dictation (Chrome/Safari) — one recognizer, pointed at one field at a time.
+  // Dictation — the shared press-to-talk turn (MediaRecorder → /api/transcribe), one mic pointed at
+  // one field at a time. Raw SpeechRecognition had no onerror, so on iOS the mic failed silently.
+  const activeField = useRef<Field | null>(null);
   const [listening, setListening] = useState<Field | null>(null);
-  const recogRef = useRef<any>(null);
-  const speechSupported =
-    typeof window !== "undefined" &&
-    ("webkitSpeechRecognition" in window || "SpeechRecognition" in window);
-
+  const dictation = useDictation((text) => {
+    const set = activeField.current === "did" ? setDid : setMats;
+    set((prev) => (prev ? prev + " " : "") + text.trim());
+  });
+  const speechSupported = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
   function toggleDictation(field: Field) {
-    if (listening) {
-      // Detach onend BEFORE stopping — a late onend from the old recognizer would
-      // otherwise clear the listening state of the one we're about to start.
-      if (recogRef.current) recogRef.current.onend = null;
-      recogRef.current?.stop();
+    if (dictation.recording) {
+      // Stop first; the turn transcribes into the field it was started on. Tap again to start the other.
+      dictation.stop();
       setListening(null);
-      if (listening === field) return; // tapped the active mic — just stop
+      return;
     }
-    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SR) return;
-    const r = new SR();
-    r.continuous = true;
-    r.interimResults = false;
-    r.lang = "en-US";
-    r.onresult = (e: any) => {
-      let text = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        text += e.results[i][0].transcript;
-      }
-      const set = field === "did" ? setDid : setMats;
-      set((prev) => (prev ? prev + " " : "") + text.trim());
-    };
-    r.onend = () => setListening(null);
-    r.start();
-    recogRef.current = r;
+    activeField.current = field;
     setListening(field);
+    void dictation.start();
   }
 
   function submit() {
@@ -81,7 +67,7 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
   }
 
   function close() {
-    recogRef.current?.stop();
+    dictation.cancel(); // leaving the screen: mic released, audio discarded
     setListening(null);
     onClose();
   }
@@ -92,16 +78,16 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
         type="button"
         onClick={() => toggleDictation(field)}
         className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium ${
-          listening === field ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+          dictation.recording && listening === field ? "bg-red-50 text-red-600" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
         }`}
       >
-        {listening === field ? (
+        {dictation.recording && listening === field ? (
           <>
             <MicOff className="h-4 w-4 shrink-0" /> Stop
           </>
         ) : (
           <>
-            <Mic className="h-4 w-4 shrink-0" /> Dictate
+            <Mic className="h-4 w-4 shrink-0" /> {dictation.transcribing && listening === field ? "…" : "Dictate"}
           </>
         )}
       </button>

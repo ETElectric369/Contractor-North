@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { voiceGate } from "@/lib/voice-gate";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -13,6 +14,8 @@ export const maxDuration = 30;
  * key it 503'd → "transcription error".)
  */
 export async function POST(req: Request) {
+  const gate = await voiceGate("stt", 90);
+  if (gate) return gate;
   const elKey = process.env.ELEVENLABS_API_KEY;
   const oaKey = process.env.OPENAI_API_KEY;
   if (!elKey && !oaKey) {

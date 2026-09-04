@@ -3,6 +3,11 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Lint is run separately in CI; don't fail production builds on lint.
   eslint: { ignoreDuringBuilds: true },
+  // Pin every client to the deployment that served it. Alone this only stamps requests with
+  // x-deployment-id; with Vercel Skew Protection switched on in the project settings, an old
+  // tab keeps talking to ITS build instead of the new one — the "e[o] is not a function" /
+  // "unexpected response" rows in the error log. Undefined locally, harmless.
+  deploymentId: process.env.VERCEL_DEPLOYMENT_ID,
   // The PDF engine's headless chromium must load from node_modules at runtime, not be
   // webpack-bundled (its brotli-packed binary breaks under bundling).
   serverExternalPackages: ["@sparticuz/chromium", "puppeteer-core"],
