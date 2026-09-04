@@ -41,6 +41,9 @@ export type Result = {
   token?: string;
   /** …and the lead's phone, so the UI can prefill the sms: handoff. */
   phone?: string | null;
+  /** Firm inspection booking: WHEN it landed (org-local date + time and the UTC instant), so a
+   *  caller — the assistant above all — reads back the real time instead of assuming one. */
+  data?: { starts_at: string; date: string; time: string };
 };
 
 function orNull(s: string): string | null {
@@ -528,7 +531,11 @@ export async function convertInquiry(
     revalidatePath("/leads");
     revalidatePath("/schedule");
     revalidatePath("/planner");
-    return { ok: true, redirect: `/schedule?view=day&date=${startDate}` };
+    // WHEN IT LANDED, in the result — the assistant reads this back instead of narrating a
+    // time it never controlled (Nort told Justin "run the questions now" about a visit it had
+    // just booked two days out at 9 AM).
+    const startTime = /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00";
+    return { ok: true, redirect: `/schedule?view=day&date=${startDate}`, data: { starts_at: startsAtIso, date: startDate, time: startTime } };
   }
 
   // ESTIMATE — the deferred-customer path (Erik's flow: a prospect becomes a saved Contact ONLY when

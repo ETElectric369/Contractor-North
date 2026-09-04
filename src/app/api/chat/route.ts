@@ -10,6 +10,8 @@ import {
 import { getOrgSettings } from "@/lib/org-settings";
 import { recordAiUsage, aiSpendExceeded, modelFor } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
+import { after } from "next/server";
+import { todayStrInTz } from "@/lib/tz";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
@@ -271,6 +273,15 @@ export async function POST(req: Request) {
   // before (stable → memory → voice → recall), so zero behavior change; but the volatile tail can no
   // longer bust the big cached prefix, so the cache finally HITS on repeat requests + agentic rounds.
   let volatilePrompt = "";
+  // THE CLOCK. Nothing ever told Nort what day or time it is — every 'today', 'tomorrow',
+  // 'Friday', 'right now' it turned into a tool date was a guess (Justin's 'walkthrough right
+  // now' landed two days out). Company-local, so a 7 AM Pacific ask is still today. Volatile
+  // block: it changes every minute and must never key the cached prefix.
+  {
+    const tz = orgS.timezone;
+    const stamp = new Date().toLocaleString("en-US", { timeZone: tz, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+    volatilePrompt += `\n\nRIGHT NOW: ${stamp} (${tz}). Today is ${todayStrInTz(tz)} — derive EVERY date/time you pass to a tool ('today', 'tomorrow', 'Friday', 'right now', 'in an hour') from this, never from memory.`;
+  }
   // HOW THIS PERSON WANTS TO BE TALKED TO (0183). PER-PERSON, so it belongs in the VOLATILE block —
   // putting it in the cached prefix would key the cache per user instead of per org/role and throw
   // away the hit rate the split above exists to protect.
@@ -647,6 +658,17 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     return msgs;
   };
 
+  // POST-STREAM WORK MUST OUTLIVE THE RESPONSE. The audit row and the transcript persistence
+  // run in the stream's `finally`, AFTER controller.close() — and on Vercel a function can be
+  // frozen the moment its response ends, so those awaits raced teardown and whole turns of
+  // Nort's memory silently vanished (every user's live thread was longer than what the
+  // conversations table held: 16→14, 8→4, 6→2, 2→0). `after()` is the platform's promise to
+  // wait; it must be registered in request scope, so the finally resolves this deferred and
+  // the handler hands `after` the promise before returning the Response.
+  let settle: () => void = () => {};
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
@@ -949,9 +971,13 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         } catch {
           /* transcript persistence is best-effort — never affects the response */
         }
+        settle();
       }
     },
   });
+  // Keep the function alive until the finally's writes land (capped so a hung write can
+  // never pin the function past its own deadline).
+  after(() => Promise.race([settled, new Promise<void>((resolve) => setTimeout(resolve, 20_000))]));
 
   return new Response(stream, {
     headers: {

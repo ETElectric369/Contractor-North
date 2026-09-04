@@ -45,11 +45,18 @@ export const inquiryActions: Record<string, ActionDef> = {
     group: "inquiry",
     label: "Convert inquiry",
     description:
-      "Convert a lead/inquiry. Targets: 'inspection' books a site inspection on the schedule and keeps the lead open (use for big jobs that need a site visit before a firm price); 'quote'/'estimate' start a priced draft or estimate job; 'job' books the work; 'customer' just files them in the CRM.",
-    input: z.object({ id: z.string(), target: z.enum(["inspection", "customer", "quote", "estimate", "job"]).default("estimate") }),
+      "Convert a lead/inquiry. Targets: 'inspection' books a site inspection on the schedule and keeps the lead open (use for big jobs that need a site visit before a firm price); 'quote'/'estimate' start a priced draft or estimate job; 'job' books the work; 'customer' just files them in the CRM. For 'inspection': when they name a time — 'today', 'right now', 'Tuesday at 10' — pass date (YYYY-MM-DD, company-local) and time (HH:MM, 24h); left out, it lands two days out at 09:00. The result's data.starts_at / date / time are WHEN it actually landed — read that back to them; never assume it's now.",
+    input: z.object({
+      id: z.string(),
+      target: z.enum(["inspection", "customer", "quote", "estimate", "job"]).default("estimate"),
+      // Inspection timing — the door the assistant lacked: with no way to say WHEN, every
+      // spoken "right now" silently became the two-days-out 9 AM default.
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      time: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+    }),
     auth: "staff", // inquiries are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
-    handler: (i) => convertInquiry(i.id, i.target),
+    handler: (i) => convertInquiry(i.id, i.target, { startDate: i.date, startTime: i.time }),
   },
   "inquiry.delete": {
     name: "inquiry.delete",
