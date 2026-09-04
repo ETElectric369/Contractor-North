@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
 import { LogOut, Settings } from "lucide-react";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
@@ -152,12 +153,24 @@ export function AccountMenu({
           </Link>
           <div className="relative z-10 my-1 border-t border-white/50" />
           <form action={signOut}>
-            <button className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15">
-              <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Sign Out
-            </button>
+            <SignOutButton />
           </form>
         </div>
       )}
     </div>
+  );
+}
+
+/** Sign Out goes quiet while the action runs: a second tap must never fire a second sign-out. */
+function SignOutButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      disabled={pending}
+      aria-busy={pending || undefined}
+      className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-60"
+    >
+      <LogOut className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {pending ? "Signing Out…" : "Sign Out"}
+    </button>
   );
 }

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { safeNextPath } from "@/lib/safe-next";
@@ -196,13 +197,33 @@ export async function verifyLoginCode(formData: FormData) {
   redirect(dest);
 }
 
+/** The session id inside a Supabase access token (no verification — we only need the claim). */
+function sessionIdFromJwt(token: string | undefined): string | null {
+  try {
+    const payload = JSON.parse(Buffer.from((token ?? "").split(".")[1] ?? "", "base64url").toString("utf8"));
+    return typeof payload?.session_id === "string" ? payload.session_id : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function signOut() {
   const supabase = await createClient();
-  // THIS device only. supabase-js defaults signOut to scope "global", which revokes EVERY session
-  // the person has — sign out on the phone and the office desktop (and the native shell) are
-  // thrown to the login screen too. Seen 2026-09-04 during the Phase 0 shell test. Deactivation
-  // (the login gates + /account-deactivated + offboarding) keeps the global kill on purpose.
-  await supabase.auth.signOut({ scope: "local" });
+  // THIS device only — and never through GoTrue's /logout. Two things bit us on 2026-09-04:
+  //   1. supabase-js signOut() defaults to scope "global": one tap signed out the phone, the office
+  //      desktop and the native shell together.
+  //   2. /logout?scope=local falls back to a USER-WIDE logout when the session in the token can't be
+  //      found (already ended — the action ran twice) — verified: a fresh page, one Sign Out, every
+  //      session gone.
+  // So: end exactly this session by id (0242, SECURITY DEFINER, user_id = auth.uid()), then drop
+  // the cookies. Deactivation and offboarding keep the global kill on purpose.
+  const { data } = await supabase.auth.getSession();
+  const sid = sessionIdFromJwt(data.session?.access_token);
+  if (sid) await supabase.rpc("end_my_session", { p_session: sid });
+  const store = await cookies();
+  for (const c of store.getAll()) {
+    if (/^sb-.*-auth-token(\.\d+)?$/.test(c.name)) store.delete(c.name);
+  }
   revalidatePath("/", "layout");
   redirect("/login");
 }

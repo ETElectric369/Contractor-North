@@ -4,7 +4,7 @@ import { shellFromUserAgent } from "@/lib/native-shell";
 import { NO_INDEX } from "@/lib/no-index";
 import { login, signup, sendLoginCode, verifyLoginCode } from "./actions";
 import { APP_VERSION } from "@/lib/version";
-import { Button } from "@/components/ui/button";
+import { FormSubmit } from "@/components/form-submit";
 import { Input, Label } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { PurgePageCache } from "@/components/purge-page-cache";
@@ -81,9 +81,9 @@ export default async function LoginPage({
                   />
                   <p className="mt-1 text-xs text-slate-400">Sent to {email} — enter the code, or just tap the sign-in link in the email. Check spam if it&apos;s not there.</p>
                 </div>
-                <Button type="submit" className="w-full" size="lg" formAction={verifyLoginCode}>
+                <FormSubmit className="w-full" size="lg" formAction={verifyLoginCode}>
                   Verify &amp; sign in
-                </Button>
+                </FormSubmit>
                 <div className="flex items-center justify-between text-xs">
                   <button formAction={sendLoginCode} formNoValidate className="font-medium text-brand hover:underline">
                     Resend code
@@ -98,9 +98,9 @@ export default async function LoginPage({
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" name="email" type="email" placeholder="you@company.com" defaultValue={email ?? ""} required autoFocus />
                 </div>
-                <Button type="submit" className="w-full" size="lg" formAction={sendLoginCode}>
+                <FormSubmit className="w-full" size="lg" formAction={sendLoginCode}>
                   Email me a code
-                </Button>
+                </FormSubmit>
                 <p className="text-center text-xs">
                   <Link href="/login" className="text-slate-500 hover:underline">Use a password instead</Link>
                 </p>
@@ -128,9 +128,9 @@ export default async function LoginPage({
                 <PasswordInput id="password" name="password" placeholder="••••••••" required minLength={6} />
               </div>
 
-              <Button type="submit" className="w-full" size="lg" formAction={isSignup ? signup : login}>
+              <FormSubmit className="w-full" size="lg" formAction={isSignup ? signup : login}>
                 {isSignup ? "Create Account" : "Sign In"}
-              </Button>
+              </FormSubmit>
 
               {!isSignup && (
                 <p className="text-center text-xs">
