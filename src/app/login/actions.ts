@@ -198,7 +198,11 @@ export async function verifyLoginCode(formData: FormData) {
 
 export async function signOut() {
   const supabase = await createClient();
-  await supabase.auth.signOut();
+  // THIS device only. supabase-js defaults signOut to scope "global", which revokes EVERY session
+  // the person has — sign out on the phone and the office desktop (and the native shell) are
+  // thrown to the login screen too. Seen 2026-09-04 during the Phase 0 shell test. Deactivation
+  // (the login gates + /account-deactivated + offboarding) keeps the global kill on purpose.
+  await supabase.auth.signOut({ scope: "local" });
   revalidatePath("/", "layout");
   redirect("/login");
 }
