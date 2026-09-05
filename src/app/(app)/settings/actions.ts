@@ -159,11 +159,15 @@ export async function setLogoUrl(url: string | null): Promise<Result> {
   const supabase = await createClient();
   const orgId = await myOrgId(supabase);
   if (!orgId) return { ok: false, error: "No organization." };
-  const { error } = await supabase
+  const { data: wroteLogo, error } = await supabase
     .from("organizations")
     .update({ logo_url: url })
-    .eq("id", orgId);
+    .eq("id", orgId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wroteLogo?.length) return { ok: false, error: "That didn't save - reload and try again." };
+  // The logo is on every customer document - drop the stored PDFs so the new one takes (audit v921).
+  await bustOrgPdfs(orgId);
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };

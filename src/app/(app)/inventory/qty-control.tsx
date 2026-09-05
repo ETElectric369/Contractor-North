@@ -26,8 +26,14 @@ export function QtyControl({
   const [error, setError] = useState<string | null>(null);
 
   function bump(delta: number) {
+    setError(null);
     start(async () => {
-      await adjustQuantity(id, delta);
+      // A rejected +/- must not leave the on-hand count silently wrong (audit v921).
+      const res = await adjustQuantity(id, delta);
+      if (!res?.ok) {
+        setError(res?.error ?? "That didn't save - try again.");
+        return;
+      }
       router.refresh();
     });
   }

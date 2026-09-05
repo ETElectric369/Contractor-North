@@ -89,11 +89,18 @@ export async function markPeriodPaid(input: {
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
   const ids = list.map((e) => e.id);
-  const { error: upErr } = await supabase
+  // CLAIM ONLY STILL-UNPAID ROWS (audit v921): two staff (or two taps) both read the unpaid list
+  // before either wrote, so both stamped and both inserted a payroll_runs row -> doubled gross in
+  // the accountant export. Filtering the UPDATE on paid_at IS NULL + row-checking means the loser
+  // stamps nothing and bails before inserting a second run.
+  const { data: stamped, error: upErr } = await supabase
     .from("time_entries")
     .update({ paid_at: new Date().toISOString() })
-    .in("id", ids);
+    .in("id", ids)
+    .is("paid_at", null)
+    .select("id");
   if (upErr) return { ok: false, error: upErr.message };
+  if (!stamped?.length) return { ok: false, error: "Those hours were just marked paid by someone else." };
 
   // org_id is stamped by the set_org_id trigger. Base bucket only: no miles, no
   // mileage dollars — those live on kind='mileage' rows, human-stated.

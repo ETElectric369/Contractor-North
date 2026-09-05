@@ -1468,6 +1468,8 @@ async function requireDraftInvoice(supabase: any, invoiceId: string): Promise<Re
   return null;
 }
 
+const INVOICE_STATUSES = ["draft", "sent", "partial", "paid", "overdue", "void"];
+
 export async function setInvoiceStatus(
   id: string,
   status: string,
@@ -1475,8 +1477,19 @@ export async function setInvoiceStatus(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("invoices").update({ status }).eq("id", id);
+  // A whitelisted status only, and NEVER back to Draft once money is on it (audit v921): a draft
+  // is line-editable and off the AR list, so demoting a paid/partial invoice hides real revenue
+  // and lets its lines change under recorded payments.
+  if (!INVOICE_STATUSES.includes(status)) return { ok: false, error: "That isn't a valid invoice status." };
+  if (status === "draft") {
+    const { data: paidRow } = await supabase.from("invoices").select("amount_paid").eq("id", id).maybeSingle();
+    if (Number((paidRow as { amount_paid?: number } | null)?.amount_paid ?? 0) > 0) {
+      return { ok: false, error: "This invoice has payments — it can't go back to Draft. Void it instead." };
+    }
+  }
+  const { data: wroteS, error } = await supabase.from("invoices").update({ status }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wroteS?.length) return { ok: false, error: "Invoice not found." };
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
   // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
@@ -1594,9 +1607,16 @@ export async function updatePayment(
   // current balance plus whatever this payment is contributing today.
   const [{ data: inv }, { data: cur }] = await Promise.all([
     supabase.from("invoices").select("total, amount_paid, invoice_number").eq("id", invoiceId).maybeSingle(),
-    supabase.from("payments").select("amount").eq("id", paymentId).maybeSingle(),
+    // Read the payment WITH its invoice_id + stripe link so we can prove it belongs here (audit v921).
+    supabase.from("payments").select("amount, invoice_id, stripe_payment_intent").eq("id", paymentId).maybeSingle(),
   ]);
   if (!inv) return { ok: false, error: "Invoice not found." };
+  if (!cur || (cur as { invoice_id?: string }).invoice_id !== invoiceId) {
+    return { ok: false, error: "That payment isn't on this invoice." };
+  }
+  if ((cur as { stripe_payment_intent?: string | null }).stripe_payment_intent) {
+    return { ok: false, error: "This is an online card payment — adjust it in Stripe (refund), not here." };
+  }
   const cap =
     invoiceBalance((inv as any).total, (inv as any).amount_paid) + Number((cur as any)?.amount ?? 0);
   if (patch.amount > cap + 0.01) {
@@ -1609,7 +1629,7 @@ export async function updatePayment(
   if (paidAt && Date.parse(paidAt) > Date.now() + 86_400_000) {
     return { ok: false, error: "That payment date is in the future." };
   }
-  const { error } = await supabase
+  const { data: updP, error } = await supabase
     .from("payments")
     .update({
       amount: patch.amount,
@@ -1617,8 +1637,11 @@ export async function updatePayment(
       note: patch.note || null,
       ...(paidAt ? { paid_at: paidAt } : {}),
     })
-    .eq("id", paymentId);
+    .eq("id", paymentId)
+    .eq("invoice_id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!updP?.length) return { ok: false, error: "That payment isn't on this invoice." };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidateMoney();
@@ -1630,8 +1653,28 @@ export async function deletePayment(paymentId: string, invoiceId: string): Promi
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("payments").delete().eq("id", paymentId);
+  // An ONLINE card payment must not be deleted like a mistyped check (audit v921): deleting it
+  // reopens the balance for a SECOND charge and severs refund/dispute matching (the stripe intent
+  // is the only key charge.refunded can match on). Refund it in Stripe instead.
+  const { data: pay } = await supabase
+    .from("payments")
+    .select("id, invoice_id, stripe_payment_intent")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (!pay || (pay as { invoice_id?: string }).invoice_id !== invoiceId) {
+    return { ok: false, error: "That payment isn't on this invoice." };
+  }
+  if ((pay as { stripe_payment_intent?: string | null }).stripe_payment_intent) {
+    return { ok: false, error: "This was paid online by card — refund it in Stripe rather than deleting it here." };
+  }
+  const { data: del, error } = await supabase
+    .from("payments")
+    .delete()
+    .eq("id", paymentId)
+    .eq("invoice_id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!del?.length) return { ok: false, error: "That payment isn't on this invoice." };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidateMoney();

@@ -21,6 +21,7 @@ export function JobNotes({
   const router = useRouter();
   const [value, setValue] = useState(notes ?? "");
   const [done, setDone] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoMsg, setPhotoMsg] = useState<string | null>(null);
@@ -28,8 +29,14 @@ export function JobNotes({
 
   function save() {
     setDone(false);
+    setSaveErr(null);
     start(async () => {
-      await updateJobNotes(jobId, value);
+      // Don't claim Saved on a failed write (audit v921 NOTHING-SILENT).
+      const res = await updateJobNotes(jobId, value);
+      if (!res?.ok) {
+        setSaveErr(res?.error ?? "That didn't save - try again.");
+        return;
+      }
       setDone(true);
       setTimeout(() => setDone(false), 2000);
     });
@@ -100,6 +107,7 @@ export function JobNotes({
             <Check className="h-4 w-4" /> Saved
           </span>
         )}
+        {saveErr && <span className="text-sm text-rose-600">{saveErr}</span>}
         {photoMsg && <span className="text-xs text-slate-500">{photoMsg}</span>}
       </div>
     </div>

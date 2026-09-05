@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, X } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -15,10 +15,17 @@ export function CoStatusControl({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
 
   function set(next: string) {
+    setErr(null);
     start(async () => {
-      await setChangeOrderStatus(id, next);
+      // A rejected status change must say so, not silently no-op (audit v921).
+      const res = await setChangeOrderStatus(id, next);
+      if (!res?.ok) {
+        setErr(res?.error ?? "That didn't save - try again.");
+        return;
+      }
       router.refresh();
     });
   }
@@ -28,7 +35,7 @@ export function CoStatusControl({
       <button
         onClick={() => set("pending")}
         disabled={pending}
-        title="Reset to pending"
+        title={err ?? "Reset to pending"}
       >
         <Badge tone={statusTone(status)}>{status}</Badge>
       </button>
@@ -36,7 +43,8 @@ export function CoStatusControl({
   }
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5" title={err ?? undefined}>
+      {err && <span className="text-xs text-rose-600">{err}</span>}
       <button
         onClick={() => set("approved")}
         disabled={pending}
