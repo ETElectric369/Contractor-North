@@ -147,9 +147,10 @@ export async function saveSetup(answers: Answers): Promise<Result> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   const role = (me as { role?: string } | null)?.role;
-  if (!role || !["owner", "admin", "office"].includes(role))
+  // A deactivated seat is refused here too (audit v921 critical — see staff-guard.ts).
+  if (!role || !["owner", "admin", "office"].includes(role) || (me as { active?: boolean | null } | null)?.active === false)
     return { ok: false, error: "You don't have access to that." };
 
   // Same coercion the fill path uses — a hand-typed rate and a heard one land identically.

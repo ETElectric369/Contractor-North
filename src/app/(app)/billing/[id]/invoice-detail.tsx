@@ -882,7 +882,10 @@ export function InvoiceDetail({
               {taxRates.length > 0 && isDraft ? (
                 <Select
                   className="h-8 w-44 text-xs"
-                  value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 1e-9)?.id ?? ""}
+                  // Match with a tolerance a stored fraction can actually hit (0243 widened the column to
+                  // numeric(8,6)); 1e-9 demanded an exactness the DB never promised, so a taxed draft
+                  // at a 3-decimal rate read "No tax" and a re-save could zero it (audit v921).
+                  value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 5e-7)?.id ?? ""}
                   disabled={pending}
                   onChange={(e) =>
                     start(async () => {

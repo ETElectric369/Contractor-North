@@ -20,8 +20,8 @@ async function staff(): Promise<Staff> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  const role = (me as { role?: string } | null)?.role;
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  const role = (me as { active?: boolean | null } | null)?.active === false ? null : (me as { role?: string } | null)?.role;
   // A playbook is what every estimate for this company is built from. Editing it is an owner /
   // admin / office act, not a field one — and RLS scopes the write to the org regardless.
   if (!role || !["owner", "admin", "office"].includes(role))

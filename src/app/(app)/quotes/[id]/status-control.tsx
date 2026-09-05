@@ -38,6 +38,8 @@ export function StatusControl({ id, status }: { id: string; status: string }) {
             setErr(res?.error ?? "That didn't save — try again.");
             return;
           }
+          // Accepted, but the job didn't spin up — say so instead of a silent "done".
+          if ("warning" in res && res.warning) setErr(res.warning);
           router.refresh();
         });
       }}

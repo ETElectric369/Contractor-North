@@ -54,18 +54,18 @@ export default async function AppLayout({
     .eq("id", user.id)
     .single();
 
+  // DEACTIVATED IS CHECKED FIRST (audit v921 high). A revoked site collaborator has active=false
+  // AND org_id=null (revokeSiteCollaborator sets both), so the org-less redirect below fired
+  // first and sent them to /onboarding — where they could create a BRAND-NEW org and be back in.
+  // Lock the door before offering the room. The deactivated screen ends their session; reversible.
+  if (profile?.active === false) redirect("/account-deactivated");
+
   // No organization yet → finish onboarding before entering the app.
   if (!profile?.org_id) redirect("/onboarding");
 
   // Created with a handed-out temp password (crew import / add-employee) → force them to
   // pick their own before they can use the app, so the temp can't be reused indefinitely.
   if (profile.must_reset_password) redirect("/set-password");
-
-  // Deactivated → locked out. `active=false` used to only hide a member from assignee
-  // pickers while they could still sign in and use the app; this is the choke point that
-  // makes deactivation actually bar access. The deactivated screen ends their session.
-  // Reversible: an owner/admin flipping active back lets them in again.
-  if (profile.active === false) redirect("/account-deactivated");
 
   // THE PROJECTION LAW, on the paywall itself. graceDaysLeft counts forward from
   // current_period_end and treats a MISSING one as "no period recorded → don't lock them out",

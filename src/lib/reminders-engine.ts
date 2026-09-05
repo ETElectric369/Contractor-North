@@ -142,14 +142,17 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       const horizon = new Date(now + 36 * 3_600_000).toISOString();
       const { data: appts } = await supabase
         .from("appointments")
-        .select("id, title, starts_at, location, customers(name, email)")
+        // A LEAD'S site visit carries inquiry_id with customer_id NULL, so its contact is on the
+        // inquiry, not a customer (audit v921 high) — an auto-booked inspection reminded no one.
+        .select("id, title, starts_at, location, customers(name, email), inquiries(name, email)")
         .eq("org_id", org.id)
         .eq("status", "scheduled")
         .eq("absorbed", false) // a visit absorbed into its job must not remind anyone (0237)
         .gte("starts_at", nowIso)
         .lte("starts_at", horizon);
       for (const a of appts ?? []) {
-        const cust = (a as any).customers;
+        // Prefer the customer, fall back to the lead — whichever carries the contact.
+        const cust = ((a as any).customers ?? (a as any).inquiries) as { name?: string | null; email?: string | null } | null;
         if (!cust?.email) { counts.skipped_no_email++; continue; }
         if (await suppress("appointment", a.id, 3650, 1)) continue;
         const when = new Date(a.starts_at).toLocaleString("en-US", { timeZone: tz, dateStyle: "full", timeStyle: "short" });

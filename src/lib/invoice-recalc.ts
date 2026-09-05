@@ -18,7 +18,16 @@ import { reportError } from "@/lib/observe";
  *
  *  Works with any client (RLS-scoped user client or the service client) — the credits
  *  SELECT needs whatever visibility the caller already has on the invoice. */
-export async function recalcInvoice(supabase: any, invoiceId: string): Promise<void> {
+/**
+ * Recompute an invoice's money from its stored lines, payments and credits.
+ *
+ * RETURNS FALSE WHEN IT DID NOT LAND (audit v921 high). It used to swallow every failure and
+ * return void, so the Stripe webhook could insert a payment row, watch this fail, and still ack
+ * 200 — Stripe never retries a 2xx, nothing else re-runs recalc, and the invoice kept its old
+ * balance while the pay link stayed live for a second full charge. Callers that hold money in
+ * their hands must check this.
+ */
+export async function recalcInvoice(supabase: any, invoiceId: string): Promise<boolean> {
   const [itemsRes, paysRes, creditsRes, invRes] = await Promise.all([
     supabase.from("invoice_items").select("line_total").eq("invoice_id", invoiceId),
     supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
@@ -38,7 +47,7 @@ export async function recalcInvoice(supabase: any, invoiceId: string): Promise<v
   const readErr = itemsRes.error || paysRes.error || creditsRes.error || invRes.error;
   if (readErr || !invRes.data) {
     reportError("recalcInvoice:read", readErr ?? new Error("invoice not found"), { invoiceId });
-    return; // nothing computed, so nothing written — and the stored PDF stays valid
+    return false; // nothing computed, so nothing written — and the stored PDF stays valid
   }
   const items = itemsRes.data;
   const pays = paysRes.data;
@@ -67,4 +76,5 @@ export async function recalcInvoice(supabase: any, invoiceId: string): Promise<v
   // deleted, Stripe settlements, credits — so this is THE place the stored PDF (0198) goes
   // stale for the customer door. Drop it; the next staff view or send re-stores a fresh copy.
   await bustDocPdf("invoice", invoiceId);
+  return !error;
 }

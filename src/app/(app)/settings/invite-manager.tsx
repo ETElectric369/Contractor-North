@@ -75,7 +75,6 @@ export function InviteManager({
             <option value="tech">Tech</option>
             <option value="office">Office</option>
             <option value="admin">Admin</option>
-            <option value="owner">Owner</option>
           </Select>
         </div>
         <Button type="submit" disabled={pending}>

@@ -30,6 +30,11 @@ export const normName = (n: string | null | undefined) => (n ?? "").toLowerCase(
  * exact same keys `findDuplicateGroups` groups on, so "accept an estimate" and "find duplicates"
  * never disagree. null = genuinely new. Pure + unit-tested.
  */
+// Placeholder names that are NOT a person: a fragment-first lead defaults to "Unknown caller",
+// and a job-named customer can be a pure phone number. Two of these share a normalized name
+// without being the same anyone — they must never link on name (audit v921 high).
+const isPlaceholderName = (n: string) => n === "unknowncaller" || /^[0-9]+$/.test(n);
+
 export function findMatchingCustomerId(
   candidate: { name?: string | null; email?: string | null; phone?: string | null },
   existing: DupCustomer[],
@@ -37,10 +42,19 @@ export function findMatchingCustomerId(
   const p = normPhone(candidate.phone);
   const e = normEmail(candidate.email);
   const n = normName(candidate.name);
+  // STRONG keys link on the first hit — a phone or an email identifies one person.
   for (const c of existing) {
     if (p.length >= 7 && normPhone(c.phone) === p) return c.id;
     if (e && normEmail(c.email) === e) return c.id;
-    if (n && normName(c.name) === n) return c.id;
+  }
+  // NAME NEVER GUESSES BETWEEN TWO PEOPLE (matchKnownCustomer's law, finally applied to the win
+  // path too). Two "Chris Taylor"s in the book are different customers; linking money to whichever
+  // the DB returned first attaches it to a stranger — and puts this invoice on that stranger's
+  // portal. A name links ONLY when it is unique in the book; otherwise return null so the caller
+  // mints a fresh customer (and can surface a merge suggestion).
+  if (n && !isPlaceholderName(n)) {
+    const hits = existing.filter((c) => normName(c.name) === n);
+    if (hits.length === 1) return hits[0].id;
   }
   return null;
 }

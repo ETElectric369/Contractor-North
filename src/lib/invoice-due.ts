@@ -11,8 +11,15 @@ export function dueDateIsoFromSettings(settingsRaw: unknown, now: Date = new Dat
   const settings = getOrgSettings(settingsRaw);
   const tz = settings.timezone || "America/Los_Angeles";
   const netDays = settings.invoice_due_days > 0 ? settings.invoice_due_days : 30;
-  const todayStart = tzLocalHourUtc(todayStrInTz(tz, now), 0, tz);
-  const dueStr = todayStrInTz(tz, new Date(todayStart.getTime() + netDays * 86_400_000));
+  // ADD DAYS ON THE CALENDAR, NOT BY MILLISECONDS (audit v921 high). Adding netDays * 86_400_000
+  // to a UTC instant is 24h per day; a Pacific day across the fall-back night is 25h long, so
+  // "today + 30" landed at 23:00 local of the day BEFORE the intended one and re-deriving the
+  // calendar day gave a due date one day early. A date-only string has no DST — add days to it
+  // as a bare UTC calendar date, then stamp noon in the org tz.
+  const todayStr = todayStrInTz(tz, now);
+  const dueStr = new Date(Date.parse(todayStr + "T00:00:00Z") + netDays * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   return tzLocalHourUtc(dueStr, 12, tz).toISOString();
 }
 

@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { reportError } from "@/lib/observe";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -473,16 +474,40 @@ function clampAllocationHours<T extends { hours: number }>(
 async function scaleRecordedToWorked(
   supabase: any,
   entryId: string,
-  rows: { id: string; hours: number | null }[],
+  rows: {
+    id: string;
+    hours: number | null;
+    job_id?: string | null;
+    job_code?: string | null;
+    description?: string | null;
+    sort_order?: number | null;
+  }[],
   workedHrs: number,
 ): Promise<number> {
   const sum = rows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
   if (!rows.length || sum <= workedHrs + 0.01) return sum;
   const scaled = clampAllocationHours(rows.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })), workedHrs);
-  for (const r of scaled) {
-    await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id);
+  // THE SCALE HAS TO LAND, AND IT HAS TO BE ATOMIC (audit v921 high). Row-by-row UPDATEs were
+  // refused by guard_time_allocation for techs — it sums the OTHER rows at their unscaled values,
+  // so every single update overshoots — and the results were discarded, so this returned a
+  // fictional scaled total while the rows stayed high and the job billed hours nobody was paid
+  // for. 0244 replaces the whole set in one transaction and checks the ceiling once.
+  const byId = new Map(scaled.map((r) => [r.id, r.hours]));
+  const { error } = await supabase.rpc("replace_time_allocations", {
+    p_entry: entryId,
+    p_rows: rows.map((r, idx) => ({
+      job_id: r.job_id ?? null,
+      job_code: r.job_code ?? null,
+      hours: byId.get(r.id) ?? (Number(r.hours) || 0),
+      description: r.description ?? null,
+      sort_order: r.sort_order ?? idx,
+    })),
+  });
+  if (error) {
+    // Say what actually happened rather than returning a number the rows do not back.
+    reportError("scaleRecordedToWorked", error, { entryId });
+    return sum;
   }
-  void entryId;
   return scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
 }
 
@@ -536,9 +561,12 @@ export async function clockOut(input: {
   // un-allocated tail needs filling below.
   const { data: recordedRows } = await supabase
     .from("time_allocations")
-    .select("id, hours")
+    .select("id, hours, job_id, job_code, description, sort_order")
     .eq("time_entry_id", input.entry_id);
-  const recorded = (recordedRows ?? []) as { id: string; hours: number | null }[];
+  // The WHOLE row, not just id+hours: scaleRecordedToWorked now rewrites the set through
+  // 0244, and a replace that only knew the hours would put the split back with no job on it
+  // (the projection law — you cannot preserve what you did not select).
+  const recorded = (recordedRows ?? []) as { id: string; hours: number | null; job_id: string | null; job_code: string | null; description: string | null; sort_order: number | null }[];
   const recordedHours = recorded.reduce((s, a) => s + (Number(a.hours) || 0), 0);
 
   // Clock-out time defaults to now; `at` (the geofence "time they left") is honored
@@ -578,7 +606,13 @@ export async function clockOut(input: {
     .update({
       clock_out: clockOutIso,
       lunch_minutes: lunchMinutes,
-      notes: input.notes || null,
+      // NEVER BLANK WHAT THE SHIFT ALREADY CARRIES (audit v921 high). `input.notes || null`
+      // erased the tech's end-of-day note AND switchJob's "[switched to … at …]" breadcrumbs
+      // whenever a door closed the shift without re-sending them — the job page's Clock Out and
+      // Nort both pass "". The office then reads a blank card, the EOD cron texts the tech to
+      // fill in a note they already wrote, and the breadcrumb the office needs to re-derive a
+      // split is gone. An empty string means "not supplied", not "delete it".
+      ...(input.notes && input.notes.trim() ? { notes: input.notes } : {}),
       gps_out: input.gps,
       status: "closed",
       source: input.auto ? "auto_gps" : undefined,
@@ -626,9 +660,18 @@ export async function clockOut(input: {
           sort_order: idx,
         })),
       );
-      const { error: allocErr } = await supabase.from("time_allocations").insert(rows);
-      if (allocErr) return { ok: false, error: allocErr.message };
-      if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
+      // ONE MOVE (0244). Insert-then-delete was chosen because the JS client has no transaction,
+      // but during the overlap guard_time_allocation sees old + new and refuses the second row
+      // for any tech who switched jobs mid-shift — the shift was already closed by then, so the
+      // person saw "Could not clock out" on a closed shift and the post-switch hours never
+      // landed (audit v921 high). The RPC deletes and inserts in one transaction, so a failure
+      // rolls back to the recorded split — the same safety, without the false refusal.
+      const { error: allocErr } = await supabase.rpc("replace_time_allocations", {
+        p_entry: input.entry_id,
+        p_rows: rows.map((r, idx) => ({ ...r, sort_order: idx })),
+      });
+      if (allocErr) return { ok: false, error: dbError(allocErr) };
+      void oldIds;
     }
     // An EMPTY submitted set no longer destroys recorded rows. `[]` used to mean
     // "clear the split" and the delete ran unconditionally — so the geofence close
@@ -875,16 +918,25 @@ export async function completeAutoClockOut(input: {
   if (!entry) return { ok: false, error: "Entry not found." };
 
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
-  await supabase.from("time_entries").update({ lunch_minutes: lunch }).eq("id", input.entry_id);
+  const { data: lunchUpd, error: lunchErr } = await supabase
+    .from("time_entries")
+    .update({ lunch_minutes: lunch })
+    .eq("id", input.entry_id)
+    .select("id");
+  // A zero-row update is a 204, not a success (the silent-write law): without this, a confirmed
+  // meal that never landed still reported ok and the shift stayed paid gross.
+  if (lunchErr || !lunchUpd?.length) {
+    return { ok: false, error: lunchErr ? dbError(lunchErr) : "That shift didn't take the lunch — reload and try again." };
+  }
 
   // Whatever the entry already carries. This action INSERTS alongside those rows (it
   // never replaces them), so both the clamp ceiling and the sort order have to start
   // from what's there — a mid-shift switch's segments now SURVIVE the geofence close.
   const { data: existing } = await supabase
     .from("time_allocations")
-    .select("id, hours")
+    .select("id, hours, job_id, job_code, description, sort_order")
     .eq("time_entry_id", input.entry_id);
-  const existingRows = (existing ?? []) as { id: string; hours: number | null }[];
+  const existingRows = (existing ?? []) as { id: string; hours: number | null; job_id: string | null; job_code: string | null; description: string | null; sort_order: number | null }[];
   let already = existingRows.reduce((s, a) => s + (Number(a.hours) || 0), 0);
 
   // A meal confirmed HERE, AFTER the switch segments + tail were recorded (the switched
@@ -899,10 +951,21 @@ export async function completeAutoClockOut(input: {
         existingRows.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })),
         workedNow,
       );
-      for (const r of scaled) {
-        await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id);
-      }
-      already = scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+      // Same atomic replace as clockOut (0244) — the per-row loop here was refused by
+      // guard_time_allocation for techs and its errors were discarded (audit v921 high).
+      const byId = new Map(scaled.map((r) => [r.id, r.hours]));
+      const { error: scaleErr } = await supabase.rpc("replace_time_allocations", {
+        p_entry: input.entry_id,
+        p_rows: existingRows.map((r, idx) => ({
+          job_id: r.job_id ?? null,
+          job_code: r.job_code ?? null,
+          hours: byId.get(r.id) ?? (Number(r.hours) || 0),
+          description: r.description ?? null,
+          sort_order: r.sort_order ?? idx,
+        })),
+      });
+      if (scaleErr) reportError("completeAutoClockOut:scale", scaleErr, { entryId: input.entry_id });
+      else already = scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
     }
   }
 
@@ -1097,7 +1160,7 @@ export async function updateTimeEntry(input: {
   // a truthful new run instead of silently diverging the books.
   const { data: prev } = await supabase
     .from("time_entries")
-    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at")
+    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason")
     .eq("id", input.id)
     .maybeSingle();
   const stored = prev as {
@@ -1110,8 +1173,27 @@ export async function updateTimeEntry(input: {
     miles: number | null;
     paid_at: string | null;
     mileage_paid_at: string | null;
+    auto_closed_reason: string | null;
   } | null;
   if (!stored) return { ok: false, error: "Entry not found." };
+
+  // AUTO-LUNCH IS THE SERVER'S TRUTH ON THIS DOOR TOO (audit v921 high). Every other close
+  // deducts the 30-minute meal over 5 hours; the office edit modal seeds lunch from the stored
+  // row — which is 0 on a still-open shift and on every 0193 zero-close — so closing a forgotten
+  // 7.5h tech shift from the Needs-attention strip paid gross. When the office did NOT explicitly
+  // set a lunch (the seed still equals what was stored) and the row was open or zero-closed,
+  // apply the auto floor; an explicit number the office typed always wins.
+  {
+    const wasOpenOrZero = stored.clock_out == null
+      || stored.clock_out === stored.clock_in
+      || !!stored.auto_closed_reason;
+    const officeChangedLunch = (input.lunch_minutes || 0) !== (stored.lunch_minutes ?? 0);
+    if (wasOpenOrZero && !officeChangedLunch) {
+      const gross = hoursBetween(ci.toISOString(), co.toISOString(), 0);
+      const floor = autoLunchMinutes(gross);
+      if (floor > (patch.lunch_minutes as number)) patch.lunch_minutes = floor;
+    }
+  }
   const oldJobId: string | null = stored.job_id;
 
   // The locks trip on VALUE-diff, not field presence — clock_in/out/lunch are

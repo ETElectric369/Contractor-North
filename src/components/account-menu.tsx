@@ -9,6 +9,7 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { ShareQrButton } from "@/components/share-qr-button";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
+import { removePushSubscription } from "@/app/(app)/settings/push-actions";
 import type { Profile } from "@/lib/types";
 
 /**
@@ -152,7 +153,28 @@ export function AccountMenu({
             <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
           </Link>
           <div className="relative z-10 my-1 border-t border-white/50" />
-          <form action={signOut}>
+          <form
+            action={signOut}
+            onSubmit={() => {
+              // UNBIND THIS DEVICE'S PUSH BEFORE LEAVING (audit v921 high). On a shared crew
+              // phone the push_subscriptions row is keyed by the browser endpoint and pointed at
+              // whoever last subscribed — so after A signs out, A's org notifications kept
+              // arriving on the device until B re-subscribed. Best-effort, fire-and-forget: the
+              // sign-out itself must never wait on or fail over the push teardown.
+              void (async () => {
+                try {
+                  const reg = await navigator.serviceWorker?.getRegistration();
+                  const sub = await reg?.pushManager.getSubscription();
+                  if (sub?.endpoint) {
+                    await removePushSubscription(sub.endpoint);
+                    await sub.unsubscribe();
+                  }
+                } catch {
+                  /* device push may be unavailable; sign-out proceeds regardless */
+                }
+              })();
+            }}
+          >
             <SignOutButton />
           </form>
         </div>

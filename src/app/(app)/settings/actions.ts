@@ -20,10 +20,10 @@ export async function disconnectQuickbooks(): Promise<Result> {
   } = await supabase.auth.getUser();
   const { data: me } = await supabase
     .from("profiles")
-    .select("org_id, role")
+    .select("org_id, role, active")
     .eq("id", user?.id ?? "")
     .maybeSingle();
-  if (!me?.org_id || !["owner", "admin"].includes(me.role)) {
+  if (!me?.org_id || !["owner", "admin"].includes(me.role) || me.active === false) {
     return { ok: false, error: "Not allowed." };
   }
   const svc = createServiceClient();
@@ -208,7 +208,11 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
   if (!orgId) return { ok: false, error: "No organization." };
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const role = String(formData.get("role") ?? "tech");
+  // WHITELIST THE ROLE (audit v921 high). It came straight off the form and the invite UI even
+  // offered <option value="owner">, so an admin could invite a second owner — a seat 0225 says
+  // is owner-only. There is exactly one owner; an invite can only mint staff or a tech.
+  const raw = String(formData.get("role") ?? "tech");
+  const role = ["admin", "office", "tech"].includes(raw) ? raw : "tech";
   if (!email) return { ok: false, error: "Email is required." };
 
   const { error } = await supabase.from("invitations").insert({
@@ -286,10 +290,11 @@ export async function createEmployee(input: {
   if (!user) return { ok: false, error: "Not signed in." };
   const { data: me } = await supabase
     .from("profiles")
-    .select("role, org_id")
+    .select("role, org_id, active")
     .eq("id", user.id)
     .maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  // See staff-guard.ts: a deactivated admin must not reach the service-role client (audit v921).
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (!me.org_id) return { ok: false, error: "No organization." };
 
   const name = input.full_name.trim();
@@ -349,8 +354,10 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  // `active === false` refused here too — see staff-guard.ts (audit v921 critical): these actions
+  // reach for the service-role client, which never runs 0158's RLS trust roots.
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (!me.org_id) return { ok: false, error: "No organization." };
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
   if (!adminConfigured()) return { ok: false, error: "Crew import needs SUPABASE_SERVICE_ROLE_KEY set on the server (it is, in production)." };
@@ -582,8 +589,8 @@ export async function updateMember(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, active").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (id === user.id && patch.role && patch.role !== "owner") {
     return { ok: false, error: "You can't change your own owner role." };
   }
@@ -619,12 +626,21 @@ export async function updateMemberAuth(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  // `active === false` refused here too — see staff-guard.ts (audit v921 critical): these actions
+  // reach for the service-role client, which never runs 0158's RLS trust roots.
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
 
   // The target must be in the same org.
-  const { data: target } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  const { data: target } = await supabase.from("profiles").select("org_id, role").eq("id", id).maybeSingle();
   if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  // THE OWNER SEAT IS OWNER-ONLY (audit v921 critical; 0225 made role/active owner-only but left
+  // the LOGIN open). updateMemberAuth reset only on caller-is-owner-or-admin and never looked at
+  // the target — so an admin could change the OWNER's email + password and take the seat. Only
+  // the owner may rewrite the owner's login (their own).
+  if ((target as { role?: string }).role === "owner" && me.role !== "owner") {
+    return { ok: false, error: "Only the owner can change the owner's login." };
+  }
 
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
   if (!adminConfigured()) {
@@ -659,8 +675,10 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  // `active === false` refused here too — see staff-guard.ts (audit v921 critical): these actions
+  // reach for the service-role client, which never runs 0158's RLS trust roots.
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (id === user.id && !active) return { ok: false, error: "You can't deactivate your own account." };
 
   // Same-org guard (defense-in-depth over RLS) + never deactivate the owner.
@@ -704,8 +722,10 @@ export async function memberFootprint(id: string): Promise<{ ok: boolean; error?
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  // `active === false` refused here too — see staff-guard.ts (audit v921 critical): these actions
+  // reach for the service-role client, which never runs 0158's RLS trust roots.
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   const { count, error } = await supabase
     .from("time_entries")
     .select("id", { count: "exact", head: true })
@@ -726,8 +746,10 @@ export async function removeMember(id: string): Promise<Result> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
+  // `active === false` refused here too — see staff-guard.ts (audit v921 critical): these actions
+  // reach for the service-role client, which never runs 0158's RLS trust roots.
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (id === user.id) return { ok: false, error: "You can't remove your own account." };
 
   const { data: target } = await supabase.from("profiles").select("org_id, role").eq("id", id).maybeSingle();
@@ -771,8 +793,8 @@ export async function updateMemberRate(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (!me || !["owner", "admin"].includes(me.role)) return { ok: false, error: "Not allowed." };
+  const { data: me } = await supabase.from("profiles").select("role, active").eq("id", user.id).maybeSingle();
+  if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
 
   const patch: Record<string, unknown> = { hourly_rate: hourlyRate };
   if (billRate !== undefined) patch.bill_rate = billRate;
@@ -846,6 +868,14 @@ export async function setCustomDomain(
   if (domain) {
     if (domain.length > 253 || !/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(domain)) {
       return { ok: false, error: "Enter a valid domain like yourcompany.com." };
+    }
+    // NOT ONE OF OUR OWN HOSTS (audit v921 high). Our wildcard already answers *.contractornorth.com,
+    // so a tenant could "connect" et-electric.contractornorth.com (another org's FREE subdomain,
+    // claimed via public_handle with no DNS control) or app./api./www. and, through the by-domain
+    // resolver, hijack that host. A real custom domain is never under our own zone.
+    const SITES = (process.env.SITES_DOMAIN || "contractornorth.com").toLowerCase();
+    if (domain === SITES || domain.endsWith(`.${SITES}`)) {
+      return { ok: false, error: "Use your own domain here. A free contractornorth.com address is set as your handle instead." };
     }
     const svc = createServiceClient();
     const { data: taken } = await svc
@@ -921,6 +951,13 @@ export async function updateOrgSettings(
   if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length)
     return { ok: false, error: "That didn't save — your role can't change company settings. Ask an owner or admin." };
+  // DOC-STYLE, TERMS AND FOOTER RIDE ON EVERY STORED PDF (audit v921 high). doc_style (0239),
+  // invoice_terms/quote_terms/document_footer all render into the customer's document; changing
+  // them here left the cached PDFs (0198) untouched, so a customer's Download kept handing out the
+  // old letterhead. Same drop the two guarded setters already do — only when a doc-affecting key
+  // actually changed.
+  const DOC_AFFECTING = ["doc_style", "invoice_terms", "quote_terms", "document_footer", "company_logo_url", "name"];
+  if (DOC_AFFECTING.some((k) => k in safe)) await bustOrgPdfs(ctx.orgId);
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true };

@@ -103,7 +103,10 @@ export default async function TaxReportPage({
   // Map a decimal tax_rate to a named jurisdiction when possible.
   const nameFor = (rateDec: number) => {
     const pct = rateDec * 100;
-    const match = (taxRates ?? []).find((t: any) => Math.abs(Number(t.rate) - pct) < 0.001);
+    // 0.001 was tighter than the rounding the old numeric(6,4) column forced (7.38 vs 7.375), so
+    // a filing report showed "7.380%" with no jurisdiction. 0243 widened the column; keep a
+    // tolerance that survives float round-tripping either way (audit v921).
+    const match = (taxRates ?? []).find((t: any) => Math.abs(Number(t.rate) - pct) < 0.0005);
     return match?.name ?? (pct === 0 ? "No tax" : `${pct.toFixed(3)}%`);
   };
 

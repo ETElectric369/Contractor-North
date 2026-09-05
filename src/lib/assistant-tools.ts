@@ -597,30 +597,30 @@ function embedName(rel: any): string | null {
 const money = (n: any) => Math.round(Number(n ?? 0) * 100) / 100;
 
 /** Compute [startISO, endISO) for a named window, in UTC (matches the calendar). */
-function windowFor(range: string): { start: string; end: string; label: string } {
-  const now = new Date();
-  const startOfDay = new Date(now);
-  startOfDay.setUTCHours(0, 0, 0, 0);
+function windowFor(range: string, tz = "America/Los_Angeles"): { start: string; end: string; label: string } {
+  // ORG-LOCAL boundaries, not UTC (audit v921 high). Building "today"/"this week" with
+  // setUTCHours made Nort's schedule_overview read Sep 9 5pm -> Sep 10 5pm Pacific for "Sep 10",
+  // dropping a 5:30pm call and pulling in the prior evening. Anchor every window on the org tz.
+  const todayStr = todayStrInTz(tz, new Date());
+  const addDays = (ymd: string, n: number) =>
+    new Date(Date.parse(ymd + "T00:00:00Z") + n * 86_400_000).toISOString().slice(0, 10);
+  const at = (ymd: string) => tzDayStartUtc(ymd, tz).toISOString();
 
   if (range === "today") {
-    const end = new Date(startOfDay);
-    end.setUTCDate(end.getUTCDate() + 1);
-    return { start: startOfDay.toISOString(), end: end.toISOString(), label: "today" };
+    return { start: at(todayStr), end: at(addDays(todayStr, 1)), label: "today" };
   }
   if (range === "this_month") {
-    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    return { start: start.toISOString(), end: end.toISOString(), label: "this month" };
+    const first = todayStr.slice(0, 8) + "01";
+    const [y, m] = first.split("-").map(Number);
+    const nextFirst = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`;
+    return { start: at(first), end: at(nextFirst), label: "this month" };
   }
-  // week-based (Monday start), this_week or next_week
-  const day = (now.getUTCDay() + 6) % 7; // Monday = 0
-  const weekStart = new Date(startOfDay);
-  weekStart.setUTCDate(startOfDay.getUTCDate() - day + (range === "next_week" ? 7 : 0));
-  const weekEnd = new Date(weekStart);
-  weekEnd.setUTCDate(weekStart.getUTCDate() + 7);
+  // week-based (Monday start), this_week or next_week — Monday of the ORG-local week.
+  const dow = (new Date(Date.parse(todayStr + "T00:00:00Z")).getUTCDay() + 6) % 7; // Monday = 0
+  const weekStart = addDays(todayStr, -dow + (range === "next_week" ? 7 : 0));
   return {
-    start: weekStart.toISOString(),
-    end: weekEnd.toISOString(),
+    start: at(weekStart),
+    end: at(addDays(weekStart, 7)),
     label: range === "next_week" ? "next week" : "this week",
   };
 }
@@ -1593,22 +1593,25 @@ export async function runDataTool(
       case "schedule_overview": {
         // A specific date / an "around" pivot beats the named range — and both may sit in
         // the PAST (the named ranges are future-biased; "when WAS the Waldow oven visit"
-        // needs to look backward).
+        // needs to look backward). Day boundaries are the ORG's local midnight, not UTC
+        // (audit v921 high) — else a Pacific org's evening visits fall a day out.
+        const { data: schedOrg } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        const schedTz = getOrgSettings((schedOrg as any)?.settings).timezone || "America/Los_Angeles";
         const day = sanitize(input.date);
         const pivot = sanitize(input.around);
+        const addSchedDays = (ymd: string, n: number) =>
+          new Date(Date.parse(ymd + "T00:00:00Z") + n * 86_400_000).toISOString().slice(0, 10);
         let start: string, end: string, label: string;
         if (/^\d{4}-\d{2}-\d{2}$/.test(day)) {
-          const s = Date.parse(`${day}T00:00:00Z`);
-          start = new Date(s).toISOString();
-          end = new Date(s + 86_400_000).toISOString();
+          start = tzDayStartUtc(day, schedTz).toISOString();
+          end = tzDayStartUtc(addSchedDays(day, 1), schedTz).toISOString();
           label = day;
         } else if (/^\d{4}-\d{2}-\d{2}$/.test(pivot)) {
-          const p = Date.parse(`${pivot}T00:00:00Z`);
-          start = new Date(p - 14 * 86_400_000).toISOString();
-          end = new Date(p + 15 * 86_400_000).toISOString(); // ±2 weeks, pivot day inclusive
+          start = tzDayStartUtc(addSchedDays(pivot, -14), schedTz).toISOString();
+          end = tzDayStartUtc(addSchedDays(pivot, 15), schedTz).toISOString(); // ±2 weeks, pivot day inclusive
           label = `two weeks around ${pivot}`;
         } else {
-          ({ start, end, label } = windowFor(String(input.range ?? "this_week")));
+          ({ start, end, label } = windowFor(String(input.range ?? "this_week"), schedTz));
         }
         const [jobsRes, apptRes, taskRes] = await Promise.all([
           supabase

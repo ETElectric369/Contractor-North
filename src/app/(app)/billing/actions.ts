@@ -345,6 +345,13 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     if (itemsErr) return { ok: false, error: dbError(itemsErr) };
   }
 
+  // DERIVE THE TOTAL FROM THE LINES THAT LANDED (audit v921 high). The header was copied from
+  // the quote row; the invoice's own line_totals are what every later recalc computes from. A
+  // one-cent difference between the two meant the customer paid the sent total in full and the
+  // first recalc (their payment) flipped the invoice to "partial, $0.01 owed" — into AR aging,
+  // into the dunning cron, with a $0.01 pay link live on the customer's copy.
+  await recalcInvoice(supabase, invoice.id);
+
   revalidateMoney();
   return { ok: true, id: invoice.id };
 }

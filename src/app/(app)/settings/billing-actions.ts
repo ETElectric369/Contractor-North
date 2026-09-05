@@ -20,11 +20,12 @@ async function loadOwnerOrg() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("org_id, role")
+    .select("org_id, role, active")
     .eq("id", user.id)
     .maybeSingle();
 
-  if (!profile?.org_id || !["owner", "admin"].includes(profile.role)) {
+  // A deactivated seat is refused here too (audit v921 critical — see staff-guard.ts).
+  if (!profile?.org_id || !["owner", "admin"].includes(profile.role) || profile.active === false) {
     redirect("/settings?tab=getpaid&billing_error=Only an owner or admin can manage billing.");
   }
 

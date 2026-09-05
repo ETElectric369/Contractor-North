@@ -44,6 +44,11 @@ export async function CrewBoardPanel({ date }: { date?: string }) {
       .gte("starts_at", startIso)
       .lt("starts_at", endIso)
       .neq("status", "cancelled")
+      // Not the ghost of a booking that BECAME a job (0237): a converted visit keeps its row
+      // with absorbed=true at the job's own start time. The calendar, My Day, feeders, Google
+      // sync and reminders all drop it; the crew board did not, so the assignee's lane showed
+      // both the visit card and the job card and the load pill counted twice (audit v921 high).
+      .eq("absorbed", false)
       .order("starts_at"),
   ]);
 

@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
+import { endSessionIfDeactivated, DEACTIVATED_MESSAGE } from "@/lib/deactivation-gate";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { safeNextPath } from "@/lib/safe-next";
@@ -29,14 +30,10 @@ async function collaboratorHome(
   return g?.length ? "/content" : null;
 }
 
-/** True when the signed-in profile has been deactivated. Read on the caller's own client:
- *  profiles_read's `id = auth.uid()` disjunct still works for a deactivated user, which is
- *  exactly the sliver of access 0158 deliberately leaves open. */
+/** The deactivation rule lives in ONE place now (lib/deactivation-gate) so the magic-link
+ *  callback cannot drift from these two forms — it did, and that was an audit v921 high. */
 async function isDeactivated(supabase: Awaited<ReturnType<typeof createClient>>): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-  const { data } = await supabase.from("profiles").select("active").eq("id", user.id).maybeSingle();
-  return (data as { active?: boolean } | null)?.active === false;
+  return endSessionIfDeactivated(supabase);
 }
 
 export async function login(formData: FormData) {
@@ -54,13 +51,15 @@ export async function login(formData: FormData) {
   // token — and the credential itself is what an ex-employee still holds. Sign the new
   // session straight back out and say so plainly.
   if (await isDeactivated(supabase)) {
-    await supabase.auth.signOut();
-    redirect(`/login?error=${encodeURIComponent("This account has been deactivated. Contact your office.")}`);
+    redirect(`/login?error=${encodeURIComponent(DEACTIVATED_MESSAGE)}`);
   }
 
   // A RETURNING org-less collaborator belongs on /content (their grants may still be pending
-  // claim if their first session never hit a claiming route).
-  const dest = (await collaboratorHome(supabase)) ?? "/planner";
+  // claim if their first session never hit a claiming route). Otherwise honour ?next= — the
+  // middleware stamps it on every bounce to /login, and until now sign-in threw it away, so a
+  // deep link (a job, an invoice, a doc) always dumped the person on My Day (audit v921).
+  const wanted = safeNextPath(String(formData.get("next") ?? "")) ?? "/planner";
+  const dest = (await collaboratorHome(supabase)) ?? wanted;
   revalidatePath("/", "layout");
   redirect(dest);
 }
@@ -188,11 +187,12 @@ export async function verifyLoginCode(formData: FormData) {
   // Same deactivation gate as the password path — otherwise the 6-digit code is a way
   // straight around it.
   if (await isDeactivated(supabase)) {
-    await supabase.auth.signOut();
-    redirect(`/login?error=${enc("This account has been deactivated. Contact your office.")}`);
+    redirect(`/login?error=${enc(DEACTIVATED_MESSAGE)}`);
   }
-  // Same routing as password login: an org-less site collaborator belongs on /content.
-  const dest = (await collaboratorHome(supabase)) ?? "/planner";
+  // Same routing as password login: an org-less site collaborator belongs on /content, and a
+  // deep link the middleware stashed in ?next= is honoured.
+  const wanted = safeNextPath(String(formData.get("next") ?? "")) ?? "/planner";
+  const dest = (await collaboratorHome(supabase)) ?? wanted;
   revalidatePath("/", "layout");
   redirect(dest);
 }

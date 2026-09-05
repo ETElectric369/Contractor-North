@@ -83,7 +83,10 @@ export async function POST(req: Request) {
         // invoice header still reading $0 owed-in-full (audit 8). recalc is idempotent, so
         // running it on every benign retry is free and it heals the crashed case. Deliberately
         // NOT the push: that one isn't idempotent and the duplicate is usually benign.
-        await recalcInvoice(supabase, invoiceId);
+        if (!(await recalcInvoice(supabase, invoiceId))) {
+          // Still not settled — let Stripe retry rather than acking a lie (see below).
+          throw new Error(`recalcInvoice failed on retry for invoice ${invoiceId}`);
+        }
         return;
       }
       throw new Error(insErr.message);
@@ -94,7 +97,17 @@ export async function POST(req: Request) {
     // $1,000 invoice came back as $800 paid / status "partial", so the invoice kept a
     // phantom $200 balance forever — aged in A/R, dunned by the reminder cron, and payable
     // a SECOND time on the public page. One definition, both paths agree by construction.
-    await recalcInvoice(supabase, invoiceId);
+    //
+    // AND IT HAS TO LAND (audit v921 high). The money row is already in; if the settle fails,
+    // the invoice keeps its old balance, AR ages it, the dunning cron chases a customer who
+    // paid, and GET /api/pay/<token> still sees balance > 0 and opens a SECOND full-amount
+    // Checkout. Acking 200 here ends the story — Stripe never retries a 2xx and no cron
+    // re-runs recalc. So throw: the handler answers 500, Stripe retries the same event id,
+    // the insert hits 23505 and the heal branch above settles it. Recalc is idempotent, so
+    // the retry is free; a swallowed failure is not.
+    if (!(await recalcInvoice(supabase, invoiceId))) {
+      throw new Error(`recalcInvoice failed after recording payment on invoice ${invoiceId}`);
+    }
     const { data: inv } = await supabase
       .from("invoices")
       // total + amount_paid so the overpayment is knowable HERE — the projection law: you cannot
@@ -146,12 +159,27 @@ export async function POST(req: Request) {
     // have silently re-planned every org on it. Storing the price id too gives
     // grandfathering: repricing creates a NEW id and existing orgs keep theirs.
     const priceId = sub.items.data[0]?.price?.id ?? null;
+    // PERIOD END MOVED IN A NEWER STRIPE API (audit v921 high). On the "basil" endpoint version,
+    // current_period_end lives on the subscription ITEM, not the subscription; reading the old
+    // field gives undefined -> new Date(NaN).toISOString() THROWS, which 500s every subscription
+    // event and, downstream, lets the card-declined push never fire. Read the item first, fall
+    // back to the subscription, and never let a bad timestamp crash the sync.
+    const item0 = sub.items.data[0] as { current_period_end?: number } | undefined;
+    const subPeriodEnd = (sub as { current_period_end?: number }).current_period_end;
+    const periodEndSec =
+      typeof item0?.current_period_end === "number"
+        ? item0.current_period_end
+        : typeof subPeriodEnd === "number"
+          ? subPeriodEnd
+          : undefined;
+    const periodEndIso =
+      periodEndSec && Number.isFinite(periodEndSec) ? new Date(periodEndSec * 1000).toISOString() : null;
     const update = {
       subscription_status: sub.status, // active, trialing, past_due, canceled…
       stripe_subscription_id: sub.id,
       plan: tierForPriceId(priceId) ?? sub.items.data[0]?.price?.nickname ?? "crew",
       stripe_price_id: priceId,
-      current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
+      ...(periodEndIso ? { current_period_end: periodEndIso } : {}),
     };
     // Match by org_id metadata if present, else by stripe_customer_id.
     if (orgId) {

@@ -42,11 +42,23 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
+  // The Estimate|Quote label is a LEGAL claim on the document — QuoteDocument prints a
+  // "fixed price" sentence for a quote and a "not a contract" one for an estimate. Flipping it
+  // after the customer already has a copy leaves their stored PDF asserting the wrong basis
+  // (audit v921 high). Only reshape a DRAFT; once it's out, the pricing basis is fixed.
+  const { data: cur } = await supabase.from("quotes").select("status").eq("id", id).maybeSingle();
+  const curStatus = (cur as { status?: string } | null)?.status;
+  if (curStatus && curStatus !== "draft") {
+    return { ok: false, error: "This estimate was already sent — its type can't be changed. Duplicate it to start a new one." };
+  }
+  const { data: wrote, error } = await supabase
     .from("quotes")
     .update({ doc_type: docType, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That estimate could not be found." };
+  await bustDocPdf("quote", id); // even a draft may have a cached preview
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true };
@@ -284,12 +296,13 @@ async function recalcQuote(supabase: any, quoteId: string) {
   ]);
   if (quoteRes.error || itemsRes.error || !itemsRes.data) {
     reportError("recalcQuote:read", quoteRes.error ?? itemsRes.error ?? new Error("no rows object"), { quoteId });
+    // (returns null below — the caller keeps whatever it computed rather than showing zeros)
     // Leave the stored TOTALS alone — a failed read is not an empty quote. But the caller only
     // reaches recalc after CHANGING a line, so the stored PDF is stale no matter what happened
     // here: bust it anyway, or the customer's Download button keeps handing out a document that
     // shows neither the new line nor the old total (v800 verification).
     await bustDocPdf("quote", quoteId);
-    return;
+    return null;
   }
   const { subtotal, tax, total } = subtotalTaxTotal(
     itemsRes.data.map((i: any) => Number(i.line_total ?? 0)),
@@ -304,6 +317,7 @@ async function recalcQuote(supabase: any, quoteId: string) {
   // A sent quote stays editable (unlike an invoice), so every content write funnels here —
   // drop the stored PDF (0198) or the customer's Download button would hand out old numbers.
   await bustDocPdf("quote", quoteId);
+  return { subtotal, tax, total };
 }
 
 export async function addQuoteItem(
@@ -614,6 +628,13 @@ export async function saveQuote(input: SaveQuoteInput) {
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const supabase = ctx.supabase;
 
+  // THE HEADER IS A PROVISIONAL FIGURE HERE. These products are raw JS floats summed and then
+  // rounded once; the DB stores each line as round(quantity * unit_price, 2) and rounds half
+  // AWAY from zero. Two lines of 2.25 hr x $95.50 give lines of $214.88 each ($429.76) under a
+  // header of $429.75 — a customer-facing document whose lines do not add up, tax on the wrong
+  // base, and a later edit silently moving the total of an already-sent quote (audit v921 high).
+  // So this value only carries the insert; recalcQuote below re-derives the header from the
+  // stored line_total column and that is what we persist and return.
   const { subtotal, tax, total } = subtotalTaxTotal(
     input.items.map((i) => i.quantity * i.unit_price),
     input.tax_rate || 0,
@@ -776,8 +797,14 @@ export async function saveQuote(input: SaveQuoteInput) {
     revalidatePath("/leads");
   }
 
+  // Re-derive the header from what the DB actually stored, so the lines on the document always
+  // add up to its Subtotal (audit v921 high). Idempotent, and the same function every editor
+  // path already funnels through. If the read fails it returns null and we keep the provisional
+  // figures — a transient error must never zero a real estimate (the v800 rule).
+  const stored = await recalcQuote(supabase, quote.id);
+
   revalidatePath("/quotes");
-  // Return the SAVED money figures (the subtotalTaxTotal rollup that was written) +
+  // Return the SAVED money figures (the recalc rollup that was written) +
   // the trigger-assigned number, so every caller — Nort's quote.create especially —
   // reads the real total back instead of re-deriving it. The announce-vs-save drift:
   // Nort told Erik "~$2,560" then saved E-014 at $2,620, because the announced figure
@@ -786,9 +813,9 @@ export async function saveQuote(input: SaveQuoteInput) {
     ok: true as const,
     id: quote.id,
     quote_number: (quote as { quote_number?: string }).quote_number ?? null,
-    subtotal,
-    tax,
-    total,
+    subtotal: stored?.subtotal ?? subtotal,
+    tax: stored?.tax ?? tax,
+    total: stored?.total ?? total,
   };
 }
 
@@ -1007,8 +1034,12 @@ export async function updateQuoteStatus(id: string, status: string) {
   // alerts the office in-app (the My Day feeder catches status='accepted') AND by push.
   const patch: Record<string, unknown> =
     status === "accepted" ? { status, accepted_at: new Date().toISOString() } : { status };
-  const { error } = await supabase.from("quotes").update(patch).eq("id", id);
+  // .select("id") so a zero-row write is caught (silent-write law). quotes_write is org-scoped,
+  // so a foreign-org quote id matches nothing here — without the row check the function sailed
+  // on to read the quote and ring THAT org's bell (audit v921 high). No rows = not ours = stop.
+  const { data: updated, error } = await supabase.from("quotes").update(patch).eq("id", id).select("id");
   if (error) return { ok: false as const, error: dbError(error) };
+  if (!updated?.length) return { ok: false as const, error: "That estimate could not be found." };
 
   /**
    * ONE DECISION, RECORDED WHEREVER IT IS MADE (Erik, 8/19: "it would be the one in the same
@@ -1038,10 +1069,27 @@ export async function updateQuoteStatus(id: string, status: string) {
   }
 
   if (status === "accepted") {
-    await createJobFromQuote(id).catch(() => {}); // links quotes.job_id + spins up WO/materials
+    // THE JOB IS THE POINT OF ACCEPTING (audit v921 high). createJobFromQuote returns
+    // {ok:false} on failure rather than throwing, and .catch(() => {}) swallowed even a throw —
+    // so a failed job/customer creation still reported "accepted" with no job, no work order,
+    // no materials, and nothing on My Day. The status flip already landed; surface the failure
+    // so the office knows to finish the hand-off instead of believing the work is scheduled.
+    let jobWarn: string | null = null;
+    try {
+      const jobRes = await createJobFromQuote(id); // links quotes.job_id + spins up WO/materials
+      if (jobRes && jobRes.ok === false) jobWarn = jobRes.error ?? "The job wasn't created.";
+    } catch (e) {
+      jobWarn = "The job wasn't created.";
+      reportError("updateQuoteStatus:createJob", e, { quoteId: id });
+    }
     await pushQuoteAccepted(id);
     revalidatePath("/planner"); // so the "Accepted — schedule it" item shows immediately
     revalidatePath("/schedule");
+    revalidatePath(`/quotes/${id}`);
+    revalidatePath("/quotes");
+    if (jobWarn) {
+      return { ok: true as const, warning: `Estimate accepted, but the job needs attention: ${jobWarn}` };
+    }
   }
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
