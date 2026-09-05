@@ -1623,6 +1623,7 @@ export async function runDataTool(
           supabase
             .from("appointments")
             .select("id, title, type, starts_at, ends_at, location, status, customers(name), jobs(name)")
+            .eq("absorbed", false) // don't list a converted visit beside the job it became (audit v921)
             .gte("starts_at", start)
             .lt("starts_at", end)
             .order("starts_at"),

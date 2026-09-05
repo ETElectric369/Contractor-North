@@ -500,11 +500,13 @@ export async function linkAppointmentTo(
     patch.title = `Site inspection: ${name}`;
   }
 
-  const { error } = await supabase
+  const { data: linked, error } = await supabase
     .from("appointments")
     .update({ ...patch, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!linked?.length) return { ok: false, error: "That appointment could not be found." };
 
   revalidatePath("/schedule");
   revalidatePath("/planner");
@@ -774,7 +776,7 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const typed = resolveType(formData, "appointment");
   if (typed.error) return { ok: false, error: typed.error };
 
-  const { error } = await supabase
+  const { data: wroteAppt, error } = await supabase
     .from("appointments")
     .update({
       type: typed.type,
@@ -788,8 +790,10 @@ export async function updateAppointment(id: string, formData: FormData): Promise
       assigned_to: emptyToNull(formData.get("assigned_to")),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wroteAppt?.length) return { ok: false, error: "That appointment could not be found." };
 
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
 
@@ -1062,8 +1066,9 @@ export async function deleteAppointment(id: string): Promise<Result> {
   const supabase = ctx.supabase;
   // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
   await deleteCalendarItem("appointment", id);
-  const { error } = await supabase.from("appointments").delete().eq("id", id);
+  const { data: del, error } = await supabase.from("appointments").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!del?.length) return { ok: false, error: "That appointment could not be found." };
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too

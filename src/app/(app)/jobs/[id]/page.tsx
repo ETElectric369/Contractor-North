@@ -257,6 +257,7 @@ export default async function JobDetailPage({
       .from("appointments")
       .select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to")
       .eq("job_id", id)
+      .eq("absorbed", false) // the converted source booking is the job now, not a live visit (audit v921)
       .order("starts_at"),
     // Subs & contacts linked to THIS job (many-to-many). Graceful: if job_contacts doesn't exist
     // yet (migration 0087 not applied), the query errors and we just show an empty card.

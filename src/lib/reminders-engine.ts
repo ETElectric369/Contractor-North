@@ -105,12 +105,16 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
     // closer to "time since sent" than created_at; no sent_at column exists yet); max 2.
     if (s.remind_quote_followup) {
       const cutoff = new Date(now - 3 * DAY).toISOString();
+      // Don't chase a DEAD quote (audit v921): once valid_until has passed the offer is expired,
+      // so a follow-up "still thinking it over?" is wrong. Skip past-due ones (null = no expiry).
+      const todayStr = new Date(now).toISOString().slice(0, 10);
       const { data: qs } = await supabase
         .from("quotes")
-        .select("id, quote_number, public_token, doc_type, customers(name, email)")
+        .select("id, quote_number, public_token, doc_type, valid_until, customers(name, email)")
         .eq("org_id", org.id)
         .eq("status", "sent")
-        .lt("updated_at", cutoff);
+        .lt("updated_at", cutoff)
+        .or(`valid_until.is.null,valid_until.gte.${todayStr}`);
       for (const q of qs ?? []) {
         const cust = (q as any).customers;
         if (!cust?.email) { counts.skipped_no_email++; continue; }
