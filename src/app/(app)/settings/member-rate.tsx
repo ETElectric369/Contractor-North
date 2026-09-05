@@ -22,11 +22,22 @@ export function MemberRate({
   const [bill, setBill] = useState(billRate ?? 0);
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
 
   function save() {
     if ((rate ?? 0) === pay && (billRate ?? 0) === bill) return;
     start(async () => {
-      await updateMemberRate(id, pay || null, bill || null);
+      // CHECK THE RESULT (audit v921 high): the action returns {ok:false,error} for a non-staff
+      // caller or a rejected write, and the old code flashed the green check regardless — the
+      // office thought a pay change saved when it hadn't. Only claim success on ok.
+      const res = await updateMemberRate(id, pay || null, bill || null);
+      if (!res?.ok) {
+        setErr(res?.error ?? "That didn't save — try again.");
+        setPay(rate ?? 0);
+        setBill(billRate ?? 0);
+        return;
+      }
+      setErr(null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       router.refresh();
@@ -47,6 +58,7 @@ export function MemberRate({
       </span>
       {pending && <span className="text-slate-400">…</span>}
       {saved && <Check className="h-3.5 w-3.5 text-green-600" />}
+      {err && <span className="text-rose-600">{err}</span>}
     </span>
   );
 }

@@ -172,6 +172,13 @@ export function kitQuantities(
 export function kitIsParametric(items: ParametricKitItem[]): boolean {
   return (items ?? []).some((i) => {
     const s = sizingOf(i);
-    return (s.qty_per_sqft ?? 0) > 0 || (s.qty_per_lf ?? 0) > 0;
+    // The legacy pair OR the generic 0241 rule (sized_by + qty_per) — a "Per <measurement>" line
+    // sets perSqft/perLf to 0 and drives off sized_by, so checking only the pair missed it and
+    // the picker never offered to size the kit.
+    return (
+      (s.qty_per_sqft ?? 0) > 0 ||
+      (s.qty_per_lf ?? 0) > 0 ||
+      (!!s.sized_by && (Number(s.qty_per) || 0) > 0)
+    );
   });
 }

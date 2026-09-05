@@ -123,16 +123,27 @@ const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?
   qty_round: typeof s.qty_round === "string" && s.qty_round ? s.qty_round : null,
 });
 
-/** Validate + shape a sizing patch for either table. `undefined` = leave alone; null/"" = clear. */
-function sizingPatch(sizing: Partial<KitSizing>): { patch: Record<string, unknown>; error?: string } {
+/** Validate + shape a sizing patch for a specific table. `undefined` = leave alone; null/"" = clear.
+ *  kit_items does NOT have sized_by/qty_per — those are the per-measurement rule (0241) and live
+ *  only on price_list_items, where a LINKED line inherits them. Writing them to kit_items is a
+ *  PGRST204 that broke every save of a hand-typed (unlinked) kit line (audit v921 high). */
+function sizingPatch(
+  sizing: Partial<KitSizing>,
+  table: "kit_items" | "price_list_items" = "price_list_items",
+): { patch: Record<string, unknown>; error?: string } {
   const patch: Record<string, unknown> = {};
-  for (const k of ["qty_per_sqft", "qty_per_lf", "qty_min", "qty_per"] as const) {
+  const coefKeys =
+    table === "price_list_items"
+      ? (["qty_per_sqft", "qty_per_lf", "qty_min", "qty_per"] as const)
+      : (["qty_per_sqft", "qty_per_lf", "qty_min"] as const);
+  for (const k of coefKeys) {
     if (sizing[k] === undefined) continue;
     const n = finite(sizing[k]);
     if (n !== null && n < 0) return { patch, error: "A sizing number can't be negative." };
     patch[k] = n && n > 0 ? n : null;
   }
-  if (sizing.sized_by !== undefined) {
+  // sized_by is a price_list_items-only column; a kit_items patch must never carry it.
+  if (table === "price_list_items" && sizing.sized_by !== undefined) {
     const key = (sizing.sized_by ?? "").trim();
     if (key.length > 64) return { patch, error: "That measurement name is too long." };
     patch.sized_by = key || null;
@@ -495,7 +506,7 @@ export async function updateKitItem(
     patch = { quantity };
   } else {
     if (!input.description?.trim()) return { ok: false, error: "Description is required." };
-    const { patch: sizing, error: sErr } = sizingPatch(input);
+    const { patch: sizing, error: sErr } = sizingPatch(input, "kit_items");
     if (sErr) return { ok: false, error: sErr };
     patch = {
       description: input.description.trim(),

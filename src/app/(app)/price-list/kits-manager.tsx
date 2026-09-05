@@ -401,7 +401,7 @@ function EditItemModal({ item, orgDefaultPct, measurements = [], onClose }: { it
         <details className="rounded-lg border border-slate-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-slate-700">
             Item Formula
-            {(sizing.perSqft !== "" || sizing.perLf !== "") && <span className="ml-2 text-xs font-normal text-brand">on</span>}
+            {(sizing.perSqft !== "" || sizing.perLf !== "" || (!!sizing.sizedBy && sizing.qtyPer !== "")) && <span className="ml-2 text-xs font-normal text-brand">on</span>}
           </summary>
           <p className="mt-2 text-xs text-slate-500">
             {view.linked
@@ -504,7 +504,10 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
                     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                       {views.map(({ it, v }) => {
                         const qty = Number(it.quantity) || 0;
-                        const sized = (v.sizing.qty_per_sqft ?? 0) > 0 || (v.sizing.qty_per_lf ?? 0) > 0;
+                        const sized =
+                          (v.sizing.qty_per_sqft ?? 0) > 0 ||
+                          (v.sizing.qty_per_lf ?? 0) > 0 ||
+                          (!!v.sizing.sized_by && (Number(v.sizing.qty_per) || 0) > 0); // 0241 per-measurement (audit v921)
                         return (
                           <li key={it.id} className="flex items-center gap-3 px-3 py-2 text-sm">
                             <span className="flex min-w-0 flex-1 items-center gap-1.5">
