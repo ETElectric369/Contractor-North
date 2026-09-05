@@ -11,7 +11,7 @@
  */
 import { classifyLead, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, tzDayStartUtc, tzLocalHourUtc } from "@/lib/tz";
+import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { sendEmail } from "@/lib/email";
@@ -119,8 +119,10 @@ export async function createTriagedInquiry(
       // leads/actions.ts). Same tz idiom as recurring/actions' defaultDueDateIso.
       const { data: orgTz } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
       const tz = getOrgSettings((orgTz as { settings?: unknown } | null)?.settings).timezone;
-      const todayStart = tzDayStartUtc(todayStrInTz(tz), tz);
-      const dayStr = todayStrInTz(tz, new Date(todayStart.getTime() + 2 * 86_400_000));
+      // +2 days on the CALENDAR, not by ms (audit v921): a fall-back night is 25h, so adding
+      // 2*86_400_000 landed a day early. Add to the date string, then stamp 9 AM org-local.
+      const todayStr = todayStrInTz(tz);
+      const dayStr = new Date(Date.parse(todayStr + "T00:00:00Z") + 2 * 86_400_000).toISOString().slice(0, 10);
       const when = tzLocalHourUtc(dayStr, 9, tz);
       await supabase.from("appointments").insert({
         org_id: orgId,

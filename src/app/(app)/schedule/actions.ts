@@ -173,6 +173,19 @@ export async function createJob(formData: FormData): Promise<Result> {
 // (which revalidates /schedule + /planner so the calendar stays fresh).
 
 /** Assign a job to a single employee (or clear). */
+/** Keep only ids that are profiles the caller can see — i.e. in their own org (RLS scopes
+ *  profiles_read). A job's assigned_to must never carry a foreign-org profile (audit v921):
+ *  setJobCrew/setJobAssignee took any uuid and the crew-added push then reached across tenants. */
+async function orgMemberIds(
+  supabase: SupabaseClient,
+  ids: string[],
+): Promise<string[]> {
+  if (!ids.length) return [];
+  const { data } = await supabase.from("profiles").select("id").in("id", ids);
+  const ok = new Set((data ?? []).map((r: { id: string }) => r.id));
+  return ids.filter((x) => ok.has(x));
+}
+
 export async function setJobAssignee(
   id: string,
   employeeId: string,
@@ -180,7 +193,7 @@ export async function setJobAssignee(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const ids = employeeId ? [employeeId] : [];
+  const ids = await orgMemberIds(supabase, employeeId ? [employeeId] : []);
   // Read the OLD crew first so the write can be diffed — a newly ADDED member gets
   // the bell + "assigned" push (never the caller, never on removal).
   const { data: prev } = await supabase
@@ -216,7 +229,7 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const ids = Array.from(new Set((employeeIds ?? []).map(String).filter(Boolean)));
+  const ids = await orgMemberIds(supabase, Array.from(new Set((employeeIds ?? []).map(String).filter(Boolean))));
   // Old crew first (diff base) — also proves the job is visible to the caller.
   const { data: prev } = await supabase
     .from("jobs")

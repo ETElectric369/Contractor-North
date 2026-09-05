@@ -589,7 +589,7 @@ export async function updateMember(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, active").eq("id", user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (id === user.id && patch.role && patch.role !== "owner") {
     return { ok: false, error: "You can't change your own owner role." };
@@ -607,8 +607,13 @@ export async function updateMember(
   if (patch.crew_lead !== undefined) clean.crew_lead = !!patch.crew_lead;
   if (!Object.keys(clean).length) return { ok: true };
 
-  const { error } = await supabase.from("profiles").update(clean).eq("id", id);
+  // Same-org + row check (audit v921 silent-write): the update was id-keyed with no org guard and
+  // no .select, so a zero-row write (foreign or vanished member) reported success.
+  const { data: tgt } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  if (!tgt || (tgt as { org_id?: string | null }).org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  const { data: wroteM, error } = await supabase.from("profiles").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wroteM?.length) return { ok: false, error: "That didn't save - reload and try again." };
   revalidatePath("/team");
   revalidatePath("/settings");
   revalidatePath("/planner"); // role/active/rate feed the planner's assignee pickers
@@ -793,13 +798,17 @@ export async function updateMemberRate(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role, active").eq("id", user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
+  // Same-org + row check (audit v921 silent-write).
+  const { data: rt } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  if (!rt || (rt as { org_id?: string | null }).org_id !== me.org_id) return { ok: false, error: "Member not found." };
 
   const patch: Record<string, unknown> = { hourly_rate: hourlyRate };
   if (billRate !== undefined) patch.bill_rate = billRate;
-  const { error } = await supabase.from("profiles").update(patch).eq("id", id);
+  const { data: wroteR, error } = await supabase.from("profiles").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wroteR?.length) return { ok: false, error: "That didn't save - reload and try again." };
   revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
@@ -823,7 +832,13 @@ export async function setPublicHandle(
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
   if (handle && !/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(handle)) {
-    return { ok: false, error: "Use 2–40 letters, numbers, or hyphens." };
+    return { ok: false, error: "Use 2-40 letters, numbers, or hyphens." };
+  }
+  // A handle becomes a *.contractornorth.com subdomain, so it must not collide with our own
+  // reserved hosts, or the by-domain resolver would serve this org on an infra host (audit v921).
+  const RESERVED_HANDLE = new Set(["www", "app", "api", "admin", "mail", "staging", "dev", "preview"]);
+  if (handle && RESERVED_HANDLE.has(handle)) {
+    return { ok: false, error: "That web address is reserved - try another." };
   }
   if (handle) {
     const svc = createServiceClient();

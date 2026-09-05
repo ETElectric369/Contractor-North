@@ -78,11 +78,19 @@ export async function updateEmployeeDoc(
   return { ok: true };
 }
 
-export async function deleteEmployeeDoc(id: string, path: string): Promise<Result> {
-  const supabase = await createClient();
-  await supabase.storage.from("documents").remove([path]);
-  const { error } = await supabase.from("employee_documents").delete().eq("id", id);
+export async function deleteEmployeeDoc(id: string, _path: string): Promise<Result> {
+  // STAFF ONLY, path from the ROW not the caller (audit v921): no role gate + client-supplied
+  // path meant a non-staff or crafted call could delete an arbitrary object, silently.
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: row } = await supabase.from("employee_documents").select("id, file_url").eq("id", id).maybeSingle();
+  if (!row) return { ok: false, error: "Document not found." };
+  const storedPath = (row as { file_url?: string | null }).file_url ?? null;
+  const { data: del, error } = await supabase.from("employee_documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!del?.length) return { ok: false, error: "Document not found." };
+  if (storedPath) await supabase.storage.from("documents").remove([storedPath]);
   revalidatePath("/employee-docs");
   return { ok: true };
 }

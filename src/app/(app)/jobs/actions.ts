@@ -756,15 +756,19 @@ export async function updateDocument(
 
 export async function deleteDocument(
   id: string,
-  path: string | null,
+  _path: string | null, // ignored: the file path comes from the ROW, never the caller (audit v921)
   jobId: string,
 ): Promise<Result> {
   const supabase = await createClient();
-  // Remove the file then the row (best-effort on the file). Organize notes filed
-  // to a job have NO file (file_url null) — skip storage for those, like /organize does.
-  if (path) await supabase.storage.from("documents").remove([path]);
-  const { error } = await supabase.from("documents").delete().eq("id", id);
+  // Read the row FIRST (RLS scopes it to the caller's org) so we delete the file it actually
+  // points at, not a client path that could name another org's object; row-check the delete.
+  const { data: row } = await supabase.from("documents").select("id, file_url").eq("id", id).maybeSingle();
+  if (!row) return { ok: false, error: "Document not found." };
+  const storedPath = (row as { file_url?: string | null }).file_url ?? null;
+  const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!del?.length) return { ok: false, error: "Document not found." };
+  if (storedPath) await supabase.storage.from("documents").remove([storedPath]);
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

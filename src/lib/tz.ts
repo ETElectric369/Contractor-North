@@ -35,8 +35,9 @@ export function todayStrInTz(tz: string, at: Date = new Date()): string {
 
 /** The UTC instant of local midnight for a "YYYY-MM-DD" in the given timezone. */
 export function tzDayStartUtc(ymd: string, tz: string): Date {
-  const guess = new Date(`${ymd}T00:00:00Z`);
-  return new Date(guess.getTime() - tzOffsetMs(tz, guess));
+  const naive = Date.parse(`${ymd}T00:00:00Z`);
+  const firstPass = new Date(naive - tzOffsetMs(tz, new Date(naive)));
+  return new Date(naive - tzOffsetMs(tz, firstPass));
 }
 
 /** Minutes past local midnight for an instant in the given timezone — the
@@ -74,7 +75,14 @@ export function timeEntryGridSpan(
  *  in the given timezone. Lets server actions store "8 AM local" without the
  *  bare-string `new Date("…T08:00")` trap (which parses as the server's UTC). */
 export function tzLocalHourUtc(ymd: string, hour: number, tz: string): Date {
-  return new Date(tzDayStartUtc(ymd, tz).getTime() + hour * 3_600_000);
+  // Compute the offset AT THE TARGET local time, not at midnight (audit v921). Adding N hours of
+  // ms to local-midnight-as-UTC used midnight's offset, so any hour after a 2 AM DST transition
+  // landed an hour off (spring-forward and fall-back both). Standard wall-time-to-UTC: guess with
+  // the naive instant, then correct once with the offset at that guess — idempotent on normal
+  // days, exact across a transition boundary.
+  const naive = Date.parse(`${ymd}T00:00:00Z`) + hour * 3_600_000;
+  const firstPass = new Date(naive - tzOffsetMs(tz, new Date(naive)));
+  return new Date(naive - tzOffsetMs(tz, firstPass));
 }
 
 /** UTC ISO for "YYYY-MM-DD" + "HH:MM" interpreted in the given timezone. The
