@@ -20,8 +20,8 @@ export function setOAuthState(res: NextResponse, provider: string, state: string
   res.cookies.set(`oauth_state_${provider}`, state, COOKIE_OPTS);
 }
 
-/** True if the returned state matches the cookie set at connect-time. Always clears
- *  the cookie on `res` (single-use), whether or not it matched. */
+/** True if the returned state matches the cookie set at connect-time. Clears the cookie
+ *  whichever way it goes — the nonce is single-use. */
 export async function verifyOAuthState(
   res: NextResponse,
   provider: string,
@@ -29,6 +29,16 @@ export async function verifyOAuthState(
 ): Promise<boolean> {
   const jar = await cookies();
   const expected = jar.get(`oauth_state_${provider}`)?.value;
+  // "SINGLE-USE" WAS ONLY TRUE WHEN IT FAILED (audit v921). Callers hand us the pre-built
+  // FAILURE response and return a different one on success, so the clear rode a response that
+  // was never sent and the nonce stayed valid for its full 600s. Clear it on the request's own
+  // cookie jar too — a Route Handler may write cookies, and Next merges them onto whichever
+  // response the route actually returns. The `res` clear stays for the failure path.
   res.cookies.set(`oauth_state_${provider}`, "", { ...COOKIE_OPTS, maxAge: 0 });
+  try {
+    jar.set(`oauth_state_${provider}`, "", { ...COOKIE_OPTS, maxAge: 0 });
+  } catch {
+    /* a read-only cookie store (non-route-handler caller) — the `res` clear above still stands */
+  }
   return !!expected && !!returned && expected === returned;
 }

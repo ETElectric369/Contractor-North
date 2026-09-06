@@ -1,17 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
-import { createCustomerCredit } from "../actions";
+import { formatCurrency } from "@/lib/utils";
+import { applyCustomerCredit, createCustomerCredit, listCustomerCreditsForInvoice, markCreditRefunded } from "../actions";
 
-/** Post a credit/refund to the customer's account from this invoice.
- *  With `menuItem` the trigger renders as an Actions-menu row (the rare
- *  accounting verb lives behind the ⋯ seek door, not the header). */
+type OpenCredit = { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean };
+
+/** Post a credit/refund to the customer's account from this invoice — and SPEND one that's
+ *  already sitting there. With `menuItem` the trigger renders as an Actions-menu row (the rare
+ *  accounting verb lives behind the ⋯ seek door, not the header).
+ *
+ *  The account list is the way out of the dead end (audit v921): a credit posted from an
+ *  overpaid invoice reduced nothing there and had no button anywhere that could move it onto
+ *  the customer's next bill, so the CRM tile counted it forever. */
 export function CreditButton({
   invoiceId,
   defaultAmount,
@@ -28,6 +35,28 @@ export function CreditButton({
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [credits, setCredits] = useState<OpenCredit[]>([]);
+
+  // Load what's already on the account when the window opens — this is the only place the
+  // office can see (and use) an open credit from the invoice they're looking at.
+  const loadCredits = useCallback(async () => {
+    const res = await listCustomerCreditsForInvoice(invoiceId);
+    setCredits(res.ok ? (res.credits ?? []) : []);
+  }, [invoiceId]);
+  useEffect(() => {
+    if (open) void loadCredits();
+  }, [open, loadCredits]);
+
+  /** Run one account action, then re-read the list so the row reflects what landed. */
+  function act(run: () => Promise<{ ok: boolean; error?: string }>) {
+    setError(null);
+    start(async () => {
+      const res = await run();
+      if (!res.ok) return setError(res.error ?? "Could not save.");
+      await loadCredits();
+      router.refresh();
+    });
+  }
 
   function save() {
     setError(null);
@@ -79,13 +108,52 @@ export function CreditButton({
       >
         <div className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {credits.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">On this customer&apos;s account</div>
+              <ul className="mt-2 space-y-2">
+                {credits.map((c) => (
+                  <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span className="text-slate-700">
+                      <span className="font-medium text-slate-900">{formatCurrency(c.amount)}</span>{" "}
+                      {c.disposition === "refund"
+                        ? "refund pending"
+                        : c.onThisInvoice
+                          ? "credited on this invoice"
+                          : "account credit"}
+                      {c.note ? ` — ${c.note}` : ""}
+                    </span>
+                    {c.disposition === "refund" ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => act(() => markCreditRefunded(c.id))}
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Mark Refunded
+                      </button>
+                    ) : c.onThisInvoice ? null : (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => act(() => applyCustomerCredit(c.id, invoiceId))}
+                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Apply To This Invoice
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div>
             <Label htmlFor="cr-amt">Amount</Label>
             <NumberInput id="cr-amt" value={amount} onValueChange={setAmount} />
           </div>
           <div className="space-y-2">
             <Label>What should happen?</Label>
-            {opt("credit", "Keep as account credit", "Sits on the customer's account toward future work")}
+            {opt("credit", "Keep as account credit", "Sits on the customer's account — apply it to another invoice from this window")}
             {opt("refund", "Flag accounting to refund", "Posts the credit and flags it to be paid back")}
           </div>
           <div>

@@ -248,13 +248,28 @@ export function QuoteItemsEditor({
             }
             onAdd={(lines) =>
               start(async () => {
+                setError(null);
+                // Each line is its own write and any of them can be refused — a locked estimate
+                // (accepted with a signed contract or a billed draw), a DB error. Throwing the
+                // results away meant a kit landed half its lines, or none, and the screen just
+                // re-rendered with a wrong total and no message (audit v921).
+                let added = 0;
                 for (const l of lines) {
-                  await addQuoteItem(quote.id, {
+                  const res = await addQuoteItem(quote.id, {
                     description: l.description,
                     quantity: l.quantity,
                     unit: l.unit,
                     unit_price: l.unit_price,
                   });
+                  if (!res.ok) {
+                    setError(
+                      added
+                        ? `Added ${added} of ${lines.length}, then stopped: ${res.error ?? "the rest couldn't be added."}`
+                        : res.error ?? "Couldn't add those items.",
+                    );
+                    break;
+                  }
+                  added++;
                 }
                 refresh();
               })

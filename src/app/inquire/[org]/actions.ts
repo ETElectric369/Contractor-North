@@ -89,8 +89,13 @@ export async function submitPublicInquiry(
  * anonymous, so this reads the real just-created row with the service client
  * (content can't be spoofed by the caller) and only fires for an inquiry created
  * in the last 2 minutes — bounding any replay of this hook to a real submission.
+ *
+ * NOT EXPORTED (audit v921): this file is "use server", so an export is a POSTable server action.
+ * Exported, it took an org uuid from the caller with no honeypot and no limiter — inside the
+ * 2-minute window after any real inquiry, anyone holding the action id could re-fire the push to
+ * that tenant's whole office, once per request. It has exactly one caller, right above.
  */
-export async function notifyNewInquiry(orgId: string): Promise<void> {
+async function notifyNewInquiry(orgId: string): Promise<void> {
   try {
     if (!orgId) return;
     const sb = createServiceClient();

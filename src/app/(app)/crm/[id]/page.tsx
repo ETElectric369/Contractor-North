@@ -48,9 +48,32 @@ export default async function CustomerDetailPage({
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
 
-  const [{ data: jobs }, { data: quotes }, { data: invoices }, { data: pricingLevels }, { data: credits }, { data: staffRows }] = await Promise.all([
-    supabase.from("jobs").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
-    supabase.from("quotes").select("*").eq("customer_id", id).order("created_at", { ascending: false }),
+  // ONE ROUND, NOT THREE (audit v921). The linked-jobs read depends only on `id` and the merge
+  // pick-list only on viewerIsStaff — both already known — so they waited behind this batch for
+  // nothing: two extra serial round trips on every contact open. And the two select("*")s shipped
+  // columns nothing here renders (the job's description/notes, the estimate's circuits jsonb);
+  // PROJECTION LAW cuts both ways — ask for the fields the tabs actually classify on.
+  const [
+    { data: jobs },
+    { data: quotes },
+    { data: invoices },
+    { data: pricingLevels },
+    { data: credits },
+    { data: staffRows },
+    { data: linkedRaw },
+    { data: otherCustomers },
+  ] = await Promise.all([
+    supabase
+      .from("jobs")
+      // address parts ride along for the appointment picker's site prefill (toJobOptions).
+      .select("id, name, job_number, status, address, city, state, zip")
+      .eq("customer_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("quotes")
+      .select("id, quote_number, total, status")
+      .eq("customer_id", id)
+      .order("created_at", { ascending: false }),
     supabase
       .from("invoices")
       .select("id, invoice_number, status, total")
@@ -64,28 +87,23 @@ export default async function CustomerDetailPage({
       .eq("status", "open"),
     // Assignee options for the New-appointment modal in the impulse row.
     listActiveTechs(supabase),
+    // The reverse of jobs.customer_id: jobs this contact is LINKED to as a sub / supplier /
+    // inspector (so a subcontractor sees every job they're on, not just jobs where they're the client).
+    supabase
+      .from("job_contacts")
+      .select("id, role, jobs(id, job_number, name, status)")
+      .eq("customer_id", id)
+      .order("created_at", { ascending: false }),
+    // Other customers in the org (RLS-scoped) — the pick-list for "Merge into…".
+    // Staff-only, since merge is destructive (it deletes the source record).
+    viewerIsStaff
+      ? supabase.from("customers").select("id, name").neq("id", id).order("name")
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
   ]);
 
-  // The reverse of jobs.customer_id: jobs this contact is LINKED to as a sub / supplier / inspector
-  // (so a subcontractor sees every job they're on, not just jobs where they're the client).
-  const { data: linkedRaw } = await supabase
-    .from("job_contacts")
-    .select("id, role, jobs(id, job_number, name, status)")
-    .eq("customer_id", id)
-    .order("created_at", { ascending: false });
   const linkedJobs = (linkedRaw ?? [])
     .filter((r: any) => r.jobs)
     .map((r: any) => ({ linkId: r.id, role: r.role as string, ...(r.jobs as any) }));
-
-  // Other customers in the org (RLS-scoped) — the pick-list for "Merge into…".
-  // Staff-only, since merge is destructive (it deletes the source record).
-  const { data: otherCustomers } = viewerIsStaff
-    ? await supabase
-        .from("customers")
-        .select("id, name")
-        .neq("id", id)
-        .order("name")
-    : { data: [] as { id: string; name: string }[] };
 
   const accountCredit = (credits ?? [])
     .filter((x: any) => x.disposition === "credit")

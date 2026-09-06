@@ -117,11 +117,30 @@ export function scheduleStatus(milestones: Milestone[], contractTotal: number): 
     return { ...m, index, kind: milestoneKind(index, count), dollars, billed };
   });
   const scheduledPct = cents(rows.reduce((s, r) => s + fin(r.percent), 0));
+  const contract = fin(contractTotal);
+  /**
+   * THE LAST PENDING MILESTONE ABSORBS THE ROUNDING (audit v921).
+   *
+   * Each percent milestone rounded to cents on its own, so 30/35/35 of a $100.01 contract
+   * scheduled $30.00 + $35.00 + $35.00 = $100.00 — a cent of the accepted quote that no draw
+   * ever bills. Nothing surfaced it either: `remaining` measures against the SCHEDULE, not the
+   * contract, and the percents do sum to 100 so percentUnder stays false. defaultSchedule
+   * already makes its final percent absorb the rounding; the dollars must do the same.
+   *
+   * Bounded to rounding scale (a cent per row) on purpose: a schedule that genuinely underbills
+   * the contract must still read as percentUnder/percentOff, not be silently topped up here.
+   */
+  const lastRow = rows[rows.length - 1];
+  if (contract > 0.005 && lastRow && !lastRow.billed && fin(lastRow.percent) > 0 && Math.abs(scheduledPct - 100) <= 0.5) {
+    const drift = cents(contract - cents(rows.reduce((s, r) => s + r.dollars, 0)));
+    if (drift !== 0 && Math.abs(drift) <= 0.01 * rows.length) {
+      lastRow.dollars = cents(Math.max(0, lastRow.dollars + drift));
+    }
+  }
   const scheduledTotal = cents(rows.reduce((s, r) => s + r.dollars, 0));
   const billedTotal = cents(rows.filter((r) => r.billed).reduce((s, r) => s + r.dollars, 0));
   const next = rows.find((r) => !r.billed) ?? null;
   const usesPercent = rows.some((r) => fin(r.percent) > 0);
-  const contract = fin(contractTotal);
   return {
     rows,
     scheduledPct,

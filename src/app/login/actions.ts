@@ -6,6 +6,7 @@ import { endSessionIfDeactivated, DEACTIVATED_MESSAGE } from "@/lib/deactivation
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { safeNextPath } from "@/lib/safe-next";
+import { reportError } from "@/lib/observe";
 
 /**
  * Where does a freshly-signed-in user with NO org belong? An external site collaborator
@@ -30,6 +31,15 @@ async function collaboratorHome(
   return g?.length ? "/content" : null;
 }
 
+/** GoTrue answers a BANNED seat with its own wording ("Invalid login credentials" on some
+ *  versions, "User is banned" on others). setMemberActive bans the login on deactivation, so that
+ *  rejection happens before any app code runs and the deactivation gate never gets to speak.
+ *  Translate it back to the one sentence the office tells people (audit v921). Anything else is
+ *  passed through untouched — a real typo must still read like a typo. */
+function bannedMessage(raw: string): string {
+  return /banned|user is banned/i.test(raw) ? DEACTIVATED_MESSAGE : raw;
+}
+
 /** The deactivation rule lives in ONE place now (lib/deactivation-gate) so the magic-link
  *  callback cannot drift from these two forms — it did, and that was an audit v921 high. */
 async function isDeactivated(supabase: Awaited<ReturnType<typeof createClient>>): Promise<boolean> {
@@ -43,7 +53,10 @@ export async function login(formData: FormData) {
 
   const { error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) {
-    redirect(`/login?error=${encodeURIComponent(error.message)}`);
+    // setMemberActive now BANS the seat at GoTrue, which rejects the sign-in before any app code
+    // runs — so the deactivation gate below can never speak (audit v921 review blocker). Say the
+    // sentence the office expects instead of GoTrue's raw "Invalid login credentials".
+    redirect(`/login?error=${encodeURIComponent(bannedMessage(error.message))}`);
   }
 
   // A deactivated account must not get a session at all. Migration 0158 already denies it
@@ -219,7 +232,20 @@ export async function signOut() {
   // the cookies. Deactivation and offboarding keep the global kill on purpose.
   const { data } = await supabase.auth.getSession();
   const sid = sessionIdFromJwt(data.session?.access_token);
-  if (sid) await supabase.rpc("end_my_session", { p_session: sid });
+  if (sid) {
+    // The RPC's answer is not optional (audit v921): it returns the DELETE's row count, and a
+    // 0 — or an error — means the auth.sessions row and its refresh token are still ALIVE on
+    // the server while this device is about to look signed out. Nothing to show the user (the
+    // cookies do go), but it must not vanish: it lands in error_events for the ops triage.
+    const { data: ended, error } = await supabase.rpc("end_my_session", { p_session: sid });
+    if (error || Number(ended) === 0) {
+      reportError("signOut.end_my_session", error ?? new Error("no session row ended"), { sessionId: sid });
+    }
+  } else if (data.session) {
+    // A session exists but its token carries no session_id claim — we have nothing to end by
+    // id, so the server-side session outlives the cookies. Same reason to log it.
+    reportError("signOut.end_my_session", new Error("no session_id claim in access token"));
+  }
   const store = await cookies();
   for (const c of store.getAll()) {
     if (/^sb-.*-auth-token(\.\d+)?$/.test(c.name)) store.delete(c.name);

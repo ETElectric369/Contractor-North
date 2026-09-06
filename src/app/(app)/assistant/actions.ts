@@ -5,6 +5,8 @@ import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { resolveCustomerId } from "@/lib/actions/resolve-id";
+import { todayStrInTz } from "@/lib/tz";
 import type { AgentDraft } from "@/lib/assistant-protocol";
 
 type StoredMsg = { role: "user" | "assistant"; content: string };
@@ -85,12 +87,33 @@ export async function saveQuoteFromDraft(
   let customerId = draft.customer_id ?? null;
   const custName = (draft.customer_name ?? "").trim();
   if (!customerId && custName) {
-    const esc = custName.replace(/[\\%_]/g, (m) => "\\" + m);
-    const exact = await supabase.from("customers").select("id").ilike("name", esc).limit(1).maybeSingle();
-    customerId = (exact.data as { id?: string } | null)?.id ?? null;
+    // audit v921: the hand-rolled exact-then-contains lookup ran .limit(1), so "Miller" silently
+    // attached the quote to whichever of "Bob Miller" / "Miller & Sons" came back first. Go through
+    // the resolver instead — it NEVER picks among candidates (resolve-id.ts), because the wrong
+    // customer on a quote is a money-adjacent error. Several matches → hand the sentence back so
+    // the screen can ask; only a genuine ZERO match falls through to creating the contact.
+    const resolved = await resolveCustomerId(supabase, custName);
+    if ("error" in resolved) {
+      if (!resolved.error.startsWith("No customer named")) return { ok: false, error: resolved.error };
+    } else {
+      customerId = resolved.id;
+    }
     if (!customerId) {
-      const partial = await supabase.from("customers").select("id").ilike("name", `%${esc}%`).limit(1).maybeSingle();
-      customerId = (partial.data as { id?: string } | null)?.id ?? null;
+      // BEFORE CREATING, TRY THE NAME LITERALLY (audit v921 review blocker). resolve-id's
+      // safeForOr() strips [,()*:%\"'.] to spaces to build its PostgREST filter, so "Joe's
+      // Plumbing", "Miller Jr." and "Smith & Sons, Inc." never match their own stored row — the
+      // resolver answers "No customer named …" and this fell straight through to customer.create,
+      // which has no dedupe. That silently minted a second, empty contact and hung the estimate
+      // on it. An exact (case-insensitive) equality carries the punctuation safely.
+      const { data: exact } = await supabase
+        .from("customers")
+        .select("id")
+        .ilike("name", custName)
+        .limit(2);
+      if (exact?.length === 1) customerId = (exact[0] as { id: string }).id;
+      else if ((exact?.length ?? 0) > 1) {
+        return { ok: false, error: `More than one customer is named "${custName}" — open the estimate and pick the right one.` };
+      }
     }
     if (!customerId) {
       const made = await executeAction("customer.create", { name: custName }, { source: "ui" });
@@ -107,12 +130,16 @@ export async function saveQuoteFromDraft(
   ]);
   const taxRate =
     draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
-  const expiryDays = getOrgSettings((org as { settings?: unknown } | null)?.settings).quote_expiry_days;
-  const validUntil = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() + (expiryDays || 30));
-    return d.toISOString().slice(0, 10);
-  })();
+  const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  const expiryDays = orgS.quote_expiry_days;
+  // audit v921: expiry was counted off the SERVER's day (UTC on Vercel), so a 6 PM Pacific estimate
+  // was dated a day long. Count the calendar days off the ORG's today, noon-anchored so a DST day
+  // (23 or 25 hours) can't shift the result.
+  const validUntil = new Date(
+    new Date(`${todayStrInTz(orgS.timezone)}T12:00:00Z`).getTime() + (expiryDays || 30) * 86_400_000,
+  )
+    .toISOString()
+    .slice(0, 10);
 
   const res = await executeAction(
     "quote.create",

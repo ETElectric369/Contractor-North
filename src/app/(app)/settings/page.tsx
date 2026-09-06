@@ -3,7 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { FormSubmit } from "@/components/form-submit";
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import {
   User,
@@ -99,9 +100,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; gcal?: string; tab?: string }>;
+  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; qbo_error?: string; gcal?: string; tab?: string }>;
 }) {
-  const { billing, billing_error, qbo, gcal, tab } = await searchParams;
+  const { billing, billing_error, qbo, qbo_error, gcal, tab } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -509,11 +510,13 @@ export default async function SettingsPage({
                         <div className="mt-4 flex flex-wrap gap-2">
                           {canAcceptPayments(st) ? (
                             <form action={openPayoutsDashboard}>
-                              <Button variant="outline">View Payouts</Button>
+                              {/* FormSubmit, not Button (audit v921): these four forms mint Stripe
+                                  objects, and a plain button stays live through the 1-3s round trip. */}
+                              <FormSubmit variant="outline">View Payouts</FormSubmit>
                             </form>
                           ) : (
                             <form action={connectPayments}>
-                              <Button>{st.accountId ? "Finish Setup" : "Set Up Card Payments"}</Button>
+                              <FormSubmit>{st.accountId ? "Finish Setup" : "Set Up Card Payments"}</FormSubmit>
                             </form>
                           )}
                         </div>
@@ -549,9 +552,9 @@ export default async function SettingsPage({
                 {billingEnabled ? (
                   <div className="mt-4 flex gap-2">
                     {(org as Organization).subscription_status === "active" ? (
-                      <form action={openPortal}><Button variant="outline">Manage Billing</Button></form>
+                      <form action={openPortal}><FormSubmit variant="outline">Manage Billing</FormSubmit></form>
                     ) : (
-                      <form action={startCheckout}><Button>Subscribe</Button></form>
+                      <form action={startCheckout}><FormSubmit>Subscribe</FormSubmit></form>
                     )}
                   </div>
                 ) : (
@@ -745,14 +748,36 @@ export default async function SettingsPage({
                 {(qbo === "error" || qbo === "denied") && (
                   <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">Could not connect to QuickBooks. Please try again.</div>
                 )}
+                {qbo === "disconnected" && (
+                  <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Disconnected from QuickBooks.</div>
+                )}
+                {qbo_error && (
+                  <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{qbo_error}</div>
+                )}
                 {!qboConfigured() ? (
                   <p className="text-sm text-slate-400">Not configured yet. Add QBO_CLIENT_ID, QBO_CLIENT_SECRET, and QBO_ENVIRONMENT to enable syncing.</p>
                 ) : qboConn?.realm_id ? (
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge tone="green">Connected</Badge>
                     <span className="text-sm text-slate-500">Send invoices to QuickBooks from any invoice page.</span>
-                    <form action={async () => { "use server"; await disconnectQuickbooks(); }}>
-                      <Button variant="outline">Disconnect</Button>
+                    {/* THE RESULT WAS THROWN AWAY (audit v921). A non-owner/admin got {ok:false,
+                        error:"Not allowed."} and saw nothing happen at all, and the deliberate
+                        "Disconnected here, but QuickBooks didn't confirm the revoke" warning — the
+                        one that tells an owner a live Intuit grant survived — never reached the
+                        screen either. Carry it back on the URL, the way the connect callback does. */}
+                    <form
+                      action={async () => {
+                        "use server";
+                        const res = await disconnectQuickbooks();
+                        const msg = res.error ?? (res.ok ? null : "Could not disconnect QuickBooks.");
+                        redirect(
+                          msg
+                            ? `/settings?tab=integrations&qbo_error=${encodeURIComponent(msg)}`
+                            : "/settings?tab=integrations&qbo=disconnected",
+                        );
+                      }}
+                    >
+                      <FormSubmit variant="outline">Disconnect</FormSubmit>
                     </form>
                   </div>
                 ) : (

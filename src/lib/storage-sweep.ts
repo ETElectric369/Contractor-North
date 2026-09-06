@@ -14,13 +14,20 @@ import { reportError } from "@/lib/observe";
  *   · documents/<org>/ai-uploads/ — the estimator stash is delete-on-read BEST-EFFORT; any
  *     survivor is a dead transport (and audit 7's reason for delete-on-read — a CED quote's net
  *     pricing sitting where any org member can read it — applies doubly to a leak).
+ *   · documents/<org>/bug-screenshots/ — a fourth class, found by audit v921: the reporter writes
+ *     a capture of the staff member's screen on every report and NOTHING ever deleted one, so
+ *     every screen anyone has ever reported from stays readable to the whole org forever.
  *
  * SQL cannot touch storage ("Direct deletion from storage tables is not allowed") — this runs on
- * the service client through the Storage API, from the daily cron. Everything gets a 48-hour age
- * guard: nothing mid-flight is ever reaped, and a file must be BOTH old and unreferenced to go.
+ * the service client through the Storage API, from the daily cron. Everything gets an age guard
+ * (48 hours; 30 days for bug screenshots, which are a debug trail people come back to): nothing
+ * mid-flight is ever reaped, and a file must be BOTH old and unreferenced to go.
  */
 
 const AGE_MS = 48 * 60 * 60 * 1000;
+/** A bug screenshot is a debug transport, not a record: once the report it belongs to is closed
+ *  (or gone), the capture of that staff screen goes at this age (audit v921). */
+const BUG_SHOT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 /** Refuse an intake sweep that would wipe this many files against an EMPTY reference set —
  *  that shape is a broken read, not an empty inbox (audit v800). */
 const MASS_DELETE_FLOOR = 5;
@@ -29,6 +36,29 @@ const MAX_PAGES = 20; // 20k objects per folder per run — a bound, not a targe
 
 type Svc = ReturnType<typeof createServiceClient>;
 type Entry = { name: string; id: string | null; created_at?: string };
+
+/**
+ * A WHOLE reference set, or none (audit v921). A single `.limit(10000)` select is a cliff:
+ * PostgREST's db-max-rows (1000 by default, a project setting that lives nowhere in this repo)
+ * truncates it SILENTLY — status 200, no error — so the set came back partial and every lead past
+ * the cap had its still-referenced plan PDFs classified as orphans and deleted. Page it, advancing
+ * by the rows ACTUALLY returned (a page can come back capped short), and stop only on an empty
+ * page. Anything else — an error, or running out of pages — returns rows:null so the caller
+ * fails closed, the same contract as the other reference reads here.
+ */
+async function readAllRefs<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<{ rows: T[] | null; error: unknown }> {
+  const out: T[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await page(from, from + PAGE - 1);
+    if (error || !data) return { rows: null, error: error ?? new Error("no rows object") };
+    if (!data.length) return { rows: out, error: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: null, error: new Error(`reference set exceeded ${MAX_PAGES * PAGE} rows`) };
+}
 
 /** Every entry under a prefix, paginated. Folders come back with id=null. */
 async function listAll(svc: Svc, bucket: string, prefix: string): Promise<Entry[]> {
@@ -42,8 +72,8 @@ async function listAll(svc: Svc, bucket: string, prefix: string): Promise<Entry[
   return out;
 }
 
-const oldEnough = (e: Entry, now: number): boolean =>
-  !!e.created_at && now - new Date(e.created_at).getTime() > AGE_MS;
+const oldEnough = (e: Entry, now: number, ageMs: number = AGE_MS): boolean =>
+  !!e.created_at && now - new Date(e.created_at).getTime() > ageMs;
 
 /** Batch-remove with a hard result: how many actually went. */
 async function removeAll(svc: Svc, bucket: string, paths: string[]): Promise<number> {
@@ -59,7 +89,7 @@ async function removeAll(svc: Svc, bucket: string, paths: string[]): Promise<num
 export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
   const svc = createServiceClient();
   const now = Date.now();
-  const result: Record<string, number> = { intake_removed: 0, capture_removed: 0, stash_removed: 0 };
+  const result: Record<string, number> = { intake_removed: 0, capture_removed: 0, stash_removed: 0, bug_shot_removed: 0 };
 
   // ── intake-uploads: files no live inquiry references ────────────────────────────────────
   const intakeOrgs = (await listAll(svc, INTAKE_BUCKET, "")).filter((e) => e.id === null);
@@ -72,12 +102,19 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
     // ANY error — a statement timeout, a transient 5xx — and `inqs ?? []` turned that into "no
     // lead references anything", which made every plan set in the org an orphan and deleted the
     // lot. A janitor must fail CLOSED: when we cannot prove a file is unreferenced, it stays.
-    const { data: inqs, error: inqErr } = await svc
-      .from("inquiries")
-      .select("intake")
-      .eq("org_id", org.name)
-      .not("intake", "is", null)
-      .limit(10000);
+    //
+    // AND A CAPPED READ IS NOT A WHOLE REFERENCE SET (audit v921) — see readAllRefs: the old
+    // single .limit(10000) select was truncated silently by PostgREST's max-rows, which deleted
+    // the live plan sets of every lead past the cap. Ordered + paged, or nothing.
+    const { rows: inqs, error: inqErr } = await readAllRefs<{ intake?: unknown }>((from, to) =>
+      svc
+        .from("inquiries")
+        .select("intake")
+        .eq("org_id", org.name)
+        .not("intake", "is", null)
+        .order("id")
+        .range(from, to),
+    );
     if (inqErr || !inqs) {
       reportError("storage-sweep:intake-refs", inqErr ?? new Error("no rows object"), { org: org.name });
       continue;
@@ -147,6 +184,51 @@ export async function sweepOrphanedUploads(): Promise<Record<string, number>> {
       "documents",
       stash.map((f) => `${org.name}/ai-uploads/${f.name}`),
     );
+
+    // ── documents/<org>/bug-screenshots/: nothing has ever deleted one (audit v921 — 215 objects
+    //    in production and only ever growing; the reporter writes, no code path removes). A shot
+    //    is a capture of a staff SCREEN that every member of the org can read for as long as it
+    //    sits there, and it stops being evidence the moment the report is closed. Keep every shot
+    //    an OPEN report still points at, whatever its age; reap the rest after a month. Fail
+    //    closed like the sweeps above: no provable reference set, no deletions.
+    const shots = (await listAll(svc, "documents", `${org.name}/bug-screenshots`)).filter(
+      (e) => e.id !== null && oldEnough(e, now, BUG_SHOT_AGE_MS),
+    );
+    if (shots.length) {
+      const { rows: openBugs, error: bugErr } = await readAllRefs<{ screenshot_path: string | null }>(
+        (from, to) =>
+          svc
+            .from("bug_reports")
+            .select("screenshot_path")
+            .eq("org_id", org.name)
+            .eq("status", "open")
+            .not("screenshot_path", "is", null)
+            .order("id")
+            .range(from, to),
+      );
+      if (bugErr || !openBugs) {
+        reportError("storage-sweep:bug-shot-refs", bugErr ?? new Error("no rows object"), { org: org.name });
+      } else {
+        const keep = new Set(openBugs.map((r) => String(r.screenshot_path ?? "")));
+        const gone = shots.map((f) => `${org.name}/bug-screenshots/${f.name}`).filter((p) => !keep.has(p));
+        const removed = await removeAll(svc, "documents", gone);
+        result.bug_shot_removed += removed;
+        // The pointer goes with the file: a report that still claims a screenshot gets a "View
+        // screenshot" button that signs a URL for an object that isn't there and silently does
+        // NOTHING (bug-list.tsx:29). Clearing the column is what removes the dead one-tap.
+        // A zero-row match is normal here — a shot uploaded by a report that never sent has no
+        // row at all — so only a real error is worth reporting.
+        for (let i = 0; removed && i < gone.length; i += 100) {
+          const { error: clearErr } = await svc
+            .from("bug_reports")
+            .update({ screenshot_path: null })
+            .eq("org_id", org.name)
+            .in("screenshot_path", gone.slice(i, i + 100))
+            .select("id");
+          if (clearErr) reportError("storage-sweep:bug-shot-clear", clearErr, { org: org.name });
+        }
+      }
+    }
   }
 
   return result;

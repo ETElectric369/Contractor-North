@@ -113,7 +113,13 @@ export function tzNaiveIsoToUtc(v: string | undefined, tz: string): string | und
 export function todayBoundsInTz(tz: string): { dayStart: Date; dayEnd: Date; todayStr: string } {
   const todayStr = todayStrInTz(tz);
   const dayStart = tzDayStartUtc(todayStr, tz);
-  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+  // The day ends at TOMORROW'S local midnight, resolved on the calendar (audit v921). dayStart +
+  // 86_400_000 assumed every day is 24 hours: on fall-back (Nov 1) it cut "today" an hour short,
+  // so an 11 PM clock-in vanished from today's jobs / GPS summary; on spring-forward it pulled an
+  // hour of tomorrow in. Add the DAY, then resolve the offset that day actually has.
+  const next = new Date(`${todayStr}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const dayEnd = tzDayStartUtc(next.toISOString().slice(0, 10), tz);
   return { dayStart, dayEnd, todayStr };
 }
 

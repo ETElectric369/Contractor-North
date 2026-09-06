@@ -52,6 +52,56 @@ d("RLS multi-tenant isolation invariant", () => {
     expect(noPolicy).toEqual([]);
   });
 
+  // A policy EXISTING is not the invariant — a policy that SCOPES BY ORG is. `create policy
+  // jobs_read on public.jobs for select using (true)` keeps RLS on and the count above at ≥1, so
+  // the two checks above stayed green while every tenant could read every job — the exact 0173
+  // class this file exists to catch (audit v921). So read the EXPRESSIONS, not the count.
+  const orgPoliciesSql = `
+    select p.tablename as tbl, p.policyname as pol,
+      coalesce(p.qual,'') as qual, coalesce(p.with_check,'') as with_check
+    from pg_policies p
+    where p.schemaname='public'
+      and exists (select 1 from information_schema.columns col
+                  where col.table_schema='public' and col.table_name=p.tablename and col.column_name='org_id')`;
+
+  // Tables that carry an org_id but are scoped to the PERSON, not the org: their policies key on
+  // auth.uid(), which is correct (a push subscription belongs to one device, an assistant state to
+  // one user). They are exempt from the org_id reference only — the wide-open check still binds.
+  const USER_SCOPED = new Set([
+    // profiles_insert_self is `with_check (id = auth.uid())` with an empty qual — a legitimate
+    // self-scoped insert on an org-scoped table (audit v921 review: without this the new
+    // invariant assertion fails against the live schema).
+    "profiles",
+    "push_subscriptions",
+    "assistant_state",
+    "webauthn_credentials",
+    "notifications",
+    "site_collaborators",
+  ]);
+
+  it("no policy on an org-scoped table is wide open (qual/with_check literally true)", async () => {
+    const { rows } = await client.query(orgPoliciesSql);
+    expect(rows.length).toBeGreaterThan(30); // sanity: we actually inspected the policies
+    const wideOpen = rows
+      .filter((r: any) => r.qual.trim() === "true" || r.with_check.trim() === "true")
+      .map((r: any) => `${r.tbl}.${r.pol}`);
+    expect(wideOpen).toEqual([]);
+  });
+
+  it("every non-deny policy on an org-scoped table scopes by org", async () => {
+    const { rows } = await client.query(orgPoliciesSql);
+    const unscoped = rows
+      .filter((r: any) => {
+        // `using (false)` / `with check (false)` is a deliberate deny — service-role only.
+        const expr = [r.qual, r.with_check].filter((e: string) => e && e.trim() !== "false").join(" ");
+        if (!expr) return false;
+        if (/auth_org_id|org_id/.test(expr)) return false;
+        return !(USER_SCOPED.has(r.tbl) && /auth\.uid\(\)/.test(expr));
+      })
+      .map((r: any) => `${r.tbl}.${r.pol}`);
+    expect(unscoped).toEqual([]);
+  });
+
   it("the org-scoping security-definer helpers exist", async () => {
     const { rows } = await client.query(
       `select proname from pg_proc where proname in ('auth_org_id','is_org_staff','set_org_id')`,

@@ -55,7 +55,14 @@ export default async function PriceListPage() {
   ]);
   // 0241: what THIS company can count an item by — every form's playbook, measured number needs.
   // Best-effort: no forms (or a pre-playbook org) just means the two built-in dimensions.
-  const { data: formRows } = await supabase.from("forms").select("schema, playbook").limit(20);
+  // Ordered and paged past the old cap of 20 (audit v921): an unordered .limit(20) handed back an
+  // ARBITRARY 20 of an org's forms, so a need defined in the 21st vanished from "How It's Counted"
+  // — and an item already sized by it read as a plain fixed quantity, differently between requests.
+  const { data: formRows } = await supabase
+    .from("forms")
+    .select("schema, playbook")
+    .order("created_at", { ascending: true })
+    .limit(500);
   const measurements = measurementOptions(((formRows ?? []) as { schema?: unknown; playbook?: unknown }[]).map((f) => playbookForForm(f)));
   const defaultMarkupPct = getOrgSettings((org as { settings?: unknown } | null)?.settings).default_markup_pct;
 

@@ -1,7 +1,7 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { NO_INDEX } from "@/lib/no-index";
 import { DatePicker } from "./date-picker";
-import { accentHex } from "@/lib/org-settings";
+import { accentHex, getOrgSettings } from "@/lib/org-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +37,24 @@ export default async function PickDatePage({
     chosen_date: string | null;
     chosen_at: string | null;
   };
-  const brand = accentHex((p as { glass_tint?: string }).glass_tint);
+  /* THE TENANT'S OWN COLOR, ON THE TENANT'S OWN PAGE (audit v921). This classified on a
+     `glass_tint` key get_schedule_proposal never emits — it returns brand_color, a column the app
+     stopped editing — so accentHex fell back to the default and every customer, on every org's
+     link, saw Contractor North's sea-glass. PUBLIC-RPC PROJECTION PARITY: a component can only
+     classify on fields the query actually returns. The RPC can't be changed from here, so the tint
+     is read off the proposal's OWN org row — the token is the capability and the org scope comes
+     from the row that token names, never from anything the browser sent. */
+  let tint: string | undefined;
+  if (/^[A-Za-z0-9_-]{8,128}$/.test(token)) {
+    const svc = createServiceClient();
+    const { data: sp } = await svc.from("schedule_proposals").select("org_id").eq("token", token).maybeSingle();
+    const orgId = (sp as { org_id?: string | null } | null)?.org_id ?? null;
+    if (orgId) {
+      const { data: org } = await svc.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+      tint = getOrgSettings((org as { settings?: unknown } | null)?.settings).glass_tint;
+    }
+  }
+  const brand = accentHex(tint);
   const hasTimes = (p.dates ?? []).some((d) => typeof d === "object");
 
   return (

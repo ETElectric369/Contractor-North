@@ -294,18 +294,31 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
   const since = new Date(
     (conn.last_synced_at ? new Date(conn.last_synced_at).getTime() : Date.now() - 86400_000) - 5 * 60_000,
   ).toISOString();
+  // A FAILED PUSH MUST NOT BE SWEPT PAST (audit v921). Per-item failures were reportError'd and
+  // nothing else: res.errors stayed empty (so "Sync now" answered ok) and last_synced_at still
+  // advanced to startedAt, which put the failed job outside every later window — one retry that
+  // never came, and the job stayed off the owner's phone calendar with no sign. Count them, and
+  // hold the watermark at the oldest item that failed so the next run picks it up again.
+  // updated_at is selected for that reason (the projection law: you can't hold what you didn't read).
+  let sweepFailed = 0;
+  let oldestFailed: string | null = null;
   try {
     const [{ data: jobs }, { data: appts }, { data: unpushedAppts }] = await Promise.all([
-      service.from("jobs").select(JOB_PUSH_COLS).eq("org_id", conn.org_id).gte("updated_at", since).limit(200),
       service
-        .from("appointments")
-        .select(APPT_PUSH_COLS)
+        .from("jobs")
+        .select(`${JOB_PUSH_COLS}, updated_at`)
         .eq("org_id", conn.org_id)
         .gte("updated_at", since)
         .limit(200),
       service
         .from("appointments")
-        .select(APPT_PUSH_COLS)
+        .select(`${APPT_PUSH_COLS}, updated_at`)
+        .eq("org_id", conn.org_id)
+        .gte("updated_at", since)
+        .limit(200),
+      service
+        .from("appointments")
+        .select(`${APPT_PUSH_COLS}, updated_at`)
         .eq("org_id", conn.org_id)
         .eq("status", "scheduled")
         .is("google_event_id", null)
@@ -320,6 +333,10 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
         res.swept++;
       } catch (e) {
         reportError("gcal-sync-sweep-job", e, { orgId: conn.org_id, jobId: j.id });
+        sweepFailed++;
+        // Never rewind past this window's own start — the failed item is inside it either way.
+        const at: string = j.updated_at && j.updated_at > since ? j.updated_at : since;
+        if (!oldestFailed || at < oldestFailed) oldestFailed = at;
       }
     }
     for (const a of apptById.values()) {
@@ -328,6 +345,9 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
         res.swept++;
       } catch (e) {
         reportError("gcal-sync-sweep-appt", e, { orgId: conn.org_id, apptId: a.id });
+        sweepFailed++;
+        const at: string = a.updated_at && a.updated_at > since ? a.updated_at : since;
+        if (!oldestFailed || at < oldestFailed) oldestFailed = at;
       }
     }
   } catch (e) {
@@ -335,9 +355,24 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
     reportError("gcal-sync-sweep", e, { orgId: conn.org_id });
   }
 
+  if (sweepFailed > 0) {
+    res.errors.push(
+      `${sweepFailed} item${sweepFailed === 1 ? "" : "s"} didn't reach Google — they'll be tried again on the next sync.`,
+    );
+  }
+
+  // NEVER MOVE THE WATERMARK BACKWARD (audit v921 review blocker). A failed item is clamped to
+  // `since`, which is the previous watermark MINUS 5 minutes — and an unpushed appointment stays
+  // failed every run (it never stamps updated_at), so this rewound 5 minutes per run forever. The
+  // sweep window then grows without bound while the queries are .limit(200) with no order, so once
+  // the window holds more than 200 rows the NEWEST items silently stop reaching Google — the exact
+  // failure this retry logic exists to prevent. Retry from the older point, but never before where
+  // we already were.
+  const prev = conn.last_synced_at ? Date.parse(conn.last_synced_at) : 0;
+  const retryFrom = oldestFailed && Date.parse(oldestFailed) > prev ? oldestFailed : null;
   await service
     .from("calendar_connections")
-    .update({ sync_tokens: tokens, last_synced_at: startedAt })
+    .update({ sync_tokens: tokens, last_synced_at: retryFrom ?? conn.last_synced_at ?? startedAt })
     .eq("id", conn.id);
 
   return res;

@@ -74,12 +74,31 @@ export default async function PayrollPage({
     .lt("clock_in", endIso);
   const openNames = [...new Set((openInPeriod ?? []).map((e: any) => e.profiles?.full_name).filter(Boolean))];
 
+  // The same silent gap from the other side (audit v921): a 0193 auto-close closes a forgotten
+  // shift at clock_out = clock_in when the next punch lands, so the row IS closed, passes the
+  // filter above, and adds ZERO hours — the open-entry banner (clock_out is null) can never
+  // catch it. Unpaid only: once it's paid the fix is an Undo, and this banner is about the
+  // period you're looking at now.
+  const { data: autoClosedInPeriod } = await supabase
+    .from("time_entries")
+    .select("id, profiles(full_name)")
+    .not("auto_closed_reason", "is", null)
+    .is("paid_at", null)
+    .gte("clock_in", startIso)
+    .lt("clock_in", endIso);
+  const autoClosedNames = [...new Set((autoClosedInPeriod ?? []).map((e: any) => e.profiles?.full_name).filter(Boolean))];
+
   return (
     <div className="mx-auto max-w-4xl">
       <PageHeader title="Payroll" description="Base pay (hours × pay rate) per pay period. Mileage is tracked in miles and settled separately — mark each paid when you actually pay it; export for your accountant." />
       {openNames.length > 0 && (
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
           {openInPeriod!.length} open {openInPeriod!.length === 1 ? "entry" : "entries"} ({openNames.join(", ")}) not counted — close {openInPeriod!.length === 1 ? "it" : "them"} on the timecards page and these totals will update.
+        </div>
+      )}
+      {autoClosedNames.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          {autoClosedInPeriod!.length} auto-closed {autoClosedInPeriod!.length === 1 ? "entry" : "entries"} ({autoClosedNames.join(", ")}) — the app closed {autoClosedInPeriod!.length === 1 ? "it" : "them"} at the next punch, so {autoClosedInPeriod!.length === 1 ? "its hours are" : "those hours are"} probably wrong (often zero). Fix {autoClosedInPeriod!.length === 1 ? "it" : "them"} on the timecards page — Mark Paid refuses this period until you do.
         </div>
       )}
       <PayrollView

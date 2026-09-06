@@ -41,7 +41,11 @@ export type MoneyPipeline = {
 export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyPipeline> {
   const [today, invRes, jobRes, quoteRes, msRes] = await Promise.all([
     orgTodayStr(supabase),
-    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)"),
+    // Bounded like its siblings (audit v921): an unbounded select truncates silently at
+    // PostgREST's 1000-row max, and invoicedJobIds below is built from whatever survived —
+    // past that cliff a job whose invoice fell outside the window reappears in "Done — not
+    // invoiced" and the Outstanding/Overdue tiles undercount.
+    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)").limit(50000),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
     // such a job can't escape the board (jobs with a real invoice are removed by the
@@ -59,19 +63,18 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
 
   // A job is "invoiced" if it has any non-void invoice.
   const invoicedJobIds = new Set(invoices.filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string));
-  // Value an un-invoiced job by its biggest quote (best guess at what to bill)…
-  const quoteByJob: Record<string, number> = {};
-  // …and keep every quote per job for contract math (accepted preferred — contractTotalFromQuotes).
-  const quotesByJob: Record<string, { total: number | null; status: string | null }[]> = {};
+  // Keep every quote per job for contract math (accepted preferred — contractTotalFromQuotes).
+  const quotesByJob: Record<string, { total: number | null; status: string | null; created_at: string | null }[]> = {};
   for (const q of quotes) {
-    const t = Number(q.total) || 0;
-    if (!quoteByJob[q.job_id] || t > quoteByJob[q.job_id]) quoteByJob[q.job_id] = t;
     (quotesByJob[q.job_id] ??= []).push(q);
   }
 
   const doneNotInvoiced: PipelineJob[] = completeJobs
     .filter((j) => !invoicedJobIds.has(j.id))
-    .map((j) => ({ id: j.id, name: j.name, job_number: j.job_number, customer: j.customers?.name ?? null, value: quoteByJob[j.id] ?? 0 }));
+    // ONE contract rule for both stage-1 branches (audit v921): this used to value the row at
+    // the job's BIGGEST quote, so a $30k proposal the customer declined outbid the $4k one they
+    // accepted, while the draw branch below already used contractTotalFromQuotes.
+    .map((j) => ({ id: j.id, name: j.name, job_number: j.job_number, customer: j.customers?.name ?? null, value: contractTotalFromQuotes(quotesByJob[j.id] ?? []) }));
 
   // Partially-billed schedule jobs: a fixed-bid job that drew its deposit HAS an invoice, so
   // the no-invoice filter above skips it — yet most of the contract may never have been billed.

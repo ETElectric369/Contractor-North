@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+// audit v921: the draw kinds and the blocker predicate come from the APP's own module, not
+// re-typed here. This test used to hand-write `invoice_kind in ('deposit','progress','final')`
+// and the `total > 0.005 or exists(items)` predicate — copies that stayed green no matter how
+// far the real guards drifted from them.
+import { DRAW_KINDS, isStandardBillingBlocker } from "./invoice-math";
 
 // Integration test of the draw-billing invariants the H1/H3/H4 guards rely on,
 // exercised against the REAL schema in a rolled-back transaction — the SQL behaviour
@@ -57,10 +62,12 @@ d("billing draw invariants (DB integration)", () => {
       );
       await client.query("insert into payments (org_id, invoice_id, amount) values ($1,$2,10000)", [orgId, draw.id]);
 
-      // 1. activeDrawOnJob: the job is on the draw path.
+      // 1. activeDrawOnJob: the job is on the draw path. Kinds from DRAW_KINDS — narrow that
+      //    constant and this expectation moves with it instead of silently agreeing.
+      const drawKinds = [...DRAW_KINDS];
       const { rows: draws } = await client.query(
-        `select id from invoices where job_id=$1 and status<>'void' and invoice_kind in ('deposit','progress','final')`,
-        [job.id],
+        `select id from invoices where job_id=$1 and status<>'void' and invoice_kind = any($2)`,
+        [job.id, drawKinds],
       );
       expect(draws.length).toBe(1);
 
@@ -83,8 +90,8 @@ d("billing draw invariants (DB integration)", () => {
       );
       const { rows: blockers } = await client.query(
         `select id from invoices where job_id=$1 and id<>$2 and status<>'void'
-           and invoice_kind in ('deposit','progress','final') limit 1`,
-        [job.id, std.id],
+           and invoice_kind = any($3) limit 1`,
+        [job.id, std.id, drawKinds],
       );
       expect(blockers.length).toBe(1); // standardInvoiceOnDrawJob would block content on std
 
@@ -95,29 +102,34 @@ d("billing draw invariants (DB integration)", () => {
         [orgId, cust.id, job.id],
       );
       const { rows: openDrafts } = await client.query(
-        `select id from invoices where job_id=$1 and status='draft' and invoice_kind in ('deposit','progress','final')`,
-        [job.id],
+        `select id from invoices where job_id=$1 and status='draft' and invoice_kind = any($2)`,
+        [job.id, drawKinds],
       );
       expect(openDrafts.map((r: any) => r.id)).toContain(draft.id);
 
       // 5. H4 reverse (standardBillingBlockerOnJob): a non-void STANDARD invoice that
       //    CARRIES content must block creating a draw. A blank standard invoice (no
       //    lines, $0) carries nothing, so it must NOT block.
-      const reverseBlockerSql =
-        `select i.id from invoices i where i.job_id=$1 and i.invoice_kind='standard' and i.status<>'void'
-           and (coalesce(i.total,0) > 0.005
-                or exists (select 1 from invoice_items it where it.invoice_id = i.id))`;
+      //    The SQL only fetches what standardBillingBlockerOnJob fetches (kind, total, line
+      //    count); the DECISION is made by the app's own isStandardBillingBlocker, so a change
+      //    to that predicate fails here instead of passing against a copy of it.
+      const candidatesSql =
+        `select i.id, i.invoice_kind, coalesce(i.total,0)::float as total,
+                (select count(*) from invoice_items it where it.invoice_id = i.id)::int as items
+           from invoices i where i.job_id=$1 and i.status<>'void'`;
+      const blockersOnJob = async () => {
+        const { rows } = await client.query(candidatesSql, [job.id]);
+        return rows.filter((r: any) => isStandardBillingBlocker(r.invoice_kind, r.total, r.items));
+      };
       // TEST-INV-2 is still a blank ($0, no lines) standard invoice → not a blocker yet.
-      const { rows: blankBlockers } = await client.query(reverseBlockerSql, [job.id]);
-      expect(blankBlockers.length).toBe(0);
+      expect((await blockersOnJob()).length).toBe(0);
       // Add a billable line to the standard invoice → it now blocks a new draw.
       await client.query(
         `insert into invoice_items (org_id, invoice_id, description, quantity, unit_price)
          values ($1,$2,'Labor — Sam',10,95)`,
         [orgId, std.id],
       );
-      const { rows: contentBlockers } = await client.query(reverseBlockerSql, [job.id]);
-      expect(contentBlockers.map((r: any) => r.id)).toContain(std.id);
+      expect((await blockersOnJob()).map((r: any) => r.id)).toContain(std.id);
     } finally {
       await client.query("rollback");
     }

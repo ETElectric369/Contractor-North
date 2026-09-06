@@ -7,6 +7,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
+import { tzDayStartUtc } from "@/lib/tz";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -29,6 +30,8 @@ export async function getActionItemsCount(ctx: {
   todayStr: string;
   isStaff: boolean;
   userId: string;
+  /** ORG timezone — see getActionItems. Optional so a caller that hasn't got it yet still works. */
+  tz?: string;
 }): Promise<number> {
   return (await getActionItems(ctx)).length;
 }
@@ -68,10 +71,23 @@ export async function getActionItems(ctx: {
   todayStr: string;
   isStaff: boolean;
   userId: string;
+  /** ORG timezone — see the day-cut note below. Optional: without it the cuts fall back to the
+   *  old session-zone (UTC) literals, which drift by up to a day. */
+  tz?: string;
 }): Promise<ActionItem[]> {
-  const { todayStr, isStaff, userId } = ctx;
+  const { todayStr, isStaff, userId, tz } = ctx;
   const supabase = await createClient();
-  const endOfToday = `${todayStr}T23:59:59`;
+  /* ONE LAW TWO CLOCKS ONE MAP (audit v921). starts_at is timestamptz and a bare `T00:00:00`
+     literal is parsed in the SESSION zone — UTC on Supabase — so "before today" actually meant
+     before 5 PM YESTERDAY Pacific: a 5:30 PM visit nobody closed out was in neither today's
+     agenda (which cuts on org-tz bounds) nor this inbox until the day AFTER. Same mirror on the
+     write-up ceiling, which trimmed the day at 4:59 PM. The cut belongs on the ORG's midnight. */
+  const dayStartIso = (ymd: string) => (tz ? tzDayStartUtc(ymd, tz).toISOString() : `${ymd}T00:00:00`);
+  // The last instant of the org's today = tomorrow's org-midnight, one second back. The day is
+  // added on the CALENDAR (daysAgoStr walks date strings), never by adding 86_400_000 ms.
+  const endOfToday = tz
+    ? new Date(tzDayStartUtc(daysAgoStr(todayStr, -1), tz).getTime() - 1000).toISOString()
+    : `${todayStr}T23:59:59`;
   // Forward day cuts for the materials-needed window (yyyy-mm-dd; daysAgoStr with a
   // negative offset walks forward). Same ≤1-day tz fuzz as the other feeders.
   const tomorrowStr = daysAgoStr(todayStr, -1);
@@ -130,8 +146,8 @@ export async function getActionItems(ctx: {
       .select("id, type, title, starts_at, status, job_id, assigned_to")
       .eq("status", "scheduled")
       .eq("absorbed", false)
-      .gte("starts_at", `${daysAgoStr(todayStr, 14)}T00:00:00`)
-      .lt("starts_at", `${todayStr}T00:00:00`)
+      .gte("starts_at", dayStartIso(daysAgoStr(todayStr, 14)))
+      .lt("starts_at", dayStartIso(todayStr))
       .order("starts_at", { ascending: true })
       .limit(50),
     // Captures awaiting a filing decision — staff only.

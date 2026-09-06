@@ -28,7 +28,16 @@ export function companyFromOrg(org: Organization | null): CompanyInfo {
     phone: org?.phone || COMPANY.phone,
     email: org?.email || COMPANY.email,
     license: org?.license || COMPANY.license,
-    brand: accentHex((org as { settings?: { glass_tint?: string } } | null)?.settings?.glass_tint),
+    // The office pages hand us the whole organizations row (settings included); the public
+    // doors hand us an RPC projection, which whitelists scalars and never ships settings —
+    // audit v921: /q, /i and /c were painting the platform default teal while the very PDF
+    // offered on the same page carried the org's tint. Read the flat key the projection can
+    // carry, then the full row's settings. The projections still have to WHITELIST glass_tint
+    // (one scalar, the way 0239 added doc_style) before the public doors go coloured.
+    brand: accentHex(
+      (org as { glass_tint?: string; settings?: { glass_tint?: string } } | null)?.glass_tint ??
+        (org as { settings?: { glass_tint?: string } } | null)?.settings?.glass_tint,
+    ),
     logo: org?.logo_url || "",
   };
 }

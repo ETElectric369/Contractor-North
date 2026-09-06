@@ -4,6 +4,7 @@ import { sendSms } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { todayBoundsInTz } from "@/lib/tz";
+import { reportError } from "@/lib/observe";
 
 /**
  * End-of-day "fill out your form" reminder. Runs on an evening schedule (Vercel
@@ -41,7 +42,13 @@ export async function GET(request: Request) {
         .from("time_entries")
         .select("profile_id, status, notes, time_allocations(id)")
         .eq("org_id", org.id)
-        .gte("clock_in", dayStart.toISOString()),
+        // TODAY'S ROWS **OR** ANYTHING STILL OPEN (audit v921). Filtering on clock_in alone meant
+        // a punch left open from yesterday was reminded once, on Monday evening, and never again:
+        // Tuesday's fetch didn't return it, the tech's list came back empty and the loop skipped
+        // him, while the hours kept accruing. 0193 only closes a stale entry on that person's NEXT
+        // punch — if he never punches again, nothing else catches it. Still org-scoped: the
+        // service client bypasses RLS, so the org filter stays outside the or().
+        .or(`clock_in.gte.${dayStart.toISOString()},status.eq.open`),
     ]);
     if (!techs?.length) continue;
 
@@ -82,8 +89,12 @@ export async function GET(request: Request) {
   let close_out: unknown = null;
   try {
     close_out = await sendCloseOutNudges(supabase);
-  } catch {
+  } catch (e) {
+    // "failed" in a cron JSON nobody reads is a silent failure (audit v921). Every sub-step of
+    // the morning cron reports; this one didn't, so the night debrief could stop going out for
+    // weeks with nothing in error_events to say so.
     close_out = "failed";
+    reportError("cron-close-out", e);
   }
 
   return NextResponse.json({ checked, reminded, close_out });

@@ -7,6 +7,8 @@ import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem } from "@/lib/calendar-sync";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { requireStaff } from "@/lib/staff-guard";
+import { customerForInquiry } from "@/lib/actions/win-customer";
+import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
@@ -96,19 +98,33 @@ export async function createJob(formData: FormData): Promise<Result> {
   let customerId = emptyToNull(formData.get("customer_id"));
   const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
   if (!customerId && newCustomerName) {
-    const { data: cust, error: cErr } = await supabase
-      .from("customers")
-      .insert({
-        name: newCustomerName,
-        phone: emptyToNull(formData.get("new_customer_phone")),
-        email: emptyToNull(formData.get("new_customer_email")),
-        status: "active",
-        created_by: ctx.userId,
-      })
-      .select("id")
-      .single();
-    if (cErr) return { ok: false, error: cErr.message };
-    customerId = cust.id;
+    /* CROSSCHECK THE BOOK, THEN FORMAT THE NUMBER (audit v921). This door minted blind: "start a
+       job for Mike Scrivano, 5306060045" made a SECOND Mike whose phone read 5306060045 beside the
+       first's (530) 606-0045 — and the job, its invoices and its portal all landed on the twin.
+       Every other customer door (createCustomer, setLeadContact, setJobContact) formats the phone
+       and the win path dedups on the CRM's own keys; this one now does both. */
+    const newPhone = formatPhone(String(formData.get("new_customer_phone") ?? "").trim());
+    const newEmail = String(formData.get("new_customer_email") ?? "").trim();
+    const { data: book } = await supabase.from("customers").select("id, name, company_name, email, phone");
+    customerId = findMatchingCustomerId(
+      { name: newCustomerName, phone: newPhone, email: newEmail },
+      (book ?? []) as DupCustomer[],
+    );
+    if (!customerId) {
+      const { data: cust, error: cErr } = await supabase
+        .from("customers")
+        .insert({
+          name: newCustomerName,
+          phone: newPhone || null,
+          email: newEmail || null,
+          status: "active",
+          created_by: ctx.userId,
+        })
+        .select("id")
+        .single();
+      if (cErr) return { ok: false, error: cErr.message };
+      customerId = cust.id;
+    }
   }
 
   // Fragment-first: a bare address (or just a customer) is a valid start — never
@@ -843,7 +859,8 @@ export async function setJobHold(jobId: string, reason: string | null): Promise<
  *     customer's number is shared by every job they have, and correcting it belongs on their card
  *     where the change is seen in context. The refusal says so (nothing silent).
  *   no customer at all → the phone IS the fragment that starts one (fragment-first: never demand
- *     the rest first). A minimal card named after the job, linked, growable later.
+ *     the rest first). But WHO first (audit v921): the lead this job came from, then the book by
+ *     that very number — a new card only when neither knows them, and never named after the job.
  */
 export async function setJobContact(
   jobId: string,
@@ -859,22 +876,53 @@ export async function setJobContact(
 
   const { data: job } = await supabase
     .from("jobs")
-    .select("id, name, customer_id, created_by")
+    // PROJECTION LAW: inquiry_id is read below — the lead is where a customer-less job's PERSON is.
+    .select("id, name, customer_id, inquiry_id, created_by")
     .eq("id", jobId)
     .maybeSingle();
   if (!job) return { ok: false, error: "That job isn't available." };
 
-  if (job.customer_id) {
+  /* WHO IT IS BEFORE MINTING ANYONE (audit v921). This branch used to insert a card named after the
+     JOB — "Site inspection: Karen" — for any job with no customer, ignoring both the lead the job
+     was born from and the book. Karen ended up twice: once as herself, once as a calendar entry.
+     So: the lead's own contact first (customerForInquiry dedups and carries her name and address),
+     then the book by the phone/email just typed, and only then a new card. The job's NAME is never
+     a person, so it is never a match key. */
+  let customerId = (job.customer_id as string | null) ?? null;
+  if (!customerId && job.inquiry_id) {
+    customerId = await customerForInquiry(supabase, String(job.inquiry_id), ctx.userId);
+  }
+  if (!customerId) {
+    const { data: book } = await supabase.from("customers").select("id, name, company_name, email, phone");
+    customerId = findMatchingCustomerId({ phone, email }, (book ?? []) as DupCustomer[]);
+  }
+  // A job that had none and just got one: the LINK is the deed, so "already on file" isn't a refusal.
+  const linkedNow = !job.customer_id && !!customerId;
+
+  if (customerId) {
     const { data: cust } = await supabase
       .from("customers")
       .select("id, phone, email") // PROJECTION LAW: the fill-only rule reads both below
-      .eq("id", job.customer_id)
+      .eq("id", customerId)
       .maybeSingle();
     if (!cust) return { ok: false, error: "This job's customer isn't available." };
+    if (linkedNow) {
+      const { data: linked } = await supabase
+        .from("jobs")
+        .update({ customer_id: cust.id, updated_at: new Date().toISOString() })
+        .eq("id", jobId)
+        .select("id"); // SILENT-WRITE LAW: a zero-row link is a 204, not a linked job
+      if (!linked?.length) return { ok: false, error: "That job isn't available." };
+    }
     const fill: Record<string, string> = {};
     if (phone && !String(cust.phone ?? "").trim()) fill.phone = phone;
     if (email && !String(cust.email ?? "").trim()) fill.email = email;
     if (!Object.keys(fill).length) {
+      if (linkedNow) {
+        revalidatePath("/schedule");
+        revalidatePath(`/jobs/${jobId}`);
+        return { ok: true };
+      }
       return { ok: false, error: "This customer already has that on file — change it on their card, where every job sees it." };
     }
     const { error } = await supabase.from("customers").update({ ...fill, updated_at: new Date().toISOString() }).eq("id", cust.id);
@@ -892,7 +940,12 @@ export async function setJobContact(
       .select("id")
       .single();
     if (error || !cust) return { ok: false, error: dbError(error) };
-    await supabase.from("jobs").update({ customer_id: cust.id, updated_at: new Date().toISOString() }).eq("id", jobId);
+    const { data: linked } = await supabase
+      .from("jobs")
+      .update({ customer_id: cust.id, updated_at: new Date().toISOString() })
+      .eq("id", jobId)
+      .select("id"); // SILENT-WRITE LAW: the new card is useless if the link didn't land
+    if (!linked?.length) return { ok: false, error: "That job isn't available." };
   }
   revalidatePath("/schedule");
   revalidatePath(`/jobs/${jobId}`);

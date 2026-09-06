@@ -154,6 +154,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [status, setStatus] = useState<string | null>(null); // transient "Searching…" tool-status
+  // audit v921: the autosave used to swallow every failure under a promise that "nothing is ever
+  // lost" — an expired session ate the estimate draft the restore path exists for, silently.
+  const [saveFailed, setSaveFailed] = useState(false);
   const [pendingPick, setPendingPick] = useState<AgentPick | null>(null); // on-screen contact picker
   const [listening, setListening] = useState(false);
   const [voiceOn, setVoiceOn] = useState(false); // is the mic available
@@ -414,7 +417,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // ...and auto-persist (debounced) so nothing is ever lost.
   useEffect(() => {
     if (messages.length === 0 && !draft) return;
-    const t = setTimeout(() => { saveConversation(messages, draft).catch(() => {}); }, 800);
+    // A failed save is SAID, not swallowed (audit v921): a zero-row write and a rejected promise
+    // both mean the draft on screen is the only copy there is.
+    const t = setTimeout(() => {
+      saveConversation(messages, draft)
+        .then((r) => setSaveFailed(!r?.ok))
+        .catch(() => setSaveFailed(true));
+    }, 800);
     return () => clearTimeout(t);
   }, [messages, draft]);
 
@@ -871,6 +880,15 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           </div>
         </>
       )}
+
+      {/* NOT SAVING — the autosave is failing (expired session, no network), so this conversation
+          and the draft on screen exist only here until it comes back. Shown in both skins; the one
+          thing worse than losing it is losing it quietly. */}
+      {saveFailed ? (
+        <div className="mx-2 mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
+          Not saving — this conversation isn&apos;t being kept. Reconnect or sign in again, then keep going.
+        </div>
+      ) : null}
 
       {/* non-glass status pill (the glass drawer shows the status LINE above instead) */}
       {status && streaming && !glass ? (

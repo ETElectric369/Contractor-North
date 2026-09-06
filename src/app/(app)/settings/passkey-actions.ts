@@ -102,9 +102,23 @@ export async function listPasskeys(): Promise<{ id: string; label: string | null
   return (data ?? []) as any;
 }
 
-export async function removePasskey(id: string): Promise<{ ok: boolean }> {
+export async function removePasskey(id: string): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
-  await supabase.from("webauthn_credentials").delete().eq("id", id);
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  // A ZERO-ROW DELETE IS A 204 (audit v921). 0083's policy is user_id = auth.uid(), so a stale or
+  // foreign id deleted nothing and this still returned ok — the passkey that gates every money
+  // action the assistant takes was still there, and the user was told it was gone.
+  const { data: gone, error } = await supabase
+    .from("webauthn_credentials")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That passkey wasn't removed — refresh and try again." };
   revalidatePath("/settings");
   return { ok: true };
 }

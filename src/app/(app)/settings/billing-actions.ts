@@ -146,6 +146,9 @@ export async function connectPayments() {
     let accountId = org.stripe_account_id as string | null;
 
     if (!accountId) {
+      // ONE ORG, ONE EXPRESS ACCOUNT (audit v921). A double-tap, a second tab or a retry after a
+      // failed link write each minted another acct_…; keyed on the org, Stripe replays the first
+      // account instead of creating a second one.
       const account = await stripe.accounts.create({
         type: "express",
         email: org.email ?? undefined,
@@ -156,14 +159,23 @@ export async function connectPayments() {
         },
         capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
         metadata: { org_id: org.id },
-      });
+      }, { idempotencyKey: `connect-account-${org.id}` });
       accountId = account.id;
       // Service-role write: 0161 pins these columns against the client on purpose.
+      // AND CHECKED (audit v921) — this was a bare await, the very pattern startCheckout's comment
+      // above points at as "the correct pattern". If the link doesn't land, the owner still gets
+      // sent into Stripe to hand over identity and bank details for an account no org row names:
+      // account.updated matches nothing, Connect status stays empty, and the next click mints
+      // another Express account. Fail here instead, before the onboarding link.
       const admin = createServiceClient();
-      await admin
+      const { data: linked, error: linkErr } = await admin
         .from("organizations")
         .update({ stripe_account_id: accountId, stripe_account_status: "pending" })
-        .eq("id", org.id);
+        .eq("id", org.id)
+        .select("id");
+      if (linkErr || !linked?.length) {
+        throw new Error(`link-account: ${linkErr?.message ?? "the account wasn't saved to your company"}`);
+      }
     }
 
     const link = await stripe.accountLinks.create({
@@ -216,7 +228,15 @@ export async function refreshConnectStatus(): Promise<{ ok: boolean; chargesEnab
     const account = await getStripe().accounts.retrieve(org.stripe_account_id);
     const fields = accountUpdateFields(account);
     const admin = createServiceClient();
-    await admin.from("organizations").update(fields).eq("id", org.id);
+    // .select("id") — same reason as the link write above (audit v921): a mirror that didn't land
+    // reported ok with Stripe's live numbers, so the badge said "Ready to take cards" off a row
+    // that never changed.
+    const { data: mirrored, error } = await admin
+      .from("organizations")
+      .update(fields)
+      .eq("id", org.id)
+      .select("id");
+    if (error || !mirrored?.length) return { ok: false };
     revalidatePath("/settings");
     return { ok: true, chargesEnabled: fields.stripe_charges_enabled };
   } catch {

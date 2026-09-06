@@ -40,6 +40,9 @@ const BY_CONSTRAINT: Record<string, string> = {
   organizations_public_handle_uniq: "Another company is already using that web address — pick another.",
   organizations_custom_domain_uniq: "Another company has already connected that domain. If it's yours, contact support.",
   organizations_lead_secret_uniq: "That inbound key is already in use — generate a new one.",
+  // 0240 made a price-list code unique per org. Without a sentence here the edit modal's six
+  // fields all looked equally guilty (audit v921) — name the field that actually collided.
+  price_list_items_org_code_uidx: "That code is already on another item in your price list.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */

@@ -69,6 +69,45 @@ d("time_entries pay-column tamper guard (0143)", () => {
     expect(body).toMatch(/new\.paid_at is distinct from old\.paid_at/);
   });
 
+  /**
+   * THE 0169 WAGE PROTECTIONS (audit v921).
+   *
+   * Everything above pins the 0143 body. 0169 later added the clauses a punch can actually be
+   * abused through, and nothing asserted them: a `create or replace function
+   * guard_paid_time_entry()` that restored the 0143 body left all six tests green while a tech
+   * could PATCH lunch_minutes 30→0 on a closed 8-hour shift and be paid half an hour a day for
+   * it. These are read from the same catalog definition, one `it` per protection so a dropped
+   * clause names itself in the failure.
+   */
+  it("a member cannot lower the lunch on a finished shift (0169)", () => {
+    expect(body).toMatch(/coalesce\(new\.lunch_minutes, ?0\) < coalesce\(old\.lunch_minutes, ?0\)/);
+  });
+
+  it("a shift over five hours cannot be closed without the 30-minute lunch (0169)", () => {
+    expect(body).toMatch(/gross_hours > 5/);
+    expect(body).toMatch(/coalesce\(new\.lunch_minutes, ?0\) < 30/);
+  });
+
+  it("a shift longer than a day cannot be closed by its owner (0169)", () => {
+    expect(body).toMatch(/interval '18 hours'/);
+  });
+
+  it("a backdated punch cannot be laid on top of a shift already recorded (0169)", () => {
+    expect(body).toMatch(/coalesce\(t\.clock_out, now\(\)\) > new\.clock_in \+ interval '1 minute'/);
+  });
+
+  it("a self-punch may only reach back 45 minutes live / 4h15m offline (0169)", () => {
+    expect(body).toMatch(/max_backdate/);
+    expect(body).toMatch(/interval '4 hours 15 minutes'/);
+    expect(body).toMatch(/interval '45 minutes'/);
+    expect(body).toMatch(/new\.clock_in < now\(\) - max_backdate/);
+  });
+
+  it("a member cannot rewrite how a punch was recorded, except the geofence's own close (0169)", () => {
+    expect(body).toMatch(/new\.source is distinct from old\.source/);
+    expect(body).toMatch(/new\.source = 'auto_gps'/);
+  });
+
   it("leaves the legitimate tech write-paths open (notes, gps_in, job_id, closing an open shift)", () => {
     // The guard names only pay-relevant columns — a switchJob/saveEntryNotes/clockOut
     // write must never start failing for the crew mid-shift.

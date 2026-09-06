@@ -1452,7 +1452,7 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
           onPick={async (iso) => {
             if (!iso) return { ok: false, error: "Pick a day." };
             if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
-            const t = shiftApptToDay(a.starts_at, a.ends_at, iso);
+            const t = shiftApptToDay(a.starts_at, a.ends_at, iso, tz); // org tz (audit v921 review)
             const res = await rescheduleAppointment(a.id, t.start, t.end);
             if (res.ok) router.refresh();
             return res; // a returned `note` (withdrawn link) surfaces as a toast

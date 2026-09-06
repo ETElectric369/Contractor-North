@@ -88,13 +88,22 @@ export default async function PublicQuotePage({
         // to its default footer, the same as before.
         showContact
         acceptSlot={
-          <PublicQuoteAccept
-            token={token}
-            accepted={q.status === "accepted"}
-            declined={q.status === "declined"}
-            brand={co.brand}
-            docLabel={label}
-          />
+          // audit v921: public_quote serves 'expired' too, and an expired quote used to render the
+          // full Accept button — both RPCs refuse anything but 'sent', so the only outcome of that
+          // tap was a red "no longer available". Say it before the click, not after.
+          q.status === "expired" ? (
+            <div className="no-print flex items-center justify-center gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+              This {label.toLowerCase()} has expired. Call us and we'll send you a fresh one.
+            </div>
+          ) : (
+            <PublicQuoteAccept
+              token={token}
+              accepted={q.status === "accepted"}
+              declined={q.status === "declined"}
+              brand={co.brand}
+              docLabel={label}
+            />
+          )
         }
       />
     </div>

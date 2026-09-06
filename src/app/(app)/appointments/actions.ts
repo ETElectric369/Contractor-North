@@ -934,6 +934,17 @@ export async function rescheduleAppointment(
     .eq("appointment_id", id)
     .eq("status", "pending")
     .select("id");
+  /* audit v921: THE DOOR BACK OUT OF "pending pick". The office just chose the time by hand, but
+     nothing wrote status — choose_schedule_slot is the ONLY proposed→scheduled writer and the link
+     it needs was withdrawn a line ago. The visit read "pending pick" forever, never reached Google
+     (APPT_PUSH_STATUSES drops proposed) and never nagged from Needs action once its day passed.
+     Zero rows here just means it wasn't proposed; the flip has to land before the push below. */
+  await supabase
+    .from("appointments")
+    .update({ status: "scheduled" })
+    .eq("id", id)
+    .eq("status", "proposed")
+    .select("id");
   await pushCalendarItem("appointment", id); // live Google push (fire-safe)
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
@@ -949,7 +960,7 @@ export async function rescheduleAppointment(
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
  *  customer, title → name, location → address, and start time. */
-export async function createJobFromAppointment(appointmentId: string): Promise<Result> {
+export async function createJobFromAppointment(appointmentId: string): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -977,6 +988,18 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
      A number is only worth asking for once. The size comes across, the finish is computed from it
      rather than defaulted, and inquiry_id comes too so the chain from the lead survives the step
      instead of ending here. */
+  /* WHO THE WORK IS FOR TRAVELS WITH IT TOO (audit v921). The "let them pick" door books the visit
+     with customer_id null, so this insert wrote jobs.customer_id = null — and nothing in the tree
+     ever backfills it: settleUp mints/links the customer onto the INVOICE only. The result was a
+     paid job missing from its own customer's card and a job page with no contact. If the lead
+     already carries a card, the job inherits it here, at the one step that connects the two. */
+  const inquiryId = (appt as { inquiry_id?: string | null }).inquiry_id ?? null;
+  let customerId = appt.customer_id ?? null;
+  if (!customerId && inquiryId) {
+    const { data: inq } = await supabase.from("inquiries").select("customer_id").eq("id", inquiryId).maybeSingle();
+    customerId = (inq as { customer_id?: string | null } | null)?.customer_id ?? null;
+  }
+
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
   const scheduledEnd = sized > 0 && appt.starts_at
@@ -987,8 +1010,8 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     .from("jobs")
     .insert({
       name: appt.title || "Job from appointment",
-      customer_id: appt.customer_id,
-      inquiry_id: (appt as { inquiry_id?: string | null }).inquiry_id ?? null,
+      customer_id: customerId,
+      inquiry_id: inquiryId,
       status: "scheduled",
       planned_minutes: sized > 0 ? sized : null, // blank stays blank — never a made-up number
       scheduled_start: appt.starts_at,
@@ -1029,21 +1052,34 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   // over on EVERY surface at once — grid, My Day, feeders, Google, reminder emails. One column,
   // one meaning; the per-surface type-based skips this replaces each covered one door and left
   // the rest showing ghosts.
-  await supabase.from("appointments").update({ job_id: job.id, absorbed: true }).eq("id", appointmentId);
+  // SILENT-WRITE LAW (audit v921): a zero-row update here is a 204, not a success — the job would
+  // exist while the booking stayed LIVE, the exact ghost this column prevents. The only way to land
+  // zero rows is the appointment disappearing between the read above and this write (deleteAppointment
+  // hard-deletes), so we say that out loud instead of returning a clean ok; re-converting is NOT the
+  // answer (it would mint a second job), which is why this is a note on a successful create.
+  const { data: absorbed } = await supabase
+    .from("appointments")
+    // …and the visit keeps the same answer the job just got (audit v921) — one contact, both records.
+    .update({ job_id: job.id, absorbed: true, ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}) })
+    .eq("id", appointmentId)
+    .select("id");
+  const absorbNote = absorbed?.length
+    ? undefined
+    : "That visit disappeared while the job was being created — the job was made from what it had.";
   /* STAMP FOLLOWS DEED — the lead too. This path minted jobs without ever telling the lead, so
      Karen sat on /leads as "contacted" while her job was already on the calendar ("the leads
      converted to jobs put back as leads are still there"). A lead whose work became a job is won,
      and not a lead anymore. */
-  if ((appt as { inquiry_id?: string | null }).inquiry_id) {
+  if (inquiryId) {
     await supabase
       .from("inquiries")
       .update({
         status: "won",
         converted_at: new Date().toISOString(),
-        ...(appt.customer_id ? { customer_id: appt.customer_id } : {}),
+        ...(customerId ? { customer_id: customerId } : {}),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", (appt as { inquiry_id?: string | null }).inquiry_id!)
+      .eq("id", inquiryId)
       .is("converted_at", null); // idempotent — an already-stamped lead keeps its original stamp
     revalidatePath("/leads");
   }
@@ -1057,7 +1093,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
-  return { ok: true, id: job.id };
+  return { ok: true, id: job.id, ...(absorbNote ? { note: absorbNote } : {}) };
 }
 
 export async function deleteAppointment(id: string): Promise<Result> {
@@ -1105,6 +1141,10 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
     .update({ status: "cancelled" })
     .eq("appointment_id", id)
     .eq("status", "pending");
+  // audit v921: mirror of rescheduleAppointment — with the link withdrawn nothing could ever move
+  // this row off "proposed" again, so a booking waiting for a day would sit on the rail claiming a
+  // pick that can no longer happen. A dateless booking's status is plain 'scheduled'.
+  await supabase.from("appointments").update({ status: "scheduled" }).eq("id", id).eq("status", "proposed").select("id");
   await pushCalendarItem("appointment", id); // unscheduled = a Google delete (gcal-map's rule)
   revalidatePath("/schedule");
   revalidatePath("/planner");

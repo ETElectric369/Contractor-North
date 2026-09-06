@@ -31,6 +31,12 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "payroll", "permits", "petty-cash", "planner", "plans", "price-list", "purchasing", "quotes",
   "recurring", "resources", "safety", "schedule", "settings", "tasks", "tax-report", "team",
   "timecards", "timeclock", "tools", "work-orders",
+  // audit v921: these three shipped after this list was written and drifted out of it — the dock
+  // links /inspections and Settings links /doc-studio and /site-studio, so on an org host the page
+  // resolver swallowed all three and crew got a hard 404 on their own company domain (verified
+  // live: etelectricity.com/inspections → 404 while /jobs → 307 to login). "intake" is a real
+  // public route (/intake/<handle>) and belongs here for the same reason.
+  "inspections", "doc-studio", "site-studio", "intake",
   // Infra / assets
   "api", "site", "p", "_next", "assets", "images", "static", "offline",
   "sitemap", "sitemap.xml", "robots.txt", "manifest", "manifest.webmanifest", "sw.js",

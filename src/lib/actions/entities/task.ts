@@ -243,17 +243,24 @@ export const taskActions: Record<string, ActionDef> = {
         .eq("status", "open")
         .select("id");
       if (kidsError) return { ok: false, error: kidsError.message };
-      const { error } = await supabase
+      // Silent-write law (audit v921): the readback below used to count the MATCHED ids, not the
+      // rows this statement actually touched — a task completed or deleted between the match and
+      // the write made "Cleared 6 tasks." a lie with nothing to catch it. Count what landed, like
+      // the children update directly above.
+      const { data: done, error } = await supabase
         .from("tasks")
         .update({ status: "done", completed_at: doneAt })
-        .in("id", m.ids);
+        .in("id", m.ids)
+        .select("id");
       if (error) return { ok: false, error: dbError(error) };
+      const affected = done?.length ?? 0;
+      if (!affected) return { ok: false, error: "Nothing was cleared — those tasks aren't yours to change, or they already moved." };
       revalidateBulkViews(i);
       const kidCount = kids?.length ?? 0;
       return {
         ok: true,
-        data: { affected: m.ids.length, subtasks: kidCount },
-        speak: `Cleared ${m.ids.length} task${m.ids.length === 1 ? "" : "s"}${
+        data: { affected, subtasks: kidCount },
+        speak: `Cleared ${affected} task${affected === 1 ? "" : "s"}${
           kidCount ? ` and ${kidCount} subtask${kidCount === 1 ? "" : "s"}` : ""
         }.`,
       };
@@ -277,13 +284,21 @@ export const taskActions: Record<string, ActionDef> = {
       if ("error" in m) return { ok: false, error: m.error };
       if (!m.ids.length) return { ok: true, data: { affected: 0 }, speak: "No open tasks match that." };
       const supabase = await createClient();
-      const { error } = await supabase.from("tasks").update({ due_date: i.new_due }).in("id", m.ids);
+      // Silent-write law (audit v921): report the rows the update RETURNED, not the ids the match
+      // found — a zero-row update is a 204, and "Moved 6 tasks" over nothing is the lie it makes.
+      const { data: moved, error } = await supabase
+        .from("tasks")
+        .update({ due_date: i.new_due })
+        .in("id", m.ids)
+        .select("id");
       if (error) return { ok: false, error: dbError(error) };
+      const affected = moved?.length ?? 0;
+      if (!affected) return { ok: false, error: "Nothing moved — those tasks aren't yours to change, or they already moved." };
       revalidateBulkViews(i);
       return {
         ok: true,
-        data: { affected: m.ids.length },
-        speak: `Moved ${m.ids.length} task${m.ids.length === 1 ? "" : "s"} to ${i.new_due}.`,
+        data: { affected },
+        speak: `Moved ${affected} task${affected === 1 ? "" : "s"} to ${i.new_due}.`,
       };
     },
   },

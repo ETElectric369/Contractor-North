@@ -63,7 +63,7 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
-import { formatDateTz } from "@/lib/tz";
+import { formatDateTz, todayStrInTz } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -151,6 +151,7 @@ export default async function JobDetailPage({
     { data: bills },
     { data: tasks },
     { data: permits },
+    rates,
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total, doc_type, created_at").eq("job_id", id),
     supabase.from("work_orders").select("id, wo_number, title, status").eq("job_id", id),
@@ -199,6 +200,9 @@ export default async function JobDetailPage({
       .select("id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, fee, notes, portal_url")
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
+    // Rides along in the wave instead of behind it (audit v921): it needs nothing from these
+    // reads, and awaiting it separately cost the page a whole round trip on every job open.
+    payRateMap(supabase),
   ]);
 
   // RATES MERGED FROM THE STAFF-SCOPED VIEW (0215/0216 revoked them from the authenticated
@@ -207,7 +211,6 @@ export default async function JobDetailPage({
   // avoid, reintroduced by narrowing the embeds without merging. Both shapes: the entry rows,
   // and the allocation rows whose entry is nested one level down.
   {
-    const rates = await payRateMap(supabase);
     attachRates((ownEntries ?? []) as any[], rates, (e: any) => ({ id: e.profile_id, holder: e }));
     attachRates((inboundAllocRows ?? []) as any[], rates, (a: any) => ({
       id: a.time_entries?.profile_id,
@@ -299,7 +302,25 @@ export default async function JobDetailPage({
     a.clock_in < b.clock_in ? 1 : -1,
   );
 
-  const [{ data: techs }, { data: jobCodes }, { data: lists }, { data: org }, { data: allCustomers }, { data: allJobs }, { data: codeTemplates }, { data: openEntryRow }] = await Promise.all([
+  // FOUR MORE THAT WERE WAITING THEIR TURN FOR NOTHING (audit v921). storyForJob, the billing
+  // labor rows, the customer's labor rate and this job's refunds each need only the job id (and
+  // the invoices wave 1 already returned) — they ran one after another below, four extra serial
+  // round trips on the most-opened page in the app. They ride this wave instead.
+  const invoiceIds = (invoices ?? []).map((i: any) => i.id);
+  const [
+    { data: techs },
+    { data: jobCodes },
+    { data: lists },
+    { data: org },
+    { data: allCustomers },
+    { data: allJobs },
+    { data: codeTemplates },
+    { data: openEntryRow },
+    story,
+    laborRows,
+    jobLevelRate,
+    { data: refundRows },
+  ] = await Promise.all([
     // Staff get hourly_rate + bill_rate for the add-time/edit modals' pay-rate
     // anchor; NON-staff keep the narrow select. The gate matters here: this array
     // serializes into client-component props (RSC), so an unconditional enrichment
@@ -323,6 +344,13 @@ export default async function JobDetailPage({
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
+    // The activity log — assembled from the rows themselves, see lib/story.
+    storyForJob(supabase, j.id),
+    fetchJobLaborRows(supabase, id),
+    customerLaborRateForJob(supabase, id),
+    invoiceIds.length
+      ? supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
+      : Promise.resolve({ data: [] as any[] }),
   ]);
   const oe = openEntryRow as any;
   const openEntry = oe
@@ -359,8 +387,6 @@ export default async function JobDetailPage({
   const navTarget = directionsTarget(jobAddress, customerAddress, j.name);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
-  // The activity log — assembled from the rows themselves, see lib/story.
-  const story = await storyForJob(supabase, j.id);
   // The org's all-day work window (Settings → Scheduling) — the same resolver the
   // schedule writers use, threaded into the schedule/edit controls so their "blank
   // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
@@ -389,8 +415,6 @@ export default async function JobDetailPage({
   // timeclock_job_codes=false must hide EVERY code picker (cn-v517) — including the
   // Time tab's add/edit modals here, not just the /timecards mounts.
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
-  const laborRows = await fetchJobLaborRows(supabase, id);
-  const jobLevelRate = await customerLaborRateForJob(supabase, id);
   const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate, jobLevelRate, laborRows.nonBillableCodes).total;
   const progress = computeJobProgress({
     billingTypeRaw: (j as any).billing_type,
@@ -426,10 +450,6 @@ export default async function JobDetailPage({
       number: i.invoice_number,
       balance: invoiceBalance(i.total, i.amount_paid),
     }));
-  const invoiceIds = (invoices ?? []).map((i: any) => i.id);
-  const { data: refundRows } = invoiceIds.length
-    ? await supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
-    : { data: [] as any[] };
   const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const revenue = Math.max(0, collected - jobRefunds);
   // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
@@ -974,6 +994,11 @@ export default async function JobDetailPage({
             jobId={j.id}
             lien={(lienRecord as any) ?? null}
             insurance={(insuranceClaim as any) ?? null}
+            /* ONE LAW TWO CLOCKS (audit v921): the card ran its own `new Date()` in the BROWSER,
+               so after 5 PM Pacific it counted from the UTC day — a 20-day preliminary-notice
+               deadline read "past due" an evening early, and one day short of the Needs-action
+               feeder, which has always used the org's day. The org's today, from here. */
+            today={todayStrInTz(tz)}
             defaults={{
               ownerName: (j.customers as any)?.name ?? undefined,
               ownerAddress: formatFullAddress((j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip) || undefined,

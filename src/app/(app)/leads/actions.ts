@@ -17,6 +17,7 @@ import {
 } from "@/lib/schedule/work-shape";
 import { carryFromCustomer, matchKnownCustomer, type KnownCustomer } from "@/lib/inquiries/known-customer";
 import { createServiceClient } from "@/lib/supabase/server";
+import { customerForInquiry } from "@/lib/actions/win-customer";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
@@ -142,7 +143,13 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       link_note = c.note || `Linked to ${m.customer.name ?? "an existing customer"}.`;
     } else if (m.kind === "ambiguous") {
       // Deliberately unlinked — but say so, or he silently gets a duplicate he never notices.
-      link_note = `You have ${m.count} customers named "${name}" — this lead wasn't linked to either. Open it and pick the right one.`;
+      //
+      // AND THE WAY FORWARD HAS TO EXIST (audit v921). This used to say "Open it and pick the
+      // right one" — there is no contact picker on the lead form or the row, and nothing else
+      // ever sets inquiries.customer_id by hand, so it named a door that isn't there. What IS
+      // true: a phone or an email is a strong key, and findMatchingCustomerId links on it before
+      // it ever considers a name — so the fix the office can actually perform is to type one.
+      link_note = `You have ${m.count} customers named "${name}" — a name alone can't pick between them, so this lead isn't linked to either. Add their phone or email and converting it will find the right one.`;
     }
   } catch {
     // Never let the convenience break the capture. Fragment-first: the lead saves regardless.
@@ -187,11 +194,15 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
   if (!name && (fields.phone || fields.message)) name = fields.phone ?? "Unknown caller";
   if (!name) return { ok: false, error: "Add a name, phone, or note to save the lead." };
 
-  const { error } = await supabase
+  // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — a deleted or
+  // merged-away lead edited from a stale tab used to answer "Saved".
+  const { data, error } = await supabase
     .from("inquiries")
     .update({ name, ...fields, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That lead isn't available." };
 
   revalidatePath("/leads");
   return { ok: true };
@@ -227,8 +238,11 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
     const cur = (row as { next_follow_up_at?: string | null } | null)?.next_follow_up_at ?? null;
     if (!cur || cur <= todayStr) patch.next_follow_up_at = ymdAddDays(todayStr, FOLLOW_UP_DEFAULT_DAYS);
   }
-  const { error } = await supabase.from("inquiries").update(patch).eq("id", id);
+  // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204 — ticking "contacted" from a
+  // stale My Day tab on a lead that's since been deleted used to toast "Marked contacted".
+  const { data: hit, error } = await supabase.from("inquiries").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!hit?.length) return { ok: false, error: "That lead isn't available." };
   revalidatePath("/leads");
   // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
   // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
@@ -246,11 +260,34 @@ export async function setInquiryStatus(id: string, status: string): Promise<Resu
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
+
+  /* "WON" IS A DEED, NOT A LABEL (audit v921).
+     Picking Won in the row's Status select wrote the word and nothing else: converted_at stayed
+     null and no contact was ever filed, so the lead sat in every open-lead projection — listed on
+     /leads and counted in "Open inquiries", still offered on the schedule's lead rail, counted on
+     My Day, nagged by Nort — while the referral tally already counted it as a commission. That is
+     precisely the state win-customer names as a bug: "a won deal wearing a lead costume".
+     So the word now does the deed: customerForInquiry mints or links the contact with the CRM's
+     own dedup keys and stamps status + converted_at, exactly as an accepted estimate or a cash
+     settle-up does. ("quoted" by hand stays open on purpose — cn-v477.) */
+  if (status === "won") {
+    const customerId = await customerForInquiry(supabase, id, ctx.userId);
+    if (!customerId)
+      return { ok: false, error: "Couldn't mark this lead won — it isn't available, or its contact card couldn't be created." };
+    revalidatePath("/leads");
+    revalidatePath("/crm");
+    revalidatePath("/planner");
+    return { ok: true, id: customerId };
+  }
+
+  // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error.
+  const { data, error } = await supabase
     .from("inquiries")
     .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That lead isn't available." };
   revalidatePath("/leads");
   revalidatePath("/planner"); // My Day shows inquiry counts — keep it in sync
   return { ok: true };
@@ -297,10 +334,18 @@ export async function deleteInquiry(id: string): Promise<Result> {
   // storage forever with nothing pointing at it. Paths are minted per-upload (epoch+uuid), so no
   // other lead can reference them; the service client does the remove because the bucket is
   // private (no member delete policy), gated by the same own-org path check as every other
-  // intake-file door. Best-effort AFTER validation: a storage hiccup shouldn't block the delete,
-  // and once the row is gone there is no second chance to learn the paths.
+  // intake-file door. Best-effort AFTER validation: a storage hiccup shouldn't block the delete.
+  //
+  // THE ROW GOES FIRST (audit v921). The paths were captured in `inq` above, so they survive the
+  // delete — and removing the files first meant that a delete which then FAILED (an RLS change, a
+  // statement timeout) left a surviving lead pointing at storage that no longer existed: IntakeFiles
+  // listing names that 404 on click, the plan brief reporting "file no longer in storage", and
+  // nothing able to repair it. Files are only destroyed once the row they belonged to is gone.
   const orgId = String((inq as { org_id?: string }).org_id ?? "");
   const filePaths = intakePaths((inq as { intake?: unknown }).intake).filter((p) => isOwnIntakePath(orgId, p));
+  const { data: gone, error } = await supabase.from("inquiries").delete().eq("id", id).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That lead isn't available." };
   if (filePaths.length) {
     await createServiceClient()
       .storage.from(INTAKE_BUCKET)
@@ -310,8 +355,6 @@ export async function deleteInquiry(id: string): Promise<Result> {
         () => undefined,
       );
   }
-  const { error } = await supabase.from("inquiries").delete().eq("id", id);
-  if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/leads");
   revalidatePath("/schedule");
   revalidatePath("/inspections");

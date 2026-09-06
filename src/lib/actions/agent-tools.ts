@@ -119,6 +119,13 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "memory.forget", // confirm-gated: the delete path that makes "memory is full" actionable
 ]);
 
+/** The READ actions offered alongside those writes. Normal reads live in DATA_TOOLS
+ *  (assistant-tools.ts); this set is for a read the registry owns and a write above depends on.
+ *  audit v921: memory.forget takes a uuid whose only source is memory.list, but nothing offered
+ *  memory.list — no chat tool, no screen — so "Memory is full — clear some out" was an
+ *  instruction nobody could follow. The remedy has to be reachable from the same table. */
+export const AGENT_READ_ALLOWED = new Set<string>(["memory.list"]);
+
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
 const toToolName = (name: string) => name.replace(/\./g, "__");
 
@@ -130,16 +137,20 @@ export function agentWriteToolsForRole(role: string | null | undefined): {
   tools: Anthropic.Tool[];
   resolve: (toolName: string) => string | null;
 } {
-  const allowed = actionsForRole(role, { effect: "write" }).filter(
-    (a) =>
-      AGENT_WRITE_ALLOWED.has(a.name) &&
-      // tier-1 runs straight through; tier-2 CONFIRM actions are now offered too because the
-      // chat surfaces the confirm (propose → user yes). Money-MOVEMENT (stepUp) and tier-3
-      // (human-only) stay OUT of the agent's reach entirely.
-      (actionRisk(a) <= 1 || a.confirm != null) &&
-      !a.stepUp &&
-      actionRisk(a) < 3,
-  );
+  const allowed = [
+    ...actionsForRole(role, { effect: "write" }).filter(
+      (a) =>
+        AGENT_WRITE_ALLOWED.has(a.name) &&
+        // tier-1 runs straight through; tier-2 CONFIRM actions are now offered too because the
+        // chat surfaces the confirm (propose → user yes). Money-MOVEMENT (stepUp) and tier-3
+        // (human-only) stay OUT of the agent's reach entirely.
+        (actionRisk(a) <= 1 || a.confirm != null) &&
+        !a.stepUp &&
+        actionRisk(a) < 3,
+    ),
+    // …plus the registry-owned reads a write above can't be walked without (audit v921).
+    ...actionsForRole(role, { effect: "read" }).filter((a) => AGENT_READ_ALLOWED.has(a.name)),
+  ];
   const map = new Map<string, string>();
   const tools: Anthropic.Tool[] = allowed.map((a) => {
     const tn = toToolName(a.name);

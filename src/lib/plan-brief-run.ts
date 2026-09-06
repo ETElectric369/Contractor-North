@@ -6,7 +6,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
 import { playbookForForm } from "@/lib/playbook/parse";
-import { INTAKE_BUCKET, extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
+import { INTAKE_BUCKET, extOf, intakePaths, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import type { Need, Playbook } from "@/lib/playbook/types";
 import {
   BRIEF_LIMITS,
@@ -97,7 +97,11 @@ export async function runPlanBrief(
     .maybeSingle();
   if (!inq) return { ok: false, error: "Lead not found." };
 
-  const paths = intakePaths(inq.intake);
+  // Own-org paths ONLY. The service client below bypasses storage RLS, so a foreign path sitting
+  // in the answers bag would be downloaded and read to the model, and its summary would land on
+  // this org's lead. Every other reader of this bag filters the same way (quotes/actions.ts,
+  // leads/actions.ts, the intake write door) — this runner was the one that didn't (audit v921).
+  const paths = intakePaths(inq.intake).filter((p) => isOwnIntakePath(orgId, p));
   if (!paths.length) return { ok: false, error: "This lead has no uploaded files." };
 
   // The last GOOD report survives every failure below (review: "Read again" plus a tripped

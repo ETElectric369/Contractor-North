@@ -40,6 +40,13 @@ export async function POST(req: Request) {
   const org = await getPublicOrgByHandle(handle);
   if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });
 
+  // Per-org daily ceiling, mirroring /api/intake/upload-url (audit v921): the per-IP limit above is
+  // useless against a rotating-IP flood, and every 4MB that lands here is public storage billed to
+  // the contractor.
+  if (await rateLimited(`upload-org:${org.id}`, 200, 86400)) {
+    return NextResponse.json({ error: "Too many uploads today — please call us instead." }, { status: 429 });
+  }
+
   const supabase = createServiceClient();
   const path = `${org.id}/${Date.now()}-${crypto.randomUUID()}.${ALLOWED[file.type]}`;
   const buf = Buffer.from(await file.arrayBuffer());

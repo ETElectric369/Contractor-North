@@ -9,8 +9,16 @@ describe("contractTotalFromQuotes (shared contract-base rule)", () => {
     ]);
     expect(t).toBe(40000);
   });
-  it("sums all quotes only when none are accepted yet", () => {
-    expect(contractTotalFromQuotes([{ total: 10000, status: "sent" }])).toBe(10000);
+  // The title used to say "sums all quotes" and passed ONE quote, so it could not tell a sum from
+  // newest-wins — it described the rule audit 8 REMOVED (the $22,000 contract). Two dated quotes,
+  // so the assertion can only pass under the rule the code actually implements (audit v921).
+  it("with nothing accepted, the NEWEST proposal stands alone (never a sum)", () => {
+    expect(
+      contractTotalFromQuotes([
+        { total: 10000, status: "sent", created_at: "2026-01-01T00:00:00Z" },
+        { total: 12000, status: "sent", created_at: "2026-02-01T00:00:00Z" },
+      ]),
+    ).toBe(12000);
   });
   it("handles empty + bad totals", () => {
     expect(contractTotalFromQuotes([])).toBe(0);
@@ -78,6 +86,20 @@ describe("scheduleStatus", () => {
   it("flags percentOff when the percents don't add to 100", () => {
     const s = scheduleStatus([{ sort_order: 0, label: "a", percent: 50 }, { sort_order: 1, label: "b", percent: 40 }], 10000);
     expect(s.percentOff).toBe(true);
+  });
+  // Audit v921: each percent milestone rounded to cents on its own, so an odd-cent contract left
+  // a cent that no draw ever billed and nothing flagged (the percents DO sum to 100).
+  it("an odd-cent contract is partitioned exactly — the final milestone absorbs the rounding", () => {
+    const s = scheduleStatus(defaultSchedule(30), 100.01);
+    expect(s.scheduledTotal).toBe(100.01);
+    expect(s.rows.map((r) => r.dollars)).toEqual([30, 35, 35.01]);
+    expect(s.percentOff).toBe(false);
+    expect(s.overContract).toBe(false);
+  });
+  it("a genuine under-schedule is still flagged, not quietly topped up", () => {
+    const s = scheduleStatus([{ sort_order: 0, label: "a", percent: 50 }, { sort_order: 1, label: "b", percent: 40 }], 10000);
+    expect(s.scheduledTotal).toBe(9000);
+    expect(s.percentUnder).toBe(true);
   });
   it("sorts by sort_order regardless of input order", () => {
     const s = scheduleStatus([{ sort_order: 2, label: "Final", percent: 30 }, { sort_order: 0, label: "Deposit", percent: 70 }], 1000);

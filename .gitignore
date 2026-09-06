@@ -20,10 +20,23 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# env files — never commit secrets
-.env
-.env*.local
-.env.local
+# env files — never commit secrets.
+# `.env*.local` matched NOTHING that `vercel env pull --environment=production` or Next's own
+# convention writes: .env.production, .env.development, .env.test, .env.vercel were all
+# committable (audit v921). Ignore every .env* and un-ignore the one that is meant to be read.
+.env*
+!.env.example
+
+# iOS signing + service credentials. The repo carries ios/ + ci_scripts/ now, and it is PUBLIC:
+# an App Store Connect key (AuthKey_*.p8) or a .p12 is a signing identity, not a config file
+# (audit v921). Info.plist is deliberately NOT matched — only the credential-bearing names are.
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+**/GoogleService-Info.plist
+**/ExportOptions.plist
 
 # vercel
 .vercel
@@ -79,3 +92,15 @@ yarn-error.log*
 !/tailwind.config.js
 !/eslint.config.js
 !/eslint.config.mjs
+
+# …and the same throwaway names ONE DIRECTORY DOWN. The allowlist above is root-anchored
+# (`/*.mjs`), so `scripts/.tmp-probe.mjs` — an audit agent's CN_PW-building probe written
+# beside the real scripts — was committable by `git add -A` exactly as the 2026-07-25 leak was
+# (audit v921). Real scripts (scripts/db-query.mjs, run-migrations.mjs) don't carry these names.
+**/.tmp-*
+**/.audit-*
+**/.tokenlens-*
+**/*_tmp.*
+**/probe*.js
+**/probe*.cjs
+**/probe*.mjs

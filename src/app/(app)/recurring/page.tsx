@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { RecurringButton, type RecurringValue } from "./recurring-button";
 import { RecurringRowActions, GenerateDueButton } from "./recurring-actions-ui";
@@ -16,12 +18,16 @@ const FREQ_LABEL: Record<string, string> = {
 
 export default async function RecurringPage() {
   const supabase = await createClient();
-  const today = new Date().toISOString().slice(0, 10);
 
-  const [{ data: templates }, { data: customers }] = await Promise.all([
+  const [{ data: templates }, { data: customers }, { data: orgRow }] = await Promise.all([
     supabase.from("recurring_templates").select("*, customers(name)").order("next_date"),
     listCustomerOptions(supabase),
+    supabase.from("organizations").select("settings").maybeSingle(),
   ]);
+  // "Due" is an ORG-LOCAL calendar decision (audit v921). A UTC today rolls over at ~5 PM Pacific,
+  // so this page said "Generate 1 Due" while generateDueTemplates — which gates on the org's own
+  // today — created nothing and the toast read "Generated 0 invoices". Same clock, both sides.
+  const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
   const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, name: c.name }));
   const dueCount = (templates ?? []).filter((t: any) => t.active && t.next_date <= today).length;

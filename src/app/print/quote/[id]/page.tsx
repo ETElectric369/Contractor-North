@@ -32,7 +32,7 @@ export default async function QuotePrintPage({
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select(`*, customers(name, company_name, email, phone, ${SITE_COLS}), jobs(${SITE_COLS}), inquiries(${SITE_COLS})`)
+    .select(`*, customers(name, company_name, email, phone, ${SITE_COLS}), jobs(${SITE_COLS}), inquiries(name, company_name, email, phone, ${SITE_COLS})`)
     .eq("id", id)
     .maybeSingle();
 
@@ -58,6 +58,12 @@ export default async function QuotePrintPage({
   // customer-facing wording follows doc_type (via THE one docLabel helper).
   const label = docLabel(q);
 
+  // 0119 keeps a sent estimate's customer_id NULL until the win, so the prospect still lives on
+  // the inquiry — public_quote coalesces the customer block onto it, which is why /q prints the
+  // lead's name. audit v921: this page didn't coalesce, so the office PDF — and the customer's
+  // own share-pdf download, which is these same bytes — printed "Prepared for —". Same order.
+  const preparedFor = q.customers ?? (q as any).inquiries;
+
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
@@ -81,7 +87,7 @@ export default async function QuotePrintPage({
         title={q.title}
         description={(q as any).description}
         circuits={(q as any).circuits}
-        customer={q.customers}
+        customer={preparedFor}
         items={lineItems as any}
         subtotal={q.subtotal}
         taxRate={q.tax_rate}

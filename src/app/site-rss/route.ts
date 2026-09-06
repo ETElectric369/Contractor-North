@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { getPublicOrgByDomain, getPublicOrgByHandle } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
+import { orgPublicBaseUrl } from "@/lib/org-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,12 @@ export async function GET(req: Request) {
   const org = byDomain ?? (handle ? await getPublicOrgByHandle(handle) : null);
   if (!org) return new Response("Not found", { status: 404 });
 
-  const base = `https://${host}`;
+  // audit v921: the feed advertises the CANONICAL base, never the request host — same source as
+  // the sitemap and every page's rel=canonical. The free subdomain and www.<custom-domain> both
+  // serve this feed, and host-built links handed aggregators duplicate URLs whose pages then
+  // declared a different canonical (live: et-electric.contractornorth.com/blog/rss.xml listed
+  // subdomain links for pages canonicalized to etelectricity.com).
+  const base = orgPublicBaseUrl(org.settings);
   const posts = await getPublicPosts(org.id);
   const items = posts
     .slice(0, 50)

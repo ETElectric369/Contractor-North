@@ -37,7 +37,20 @@ export async function removePushSubscription(endpoint: string) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false };
-  await supabase.from("push_subscriptions").delete().eq("endpoint", endpoint);
+  // A ZERO-ROW DELETE IS A 204 (audit v921). Deleting by endpoint alone matched nothing whenever
+  // the row belonged to another profile on a shared device — push_subs_own scopes to auth.uid()
+  // and endpoint is unique — yet this said ok, so the screen read "Turned off for this device"
+  // while the server row lived on until web-push finally got a 410.
+  const { data: gone, error } = await supabase
+    .from("push_subscriptions")
+    .delete()
+    .eq("endpoint", endpoint)
+    .eq("profile_id", user.id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) {
+    return { ok: false, error: "This device's notifications weren't registered to your account — nothing was turned off on the server." };
+  }
   return { ok: true };
 }
 

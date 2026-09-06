@@ -4,6 +4,8 @@ import { contentDisposition } from "@/lib/content-disposition";
 import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { normalizeDocStyle } from "@/lib/doc-style";
+import { docLabel } from "@/lib/doc-label";
 
 export const dynamic = "force-dynamic";
 /** Concurrent chromium renders allowed per function instance (each is ~150MB). */
@@ -45,6 +47,21 @@ async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, d
       filename = `Invoice ${inv.invoice_number}${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
     }
   }
+  // audit v921: quotes fell through to "quote-9f3c1a2b.pdf" — the word "quote" even when doc_type
+  // is 'estimate', and no number to match the email subject the customer is looking at. Same
+  // derivation as every other surface (docLabel), so the file and the page can't disagree.
+  if (doc === "quote") {
+    const { data: q } = await supabase
+      .from("quotes")
+      .select("quote_number, doc_type, customers(name)")
+      .eq("id", id)
+      .maybeSingle();
+    if (q?.quote_number) {
+      const cust = ((q as { customers?: { name?: string | null } | { name?: string | null }[] }).customers ?? null);
+      const custName = String((Array.isArray(cust) ? cust[0]?.name : cust?.name) ?? "").trim();
+      filename = `${docLabel(q as { doc_type?: string | null })} ${q.quote_number}${custName ? ` — ${custName.slice(0, 60)}` : ""}.pdf`;
+    }
+  }
   return filename;
 }
 
@@ -79,8 +96,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
 
   const url = new URL(req.url);
-  const m = Math.min(1.25, Math.max(0.25, Number(url.searchParams.get("m")) || 0.75));
-  const margin = `${m}in`;
+  const mParam = url.searchParams.get("m");
+  const m = Math.min(1.25, Math.max(0.25, Number(mParam) || 0.75));
 
   /**
    * THE STORED COPY, WHEN NOTHING CHANGED (Erik: "once the pdf is created and nothing has been
@@ -231,6 +248,20 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     // Chromium IGNORES pdf()'s margin option whenever the page's stylesheets declare an
     // @page margin (our print CSS does), so CSS is the only channel that actually works
     // (verified locally: option-margins → content flush to every edge; CSS-margins → correct).
+    // THE ORG'S OWN MARGINS (audit v921). doc_style.margin_x/margin_y reach the sheet only as the
+    // --doc-mx/--doc-my padding on .print-page — which the rule below zeroes — so the studio's
+    // Margins fields and ruler stops changed the screen and were silently dropped from every real
+    // PDF, including the copy the customer downloads. The knobs are the truth here; the preview's
+    // Narrow/Wide picker still overrides both axes for that one render (?m=0.5 / ?m=1).
+    // Invoice/quote only, on purpose: those two print pages are the ones that carry the doc_style
+    // vars, so a knob change moves their HTML fingerprint and the stored copy re-renders itself.
+    // A document whose HTML never mentions doc_style would keep serving old margins from cache.
+    let margin = `${m}in`;
+    if (orgId && (doc === "invoice" || doc === "quote") && (!mParam || m === 0.75)) {
+      const { data: orgRow } = await svc.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+      const style = normalizeDocStyle((orgRow as { settings?: { doc_style?: unknown } | null } | null)?.settings?.doc_style);
+      margin = `${style.margin_y}in ${style.margin_x}in`;
+    }
     await page.addStyleTag({
       content: `
         .no-print { display: none !important; }

@@ -15,7 +15,7 @@ import { rateLimited } from "@/lib/rate-limit";
  *
  * Trust model: the TOKEN is the capability — the same unguessable token that authorized the pick
  * itself. The server re-reads the proposal with the service client and speaks only when the DB
- * says a pick actually just happened (status confirmed, chosen minutes ago). boss_notified_at
+ * says a pick actually happened (status confirmed, not expired). boss_notified_at
  * (0238) is a compare-and-set latch: replays and double-fires can never ring the bell twice, and
  * a forged token matches nothing. Rate-limited like the other public doors.
  */
@@ -34,12 +34,17 @@ export async function POST(req: Request) {
   const sb = createServiceClient();
   const { data: prop } = await sb
     .from("schedule_proposals")
-    .select("id, org_id, status, chosen_date, chosen_at, appointment_id, job_id, boss_notified_at")
+    .select("id, org_id, status, chosen_date, appointment_id, job_id, boss_notified_at, expires_at")
     .eq("token", token)
     .maybeSingle();
   if (!prop || prop.status !== "confirmed" || prop.boss_notified_at) return NextResponse.json({ ok: true });
-  // Only a pick that JUST happened — an old confirmed proposal resurfacing must stay silent.
-  if (!prop.chosen_at || Date.now() - new Date(prop.chosen_at).getTime() > 15 * 60_000) {
+  // audit v921: this used to gate on `chosen_at` being minutes old, but the RPC writes chosen_at =
+  // the chosen SLOT'S START instant (0222), never now() — so a same-day pick (a date-only job option
+  // defaults to 08:00, an appointment slot picked half an hour into its window) was already "stale"
+  // and the most time-critical pick was the silent one. The boss_notified_at CAS latch below is what
+  // bounds replays; expiry is the only staleness that matters here — an expired proposal can't be
+  // picked at all, so a long-dead row resurfacing still says nothing.
+  if (prop.expires_at && new Date(prop.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ ok: true });
   }
 

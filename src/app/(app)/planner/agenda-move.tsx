@@ -48,7 +48,7 @@ export function JobMoveButton({ jobId, fromDate }: { jobId: string; fromDate: st
  *  The new instant is computed in the browser (via the shared shiftApptToDay
  *  helper) so the user's own timezone is honored and the calendar/agenda paths
  *  can't drift across a DST boundary. */
-export function ApptMoveButton({ id, startsAt, endsAt }: { id: string; startsAt: string; endsAt: string | null }) {
+export function ApptMoveButton({ id, startsAt, endsAt, tz }: { id: string; startsAt: string; endsAt: string | null; tz?: string }) {
   const router = useRouter();
   return (
     <MoveToDay
@@ -56,7 +56,7 @@ export function ApptMoveButton({ id, startsAt, endsAt }: { id: string; startsAt:
       triggerClassName={rowTrigger}
       onPick={async (dateISO) => {
         if (!dateISO) return { ok: false, error: "Pick a day." };
-        const t = shiftApptToDay(startsAt, endsAt, dateISO);
+        const t = shiftApptToDay(startsAt, endsAt, dateISO, tz); // org tz (audit v921 review)
         const res = await rescheduleAppointment(id, t.start, t.end);
         if (res.ok) router.refresh();
         return res; // a withdrawn pick-a-time link surfaces via `note` as a toast

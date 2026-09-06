@@ -82,52 +82,52 @@ export default async function AppLayout({
     current_period_end: string | null;
     settings: unknown;
   };
-  let org: OrgLite | null = null;
-  try {
-    const { data } = await supabase
-      .from("organizations")
-      .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
-      .eq("id", profile.org_id)
-      .maybeSingle();
-    org = (data as OrgLite | null) ?? null;
-  } catch (e) {
-    // A transient org-read failure must not tear down the whole shell — degrade to
-    // defaults (branding → nulls, settings → DEFAULT_SETTINGS below, billing gate is
-    // already guarded on `org &&`). Logged so it's visible in the ops sink.
-    reportError("app-layout:org", e);
-  }
+  const isStaff = isStaffRole(profile.role);
+
+  // TWO STAGES, NOT FIVE SERIAL HOPS (audit v921). This shell re-renders on every hard load,
+  // every router.refresh and every revalidatePath in the app, and its reads used to run one after
+  // another — ~100–200ms of pure round-trip added to time-to-first-byte before the page's own
+  // queries started. Only ONE dependency is real: the org row feeds `settings`, which gates the
+  // geofence read and hands the action-items count its timezone. So: {org, lead badge} together
+  // here, {open entry, action items} together below. Each keeps its own try/catch — one failing
+  // read still degrades on its own and never takes the shell down.
+  const [org, freshLeads] = await Promise.all([
+    (async (): Promise<OrgLite | null> => {
+      try {
+        const { data } = await supabase
+          .from("organizations")
+          .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
+          .eq("id", profile.org_id)
+          .maybeSingle();
+        return (data as OrgLite | null) ?? null;
+      } catch (e) {
+        // A transient org-read failure must not tear down the whole shell — degrade to
+        // defaults (branding → nulls, settings → DEFAULT_SETTINGS below, billing gate is
+        // already guarded on `org &&`). Logged so it's visible in the ops sink.
+        reportError("app-layout:org", e);
+        return null;
+      }
+    })(),
+    // THE RED DOT ANDREW ASKED FOR: uncontacted leads on the Sales icon. The dock's badge sum
+    // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
+    // day it shipped. A count is cosmetic, never a crash.
+    (async (): Promise<number> => {
+      if (!isStaff) return 0;
+      try {
+        const { count } = await supabase
+          .from("inquiries")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "new")
+          .is("converted_at", null);
+        return count ?? 0;
+      } catch (e) {
+        reportError("app-layout:lead-badge", e);
+        return 0;
+      }
+    })(),
+  ]);
 
   const settings = getOrgSettings((org as any)?.settings);
-
-  // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
-  // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
-  // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
-  // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
-  // clock-in. Requiring gps_in here is what silently disabled the geofence for most
-  // punches (the 30-hour open shift).
-  let openEntry:
-    | {
-        id: string;
-        gps_in: GeoPoint | null;
-        clock_in: string;
-        job_id: string | null;
-        job: { job_number: string; name: string } | null;
-      }
-    | null = null;
-  if (settings.geofence_logout) {
-    try {
-      const { data: oe } = await supabase
-        .from("time_entries")
-        .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
-        .eq("profile_id", user.id)
-        .eq("status", "open")
-        .maybeSingle();
-      if (oe) openEntry = oe as any;
-    } catch (e) {
-      // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
-      reportError("app-layout:open-entry", e);
-    }
-  }
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
   // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
@@ -164,36 +164,58 @@ export default async function AppLayout({
   // The unified "Needs action" inbox count, surfaced on the dock Home icon (it
   // already includes the organize/needs-review captures, so no separate badge).
   const tz = settings.timezone || "America/Los_Angeles";
-  const isStaff = isStaffRole(profile.role);
-  // The dock badge is cosmetic — a failure anywhere in the ~21-query action-items fan-out
-  // must NEVER crash every route (this unguarded await was the app-wide single point of
-  // failure). Degrade to 0 and log it to the ops sink so the underlying error stays visible.
-  let needsAction = 0;
-  try {
-    needsAction = await getActionItemsCount({
-      todayStr: todayStrInTz(tz),
-      isStaff,
-      userId: user.id,
-    });
-  } catch (e) {
-    reportError("app-layout:action-items", e);
-  }
-  // THE RED DOT ANDREW ASKED FOR: uncontacted leads on the Sales icon. The dock's badge sum
-  // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
-  // day it shipped. Same degrade rule as needsAction: a count is cosmetic, never a crash.
-  let freshLeads = 0;
-  if (isStaff) {
-    try {
-      const { count } = await supabase
-        .from("inquiries")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "new")
-        .is("converted_at", null);
-      freshLeads = count ?? 0;
-    } catch (e) {
-      reportError("app-layout:lead-badge", e);
-    }
-  }
+  // STAGE TWO (audit v921): the two reads that actually needed `settings` — the geofence gate and
+  // this count's timezone — go together instead of one after the other.
+  type OpenEntry = {
+    id: string;
+    gps_in: GeoPoint | null;
+    clock_in: string;
+    job_id: string | null;
+    job: { job_number: string; name: string } | null;
+  };
+  const [openEntry, needsAction] = await Promise.all([
+    // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
+    // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
+    // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
+    // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
+    // clock-in. Requiring gps_in here is what silently disabled the geofence for most
+    // punches (the 30-hour open shift).
+    (async (): Promise<OpenEntry | null> => {
+      if (!settings.geofence_logout) return null;
+      try {
+        const { data: oe } = await supabase
+          .from("time_entries")
+          .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
+          .eq("profile_id", user.id)
+          .eq("status", "open")
+          .maybeSingle();
+        return (oe as any) ?? null;
+      } catch (e) {
+        // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
+        reportError("app-layout:open-entry", e);
+        return null;
+      }
+    })(),
+    // The dock badge is cosmetic — a failure anywhere in the ~21-query action-items fan-out
+    // must NEVER crash every route (this unguarded await was the app-wide single point of
+    // failure). Degrade to 0 and log it to the ops sink so the underlying error stays visible.
+    (async (): Promise<number> => {
+      try {
+        return await getActionItemsCount({
+          todayStr: todayStrInTz(tz),
+          // Pass the tz (audit v921 review blocker): /planner passes it, and without it here the
+          // badge counts on UTC day-cuts while the list it links to counts on the org's — a badge
+          // whose number doesn't match its own list.
+          tz,
+          isStaff,
+          userId: user.id,
+        });
+      } catch (e) {
+        reportError("app-layout:action-items", e);
+        return 0;
+      }
+    })(),
+  ]);
   const badges = { "/planner": needsAction, "/leads": freshLeads };
 
   return (

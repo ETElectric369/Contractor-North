@@ -123,6 +123,22 @@ const sizingOfRow = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?
   qty_round: typeof s.qty_round === "string" && s.qty_round ? s.qty_round : null,
 });
 
+/** The same rule reshaped for kit_items, which has NO sized_by/qty_per — 0241 put the
+ *  per-measurement rule on price_list_items only. Sending those two keys in a kit_items UPDATE is a
+ *  PGRST204, which made unlinking any sized item impossible (audit v921). The two built-in
+ *  dimensions have kit-shaped twins so they follow the frozen line; a rule counted per a
+ *  walk-through need has nowhere to land on kit_items and is dropped — the frozen line falls back
+ *  to its flat quantity, which is what an unlinked line did before 0241 anyway. */
+const kitShapedSizing = (s: KitSizing): Record<string, unknown> => {
+  const per = s.qty_per !== null && s.qty_per > 0 ? s.qty_per : null;
+  return {
+    qty_per_sqft: s.sized_by === "area_sqft" && per !== null ? per : s.qty_per_sqft,
+    qty_per_lf: s.sized_by === "length_lf" && per !== null ? per : s.qty_per_lf,
+    qty_min: s.qty_min,
+    qty_round: s.qty_round,
+  };
+};
+
 /** Validate + shape a sizing patch for a specific table. `undefined` = leave alone; null/"" = clear.
  *  kit_items does NOT have sized_by/qty_per — those are the per-measurement rule (0241) and live
  *  only on price_list_items, where a LINKED line inherits them. Writing them to kit_items is a
@@ -402,7 +418,7 @@ export async function linkKitItem(kitItemId: string, priceListItemId: string | n
       const item = await loadBookItem(supabase, line.price_list_item_id);
       if (item) {
         Object.assign(patch, snapshotOf(item, await orgDefaultMarkup(supabase)));
-        if (hasSizing(item) && !hasSizing(line)) Object.assign(patch, sizingOfRow(item));
+        if (hasSizing(item) && !hasSizing(line)) Object.assign(patch, kitShapedSizing(sizingOfRow(item)));
       }
     }
     const { data, error } = await supabase.from("kit_items").update(patch).eq("id", kitItemId).select("id");

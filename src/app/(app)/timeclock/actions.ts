@@ -9,7 +9,7 @@ import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { autoLunchMinutes, AUTO_LUNCH_MIN, AUTO_LUNCH_OVER_HOURS } from "@/lib/lunch-rule";
 import { resolveOfflinePunchTime } from "@/lib/offline/punch-time";
 import { runOnce } from "@/lib/offline/run-once";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -549,11 +549,13 @@ export async function clockOut(input: {
   // auto-lunch, and the allocation clamp below.
   const { data: entRow } = await supabase
     .from("time_entries")
-    .select("clock_in, job_id, job_code, lunch_minutes")
+    .select("clock_in, job_id, job_code, lunch_minutes, status")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .maybeSingle();
-  const ent = entRow as { clock_in?: string; job_id?: string | null; job_code?: string | null; lunch_minutes?: number | null } | null;
+  // `status` rides along for the zero-row branch below — you cannot tell "already closed"
+  // from "entry is gone" without it (audit v921, the projection law).
+  const ent = entRow as { clock_in?: string; job_id?: string | null; job_code?: string | null; lunch_minutes?: number | null; status?: string | null } | null;
   const entClockIn = ent?.clock_in ?? null;
 
   // The entry's ALREADY-RECORDED segments (switchJob writes one per mid-shift switch).
@@ -598,10 +600,13 @@ export async function clockOut(input: {
   let lunchMinutes = lunchAsked ? (input.lunch_minutes as number) : Math.max(0, Number(ent?.lunch_minutes) || 0);
   if (entClockIn) {
     const gross = hoursBetween(entClockIn, clockOutIso, 0);
-    if (gross > 5 && (!lunchAsked || !isStaff)) lunchMinutes = Math.max(lunchMinutes, 30);
+    // ONE LUNCH RULE (audit v921): the literal 5/30 here was a second copy of lib/lunch-rule.ts,
+    // so an org moving the threshold would change createManualEntry and NOT the everyday
+    // clock-out — two clocks. Same numbers, read from the one place that defines them.
+    if (gross > AUTO_LUNCH_OVER_HOURS && (!lunchAsked || !isStaff)) lunchMinutes = Math.max(lunchMinutes, AUTO_LUNCH_MIN);
   }
 
-  const { error } = await supabase
+  const { data: closedRows, error } = await supabase
     .from("time_entries")
     .update({
       clock_out: clockOutIso,
@@ -624,9 +629,31 @@ export async function clockOut(input: {
       ...(input.miles != null && input.miles > 0 ? { miles: input.miles } : {}),
     })
     .eq("id", input.entry_id)
-    .eq("profile_id", user.id);
+    .eq("profile_id", user.id)
+    // ONLY AN OPEN ROW MAY BE CLOSED (audit v921). The panel and My Day send an entry id from
+    // a server render that can be minutes old: the geofence on his other phone may have closed
+    // the shift at 15:00 already. Without this filter a 17:30 tap on the stale screen moved
+    // clock_out two and a half hours later, recomputed the lunch and overwrote gps_out on a
+    // FINISHED shift — staff and owners skip the DB's "ask the office to correct a finished
+    // shift" refusal (0169 runs only for non-staff), so nothing else stopped it.
+    .eq("status", "open")
+    // And a zero-row UPDATE is a 204, not a success (the silent-write law): if the office
+    // removed or reassigned the entry while the panel sat open, this matched nothing and
+    // clockOut still returned ok — the tech watched a clean clock-out and had no hours.
+    .select("id");
 
   if (error) return { ok: false, error: dbError(error) };
+  if (!closedRows?.length) {
+    // Say which failure it is, and refresh the screens so the next tap sees the truth.
+    revalidatePath("/timeclock");
+    revalidatePath("/planner");
+    return {
+      ok: false,
+      error: ent
+        ? "That shift is already closed — pull down to refresh."
+        : "That entry is gone — the office may have removed it. Ask them to add the shift.",
+    };
+  }
 
   // Replace any existing allocations with the submitted set — ONLY when the caller
   // actually sent one (undefined = leave the recorded rows alone, so a one-tap close

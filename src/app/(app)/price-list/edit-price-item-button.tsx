@@ -212,6 +212,17 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
                         Per {m.label}{m.unit ? ` (${m.unit})` : ""}
                       </option>
                     ))}
+                    {/* The measurement this item is counted per is not in the list any more — the
+                        need was deleted, or stopped being a measured number. With no option to
+                        match, the select fell back to "Fixed Quantity" while the sentence above
+                        still read "Counts N per …" (audit v921), so the rule is named, not hidden:
+                        keep it, or pick another way to count and save. */}
+                    {sizedBy && qtyPer > 0 && !measurements.some((m) => !m.builtIn && m.key === sizedBy) && (
+                      <option value={`m:${sizedBy}`}>
+                        Per {measurementLabel(sizedBy, measurements)}
+                        {measurements.some((m) => m.key === sizedBy) ? "" : " (no longer measured)"}
+                      </option>
+                    )}
                   </Select>
                 </div>
                 {sizedBy && qtyPer > 0 && (

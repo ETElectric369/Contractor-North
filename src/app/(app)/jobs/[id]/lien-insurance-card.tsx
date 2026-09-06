@@ -23,11 +23,14 @@ export function LienInsuranceCard({
   lien,
   insurance,
   defaults,
+  today,
 }: {
   jobId: string;
   lien: LienRow;
   insurance: InsRow;
   defaults: Defaults;
+  /** The ORG's calendar day, from the server page. A client "today" is the viewer's UTC day. */
+  today?: string;
 }) {
   const router = useRouter();
   const [editLien, setEditLien] = useState(false);
@@ -40,6 +43,10 @@ export function LienInsuranceCard({
     lienRecordedAt: lien?.lien_recorded_at,
     nocRecorded: lien?.noc_recorded,
     isSubcontractor: !!lien?.gc_name,
+    // The day the whole app counts from (audit v921) — without it lien-math falls back to
+    // new Date() in the browser, i.e. the UTC day, and every deadline here read one day short
+    // of the Needs-action inbox after 5 PM Pacific.
+    today,
   });
 
   // formatDate now renders date-only values as a stable wall date (no zone shift),

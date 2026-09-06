@@ -40,16 +40,22 @@ export default async function BillsPage() {
     line_items: [...(b.bill_line_items ?? [])].sort((a: any, c: any) => (a.sort_order ?? 0) - (c.sort_order ?? 0)),
   }));
 
-  // Sign the receipt/bill document URLs. documents.file_url is nullable (Organize
-  // notes have no file) — createSignedUrl(null) throws a TypeError that storage-js
-  // rethrows, crashing the RSC render, so skip signing fileless rows.
-  const docs = await Promise.all(
-    (docRows ?? []).map(async (d: any) => {
-      if (!d.file_url) return { ...d, signedUrl: null };
-      const { data } = await supabase.storage.from("documents").createSignedUrl(d.file_url, 3600);
-      return { ...d, signedUrl: data?.signedUrl ?? null };
-    }),
-  );
+  // Sign the receipt/bill document URLs — ONE round trip for the whole page (audit v921).
+  // This was createSignedUrl per row inside a map: every photographed receipt was its own JWT
+  // mint + HTTPS hop, and this list has no ceiling, so the fan-out grew with the shoebox.
+  // documents.file_url is nullable (Organize notes have no file) — a null path throws a
+  // TypeError that storage-js rethrows, crashing the RSC render, so fileless rows never go in.
+  const paths = Array.from(new Set((docRows ?? []).map((d: any) => d.file_url).filter(Boolean))) as string[];
+  const signed = new Map<string, string>();
+  if (paths.length) {
+    try {
+      const { data } = await supabase.storage.from("documents").createSignedUrls(paths, 3600);
+      for (const s of data ?? []) if (s.path && s.signedUrl) signed.set(s.path, s.signedUrl);
+    } catch {
+      // A signing failure drops the LINKS, never the page — the rows still list what's on file.
+    }
+  }
+  const docs = (docRows ?? []).map((d: any) => ({ ...d, signedUrl: (d.file_url && signed.get(d.file_url)) || null }));
 
   return (
     <div>

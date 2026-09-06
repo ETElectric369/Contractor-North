@@ -4,6 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { revokeQboToken } from "@/lib/quickbooks";
 import { bustOrgPdfs } from "@/lib/pdf-cache";
+import { normalizeDocStyle } from "@/lib/doc-style";
 import { emptyToNull } from "@/lib/forms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
@@ -208,8 +209,18 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const orgId = await myOrgId(supabase);
-  if (!orgId) return { ok: false, error: "No organization." };
+  // ROLE GATE IN THE APP LAYER TOO (audit v921 — an invite is a signup key). This leaned entirely
+  // on the invitations_all policy (0004: owner/admin), so an office user got a raw Postgres error
+  // back instead of a plain refusal — and one RLS policy is a convention, not a boundary (0173).
+  const { data: me } = await supabase
+    .from("profiles")
+    .select("org_id, role, active")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (!me?.org_id || !["owner", "admin"].includes(me.role) || me.active === false) {
+    return { ok: false, error: "Only an owner or admin can invite someone." };
+  }
+  const orgId = me.org_id as string;
 
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   // WHITELIST THE ROLE (audit v921 high). It came straight off the form and the invite UI even
@@ -255,8 +266,12 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
 
 export async function deleteInvitation(id: string): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase.from("invitations").delete().eq("id", id);
+  // A ZERO-ROW DELETE IS A 204 (audit v921). Revoking an invite is exactly when "it said it worked"
+  // must be true: a pending invitation is still a signup key (0125's signup_allowed), so a delete
+  // that matched nothing — wrong id, or a role RLS refuses — cannot report success.
+  const { data: gone, error } = await supabase.from("invitations").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That invite wasn't revoked — refresh and try again." };
   revalidatePath("/team");
   revalidatePath("/settings");
   return { ok: true };
@@ -442,16 +457,35 @@ export async function syncScheduleToGoogle(): Promise<Result & { synced?: number
   if (!jobs?.length) return { ok: true, synced: 0 };
 
   let synced = 0;
-  for (const j of jobs as any[]) {
-    try {
-      const eventId = await gcalUpsertJobEvent(auth.token, auth.calendarId, j);
-      if (eventId !== j.google_event_id) {
-        await supabase.from("jobs").update({ google_event_id: eventId }).eq("id", j.id);
-      }
-      synced++;
-    } catch (e) {
-      reportError("gcal-sync", e, { jobId: j.id }); // keep going, but don't vanish silently
-    }
+  // FIVE AT A TIME, NOT ONE (audit v921). This awaited a Google round trip AND a write per job,
+  // strictly serially, on a button press: a shop with 25 scheduled jobs sat on the spinner for the
+  // better part of ten seconds. Chunked so we still stay polite with Google's rate limits.
+  const CONCURRENCY = 5;
+  const list = jobs as any[];
+  // const, so the `if (!auth) return` narrowing above still holds inside the callbacks.
+  const { token, calendarId } = auth;
+  for (let i = 0; i < list.length; i += CONCURRENCY) {
+    await Promise.all(
+      list.slice(i, i + CONCURRENCY).map(async (j) => {
+        try {
+          const eventId = await gcalUpsertJobEvent(token, calendarId, j);
+          if (eventId !== j.google_event_id) {
+            // .select("id") — a zero-row UPDATE is a 204, and an event id that never lands means
+            // the NEXT sync creates a second calendar event for the same job.
+            const { data: wrote, error } = await supabase
+              .from("jobs")
+              .update({ google_event_id: eventId })
+              .eq("id", j.id)
+              .select("id");
+            if (error) throw error;
+            if (!wrote?.length) throw new Error("google_event_id didn't save");
+          }
+          synced++;
+        } catch (e) {
+          reportError("gcal-sync", e, { jobId: j.id }); // keep going, but don't vanish silently
+        }
+      }),
+    );
   }
   revalidatePath("/settings");
   return { ok: true, synced };
@@ -695,8 +729,16 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
   if (!target || target.org_id !== me.org_id) return { ok: false, error: "Member not found." };
   if (target.role === "owner" && !active) return { ok: false, error: "The owner can't be deactivated." };
 
-  const { error } = await supabase.from("profiles").update({ active, deactivated_at: active ? null : new Date().toISOString(), deactivated_by: active ? null : user.id }).eq("id", id);
+  // .select("id") — a zero-row UPDATE is a 204 (audit v921), and "they're locked out" is the last
+  // claim allowed to be wrong: if profiles_update matches no row (the seat vanished, or a policy
+  // narrows), this reported a lockout that never happened and the login kept working.
+  const { data: wrote, error } = await supabase
+    .from("profiles")
+    .update({ active, deactivated_at: active ? null : new Date().toISOString(), deactivated_by: active ? null : user.id })
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save — your role can't change this member." };
 
   // KILL THE LIVE SESSION. Migration 0158 makes RLS itself deny a deactivated profile, so
   // their token stops returning data immediately — but the token is still a valid
@@ -704,21 +746,39 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
   // to a shell that simply shows nothing. Revoking server-side ends it now and forces a
   // fresh sign-in (which the login gate then refuses). Best-effort: the data boundary is
   // already closed by RLS, so a missing service key must not fail the deactivation.
-  if (!active) {
-    try {
-      const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
-      if (!adminConfigured()) throw new Error("Service role key not configured.");
+  //
+  // THE SIGN-OUT NEVER RAN (audit v921). admin.auth.admin.signOut(id, "global") takes the user's
+  // JWT — auth-js sends the first argument as the bearer on POST /logout — not a profile id, and
+  // it RETURNS the auth error instead of throwing, so the catch below never saw it and nothing was
+  // ever revoked. The live DB proved it: a seat cut weeks ago still owned a session with an
+  // unrevoked refresh token, banned_until NULL. Ban the login instead: GoTrue refuses every token
+  // refresh for a banned user, so the credential dies at the auth layer for real, and reactivating
+  // lifts it. Still best-effort — 0158 already closed the data boundary, so a missing service key
+  // must not fail the deactivation itself.
+  let warning: string | undefined;
+  try {
+    const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
+    if (!adminConfigured()) {
+      // No service key means nobody was ever banned, so a reactivate has nothing to undo — but a
+      // deactivate must not claim a lockout it can't deliver.
+      if (!active) throw new Error("SUPABASE_SERVICE_ROLE_KEY isn't set on the server.");
+    } else {
       const admin = createAdminClient();
-      await admin.auth.admin.signOut(id, "global");
-    } catch (e) {
-      reportError("setMemberActive.signOut", e, { profileId: id });
+      // 876000h ≈ 100 years: banned until someone reactivates them.
+      const { error: banErr } = await admin.auth.admin.updateUserById(id, { ban_duration: active ? "none" : "876000h" });
+      if (banErr) throw banErr;
     }
+  } catch (e) {
+    reportError("setMemberActive.revokeLogin", e, { profileId: id, active });
+    warning = active
+      ? "Reactivated here, but their sign-in ban couldn't be lifted — if they still can't get in, try again."
+      : "Deactivated here, but their existing sign-in couldn't be ended — they're refused by the app, and the token itself dies when it expires.";
   }
 
   revalidatePath("/team");
   revalidatePath("/settings");
   revalidatePath("/planner"); // assignee pickers filter on active
-  return { ok: true };
+  return warning ? { ok: true, error: warning } : { ok: true };
 }
 
 /** How much history a member carries — the remove-vs-deactivate signal. A member with
@@ -944,6 +1004,12 @@ export async function updateOrgSettings(
 
   const safe = { ...patch };
   for (const k of PROTECTED_SETTINGS_KEYS) delete safe[k];
+  // NORMALIZE doc_style ON THE WAY IN TOO (audit v921). public_quote/public_invoice (0239) hand
+  // `o.settings->'doc_style'` to anyone holding a share token, verbatim — so whatever extra keys
+  // this passthrough stored (an internal note, a pricing comment, a blob) shipped in the anonymous
+  // response body. normalizeDocStyle protects rendering; storing only the eight known keys protects
+  // the wire.
+  if ("doc_style" in safe) safe.doc_style = normalizeDocStyle(safe.doc_style);
 
   const { data: org } = await ctx.supabase
     .from("organizations")

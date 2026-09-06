@@ -118,7 +118,7 @@ export async function updateCustomer(
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Name is required." };
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("customers")
     .update({
       name,
@@ -134,11 +134,15 @@ export async function updateCustomer(
       notes: emptyToNull(formData.get("notes")),
       pricing_level_id: emptyToNull(formData.get("pricing_level_id")),
     })
-    .eq("id", id);
+    .eq("id", id)
+    // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — editing a
+    // contact that was merged away (or deleted) in another tab answered "Saved" and changed nothing.
+    .select("id");
   // The bill-to block renders this person's name/address on every stored customer PDF —
   // drop their documents' copies so the next view/send re-renders (audit 7).
   if (!error) void bustCustomerPdfs(id);
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That contact isn't available." };
 
   revalidatePath(`/crm/${id}`);
   revalidatePath("/crm");
@@ -172,8 +176,11 @@ export async function patchCustomer(
   if (patch.zip !== undefined) upd.zip = patch.zip == null ? null : orNull(formatZip(String(patch.zip)));
   if (patch.notes !== undefined) upd.notes = emptyToNull(patch.notes);
   if (Object.keys(upd).length === 0) return { ok: false, error: "Nothing to update." };
-  const { error } = await supabase.from("customers").update(upd).eq("id", id);
+  // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204. Nort fixing the spelling on a
+  // customer that had just been merged into another card reported "fixed" and wrote nothing.
+  const { data, error } = await supabase.from("customers").update(upd).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That contact isn't available." };
   revalidatePath("/crm");
   return { ok: true };
 }

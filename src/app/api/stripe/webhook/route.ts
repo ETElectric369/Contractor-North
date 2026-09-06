@@ -6,6 +6,7 @@ import { formatCurrency } from "@/lib/utils";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
+import { reportError } from "@/lib/observe";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -60,8 +61,50 @@ export async function POST(req: Request) {
     amount: number,
     eventId: string,
     paymentIntent: string | null,
+    connectedAccount: string | null,
   ) {
     if (!invoiceId || !orgId || amount <= 0) return;
+    /**
+     * THE EVENT'S ACCOUNT IS THE ORG BOUNDARY — THE METADATA IS A CLAIM (audit v921).
+     *
+     * Everything this writes is scoped by session.metadata, which the sender chose. The connected
+     * endpoint delivers checkout.session.completed from EVERY connected account, so an account
+     * able to mint its own session could name another tenant's invoice and mark it paid with a
+     * $1 charge. It can't today (Express accounts hold no API keys and only /api/pay mints these
+     * sessions), which is exactly why the check belongs here: [[tenant-isolation-root-cause]] —
+     * a rule applied at one write path is a convention, not a boundary.
+     */
+    if (connectedAccount) {
+      const { data: owner } = await supabase
+        .from("organizations")
+        .select("id")
+        .eq("id", orgId)
+        .eq("stripe_account_id", connectedAccount)
+        .maybeSingle();
+      if (!owner) {
+        // A retry can't fix a claim that doesn't hold, so ack and leave a row in the ops log
+        // rather than looping Stripe forever on it.
+        reportError("stripe:webhook:account-org-mismatch", new Error("checkout session names an org that doesn't own the connected account"), {
+          orgId,
+          invoiceId,
+          connectedAccount,
+        });
+        return;
+      }
+    }
+    const { data: target } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("id", invoiceId)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (!target) {
+      reportError("stripe:webhook:invoice-org-mismatch", new Error("checkout session names an invoice that isn't the org's"), {
+        orgId,
+        invoiceId,
+      });
+      return;
+    }
     // org_id is set explicitly (the set_org_id trigger has no auth context here).
     // Idempotency: stripe_event_id is UNIQUE, so a retried webhook (Stripe resends
     // the SAME event.id on timeout) fails the insert and we stop — no double pay.
@@ -182,13 +225,25 @@ export async function POST(req: Request) {
       ...(periodEndIso ? { current_period_end: periodEndIso } : {}),
     };
     // Match by org_id metadata if present, else by stripe_customer_id.
-    if (orgId) {
-      await supabase.from("organizations").update(update).eq("id", orgId);
-    } else {
-      await supabase
-        .from("organizations")
-        .update(update)
-        .eq("stripe_customer_id", customerId);
+    const { data: synced, error: syncErr } = orgId
+      ? await supabase.from("organizations").update(update).eq("id", orgId).select("id")
+      : await supabase
+          .from("organizations")
+          .update(update)
+          .eq("stripe_customer_id", customerId)
+          .select("id");
+    // A ZERO-ROW UPDATE IS A 204 (audit v921). This was fire-and-forget: a subscription carrying
+    // no org_id metadata whose customer id no org row holds (a comped or dashboard-made one)
+    // moved nothing, answered Stripe 200, and left the paywall reading the old state — Stripe
+    // says paid, the app says locked, nobody is told. A DB error can be retried, so throw and let
+    // Stripe resend it; a no-match can't be, so it goes to the ops log instead.
+    if (syncErr) throw new Error(`subscription sync failed: ${syncErr.message}`);
+    if (!synced?.length) {
+      reportError("stripe:webhook:subscription-no-org", new Error("no organization matched this subscription"), {
+        subscriptionId: sub.id,
+        orgId: orgId ?? null,
+        customerId,
+      });
     }
   }
 
@@ -197,7 +252,8 @@ export async function POST(req: Request) {
   // handles them identically — the metadata we attached at checkout carries invoice_id
   // and org_id, so nothing depends on which account the event came from. Subscription
   // events are OURS (no event.account) and must never be read off a connected account.
-  const fromConnectedAccount = !!(event as { account?: string }).account;
+  const eventAccount = (event as { account?: string }).account ?? null;
+  const fromConnectedAccount = !!eventAccount;
 
   switch (event.type) {
     // A contractor finished (or changed) their Stripe onboarding. Mirror the two facts
@@ -205,12 +261,21 @@ export async function POST(req: Request) {
     // can never flip a tenant's charging state.
     case "account.updated": {
       const account = event.data.object as Stripe.Account;
-      const { error } = await supabase
+      const { data: mirrored, error } = await supabase
         .from("organizations")
         .update(accountUpdateFields(account))
-        .eq("stripe_account_id", account.id);
+        .eq("stripe_account_id", account.id)
+        .select("id");
       if (error) {
         return new Response(`account.updated sync failed: ${error.message}`, { status: 500 });
+      }
+      // The error check alone missed the 204 (audit v921): no org holds this stripe_account_id,
+      // so the tenant's charging state never moved. Stripe retrying won't find the row, so say so
+      // where the daily ops triage reads instead of 500-ing forever.
+      if (!mirrored?.length) {
+        reportError("stripe:webhook:account-no-org", new Error("no organization holds this stripe_account_id"), {
+          accountId: account.id,
+        });
       }
       break;
     }
@@ -270,6 +335,7 @@ export async function POST(req: Request) {
             typeof session.payment_intent === "string"
               ? session.payment_intent
               : (session.payment_intent?.id ?? null),
+            eventAccount,
           );
         }
       } else if (session.subscription && !fromConnectedAccount) {

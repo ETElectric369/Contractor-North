@@ -44,6 +44,27 @@ async function openEntryError(supabase: any, profileId: string, startIso: string
   return `${name} has an open entry inside this period — close it on Timecards first.`;
 }
 
+/** A 0193 auto-closed entry inside the period is an UNREVIEWED day: the trigger closed a
+ *  forgotten shift at clock_out = clock_in (zero hours, zero pay) when the next punch came
+ *  in. It reads as a normal closed row, so the open-entry check above can't see it — and
+ *  once Mark Paid stamps paid_at on it, updateTimeEntry refuses the fix ("Undo on Payroll
+ *  first"). Refuse the same way an open entry does (audit v921); editing the entry on
+ *  Timecards clears auto_closed_reason and unblocks the period. */
+async function autoClosedEntryError(supabase: any, profileId: string, startIso: string, endIso: string) {
+  const { data: rows } = await supabase
+    .from("time_entries")
+    .select("id, profiles(full_name)")
+    .eq("profile_id", profileId)
+    .not("auto_closed_reason", "is", null)
+    .is("paid_at", null)
+    .gte("clock_in", startIso)
+    .lt("clock_in", endIso)
+    .limit(1);
+  if (!rows?.length) return null;
+  const name = (rows[0] as any).profiles?.full_name ?? "This person";
+  return `${name} has an auto-closed entry inside this period — the system closed it, so nobody has checked those hours. Fix it on Timecards first.`;
+}
+
 /** Lock an employee's UNPAID closed hours in a pay period as BASE-pay paid, and
  *  snapshot a kind='base' run for the accountant export. BASE ONLY — miles are
  *  not touched here; mileage settles separately via settleMileage with a
@@ -61,6 +82,8 @@ export async function markPeriodPaid(input: {
   const { startIso, endIso, tz } = await periodInstants(supabase, input.periodStart, input.periodEnd);
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
+  const autoErr = await autoClosedEntryError(supabase, input.profileId, startIso, endIso);
+  if (autoErr) return { ok: false, error: autoErr };
 
   const { data: prof } = await supabase.from("profile_pay").select("hourly_rate").eq("id", input.profileId).maybeSingle();
   const rate = Number(prof?.hourly_rate ?? 0);
@@ -145,28 +168,69 @@ export async function unmarkPeriodPaid(input: {
   const { supabase } = ctx;
 
   const { startIso, endIso } = await periodInstants(supabase, input.periodStart, input.periodEnd);
-  const { error } = await supabase
-    .from("time_entries")
-    .update({ paid_at: null })
-    .eq("profile_id", input.profileId)
-    .eq("status", "closed")
-    .not("paid_at", "is", null)
-    .gte("clock_in", startIso)
-    .lt("clock_in", endIso);
-  if (error) return { ok: false, error: dbError(error) };
 
   // THE SILENT-WRITE LAW on a money record: this delete's result was discarded, so a failed
   // delete left the run row standing while the entries were already un-paid — and re-paying
   // then doubled the accountant's gross. Read the result; say so if it didn't land.
-  const { error: runErr } = await supabase
+  // THE ROWS, NOT JUST THE ERROR (audit v921): the comment above promised this check and the
+  // code only ever read `error`, so a zero-row delete (period bounds moved since Mark Paid, so
+  // period_start/end no longer match the stored run) still returned ok. The delete now runs
+  // FIRST — a period with no matching run is refused before any hours are un-paid.
+  const { data: runs, error: runErr } = await supabase
     .from("payroll_runs")
     .delete()
     .eq("profile_id", input.profileId)
     .eq("period_start", input.periodStart)
     .eq("period_end", input.periodEnd)
     .eq("kind", "base")
-    .select("id");
+    .select("*");
   if (runErr) return { ok: false, error: dbError(runErr) };
+  // Zero rows deleted is only DANGEROUS when a run for these hours survives under different
+  // keys (the pay anchor moved after Mark Paid): un-pay around it and the re-mark inserts a
+  // SECOND run — the doubled gross. Name that record and refuse. When there is genuinely no
+  // record at all, un-paying can't double anything, so it goes ahead rather than dead-ending
+  // hours that updateTimeEntry then refuses to fix.
+  if (!runs?.length) {
+    const { data: stale } = await supabase
+      .from("payroll_runs")
+      .select("period_start, period_end")
+      .eq("profile_id", input.profileId)
+      .eq("kind", "base")
+      .lt("period_start", input.periodEnd)
+      .gt("period_end", input.periodStart)
+      .limit(1);
+    if (stale?.length) {
+      const r = stale[0] as { period_start: string; period_end: string };
+      return {
+        ok: false,
+        error: `These hours are filed under the pay period ${r.period_start} to ${r.period_end}, not this one — the pay schedule changed after they were marked paid. Put the old pay schedule back in Settings, undo there, then change it again.`,
+      };
+    }
+  }
+
+  const { data: cleared, error } = await supabase
+    .from("time_entries")
+    .update({ paid_at: null })
+    .eq("profile_id", input.profileId)
+    .eq("status", "closed")
+    .not("paid_at", "is", null)
+    .gte("clock_in", startIso)
+    .lt("clock_in", endIso)
+    .select("id");
+  if (error) {
+    // Same compensation shape as markPeriodPaid: no snapshot may go missing while the hours
+    // stay locked. Put the run row back and say what happened.
+    const { error: compErr } = runs?.length
+      ? await supabase.from("payroll_runs").insert(runs)
+      : { error: null };
+    return {
+      ok: false,
+      error: compErr
+        ? `Un-paying the hours failed (${dbError(error)}) and restoring the payroll record also failed (${dbError(compErr)}) — check this period on Timecards before retrying.`
+        : `Un-paying the hours failed — nothing was unmarked. ${dbError(error)}`,
+    };
+  }
+  if (!runs?.length && !cleared?.length) return { ok: false, error: "Nothing to undo in this period." };
 
   revalidatePath("/payroll");
   revalidatePath("/timecards");
@@ -268,28 +332,65 @@ export async function unsettleMileage(input: {
   const { supabase } = ctx;
 
   const { startIso, endIso } = await periodInstants(supabase, input.periodStart, input.periodEnd);
-  const { error } = await supabase
-    .from("time_entries")
-    .update({ mileage_paid_at: null })
-    .eq("profile_id", input.profileId)
-    .eq("status", "closed")
-    .not("mileage_paid_at", "is", null)
-    .gte("clock_in", startIso)
-    .lt("clock_in", endIso);
-  if (error) return { ok: false, error: dbError(error) };
 
   // THE SILENT-WRITE LAW on a money record: this delete's result was discarded, so a failed
-  // delete left the run row standing while the entries were already un-paid — and re-paying
-  // then doubled the accountant's gross. Read the result; say so if it didn't land.
-  const { error: runErr } = await supabase
+  // delete left the run row standing while the miles were already un-settled — and re-settling
+  // then doubled the accountant's reimbursement. Read the result; say so if it didn't land.
+  // THE ROWS, NOT JUST THE ERROR (audit v921): the check the comment promised was never written,
+  // so a zero-row delete returned ok. Delete first, refuse before touching the miles.
+  const { data: runs, error: runErr } = await supabase
     .from("payroll_runs")
     .delete()
     .eq("profile_id", input.profileId)
     .eq("period_start", input.periodStart)
     .eq("period_end", input.periodEnd)
     .eq("kind", "mileage")
-    .select("id");
+    .select("*");
   if (runErr) return { ok: false, error: dbError(runErr) };
+  // Same rule as unmarkPeriodPaid: a settlement filed under different period keys must be
+  // named and refused (re-settling would double the reimbursement), while no record at all
+  // is safe to un-settle.
+  if (!runs?.length) {
+    const { data: stale } = await supabase
+      .from("payroll_runs")
+      .select("period_start, period_end")
+      .eq("profile_id", input.profileId)
+      .eq("kind", "mileage")
+      .lt("period_start", input.periodEnd)
+      .gt("period_end", input.periodStart)
+      .limit(1);
+    if (stale?.length) {
+      const r = stale[0] as { period_start: string; period_end: string };
+      return {
+        ok: false,
+        error: `These miles are settled under the pay period ${r.period_start} to ${r.period_end}, not this one — the pay schedule changed after they were paid. Put the old pay schedule back in Settings, undo there, then change it again.`,
+      };
+    }
+  }
+
+  const { data: cleared, error } = await supabase
+    .from("time_entries")
+    .update({ mileage_paid_at: null })
+    .eq("profile_id", input.profileId)
+    .eq("status", "closed")
+    .not("mileage_paid_at", "is", null)
+    .gte("clock_in", startIso)
+    .lt("clock_in", endIso)
+    .select("id");
+  if (error) {
+    // Same compensation as settleMileage: no settlement record may go missing while the miles
+    // stay locked. Put the run row back and say what happened.
+    const { error: compErr } = runs?.length
+      ? await supabase.from("payroll_runs").insert(runs)
+      : { error: null };
+    return {
+      ok: false,
+      error: compErr
+        ? `Un-settling the miles failed (${dbError(error)}) and restoring the settlement record also failed (${dbError(compErr)}) — check this period before retrying.`
+        : `Un-settling the miles failed — nothing was unsettled. ${dbError(error)}`,
+    };
+  }
+  if (!runs?.length && !cleared?.length) return { ok: false, error: "Nothing to undo in this period." };
 
   revalidatePath("/payroll");
   revalidatePath("/timecards");

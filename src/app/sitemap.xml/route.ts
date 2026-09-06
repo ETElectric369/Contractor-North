@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
 import { createServiceClient } from "@/lib/supabase/server";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
+import { isReservedSlug } from "@/lib/site-reserved";
 import { lastmodDate, newestLastmod, urlEntry } from "./lastmod";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,13 @@ export async function GET() {
         .limit(500),
     ]);
     const posts = (postsRes.data ?? []) as { path: string; updated_at: string | null }[];
-    const pages = (pagesRes.data ?? []) as { slug: string; updated_at: string | null }[];
+    // audit v921: the render path refuses a reserved slug (getPublicPageBySlug returns null,
+    // middleware never routes it to the resolver), so a page stranded at a slug that became
+    // reserved AFTER it was published — "feed" now goes to RSS — would be advertised here and
+    // then be unservable. Same filter as the helpers, so the sitemap only lists URLs we serve.
+    const pages = ((pagesRes.data ?? []) as { slug: string; updated_at: string | null }[]).filter(
+      (p) => !isReservedSlug(p.slug),
+    );
 
     // The homepage's content is mostly organizations.settings (hero, headline, home_blocks,
     // portfolio, reviews…), so fold the org row's touch-trigger updated_at into the lastmod

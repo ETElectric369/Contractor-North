@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, ArrowDownCircle, ArrowUpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,14 @@ import { DeleteButton } from "@/components/ui/delete-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
+
+/** "YYYY-MM-DD" for the device's own calendar day — the same shape the rest of the app's
+ *  date inputs use (timecards, appointments, job time). */
+function localDayStr(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 export interface PettyTx {
   id: string;
@@ -30,14 +38,20 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
   const [amount, setAmount] = useState(0);
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  // The date field defaults to the day it is HERE, not in UTC (audit v921). toISOString()
+  // hands back the UTC calendar day, which after 4-5 PM Pacific is TOMORROW — so an evening
+  // cash-box entry was filed a day ahead unless someone noticed the prefilled date. Filled
+  // on mount, not in the initial state: the server renders this page in UTC, so seeding it
+  // there is the same wrong day AND a hydration mismatch in exactly the evening window.
+  const [date, setDate] = useState("");
+  useEffect(() => setDate(localDayStr()), []);
   const [error, setError] = useState<string | null>(null);
 
   function add() {
     setError(null);
     if (!amount || amount <= 0) return setError("Enter an amount.");
     start(async () => {
-      const res = await addPettyCash({ tx_date: date, kind, amount, category, description });
+      const res = await addPettyCash({ tx_date: date || localDayStr(), kind, amount, category, description });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setAmount(0); setCategory(""); setDescription("");
       router.refresh();

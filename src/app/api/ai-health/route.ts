@@ -1,4 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { requireStaff } from "@/lib/staff-guard";
+import { rateLimited } from "@/lib/rate-limit";
 
 // Candidate models to probe when the configured one fails, best → most-available.
 const CANDIDATES = ["claude-opus-4-8", "claude-opus-4-5", "claude-sonnet-4-5"];
@@ -18,6 +20,18 @@ async function tryModel(key: string, model: string) {
 // real request succeeds. On failure it probes other models so the user can see
 // exactly what their deployed key can access. Never returns the key itself.
 export async function GET(req: NextRequest) {
+  // audit v921: ?live=1 SPENDS the platform's Anthropic key, and the only gate was middleware's
+  // blanket 401 for /api/* — a rule at one layer is a convention, not a boundary (0173), so any
+  // signed-in tech of any org could loop this. Staff-only (the Settings panel that calls it is
+  // staff-gated too) with a per-person window, the same shape as the voice routes.
+  const ctx = await requireStaff();
+  if ("error" in ctx) {
+    return NextResponse.json({ error: ctx.error }, { status: ctx.error === "Not signed in." ? 401 : 403 });
+  }
+  if (await rateLimited(`ai-health:${ctx.userId}`, 5, 600)) {
+    return NextResponse.json({ error: "Too many key tests in a row — give it a few minutes." }, { status: 429 });
+  }
+
   const key = process.env.ANTHROPIC_API_KEY || "";
   const model = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
   const configured = !!key;

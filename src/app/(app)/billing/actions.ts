@@ -69,6 +69,147 @@ export async function createCustomerCredit(
   return { ok: true };
 }
 
+/**
+ * THE CREDIT HAD NO WAY OUT (audit v921).
+ *
+ * A credit was pinned to the invoice it was posted FROM, and recalcInvoice only ever reads
+ * credits on that same invoice (capped at its shortfall) — so the one case the Stripe webhook
+ * steers the office to, "this invoice is overpaid, credit it or refund it", produced a row that
+ * reduced nothing, could not reach the customer's next invoice, and had no button anywhere that
+ * could close it. The CRM tile said "Account credit $X" forever. These three actions are the
+ * way forward: see what's on the account, move an open credit onto the invoice you're looking
+ * at, or close out a refund once accounting has actually paid it.
+ */
+export async function listCustomerCreditsForInvoice(
+  invoiceId: string,
+): Promise<{
+  ok: boolean;
+  error?: string;
+  balance?: number;
+  credits?: { id: string; amount: number; disposition: string; note: string | null; created_at: string; onThisInvoice: boolean }[];
+}> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("customer_id, total, amount_paid")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (!inv.customer_id) return { ok: true, balance: invoiceBalance(inv.total, inv.amount_paid), credits: [] };
+  const { data: rows, error } = await supabase
+    .from("customer_credits")
+    .select("id, amount, disposition, note, created_at, invoice_id")
+    .eq("customer_id", inv.customer_id)
+    .eq("status", "open")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) return { ok: false, error: dbError(error) };
+  return {
+    ok: true,
+    balance: invoiceBalance(inv.total, inv.amount_paid),
+    credits: (rows ?? []).map((c: any) => ({
+      id: c.id,
+      amount: Number(c.amount) || 0,
+      disposition: c.disposition,
+      note: c.note ?? null,
+      created_at: c.created_at,
+      onThisInvoice: c.invoice_id === invoiceId,
+    })),
+  };
+}
+
+/** Move an open account credit onto THIS invoice so it actually reduces what the customer
+ *  owes. The credit row is the ledger entry — it moves, it is never copied, or the same
+ *  dollars would sit on the account twice (the CRM tile sums every open row). */
+export async function applyCustomerCredit(
+  creditId: string,
+  invoiceId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("customer_id, total, amount_paid, status")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status === "void") return { ok: false, error: "This invoice is void — apply the credit to a live one." };
+
+  const { data: credit } = await supabase
+    .from("customer_credits")
+    .select("id, amount, customer_id, invoice_id, disposition, status")
+    .eq("id", creditId)
+    .maybeSingle();
+  if (!credit) return { ok: false, error: "Credit not found." };
+  if (credit.status !== "open") return { ok: false, error: "That credit is already closed out." };
+  if (credit.disposition !== "credit") return { ok: false, error: "That one is flagged for a refund — mark it refunded instead of applying it." };
+  if (credit.invoice_id === invoiceId) return { ok: false, error: "That credit is already on this invoice." };
+  // It is the CUSTOMER's money, not the invoice id's — never let one customer's credit land on
+  // another's bill because an id came in from the page.
+  if ((credit.customer_id ?? null) !== (inv.customer_id ?? null)) {
+    return { ok: false, error: "That credit belongs to a different customer." };
+  }
+
+  // A credit may only ever reduce what is still OWED (invoice-math's cap), so applying one
+  // bigger than the balance would quietly waste the difference on this invoice. Say so instead.
+  const room = invoiceBalance(inv.total, inv.amount_paid);
+  const amount = Number(credit.amount) || 0;
+  if (!(room > 0.005)) return { ok: false, error: "This invoice has nothing left to cover." };
+  if (amount > room + 0.005) {
+    return {
+      ok: false,
+      error: `That credit is ${formatCurrency(amount)} and this invoice only has ${formatCurrency(room)} left to cover — apply it to a bigger invoice, or post it as a refund.`,
+    };
+  }
+
+  const origin = (credit.invoice_id as string | null) ?? null;
+  const { data: moved, error } = await supabase
+    .from("customer_credits")
+    .update({ invoice_id: invoiceId })
+    .eq("id", creditId)
+    .eq("status", "open")
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!moved?.length) return { ok: false, error: "That credit was just changed by someone else — reload and try again." };
+
+  const landed = await recalcInvoice(supabase, invoiceId);
+  // The invoice it came FROM loses it, so its balance has to be recomputed too.
+  if (origin && origin !== invoiceId) await recalcInvoice(supabase, origin);
+  revalidateMoney(invoiceId);
+  if (origin) revalidateMoney(origin);
+  revalidateMoney();
+  if (inv.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
+  if (!landed) return { ok: false, error: "The credit moved but this invoice's balance didn't recompute — reload the invoice." };
+  return { ok: true };
+}
+
+/** Close out a refund-flagged credit once accounting has actually paid it back. Only the
+ *  refund disposition: a "keep on account" credit that is reducing an invoice would have its
+ *  balance jump back up if this closed it, so that one is applied, not resolved. */
+export async function markCreditRefunded(creditId: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: done, error } = await supabase
+    .from("customer_credits")
+    .update({ status: "resolved" })
+    .eq("id", creditId)
+    .eq("status", "open")
+    .eq("disposition", "refund")
+    .select("id, invoice_id, customer_id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!done?.length) return { ok: false, error: "That refund is already closed out (or it's an account credit — apply it to an invoice instead)." };
+  const row = done[0] as { invoice_id: string | null; customer_id: string | null };
+  if (row.invoice_id) revalidateMoney(row.invoice_id);
+  revalidateMoney();
+  if (row.customer_id) revalidatePath(`/crm/${row.customer_id}`);
+  return { ok: true };
+}
+
 export async function sendInvoiceToQuickbooks(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -1744,6 +1885,11 @@ export async function setInvoiceDescription(
     .update({ description: description.trim() || null })
     .eq("id", invoiceId);
   if (error) return { ok: false, error: dbError(error) };
+  // The description IS the scope block above the line items on the customer's document
+  // (invoice-document.tsx), and the stored PDF only ever drops on an explicit bust — so
+  // editing the scope on a SENT invoice left /i showing the new wording while Download PDF
+  // kept serving the old one (audit v921; same reason as the title/due-date busts above).
+  await bustDocPdf("invoice", invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
 }

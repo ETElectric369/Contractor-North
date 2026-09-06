@@ -11,13 +11,66 @@ import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
  *  (service client, all orgs) run the exact same logic. */
 
+/** Claim ONE period of a template: advance next_date only while it still holds the value we
+ *  read. Zero rows back = another run (the cron and the office's "Generate" button fire from
+ *  the same minute) already took this period. Returns false when the claim was lost or the
+ *  UPDATE errored — never "true, probably". */
+async function claimPeriod(supabase: any, t: any, nextDate: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("recurring_templates")
+    .update({ next_date: nextDate, last_generated_at: new Date().toISOString() })
+    .eq("id", t.id)
+    .eq("next_date", t.next_date)
+    .select("id");
+  if (error) { reportError("recurring-advance", error, { templateId: t.id, kind: t.kind }); return false; }
+  return !!data && data.length > 0;
+}
+
+/** Put a claimed period BACK when the occurrence could not be created (audit v921). Claiming
+ *  first is what stops the double-bill, but without this the opposite failure appears: the
+ *  insert fails, next_date has already moved past the period, and the customer/vendor is
+ *  simply never billed for it. Only rolls back while OUR claimed value is still there. */
+async function releaseClaim(supabase: any, t: any, claimed: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("recurring_templates")
+    .update({ next_date: t.next_date, last_generated_at: t.last_generated_at ?? null })
+    .eq("id", t.id)
+    .eq("next_date", claimed)
+    .select("id");
+  if (error || !data || !data.length) {
+    reportError("recurring-claim-release", error ?? new Error("claim rollback matched no row"), {
+      templateId: t.id, kind: t.kind, period: t.next_date,
+    });
+  }
+}
+
 /** Create one occurrence (a job or an expense bill) from a template and advance its
  *  next_date. org_id is set EXPLICITLY from the template: under the service client (the
  *  cron) there is no auth context, so the set_org_id trigger can't infer the tenant — an
  *  explicit org_id keeps cron-generated rows in the right org (a no-op for the user path,
- *  which sets the same id). Returns false on insert error. (Invoices go through
- *  runInvoiceTemplate instead — they need claim-first idempotency.) */
+ *  which sets the same id). Returns false on insert error or a lost claim.
+ *
+ *  CLAIM-FIRST, like runInvoiceTemplate (audit v921): jobs and expenses used to insert and
+ *  THEN advance with a bare .eq("id") — so the 8am cron and a staffer tapping "Generate N
+ *  Due" in the same second both read the same next_date, both inserted, and the vendor had
+ *  two identical unpaid bills double-counting the payable. The claim is the lock; a failed
+ *  insert gives it back (releaseClaim) so the period isn't skipped instead. */
 export async function runTemplate(supabase: any, t: any, userId: string | null, orgSettingsRaw?: unknown): Promise<boolean> {
+  const claimed = advance(t.next_date, t.frequency);
+  if (!(await claimPeriod(supabase, t, claimed))) return false; // another run owns this period
+  try {
+    return await createOccurrence(supabase, t, userId, orgSettingsRaw, claimed);
+  } catch (e) {
+    // A throw between the claim and the insert (e.g. a malformed next_date) must give the
+    // period back too, or the occurrence is lost with next_date already past it.
+    await releaseClaim(supabase, t, claimed);
+    throw e;
+  }
+}
+
+/** The insert half of runTemplate — split out only so the claim can be released on any
+ *  failure path (error OR throw) in one place. Never call it without holding the claim. */
+async function createOccurrence(supabase: any, t: any, userId: string | null, orgSettingsRaw: unknown, claimed: string): Promise<boolean> {
   if (t.kind === "job") {
     // The org's work-day window in the ORG's timezone — not a bare `T08:00` parse (which
     // reads in the SERVER's tz: on Vercel/UTC that lands recurring jobs at midnight-1 AM
@@ -38,7 +91,7 @@ export async function runTemplate(supabase: any, t: any, userId: string | null, 
       scheduled_end: tzDateTimeUtc(t.next_date, win.end, tz),
       created_by: userId,
     });
-    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
+    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); await releaseClaim(supabase, t, claimed); return false; }
   } else {
     const { error } = await supabase.from("bills").insert({
       org_id: t.org_id,
@@ -51,16 +104,8 @@ export async function runTemplate(supabase: any, t: any, userId: string | null, 
       notes: `Recurring expense: ${t.title}`,
       created_by: userId,
     });
-    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
+    if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); await releaseClaim(supabase, t, claimed); return false; }
   }
-  // Critical: if this advance silently fails, the occurrence was already created but
-  // next_date stays in the past, so the NEXT cron run re-generates it — a duplicate
-  // job/payable. Surface the failure so the duplicate is caught instead of invisible.
-  const { error: advErr } = await supabase
-    .from("recurring_templates")
-    .update({ next_date: advance(t.next_date, t.frequency), last_generated_at: new Date().toISOString() })
-    .eq("id", t.id);
-  if (advErr) reportError("recurring-advance", advErr, { templateId: t.id, kind: t.kind });
   return true;
 }
 
@@ -68,8 +113,13 @@ export async function runTemplate(supabase: any, t: any, userId: string | null, 
  *  the template's tax rate. Totals via the shared subtotalTaxTotal (pure — no recalc
  *  round-trip). org_id explicit for the cron path. Auto-sends best-effort when the
  *  template opts in. Does NOT advance next_date — the caller claims the period first
- *  (runInvoiceTemplate). */
-async function createRecurringInvoice(supabase: any, t: any, userId: string | null): Promise<boolean> {
+ *  (runInvoiceTemplate).
+ *
+ *  Returns "none" ONLY when no invoice row exists for this period, so the caller knows it
+ *  can safely hand the claimed period back (audit v921). A line-item or send failure still
+ *  returns "created": the draft invoice IS there (visible in /billing, error in
+ *  error_events), and rolling the claim back would mint a SECOND invoice for the period. */
+async function createRecurringInvoice(supabase: any, t: any, userId: string | null): Promise<"created" | "none"> {
   const taxRate = Number(t.tax_rate) || 0;
   // Itemized when the template carries line_items; otherwise a single line from
   // `amount` (back-compat with single-amount templates created before line items).
@@ -105,7 +155,7 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
     })
     .select("id")
     .single();
-  if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return false; }
+  if (error) { reportError("recurring-template", error, { templateId: t.id, kind: t.kind }); return "none"; }
   const rows = li.map((x: any, idx: number) => ({
     invoice_id: inv.id,
     description: x.description,
@@ -115,7 +165,7 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
     sort_order: idx,
   }));
   const { error: liErr } = await supabase.from("invoice_items").insert(rows);
-  if (liErr) { reportError("recurring-invoice-item", liErr, { templateId: t.id, invoiceId: inv.id }); return false; }
+  if (liErr) { reportError("recurring-invoice-item", liErr, { templateId: t.id, invoiceId: inv.id }); return "created"; }
   if (t.auto_send) {
     // Best-effort send: a customer with no email just leaves a draft to send by hand.
     const sent = await deliverInvoiceEmail(supabase, inv.id);
@@ -123,7 +173,7 @@ async function createRecurringInvoice(supabase: any, t: any, userId: string | nu
       reportError("recurring-invoice-send", new Error(sent.error), { templateId: t.id, invoiceId: inv.id });
     }
   }
-  return true;
+  return "created";
 }
 
 /** Generate ONE invoice for a recurring template, claim-first: fast-forward next_date
@@ -149,7 +199,13 @@ export async function runInvoiceTemplate(
     .select("id");
   if (claimErr) { reportError("recurring-invoice-claim", claimErr, { templateId: t.id }); return false; }
   if (!claimed || !claimed.length) return false; // another run already claimed this period
-  return createRecurringInvoice(supabase, t, userId);
+  // The claim moved next_date PAST today before the invoice existed — so if creation fails
+  // outright, hand the period back (audit v921). Without this the customer is never billed
+  // for the period, the next cron sees next_date > today and skips it, and the office is
+  // told "Already generated for this period."
+  const outcome = await createRecurringInvoice(supabase, t, userId);
+  if (outcome === "none") { await releaseClaim(supabase, t, nd); return false; }
+  return true;
 }
 
 /** Generate every active template that is due (next_date on or before today). Jobs and

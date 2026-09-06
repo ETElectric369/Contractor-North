@@ -194,12 +194,16 @@ export type ImportResult = {
   note?: string;
 };
 
-type BookRow = { id: string; code: string | null; description: string };
+type BookRow = { id: string; code: string | null; description: string; archived?: boolean | null };
 type Book = {
-  /** lower(code) → item. 0240 makes this unique per org. */
+  /** lower(code) → item. 0240 makes this unique per org — ARCHIVED rows included, since the index
+   *  has no archived predicate, so a coded sheet row can land nowhere else (audit v921). */
   byCode: Map<string, BookRow>;
   /** normalized description → item id, or null when two items share the description (ambiguous). */
   byDesc: Map<string, string | null>;
+  /** The matched ids that are archived — the import brings them back rather than refreshing a
+   *  row nobody can see (audit v921). */
+  archivedIds: Set<string>;
 };
 type StaffDb = Extract<Awaited<ReturnType<typeof requireStaff>>, { supabase: unknown }>["supabase"];
 
@@ -211,23 +215,28 @@ const normDesc = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\
 async function loadBook(supabase: StaffDb): Promise<Book> {
   const byCode = new Map<string, BookRow>();
   const byDesc = new Map<string, string | null>();
+  const archivedIds = new Set<string>();
   const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
       .from("price_list_items")
-      .select("id, code, description")
+      .select("id, code, description, archived")
       .order("id")
       .range(from, from + PAGE - 1);
     if (error) throw error;
     for (const r of (data ?? []) as BookRow[]) {
       const code = normCode(r.code);
       if (code && !byCode.has(code)) byCode.set(code, r);
+      if (r.archived) { archivedIds.add(r.id); continue; }
+      // Description matching is between ACTIVE rows only (audit v921): an archived twin used to
+      // poison the description — byDesc marked it ambiguous — so every re-import of an uncoded
+      // sheet inserted the row again as a fresh duplicate.
       const d = normDesc(r.description);
       if (d) byDesc.set(d, byDesc.has(d) ? null : r.id);
     }
     if ((data?.length ?? 0) < PAGE) break;
   }
-  return { byCode, byDesc };
+  return { byCode, byDesc, archivedIds };
 }
 
 /** Where a sheet row lands: its de-dup key (code first, else description) and the existing item
@@ -302,6 +311,9 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
     markup_pct: number | null;
     kit: string | null;
     quantity: number;
+    /** True when the sheet actually carried a quantity for this row — a blank cell is "no news",
+     *  and only a typed number may change a kit line that already exists (audit v921). */
+    quantityGiven: boolean;
   };
   let skipped = 0;
   const cleaned: Clean[] = [];
@@ -311,6 +323,7 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
     const unitRaw = String(r.unit ?? "").trim();
     const buy = numOrNull(r.buy_price);
     const pct = numOrNull(r.markup_pct);
+    const qty = numOrNull(r.quantity);
     cleaned.push({
       code: String(r.code ?? "").trim() || null,
       description,
@@ -320,7 +333,11 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
       buy_price: buy === null ? null : cents(Math.max(0, buy)),
       markup_pct: pct === null ? null : cents(Math.max(-99.99, pct)),
       kit: String(r.kit ?? "").trim() || null,
-      quantity: Math.max(0, numOrNull(r.quantity) ?? 1) || 1,
+      // An EXPLICIT 0 is a template value the kit author meant (kit-picker opens that line
+      // unchecked); only a BLANK cell means 1. The old `|| 1` turned the zero into a billed line
+      // (audit v921).
+      quantity: qty === null ? 1 : Math.max(0, qty),
+      quantityGiven: qty !== null,
     });
   }
   if (cleaned.length === 0) return { ok: false, error: "No valid rows found in the file." };
@@ -362,9 +379,16 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
   // wipe the very column this is careful not to touch. description is always mapped (the
   // importer refuses to run without it).
   let updated = 0;
+  let restored = 0;
   const bySignature = new Map<string, { id: string; row: Clean; payload: Record<string, unknown> }[]>();
   for (const { id, row } of toUpdate) {
     const payload: Record<string, unknown> = { id, description: row.description };
+    // The row the sheet matched is ARCHIVED: 0240's unique (org, lower(code)) index has no
+    // archived predicate, so a coded row can land nowhere else — refreshing it silently leaves the
+    // new price on an item nobody can see (audit v921). We refresh the price but DO NOT un-archive
+    // (review blocker): a vendor re-import would resurrect every deliberately-hidden item into
+    // every picker and kit, in bulk, with no confirm and no undo — against the no-save-game law.
+    // The count is surfaced to the person instead, who can restore the ones they actually want.
     if (has("code") && row.code) payload.code = row.code;
     if (has("category") && row.category) payload.category = row.category;
     if (has("supplier") && row.supplier) payload.supplier = row.supplier;
@@ -384,7 +408,7 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
         .select("id");
       if (error) return { ok: false, error: `${dbError(error)} (after ${updated} updated, 0 added)` };
       const wrote = new Set((data ?? []).map((r: { id: string }) => r.id));
-      for (const { id, row } of chunk) if (wrote.has(id)) { updated++; itemIdOf.set(row, id); }
+      for (const { id, row } of chunk) if (wrote.has(id)) { updated++; itemIdOf.set(row, id); if (book.archivedIds.has(id)) restored++; }
     }
   }
 
@@ -420,6 +444,7 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
   // because its kit stage can't run.
   let kits = 0;
   let kitLines = 0;
+  let kitQtyUpdated = 0;
   let note: string | undefined;
   const kitRows = cleaned.filter((c) => c.kit && itemIdOf.has(c));
   if (kitRows.length) {
@@ -477,6 +502,22 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
         if (lErr) throw lErr;
         const linked = new Set((existingLines ?? []).map((l: { price_list_item_id: string | null }) => l.price_list_item_id).filter(Boolean));
         let sort = (existingLines ?? []).reduce((m: number, l: { sort_order: number | null }) => Math.max(m, Number(l.sort_order) || 0), 0);
+        // A line already in the kit used to be dropped on the floor: re-importing the same sheet
+        // with corrected "Qty in Kit" numbers changed nothing and the toast said nothing about it
+        // (audit v921). An EXPLICIT quantity on the sheet now updates the line it belongs to; a
+        // blank cell is still "no news" and leaves the kit alone.
+        for (const l of lines) {
+          const itemId = itemIdOf.get(l)!;
+          if (!linked.has(itemId) || !l.quantityGiven) continue;
+          const { data: upd, error: uErr } = await supabase
+            .from("kit_items")
+            .update({ quantity: l.quantity })
+            .eq("kit_id", kitId)
+            .eq("price_list_item_id", itemId)
+            .select("id");
+          if (uErr) throw uErr;
+          kitQtyUpdated += upd?.length ?? 0;
+        }
         const fresh = lines.filter((l) => !linked.has(itemIdOf.get(l)!));
         if (!fresh.length) continue;
         const payload = fresh.map((l) => {
@@ -507,8 +548,19 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
     }
   }
 
+  // What the counts alone can't say (audit v921): items that came back out of the archive, and
+  // kit quantities changed on lines that already existed — both invisible in "added N, updated M".
+  const extra = [
+    // We refreshed the price but left them archived (review blocker) — name them so the person
+    // can restore the ones they actually want, instead of a re-import resurrecting the lot.
+    restored
+      ? `${restored} archived item${restored === 1 ? " was" : "s were"} repriced but stayed archived — restore from Archived if you want ${restored === 1 ? "it" : "them"} back in the book.`
+      : null,
+    kitQtyUpdated ? `${kitQtyUpdated} kit quantit${kitQtyUpdated === 1 ? "y was" : "ies were"} updated.` : null,
+    note,
+  ].filter(Boolean);
   revalidatePath("/price-list");
-  return { ok: true, inserted, updated, skipped, kits, kitLines, note, imported: inserted + updated };
+  return { ok: true, inserted, updated, skipped, kits, kitLines, note: extra.length ? extra.join(" ") : undefined, imported: inserted + updated };
 }
 
 /**

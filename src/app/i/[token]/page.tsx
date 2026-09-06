@@ -31,10 +31,10 @@ export default async function PublicInvoicePage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ paid?: string }>;
+  searchParams: Promise<{ paid?: string; pay?: string }>;
 }) {
   const { token } = await params;
-  const { paid } = await searchParams;
+  const { paid, pay } = await searchParams;
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_invoice", { p_token: token });
   if (!data) notFound();
@@ -47,6 +47,19 @@ export default async function PublicInvoicePage({
   const co = companyFromOrg(org);
   const template = templateFor(org, "invoice");
   const balance = invoiceBalance(inv.total, inv.amount_paid);
+  const payable = billingEnabled && inv.status !== "void" && inv.status !== "draft";
+  // audit v921: /api/pay used to answer its refusals with a bare text/plain 503 — a customer who
+  // tapped "Pay now" landed on an unstyled page with no way back. It now sends them here with a
+  // reason, and this line says it out loud. The sub-$0.50 case is stated even before a click,
+  // because Stripe won't charge that amount and a button that can only fail is a dead end.
+  const payNotice =
+    pay === "unavailable"
+      ? "Card payments aren't switched on for this contractor yet. Please pay by check, or call them."
+      : pay === "failed"
+        ? "The card payment couldn't be started. Please try again in a moment, or pay by check."
+        : payable && balance > 0 && balance < 0.5
+          ? "This balance is under the $0.50 card minimum. Please pay by check, or call us."
+          : null;
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -71,7 +84,14 @@ export default async function PublicInvoicePage({
           </div>
         </div>
       )}
-      {!paid && balance > 0 && billingEnabled && inv.status !== "void" && inv.status !== "draft" && (
+      {!paid && payNotice && (
+        <div className="no-print mx-auto mb-4 max-w-3xl px-4">
+          <div className="rounded-xl bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-800">
+            {payNotice}
+          </div>
+        </div>
+      )}
+      {!paid && balance >= 0.5 && payable && pay !== "unavailable" && (
         <div className="no-print mx-auto mb-4 max-w-3xl px-4 text-center">
           <a
             href={`/api/pay/${token}`}

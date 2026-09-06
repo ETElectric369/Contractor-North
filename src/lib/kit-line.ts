@@ -39,6 +39,9 @@ export type KitSizing = {
 export type KitLinkedItem = {
   id: string;
   code?: string | null;
+  /** Archived = the item left the book. The link survives archiving, so every reader must be able
+   *  to SAY so — projecting it is what lets a surface classify on it (audit v921). */
+  archived?: boolean | null;
   description: string;
   category?: string | null;
   supplier?: string | null;
@@ -90,6 +93,11 @@ export type KitLineView = {
   category: string | null;
   supplier: string | null;
   linked: boolean;
+  /** True when the linked item has been ARCHIVED out of the book. The line still prices from it —
+   *  changing the money on an archive would be a second, silent way to compute a total — but the
+   *  contract says an archived row leaves every picker, so the surfaces need to be able to mark it
+   *  (audit v921: the embed never selected `archived`, so nothing could tell). */
+  archived: boolean;
   sizing: KitSizing;
 };
 
@@ -158,6 +166,7 @@ export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView 
       category: item.category ?? null,
       supplier: item.supplier ?? null,
       linked: true,
+      archived: item.archived === true,
       sizing: kitLineSizing(line),
     };
   }
@@ -170,6 +179,7 @@ export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView 
     category: null,
     supplier: null,
     linked: false,
+    archived: false,
     sizing: kitLineSizing(line),
   };
 }
@@ -185,10 +195,10 @@ export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView 
 export const KIT_ITEM_BASE_COLS = "id, description, quantity, unit, unit_price, sort_order";
 export const KIT_ITEM_SIZING_COLS = "qty_per_sqft, qty_per_lf, qty_min, qty_round";
 export const KIT_ITEM_LINK_COLS =
-  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, qty_per_sqft, qty_per_lf, qty_min, qty_round)";
+  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round)";
 /** 0241: the item embed with the generic sizing pair. Tried FIRST; falls to KIT_ITEM_LINK_COLS pre-migration. */
 export const KIT_ITEM_LINK_COLS_V2 =
-  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per)";
+  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per)";
 
 /** The kit_items(...) column lists, most capable first. */
 export const KIT_ITEM_SELECT_RUNGS = [

@@ -218,7 +218,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     currentJob
       ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
       : Promise.resolve({ data: null }),
-    getActionItems({ todayStr, isStaff, userId: user?.id ?? "" }),
+    // audit v921: the feeder's day cuts are calendar-day decisions — hand it the ORG tz so
+    // "before today" means org midnight, not UTC's (a 5:30 PM visit surfaced a day late).
+    getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz }),
     six.length
       ? supabase
           .from("tasks")
@@ -355,6 +357,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       // hub: capture, photos, the question sheet, navigate, start estimate.
       href: `/appointments/${a.id}`,
       apptType: a.type,
+      // audit v921: carry the appointment's status so a PROPOSED (unconfirmed) visit reads as
+      // tentative here too — the calendar day drill, the appointment page and /inspections all
+      // badge it "pending pick"; My Day was the one surface drawing it as a firm booking.
+      status: a.status,
       // A pre-sale visit's person lives on the LEAD; a sold one's on the customer card.
       phone: a.customers?.phone ?? a.inquiries?.phone ?? null,
       appt: {
@@ -388,6 +394,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const lateNudge = (() => {
     const nx = nextAgenda[0] as Agenda | undefined;
     if (!nx?.phone || !nx.time) return null;
+    // audit v921: never offer "on my way" to a customer who hasn't picked a time yet — a
+    // proposed visit's starts_at is only the FIRST offered slot, not an agreed appointment.
+    if (nx.kind === "appt" && nx.status === "proposed") return null;
     const mins = (new Date(nx.time).getTime() - Date.now()) / 60_000;
     return mins < 20 ? nx.key : null;
   })();
@@ -425,6 +434,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .select("id, type, title, starts_at, location, job_id, status")
         .gte("starts_at", weekStartUtc.toISOString())
         .lt("starts_at", weekEndUtc.toISOString())
+        // audit v921 (+ review): the day view hides a COMPLETED visit because "today" is always
+        // now. The week view pages BACKWARD (weekOffset -52..52), and a past week is nothing but
+        // completed visits — hiding them emptied every previous week, while the sibling jobs query
+        // (no status filter) still drew the job you finished. So: cancelled is never a booking,
+        // but completed stays visible here.
         .neq("status", "cancelled")
         .eq("absorbed", false) // 0237: a booking absorbed into its job must not draw beside it
         .order("starts_at"),
@@ -463,6 +477,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       // hub: capture, photos, the question sheet, navigate, start estimate.
       href: `/appointments/${a.id}`,
         apptType: a.type,
+        // audit v921: same tentative marker as the day view — a proposed visit is not a booking.
+        status: a.status,
       })),
     ]
       .filter((i) => i.time)
@@ -516,7 +532,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">
           <div className="flex items-center gap-2">
             {i.kind === "appt" ? (
-              <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"}>{appointmentTypeLabel(i.apptType)}</Badge>
+              <>
+                <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"}>{appointmentTypeLabel(i.apptType)}</Badge>
+                {/* audit v921: the same "pending pick" marker the calendar and the appointment
+                    page carry — My Day drew an unconfirmed visit like a firm booking. */}
+                {i.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
+              </>
             ) : i.status ? (
               <Badge tone={statusTone(i.status)}>{jobStatusLabel(i.status)}</Badge>
             ) : null}
@@ -557,7 +578,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             />
           )}
           {isStaff && i.appt && <ApptDoneButton id={i.appt.id} title={i.appt.title ?? "appointment"} />}
-          {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} />}
+          {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} tz={tz} />}
           {isStaff && i.jobId && <JobMoveButton jobId={i.jobId} fromDate={todayStr} />}
         </div>
       </li>

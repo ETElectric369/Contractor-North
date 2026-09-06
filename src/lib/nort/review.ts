@@ -79,13 +79,16 @@ async function buildDigest(supabase: SupabaseClient, orgId: string, sinceIso: st
     const convoUser = new Map((convos ?? []).map((c: { id: string; user_id: string }) => [c.id, c.user_id]));
     const convoIds = (convos ?? []).map((c: { id: string }) => c.id);
     if (convoIds.length) {
+      // audit v921: ascending + limit(200) handed Postgres the OLDEST 200 turns, so on a busy day
+      // the review read the morning and never saw the afternoon — exactly the newest signal it
+      // exists to catch. Take the NEWEST 200, then flip back to chronological for the digest.
       const { data: msgs } = await supabase
         .from("messages")
         .select("conversation_id, role, content, created_at")
         .in("conversation_id", convoIds)
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(200);
-      messages = (msgs ?? []).map((m: { conversation_id: string; role: string; content: string; created_at: string }) => ({
+      messages = (msgs ?? []).reverse().map((m: { conversation_id: string; role: string; content: string; created_at: string }) => ({
         role: m.role,
         content: String(m.content || "").replace(/\s+/g, " ").trim().slice(0, 500),
         created_at: m.created_at,

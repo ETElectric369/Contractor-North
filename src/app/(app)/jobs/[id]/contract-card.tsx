@@ -35,6 +35,19 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
   const [paperName, setPaperName] = useState("");
   const [paperDate, setPaperDate] = useState("");
 
+  /* VOID IS ONE TAP NEXT TO RESEND, AND THERE IS NO UN-VOID (audit v921). voidContract flips the
+     status immediately; nothing restores it, Regenerate rebuilds from the job and throws away the
+     terms edited in Review & Edit, and the customer's live /c/<token> page stops accepting a
+     signature. A mis-tap on the sent row costs all of that, so this one destructive control asks
+     first — the same window.confirm the app's DeleteButton uses everywhere else. */
+  function confirmVoid(sent: boolean): boolean {
+    return window.confirm(
+      sent
+        ? "Void this contract? The customer's signing link will stop working, and it can't be un-voided."
+        : "Void this draft contract? It can't be un-voided — regenerating builds a fresh one from the job.",
+    );
+  }
+
   function run(fn: () => Promise<{ ok: boolean; error?: string }>) {
     setError(null);
     start(async () => {
@@ -136,7 +149,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               <Button variant="outline" size="sm" onClick={() => setPaperFor(c.id)} disabled={pending}>
                 Signed on Paper
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => run(() => voidContract(c.id))} disabled={pending}>
+              <Button variant="ghost" size="sm" onClick={() => { if (confirmVoid(true)) run(() => voidContract(c.id)); }} disabled={pending}>
                 Void
               </Button>
             </div>
@@ -152,7 +165,7 @@ export function ContractCard({ jobId, contract }: { jobId: string; contract: Con
               <Button variant="ghost" size="sm" onClick={() => run(() => generateContractFromJob(jobId))} disabled={pending}>
                 Regenerate
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => run(() => voidContract(c.id))} disabled={pending}>
+              <Button variant="ghost" size="sm" onClick={() => { if (confirmVoid(false)) run(() => voidContract(c.id)); }} disabled={pending}>
                 Void
               </Button>
             </div>

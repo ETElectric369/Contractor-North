@@ -4,6 +4,8 @@ import { getStripe, billingEnabled } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { connectStateFromOrg, canAcceptPayments } from "@/lib/stripe-connect";
+import { rateLimited, clientIp } from "@/lib/rate-limit";
+import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
 
@@ -14,10 +16,20 @@ export const runtime = "nodejs";
  *   GET /api/pay/<invoice_public_token>
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ token: string }> },
 ) {
   const { token } = await params;
+
+  // audit v921: every other public route carries a limiter and this one didn't — one leaked
+  // invoice link (or a crawler following it) could loop this GET and mint unbounded Checkout
+  // Sessions on the CONTRACTOR'S OWN Stripe account, which is their dashboard, not ours.
+  if (
+    (await rateLimited(`pay:${token}`, 10, 60)) ||
+    (await rateLimited(`pay-ip:${clientIp(req.headers)}`, 30, 60))
+  ) {
+    return new NextResponse("Too many payment attempts in a row — give it a minute.", { status: 429 });
+  }
 
   if (!billingEnabled) {
     return new NextResponse(
@@ -71,37 +83,57 @@ export async function GET(
   // up holding other people's money.
   const connect = connectStateFromOrg((org ?? {}) as any);
   if (!canAcceptPayments(connect)) {
-    return new NextResponse(
-      "This contractor hasn't finished setting up online payments yet. Please pay by check or call them.",
-      { status: 503 },
-    );
+    // audit v921: this used to answer a bare text/plain 503 — a customer who tapped "Pay now" on
+    // the contractor's own page landed on an unstyled dead end with no way back to their bill.
+    // Send them back to the invoice, which says why (?pay=unavailable), like every other refusal
+    // in this route does.
+    return NextResponse.redirect(`${site}/i/${token}?pay=unavailable`, { status: 303 });
+  }
+
+  // Stripe refuses a card charge under $0.50, and both Pay buttons gate only on balance > 0 — a
+  // partial payment leaving $0.30 owed used to reach sessions.create and throw, so the customer
+  // got Next's blank 500 (audit v921). Say it on the invoice instead.
+  if (balance < 0.5) {
+    return NextResponse.redirect(`${site}/i/${token}?pay=too_small`, { status: 303 });
   }
 
   const stripe = getStripe();
-  const session = await stripe.checkout.sessions.create(
-    {
-      mode: "payment",
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: `${org?.name ?? ""} Invoice ${inv.invoice_number}`.trim() },
-            unit_amount: Math.round(balance * 100),
+  try {
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: "payment",
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `${org?.name ?? ""} Invoice ${inv.invoice_number}`.trim() },
+              unit_amount: Math.round(balance * 100),
+            },
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
-      customer_email: (inv as any).customers?.email ?? undefined,
-      success_url: `${site}/i/${token}?paid=1`,
-      cancel_url: `${site}/i/${token}`,
-      // org_id rides along because on a direct charge the webhook arrives with the
-      // CONNECTED account's context, not ours — this is how we know whose invoice it is.
-      metadata: { kind: "invoice_payment", invoice_id: inv.id, org_id: inv.org_id },
-      payment_intent_data: { metadata: { invoice_id: inv.id, org_id: inv.org_id } },
-    },
-    // THE line that makes it a direct charge.
-    { stripeAccount: connect.accountId! },
-  );
-
-  return NextResponse.redirect(session.url!, { status: 303 });
+        ],
+        customer_email: (inv as any).customers?.email ?? undefined,
+        success_url: `${site}/i/${token}?paid=1`,
+        cancel_url: `${site}/i/${token}`,
+        // org_id rides along because on a direct charge the webhook arrives with the
+        // CONNECTED account's context, not ours — this is how we know whose invoice it is.
+        metadata: { kind: "invoice_payment", invoice_id: inv.id, org_id: inv.org_id },
+        payment_intent_data: { metadata: { invoice_id: inv.id, org_id: inv.org_id } },
+      },
+      // THE line that makes it a direct charge.
+      { stripeAccount: connect.accountId! },
+    );
+    if (!session.url) {
+      reportError("pay.checkout", "Stripe returned a session with no url", { org_id: inv.org_id, invoice_id: inv.id });
+      return NextResponse.redirect(`${site}/i/${token}?pay=failed`, { status: 303 });
+    }
+    return NextResponse.redirect(session.url, { status: 303 });
+  } catch (e) {
+    // ANY Stripe-side refusal (a capability that lapsed since account.updated last spoke, a key
+    // in the wrong mode, an amount it won't take) used to escape as a raw 500 on the contractor's
+    // own domain. The customer goes back to their invoice with a reason; the operator gets the
+    // real error in error_events (audit v921).
+    reportError("pay.checkout", e, { org_id: inv.org_id, invoice_id: inv.id });
+    return NextResponse.redirect(`${site}/i/${token}?pay=failed`, { status: 303 });
+  }
 }

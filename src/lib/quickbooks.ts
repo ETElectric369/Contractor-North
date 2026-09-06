@@ -1,5 +1,6 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
+import { reportError } from "@/lib/observe";
 
 /** True when the Intuit app credentials are configured. */
 export function qboConfigured(): boolean {
@@ -122,7 +123,20 @@ export async function getConnection(orgId: string): Promise<QboConnection | null
       refresh_token: t.refresh_token ?? conn.refresh_token,
       expires_at: new Date(Date.now() + (t.expires_in ?? 3600) * 1000).toISOString(),
     };
-    await supabase.from("accounting_connections").update(patch).eq("org_id", orgId);
+    // INTUIT ROTATES THE REFRESH TOKEN AND RETIRES THE OLD ONE (audit v921). This push would
+    // still go through on the in-memory copy, but if the new token never landed the stored one is
+    // already dead: the next push refreshes with it, gets a 400, and the office is told to
+    // reconnect an hour later with nothing anywhere saying why. A zero-row update is a 204, so
+    // the rows are checked — and the reconnect is asked for NOW, at the moment we can explain it.
+    const { data: saved, error: saveErr } = await supabase
+      .from("accounting_connections")
+      .update(patch)
+      .eq("org_id", orgId)
+      .select("org_id");
+    if (saveErr || !saved?.length) {
+      reportError("quickbooks:refresh:persist", saveErr ?? new Error("no accounting_connections row updated"), { orgId });
+      throw new Error("The refreshed QuickBooks sign-in didn't save — reconnect QuickBooks in Settings.");
+    }
     return { ...conn, ...patch } as QboConnection;
   }
   return conn as QboConnection;
@@ -146,13 +160,45 @@ export async function qboFetch(conn: QboConnection, path: string, init?: Request
 async function ensureCustomer(conn: QboConnection, customer: any): Promise<string> {
   // A mapping is only valid inside the company file it was made in (audit 9, 0203).
   if (customer.qbo_id && customer.qbo_realm_id === conn.realm_id) return customer.qbo_id;
-  const created = await qboFetch(conn, "/customer?minorversion=65", {
-    method: "POST",
-    body: JSON.stringify({ DisplayName: customer.name || "Customer" }),
-  });
-  const id = created?.Customer?.Id;
+  /**
+   * ADOPT THE CUSTOMER THE BOOKS ALREADY HAVE (audit v921).
+   *
+   * QuickBooks enforces a unique DisplayName per company file, so creating "Jane Smith" outright
+   * — the normal case for a contractor who used QuickBooks before Contractor North — came back as
+   * Intuit fault 6240 "Duplicate Name Exists", the mapping was never written, and every retry
+   * failed identically with no way to link the two. Look first; create only a name the books
+   * don't have. (Single quotes are doubled: that's the escape in Intuit's query language.)
+   */
+  const name = String(customer.name || "Customer").trim() || "Customer";
+  const found = await qboFetch(
+    conn,
+    `/query?minorversion=65&query=${encodeURIComponent(
+      `select Id from Customer where DisplayName = '${name.replace(/'/g, "''")}'`,
+    )}`,
+  );
+  let id: string | undefined = found?.QueryResponse?.Customer?.[0]?.Id;
+  if (!id) {
+    const created = await qboFetch(conn, "/customer?minorversion=65", {
+      method: "POST",
+      body: JSON.stringify({ DisplayName: name }),
+    });
+    id = created?.Customer?.Id;
+  }
+  if (!id) throw new Error("QuickBooks didn't return a customer id.");
   const supabase = createServiceClient();
-  await supabase.from("customers").update({ qbo_id: id, qbo_realm_id: conn.realm_id }).eq("id", customer.id);
+  const { data: mapped, error: mapErr } = await supabase
+    .from("customers")
+    .update({ qbo_id: id, qbo_realm_id: conn.realm_id })
+    .eq("id", customer.id)
+    .select("id");
+  // A lost mapping no longer duplicates the customer (the lookup above catches it next time),
+  // but a 204 that reads as a save still belongs in the ops log.
+  if (mapErr || !mapped?.length) {
+    reportError("quickbooks:customer:map", mapErr ?? new Error("no customers row updated"), {
+      customerId: customer.id,
+      qboId: id,
+    });
+  }
   return id;
 }
 
@@ -245,14 +291,66 @@ export async function pushInvoiceToQbo(
       payload.sparse = true;
     }
 
+    /**
+     * NO MAPPING DOESN'T MEAN NO INVOICE (audit v921).
+     *
+     * The mapping write below is the only thing stopping a second "Send to QuickBooks" from
+     * creating a DUPLICATE bill — and it never runs when the POST times out after Intuit already
+     * committed, or when the write itself fails. Intuit takes no idempotency key on create, so
+     * the invoice number is the key: if it's already in the books, update THAT one instead of
+     * minting a second copy of the same bill in the customer's books.
+     */
+    if (!payload.Id && inv.invoice_number) {
+      const dup = await qboFetch(
+        conn,
+        `/query?minorversion=65&query=${encodeURIComponent(
+          `select * from Invoice where DocNumber = '${String(inv.invoice_number).replace(/'/g, "''")}'`,
+        )}`,
+      );
+      const already = dup?.QueryResponse?.Invoice?.[0];
+      // ONLY ADOPT AN INVOICE THAT IS ACTUALLY OURS (audit v921 review blocker). Invoice numbers
+      // are NOT namespaced in QuickBooks: 0190 lets an org set its own prefix (or none), so a bare
+      // "1042" collides with QuickBooks' own auto-assigned DocNumbers and with imported bills. The
+      // POST below carries CustomerRef + the whole Line array with sparse:true, so adopting a
+      // stranger's row would REWRITE that invoice's customer and line items in the contractor's
+      // live books. Same customer is the minimum proof it's the one we created.
+      const sameCustomer =
+        String((already as { CustomerRef?: { value?: string } } | undefined)?.CustomerRef?.value ?? "") ===
+        String(customerId);
+      if (already?.Id && sameCustomer) {
+        payload.Id = already.Id;
+        payload.SyncToken = already.SyncToken ?? "0";
+        payload.sparse = true;
+      }
+    }
+
     const created = await qboFetch(conn, "/invoice?minorversion=65", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     const qboId = created?.Invoice?.Id;
     // Write the mapping FIRST, even on a mismatch: without it the next attempt creates a
-    // DUPLICATE invoice in the live book instead of correcting this one.
-    await supabase.from("invoices").update({ qbo_id: qboId, qbo_realm_id: conn.realm_id }).eq("id", invoiceId);
+    // DUPLICATE invoice in the live book instead of correcting this one. AND IT HAS TO LAND
+    // (audit v921) — the result was discarded, so a zero-row update was a 204 that read as
+    // success while the link the next send depends on was never saved.
+    const { data: linked, error: linkErr } = await supabase
+      .from("invoices")
+      .update({ qbo_id: qboId, qbo_realm_id: conn.realm_id })
+      .eq("id", invoiceId)
+      .eq("org_id", orgId)
+      .select("id");
+    if (linkErr || !linked?.length) {
+      reportError("quickbooks:invoice:map", linkErr ?? new Error("no invoices row updated"), {
+        invoiceId,
+        orgId,
+        qboId,
+      });
+      return {
+        ok: false,
+        qbo_id: qboId,
+        error: `QuickBooks has this invoice as #${qboId ?? "?"}, but the link back to it didn't save. Send again — it will update that same invoice, not make a second one.`,
+      };
+    }
 
     /**
      * RECONCILE THE TOTAL, DON'T ASSUME IT (audit 9).

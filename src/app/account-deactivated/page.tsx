@@ -1,10 +1,30 @@
-import Link from "next/link";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { PurgePageCache } from "@/components/purge-page-cache";
 import { NO_INDEX } from "@/lib/no-index";
 import { Ban } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * "Back to Sign In" is a SERVER ACTION, not a link, because this is the only place the session
+ * cookie can actually be removed. The signOut() below ends the session at GoTrue, but its cookie
+ * removal is swallowed on the way out — lib/supabase/server.ts wraps setAll in try/catch because
+ * a Server Component cannot write cookies — so the device kept an sb-*-auth-token whose JWT was
+ * still signature-valid until exp. A POST can delete them, and does (audit v921). Same deletion
+ * the login/actions.ts signOut performs.
+ */
+async function leaveDeactivated() {
+  "use server";
+  const store = await cookies();
+  for (const c of store.getAll()) {
+    if (/^sb-.*-auth-token(\.\d+)?$/.test(c.name)) store.delete(c.name);
+  }
+  revalidatePath("/", "layout");
+  redirect("/login");
+}
 
 /**
  * The DEACTIVATED screen. The app layout redirects here the moment a signed-in profile
@@ -17,7 +37,9 @@ export const dynamic = "force-dynamic";
  * actions refuse to deactivate the owner or yourself).
  */
 export default async function AccountDeactivatedPage() {
-  // Kill the session so a deactivated user can't linger on any cached (app) route.
+  // Kill the session so a deactivated user can't linger on any cached (app) route. This revokes
+  // it at GoTrue (global, on purpose — offboarding); the COOKIE goes on the button below, which
+  // is the only place a write to the response is allowed (audit v921).
   const supabase = await createClient();
   await supabase.auth.signOut();
 
@@ -37,12 +59,14 @@ export default async function AccountDeactivatedPage() {
           Your access to this account has been turned off. If you think this is a mistake, contact
           your company&apos;s office — they can reactivate you.
         </p>
-        <Link
-          href="/login"
-          className="mt-5 inline-flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"
-        >
-          Back to sign in
-        </Link>
+        <form action={leaveDeactivated} className="mt-5">
+          <button
+            type="submit"
+            className="inline-flex w-full items-center justify-center rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-dark"
+          >
+            Back to Sign In
+          </button>
+        </form>
       </div>
     </div>
     </>

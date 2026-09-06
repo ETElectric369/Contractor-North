@@ -136,7 +136,11 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
     if (onOrgSite) {
       const first = pathname.split("/").filter(Boolean)[0] ?? "";
       if (!isReservedSlug(first)) {
-        return new NextResponse("Not found", { status: 404 });
+        // …but say so in the SITE's voice, not two words of plain text (audit v921). This branch
+        // answers the multi-segment dead links a contractor's marketing domain collects
+        // (etelectricity.com/some/old/page); the visitor got a bare "Not found" body with no
+        // wording and no way home. Same 404 status, same copy as the branded site/not-found.
+        return orgSiteNotFound();
       }
     }
 
@@ -147,4 +151,25 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
   }
 
   return response;
+}
+
+/** The branded 404 body for a dead URL on a contractor's own domain — the middleware twin of
+ *  src/app/site/not-found.tsx (which only covers paths that reach a /site/ route). Org-agnostic
+ *  on purpose: middleware has no org row here, and "/" resolves to the org's own homepage on its
+ *  own host. noindex so a crawler that follows a stale link doesn't shelve the URL. */
+function orgSiteNotFound(): NextResponse {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Page not found</title></head>
+<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem;font-family:ui-sans-serif,system-ui,sans-serif;background:#fff">
+<div style="text-align:center;max-width:420px">
+<p style="font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin:0">404</p>
+<h1 style="font-size:24px;margin:8px 0 8px;color:#0f172a">That page isn&rsquo;t here</h1>
+<p style="color:#64748b;font-size:15px;margin:0 0 20px">It may have moved or never existed. The homepage has everything current.</p>
+<a href="/" style="display:inline-block;background:#0f172a;color:#fff;padding:10px 22px;border-radius:10px;text-decoration:none;font-weight:600;font-size:14px">Go to the homepage</a>
+</div></body></html>`;
+  return new NextResponse(html, {
+    status: 404,
+    headers: { "content-type": "text/html; charset=utf-8", "x-robots-tag": "noindex" },
+  });
 }

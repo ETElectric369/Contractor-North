@@ -504,6 +504,10 @@ export async function setQuoteJob(
     .update({ job_id: jobId, updated_at: new Date().toISOString() })
     .eq("id", quoteId);
   if (error) return { ok: false, error: dbError(error) };
+  // The job is where the printed "Job site" address comes from (pickSite on the print page), so
+  // re-pointing it must drop the stored PDF or a sent estimate keeps serving the old address
+  // while /q shows the new one (audit v921, same reason as setQuoteCustomer above).
+  await bustDocPdf("quote", quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   revalidatePath("/quotes");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
@@ -1844,6 +1848,9 @@ export async function saveCircuitSchedule(
     .update({ circuits: clean.length ? clean : null })
     .eq("id", quoteId);
   if (error) return { ok: false, error: dbError(error) };
+  // The schedule prints as the second page — a hand correction has to bust the stored PDF just
+  // like generating one does, or the share link keeps handing out the old panel (audit v921).
+  await bustDocPdf("quote", quoteId);
   revalidatePath(`/quotes/${quoteId}`);
   return { ok: true };
 }

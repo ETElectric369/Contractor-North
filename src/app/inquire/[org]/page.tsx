@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Phone, Mail, MapPin, Zap } from "lucide-react";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
-import { assertOrgServable } from "@/lib/serve-org";
+import { assertOrgServable, orgIsServable } from "@/lib/serve-org";
 import { NO_INDEX } from "@/lib/no-index";
 import { InquiryForm } from "./inquiry-form";
 
@@ -28,6 +28,17 @@ export async function generateMetadata({ params }: { params: Promise<{ org: stri
   const { data } = await supabase.rpc("public_org", { p_org: org });
   const o = (data ?? null) as { name?: string } | null;
   if (!o?.name) return { robots: NO_INDEX };
+  // THE METADATA HAS TO AGREE WITH THE PAGE (audit v921). The body 404s on the wrong host
+  // (assertOrgServable below), but the title was built before any host check, so
+  // <other-tenant>.com/inquire/<this org id> still carried this contractor's NAME in <title> —
+  // the 2026-07-27 wrong-host leak class, reduced to a title. /estimate already guards this way.
+  const { data: orgRow } = await createServiceClient()
+    .from("organizations")
+    .select("settings")
+    .eq("id", org)
+    .maybeSingle();
+  if (!(await orgIsServable(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings))))
+    return { robots: NO_INDEX };
   return { title: `Request a quote — ${o.name}`, robots: NO_INDEX };
 }
 

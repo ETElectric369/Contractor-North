@@ -1,4 +1,4 @@
-import { createServiceClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 /**
  * THE STORED-PDF CACHE, SHARED HALF (0198).
@@ -26,15 +26,42 @@ export const CUSTOMER_VISIBLE_STATUSES: Record<"invoice" | "quote", readonly str
   quote: ["sent", "accepted", "declined", "expired"],
 };
 
+/**
+ * The signed-in caller's org, or null when there is no caller at all (Stripe webhooks, crons,
+ * post-response jobs). A bust runs on the SERVICE role and is keyed by an id that came from a
+ * client form, so without this it reaches ANY tenant's stored copies: audit v921 found org A
+ * staff able to delete org B's customer-facing PDF by calling setInvoiceTitle with B's invoice
+ * uuid — RLS made the update itself land zero rows, but the bust fired regardless and B's
+ * customer got "No PDF available yet." on their own download. Pin the delete to the caller's
+ * org (0173: a service-role write must carry an explicit org scope); a callerless service
+ * context has no client-supplied id to distrust, so it busts as it always did.
+ */
+async function callerOrgId(): Promise<string | null> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+    const { data } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+    return (data as { org_id?: string } | null)?.org_id ?? null;
+  } catch {
+    return null; // no request scope (cron) — nothing to pin to
+  }
+}
+
 /** Drop every stored copy of one document (all margins). Call from any write that changes
- *  what a customer-visible doc renders. */
-export async function bustDocPdf(doc: "invoice" | "quote", docId: string): Promise<void> {
+ *  what a customer-visible doc renders. Pass orgId when the caller already knows the doc's org. */
+export async function bustDocPdf(doc: "invoice" | "quote", docId: string, orgId?: string | null): Promise<void> {
   try {
     const svc = createServiceClient();
-    const { data: rows } = await svc.from("doc_pdf_cache").select("path").eq("doc", doc).eq("doc_id", docId);
+    const org = orgId ?? (await callerOrgId());
+    let sel = svc.from("doc_pdf_cache").select("path").eq("doc", doc).eq("doc_id", docId);
+    if (org) sel = sel.eq("org_id", org); // audit v921 — never past the caller's tenant
+    const { data: rows } = await sel;
     const paths = (rows ?? []).map((r: { path: string }) => r.path).filter(Boolean);
     if (paths.length) await svc.storage.from("doc-pdfs").remove(paths);
-    await svc.from("doc_pdf_cache").delete().eq("doc", doc).eq("doc_id", docId);
+    let del = svc.from("doc_pdf_cache").delete().eq("doc", doc).eq("doc_id", docId);
+    if (org) del = del.eq("org_id", org);
+    await del;
   } catch {
     /* the cache is a shortcut; the write it rides on is the job */
   }
@@ -81,15 +108,22 @@ export async function bustCustomerPdfs(customerId: string): Promise<void> {
   try {
     if (!customerId) return;
     const svc = createServiceClient();
-    const [{ data: invs }, { data: qs }] = await Promise.all([
-      svc.from("invoices").select("id").eq("customer_id", customerId),
-      svc.from("quotes").select("id").eq("customer_id", customerId),
-    ]);
+    // audit v921: the customer id comes off a client form and this fan-out runs on the service
+    // role — scope it to the caller's org so a foreign customer id can't enumerate and wipe
+    // another tenant's stored invoice/quote PDFs.
+    const org = await callerOrgId();
+    let invQ = svc.from("invoices").select("id").eq("customer_id", customerId);
+    let quoQ = svc.from("quotes").select("id").eq("customer_id", customerId);
+    if (org) {
+      invQ = invQ.eq("org_id", org);
+      quoQ = quoQ.eq("org_id", org);
+    }
+    const [{ data: invs }, { data: qs }] = await Promise.all([invQ, quoQ]);
     const ids = [
       ...((invs ?? []) as { id: string }[]).map((r) => ({ doc: "invoice", id: r.id })),
       ...((qs ?? []) as { id: string }[]).map((r) => ({ doc: "quote", id: r.id })),
     ];
-    for (const d of ids) await bustDocPdf(d.doc as "invoice" | "quote", d.id);
+    for (const d of ids) await bustDocPdf(d.doc as "invoice" | "quote", d.id, org);
   } catch {
     /* best-effort */
   }

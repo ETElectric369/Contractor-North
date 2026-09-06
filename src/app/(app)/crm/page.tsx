@@ -15,6 +15,9 @@ import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+/** PostgREST's own max-rows ceiling, stated here so the page can SAY when it hits it. */
+const CRM_PAGE_LIMIT = 1000;
+
 export default async function CrmPage({
   searchParams,
 }: {
@@ -30,7 +33,13 @@ export default async function CrmPage({
   const order = crmOrderColumn(spec);
   let query = supabase
     .from("customers")
-    .select("*")
+    // The columns this table renders, not the whole row (PROJECTION LAW, audit v921) — the
+    // detail page reads the rest when you open somebody.
+    .select("id, name, company_name, email, phone, type, city, state, status")
+    // PostgREST stops at 1,000 rows whether or not anyone asks it to. Asking makes the ceiling
+    // OURS: the list is A→Z, so the silent cut took the END of the alphabet off Contacts with
+    // nothing on screen saying so. Same number of rows as before, plus a line when it's reached.
+    .limit(CRM_PAGE_LIMIT)
     .order(order.column, { ascending: order.ascending, nullsFirst: order.nullsFirst });
   if (order.column !== "name") query = query.order("name", { ascending: true });
 
@@ -73,6 +82,14 @@ export default async function CrmPage({
         </form>
         <SortControl />
       </div>
+
+      {customers.length >= CRM_PAGE_LIMIT && (
+        // NOTHING SILENT: past this many contacts the list is cut, and the cut end is the end of
+        // whatever order you picked. Say so, and name the way through it.
+        <p className="mb-3 text-sm text-amber-700">
+          Showing the first {CRM_PAGE_LIMIT.toLocaleString()} contacts — search to narrow the list.
+        </p>
+      )}
 
       {customers.length === 0 ? (
         <EmptyState

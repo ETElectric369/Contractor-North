@@ -153,17 +153,36 @@ export async function createInvoiceForJob(
  *  and materials from POs/bills. Returns the invoice id for review. */
 /** Set a job's status (partial — keeps everything else). For voice: "mark the Miller job on
  *  hold / in progress". Org-scoped by RLS (a cross-org id is a clean no-op). */
-export async function setJobStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
+export async function setJobStatus(
+  id: string,
+  status: string,
+  /** Why it's parked — only read for on_hold. A hold without a reason is a shrug (0234). */
+  reason?: string | null,
+): Promise<{ ok: boolean; error?: string }> {
   if (!(JOB_STATUSES as readonly string[]).includes(status)) return { ok: false, error: `Status must be one of: ${JOB_STATUSES.join(", ")}.` };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  /* A HOLD ALWAYS CARRIES ITS WHY (audit v921). Both dropdowns ask before parking (0234), but this
+     writer took on_hold from anyone — the assistant included — and wrote the word alone, leaving
+     hold_reason NULL. J-013 is sitting in production exactly like that: "On hold" on the job page,
+     on the rail and on My Day, with nothing to act on, which is the dead end 0234 was written to
+     prevent. So a park needs a reason: the one passed here, or one the job already carries. */
+  const holdReason = String(reason ?? "").trim();
+  if (status === "on_hold" && !holdReason) {
+    const { data: cur } = await supabase.from("jobs").select("hold_reason").eq("id", id).maybeSingle();
+    if (!String((cur as { hold_reason?: string | null } | null)?.hold_reason ?? "").trim())
+      return { ok: false, error: "Say why it's on hold — open the job and pick On hold; it asks for the reason." };
+  }
   // The hold reason lives and dies WITH the hold (0234): any status that isn't on_hold clears it,
   // whichever control moved the status — a stale "waiting on the permit" on an active job is a
   // false alarm every reader would believe.
   const { data, error } = await supabase
     .from("jobs")
-    .update({ status, ...(status !== "on_hold" ? { hold_reason: null } : {}) })
+    .update({
+      status,
+      ...(status !== "on_hold" ? { hold_reason: null } : holdReason ? { hold_reason: holdReason } : {}),
+    })
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
@@ -416,7 +435,7 @@ export async function updateJob(
     .eq("id", id)
     .maybeSingle();
 
-  const { error } = await supabase
+  const { data: saved, error } = await supabase
     .from("jobs")
     .update({
       name,
@@ -434,8 +453,12 @@ export async function updateJob(
       assigned_to: assigned,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", id);
+    .eq("id", id)
+    // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — editing a job
+    // that was deleted (or belongs to another org) answered "Saved" and wrote nothing.
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!saved?.length) return { ok: false, error: "That job isn't available." };
 
   if (prevJob) {
     const p = prevJob as { assigned_to: string[] | null; org_id: string | null; job_number: string | null };
