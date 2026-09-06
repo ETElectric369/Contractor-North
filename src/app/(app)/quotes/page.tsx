@@ -37,7 +37,8 @@ export default async function QuotesPage({
   let query = supabase.from("quotes").select("*, customers(name, company_name), inquiry:inquiry_id(name)");
   if (filter) query = query.eq("doc_type", filter);
   if (statusFilter) query = query.eq("status", statusFilter);
-  const { data } = await query.order("created_at", { ascending: false });
+  // Bounded (audit v921): PostgREST truncates at its max-rows cap otherwise, silently.
+  const { data } = await query.order("created_at", { ascending: false }).limit(2000);
 
   const quotes = (data ?? []) as any[];
   // Default view: settled paperwork files away. Stable-sort by lifecycle weight (mirrors the

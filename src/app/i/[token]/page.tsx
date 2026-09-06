@@ -47,7 +47,12 @@ export default async function PublicInvoicePage({
   const co = companyFromOrg(org);
   const template = templateFor(org, "invoice");
   const balance = invoiceBalance(inv.total, inv.amount_paid);
-  const payable = billingEnabled && inv.status !== "void" && inv.status !== "draft";
+  // "Pay now" only when the ORG can actually take a card, not merely when the platform has a
+  // Stripe key (audit v921 — 0247 ships can_take_card on the org projection). Before this, an org
+  // that had never finished Connect onboarding still showed the button and the click died on a
+  // plain-text 503.
+  const orgTakesCard = (data.org as { can_take_card?: boolean } | null)?.can_take_card !== false;
+  const payable = billingEnabled && orgTakesCard && inv.status !== "void" && inv.status !== "draft";
   // audit v921: /api/pay used to answer its refusals with a bare text/plain 503 — a customer who
   // tapped "Pay now" landed on an unstyled page with no way back. It now sends them here with a
   // reason, and this line says it out loud. The sub-$0.50 case is stated even before a click,

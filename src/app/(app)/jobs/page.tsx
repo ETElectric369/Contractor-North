@@ -32,7 +32,10 @@ export default async function JobsPage({
   let query = supabase
     .from("jobs")
     .select("*, customers(name)")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    // Bounded (audit v921) — see the note in billing/page.tsx: an unbounded list truncates at
+    // PostgREST's cap with nothing on screen to say older jobs are missing.
+    .limit(2000);
   if (status) query = query.eq("status", status);
 
   const {

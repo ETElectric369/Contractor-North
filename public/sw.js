@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v928";
+const VERSION = "cn-v929";
 const STATIC_CACHE = `static-${VERSION}`;
 // Pages visited while online, kept so a dead zone shows the real page instead of /offline.
 // SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.
@@ -60,7 +60,16 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/intake/") ||
     url.pathname.startsWith("/inquire/") ||
     url.pathname.startsWith("/estimate/") ||
-    url.pathname.startsWith("/pick/")
+    url.pathname.startsWith("/pick/") ||
+    // The customer DOCUMENT doors carry a bearer token in the URL and somebody else's money
+    // details in the body (audit v921). Caching them in the crew's shared page cache means a
+    // later navigation can serve one person's invoice to whoever holds the phone — and the
+    // offline copy of a document that has since been paid is worse than no copy.
+    url.pathname.startsWith("/i/") ||
+    url.pathname.startsWith("/q/") ||
+    url.pathname.startsWith("/c/") ||
+    url.pathname.startsWith("/portal/") ||
+    url.pathname.startsWith("/voice/")
   )
     return;
 

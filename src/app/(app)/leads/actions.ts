@@ -444,7 +444,10 @@ export async function convertInquiry(
         slots,
         timeNote: opts.timeNote ?? null,
         inquiryId: id,
-        customerId: null, // deferred-customer doctrine: no contact row before the win
+        // Deferred-customer doctrine: no contact row is MINTED before the win — but if this lead
+        // already has one (a returning customer, or an earlier link), carry it, the way the firm
+        // "Book it" door does. Dropping it left the booking orphaned from a known contact (v921).
+        customerId: (inq as { customer_id?: string | null }).customer_id ?? null,
         location: inq.address,
         notes:
           [inq.message ?? inq.notes ?? null, carriedNote(carry.carried), briefNote(carry.briefCarried)]
@@ -597,8 +600,16 @@ export async function convertInquiry(
     if (lines.length) {
       // Lead arrived with a priced estimate (Tahoe Deck configurator) → seed a real draft and open it.
       const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
-      const validUntil = new Date();
-      validUntil.setDate(validUntil.getDate() + (getOrgSettings(orgRow?.settings).quote_expiry_days || 30));
+      // Count the expiry from the ORG's today, and add days on the CALENDAR — a bare new Date()
+      // is the server's UTC day (after 5pm Pacific that is already tomorrow) and adding ms across
+      // a DST night lands a day out (audit v921).
+      const orgSettings = getOrgSettings(orgRow?.settings);
+      const seedDay = todayStrInTz(orgSettings.timezone);
+      const validUntilStr = new Date(
+        Date.parse(seedDay + "T00:00:00Z") + (orgSettings.quote_expiry_days || 30) * 86_400_000,
+      )
+        .toISOString()
+        .slice(0, 10);
       const label = PROJECT_TYPES.find((p) => p.value === inq.project_type)?.label;
       const reason = typeof (inq.intake as { reason?: unknown } | null)?.reason === "string"
         ? (inq.intake as { reason: string }).reason
@@ -609,7 +620,7 @@ export async function convertInquiry(
         title: label ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
         notes: reason ? `From lead — ${reason}` : "From lead.",
         tax_rate: 0, // never infer tax on a seeded draft; the office sets it on review
-        valid_until: validUntil.toISOString().slice(0, 10),
+        valid_until: validUntilStr,
         items: lines,
       });
       if (!res.ok) return { ok: false, error: res.error };

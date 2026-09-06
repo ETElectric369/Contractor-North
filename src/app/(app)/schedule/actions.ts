@@ -818,9 +818,13 @@ export async function setJobHold(jobId: string, reason: string | null): Promise<
   if ("error" in ctx) return { ok: false, error: ctx.error };
 
   if (reason !== null) {
+    // A HOLD HAS A REASON (0234) — and " " is not one (audit v921). Refuse rather than parking the
+    // job with hold_reason NULL, which is exactly the state the migration was written to end.
+    const cleanReason = reason.trim();
+    if (!cleanReason) return { ok: false, error: "Say why it's on hold — that's what the crew and the customer will read." };
     const { data, error } = await ctx.supabase
       .from("jobs")
-      .update({ status: "on_hold", hold_reason: reason.trim() || null, updated_at: new Date().toISOString() })
+      .update({ status: "on_hold", hold_reason: cleanReason, updated_at: new Date().toISOString() })
       .eq("id", jobId)
       .select("id");
     if (error) return { ok: false, error: dbError(error) };

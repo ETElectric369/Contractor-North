@@ -29,7 +29,10 @@ export default async function BillingPage() {
       // sum(amount_paid) — that field folds in account credits, so writing off a disputed
       // invoice used to RAISE this tile above what /payments, /analytics and Nort report.
       getCollected(supabase),
-      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }),
+      // Bounded (audit v921): PostgREST silently truncates at its max-rows cap, so an unbounded
+      // list quietly stops showing older rows with nothing on screen saying so. An explicit high
+      // limit fails visibly at a known number instead of invisibly at the server's.
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }).limit(2000),
     ]);
 
   const list = (allInv ?? []) as any[];
