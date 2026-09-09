@@ -45,6 +45,11 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // A FAILURE HAS TO LOOK LIKE ONE (2026-09-09). Every outcome — "turned on", "iOS said no",
+  // "stuck at waiting for Apple" — rendered as the same 12px grey line under the button, so a
+  // real error read as nothing at all: the button just went back to Enable and the reason sat
+  // there unread. NOTHING SILENT means the failure is legible, not merely present.
+  const [msgBad, setMsgBad] = useState(false);
   const [prefs, setPrefs] = useState<Record<string, boolean>>(initialPrefs ?? {});
   // TWO TRANSPORTS (2026-09-09). In the App Store app there is no service worker and no
   // PushManager — Apple's Web Push is Safari / home-screen only — so this used to render
@@ -88,26 +93,26 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
     if (native) {
       const r = await registerForNativePush();
       if (!r.ok) {
-        setMsg(r.error);
+        setMsg(r.error); setMsgBad(true);
         setBusy(false);
         return;
       }
       const saved = await saveDeviceToken(r.token, navigator.userAgent);
       if (!saved.ok) {
-        setMsg(saved.error ?? "Could not register this phone.");
+        setMsg(saved.error ?? "Could not register this phone."); setMsgBad(true);
         setBusy(false);
         return;
       }
       setDeviceToken(r.token);
       setEnabled(true);
-      setMsg("Notifications are on for this phone.");
+      setMsg("Notifications are on for this phone."); setMsgBad(false);
       setBusy(false);
       return;
     }
     try {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
-        setMsg("Notifications were blocked — enable them in your browser settings to receive alerts.");
+        setMsg("Notifications were blocked — enable them in your browser settings to receive alerts."); setMsgBad(true);
         setBusy(false);
         return;
       }
@@ -118,14 +123,14 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
       });
       const res = await savePushSubscription(sub.toJSON() as any, navigator.userAgent);
       if (!res.ok) {
-        setMsg(res.error ?? "Could not save the subscription.");
+        setMsg(res.error ?? "Could not save the subscription."); setMsgBad(true);
         setBusy(false);
         return;
       }
       setEnabled(true);
-      setMsg("Notifications are on for this device.");
+      setMsg("Notifications are on for this device."); setMsgBad(false);
     } catch (e: any) {
-      setMsg(e?.message ?? "Could not enable notifications.");
+      setMsg(e?.message ?? "Could not enable notifications."); setMsgBad(true);
     }
     setBusy(false);
   }
@@ -145,13 +150,13 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
       }
       const res = token ? await removeDeviceToken(token) : { ok: false, error: undefined };
       if (!res.ok) {
-        setMsg(res.error ?? "Couldn't turn this phone off on the server — try again.");
+        setMsg(res.error ?? "Couldn't turn this phone off on the server — try again."); setMsgBad(true);
         setBusy(false);
         return;
       }
       setDeviceToken(null);
       setEnabled(false);
-      setMsg("This phone won't be sent notifications. iPhone Settings → North still shows them as allowed.");
+      setMsg("This phone won't be sent notifications. iPhone Settings → North still shows them as allowed."); setMsgBad(false);
       setBusy(false);
       return;
     }
@@ -163,9 +168,9 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
         await sub.unsubscribe();
       }
       setEnabled(false);
-      setMsg("Turned off for this device.");
+      setMsg("Turned off for this device."); setMsgBad(false);
     } catch (e: any) {
-      setMsg(e?.message ?? "Could not turn off.");
+      setMsg(e?.message ?? "Could not turn off."); setMsgBad(true);
     }
     setBusy(false);
   }
@@ -209,7 +214,17 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
           {busy ? "…" : enabled ? "Turn Off" : "Enable"}
         </Button>
       </div>
-      {msg && <p className="text-xs text-slate-500">{msg}</p>}
+      {msg && (
+        <p
+          className={
+            msgBad
+              ? "rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700"
+              : "rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+          }
+        >
+          {msg}
+        </p>
+      )}
 
       <div className="space-y-2">
         {TRIGGERS.map((t) => (
