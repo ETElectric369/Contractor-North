@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM } from "./types";
@@ -67,12 +68,34 @@ const QUOTE_EXPIRY_SOON_DAYS = 5;
  * which is exactly what the badge invariant (types.ts) forbids: no count may be
  * the length of an unbounded or undated set. Do not re-add a task feeder.
  */
-export async function getActionItems(ctx: {
+/**
+ * ONE FAN-OUT PER REQUEST (2026-09-08 — Erik: "taking a super long time to load anything on the
+ * phone app"). /planner asks for the LIST and the app shell asks for its COUNT, so opening My Day
+ * ran this ~31-query union TWICE. React's cache() memoises on the primitive arguments for the life
+ * of a single request, so the second caller now awaits the first one's promise. Keyed on primitives
+ * deliberately: cache() compares arguments with Object.is, and an object literal is a fresh
+ * reference every call — it would never hit.
+ */
+const actionItemsForRequest = cache(
+  (todayStr: string, isStaff: boolean, userId: string, tz: string): Promise<ActionItem[]> =>
+    buildActionItems({ todayStr, isStaff, userId, tz: tz || undefined }),
+);
+
+export function getActionItems(ctx: {
   todayStr: string;
   isStaff: boolean;
   userId: string;
   /** ORG timezone — see the day-cut note below. Optional: without it the cuts fall back to the
    *  old session-zone (UTC) literals, which drift by up to a day. */
+  tz?: string;
+}): Promise<ActionItem[]> {
+  return actionItemsForRequest(ctx.todayStr, ctx.isStaff, ctx.userId, ctx.tz ?? "");
+}
+
+async function buildActionItems(ctx: {
+  todayStr: string;
+  isStaff: boolean;
+  userId: string;
   tz?: string;
 }): Promise<ActionItem[]> {
   const { todayStr, isStaff, userId, tz } = ctx;

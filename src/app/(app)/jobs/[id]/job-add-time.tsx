@@ -8,7 +8,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { drivingDistanceMiles } from "@/lib/google-maps";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { lunchMinutesFor } from "@/lib/lunch-rule";
+import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { createManualEntry } from "../../timeclock/actions";
 import type { JobCode } from "@/lib/types";
 
@@ -66,6 +67,8 @@ export function JobAddTimeEntry({
   const [jobCode, setJobCode] = useState("");
   const [rate, setRate] = useState(0); // 0 = use the employee's default rate
   const [notes, setNotes] = useState("");
+  // Lunch is OPT-IN (Erik 2026-09-08) — unchecked means the shift is paid gross.
+  const [tookLunch, setTookLunch] = useState(false);
 
   // Mileage origin: the selected employee's home address if set, else the company address.
   const mileageOrigin = (techs.find((t) => t.id === profileId)?.home_address || companyAddress || "").trim();
@@ -80,15 +83,6 @@ export function JobAddTimeEntry({
   const billRateTyped =
     rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
 
-  const grossHrs = (() => {
-    const ci = new Date(`${date}T${startT}:00`);
-    const co = new Date(`${date}T${endT}:00`);
-    if (isNaN(ci.getTime()) || isNaN(co.getTime()) || co <= ci) return 0;
-    return (co.getTime() - ci.getTime()) / 3_600_000;
-  })();
-  // Lunch is AUTOMATIC (>5h ⇒ 30 min, the shared rule) — shown as a note, applied by
-  // the server (lunch_minutes omitted below).
-  const autoLunch = autoLunchMinutes(grossHrs);
 
   function save() {
     setError(null);
@@ -103,7 +97,8 @@ export function JobAddTimeEntry({
         clock_out: co.toISOString(),
         job_id: jobId,
         job_code: jobCode || null,
-        // Omitted → the server's auto-lunch rule decides (>5h ⇒ 30 min).
+        // Stated every time, so 0 is a real answer and not "wasn't asked".
+        lunch_minutes: lunchMinutesFor(tookLunch),
         notes,
         miles,
         rate_override: rate > 0 ? rate : null,
@@ -196,11 +191,7 @@ export function JobAddTimeEntry({
               )}
             </div>
           </div>
-          {autoLunch > 0 && (
-            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Over 5 hours — a 30-minute unpaid lunch is deducted automatically. Adjust it on the entry afterwards if needed.
-            </p>
-          )}
+          <LunchCheckbox id="at-lunch" checked={tookLunch} onChange={setTookLunch} />
           <div>
             <Label htmlFor="at-notes">Notes</Label>
             <Textarea id="at-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />

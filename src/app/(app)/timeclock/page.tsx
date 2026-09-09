@@ -138,13 +138,15 @@ export default async function TimeclockPage() {
    * everything on it is now a decision somebody made.
    */
 
-  // The week grid's data (staff render) — the same read the grid's client paging
-  // uses (listWeekAssignments, offset 0 = this week), called server-side so the
-  // grid hydrates with the current week instead of flashing empty.
-  const weekAssignments = isStaff ? await listWeekAssignments(0) : null;
-
-  // Attach each job's template codes so the code picker can narrow to the right codes.
-  const { data: tmplData } = await supabase.from("job_code_templates").select("id, codes");
+  // The week grid's data (staff render) — the same read the grid's client paging uses
+  // (listWeekAssignments, offset 0 = this week), called server-side so the grid hydrates with
+  // the current week instead of flashing empty — TOGETHER with the code templates below, which
+  // never depended on it (2026-09-08 phone-lag sweep: two round trips one after the other).
+  const [weekAssignments, { data: tmplData }] = await Promise.all([
+    isStaff ? listWeekAssignments(0) : Promise.resolve(null),
+    // Attach each job's template codes so the code picker can narrow to the right codes.
+    supabase.from("job_code_templates").select("id, codes"),
+  ]);
   const tmplMap = new Map((tmplData ?? []).map((t: any) => [t.id as string, (t.codes ?? []) as string[]]));
   const jobOptions = ((jobsRes.data ?? []) as any[]).map((j) => ({
     ...j,

@@ -48,6 +48,7 @@ import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
+import { signDocumentUrls } from "@/lib/signed-docs";
 import { jobLabel } from "@/lib/schedule-options";
 import { directionsTarget } from "@/lib/maps";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
@@ -461,16 +462,15 @@ export default async function JobDetailPage({
   const profit = revenue - laborCost - materialCost - billsCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
-  const docs = await Promise.all(
-    (docRows ?? []).map(async (d: any) => {
-      // Organize notes filed to a job are documents rows with NO file (file_url null).
-      // createSignedUrl(null) throws a TypeError that storage-js rethrows (it only
-      // swallows StorageErrors), crashing the whole RSC render — guard like /organize.
-      if (!d.file_url) return { ...d, signedUrl: null };
-      const { data } = await supabase.storage.from("documents").createSignedUrl(d.file_url, 3600);
-      return { ...d, signedUrl: data?.signedUrl ?? null };
-    }),
-  );
+  // ONE signing call for the whole tab, not one per document (2026-09-08 phone-lag sweep).
+  // Organize notes filed to a job are documents rows with NO file (file_url null); the helper
+  // skips them rather than sending a null path, which storage-js rethrows as a TypeError and
+  // used to crash the whole RSC render.
+  const docUrls = await signDocumentUrls(supabase, (docRows ?? []).map((d: any) => d.file_url));
+  const docs = (docRows ?? []).map((d: any) => ({
+    ...d,
+    signedUrl: (d.file_url && docUrls.get(d.file_url)) || null,
+  }));
 
   const empty = (label: string) => (
     <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>

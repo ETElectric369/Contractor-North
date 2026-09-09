@@ -1,15 +1,42 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { DOCK, activeSection, basePath } from "@/lib/dock";
 
+type Badges = Record<string, number>;
 type DockProps = {
   branding?: { name: string | null; logo: string | null };
   role?: string;
-  badges?: Record<string, number>;
+  /** Counts per href. Accepts a PROMISE (2026-09-08): the app shell hands the Needs-action
+   *  fan-out over unresolved so a cosmetic dot never delays the page behind it — see the note in
+   *  (app)/layout.tsx. Server render and first paint show no dots; they arrive a beat later. */
+  badges?: Badges | Promise<Badges>;
 };
+
+/** Resolve the badge counts without ever suspending the dock. A plain object is used as-is; a
+ *  promise starts empty and fills in when it lands, so the nav is interactive immediately. */
+function useBadges(badges?: Badges | Promise<Badges>): Badges {
+  const pending = !!badges && typeof (badges as Promise<Badges>).then === "function";
+  const [resolved, setResolved] = useState<Badges>(pending ? {} : ((badges as Badges) ?? {}));
+  useEffect(() => {
+    if (!pending) {
+      setResolved((badges as Badges) ?? {});
+      return;
+    }
+    let live = true;
+    (badges as Promise<Badges>)
+      .then((b) => {
+        if (live) setResolved(b ?? {});
+      })
+      .catch(() => {}); // a count is never worth an error — the dot just stays off
+    return () => {
+      live = false;
+    };
+  }, [badges, pending]);
+  return resolved;
+}
 
 /**
  * ONE dock, two orientations. The same section tiles — from the same `activeSection()`
@@ -32,7 +59,8 @@ export function Dock(props: DockProps) {
   );
 }
 
-function DockInner({ branding, role, badges }: DockProps) {
+function DockInner({ branding, role, badges: badgesProp }: DockProps) {
+  const badges = useBadges(badgesProp);
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");

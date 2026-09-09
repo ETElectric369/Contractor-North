@@ -1,3 +1,4 @@
+import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { PageHeader } from "@/components/page-header";
@@ -23,13 +24,13 @@ export default async function OrganizePage() {
       .limit(100),
   ]);
 
-  const withUrls: OrganizedItemRow[] = await Promise.all(
-    ((items ?? []) as any[]).map(async (i) => {
-      if (!i.file_url) return { ...i, signedUrl: null }; // voice/typed notes have no file
-      const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
-      return { ...i, signedUrl: data?.signedUrl ?? null };
-    }),
-  );
+  // ONE signing call for the page (2026-09-08 phone-lag sweep) — this used to open a Storage
+  // connection per row. Voice/typed notes have no file and are skipped, not sent as null.
+  const urls = await signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url));
+  const withUrls: OrganizedItemRow[] = ((items ?? []) as any[]).map((i) => ({
+    ...i,
+    signedUrl: (i.file_url && urls.get(i.file_url)) || null,
+  }));
 
   return (
     <div className="mx-auto max-w-3xl">

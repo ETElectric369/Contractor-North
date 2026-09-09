@@ -1,3 +1,4 @@
+import { signDocumentUrls } from "@/lib/signed-docs";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
@@ -26,12 +27,12 @@ export default async function EmployeeDocsPage() {
       .order("created_at", { ascending: false }),
   ]);
 
-  const docs = await Promise.all(
-    (docRows ?? []).map(async (d: any) => {
-      const { data } = await supabase.storage.from("documents").createSignedUrl(d.file_url, 3600);
-      return { ...d, signedUrl: data?.signedUrl ?? null };
-    }),
-  );
+  // ONE signing call for the whole list (2026-09-08 phone-lag sweep).
+  const urls = await signDocumentUrls(supabase, (docRows ?? []).map((d: any) => d.file_url));
+  const docs = (docRows ?? []).map((d: any) => ({
+    ...d,
+    signedUrl: (d.file_url && urls.get(d.file_url)) || null,
+  }));
 
   return (
     <div>

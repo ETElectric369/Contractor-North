@@ -111,8 +111,9 @@ export function EditEntryButton({
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   // Real lunch MINUTES (not a 30/0 boolean) so editing an unrelated field can't silently
   // collapse a stored 45/60-min lunch down to 30 and mis-state paid hours (the wage bug).
-  // No attestation checkbox anymore (Erik 2026-07-22) — lunch is auto-applied at the punch;
-  // this field exists for OFFICE corrections (worked-through-lunch → 0, long lunch → 60).
+  // The crew's doors offer one 30-minute checkbox (Erik 2026-09-08, off by default); THIS
+  // field is the office's precision instrument — any number of minutes, 0 included, and
+  // nothing on the server second-guesses it.
   const [lunchMin, setLunchMin] = useState(entry.lunch_minutes ?? 0);
   const [miles, setMiles] = useState(entry.miles ?? 0);
   // rate_override is only WRITTEN when the user actually edits the Rate field — an unrelated
@@ -458,9 +459,9 @@ export function EditEntryButton({
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>
           )}
-          {/* No attestation checkboxes (Erik 2026-07-22): lunch is auto-deducted at the
-              punch (>5 hrs ⇒ 30 min); this plain minutes field is the OFFICE correction —
-              0 = worked through lunch (adds paid time), 60 = long lunch, etc. */}
+          {/* The crew's doors carry one 30-minute box, off by default (Erik 2026-09-08).
+              This plain minutes field is the OFFICE instrument — 0 = worked through lunch,
+              45/60 = a longer one — and nothing on the server second-guesses it. */}
           <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
             <span className="text-slate-700">Unpaid lunch</span>
             <span className="ml-auto flex items-center gap-1 text-slate-600">
@@ -469,7 +470,7 @@ export function EditEntryButton({
             </span>
           </div>
           <p className="text-xs text-slate-400">
-            Deducted automatically at the punch (30 min over 5 hrs) — change it here to correct an entry.
+            Whatever was ticked at the punch — 0 unless someone said a lunch was taken. Change it here to correct an entry.
           </p>
           <div>
             <Label htmlFor="e-notes">Notes</Label>

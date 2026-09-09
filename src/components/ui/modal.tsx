@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 import { shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
+import { safeAreaTop } from "@/lib/native-shell";
 
 export function Modal({
   open,
@@ -197,7 +198,14 @@ export function Modal({
           width: vv.width,
           height: vv.height,
         });
-        setKbMaxH(`${Math.max(200, Math.round(vv.height - 24))}px`);
+        // Leave room for the wrapper's OWN padding — top is the notch inset in the native
+        // shell (var(--sat), ~59px on an iPhone with a Dynamic Island), bottom is 12px.
+        // Capping at vv.height - 24 ignored the top inset, so the panel overflowed the
+        // wrapper by the height of the notch and its pinned footer (Cancel / Save) sat
+        // below the fold with the panel's own scroller eating the drag that would reach it
+        // — Erik 2026-09-08, "Can't reach x on top and buttons aren't available".
+        const satPx = Math.max(12, safeAreaTop());
+        setKbMaxH(`${Math.max(200, Math.round(vv.height - satPx - 12))}px`);
       });
     };
     update();
@@ -247,7 +255,7 @@ export function Modal({
         <div
           onClick={(e) => e.stopPropagation()}
           style={kbMaxH ? { maxHeight: kbMaxH } : undefined}
-          className={`relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
+          className={`relative z-10 flex max-h-[calc(100dvh-max(0.75rem,var(--sat,0px))-0.75rem)] w-full ${maxW} flex-col rounded-2xl bg-white shadow-xl`}
         >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-6 py-4">
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>

@@ -88,8 +88,9 @@ export function SchedulingSettings({
       <div className="space-y-2 border-t border-slate-100 pt-4">
         <div className="text-sm font-medium text-slate-700">Timeclock (labor law)</div>
         <p className="text-xs text-slate-500">
-          A 30-minute unpaid lunch is deducted automatically on shifts over 5 hours — nobody
-          confirms checkboxes. The office can adjust any entry&apos;s lunch from Timecards.
+          Nothing is deducted for lunch unless someone says a lunch was taken: every clock-out
+          carries one 30-minute unpaid-lunch box, off by default. The office can set any entry to
+          any number of minutes from Timecards.
         </p>
         <label className="flex items-start gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={remindClock} onChange={(e) => setRemindClock(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />

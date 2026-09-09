@@ -80,30 +80,26 @@ describe("tailAllocationHours — the segment after the last switch", () => {
   });
 });
 
-describe("autoClockoutPromptState — surface the finish-timecard prompt (incl. the meal it skipped)", () => {
-  // THE REGRESSION. A >5h shift that switched jobs: switchJob recorded the outgoing
-  // segment and the close's tail backstop filled the rest, so every hour is allocated —
-  // but the geofence close deducted NO lunch. The old under-allocation-only gate hid the
-  // prompt, so the shift paid GROSS with no meal. It must now surface, lunch-only.
-  it("surfaces a lunch-only prompt for a fully-allocated >5h switched shift with no meal", () => {
+describe("autoClockoutPromptState — surface the finish-timecard prompt", () => {
+  // Lunch is OPT-IN since 2026-09-08, so a >5h shift carrying no lunch is an ordinary
+  // shift, not a "missing meal". The prompt now has exactly one job: chase hours that
+  // haven't been broken down by job/code yet.
+  it("stays quiet on a fully-allocated >5h shift with no lunch", () => {
     const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 0, allocatedHours: 8.5 });
-    expect(s.show).toBe(true);
-    expect(s.mealOnly).toBe(true);
+    expect(s.show).toBe(false);
   });
 
-  it("keeps the normal (full breakdown) prompt when hours are still unallocated", () => {
+  it("surfaces the breakdown prompt when hours are still unallocated", () => {
     const s = autoClockoutPromptState({ grossHours: 8, lunchMinutes: 0, allocatedHours: 0 });
     expect(s.show).toBe(true);
-    expect(s.mealOnly).toBe(false); // there's a remainder to log, not just the meal
   });
 
-  it("does NOT surface once a fully-allocated shift already has its meal", () => {
+  it("nets a recorded lunch out of the worked hours before comparing", () => {
     const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 30, allocatedHours: 8 });
     expect(s.show).toBe(false);
-    expect(s.mealOnly).toBe(false);
   });
 
-  it("no meal is owed on a short (≤5h) shift, so a fully-allocated one stays quiet", () => {
+  it("stays quiet on a fully-allocated short shift", () => {
     const s = autoClockoutPromptState({ grossHours: 4.5, lunchMinutes: 0, allocatedHours: 4.5 });
     expect(s.show).toBe(false);
   });
@@ -111,10 +107,9 @@ describe("autoClockoutPromptState — surface the finish-timecard prompt (incl. 
   it("still surfaces the remainder on a short shift that isn't fully allocated", () => {
     const s = autoClockoutPromptState({ grossHours: 4.5, lunchMinutes: 0, allocatedHours: 1 });
     expect(s.show).toBe(true);
-    expect(s.mealOnly).toBe(false);
   });
 
-  it("ignores rounding dust — a cent-level remainder on a meal'd shift stays quiet", () => {
+  it("ignores rounding dust — a cent-level remainder on a lunched shift stays quiet", () => {
     const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 30, allocatedHours: 7.98 });
     expect(s.show).toBe(false);
   });

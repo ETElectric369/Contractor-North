@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, updateTimeEntry } from "@/app/(app)/timeclock/actions";
 import { hoursBetween } from "@/lib/utils";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
@@ -281,16 +280,10 @@ export const timeActions: Record<string, ActionDef> = {
       }
 
       // Lunch: an explicitly stated number (incl. 0 = "no lunch") is an office correction,
-      // honored. Otherwise preserve a stored 45/60 — never collapse it. And when this call
-      // CLOSES a previously-open entry (the "Brian forgot to clock out" case) with no stored
-      // lunch, apply the SAME auto rule every clock-out door applies (>5h ⇒ 30) — otherwise
-      // office-closed forgotten shifts would systematically pay the meal half-hour.
-      const closingOpenEntry = !e.clock_out && !!clockOut;
-      const lunchMinutes =
-        i.lunch_minutes ??
-        (closingOpenEntry && !(e.lunch_minutes && e.lunch_minutes > 0)
-          ? autoLunchMinutes(hoursBetween(ciIn ?? e.clock_in, clockOut, 0))
-          : (e.lunch_minutes ?? 0));
+      // honored. Otherwise preserve what the entry already carries — never collapse a stored
+      // 45/60, and never invent one. (Erik 2026-09-08: lunch is opt-in, so closing a forgotten
+      // shift here no longer manufactures a 30-minute meal nobody said was taken.)
+      const lunchMinutes = i.lunch_minutes ?? (e.lunch_minutes ?? 0);
 
       const res = await updateTimeEntry({
         id: i.entry_id,

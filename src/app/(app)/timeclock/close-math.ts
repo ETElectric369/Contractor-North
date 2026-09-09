@@ -59,19 +59,13 @@ export function tailAllocationHours(workedHours: number, recordedHours: number):
 
 /**
  * Whether the /timeclock "finish your timecard" prompt should surface for an auto-closed
- * entry, and in which mode. TWO independent reasons to prompt:
+ * entry. ONE reason: an UNBILLED REMAINDER — worked hours exceed what's already allocated,
+ * so the tech still has to break the rest of the day down by job/code.
  *
- *  1. UNBILLED REMAINDER — worked hours exceed what's already allocated, so the tech
- *     still has to break the rest of the day down by job/code.
- *  2. MISSING MEAL — a shift over 5 GROSS hours whose auto-close skipped the 30-min meal
- *     (lunch still 0), EVEN WHEN every hour is already allocated. That last case is the
- *     switched geofence auto-close: switchJob's segments + the close's tail backstop
- *     filled the whole shift, so the old "prompt only if under-allocated" gate suppressed
- *     the prompt and the shift paid GROSS with no meal deducted — completeAutoClockOut
- *     (reached only via this prompt) is the only place an auto-closed entry's lunch is set.
- *
- * `mealOnly` marks reason 2 with nothing left to allocate — the prompt is a lunch-only
- * confirmation (Save writes just the meal; the hours are already on the entry).
+ * (Until 2026-09-08 there was a second reason — a >5h shift whose lunch was still 0 read as
+ * a "missing meal" and prompted on its own. Lunch is opt-in now and 0 is the default answer,
+ * so an untaken lunch is nothing to chase. The prompt still carries a lunch box, because an
+ * auto-closed shift is exactly the one nobody got to answer for.)
  *
  * Payroll-neutral: this only decides whether to ASK. Hours paid still come from
  * clock_in/clock_out/lunch.
@@ -83,15 +77,10 @@ export function autoClockoutPromptState(input: {
   lunchMinutes: number;
   /** sum of the entry's existing time_allocations (switch segments + any tail). */
   allocatedHours: number;
-}): { show: boolean; mealOnly: boolean } {
+}): { show: boolean } {
   const gross = Number.isFinite(input.grossHours) && input.grossHours > 0 ? input.grossHours : 0;
   const lunch = Number.isFinite(input.lunchMinutes) && input.lunchMinutes > 0 ? input.lunchMinutes : 0;
   const allocated = Number.isFinite(input.allocatedHours) && input.allocatedHours > 0 ? input.allocatedHours : 0;
   const worked = Math.max(0, gross - lunch / 60);
-  const unbilled = worked - allocated > 0.05;
-  // A meal is legally owed on a shift over 5 GROSS hours; lunch === 0 ⇒ it was skipped.
-  const mealMissing = gross > 5 && lunch === 0;
-  const show = unbilled || mealMissing;
-  const mealOnly = show && !unbilled && mealMissing;
-  return { show, mealOnly };
+  return { show: worked - allocated > 0.05 };
 }

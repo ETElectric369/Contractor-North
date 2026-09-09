@@ -7,7 +7,6 @@ import {
   MapPin,
   Mic,
   MicOff,
-  Coffee,
   Loader2,
   Plus,
   Trash2,
@@ -20,7 +19,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { lunchMinutesFor } from "@/lib/lunch-rule";
+import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { translator } from "@/lib/i18n";
 import { useDictation } from "@/lib/use-dictation";
@@ -164,6 +164,8 @@ export function TimeclockPanel({
   // When the CURRENT job segment started: clock-in, or the last mid-shift switch.
   const [segmentStartIso, setSegmentStartIso] = useState<string | null>(null);
   const [miles, setMiles] = useState(0);
+  // Unpaid lunch — off by default; nothing is deducted unless the tech says so.
+  const [tookLunch, setTookLunch] = useState(false);
   const [calcingMiles, setCalcingMiles] = useState(false);
 
   // mid-shift job switch — its own transition so the clock-out button doesn't
@@ -292,11 +294,10 @@ export function TimeclockPanel({
     });
   }
 
-  // Lunch is AUTOMATIC (Erik 2026-07-22: no more took-a-lunch/breaks checkboxes) — the
-  // ONE rule (>5 gross hrs ⇒ 30 min unpaid) drives the live display here; the server
-  // applies the same rule at the punch, so the numbers match.
-  const grossElapsed = openEntry ? hoursBetween(openEntry.clock_in, new Date(now), 0) : 0;
-  const lunchToUse = autoLunchMinutes(grossElapsed);
+  // Lunch is OPT-IN (Erik 2026-09-08: "remove the auto deduct 30 min lunch and change it to
+  // a checkbox as an option but default to 0"). The box below drives the live hours display
+  // AND the minutes sent at the punch, so what the tech sees is what gets paid.
+  const lunchToUse = lunchMinutesFor(tookLunch);
 
   // The everyday-case row used to be computed ONCE (at mount) and go stale — by
   // clock-out time the numbers didn't match the shift and the row rendered a
@@ -406,11 +407,9 @@ export function TimeclockPanel({
   }
 
   // ONE clock-out for both doors — the one-tap button AND the details questionnaire
-  // send the identical payload: lunch is null ("wasn't asked") and the server's
-  // auto-lunch (>5h ⇒ 30 min) is the single source of truth; the questionnaire no
-  // longer has a lunch answer to give (Erik 2026-07-22 — corrections live on
-  // Timecards). Either way the seeded allocation rows ride along, so a mid-shift
-  // switchJob split round-trips.
+  // send the identical payload, including the same lunch answer: whatever the single
+  // opt-in box says, 0 by default (Erik 2026-09-08). Either way the seeded allocation
+  // rows ride along, so a mid-shift switchJob split round-trips.
   function doClockOut() {
     if (!openEntry) return;
     setError(null);
@@ -418,10 +417,9 @@ export function TimeclockPanel({
       // Same short GPS cap as clock-in — the button used to sit disabled and
       // silent for up to the full 8s highAccuracy round-trip.
       const gps = await getGps(3000);
-      // The lunch the server will deduct — the same auto rule clockOut applies to every
-      // punch (no questionnaire answer exists anymore) — so the live row below nets out
-      // to the exact paid hours.
-      const punchLunch = autoLunchMinutes(hoursBetween(openEntry.clock_in, new Date(), 0));
+      // The lunch the server will deduct — exactly what the checkbox says — so the live row
+      // below nets out to the same paid hours the timecard will show.
+      const punchLunch = lunchToUse;
       // Recompute the live row's hours AT THE PUNCH (net of lunch, exact) — the
       // displayed h/m round to the minute, and the old mount-time seed went stale.
       let rows = allocations;
@@ -439,9 +437,8 @@ export function TimeclockPanel({
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
-          // null = "wasn't asked" for BOTH doors — the server's auto-lunch is the one
-          // source of truth, immune to a client/server >5h race at the boundary.
-          lunch_minutes: null,
+          // STATED on both doors — 0 is a real answer now, not "wasn't asked".
+          lunch_minutes: punchLunch,
           notes,
           gps,
           miles,
@@ -484,7 +481,7 @@ export function TimeclockPanel({
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
-          lunch_minutes: null, // server auto-lunch decides — same as every other punch
+          lunch_minutes: lunchToUse, // whatever the checkbox says — same as every other punch
           notes,
           gps,
           miles,
@@ -556,13 +553,16 @@ export function TimeclockPanel({
           )}
 
           {/* The big Clock Out — ONE tap for EVERY role now (Erik, cn-v502: "simple by
-              default for everyone"): no questionnaire, no lunch checkboxes, no mileage;
-              the server auto-deducts lunch (>5h ⇒ 30 min) and any mid-shift split
-              already recorded on the entry rides along via the seeded allocation rows.
+              default for everyone"): no questionnaire, no mileage. The single lunch box
+              above is the only question, and any mid-shift split already recorded on the
+              entry rides along via the seeded allocation rows.
               The full wrap-up still exists behind More options → "Clock out with details…". */}
           {!clockingOut && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
+              {/* A tech never opens the details questionnaire, so the lunch box lives here —
+                  the only place they can say a meal was taken. Off = paid gross. */}
+              <LunchCheckbox id="tc-lunch" checked={tookLunch} onChange={setTookLunch} />
               <Button
                 variant="destructive"
                 size="lg"
@@ -681,14 +681,9 @@ export function TimeclockPanel({
                 <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)}. Break it down below, then clock out.</p>
               </div>
 
-          {/* Lunch is automatic — the checkboxes are gone by design (Erik 2026-07-22).
-              Say what will happen so the deduction is never a surprise. */}
-          {lunchToUse > 0 && (
-            <p className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-              <Coffee className="h-4 w-4 shrink-0 text-slate-400" />
-              Over 5 hours — a 30-minute unpaid lunch is deducted automatically.
-            </p>
-          )}
+          {/* The one lunch question, off by default (Erik 2026-09-08). Ticking it nets the
+              live hours row below straight away, so the deduction is never a surprise. */}
+          <LunchCheckbox id="tc-lunch-details" checked={tookLunch} onChange={setTookLunch} />
 
           {/* Jobs worked today — the PRIMARY clock-out question: which code(s) + hours.
               This is the wrong-hours-on-wrong-jobs fix; required for the field crew. */}

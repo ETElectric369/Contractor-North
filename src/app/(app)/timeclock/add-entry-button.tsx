@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { useToast } from "@/components/toast";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
-import { buildShiftSpan, spanGrossHours } from "./shift-span";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { buildShiftSpan } from "./shift-span";
+import { lunchMinutesFor } from "@/lib/lunch-rule";
+import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { todayStrInTz } from "@/lib/tz";
+import { formatDuration } from "@/lib/utils";
 import type { JobCode } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
@@ -51,6 +54,7 @@ export function AddEntryButton({
   jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -68,6 +72,8 @@ export function AddEntryButton({
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
   const [miles, setMiles] = useState(0);
+  // Lunch is OPT-IN (Erik 2026-09-08) — unchecked means the shift is paid gross.
+  const [tookLunch, setTookLunch] = useState(false);
   const [rate, setRate] = useState(0);
   const [notes, setNotes] = useState("");
 
@@ -85,10 +91,6 @@ export function AddEntryButton({
   // end<start is rejected (a typo, not a 23h shift), while a real overnight is opt-in via
   // the End date field. The derivation is a fallback only when the two dates match.
   const span = buildShiftSpan(date, startT, endT, endDate);
-  const grossHrs = spanGrossHours(span);
-  // Lunch is AUTOMATIC (>5h ⇒ 30 min, the shared rule) — shown as a note, applied by the
-  // server (lunch_minutes omitted below). Corrections happen on the entry afterwards.
-  const autoLunch = autoLunchMinutes(grossHrs);
 
   function submit() {
     setError(null);
@@ -110,7 +112,8 @@ export function AddEntryButton({
         clock_out: clockOut.toISOString(),
         job_id: jobId || null,
         job_code: jobCode || null,
-        // Omitted → the server's auto-lunch rule decides (>5h ⇒ 30 min).
+        // Stated every time, so 0 is a real answer and not "wasn't asked".
+        lunch_minutes: lunchMinutesFor(tookLunch),
         notes,
         miles,
         // Blank/0 ⇒ default rate; a positive number sets a per-entry override.
@@ -122,6 +125,17 @@ export function AddEntryButton({
       }
       setOpen(false);
       setNotes("");
+      // SAY WHERE IT WENT (Erik 2026-09-08: "Time card entry not appearing"). /timeclock is a
+      // clock, not a ledger — the office's entries live on Timecards — so adding one from here
+      // used to close the modal onto a page that shows no trace of it. Name what was recorded
+      // and hand over the door to it, rather than leaving the office to wonder if it saved.
+      const paidHrs = Math.max(0, (clockOut.getTime() - clockIn.getTime()) / 3_600_000 - lunchMinutesFor(tookLunch) / 60);
+      const who = person?.full_name ?? "you";
+      const day = clockIn.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      toast(`Added ${formatDuration(paidHrs)} for ${who} · ${day}`, "success", {
+        label: "Timecards",
+        onClick: () => router.push("/timecards"),
+      });
       router.refresh();
     });
   }
@@ -166,9 +180,11 @@ export function AddEntryButton({
             </div>
           )}
 
+          {/* Dates in the LEFT column, times in the RIGHT one, so the two rows line up on a
+              phone (Erik 2026-09-08 — they used to alternate date/time/time/date). */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div>
-              <Label htmlFor="date">Date</Label>
+              <Label htmlFor="date">Start date</Label>
               <Input
                 id="date"
                 type="date"
@@ -183,17 +199,17 @@ export function AddEntryButton({
               />
             </div>
             <div>
-              <Label htmlFor="start">Start</Label>
+              <Label htmlFor="start">Start time</Label>
               <Input id="start" type="time" value={startT} onChange={(e) => setStartT(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="end">End</Label>
-              <Input id="end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
             <div>
               <Label htmlFor="end-date">End date</Label>
               <Input id="end-date" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
               {span?.overnight && <p className="mt-1 text-xs text-slate-500">Overnight shift</p>}
+            </div>
+            <div>
+              <Label htmlFor="end">End time</Label>
+              <Input id="end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
 
@@ -229,11 +245,7 @@ export function AddEntryButton({
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>
           )}
-          {autoLunch > 0 && (
-            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Over 5 hours — a 30-minute unpaid lunch is deducted automatically. Adjust it on the entry afterwards if needed.
-            </p>
-          )}
+          <LunchCheckbox id="m-lunch" checked={tookLunch} onChange={setTookLunch} />
 
           <div>
             <Label htmlFor="m-job">Job (optional)</Label>

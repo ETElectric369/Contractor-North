@@ -8,10 +8,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Select, Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration } from "@/lib/utils";
-import { autoLunchMinutes } from "@/lib/lunch-rule";
+import { lunchMinutesFor, LUNCH_MIN } from "@/lib/lunch-rule";
+import { LunchCheckbox } from "@/components/lunch-checkbox";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
-import { autoClockoutPromptState } from "./close-math";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 
 type JobOpt = {
@@ -58,18 +58,8 @@ export function AutoClockoutPrompt({
   const router = useRouter();
   const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   const already = Math.max(0, Number(entry.allocatedHours) || 0);
-  const gross0 = hoursBetween(entry.clock_in, entry.clock_out, 0);
   const worked0 = hoursBetween(entry.clock_in, entry.clock_out, entry.lunch_minutes);
   const remaining0 = Math.max(0, worked0 - already);
-  // MEAL-ONLY: the whole shift is ALREADY recorded (a mid-shift switch's segments + the
-  // close's tail backstop filled it) and the only thing the auto-close skipped is the
-  // 30-min meal on a >5h shift. Then this prompt is a lunch-only confirmation — there's
-  // nothing left to break down. Same pure gate the page uses to decide to show us at all.
-  const { mealOnly } = autoClockoutPromptState({
-    grossHours: gross0,
-    lunchMinutes: entry.lunch_minutes,
-    allocatedHours: already,
-  });
   const [allocations, setAllocations] = useState<AllocRow[]>([
     {
       job_id: entry.jobId ?? "",
@@ -79,13 +69,13 @@ export function AutoClockoutPrompt({
       description: "",
     },
   ]);
-  // Lunch is AUTOMATIC — no checkbox (Erik 2026-07-22). New auto closes deduct at the
-  // close itself (clockOut's auto-lunch now runs for auto closes too), so
-  // entry.lunch_minutes is already right; the max() is the belt for LEGACY entries
-  // closed before that fix (lunch 0 on a >5h shift) — in both mealOnly and breakdown
-  // mode Save then applies the same rule in ONE pass (equal-or-increase, so the 0143
-  // guard always allows it), instead of a second resurfaced prompt rescaling the split.
-  const lunchMin = Math.max(entry.lunch_minutes, autoLunchMinutes(gross0));
+  // An auto-closed shift is the ONE nobody got to answer for — a geofence close asked
+  // nothing. So the box is here too, seeded from whatever the entry already carries
+  // (0 unless the office typed something). Save may only RAISE lunch on a closed shift
+  // (the 0143 guard), so a pre-existing 45-minute lunch is the floor, never lowered here.
+  const storedLunch = Math.max(0, Number(entry.lunch_minutes) || 0);
+  const [tookLunch, setTookLunch] = useState(storedLunch > 0);
+  const lunchMin = Math.max(storedLunch, lunchMinutesFor(tookLunch));
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -95,7 +85,6 @@ export function AutoClockoutPrompt({
   // Codes off: the split identifies work by the JOB, so a job (not a code) unlocks Save.
   // Meal-only: the hours are already on the entry, so Save just writes the lunch.
   const ok =
-    mealOnly ||
     allocations.some(
       (a) => (jobCodesEnabled ? a.job_code : a.job_id) && (a.hours || 0) + (a.minutes || 0) / 60 > 0,
     );
@@ -136,13 +125,11 @@ export function AutoClockoutPrompt({
               Finish your timecard — you clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
             </div>
             <div className="text-xs text-amber-700">
-              {mealOnly
-                ? "Your hours are already recorded from switching jobs — tap Save and the 30-minute lunch is deducted automatically."
-                : jobCodesEnabled
-                  ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
-                  : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
+              {jobCodesEnabled
+                ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
+                : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
             </div>
-            {!mealOnly && already > 0.01 && (
+            {already > 0.01 && (
               <div className="mt-1 text-xs text-amber-700">
                 {`${formatDuration(already)} is already recorded from switching jobs — this is just the rest of the day.`}
               </div>
@@ -150,14 +137,16 @@ export function AutoClockoutPrompt({
           </div>
         </div>
 
-        {lunchMin > 0 && (
+        {storedLunch > LUNCH_MIN ? (
           <p className="flex items-center gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-2 text-sm text-slate-600">
             <Coffee className="h-4 w-4 shrink-0 text-slate-400" />
-            A 30-minute unpaid lunch is deducted automatically.
+            {`A ${storedLunch}-minute unpaid lunch is already on this shift.`}
           </p>
+        ) : (
+          <LunchCheckbox id="ac-lunch" checked={tookLunch} onChange={setTookLunch} className="border-amber-200 bg-white/60" />
         )}
 
-        {!mealOnly && (
+        {(
         <div className="space-y-2">
           {allocations.map((a, i) => (
             <div key={i} className="space-y-2 rounded-lg border border-amber-100 bg-white/60 p-2">

@@ -235,6 +235,27 @@ export function ItemEditor({
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       {error && <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
+      {/* ADD AT THE TOP (Erik 2026-09-08: "Add an item needs to be at the top" / "Can't add new
+          materials"). It used to sit under the whole list: on a phone, adding a 12th item meant
+          scrolling past eleven, and the field ended up at the bottom of the page where the
+          keyboard covers it — which is what "can't add" felt like. It's the first thing on the
+          card now, so the list you're building grows underneath what you're typing into.
+          Qty/unit/vendor/cost wrap onto their own line rather than sharing one crushed row. */}
+      <div className="space-y-2 border-b border-slate-100 bg-slate-50/60 p-3">
+        <div className="flex gap-2">
+          <Input placeholder="Add an item…" value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="flex-1" />
+          <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} className="w-24 shrink-0" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
+          <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 shrink-0" placeholder="ea" />
+          <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="min-w-[7rem] flex-1" placeholder="Vendor" />
+          <NumberInput value={cost} onValueChange={setCost} className="min-w-[6rem] flex-1 text-right" placeholder="Est. cost" />
+          <Button onClick={add} disabled={pending || !desc.trim()} className="ml-auto shrink-0">
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+      </div>
       <ul className="divide-y divide-slate-100">
         {tools.length > 0 && (
           <li className="flex items-center gap-1.5 bg-amber-50/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
@@ -246,7 +267,7 @@ export function ItemEditor({
           <li className="bg-slate-50/70 px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Materials</li>
         )}
         {materials.map(renderRow)}
-        {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items yet — add one below.</li>}
+        {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items yet — add one above.</li>}
       </ul>
 
       {items.length > 0 && (
@@ -256,22 +277,6 @@ export function ItemEditor({
         </div>
       )}
 
-      {/* Add item */}
-      <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
-        <div className="flex gap-2">
-          <Input placeholder="Add an item…" value={desc} onChange={(e) => setDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} className="flex-1" />
-          <Input placeholder="Part #" value={part} onChange={(e) => setPart(e.target.value)} className="w-24 shrink-0" />
-        </div>
-        <div className="flex items-center gap-2">
-          <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
-          <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 shrink-0" placeholder="ea" />
-          <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="flex-1" placeholder="Vendor" />
-          <NumberInput value={cost} onValueChange={setCost} className="flex-1 text-right" placeholder="Est. cost" />
-          <Button onClick={add} disabled={pending || !desc.trim()}>
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

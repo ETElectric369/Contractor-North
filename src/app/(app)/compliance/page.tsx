@@ -1,3 +1,4 @@
+import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { ComplianceManager } from "./compliance-manager";
@@ -25,19 +26,13 @@ export default async function CompliancePage() {
 
   // Imported documents live in the private "documents" bucket — sign view links server-side
   // (same rails as insurance certificates) so a filed license/permit doc is one tap away.
-  // Per-item try/catch: a storage hiccup or a stale/bad file path must NOT throw the whole
-  // Promise.all and white-screen the page (it just drops that one doc link).
-  const items = await Promise.all(
-    filtered.map(async (i) => {
-      if (!i.file_url) return { ...i, signedUrl: null as string | null };
-      try {
-        const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
-        return { ...i, signedUrl: data?.signedUrl ?? null };
-      } catch {
-        return { ...i, signedUrl: null as string | null };
-      }
-    }),
-  );
+  // ONE batch call (2026-09-08 phone-lag sweep); a storage hiccup or a stale path drops that
+  // one link rather than white-screening the page.
+  const urls = await signDocumentUrls(supabase, filtered.map((i: { file_url?: string | null }) => i.file_url));
+  const items = filtered.map((i: { file_url?: string | null }) => ({
+    ...i,
+    signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
+  }));
 
   return (
     <div>

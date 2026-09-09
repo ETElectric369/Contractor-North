@@ -1,3 +1,4 @@
+import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { InsuranceManager } from "./insurance-manager";
@@ -25,14 +26,12 @@ export default async function InsurancePage() {
     .order("expires_date", { ascending: true, nullsFirst: false });
 
   // Certificates live in the private "documents" bucket — sign view links server-side
-  // (the employee-docs rails).
-  const withDocs = await Promise.all(
-    (items ?? []).map(async (i) => {
-      if (!i.file_url) return { ...i, signedUrl: null as string | null };
-      const { data } = await supabase.storage.from("documents").createSignedUrl(i.file_url, 3600);
-      return { ...i, signedUrl: data?.signedUrl ?? null };
-    }),
-  );
+  // (the employee-docs rails), in ONE batch call (2026-09-08 phone-lag sweep).
+  const urls = await signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url));
+  const withDocs = ((items ?? []) as any[]).map((i) => ({
+    ...i,
+    signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
+  }));
 
   return (
     <div>

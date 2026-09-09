@@ -9,6 +9,7 @@ import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
+import { lunchMinutesFor, LUNCH_LABEL } from "@/lib/lunch-rule";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
  *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
@@ -27,8 +28,8 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
  * The MINIMAL My Day clock (Erik, cn-v502 — the old DayClock's stats/pickers stay
  * gone): clocked out → one big "Clock In" (a job-less punch; the server resolves
  * today's job for every role now); clocked in → the ticking timer + job label + a
- * one-tap "Clock Out". lunch_minutes:null lets the server's >5h ⇒ 30 min auto-lunch
- * decide, allocations stay omitted so recorded mid-shift switch segments survive,
+ * one-tap "Clock Out" with the one opt-in lunch box beside it (Erik 2026-09-08 — nothing
+ * is deducted unless it's ticked), allocations stay omitted so mid-shift switch segments survive,
  * and the entry's own note rides through untouched. No week/today hour stats, no
  * pickers, no questionnaire — the "Timeclock →" link carries anything more.
  */
@@ -49,6 +50,8 @@ export function MyDayClock({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
+  // Unpaid lunch — off by default; nothing is deducted unless the tech ticks it.
+  const [tookLunch, setTookLunch] = useState(false);
   const [held, setHeld] = useState(false);
   const [pending, start] = useTransition();
 
@@ -141,7 +144,7 @@ export function MyDayClock({
       try {
         const res = await clockOut({
           entry_id: open.id,
-          lunch_minutes: null, // "wasn't asked" → the server's auto-lunch decides
+          lunch_minutes: lunchMinutesFor(tookLunch), // stated every time; 0 is the default
           notes: open.notes ?? "", // round-trip the mid-shift note, never wipe it
           gps,
         });
@@ -180,6 +183,18 @@ export function MyDayClock({
                   Timeclock →
                 </Link>
               </div>
+              {/* The one lunch question, off by default — this card is where most days end,
+                  so it has to be answerable here and not only on /timeclock. */}
+              <label htmlFor="md-lunch" className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+                <input
+                  id="md-lunch"
+                  type="checkbox"
+                  checked={tookLunch}
+                  onChange={(e) => setTookLunch(e.target.checked)}
+                  className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand"
+                />
+                {LUNCH_LABEL}
+              </label>
             </>
           ) : (
             <>

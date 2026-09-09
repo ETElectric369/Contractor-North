@@ -173,50 +173,58 @@ export default async function AppLayout({
     job_id: string | null;
     job: { job_number: string; name: string } | null;
   };
-  const [openEntry, needsAction] = await Promise.all([
-    // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
-    // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
-    // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
-    // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
-    // clock-in. Requiring gps_in here is what silently disabled the geofence for most
-    // punches (the 30-hour open shift).
-    (async (): Promise<OpenEntry | null> => {
-      if (!settings.geofence_logout) return null;
-      try {
-        const { data: oe } = await supabase
-          .from("time_entries")
-          .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
-          .eq("profile_id", user.id)
-          .eq("status", "open")
-          .maybeSingle();
-        return (oe as any) ?? null;
-      } catch (e) {
-        // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
-        reportError("app-layout:open-entry", e);
-        return null;
-      }
-    })(),
-    // The dock badge is cosmetic — a failure anywhere in the ~21-query action-items fan-out
-    // must NEVER crash every route (this unguarded await was the app-wide single point of
-    // failure). Degrade to 0 and log it to the ops sink so the underlying error stays visible.
-    (async (): Promise<number> => {
-      try {
-        return await getActionItemsCount({
-          todayStr: todayStrInTz(tz),
-          // Pass the tz (audit v921 review blocker): /planner passes it, and without it here the
-          // badge counts on UTC day-cuts while the list it links to counts on the org's — a badge
-          // whose number doesn't match its own list.
-          tz,
-          isStaff,
-          userId: user.id,
-        });
-      } catch (e) {
-        reportError("app-layout:action-items", e);
-        return 0;
-      }
-    })(),
-  ]);
-  const badges = { "/planner": needsAction, "/leads": freshLeads };
+  // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
+  // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
+  // job-page clock buttons punch with gps:null, and the timeclock punch can outrun the
+  // iOS permission dialog) — the monitor adopts an anchor from its first good fix near
+  // clock-in. Requiring gps_in here is what silently disabled the geofence for most
+  // punches (the 30-hour open shift).
+  let openEntry: OpenEntry | null = null;
+  if (settings.geofence_logout) {
+    try {
+      const { data: oe } = await supabase
+        .from("time_entries")
+        .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
+        .eq("profile_id", user.id)
+        .eq("status", "open")
+        .maybeSingle();
+      openEntry = (oe as any) ?? null;
+    } catch (e) {
+      // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
+      reportError("app-layout:open-entry", e);
+    }
+  }
+
+  // A BADGE MAY NOT HOLD UP THE APP (2026-09-08 — Erik: "taking a super long time to load
+  // anything on the phone app and the lag was making it tough to wait for").
+  //
+  // getActionItemsCount runs the whole Needs-action union — ~31 queries in five serial waves —
+  // and this layout AWAITED it. A layout's body runs to completion BEFORE React renders its
+  // children, so that fan-out was a prerequisite of every single page in the app: nothing on
+  // /jobs, /timeclock or a job hub even started fetching until a cosmetic amber dot had its
+  // number. On a phone over LTE that is most of the wait.
+  //
+  // Now the promise is HANDED to the dock unresolved. The shell and the page render and stream
+  // immediately; the count arrives in a later chunk and the dot appears a beat afterwards, which
+  // is exactly what a badge is worth. Rejection is swallowed here (a count is never a crash) and
+  // still reported to the ops sink, so nothing awaits a promise that can throw.
+  const badges: Promise<Record<string, number>> = (async () => {
+    try {
+      const needsAction = await getActionItemsCount({
+        todayStr: todayStrInTz(tz),
+        // Pass the tz (audit v921 review blocker): /planner passes it, and without it here the
+        // badge counts on UTC day-cuts while the list it links to counts on the org's — a badge
+        // whose number doesn't match its own list.
+        tz,
+        isStaff,
+        userId: user.id,
+      });
+      return { "/planner": needsAction, "/leads": freshLeads };
+    } catch (e) {
+      reportError("app-layout:action-items", e);
+      return { "/planner": 0, "/leads": freshLeads };
+    }
+  })();
 
   return (
     <div

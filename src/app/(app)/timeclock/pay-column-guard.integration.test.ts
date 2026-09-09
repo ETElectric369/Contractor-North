@@ -83,9 +83,12 @@ d("time_entries pay-column tamper guard (0143)", () => {
     expect(body).toMatch(/coalesce\(new\.lunch_minutes, ?0\) < coalesce\(old\.lunch_minutes, ?0\)/);
   });
 
-  it("a shift over five hours cannot be closed without the 30-minute lunch (0169)", () => {
-    expect(body).toMatch(/gross_hours > 5/);
-    expect(body).toMatch(/coalesce\(new\.lunch_minutes, ?0\) < 30/);
+  // 0248 REMOVED the >5h/30-minute floor deliberately (Erik 2026-09-08: lunch is opt-in and
+  // defaults to 0). Assert it stays gone, so a future "restore the 0169 body" copy-paste can't
+  // quietly reinstate a rule that now refuses the honest punch of someone who worked through.
+  it("no >5h lunch floor is reinstated (0248 — lunch is opt-in)", () => {
+    expect(body).not.toMatch(/gross_hours > 5/);
+    expect(body).not.toMatch(/coalesce\(new\.lunch_minutes, ?0\) < 30/);
   });
 
   it("a shift longer than a day cannot be closed by its owner (0169)", () => {
