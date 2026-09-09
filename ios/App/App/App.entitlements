@@ -8,5 +8,13 @@
 	<array>
 		<string>webcredentials:app.contractornorth.com</string>
 	</array>
+	<!-- APNs. `development` is what belongs in the source file: Xcode REPLACES it with
+	     `production` when it exports an archive for TestFlight / the App Store, so one file
+	     serves both. The server copes with either — it sends to the production APNs host and
+	     retries the sandbox host once on BadDeviceToken, then remembers which one answered
+	     (src/lib/apns.ts), because a device token is only valid in the environment that
+	     issued it and a debug build and a TestFlight build issue different ones. -->
+	<key>aps-environment</key>
+	<string>development</string>
 </dict>
 </plist>

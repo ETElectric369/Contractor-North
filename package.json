@@ -17,6 +17,7 @@
     "@anthropic-ai/sdk": "^0.36.3",
     "@capacitor/core": "8.5.1",
     "@capacitor/ios": "8.5.1",
+    "@capacitor/push-notifications": "^8.1.2",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
     "@sparticuz/chromium": "^131.0.1",

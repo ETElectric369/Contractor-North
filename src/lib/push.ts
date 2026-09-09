@@ -3,13 +3,19 @@ import webpush from "web-push";
 import { STAFF_ROLES } from "@/lib/actions/perms";
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
+import { sendApns, apnsConfigured, type ApnsEnv } from "@/lib/apns";
 
 const PUBLIC = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const PRIVATE = process.env.VAPID_PRIVATE_KEY;
 const SUBJECT = process.env.VAPID_SUBJECT || "mailto:support@contractor-north.app";
 
 let vapidReady = false;
+/** True when EITHER channel can send. The digest/sweep senders gate on this, and gating on web
+ *  push alone would have kept them dark for an org whose crew is all on the native app. */
 export function pushConfigured() {
+  return !!(PUBLIC && PRIVATE) || apnsConfigured();
+}
+function webPushConfigured() {
   return !!(PUBLIC && PRIVATE);
 }
 function ensureVapid() {
@@ -67,9 +73,15 @@ const DEFAULTS: Record<PushKind, boolean> = {
 };
 
 /**
- * Best-effort web push to a set of profiles, respecting each user's toggle for
- * this notification kind. Never throws — safe to call (un-awaited) from any
- * server action; a push failure must not break the underlying operation.
+ * Best-effort push to a set of profiles, respecting each user's toggle for this notification
+ * kind. Never throws — safe to call (un-awaited) from any server action; a push failure must not
+ * break the underlying operation.
+ *
+ * TWO TRANSPORTS, ONE DOOR (2026-09-09). A subscription row is either a Web Push endpoint (the
+ * browser and the installed PWA) or an APNs device token (the native shell, which cannot do Web
+ * Push at all). They are dispatched differently and pruned differently, but the `active` check
+ * and the per-user push_prefs above them are shared — a second entry point is how a fired
+ * employee's phone keeps buzzing with customer names.
  */
 export async function sendPushToProfiles(
   profileIds: (string | null | undefined)[],
@@ -77,7 +89,7 @@ export async function sendPushToProfiles(
   payload: { title: string; body: string; url?: string },
 ): Promise<void> {
   try {
-    if (!ensureVapid()) return;
+    if (!pushConfigured()) return;
     const ids = [...new Set(profileIds.filter((x): x is string => !!x))];
     if (!ids.length) return;
 
@@ -98,7 +110,7 @@ export async function sendPushToProfiles(
 
     const { data: subs } = await sb
       .from("push_subscriptions")
-      .select("id, endpoint, p256dh, auth")
+      .select("id, platform, endpoint, p256dh, auth, device_token, apns_env")
       .in("profile_id", allowed);
     if (!subs?.length) return;
 
@@ -109,7 +121,26 @@ export async function sendPushToProfiles(
     });
 
     await Promise.all(
-      subs.map(async (s: any) => {
+      (subs as any[]).map(async (s) => {
+        // ── the native shell: an APNs device token ──
+        if (s.platform === "ios") {
+          if (!s.device_token) return;
+          const r = await sendApns(s.device_token, payload, (s.apns_env as ApnsEnv | null) ?? null);
+          if (r.ok) {
+            // Remember which APNs host answered so the next send skips the probe. Only written
+            // when it CHANGES, so the common path is a pure read.
+            if (s.apns_env !== r.env) {
+              await sb.from("push_subscriptions").update({ apns_env: r.env }).eq("id", s.id);
+            }
+          } else if (r.gone) {
+            // Apple says this token will never be valid again (reinstall / app deleted).
+            await sb.from("push_subscriptions").delete().eq("id", s.id);
+          }
+          return;
+        }
+
+        // ── the browser and the installed PWA: a Web Push subscription ──
+        if (!ensureVapid() || !s.endpoint) return;
         try {
           await webpush.sendNotification(
             { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },

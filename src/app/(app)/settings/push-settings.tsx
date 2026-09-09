@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { savePushSubscription, removePushSubscription, savePushPrefs } from "./push-actions";
+import { savePushSubscription, removePushSubscription, savePushPrefs, saveDeviceToken, removeDeviceToken } from "./push-actions";
+import { isNativeShell } from "@/lib/native-shell";
+import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -44,8 +46,27 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<Record<string, boolean>>(initialPrefs ?? {});
+  // TWO TRANSPORTS (2026-09-09). In the App Store app there is no service worker and no
+  // PushManager — Apple's Web Push is Safari / home-screen only — so this used to render
+  // "This browser doesn't support push notifications", the word "browser", inside an app, and
+  // every alert the product sends went to the PWA and not the app. The shell registers with
+  // APNs instead; the toggles below are shared because the server honours them either way.
+  const [native, setNative] = useState(false);
+  // The APNs token for THIS phone, held so Turn Off knows which row to delete.
+  const [deviceToken, setDeviceToken] = useState<string | null>(null);
 
   useEffect(() => {
+    const inShell = isNativeShell();
+    setNative(inShell);
+    if (inShell) {
+      // The OS is the source of truth for whether this phone is allowed to buzz. A token we
+      // stored earlier is worthless once someone switched North off in iPhone Settings.
+      nativePushPermission().then((p) => {
+        setSupported(p !== null);
+        setEnabled(p === "granted");
+      });
+      return;
+    }
     const ok =
       typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window;
     setSupported(ok);
@@ -57,11 +78,32 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
     }
   }, []);
 
-  const configured = !!PUBLIC_KEY;
+  // The VAPID key is the WEB transport's config. APNs is configured on the server (its signing
+  // key never reaches the browser), so the shell must not be gated on a key it doesn't use.
+  const configured = native || !!PUBLIC_KEY;
 
   async function enable() {
     setBusy(true);
     setMsg(null);
+    if (native) {
+      const r = await registerForNativePush();
+      if (!r.ok) {
+        setMsg(r.error);
+        setBusy(false);
+        return;
+      }
+      const saved = await saveDeviceToken(r.token, navigator.userAgent);
+      if (!saved.ok) {
+        setMsg(saved.error ?? "Could not register this phone.");
+        setBusy(false);
+        return;
+      }
+      setDeviceToken(r.token);
+      setEnabled(true);
+      setMsg("Notifications are on for this phone.");
+      setBusy(false);
+      return;
+    }
     try {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
@@ -91,6 +133,28 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
   async function disable() {
     setBusy(true);
     setMsg(null);
+    if (native) {
+      // iOS gives no way to hand a permission back, so "off" here means: stop sending to this
+      // phone. Say exactly that rather than implying the OS switch moved. If the token isn't in
+      // hand (a fresh page load after enabling on a previous visit), re-registering is the only
+      // way to learn it — that's silent and prompts nothing, the permission is already granted.
+      let token = deviceToken;
+      if (!token) {
+        const r = await registerForNativePush();
+        if (r.ok) token = r.token;
+      }
+      const res = token ? await removeDeviceToken(token) : { ok: false, error: undefined };
+      if (!res.ok) {
+        setMsg(res.error ?? "Couldn't turn this phone off on the server — try again.");
+        setBusy(false);
+        return;
+      }
+      setDeviceToken(null);
+      setEnabled(false);
+      setMsg("This phone won't be sent notifications. iPhone Settings → North still shows them as allowed.");
+      setBusy(false);
+      return;
+    }
     try {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
@@ -113,7 +177,13 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
   }
 
   if (!supported)
-    return <p className="text-sm text-slate-500">This browser doesn&apos;t support push notifications.</p>;
+    return (
+      <p className="text-sm text-slate-500">
+        {native
+          ? "This version of the app can't do notifications yet — update North from TestFlight."
+          : "This browser doesn't support push notifications."}
+      </p>
+    );
   if (!configured)
     return (
       <p className="text-sm text-slate-500">
@@ -128,7 +198,11 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
         <div>
           <div className="text-sm font-medium text-slate-900">Notifications on this device</div>
           <div className="text-xs text-slate-500">
-            {enabled ? "On — you'll get the alerts you've turned on below." : "Off — turn on to get alerts on this device."}
+            {enabled
+              ? "On — you'll get the alerts you've turned on below."
+              : native
+                ? "Off — turn on to get alerts on this phone."
+                : "Off — turn on to get alerts on this device."}
           </div>
         </div>
         <Button onClick={enabled ? disable : enable} disabled={busy} variant={enabled ? "outline" : "primary"}>

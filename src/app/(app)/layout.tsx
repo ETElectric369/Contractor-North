@@ -14,6 +14,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
 import { BugReporter } from "@/components/bug-reporter";
+import { NativePushBridge } from "@/components/native-push-bridge";
 import { SectionSubnav } from "@/components/section-subnav";
 import { ToastProvider } from "@/components/toast";
 import { Suspense } from "react";
@@ -262,6 +263,9 @@ export default async function AppLayout({
       <CommandBar isStaff={isStaff} />
       {/* Queued field work files itself from ANY screen, and says so (audit 9). */}
       <OfflineDrain userId={profile.id} />
+      {/* In the App Store app: a tapped notification opens the thing it is about, and the APNs
+          device token is refreshed on launch so alerts can't quietly stop. No-op on the web. */}
+      <NativePushBridge />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor

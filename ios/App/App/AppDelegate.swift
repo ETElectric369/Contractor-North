@@ -33,6 +33,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    // ── APNs, forwarded to Capacitor's PushNotifications plugin ──────────────────────────────
+    // The plugin cannot see UIApplicationDelegate callbacks on its own; the OS hands the device
+    // token here and Capacitor listens on these two notifications. Without this pair the JS
+    // `registration` event never fires and register() hangs silently — which is exactly the
+    // failure mode that looks like "push doesn't work in the app".
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        NotificationCenter.default.post(name: .capacitorDidRegisterForRemoteNotifications,
+                                        object: deviceToken)
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications,
+                                        object: error)
+    }
+
     func application(_ application: UIApplication,
                      configurationForConnecting connectingSceneSession: UISceneSession,
                      options: UIScene.ConnectionOptions) -> UISceneConfiguration {
