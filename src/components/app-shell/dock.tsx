@@ -15,27 +15,48 @@ type DockProps = {
   badges?: Badges | Promise<Badges>;
 };
 
-/** Resolve the badge counts without ever suspending the dock. A plain object is used as-is; a
- *  promise starts empty and fills in when it lands, so the nav is interactive immediately. */
+/**
+ * Resolve the badge counts without ever suspending the dock. A plain object is used as-is; a
+ * pending value starts empty and fills in when it lands, so the nav is interactive immediately.
+ *
+ * `Promise.resolve(...).then(ok, err)` on purpose, NOT `value.then(...).catch(...)`. What arrives
+ * from the server is a React THENABLE, not a spec Promise: its `.then()` registers the callback
+ * and returns UNDEFINED, so chaining `.catch` off it threw "undefined is not an object" and the
+ * app-shell error boundary swallowed every page (caught in the ops sink minutes after cn-v930
+ * shipped, on /jobs/<id>). Promise.resolve adopts any thenable; the two-argument then never
+ * chains. The shape check is inside the effect so the value and the "is it pending?" decision
+ * can never come from two different renders.
+ */
 function useBadges(badges?: Badges | Promise<Badges>): Badges {
-  const pending = !!badges && typeof (badges as Promise<Badges>).then === "function";
-  const [resolved, setResolved] = useState<Badges>(pending ? {} : ((badges as Badges) ?? {}));
+  const [resolved, setResolved] = useState<Badges>({});
   useEffect(() => {
-    if (!pending) {
-      setResolved((badges as Badges) ?? {});
-      return;
-    }
     let live = true;
-    (badges as Promise<Badges>)
-      .then((b) => {
-        if (live) setResolved(b ?? {});
-      })
-      .catch(() => {}); // a count is never worth an error — the dot just stays off
+    const v = badges as unknown;
+    if (isThenable(v)) {
+      Promise.resolve(v as PromiseLike<Badges>).then(
+        (b) => {
+          if (live) setResolved(plainBadges(b));
+        },
+        () => {}, // a count is never worth an error — the dot just stays off
+      );
+    } else {
+      setResolved(plainBadges(v));
+    }
     return () => {
       live = false;
     };
-  }, [badges, pending]);
+  }, [badges]);
   return resolved;
+}
+
+/** True for a spec Promise AND for React's RSC thenable — anything Promise.resolve can adopt. */
+export function isThenable(v: unknown): boolean {
+  return !!v && (typeof v === "object" || typeof v === "function") && typeof (v as { then?: unknown }).then === "function";
+}
+
+/** Never hand the renderer anything but a plain count map. */
+export function plainBadges(v: unknown): Badges {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Badges) : {};
 }
 
 /**
