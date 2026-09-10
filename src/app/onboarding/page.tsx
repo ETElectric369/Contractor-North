@@ -54,17 +54,25 @@ export default async function OnboardingPage({
             <Zap className="h-7 w-7" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">Welcome to Contractor North</h1>
-          <p className="mt-1 text-sm text-white/80">Let's set up your company.</p>
+          {/* AN INVITEE IS NOT STARTING A COMPANY. This said "Let's set up your company" to
+              everyone — including the person who just clicked Join-my-crew in an invite email —
+              and the Create-your-company form below carried the autofocus. A tech who does the
+              obvious thing gets their own empty org, the invitation stays unaccepted forever, and
+              the office sees nothing. That is the one row in this table's whole history. */}
+          <p className="mt-1 text-sm text-white/80">
+            {invite ? `You've been invited to ${invite.org_name}.` : "Let's set up your company."}
+          </p>
         </div>
 
         <div className="rounded-2xl bg-white p-8 shadow-xl">
-          <h2 className="mb-1 text-lg font-semibold text-slate-900">
-            Create your company
-          </h2>
-          <p className="mb-6 text-sm text-slate-500">
-            This creates your workspace. You'll be the owner and can invite your
-            crew next.
-          </p>
+          {!invite && (
+            <>
+              <h2 className="mb-1 text-lg font-semibold text-slate-900">Create your company</h2>
+              <p className="mb-6 text-sm text-slate-500">
+                This creates your workspace. You&apos;ll be the owner and can invite your crew next.
+              </p>
+            </>
+          )}
 
           {error && (
             <div className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -90,9 +98,13 @@ export default async function OnboardingPage({
                 </Button>
               </form>
               <div className="mb-4 flex items-center gap-3 text-xs uppercase tracking-wide text-slate-400">
-                <span className="h-px flex-1 bg-slate-200" /> or create your own
+                <span className="h-px flex-1 bg-slate-200" /> or start your own company
                 <span className="h-px flex-1 bg-slate-200" />
               </div>
+              <p className="mb-4 text-xs text-slate-500">
+                Only if you&apos;re not joining {invite.org_name}. Starting your own company gives
+                you a separate, empty workspace — it does not put you on their crew.
+              </p>
             </>
           )}
 
@@ -103,7 +115,10 @@ export default async function OnboardingPage({
                 id="name"
                 name="name"
                 required
-                autoFocus
+                // Focus belongs on Join when somebody was invited — the cursor sitting in
+                // "Company name" is what makes starting a rival empty org the path of least
+                // resistance for a tech who just wanted to join the crew.
+                autoFocus={!invite}
                 placeholder="e.g. Tahoe Deck"
               />
             </div>

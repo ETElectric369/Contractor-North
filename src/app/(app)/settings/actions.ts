@@ -203,7 +203,7 @@ export async function setDocTemplateFor(
   return { ok: true };
 }
 
-export async function createInvitation(formData: FormData): Promise<Result & { link?: string }> {
+export async function createInvitation(formData: FormData): Promise<Result & { link?: string; emailed?: boolean }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -230,6 +230,39 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
   const role = ["admin", "office", "tech"].includes(raw) ? raw : "tech";
   if (!email) return { ok: false, error: "Email is required." };
 
+  // AN INVITE THAT CANNOT DO ANYTHING IS NOT AN INVITE (Erik 2026-09-09, "fix the invite path").
+  // THE JASON GRANGER CASE, from the real data: he was created through the employee path on
+  // 07-07 (temp password, no email), already had a profile in TAHOE DECK, and was then INVITED to
+  // TAHOE DECK on 07-20. accept_invitation() bails with "already in an org; no-op", so that row
+  // could never do a thing — and the only visible outcome was an invite email that never arrived
+  // for an account he already had. The office was told it worked. Eight days later it was filed
+  // as "Jason never got confirmation email to sign up".
+  // So: refuse before writing the row, and say which door the office actually wants.
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("id, full_name, role, active")
+    .ilike("email", email)
+    .maybeSingle();
+  if (existing) {
+    const who = (existing as { full_name?: string | null }).full_name || email;
+    const them = existing as { role?: string; active?: boolean };
+    return {
+      ok: false,
+      error:
+        them.active === false
+          ? `${who} is already on your team (${them.role}) but their account is switched off. Turn them back on under Crew rather than inviting them again — an invite can't reactivate an account.`
+          : `${who} is already on your team as ${them.role}. If they can't get in, reset their password under Crew — inviting them again does nothing, because an invitation only works for someone who has no company yet.`,
+    };
+  }
+
+  // A LINK IN AN EMAIL HAS TO BE ABSOLUTE. With NEXT_PUBLIC_SITE_URL unset this used to build
+  // "/login?mode=signup&…", which is dead the moment it leaves the server — the invitee gets a
+  // mail whose only button goes nowhere. Refuse to send a broken invite rather than record one.
+  const base = process.env.NEXT_PUBLIC_SITE_URL || "";
+  if (!/^https?:\/\//i.test(base)) {
+    return { ok: false, error: "Invites can't be sent yet — this install has no site address configured (NEXT_PUBLIC_SITE_URL)." };
+  }
+
   const { error } = await supabase.from("invitations").insert({
     org_id: orgId,
     email,
@@ -245,9 +278,8 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   const { data: org } = await supabase.from("organizations").select("name").eq("id", orgId).maybeSingle();
   const orgName = (org as { name?: string } | null)?.name || "the team";
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "";
   const link = `${base}/login?mode=signup&email=${encodeURIComponent(email)}`;
-  await sendEmail({
+  const sendRes = await sendEmail({
     to: email,
     fromName: orgName,
     subject: `You're invited to join ${orgName} on Contractor North`,
@@ -257,11 +289,20 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
       <p style="margin:24px 0"><a href="${link}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;display:inline-block">Create your account</a></p>
       <p style="color:#94a3b8;font-size:13px;word-break:break-all">Or open this link: ${link}</p>
     </div>`,
-  }).catch(() => {}); // best-effort — the returned link is the guaranteed fallback
+  })
+    // sendEmail RESOLVES {ok:false,error} on a failed send — it does not reject. Reading the flag
+    // is the whole point; a .then(()=>true) here would call every bounce a success, which is the
+    // bug this change exists to remove. The catch is only for a thrown fetch (no network).
+    .catch((e) => ({ ok: false, error: String(e) }));
+  const sent = sendRes.ok === true;
 
   revalidatePath("/team");
   revalidatePath("/settings");
-  return { ok: true, link };
+  // SAY WHICH ONE HAPPENED. This used to swallow the send failure and hand back {ok:true}, so the
+  // office read "Invite emailed" whether or not anything left the building — the one thing they
+  // needed to know. The invitation row is real either way and the link always works, so a failed
+  // send is not a failed invite; it just means the office has to deliver the link themselves.
+  return { ok: true, link, emailed: sent };
 }
 
 export async function deleteInvitation(id: string): Promise<Result> {

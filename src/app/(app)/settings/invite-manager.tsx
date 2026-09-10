@@ -17,6 +17,10 @@ interface Invite {
   token: string;
   accepted_at: string | null;
   created_at: string;
+  /** 0251 — an invitation is a signup key with a fourteen-day life. Optional so an older
+   *  server render (or a caller that hasn't added it to its select) degrades to "no expiry
+   *  shown" rather than crashing; the DB enforces it either way. */
+  expires_at?: string | null;
 }
 
 export function InviteManager({
@@ -40,7 +44,15 @@ export function InviteManager({
         setError(res.error ?? "Could not invite.");
         return;
       }
-      toast("Invite emailed — or copy the link to text it", "success");
+      // SAY WHICH ONE ACTUALLY HAPPENED. This read "Invite emailed" whether or not anything left
+      // the building, because the action swallowed the send failure. The invitation is real either
+      // way — the link always works — so a failed send isn't a failed invite; it just means the
+      // office has to deliver the link themselves, and they can only do that if they're told.
+      if (res.emailed === false) {
+        toast("Invite created, but the email didn't send — copy the link and text it to them", "error");
+      } else {
+        toast(`Invite emailed to ${String(formData.get("email") ?? "them").trim()}`, "success");
+      }
       router.refresh();
     });
   }
@@ -85,8 +97,10 @@ export function InviteManager({
       {error && <p className="text-sm text-red-600">{error}</p>}
 
       <p className="text-xs text-slate-400">
-        The invited person signs up with this email; when they create their
-        account they'll automatically join your company with the role you set.
+        The invited person signs up with this email; when they create their account they&apos;ll
+        automatically join your company with the role you set. An invite lasts 14 days, and only
+        works for someone who isn&apos;t already on a team — if they already have an account here,
+        reset their password under Crew instead.
       </p>
 
       {invites.length > 0 && (
@@ -100,11 +114,35 @@ export function InviteManager({
                 </div>
                 <div className="text-xs text-slate-400">
                   Invited {formatDate(inv.created_at)}
+                  {/* SAY WHEN IT LAPSES. 0251 gives an invitation a fourteen-day life, and an
+                      expiry the office cannot see is the same silent dead end as no expiry at
+                      all — they'd copy a link that has quietly stopped working and wonder why
+                      the new hire still can't get in. */}
+                  {!inv.accepted_at && inv.expires_at && (
+                    <> · {new Date(inv.expires_at) > new Date()
+                      ? `expires ${formatDate(inv.expires_at)}`
+                      : `expired ${formatDate(inv.expires_at)}`}</>
+                  )}
                 </div>
               </div>
               <Badge tone="slate">{inv.role}</Badge>
               {inv.accepted_at ? (
                 <Badge tone="green">accepted</Badge>
+              ) : inv.expires_at && new Date(inv.expires_at) <= new Date() ? (
+                <>
+                  {/* An expired row keeps its Revoke button but loses Copy Link: the link no
+                      longer opens the door (signup_allowed checks expiry now), so offering it
+                      would hand the office something that fails silently in someone else's
+                      inbox. Re-inviting writes a fresh row with a fresh window. */}
+                  <Badge tone="amber">expired</Badge>
+                  <button
+                    onClick={() => remove(inv.id, inv.email)}
+                    className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                    title="Remove expired invite"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </>
               ) : (
                 <>
                   <button
