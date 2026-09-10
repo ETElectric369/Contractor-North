@@ -49,6 +49,7 @@ export function ConvertMenu({
   inquiryId,
   inquiryName,
   workKind: workKindProp = null,
+  businessPhone = null,
 }: {
   inquiryId: string;
   inquiryName: string;
@@ -58,6 +59,18 @@ export function ConvertMenu({
    *  actions firm-booking fork), the lead graduates, and Done/Pay now wait on the job page. The
    *  modal used to promise "an amber inspection… the lead stays open" for exactly that tap. */
   workKind?: string | null;
+  /**
+   * THE BUSINESS LINE (organizations.phone), so this modal can say which number the text will NOT
+   * go out from. Erik: "the text prompt defaults to my personal number and it needs to default to
+   * Google voice Tahoe deck number."
+   *
+   * It can't. `sms:` hands the message to whatever app the phone answers that scheme with, and the
+   * SENDER is that app's — an href has no way to choose it, on iOS or Android. What was actually
+   * broken is that nothing said so: the button looked like it was texting AS the business, and he
+   * only found out it hadn't after the customer replied to his cell. Naming the business number
+   * next to Copy Link is the honest version, and Copy Link is the working route to it.
+   */
+  businessPhone?: string | null;
 }) {
   const kind = workKind({ kind: "lead", workKind: workKindProp });
   const isWork = kind === "job" || kind === "service";
@@ -238,6 +251,21 @@ export function ConvertMenu({
                 <MessageSquare className="h-4 w-4 shrink-0" /> Text It
               </a>
             </div>
+            {/* Say which number it goes out from BEFORE he sends it — see the businessPhone prop. */}
+            <p className="text-xs text-slate-500">
+              {businessPhone ? (
+                <>
+                  Text It opens this phone&rsquo;s own messaging app, so it sends from this phone&rsquo;s number —
+                  not <span className="font-medium">{businessPhone}</span>. To send it from the business line,
+                  use Copy Link and paste it there.
+                </>
+              ) : (
+                <>
+                  Text It opens this phone&rsquo;s own messaging app, so it sends from this phone&rsquo;s number.
+                  No business number is saved yet — Settings &rarr; Company is where it goes.
+                </>
+              )}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">

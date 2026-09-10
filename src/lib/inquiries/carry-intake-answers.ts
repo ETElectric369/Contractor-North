@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { coerceByPlaybook } from "@/lib/playbook/answers";
+import { answerText, coerceByPlaybook, retiredAnswers, retiredLabel } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { answersFromBrief, layerBriefAnswers, parsePlanBrief } from "@/lib/plan-brief";
-import type { Answers, Playbook } from "@/lib/playbook/types";
+import type { AnswerValue, Answers, Playbook } from "@/lib/playbook/types";
 
 /**
  * WHAT THE CUSTOMER ALREADY TOLD YOU, CARRIED ONTO THE WALK-THROUGH.
@@ -86,6 +86,58 @@ export function answersFromIntake(
   // for every other need would be a pre-fill made of blanks.
   const carried = pb.needs.filter((n) => kept[n.key] != null).map((n) => n.label);
   return { answers: kept, carried };
+}
+
+/**
+ * THE OTHER HALF OF THE CARRY: WHAT THE WALK-THROUGH CANNOT ASK, SHOWN INSTEAD OF DROPPED.
+ *
+ * answersFromIntake pre-fills by KEY, and a key only matches when the same question exists on both
+ * playbooks. That is the right rule and it is deliberately strict — but it is also, for most orgs,
+ * every answer. Vivian Builders' intake declares 26 questions; their walk-through declares one, and
+ * the two share nothing. So Andy Colar's lead arrived with the project, the room, the timeline, the
+ * designer and the plans all answered, `carried` came back empty, and both of his walk-throughs
+ * were written with `inspection_answers: {}` — Erik's three reports ("the walk-through starts
+ * blank", "the intake answers don't carry over", "they aren't on the lead at all").
+ *
+ * Nothing here writes an answer. A question the contractor never put on his sheet has nowhere to be
+ * pre-filled TO, and guessing a mapping — by label, by resemblance — is exactly the drift the
+ * module header warns about (ET's `gotcha` means two different things on the two forms). What was
+ * missing is smaller and honest: the customer's answers, in the words they were ASKED in, on the
+ * walk-through, marked as theirs. He confirms rather than re-asks, which was the promise.
+ *
+ * LABELS COME FROM THE INTAKE PLAYBOOK because that is the only place they exist — `intake_answers`
+ * is a bag of keys, and `q_mst1drw8` on its own is not a question. Retired keys are rescued the way
+ * the inspector rescues its own (retiredAnswers): a question deleted from the form since submission
+ * must not take the customer's answer off the screen with it.
+ *
+ * FILE ANSWERS ARE SKIPPED — IntakeFiles renders those as openable names wherever this card goes,
+ * and a storage path is not something to read out.
+ *
+ * `skipKeys` is what the walk-through DID pre-fill: those are already on the sheet as editable
+ * answers, and repeating them here would invite him to confirm the same thing twice.
+ */
+export function intakeAnswerLines(
+  intakePb: Playbook,
+  intakeAnswers: unknown,
+  skipKeys: ReadonlySet<string> = new Set<string>(),
+): { key: string; label: string; value: string }[] {
+  if (!intakeAnswers || typeof intakeAnswers !== "object") return [];
+  const stored = intakeAnswers as Record<string, unknown>;
+  const out: { key: string; label: string; value: string }[] = [];
+  // Playbook order, not object order: the customer answered them in this order and the office
+  // reads them back in it.
+  for (const n of intakePb.needs) {
+    if (skipKeys.has(n.key)) continue;
+    if (n.slot?.type === "file") continue;
+    const value = answerText((stored[n.key] ?? null) as AnswerValue).trim();
+    if (!value) continue;
+    out.push({ key: n.key, label: n.label, value });
+  }
+  for (const [key, value] of Object.entries(retiredAnswers(intakePb, stored))) {
+    if (skipKeys.has(key)) continue;
+    out.push({ key, label: retiredLabel(key), value });
+  }
+  return out;
 }
 
 /**

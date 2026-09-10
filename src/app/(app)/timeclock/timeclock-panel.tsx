@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   Play,
   Square,
@@ -30,6 +30,7 @@ import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
+import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
 
 interface AllocRow {
@@ -131,6 +132,22 @@ export function TimeclockPanel({
   // codes on = "J-0012 · Panel swap"; codes off = "Smith · 123 Main St".
   const optionLabel = (j: JobOption) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   const toast = useToast();
+
+  // Jobs opened from a picker on THIS page. The list above is server-rendered, and the refresh
+  // that catches it up lands well after the tap — so a job you just made has to be pickable from
+  // local state or the create button would appear to do nothing. Dropped again the moment the
+  // server sends the same job, or the option would render twice.
+  const [newJobs, setNewJobs] = useState<JobOption[]>([]);
+  const jobOptions = useMemo(() => {
+    const known = new Set(jobs.map((j) => j.id));
+    return [...newJobs.filter((j) => !known.has(j.id)), ...jobs];
+  }, [jobs, newJobs]);
+  // NOTHING SILENT: a created job says its own name back, because the only other evidence is a
+  // dropdown that quietly grew by one.
+  function addNewJob(j: CreatedJob) {
+    setNewJobs((p) => (p.some((x) => x.id === j.id) ? p : [...p, { id: j.id, job_number: "", name: j.name }]));
+    toast(`Created ${j.name}`, "success");
+  }
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
@@ -200,7 +217,7 @@ export function TimeclockPanel({
   // Narrow the code picker to a job's template codes (so people pick the right code for
   // the job type). No template / unknown job → all org codes.
   function codesForJob(jobIdSel: string): JobCode[] {
-    const j = jobs.find((x) => x.id === jobIdSel);
+    const j = jobOptions.find((x) => x.id === jobIdSel);
     if (j?.codes && j.codes.length) return jobCodes.filter((c) => j.codes!.includes(c.code));
     return jobCodes;
   }
@@ -337,7 +354,7 @@ export function TimeclockPanel({
   // missing on most timecards.
   function jobAddressForMiles(): string {
     const id = allocations.find((a) => a.job_id)?.job_id || openEntry?.job_id || "";
-    const j = jobs.find((x) => x.id === id);
+    const j = jobOptions.find((x) => x.id === id);
     return j ? formatFullAddress(j.address, j.city, j.state, j.zip) : "";
   }
   function autoMiles() {
@@ -398,7 +415,7 @@ export function TimeclockPanel({
         setSwitching(false);
         setSwitchJobId("");
         setSwitchJobCode("");
-        const j = jobs.find((x) => x.id === switchJobId);
+        const j = jobOptions.find((x) => x.id === switchJobId);
         toast(`Switched to ${j ? optionLabel(j) : "the new job"}`, "success");
       } catch {
         setError(OFFLINE_MSG);
@@ -513,7 +530,7 @@ export function TimeclockPanel({
     // Codes on: name only (not the shared number·name jobLabel helper) — the running
     // banner reads better without the job number; renamed so the helper isn't shadowed.
     // Codes off: the customer · address identity IS the name the crew knows.
-    const currentJob = jobs.find((j) => j.id === openEntry.job_id);
+    const currentJob = jobOptions.find((j) => j.id === openEntry.job_id);
     const currentJobName = currentJob
       ? jobCodesEnabled
         ? currentJob.name
@@ -533,6 +550,23 @@ export function TimeclockPanel({
               {openEntry.job_code ? ` · ${openEntry.job_code}` : ""}
             </span>
           </div>
+
+          {/* A job-less punch is a real, intended outcome (the server resolves today's crew
+              day-assignment → a job scheduled today → the org's only in-progress job → none),
+              but "No job selected" reads like a mistake with nowhere to go. Say who fixes it.
+              NOT "use Switch Job": switchJob records the OUTGOING segment first, and on a punch
+              with no job that segment is written with job_id NULL — so tapping it at 3pm on a
+              job-less morning banks every hour so far to nothing and gives the job only the
+              minutes after the tap. Those rows survive the close (clockOut preserves and scales
+              recorded allocations), so the job would be quietly under-costed. Timecards sets the
+              job on the WHOLE entry, which is what somebody reading this line actually wants. */}
+          {!openEntry.job_id && (
+            <p className="text-center text-xs text-slate-500">
+              {isStaff
+                ? "No job on this punch yet — put it on the right job from Timecards when you're done."
+                : "No job on this punch yet — the office puts it on the right job."}
+            </p>
+          )}
 
           <div className="text-center">
             <div className="text-5xl font-bold tabular-nums tracking-tight text-slate-900" suppressHydrationWarning>
@@ -617,7 +651,7 @@ export function TimeclockPanel({
                             aria-label="New job"
                           >
                             <option value="">— New job —</option>
-                            {jobs
+                            {jobOptions
                               .filter((j) => j.id !== openEntry.job_id)
                               .map((j) => (
                                 <option key={j.id} value={j.id}>
@@ -625,6 +659,15 @@ export function TimeclockPanel({
                                 </option>
                               ))}
                           </Select>
+                          {/* The job you drove to may not exist yet — make it here rather than
+                              leaving the clock running while you go open one on /jobs. */}
+                          <NewJobInline
+                            onCreated={(j) => {
+                              addNewJob(j);
+                              setSwitchJobId(j.id);
+                              setSwitchJobCode("");
+                            }}
+                          />
                           {/* Codes off: the switch is just "which job now" — no code question;
                               the allocation the server records carries a null code. */}
                           {jobCodesEnabled && (
@@ -720,7 +763,7 @@ export function TimeclockPanel({
                         className="h-11 min-w-0 flex-1"
                       >
                         <option value="">— Job —</option>
-                        {jobs.map((j) => (
+                        {jobOptions.map((j) => (
                           <option key={j.id} value={j.id}>
                             {optionLabel(j)}
                           </option>
@@ -787,6 +830,21 @@ export function TimeclockPanel({
                 </div>
               </div>
             )}
+            {/* "Add Job" above adds a ROW for a job that exists; this opens a job that doesn't,
+                and gives it its own row — so a day spent on an unlogged site can still be broken
+                down honestly at the end of it instead of landing on the nearest wrong job. */}
+            <div className="mt-2">
+              <NewJobInline
+                onCreated={(j) => {
+                  addNewJob(j);
+                  setAllocsDirty(true);
+                  setAllocations((p) => [
+                    ...p,
+                    { job_id: j.id, job_code: "", hours: 0, minutes: 0, description: "" },
+                  ]);
+                }}
+              />
+            </div>
           </div>
 
           {/* Mileage — round-trip home → job, captured right on clock-out (it used
@@ -924,12 +982,24 @@ export function TimeclockPanel({
                   <Label htmlFor="job">{t("tc_job")}</Label>
                   <Select id="job" value={jobId} onChange={(e) => setJobId(e.target.value)} className="h-11">
                     <option value="">{t("tc_noJob")}</option>
-                    {jobs.map((j) => (
+                    {jobOptions.map((j) => (
                       <option key={j.id} value={j.id}>
                         {optionLabel(j)}
                       </option>
                     ))}
                   </Select>
+                  {/* THE DEAD END Erik filed from the truck: "Can't add new job from this window."
+                      The site you're parked at may have no job yet, and the only answer used to be
+                      to leave the clock, open one on /jobs, and come back. */}
+                  <div className="mt-1.5">
+                    <NewJobInline
+                      onCreated={(j) => {
+                        addNewJob(j);
+                        setJobId(j.id);
+                        setJobCode("");
+                      }}
+                    />
+                  </div>
                 </div>
                 {jobCodesEnabled && (
                   <div>
@@ -963,6 +1033,16 @@ export function TimeclockPanel({
             </>
           )}
         </Button>
+        {/* NO DEAD END ON A JOB-LESS PUNCH. A tech gets no job picker here and can't be given
+            one (createJob is staff-only), so the screen has to SAY where the punch lands instead
+            of leaving "which job?" as an unanswerable question: the server resolves today's crew
+            day-assignment → a job scheduled today → the org's only in-progress job → none. */}
+        {!isStaff && (
+          <p className="text-center text-xs text-slate-500">
+            Your job comes from today&apos;s crew assignment. Nothing assigned? Clock in anyway — the
+            office puts it on the right job.
+          </p>
+        )}
         <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
           <MapPin className="h-3.5 w-3.5" /> {t("tc_locationNote")}
         </p>

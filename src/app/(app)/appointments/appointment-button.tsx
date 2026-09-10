@@ -408,6 +408,15 @@ export function AppointmentButton({
                   <MessageSquare className="h-4 w-4 shrink-0" /> Text It
                 </a>
               </div>
+              {/* The SAME honesty the /leads handoff carries (e407833a). A defect is never just
+                  an instance: this is the identical sms: link reached from the Schedule day
+                  view's pencil rather than from a lead, so the same wrong impression — that the
+                  customer sees the business number — was available from here too. */}
+              <p className="mt-2 text-xs text-slate-500">
+                Text It opens this phone&rsquo;s own messaging app, so it sends from this
+                phone&rsquo;s number, not the business line. To send it from the business line, use
+                Copy Link and paste it there.
+              </p>
             </div>
           )}
 

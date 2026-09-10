@@ -155,6 +155,14 @@ export function ProposeDatesButton({
                   </Button>
                 )}
               </div>
+              {/* Third door onto the same sms: handoff (e407833a) — say where it sends from.
+                  The planner's "running late" text deliberately gets NO such note: that one IS
+                  the tech's own phone speaking, and should be. */}
+              <p className="text-xs text-slate-500">
+                Text It opens this phone&rsquo;s own messaging app, so it sends from this
+                phone&rsquo;s number, not the business line. Use Copy Link to send it from the
+                business line instead.
+              </p>
             </>
           ) : (
             <>

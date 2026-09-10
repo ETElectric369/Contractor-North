@@ -210,16 +210,39 @@ export default async function NewQuotePage({
   // lead's plan PDFs become one-tap read chips beside Upload Plans (server re-verifies the
   // lead carries each path before a byte moves).
   let leadPlans: { path: string; name: string }[] = [];
+  // The lead this builder was OPENED for, as a picker option in its own right (below).
+  let openedForLead: { id: string; name: string; company_name: string | null } | null = null;
   const effInquiryId = inquiry ?? captureInquiryId;
   if (effInquiryId) {
-    const { data: leadRow } = await supabase.from("inquiries").select("intake").eq("id", effInquiryId).maybeSingle();
-    leadPlans = intakePaths((leadRow as { intake?: unknown } | null)?.intake)
+    const { data: leadRow } = await supabase
+      .from("inquiries")
+      .select("id, name, company_name, intake")
+      .eq("id", effInquiryId)
+      .maybeSingle();
+    const lr = leadRow as { id?: string; name?: string; company_name?: string | null; intake?: unknown } | null;
+    if (lr?.id) openedForLead = { id: lr.id, name: lr.name ?? "Lead", company_name: lr.company_name ?? null };
+    leadPlans = intakePaths(lr?.intake)
       .filter((p) => extOf(p) === "pdf")
       .map((p) => ({ path: p, name: uploadDisplayName(p) }));
   }
-  const [{ data: customers }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
+  const [{ data: customers }, { data: leadRows }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
+      // AN ESTIMATE IS OFTEN FOR A LEAD, NOT A CUSTOMER (Erik: "I should be able to select from
+      // Lead list, not customer list when building estimate"). Nothing downstream needed
+      // changing for this — quotes.inquiry_id already carries it, the Estimates list already
+      // prints "Catherine · lead", and the printed document already coalesces the customer block
+      // onto the inquiry. This picker was the only door that pretended a customer was required,
+      // which is what pushed people into minting a customer row before the work was won.
+      //
+      // `status` is FREE TEXT (statuses.ts), so exclude the two that are FINISHED rather than
+      // whitelisting the three that aren't — an org's own wording never silently disappears.
+      supabase
+        .from("inquiries")
+        .select("id, name, company_name")
+        .not("status", "in", "(lost,won)")
+        .order("created_at", { ascending: false })
+        .limit(500),
       supabase
         .from("price_list_items")
         .select("id, code, description, category, unit, buy_price, markup_pct, updated_at")
@@ -243,6 +266,17 @@ export default async function NewQuotePage({
   const seededLines: DraftLineItem[] = pickedScopes.flatMap((g) =>
     scopeLines(ownScopes(g.picks, bookCodes), book, g.label),
   );
+
+  // The lead this page was opened for ALWAYS appears, even if it has since been won or lost or
+  // has aged past the cap — a picker that can't show what the document is actually attached to
+  // would render blank and read as "nobody", which is the lie this whole change is fixing.
+  const leadOptions = ((leadRows ?? []) as { id: string; name: string | null; company_name: string | null }[]).map((l) => ({
+    id: l.id,
+    name: l.name ?? "Lead",
+    company_name: l.company_name ?? null,
+  }));
+  const opened = openedForLead;
+  if (opened && !leadOptions.some((l) => l.id === opened.id)) leadOptions.unshift(opened);
 
   const settings = getOrgSettings((org as any)?.settings);
   const expiryDays = settings.quote_expiry_days;
@@ -293,6 +327,7 @@ export default async function NewQuotePage({
           level_markup: c.pricing_levels?.markup_pct ?? null,
           level_rate: c.pricing_levels?.labor_rate ?? null,
         }))}
+        leads={leadOptions}
         preselected={customer ?? captureCustomerId}
         jobId={job ?? captureJobId}
         inquiryId={inquiry ?? captureInquiryId}

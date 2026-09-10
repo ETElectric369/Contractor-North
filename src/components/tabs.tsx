@@ -367,7 +367,7 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
         // would override a Tailwind `absolute` (the SectionActionsMenu gotcha).
         <div
           style={{ position: "absolute", right: 0, top: "calc(100% + 0.25rem)" }}
-          className="glass glass-gloss glass-menu z-30 min-w-[180px] overflow-hidden rounded-xl py-1 shadow-xl"
+          className="glass glass-gloss glass-menu z-30 flex max-h-[min(70vh,24rem)] min-w-[180px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
         >
           {/* Opaque backing — the job-manage-menu.tsx pattern (cn-v315's "ghost Edit
               pill" root cause). glass-menu's 40% white let the page's cards/buttons
@@ -377,6 +377,15 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
               behind the rows, under the .glass-gloss sheen (-z-10 vs the z-10 rows). */}
           <div aria-hidden className="absolute inset-0 -z-10 bg-white/85" />
           <div aria-hidden className="absolute inset-0 -z-10 bg-[rgb(var(--glass-tint))]/10" />
+          {/* THE MENU SCROLLS, BECAUSE THE LIST CAN BE LONGER THAN THE PHONE (Erik: "Can't see
+              the bottom of the list", /jobs/<id>?tab=time). This panel had no max-height and
+              `overflow-hidden`, so on a hub with thirteen tabs — at 402px only a couple stay in
+              the strip — eleven rows plus their cluster headers ran off the bottom of the screen
+              and were CLIPPED, not scrollable: the bottom entries were unreachable by any gesture.
+              The cap lives on the panel (so the two backing layers still cover exactly what you
+              see) and the scroll on the rows inside it, which is why this is a flex column with a
+              min-h-0 child rather than one overflow rule. */}
+          <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {sections.map(
             (s, si) =>
               s.items.length > 0 && (
@@ -431,6 +440,7 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
                 </div>
               ),
           )}
+          </div>
         </div>
       )}
     </div>

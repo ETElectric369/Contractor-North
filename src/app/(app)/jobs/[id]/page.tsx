@@ -684,9 +684,16 @@ export default async function JobDetailPage({
       count: entries?.length ?? 0,
       content: (
         <Card className="overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3 text-sm">
+          {/* THE ROW WRAPS (Erik, from the phone: "can't see the bottom of the list" — his
+              screenshot at 402px shows "Add Time Entry" sheared off at the card's edge). Three
+              things share this line — the total, Clock In with its start-time picker underneath,
+              and Add Time Entry — and every Button is whitespace-nowrap, so at phone width the
+              row can't shrink below its content and the Card's overflow-hidden simply cut the
+              last control in half. flex-wrap lets the controls drop to their own line instead of
+              off the card; nothing here is allowed to be a half-visible tap target. */}
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <JobClockButton jobId={j.id} isStaff={viewerIsStaff} />
               {viewerIsStaff && (
                 <JobAddTimeEntry

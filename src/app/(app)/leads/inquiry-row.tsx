@@ -40,6 +40,7 @@ export function InquiryRow({
   customers,
   focused = false,
   inspections = null,
+  businessPhone = null,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
@@ -50,6 +51,8 @@ export function InquiryRow({
    *  inspection is exempt from converting, so it can still become an estimate — but the row used
    *  to look identical to one nobody had touched. This is what it takes to tell them apart. */
   inspections?: { done: number; upcoming: number } | null;
+  /** The org's own line (organizations.phone) — the "Text it" handoff has to be able to name it. */
+  businessPhone?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -280,7 +283,7 @@ export function InquiryRow({
           Already converted — its estimate or job carries the work now.
         </p>
       ) : (
-        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} />
+        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} />
       )}
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old

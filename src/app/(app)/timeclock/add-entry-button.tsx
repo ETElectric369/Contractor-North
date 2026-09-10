@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { useToast } from "@/components/toast";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
+import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { buildShiftSpan } from "./shift-span";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
@@ -71,6 +72,20 @@ export function AddEntryButton({
   const [endDate, setEndDate] = useState(today);
   const [jobId, setJobId] = useState("");
   const [jobCode, setJobCode] = useState("");
+  // Jobs opened from inside this window. The list below is server-rendered, so a job made here
+  // has to come from local state to be pickable at all — the refresh that catches the page up
+  // lands long after the tap. Dropped again once the server sends the same job, or it would
+  // render twice in the dropdown.
+  const [newJobs, setNewJobs] = useState<JobOption[]>([]);
+  const jobOptions = useMemo(() => {
+    const known = new Set(jobs.map((j) => j.id));
+    return [...newJobs.filter((j) => !known.has(j.id)), ...jobs];
+  }, [jobs, newJobs]);
+  function addNewJob(j: CreatedJob) {
+    setNewJobs((p) => (p.some((x) => x.id === j.id) ? p : [...p, { id: j.id, job_number: "", name: j.name }]));
+    setJobId(j.id);
+    toast(`Created ${j.name}`, "success");
+  }
   const [miles, setMiles] = useState(0);
   // Lunch is OPT-IN (Erik 2026-09-08) — unchecked means the shift is paid gross.
   const [tookLunch, setTookLunch] = useState(false);
@@ -251,12 +266,18 @@ export function AddEntryButton({
             <Label htmlFor="m-job">Job (optional)</Label>
             <Select id="m-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
               <option value="">— No job —</option>
-              {jobs.map((j) => (
+              {jobOptions.map((j) => (
                 <option key={j.id} value={j.id}>
                   {jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j)}
                 </option>
               ))}
             </Select>
+            {/* "Can't add new job from this window" (Erik) — a past entry is often the one that
+                needs a job nobody opened at the time, and closing this form to go make one threw
+                away everything typed into it. */}
+            <div className="mt-1.5">
+              <NewJobInline onCreated={addNewJob} />
+            </div>
           </div>
 
           <div>

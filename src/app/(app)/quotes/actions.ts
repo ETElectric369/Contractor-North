@@ -70,13 +70,18 @@ export async function textQuote(
   const supabase = await createClient();
   const { data: quote } = await supabase
     .from("quotes")
-    .select("quote_number, total, public_token, doc_type, status, customers(name, phone)")
+    // THE LEAD RIDES ALONG (PROJECTION LAW). An estimate can be made out to a lead — the printed
+    // document and the public /q link have coalesced onto the inquiry since 0119 — but Send only
+    // ever asked for the customer, so texting a perfectly reachable prospect answered "this
+    // customer has no phone number" about a customer that was never supposed to exist yet.
+    .select("quote_number, total, public_token, doc_type, status, customers(name, phone), inquiry:inquiry_id(name, phone)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
-  const customer = (quote as any).customers;
+  // Same order the document itself resolves in: the customer when there is one, else the lead.
+  const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.phone)
-    return { ok: false, error: "This customer has no phone number." };
+    return { ok: false, error: "There's no phone number on file for whoever this estimate is for — add one on their lead or contact, then send again." };
 
   const label = docLabel(quote as { doc_type?: string | null });
   const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
@@ -112,13 +117,15 @@ export async function emailQuote(
 
   const { data: quote } = await supabase
     .from("quotes")
-    .select("*, customers(name, email)")
+    // The lead too — same reason as textQuote above: an estimate made out to a lead is a real,
+    // sendable document, and the /q link it carries already prints the lead's name.
+    .select("*, customers(name, email), inquiry:inquiry_id(name, email)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
-  const customer = (quote as any).customers;
+  const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.email)
-    return { ok: false, error: "This customer has no email address." };
+    return { ok: false, error: "There's no email address on file for whoever this estimate is for — add one on their lead or contact, then send again." };
   const label = docLabel(quote as { doc_type?: string | null });
 
   const { data: org } = await supabase
@@ -555,30 +562,49 @@ export async function deleteQuote(id: string): Promise<{ ok: boolean; error?: st
   const { data: victim } = await supabase.from("quotes").select("id, inquiry_id").eq("id", id).maybeSingle();
   const { error } = await supabase.from("quotes").delete().eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
-  if (victim?.inquiry_id) {
-    // BOTH deeds, not just this one (v800 wave B caught my own v801 regression): widening the
-    // un-stamp to every converted_to value meant deleting a lead's QUOTE reopened it even when
-    // the JOB born from that lead was alive and well — stamp-follows-deed, inverted.
-    const [{ count }, { count: jobsLeft }] = await Promise.all([
-      supabase.from("quotes").select("id", { count: "exact", head: true }).eq("inquiry_id", victim.inquiry_id),
-      supabase.from("jobs").select("id", { count: "exact", head: true }).eq("inquiry_id", victim.inquiry_id),
-    ]);
-    if (!count && !jobsLeft) {
-      await supabase
-        .from("inquiries")
-        // "new", not "open": INQUIRY_STATUSES is new/contacted/quoted/won/lost, and a lead
-        // released back to the inbox is a fresh one again. "open" is not in that vocabulary and
-        // rendered as an unknown chip (v800 verification).
-        .update({ converted_to: null, converted_at: null, status: "new", updated_at: new Date().toISOString() })
-        .eq("id", victim.inquiry_id)
-        // NOT .eq("converted_to","quote"): convertInquiry writes 'estimate' or 'job', so that
-        // filter silently skipped the very rows this un-stamp exists for (audit v800).
-        .not("converted_at", "is", null);
-      revalidatePath("/leads");
-    }
-  }
+  if (victim?.inquiry_id) await releaseLeadIfOrphaned(supabase, victim.inquiry_id);
   revalidatePath("/quotes");
   return { ok: true };
+}
+
+/**
+ * PUT A LEAD BACK IN THE INBOX when nothing points at it any more.
+ *
+ * Autosave stamps a lead 'quoted' the moment a draft for it exists, so anything that takes the
+ * last deed away again has to take the stamp with it — or the lead leaves the inbox pointing at
+ * nothing (the Andrew-orphan class). Two callers: deleting the quote, and RE-POINTING it, now
+ * that the builder's picker can move an estimate from one lead to another person entirely.
+ *
+ * BOTH deeds, not just quotes (v800 wave B caught my own v801 regression): widening the un-stamp
+ * to every converted_to value meant deleting a lead's QUOTE reopened it even when the JOB born
+ * from that lead was alive and well — stamp-follows-deed, inverted. So a live job holds the
+ * stamp on its own.
+ */
+async function releaseLeadIfOrphaned(supabase: any, inquiryId: string): Promise<void> {
+  const [qRes, jRes] = await Promise.all([
+    supabase.from("quotes").select("id", { count: "exact", head: true }).eq("inquiry_id", inquiryId),
+    supabase.from("jobs").select("id", { count: "exact", head: true }).eq("inquiry_id", inquiryId),
+  ]);
+  // FAIL CLOSED ON A FAILED READ. A PostgREST count that errors comes back as `count: null` with
+  // the error alongside it — and the old `if (count || jobsLeft) return` read that null as "zero
+  // deeds left" and released the lead anyway. So one transient failure reopened a lead whose quote
+  // and job are both alive, and the inbox grew a duplicate of live work. Not releasing a lead that
+  // should have been released is a stamp somebody fixes in a tap; releasing one that shouldn't be
+  // is a lead the office chases twice. This matters more now that re-pointing an estimate reaches
+  // here from the builder, where a person can trigger it repeatedly.
+  if (qRes.error || jRes.error) return;
+  if (qRes.count || jRes.count) return;
+  await supabase
+    .from("inquiries")
+    // "new", not "open": INQUIRY_STATUSES is new/contacted/quoted/won/lost, and a lead released
+    // back to the inbox is a fresh one again. "open" is not in that vocabulary and rendered as an
+    // unknown chip (v800 verification).
+    .update({ converted_to: null, converted_at: null, status: "new", updated_at: new Date().toISOString() })
+    .eq("id", inquiryId)
+    // NOT .eq("converted_to","quote"): convertInquiry writes 'estimate' or 'job', so that filter
+    // silently skipped the very rows this un-stamp exists for (audit v800).
+    .not("converted_at", "is", null);
+  revalidatePath("/leads");
 }
 
 /**
@@ -652,6 +678,17 @@ export async function saveQuote(input: SaveQuoteInput) {
   if (inquiryId) {
     const { data: inq } = await supabase.from("inquiries").select("id").eq("id", inquiryId).maybeSingle();
     if (!inq) inquiryId = null;
+  }
+
+  // WHO AN ESTIMATE IS FOR CAN NOW MOVE. The builder's picker offers leads and customers side by
+  // side, so a draft can be re-pointed from one lead to another — or to a customer with no lead
+  // at all. Read the pointer BEFORE the write; if it changes, the lead it left has to be released
+  // afterwards or it sits stamped 'quoted' with nothing pointing at it. On an insert there is no
+  // previous pointer, so this costs one small read only on the autosave/update path.
+  let prevInquiryId: string | null = null;
+  if (input.id) {
+    const { data: before } = await supabase.from("quotes").select("inquiry_id").eq("id", input.id).maybeSingle();
+    prevInquiryId = (before as { inquiry_id?: string | null } | null)?.inquiry_id ?? null;
   }
 
   const fields = {
@@ -800,6 +837,11 @@ export async function saveQuote(input: SaveQuoteInput) {
     }
     revalidatePath("/leads");
   }
+
+  // The lead this estimate LEFT, released once the new pointer is on the row (so the count below
+  // sees the world as it now is). Guarded by "no quotes and no jobs left on it" exactly like the
+  // delete path — a lead with other live work keeps its stamp.
+  if (prevInquiryId && prevInquiryId !== inquiryId) await releaseLeadIfOrphaned(supabase, prevInquiryId);
 
   // Re-derive the header from what the DB actually stored, so the lines on the document always
   // add up to its Subtotal (audit v921 high). Idempotent, and the same function every editor

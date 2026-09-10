@@ -19,6 +19,8 @@ import { hasCaptureData } from "@/lib/inspections";
 import { ApptQuickActions } from "../appointment-status";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
+import { playbookForForm } from "@/lib/playbook/parse";
+import { intakeAnswerLines } from "@/lib/inquiries/carry-intake-answers";
 import { parsePlanBrief } from "@/lib/plan-brief";
 
 export const dynamic = "force-dynamic";
@@ -43,11 +45,15 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm] = await Promise.all([
     supabase
       .from("appointments")
       .select(
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, intake)",
+        // `message` rides along (PROJECTION LAW): it is the flattened copy of the customer's own
+        // answers that the booking doors paste into `notes`, and the only way this page can tell
+        // "the office wrote this note" from "this paragraph IS the intake summary, shown properly
+        // below" is to have the original to compare against.
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -79,6 +85,13 @@ export default async function AppointmentCapturePage({
           .eq("archived", false)
           .order("code"),
     ),
+    // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
+    // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`
+    // is not a question. Read tolerantly and org-scoped by RLS, like every other read here; an org
+    // with no public door simply has none and the card below never renders.
+    tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
+      supabase.from("forms").select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
+    ),
   ]);
   if (!appt) notFound();
 
@@ -109,6 +122,57 @@ export default async function AppointmentCapturePage({
 
   const dayStr = a.starts_at ? todayStrInTz(tz, new Date(a.starts_at)) : "";
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
+
+  /**
+   * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the walk-through, as answers, in their name.
+   *
+   * Erik, three reports off the Andy Colar lead: "the walk-through starts blank", "the intake
+   * answers don't carry over", "they aren't on the lead at all". The answers were never missing —
+   * they are on `inquiries.intake.intake_answers`, and this page has been SELECTING them all along
+   * to sign the uploaded files. Nothing read the rest.
+   *
+   * The pre-fill (carryForInquiry) matches by key, and only a question that exists on BOTH the
+   * intake form and the walk-through can match. Vivian Builders' intake asks 26 questions and their
+   * walk-through asks one, so his lead carried nothing at all — and the only trace of what the
+   * customer said was the flattened paragraph pasted into the appointment's notes, sitting there
+   * unattributed as if the office had typed it.
+   *
+   * So: the same answers, labelled with the questions they were asked under, marked as the
+   * customer's own. Read-only on purpose — a person answering a web form is neither the contractor's
+   * word ("take it as given") nor a machine's reading, and the estimator's provenance split has no
+   * third bucket. He confirms it on site, and what he types on the sheet is his.
+   */
+  const lead = (a.inquiries ?? null) as
+    | { name?: string | null; message?: string | null; intake?: { intake_answers?: unknown } | null }
+    | null;
+  const intakePlaybook = intakeForm ? playbookForForm(intakeForm) : null;
+  // Anything already sitting on the sheet as an editable answer (the key DID match) is left to the
+  // sheet — repeating it here would be asking him to confirm the same thing twice.
+  const prefilled = new Set(
+    Object.entries((inspection?.inspection_answers ?? {}) as Record<string, unknown>)
+      .filter(([, v]) => v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+      .map(([k]) => k),
+  );
+  const customerSaid = intakePlaybook
+    ? intakeAnswerLines(intakePlaybook, lead?.intake?.intake_answers, prefilled)
+    : [];
+  // NOTHING SILENT: when the walk-through asks none of what the customer answered, the pre-fill did
+  // not fail quietly — it had nowhere to put anything, and the card says so rather than leaving him
+  // to conclude the answers were lost.
+  const sheetKeys = new Set((sheets ?? []).flatMap((s) => playbookForForm(s).needs.map((n) => n.key)));
+  const sheetAsksNone =
+    customerSaid.length > 0 && prefilled.size === 0 && customerSaid.every((l) => !sheetKeys.has(l.key));
+
+  // The booking doors paste the lead's `message` — a flattened copy of exactly these answers — into
+  // the appointment's notes. Now that the answers render AS answers, printing that paragraph above
+  // them is the same ten lines twice. Strip it only when it is still there verbatim; a note somebody
+  // has edited, or one carrying an office remark as well, is left exactly as written.
+  const leadMessage = String(lead?.message ?? "").trim();
+  const notesRaw = String(a.notes ?? "");
+  const notesShown =
+    customerSaid.length > 0 && leadMessage && notesRaw.includes(leadMessage)
+      ? notesRaw.split(leadMessage).join("").replace(/\n{3,}/g, "\n\n").trim()
+      : notesRaw;
 
   // The full edit modal (same one the schedule day view opens via the pencil) —
   // title/time/type/assignee/location are editable HERE too, not just capture fields.
@@ -208,7 +272,30 @@ export default async function AppointmentCapturePage({
             </NavLink>
           )}
         </div>
-        {a.notes && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{a.notes}</p>}
+        {notesShown && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{notesShown}</p>}
+        {/* The customer's own answers, as answers. See the block above for why this is read-only
+            and why it is attributed out loud. */}
+        {a.inquiry_id && customerSaid.length > 0 && (
+          <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              What the customer told us online
+            </p>
+            <dl className="mt-1.5 space-y-1">
+              {customerSaid.map((l) => (
+                <div key={l.key} className="flex flex-wrap gap-x-2 text-sm">
+                  <dt className="shrink-0 text-slate-500">{l.label}</dt>
+                  <dd className="font-medium text-slate-800">{l.value}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-2 text-xs text-slate-400">
+              Their words, not a finding — confirm on site.
+              {sheetAsksNone
+                ? " None of these matched a question on your walk-through sheet, so none of them could fill it in."
+                : ""}
+            </p>
+          </div>
+        )}
         {/* What the customer attached at intake — the plans this walk-through prices from. The
             lead leaves the inbox once it converts, so every linked surface carries its files. */}
         {a.inquiry_id && (

@@ -97,8 +97,11 @@ export default async function InquiriesPage({
   // `new Date("YYYY-MM-DD")` is UTC midnight — 5 PM Pacific the evening BEFORE — so the old
   // instant-compare counted tomorrow's follow-ups as due every evening (this exact bug's third
   // appearance in the codebase). Two date-words compare as strings; no clock is consulted.
-  const { data: tzRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  // `phone` rides along with the settings read (PROJECTION LAW): the business line is what the
+  // "Text it" handoff has to be able to NAME — see convert-menu for why naming it is the whole fix.
+  const { data: tzRow } = await supabase.from("organizations").select("settings, phone").limit(1).maybeSingle();
   const todayYmd = todayStrInTz(getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone);
+  const businessPhone = ((tzRow as { phone?: string | null } | null)?.phone ?? "").trim() || null;
   const isDue = (i: { next_follow_up_at: string | null }) =>
     Boolean(i.next_follow_up_at && i.next_follow_up_at.slice(0, 10) <= todayYmd);
   const base = focusExtra ? [focusExtra, ...inquiries] : inquiries;
@@ -151,6 +154,7 @@ export default async function InquiriesPage({
                 customers={customers}
                 focused={i.id === focus}
                 inspections={inspectionState.get(i.id) ?? null}
+                businessPhone={businessPhone}
               />
             ))}
           </ul>

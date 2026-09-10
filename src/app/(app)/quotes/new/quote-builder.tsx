@@ -38,6 +38,13 @@ interface CustomerOption {
   level_markup?: number | null;
   level_rate?: number | null;
 }
+/** A LEAD — a person who has not bought anything yet. Deliberately NOT a CustomerOption: a lead
+ *  has no pricing level, because a pricing level is something you give a customer. */
+interface LeadOption {
+  id: string;
+  name: string;
+  company_name: string | null;
+}
 interface PriceItemLite {
   id: string;
   code: string | null;
@@ -92,12 +99,17 @@ function LineDescInput({
   priced: (p: PriceItemLite) => number;
 }) {
   const [open, setOpen] = useState(false);
+  // BROWSE, DON'T GUESS — the same rule the Add picker above it runs on (add-line-items.tsx).
+  // This sibling still demanded two typed characters before it would show anything, so tapping a
+  // Description box to see what's in the book gave you an empty screen: "no drop down menu with
+  // line items". You cannot search a catalog you have never seen. Empty box → the book; typing
+  // narrows it.
   const matches = useMemo(() => {
     const q = value.trim().toLowerCase();
-    if (q.length < 2) return [];
-    return priceItems
-      .filter((p) => [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)))
-      .slice(0, 8);
+    const pool = q
+      ? priceItems.filter((p) => [p.code, p.description, p.category].some((v) => (v ?? "").toLowerCase().includes(q)))
+      : priceItems;
+    return pool.slice(0, q ? 25 : 200);
   }, [value, priceItems]);
   return (
     <div className="relative">
@@ -108,24 +120,40 @@ function LineDescInput({
           onText(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        // Open on focus only when the box is EMPTY — that's the "I want to see what's in the
+        // book" case. Tapping back into a line you already wrote (to fix a typo) shouldn't drop a
+        // list over the rows below it; typing opens the list either way. (The overlay there would
+        // be the MATCHES for what's already typed, not the whole book — `matches` is derived from
+        // `value` — so this is about not covering the page mid-edit, not about size.)
+        onFocus={() => {
+          if (!value.trim()) setOpen(true);
+        }}
+        // Escape closes it without touching the line — a list you can't get out of is a trap
+        // when the description you want is one you're typing by hand.
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
-      {open && priceItems.length === 0 && value.trim().length >= 2 && (
+      {open && priceItems.length === 0 && (
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
           No price book yet — upload or build one under Tools → Price List and these will autocomplete.
         </div>
       )}
-      {open && matches.length > 0 && (
+      {open && priceItems.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
           {matches.map((p) => (
             <li key={p.id}>
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
-                onMouseDown={(e) => {
-                  // mousedown beats the input's blur — the pick must land before the list hides
-                  e.preventDefault();
+                // preventDefault on mousedown keeps the input focused so the blur-timer doesn't
+                // pull the list out from under the tap; the PICK itself rides onClick. It used to
+                // ride mousedown alone, and iOS only synthesizes mouse events for a tap that
+                // doesn't drift — so a finger that moved a pixel selected nothing and the list
+                // just vanished. That is the "glitchy" part.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
                   onPick(p);
                   setOpen(false);
                 }}
@@ -135,6 +163,17 @@ function LineDescInput({
               </button>
             </li>
           ))}
+          {matches.length === 0 && (
+            // Say it out loud. A dropdown that renders nothing at all reads as a broken control
+            // rather than as an answer.
+            <li className="px-3 py-2 text-sm text-slate-400">Nothing in your price list matches that.</li>
+          )}
+          {/* A silent slice reads as "that's everything". */}
+          {!value.trim() && priceItems.length > matches.length && (
+            <li className="border-t border-slate-100 px-3 py-2 text-xs text-slate-400">
+              Showing {matches.length} of {priceItems.length} — type to narrow it down.
+            </li>
+          )}
         </ul>
       )}
     </div>
@@ -143,6 +182,7 @@ function LineDescInput({
 
 export function QuoteBuilder({
   customers,
+  leads = [],
   preselected,
   jobId,
   inquiryId,
@@ -165,6 +205,9 @@ export function QuoteBuilder({
   /** For storage-first uploads (#116): the org folder the documents bucket's RLS admits. */
   orgId?: string;
   customers: CustomerOption[];
+  /** The org's open leads. An estimate is written for whoever asked for it, and that is usually
+   *  someone who is not a customer yet — see the "Who's this for?" picker below. */
+  leads?: LeadOption[];
   /** Measurements the inspector already took on the walk-through (?capture=). They prefill the
    *  kit picker's sizing boxes, so nobody types a number twice — which is the whole reason the
    *  inspection sheet asks for them as NUMBERS instead of prose. */
@@ -221,6 +264,19 @@ export function QuoteBuilder({
   // picker and never this, its sibling one screen earlier.
   const [addedCustomers, setAddedCustomers] = useState<CustomerOption[]>([]);
   const allCustomers = [...addedCustomers, ...customers];
+  /**
+   * WHO THIS DOCUMENT IS FOR — a LEAD or a CUSTOMER, and the picker says which.
+   *
+   * Erik: "shows me that it is from the lead 'Catherine' but still showing no customer as
+   * selected.. This needs to be separated.. They don't become a customer until [the work is won]."
+   *
+   * A lead is not a customer wearing a different hat. The win mints the customer, once
+   * (settleUp's law), so until then the estimate rides on `inquiries` and `quotes.inquiry_id` is
+   * the link — which the Estimates list and the printed document have both read all along. This
+   * is STATE, not the `inquiryId` prop, because the picker can now move it; the prop stays the
+   * launch context (the draft slot key and the lead's own plan PDFs are keyed to it).
+   */
+  const [leadId, setLeadId] = useState(inquiryId ?? "");
   // The customer-facing document word — Estimate (T&M) by default, toggle to a
   // fixed-price Quote per document. Same control as the saved-quote editor.
   const [docType, setDocType] = useState<QuoteDocType>(adoptedSeed?.docType === "quote" ? "quote" : "estimate");
@@ -258,6 +314,50 @@ export function QuoteBuilder({
   const levelRate = selectedCust?.level_rate;
   const markupFor = (p: PriceItemLite) =>
     effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
+
+  /* ── WHO'S THIS FOR: one picker, two kinds of person, and it never confuses them ────────── */
+  // The attached lead ALWAYS has a row to sit on, even if it's been won/lost or aged out of the
+  // server's list — a <Select> whose value matches no option renders the first one, which would
+  // read "Nobody yet" over an estimate that is very much attached to somebody.
+  const leadOptions = useMemo(() => {
+    const list = leads.slice();
+    if (leadId && !list.some((l) => l.id === leadId))
+      list.unshift({ id: leadId, name: "The lead this estimate came from", company_name: null });
+    return list;
+  }, [leads, leadId]);
+  const selectedLead = leadOptions.find((l) => l.id === leadId) ?? null;
+  // A customer WINS the display slot when there is one — that's the order the printed document
+  // and the Estimates list already resolve in (customers ?? inquiries), so the picker agrees
+  // with the paper. The lead stays attached underneath as provenance.
+  const whoValue = customerId ? `customer:${customerId}` : leadId ? `lead:${leadId}` : "";
+  function pickWho(v: string) {
+    dirtyRef.current = true;
+    if (v.startsWith("customer:")) {
+      setCustomerId(v.slice("customer:".length));
+      return; // the lead stays — it's where this estimate came from, not a competing answer
+    }
+    if (v.startsWith("lead:")) {
+      // Picking a lead is the explicit statement that nobody has been made a customer yet.
+      setLeadId(v.slice("lead:".length));
+      setCustomerId("");
+      return;
+    }
+    setCustomerId("");
+    setLeadId("");
+  }
+  const whoHint = selectedCust
+    ? selectedLead
+      ? `A customer — started from the lead ${selectedLead.name}.`
+      : "" // a plain customer needs no explaining; a line saying "A customer." is noise
+    : selectedLead
+      ? `${selectedLead.name} is a lead. They become a customer when you win the work — you don't have to make one now.`
+      : leadOptions.length || allCustomers.length
+        ? "Pick the lead who asked for it, or a customer. You can leave this blank and decide later."
+        : "No leads or customers yet — add a customer below, or leave this blank.";
+  // The plan PDFs came off the lead this PAGE was opened for. If the picker has since moved to a
+  // different lead — or to none — they are somebody else's drawings and must stop being offered,
+  // rather than quietly taking off a plan for the wrong job.
+  const plansForLead = inquiryId && leadId === inquiryId ? leadPlans : [];
   // The one sell-price rule, shared with the Add picker: sellPrice (lib/pricing/markup.ts), cents.
   const priced = (p: PriceItemLite) => sellPrice(p.buy_price, markupFor(p));
 
@@ -356,8 +456,8 @@ export function QuoteBuilder({
   const draftState = useMemo(
     // proposed/questions ride too (Andrew's 45 plan lines lived ONLY in this state), and
     // quoteId keeps a refreshed tab autosaving the same draft row instead of minting twins.
-    () => ({ customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId }),
-    [customerId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId],
+    () => ({ customerId, leadId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId }),
+    [customerId, leadId, docType, title, description, notes, taxRate, taxChoice, validUntil, items, scope, proposed, questions, quoteId],
   );
   const draft = useDraft(
     // inquiryId is in the key because a lead-sourced estimate (cn-v477 defers the customer, so it
@@ -382,6 +482,9 @@ export function QuoteBuilder({
     draftState,
     (d) => {
       setCustomerId(d.customerId ?? preselected ?? "");
+      // A draft saved before the lead picker existed carries no leadId — it keeps the launch
+      // context, which is exactly what it was riding on.
+      setLeadId(typeof (d as { leadId?: unknown }).leadId === "string" ? (d as { leadId: string }).leadId : (inquiryId ?? ""));
       // Pre-toggle drafts carry no docType — they keep the estimate default.
       if (d.docType === "quote" || d.docType === "estimate") setDocType(d.docType);
       setTitle(d.title ?? "");
@@ -483,7 +586,7 @@ export function QuoteBuilder({
       // can't open them, so it honestly returns questions instead of lines — the one button
       // everyone reaches for must do the whole job. The scope box still overrides the drawings.
       const res =
-        leadPlans.length && inquiryId
+        plansForLead.length && inquiryId
           ? await generateQuoteDraftFromLeadPlans(inquiryId, scope, levelMarkup ?? undefined, levelRate ?? undefined)
           : await generateQuoteDraft(scope, levelMarkup ?? undefined, levelRate ?? undefined);
       if (!res.ok) {
@@ -627,15 +730,16 @@ export function QuoteBuilder({
   // EVERY FIELD A SAVE SENDS RIDES A REF (audit v800). A timer armed by one render used to fire
   // with THAT render's header — so a title/customer/tax-rate typed while a save was in flight was
   // overwritten by the pre-edit values on the coalesced re-run, under a green "autosaved".
-  const headerRef = useRef({ customerId, jobId, inquiryId, captureId, title, description, notes, taxRate, validUntil, docType });
-  headerRef.current = { customerId, jobId, inquiryId, captureId, title, description, notes, taxRate, validUntil, docType };
+  const headerRef = useRef({ customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType });
+  headerRef.current = { customerId, jobId, leadId, captureId, title, description, notes, taxRate, validUntil, docType };
   const quotePayload = (cleaned: DraftLineItem[]) => {
     const h = headerRef.current;
     return {
       id: quoteIdRef.current || undefined,
       customer_id: h.customerId || null,
       job_id: h.jobId || null,
-      inquiry_id: h.inquiryId || null,
+      // The picker's lead, not the URL's — they are the same until somebody changes who this is for.
+      inquiry_id: h.leadId || null,
       capture_appointment_id: h.captureId || null,
       title: h.title,
       description: h.description,
@@ -705,7 +809,7 @@ export function QuoteBuilder({
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, title, description, notes, taxRate, validUntil, docType, customerId, jobId]);
+  }, [items, title, description, notes, taxRate, validUntil, docType, customerId, leadId, jobId]);
 
   function onSave() {
     setSaveError(null);
@@ -772,9 +876,9 @@ export function QuoteBuilder({
               </Button>
               {/* Say out loud that Generate will read the plans — Andrew expected exactly that
                   and the button gave no sign either way. */}
-              {leadPlans.length > 0 && !generating && (
+              {plansForLead.length > 0 && !generating && (
                 <span className="text-xs text-slate-500">
-                  reads the customer&apos;s plans ({leadPlans.map((p) => p.name).join(", ")})
+                  reads their plans ({plansForLead.map((p) => p.name).join(", ")})
                 </span>
               )}
             </div>
@@ -824,12 +928,13 @@ export function QuoteBuilder({
               )}
             </div>
 
-            {/* THE PLANS THE CUSTOMER ALREADY SENT — one tap, no re-upload (Andrew's estimate
-                said "attached but I can't open it" while the PDF sat on the lead). */}
-            {leadPlans.length > 0 && (
+            {/* THE PLANS THEY ALREADY SENT — one tap, no re-upload (Andrew's estimate said
+                "attached but I can't open it" while the PDF sat on the lead). "They", not "the
+                customer": these arrive on a LEAD, which is the whole point of the intake form. */}
+            {plansForLead.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 pt-2">
-                <span className="text-xs font-medium text-slate-500">The customer&apos;s plans are already here:</span>
-                {leadPlans.map((p) => (
+                <span className="text-xs font-medium text-slate-500">Their plans are already here:</span>
+                {plansForLead.map((p) => (
                   <button
                     key={p.path}
                     type="button"
@@ -1069,18 +1174,31 @@ export function QuoteBuilder({
               measured={measured}
               onAdd={addGeneratedLines}
             />
+            {/* AddLineItems renders NOTHING at all when there's no book and no kits — which on
+                this screen reads as "the dropdown is broken" rather than "you have no catalog".
+                Say which it is, and where to go. */}
+            {priceItems.length === 0 && kits.length === 0 && (
+              <p className="mb-3 text-xs text-slate-500">
+                No price list or kits yet, so there&apos;s nothing to pick from — type the lines by hand below, or build
+                your catalog under Tools → Price List and they&apos;ll show up here.
+              </p>
+            )}
 
             <div className="space-y-2">
               {grouped.map(({ group, entries }) => {
                 const gSub = subtotalTaxTotal(entries.map(({ it }) => it.quantity * it.unit_price), 0).subtotal;
                 const isCollapsed = collapsed.has(group);
+                // NO overflow-hidden on the group box. It was only rounding the header's corners,
+                // and it CLIPPED the price-book dropdown of every line inside the group — so on
+                // any estimate built from a kit or a walk-through, tapping a Description opened a
+                // list you couldn't see. The header rounds its own corners instead.
                 return (
-                  <div key={group || "__ungrouped"} className={group ? "overflow-hidden rounded-lg border border-slate-200" : ""}>
+                  <div key={group || "__ungrouped"} className={group ? "rounded-lg border border-slate-200" : ""}>
                     {group && (
                       <button
                         type="button"
                         onClick={() => toggleGroup(group)}
-                        className="flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left hover:bg-slate-100"
+                        className={`flex w-full items-center gap-2 bg-slate-50 px-3 py-2 text-left hover:bg-slate-100 ${isCollapsed ? "rounded-lg" : "rounded-t-lg"}`}
                       >
                         {isCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
                         <span className="text-sm font-semibold text-slate-800">{group}</span>
@@ -1166,26 +1284,42 @@ export function QuoteBuilder({
               />
             </div>
             <div>
-              <Label htmlFor="customer">Customer</Label>
-              <Select
-                id="customer"
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-              >
-                <option value="">
-                  {allCustomers.length ? "— Select customer —" : "— No customers yet — add one below, or leave blank (a lead becomes the customer when you win the job) —"}
-                </option>
-                {allCustomers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {c.company_name ? ` (${c.company_name})` : ""}
-                  </option>
-                ))}
+              {/* Sentence case, like every other field label on this card ("Tax rate", "Valid
+                  until") — Title Case is the law for CLICKABLES, not for labels. */}
+              <Label htmlFor="who">Who&apos;s this for?</Label>
+              <Select id="who" value={whoValue} onChange={(e) => pickWho(e.target.value)}>
+                <option value="">— Nobody yet —</option>
+                {leadOptions.length > 0 && (
+                  <optgroup label="Leads — not customers yet">
+                    {leadOptions.map((l) => (
+                      <option key={l.id} value={`lead:${l.id}`}>
+                        {l.name}
+                        {l.company_name ? ` (${l.company_name})` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {allCustomers.length > 0 && (
+                  <optgroup label="Customers">
+                    {allCustomers.map((c) => (
+                      <option key={c.id} value={`customer:${c.id}`}>
+                        {c.name}
+                        {c.company_name ? ` (${c.company_name})` : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </Select>
+              {/* Say which of the two this is, in plain words. The old copy hid the whole
+                  explanation — "a lead becomes the customer when you win the job" — inside the
+                  blank <option>, where it only showed for an org with NO customers at all, and
+                  never at the moment somebody was actually deciding. */}
+              {whoHint && <p className="mt-1.5 text-xs text-slate-500">{whoHint}</p>}
               <NewCustomerInline
                 className="mt-1.5"
                 onCreated={(c) => {
                   setAddedCustomers((prev) => [{ id: c.id, name: c.name, company_name: null }, ...prev]);
+                  dirtyRef.current = true;
                   setCustomerId(c.id);
                 }}
               />

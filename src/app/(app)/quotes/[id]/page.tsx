@@ -39,7 +39,10 @@ export default async function QuoteDetailPage({
     // pricing_levels nested INSIDE customers(*) — the star stays, because CustomerSelect's
     // `customer` prop needs the full row for EditCustomerButton. Narrowing it to a field list
     // would fix the markup and break that card.
-    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name, intake)")
+    // The lead's contact block rides along (PROJECTION LAW): the "Prepared for" card has to be
+    // able to show WHO an estimate with no customer is for, and a lead is a person with a name,
+    // a phone and an email — not a blank.
+    .select("*, customers(*, pricing_levels(markup_pct)), inquiry:inquiry_id(id, name, company_name, email, phone, intake)")
     .eq("id", id)
     .maybeSingle();
 
@@ -158,6 +161,11 @@ export default async function QuoteDetailPage({
           <CustomerSelect
             quoteId={q.id}
             customer={q.customers ?? null}
+            // Erik: "shows me that it is from the lead 'Catherine' but still showing no customer
+            // as selected.. This needs to be separated." It always WAS separate in the data —
+            // this card just never asked for the lead, so it printed "No customer attached" over
+            // an estimate that knows exactly whose it is.
+            lead={(q as any).inquiry ?? null}
             customers={(customers ?? []) as { id: string; name: string; company_name: string | null }[]}
           />
         </CardContent>
