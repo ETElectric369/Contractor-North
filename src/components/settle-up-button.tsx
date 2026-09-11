@@ -119,11 +119,15 @@ export function SettleUpButton(props: Mode & {
           return;
         }
         if (!art.payQr) {
-          // Stripe isn't connected — record it as a card payment taken some other way rather
-          // than dead-ending with cash in the air.
-          const r = await recordPayment({ invoice_id: invoiceId, amount: amt(), method: "card", note: "" });
-          toast(r.ok ? `Recorded — $${amt().toLocaleString()} card.` : (r.error ?? "Couldn't record that."), r.ok ? "success" : "error");
-          if (r.ok) { setOpen(false); router.refresh(); }
+          // NO DOOR, NO PHANTOM. This used to "record it as a card payment taken some other way"
+          // — a ledger row for money that never moved, on the one button whose job is to move it
+          // (Erik 2026-09-10: "No card charging going on here"). A card payment the office took
+          // on some other terminal belongs in Record payment, which says so. Here, say why the
+          // door is shut and where it gets opened; write nothing.
+          toast(
+            "Card payments aren't switched on yet — Settings → Getting Paid → Set Up Card Payments. Took the card some other way? Use Record payment instead.",
+            "error",
+          );
           return;
         }
         // The card QR opens Stripe Checkout for the invoice's FULL BALANCE (that is what /api/pay

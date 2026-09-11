@@ -2285,10 +2285,28 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, invoice_number, total, amount_paid, public_token, org_id")
+    .select("id, invoice_number, status, total, amount_paid, public_token, org_id")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
+
+  // A PAY DOOR ON A DRAFT IS A DOOR ONTO A WALL (Erik 2026-09-10, INV-064). The appointment/job
+  // sources reach here through settleUp, which SENDS the invoice first; the invoice source did
+  // not — so Pay Now on a still-draft invoice built a QR to /api/pay, which redirects drafts to
+  // the read-only view, and the customer scanned their way to a page with no Pay button. Putting
+  // a bill in front of a customer IS sending it: promote here, checked (a zero-row update would
+  // mean the door is still shut, and saying so beats a QR that fails on someone else's phone).
+  if ((inv as { status?: string }).status === "draft") {
+    const { data: sent, error: sendErr } = await supabase
+      .from("invoices")
+      .update({ status: "sent" })
+      .eq("id", invoiceId)
+      .eq("status", "draft")
+      .select("id");
+    if (sendErr || !sent?.length) {
+      return { ok: false, error: "Couldn't send this invoice, so there's nothing for them to pay yet." };
+    }
+  }
 
   const balance = invoiceBalance(inv.total, inv.amount_paid);
   const out: Awaited<ReturnType<typeof collectArtifacts>> = {

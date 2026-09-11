@@ -926,7 +926,7 @@ export function InvoiceDetail({
         <Card id="record-payment" className="scroll-mt-24">
           <CardContent className="space-y-3 py-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Record payment</h3>
+              <h3 className="text-sm font-semibold text-slate-900">Record a payment you already took</h3>
               {/* PAY NOW — the on-the-spot half. "Record payment" below writes down money that
                   already moved; this one MOVES it: card → the customer scans a QR into Stripe
                   checkout on their phone, Venmo → the org's QR with the amount filled in. */}
@@ -934,6 +934,15 @@ export function InvoiceDetail({
                 <SettleUpButton source="invoice" invoiceId={invoice.id} balance={balance} compact methods={paymentMethods} />
               )}
             </div>
+            {/* TWO SURFACES THAT LOOK ALIKE, ONE OF WHICH SAYS "CARD" AND DOESN'T CHARGE (Erik
+                2026-09-10, "No card charging going on here"): this form is the hand-ledger for
+                money that already moved — a check, cash, a card run on some other terminal. The
+                button beside the heading is the one that MOVES money. Say so, right here, or the
+                Method dropdown's "Card" reads as "charge the card" and writes a phantom. */}
+            <p className="text-xs text-slate-500">
+              This writes down money that has already changed hands — a check, cash, or a card you
+              ran somewhere else. To charge a card or show a QR, use <span className="font-medium text-slate-700">Pay Now</span>.
+            </p>
             {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments
                 arrive before the invoice goes out, and blocking them here forced a fake
                 workflow. The soft note keeps the state honest; the sent invoice shows
@@ -1143,7 +1152,7 @@ export function InvoiceDetail({
           onCancel={() => setLinkOpen(false)}
           onSave={saveLink}
           saving={pending}
-          saveLabel="Save Link"
+          saveLabel="Save"
         />
       </Modal>
     </div>
