@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { SettleUpButton } from "@/components/settle-up-button";
+import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { UnscheduleButton } from "../unschedule-button";
 import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
 import { MapPin } from "lucide-react";
@@ -57,7 +58,7 @@ export default async function AppointmentCapturePage({
       )
       .eq("id", id)
       .maybeSingle(),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
     // Jobs/customers/staff option lists for the Edit-details modal (the same
     // SSOT helper the schedule's picker uses).
     getSchedulePickerOptions(supabase),
@@ -214,6 +215,7 @@ export default async function AppointmentCapturePage({
             <SettleUpButton
               source="appointment"
               id={a.id}
+              cardEnabled={canAcceptPayments(connectStateFromOrg((org ?? {}) as any))}
               methods={orgSettings.payment_methods}
               venmoConfigured={Boolean(orgSettings.venmo_handle?.trim())}
             />

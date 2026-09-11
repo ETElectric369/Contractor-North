@@ -1,6 +1,7 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { storyForJob } from "@/lib/story";
 import { SettleUpButton } from "@/components/settle-up-button";
+import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -332,7 +333,7 @@ export default async function JobDetailPage({
       : supabase.from("profile_pay").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
-    supabase.from("organizations").select("address_line1, city, state, zip, settings").limit(1).maybeSingle(),
+    supabase.from("organizations").select("address_line1, city, state, zip, settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
     supabase.from("customers").select("id, name, type").order("name"),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("job_code_templates").select("id, name").order("name"),
@@ -1110,6 +1111,7 @@ export default async function JobDetailPage({
               source="job"
               id={j.id}
               compact
+              cardEnabled={canAcceptPayments(connectStateFromOrg((org ?? {}) as any))}
               methods={getOrgSettings((org as any)?.settings).payment_methods}
               venmoConfigured={Boolean(getOrgSettings((org as any)?.settings).venmo_handle?.trim())}
             />

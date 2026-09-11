@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { User, FileText, Printer, CreditCard, Banknote } from "lucide-react";
+import { User, FileText, Printer, Banknote } from "lucide-react";
 import { BackLink } from "@/components/back-link";
-import { billingEnabled } from "@/lib/stripe";
+import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
+import { PayNowButton } from "@/components/settle-up-button";
 import { qboConfigured } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
@@ -69,7 +70,7 @@ export default async function InvoicePage({
       // here exactly as it does in the quote composer, never from its frozen snapshot.
       firstThatWorks(kitsSelectRungs("id, name").map((sel) => () => supabase.from("kits").select(sel).order("name"))),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
-      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      supabase.from("organizations").select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
       isDraft
         ? listCustomerOptions(supabase, 2000)
         : Promise.resolve({ data: [] as { id: string; name: string }[] }),
@@ -79,6 +80,8 @@ export default async function InvoicePage({
     ]);
   const orgSettings = getOrgSettings((org as any)?.settings);
   const paymentMethods = orgSettings.payment_methods;
+  // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".
+  const cardEnabled = canAcceptPayments(connectStateFromOrg((org ?? {}) as any));
 
   // A deposit/progress/final invoice on a job carries a progress-report summary
   // so the payment request doubles as a running-balance statement.
@@ -124,17 +127,13 @@ export default async function InvoicePage({
             the ⋯ Actions menu (last) is the seek door for the rare deliberate ones —
             Credit/refund, QuickBooks, the Job link, and Delete (danger, last). */}
         <div className="flex flex-wrap items-center gap-2 self-start">
-          {/* Collect-payment is only meaningful once the invoice is actually billed:
-              you can't collect on an unsent draft. Hidden until it leaves draft. */}
-          {billingEnabled && !isDraft && invoiceBalance(inv.total, inv.amount_paid) > 0 && (
-            <a
-              href={`/api/pay/${(inv as any).public_token}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-lg bg-green-600 h-11 px-4 text-sm font-medium text-white hover:bg-green-700"
-            >
-              <CreditCard className="h-4 w-4" /> Collect Payment
-            </a>
+          {/* PAY NOW — the card door, up here with the other verbs (Erik 2026-09-10: "the pay now
+              button should have the credit card stuff"). It replaces the old Collect Payment link,
+              which opened the customer's checkout in a new tab of the OFFICE's browser. Shown on a
+              draft too: Pay Now sends the invoice the moment it builds the door, because putting a
+              bill in front of a customer is sending it. */}
+          {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
+            <PayNowButton source="invoice" invoiceId={inv.id} balance={invoiceBalance(inv.total, inv.amount_paid)} cardEnabled={cardEnabled} />
           )}
           <EmailButton
             id={inv.id}

@@ -2267,6 +2267,30 @@ export async function settleUp(input: {
  * QRs are data URLs (the same `qrcode` the share door uses) — nothing external, works offline
  * once rendered, which matters in a driveway with one bar of LTE.
  */
+/**
+ * THE WATCH behind the card control screen. Stripe's webhook writes the payment; the screen only
+ * needs to know when. One narrow read the tech's own session can make — no service client,
+ * nothing written — so Pay Now can poll it every few seconds while the QR is up and flip to
+ * "Paid" the moment the money lands, instead of someone refreshing the page to find out.
+ */
+export async function invoiceCollectStatus(invoiceId: string): Promise<{
+  ok: boolean;
+  error?: string;
+  total?: number;
+  amountPaid?: number;
+  status?: string;
+}> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data } = await ctx.supabase
+    .from("invoices")
+    .select("total, amount_paid, status")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!data) return { ok: false, error: "Invoice not found." };
+  return { ok: true, total: Number(data.total ?? 0), amountPaid: Number(data.amount_paid ?? 0), status: String(data.status ?? "") };
+}
+
 export async function collectArtifacts(invoiceId: string, collectAmount?: number): Promise<{
   ok: boolean;
   error?: string;

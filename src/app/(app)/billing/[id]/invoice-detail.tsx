@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { SettleUpButton } from "@/components/settle-up-button";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers } from "lucide-react";
@@ -29,6 +28,7 @@ import {
   setInvoiceDueDate,
   setInvoiceCustomerJob,
   recordPayment,
+  collectArtifacts,
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
   reimportFromScratch,
@@ -173,7 +173,19 @@ export function InvoiceDetail({
 
   // payment state
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
-  const [payMethod, setPayMethod] = useState(paymentMethods[0] ?? "Check");
+  const [payMethod, setPayMethod] = useState(paymentMethods.find((m) => m.toLowerCase() !== "card") ?? "Check");
+  const [venmoQr, setVenmoQr] = useState<string | null>(null);
+  const [venmoBusy, setVenmoBusy] = useState(false);
+  async function showVenmoQr() {
+    setVenmoBusy(true);
+    const art = await collectArtifacts(invoice.id, payAmount).catch(() => null);
+    setVenmoBusy(false);
+    if (!art?.ok || !art.venmoQr) {
+      toast(art?.error ?? "Add your Venmo username in Settings → Payment methods first.", "error");
+      return;
+    }
+    setVenmoQr(art.venmoQr);
+  }
 
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -925,23 +937,15 @@ export function InvoiceDetail({
             here (at 375px this card stacks below the whole line-items editor). */}
         <Card id="record-payment" className="scroll-mt-24">
           <CardContent className="space-y-3 py-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold text-slate-900">Record a payment you already took</h3>
-              {/* PAY NOW — the on-the-spot half. "Record payment" below writes down money that
-                  already moved; this one MOVES it: card → the customer scans a QR into Stripe
-                  checkout on their phone, Venmo → the org's QR with the amount filled in. */}
-              {balance > 0.005 && (
-                <SettleUpButton source="invoice" invoiceId={invoice.id} balance={balance} compact methods={paymentMethods} />
-              )}
-            </div>
-            {/* TWO SURFACES THAT LOOK ALIKE, ONE OF WHICH SAYS "CARD" AND DOESN'T CHARGE (Erik
-                2026-09-10, "No card charging going on here"): this form is the hand-ledger for
-                money that already moved — a check, cash, a card run on some other terminal. The
-                button beside the heading is the one that MOVES money. Say so, right here, or the
-                Method dropdown's "Card" reads as "charge the card" and writes a phantom. */}
+            <h3 className="text-sm font-semibold text-slate-900">Record Payment</h3>
+            {/* EVERYTHING BUT CARD (Erik 2026-09-10: "the pay now button should have the credit
+                card stuff and the record payment is everything else"). Cash, check, transfer,
+                Venmo — money that moves outside Stripe and has to be written down by a person.
+                Card lives behind Pay Now in the header: the door that MOVES money. A "Card"
+                option here was how a $2.22 phantom got onto the ledger with nothing charged. */}
             <p className="text-xs text-slate-500">
-              This writes down money that has already changed hands — a check, cash, or a card you
-              ran somewhere else. To charge a card or show a QR, use <span className="font-medium text-slate-700">Pay Now</span>.
+              Cash, check, Venmo or transfer. Card payments go through{" "}
+              <span className="font-medium text-slate-700">Pay Now</span> at the top of the page.
             </p>
             {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments
                 arrive before the invoice goes out, and blocking them here forced a fake
@@ -970,9 +974,11 @@ export function InvoiceDetail({
                   value={payMethod}
                   onChange={(e) => setPayMethod(e.target.value)}
                 >
-                  {(paymentMethods.length ? paymentMethods : ["Check", "Card", "Cash"]).map((m) => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
+                  {(paymentMethods.length ? paymentMethods : ["Check", "Cash", "Venmo"])
+                    .filter((m) => m.toLowerCase() !== "card")
+                    .map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
                 </Select>
               </div>
             </div>
@@ -991,6 +997,22 @@ export function InvoiceDetail({
                 />
               </div>
             </div>
+            {/* Venmo can't tell the app when it lands, so the QR lives beside the form that
+                records it: show the code, they pay, tap Record Payment. */}
+            {payMethod.toLowerCase() === "venmo" && (
+              <div className="flex flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {venmoQr ? (
+                  <>
+                    <img src={venmoQr} alt="Venmo QR code" className="h-48 w-48 rounded-lg" />
+                    <p className="text-xs text-slate-500">They scan, they pay — then tap Record Payment below.</p>
+                  </>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={showVenmoQr} disabled={venmoBusy}>
+                    {venmoBusy ? "Building…" : `Show Venmo QR for $${payAmount.toLocaleString()}`}
+                  </Button>
+                )}
+              </div>
+            )}
             <Button className="w-full" onClick={pay} disabled={pending}>
               {pending ? "Saving…" : "Record Payment"}
             </Button>
