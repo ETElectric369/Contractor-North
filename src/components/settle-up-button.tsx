@@ -590,8 +590,11 @@ export function PayNowButton(props: Mode & {
         pi = { invoiceId: id, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
         tapPi.current = pi;
         balanceRef.current = r.balance;
-        setTapStarted(true);
       }
+      // THE WATCH RUNS FROM HERE — whichever open minted the door. It used to be switched on
+      // only when THIS press minted it; the open-time mint (Apple 5.6) skipped that branch, and a
+      // confirmed tap sat on "recording it…" forever while the invoice had long read Paid.
+      setTapStarted(true);
       const holdCard = `Hold their card to the top of the phone — ${money(pi.amount / 100)}`;
       setTap({ kind: "busy", phase: "pay", label: holdCard });
       let c = await collectTapPayment(pi);
