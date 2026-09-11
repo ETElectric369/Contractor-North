@@ -17,7 +17,10 @@ import { APPLE_PAY_DISCLAIMER, TAP_TO_PAY_SHORT_COPY, TERMS_APPLY } from "./sett
  * on. Its own overlay, not <Modal>: Modal's largest size is a max-w-2xl sheet in a dimmed page,
  * and 3.2 wants the awareness moment to BE the screen — so this is a fixed, inset-0, scrollable
  * white surface above the dock (the Modal tier, z-[120]; dock is 70), padded under the notch
- * with var(--sat). Text only: Apple forbids custom imagery of the feature.
+ * with var(--sat). The picture is APPLE'S: the toolkit's in-app Hero tile (card to iPhone) —
+ * Apple forbids custom imagery of the feature, and this is the exported tile cropped to its
+ * visual, the copy and CTA around it set live so the words are ours to keep current. Order is
+ * the template's: headline, visual, copy, CTA, "Terms apply."
  *
  * THE WORDS ARE APPLE'S. Headline, subheadline, body and the two CTAs are the Tap to Pay on
  * iPhone marketing toolkit's, verbatim (settings-section.tsx keeps the shared strings) — which
@@ -187,6 +190,16 @@ export function TapToPayAwareness() {
           <h1 id="tap-to-pay-intro-headline" className="text-3xl font-semibold tracking-tight text-slate-900">
             {HEADLINE}
           </h1>
+          {/* eslint-disable-next-line @next/next/no-img-element -- a static marketing asset, no
+              sizing to negotiate; Apple's hero tile (Marketing Toolkit, US-EN, July 2026). */}
+          <img
+            src="/tap-to-pay-hero.jpg"
+            alt="A customer holding a contactless card to the top of an iPhone that reads Hold Here to Pay"
+            width={1200}
+            height={1055}
+            className="mt-4 w-full max-w-sm self-center"
+            draggable={false}
+          />
           <p className="mt-3 text-lg font-medium text-slate-800">{SUBHEADLINE}</p>
           <p className="mt-5 text-base leading-relaxed text-slate-700">{TAP_TO_PAY_SHORT_COPY}</p>
           {/* Ours, not Apple's: where the door is, for people who can walk through it (staff). */}
