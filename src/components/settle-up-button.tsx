@@ -649,7 +649,10 @@ export function PayNowButton(props: Mode & {
       if (left <= 0.005 || s.status === "paid") {
         setPaid(s.amountPaid ?? balanceRef.current);
         toast(`Paid — ${money(s.amountPaid ?? balanceRef.current)} by card. Done.`, "success");
-        router.refresh();
+        // NO router.refresh() here. The page behind mounts this button only while a balance is
+        // owed; refreshing on "paid" re-rendered the header without it, and the Paid screen —
+        // the outcome and the receipt row Apple 5.9/5.10 want in front of the person — vanished
+        // a second after it appeared (Erik, 2026-09-11: "then cleared"). close() refreshes.
       }
     };
     const timer = setInterval(tick, 4000);
