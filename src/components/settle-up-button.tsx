@@ -4,11 +4,13 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeDollarSign, Check, Copy, CreditCard, Loader2, MessageSquare } from "lucide-react";
+import { BadgeDollarSign, Check, Copy, CreditCard, Loader2, MessageSquare, Nfc } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp } from "@/app/(app)/billing/actions";
+import { createTapPaymentIntent } from "@/app/(app)/billing/tap-actions";
+import { cancelTapPayment, collectTapPayment, tapToPaySupported } from "@/lib/native-tap";
 
 /**
  * TWO VERBS, SPLIT BY WHERE THE MONEY MOVES (Erik 2026-09-10: "the pay now button should have the
@@ -17,7 +19,11 @@ import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp } from 
  *   PAY NOW         → card. Opens the CARD CONTROL SCREEN: the balance, a QR the customer scans
  *                     into Stripe checkout on their phone, the same link to text or copy — and then
  *                     it WATCHES, polling the invoice until the webhook writes the payment, so the
- *                     tech sees "Paid" land without refreshing. Tap to Pay slots in here.
+ *                     tech sees "Paid" land without refreshing. TAP TO PAY sits beside the QR
+ *                     button (Erik 2026-09-10) on a phone that can do it: the iPhone is the reader,
+ *                     the customer holds their card to it, the same webhook writes the same row.
+ *                     The button exists only where src/lib/native-tap.ts says yes — nowhere else
+ *                     is anything different.
  *   RECORD PAYMENT  → everything else. Cash, check, transfer, Venmo. Money that moves outside
  *                     Stripe and has to be written down by a person, with the date it happened
  *                     and a note (check #). Venmo shows the org's QR right here, then "They paid".
@@ -38,6 +44,14 @@ type Mode =
   | { source: "invoice"; invoiceId: string; balance: number; id?: never };
 
 type Art = { payUrl?: string; payQr?: string; venmoQr?: string; venmoHandle?: string; balance?: number; invoiceNumber?: string | null };
+
+/** Where a tap is: nothing / the phone is at it / Stripe said yes and the webhook is writing it /
+ *  it stopped, with the sentence that says why. */
+type TapState =
+  | { kind: "idle" }
+  | { kind: "busy"; label: string }
+  | { kind: "confirmed" }
+  | { kind: "error"; error: string };
 
 const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -93,6 +107,17 @@ export function PayNowButton(props: Mode & {
   const [copied, setCopied] = useState(false);
   const balanceRef = useRef<number>(props.source === "invoice" ? props.balance : 0);
 
+  // TAP TO PAY. `tapOk` is asked once per open and answers false at once anywhere but a shell
+  // build that can do it — so on the web and in the PWA none of this renders. `tapStarted`
+  // means a PaymentIntent exists for this open of the screen: the watch below runs from then on,
+  // because a tap that Stripe confirmed lands on the invoice through the webhook, not through us.
+  const [tapOk, setTapOk] = useState(false);
+  const [tap, setTap] = useState<TapState>({ kind: "idle" });
+  const [tapStarted, setTapStarted] = useState(false);
+  /** The PaymentIntent for THIS open of the screen. A declined card retries on the SAME one —
+   *  Stripe re-uses it; a fresh one per attempt would be a second door onto the same balance. */
+  const tapPi = useRef<{ invoiceId: string; clientSecret: string; paymentIntentId: string; amount: number } | null>(null);
+
   /** Build the door: for a visit/job that means minting AND sending the bill first (so it's an
    *  explicit tap, never a side effect of opening the screen); for an invoice it's one read. */
   function prepare() {
@@ -111,11 +136,51 @@ export function PayNowButton(props: Mode & {
     });
   }
 
+  /** The phone as the reader. Same door-building as the QR for a visit/job (the bill must exist
+   *  and be SENT before a card can pay it), then Stripe's PaymentIntent on the tenant's account,
+   *  then the bridge: Apple takes the screen while the customer holds their card to the phone. */
+  async function tapToPay() {
+    setTap({ kind: "busy", label: "Getting it ready…" });
+    try {
+      let id = invoiceId;
+      if (!id) {
+        id = await ensureInvoice(props, "card", "later", 0, "", null, toast, (other) => router.push(`/billing/${other}`));
+        if (!id) { setTap({ kind: "idle" }); return; }
+        setInvoiceId(id);
+      }
+      let pi = tapPi.current;
+      if (!pi || pi.invoiceId !== id) {
+        const r = await createTapPaymentIntent(id);
+        if (!r.ok) { setTap({ kind: "error", error: r.error }); return; }
+        pi = { invoiceId: id, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
+        tapPi.current = pi;
+        balanceRef.current = r.balance;
+        setTapStarted(true);
+      }
+      setTap({ kind: "busy", label: `Hold their card to the top of the phone — ${money(pi.amount / 100)}` });
+      const c = await collectTapPayment(pi);
+      if (c.ok) {
+        // Stripe confirmed the charge. The invoice flips when the webhook writes it; the watch
+        // sees it land exactly as it does for the QR.
+        tapPi.current = null;
+        setTap({ kind: "confirmed" });
+        return;
+      }
+      if (c.cancelled) { setTap({ kind: "idle" }); return; }
+      setTap({ kind: "error", error: c.error });
+    } catch (e) {
+      setTap({
+        kind: "error",
+        error: e instanceof Error && e.message ? e.message : "That didn't reach the server — check your connection and try again.",
+      });
+    }
+  }
+
   // THE WATCH. Stripe's webhook writes the payment; nothing on this screen does. Poll the invoice
-  // while the QR is up so the person holding the phone sees it land, then stop — a screen that
-  // keeps polling after "Paid" is a battery drain in a truck.
+  // while the QR is up (or a tap has been started) so the person holding the phone sees it land,
+  // then stop — a screen that keeps polling after "Paid" is a battery drain in a truck.
   useEffect(() => {
-    if (!open || !art || !invoiceId || paid != null) return;
+    if (!open || (!art && !tapStarted) || !invoiceId || paid != null) return;
     let live = true;
     const tick = async () => {
       const s = await invoiceCollectStatus(invoiceId).catch(() => null);
@@ -129,13 +194,18 @@ export function PayNowButton(props: Mode & {
     };
     const timer = setInterval(tick, 4000);
     return () => { live = false; clearInterval(timer); };
-  }, [open, art, invoiceId, paid, router, toast]);
+  }, [open, art, tapStarted, invoiceId, paid, router, toast]);
 
   function close() {
+    // A reader still waiting for a card must not stay armed behind a closed sheet.
+    if (tap.kind === "busy") void cancelTapPayment();
     setOpen(false);
     setArt(null);
     setPaid(null);
     setCopied(false);
+    setTap({ kind: "idle" });
+    setTapStarted(false);
+    tapPi.current = null;
     router.refresh();
   }
 
@@ -154,6 +224,8 @@ export function PayNowButton(props: Mode & {
           // An invoice's door can be built the moment the screen opens — one read, no side
           // effects. A visit/job waits for the explicit tap, because building it SENDS a bill.
           if (props.cardEnabled && props.source === "invoice" && !art) prepare();
+          // Can this phone be the reader? False at once off the shell; never throws.
+          if (props.cardEnabled) tapToPaySupported().then(setTapOk, () => setTapOk(false));
         }}
       >
         <CreditCard className="h-4 w-4" /> {props.label ?? "Pay Now"}
@@ -177,6 +249,19 @@ export function PayNowButton(props: Mode & {
             <p className="text-xs text-slate-500">Recorded on the invoice. The money lands in your Stripe balance.</p>
             <Button size="sm" className="mt-2" onClick={close}>Done</Button>
           </div>
+        ) : tap.kind === "busy" ? (
+          // Apple owns the screen while the card is read; this is what shows before and after.
+          <div className="flex flex-col items-center gap-3 py-4 text-center">
+            <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
+            <div className="text-sm font-medium text-slate-800">{tap.label}</div>
+            <Button size="sm" variant="outline" onClick={() => void cancelTapPayment()}>Cancel</Button>
+          </div>
+        ) : tap.kind === "confirmed" ? (
+          <div className="flex flex-col items-center gap-2 py-4 text-center">
+            <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+            <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
+            <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
+          </div>
         ) : !art ? (
           <div className="space-y-4">
             <div className="flex items-baseline justify-between">
@@ -188,10 +273,22 @@ export function PayNowButton(props: Mode & {
                 This writes the bill, sends it, and marks the visit done — then puts the card door in front of the customer.
               </p>
             )}
-            <Button className="w-full" onClick={prepare} disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-              {pending ? "Getting it ready…" : props.source === "invoice" ? "Show the QR" : "Send the bill & show the QR"}
-            </Button>
+            {tap.kind === "error" && (
+              <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{tap.error}</p>
+            )}
+            {/* Tap to Pay beside the QR button on a phone that can do it; the QR button alone
+                everywhere else. A visit/job's QR label is a sentence, so there the two stack. */}
+            <div className={tapOk ? (props.source === "invoice" ? "grid grid-cols-2 gap-2" : "grid gap-2") : ""}>
+              <Button className="w-full" onClick={prepare} disabled={pending}>
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                {pending ? "Getting it ready…" : props.source === "invoice" ? "Show the QR" : "Send the bill & show the QR"}
+              </Button>
+              {tapOk && (
+                <Button className="w-full" variant="outline" onClick={() => void tapToPay()} disabled={pending}>
+                  <Nfc className="h-4 w-4" /> {tap.kind === "error" && tapStarted ? "Try Again" : "Tap to Pay"}
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-3">
@@ -200,7 +297,15 @@ export function PayNowButton(props: Mode & {
             <p className="max-w-64 text-center text-xs text-slate-500">
               Card, Apple Pay or Google Pay on their phone. It records itself the moment it lands.
             </p>
+            {tap.kind === "error" && (
+              <p className="w-full rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{tap.error}</p>
+            )}
             <div className="flex w-full flex-wrap justify-center gap-2">
+              {tapOk && (
+                <Button size="sm" variant="outline" onClick={() => void tapToPay()}>
+                  <Nfc className="h-4 w-4" /> {tap.kind === "error" && tapStarted ? "Try Again" : "Tap to Pay"}
+                </Button>
+              )}
               <a
                 href={`sms:?body=${smsBody}`}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"

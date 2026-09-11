@@ -26,10 +26,12 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>North can use Bluetooth to talk to a supported card reader. Tap to Pay on iPhone itself needs no reader — the phone is the reader.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>North uses the camera so you can photograph job sites, materials, receipts and documents and attach them to the job.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>North uses your location to stamp where you clocked in, verify you're at the job site, and get local weather for scheduling.</string>
+	<string>North uses your location to stamp where you clocked in, verify you're at the job site, get local weather for scheduling, and to take Tap to Pay card payments — Apple requires a location fix to accept a card.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>North uses the microphone for voice notes and hands-free dictation on the job.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

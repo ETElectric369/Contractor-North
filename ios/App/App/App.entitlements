@@ -16,5 +16,8 @@
 	     issued it and a debug build and a TestFlight build issue different ones. -->
 	<key>aps-environment</key>
 	<string>development</string>
+	<!-- NO Tap to Pay key here on purpose. It lives in AppDebug.entitlements (Debug builds only)
+	     until Apple approves DISTRIBUTION for it — an archive carrying it before then fails
+	     signing. See that file for the whole story. -->
 </dict>
 </plist>

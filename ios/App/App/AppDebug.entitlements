@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- THE DEBUG ENTITLEMENTS = App.entitlements + Tap to Pay. Why two files (2026-09-10): Apple
+	     granted the Tap to Pay on iPhone entitlement to the account (Case-ID 22149525) for
+	     DEVELOPMENT distribution only — the normal first grant. A Debug build to a cabled phone
+	     signs with it; an App Store / TestFlight archive carrying this key FAILS signing until Apple
+	     approves distribution (a second review, requested by replying to the same case with flow
+	     recordings). So the Debug configuration points here (project.pbxproj CODE_SIGN_ENTITLEMENTS)
+	     and Release keeps App.entitlements, and the Xcode Cloud archive → TestFlight pipeline never
+	     sees the key. When distribution is approved: move the Tap to Pay key into App.entitlements
+	     and delete this file + the Debug override. Keep the two files otherwise identical. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>webcredentials:app.contractornorth.com</string>
+	</array>
+	<key>aps-environment</key>
+	<string>development</string>
+	<!-- Tap to Pay on iPhone: the phone is the card reader (Stripe Terminal via
+	     @capacitor-community/stripe-terminal; src/lib/native-tap.ts). -->
+	<key>com.apple.developer.proximity-reader.payment.acceptance</key>
+	<true/>
+</dict>
+</plist>

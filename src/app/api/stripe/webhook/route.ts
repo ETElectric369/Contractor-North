@@ -62,6 +62,10 @@ export async function POST(req: Request) {
     eventId: string,
     paymentIntent: string | null,
     connectedAccount: string | null,
+    // HOW the money arrived, for the ledger note and the office push. Defaulted so the Checkout
+    // branch reads exactly as it always has; Tap to Pay passes its own words. One writer, one
+    // extra parameter — NOT a second insert path (the double-record class this helper closed).
+    via: { note: string; said: string } = { note: "Online payment", said: "paid online" },
   ) {
     if (!invoiceId || !orgId || amount <= 0) return;
     /**
@@ -113,7 +117,7 @@ export async function POST(req: Request) {
       org_id: orgId,
       amount,
       method: "card",
-      note: "Online payment",
+      note: via.note,
       stripe_event_id: eventId,
       // The ONE id a later charge.refunded / charge.dispute.created can be matched on. The
       // event id can't be: Stripe sends a different event for the refund. See migration 0220.
@@ -183,12 +187,12 @@ export async function POST(req: Request) {
     await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", over > 0.005
       ? {
           title: "Overpaid — action needed",
-          body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
+          body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
           url: `/billing/${invoiceId}`,
         }
       : {
           title: "Payment received",
-          body: `${formatCurrency(amount)} paid online on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
+          body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
           url: `/billing/${invoiceId}`,
         });
   }
@@ -425,6 +429,61 @@ export async function POST(req: Request) {
         } catch {
           /* the push is a courtesy; never fail the webhook on it */
         }
+      }
+      break;
+    }
+    /**
+     * TAP TO PAY ON IPHONE — the phone was the card reader (2026-09-10, migration 0252).
+     *
+     * The tech's iPhone collected and confirmed a `card_present` PaymentIntent that
+     * createTapPaymentIntent (billing/tap-actions.ts) minted ON the tenant's connected account, so
+     * the event arrives on the connected-accounts endpoint with event.account set. Nothing
+     * client-side writes the payment — the plugin doesn't even hand the confirmed PaymentIntent
+     * back to JS — so this branch is the ONE place a tap becomes money on the invoice, through the
+     * same recordInvoicePayment as an online payment (org↔account ownership check, invoice↔org
+     * check, event-id idempotency, the shared recalc, the office push).
+     *
+     * ── THE DOUBLE-BOOKING HAZARD, AND WHY THE GATE IS METADATA, NOT THE EVENT ID ─────────────
+     *
+     * A hosted-Checkout payment ALSO emits payment_intent.succeeded. Checkout creates a
+     * PaymentIntent under the hood, /api/pay stamps it with payment_intent_data.metadata
+     * { invoice_id, org_id }, and Stripe then sends BOTH checkout.session.completed AND
+     * payment_intent.succeeded for the same money — under two DIFFERENT event ids. The
+     * checkout branch above already books the first; the stripe_event_id unique index cannot
+     * stop the second, because it is a different event. An ungated branch here keyed on
+     * invoice_id would therefore insert a second payments row for every online payment, and the
+     * invoice would read overpaid (or $0 owed twice over) with the customer charged once.
+     *
+     * So this branch books ONLY what carries the marker no Checkout PaymentIntent has:
+     *   metadata.source === "tap_to_pay"   — set solely by createTapPaymentIntent
+     *   metadata.kind   === "invoice_payment" and an invoice_id — what recordInvoicePayment needs
+     *   payment_method_types includes "card_present" — belt to the braces: Checkout never creates
+     *                                                   a card_present PI, so even a copied
+     *                                                   metadata blob could not slip through.
+     * Everything else that arrives as payment_intent.succeeded — Checkout PIs, our own
+     * subscription PIs on the platform account — falls through untouched. The checkout branch
+     * is not changed by this.
+     */
+    case "payment_intent.succeeded": {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const md = pi.metadata ?? {};
+      const isTap =
+        fromConnectedAccount &&
+        md.source === "tap_to_pay" &&
+        md.kind === "invoice_payment" &&
+        !!md.invoice_id &&
+        (pi.payment_method_types ?? []).includes("card_present");
+      if (isTap) {
+        await recordInvoicePayment(
+          md.invoice_id,
+          md.org_id,
+          // amount_received is the settled figure; with capture_method automatic it equals amount.
+          (pi.amount_received ?? 0) / 100,
+          event.id,
+          pi.id,
+          eventAccount,
+          { note: "Tap to Pay", said: "paid by card in person" },
+        );
       }
       break;
     }

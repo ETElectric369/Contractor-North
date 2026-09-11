@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
+    "@capacitor-community/stripe-terminal": "^8.2.1",
     "@capacitor/core": "8.5.1",
     "@capacitor/ios": "8.5.1",
     "@capacitor/push-notifications": "^8.1.2",

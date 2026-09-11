@@ -9,6 +9,15 @@
         "revision" : "6afa7424fd2fcd8ca1e577478e8a00af284b7e82",
         "version" : "8.5.1"
       }
+    },
+    {
+      "identity" : "stripe-terminal-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/stripe/stripe-terminal-ios.git",
+      "state" : {
+        "revision" : "f582cccada5ef6d1650b8313e1de49d14120de0b",
+        "version" : "5.7.0"
+      }
     }
   ],
   "version" : 3
