@@ -2339,11 +2339,19 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
     invoiceNumber: inv.invoice_number ?? null,
   };
 
-  const { data: org } = await supabase
+  // THE CONTRADICTION (Erik 2026-09-10: Settings said "Accepting Payments", Pay Now said "not
+  // switched on"). This select named `stripe_details_submitted`, a column that does not exist.
+  // PostgREST refuses the whole read, `org` comes back null, canAcceptPayments() is false, and the
+  // caller told the office to go set up card payments they had already set up — for a reason
+  // that was never checked. Real columns only, and a failed read is an ERROR, not "no card door".
+  const { data: org, error: orgErr } = await supabase
     .from("organizations")
-    .select("settings, stripe_account_id, stripe_charges_enabled, stripe_details_submitted")
+    .select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled")
     .eq("id", inv.org_id)
     .maybeSingle();
+  if (orgErr || !org) {
+    return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  }
 
   // CARD — only when the door actually opens. A QR to a checkout that will 503 is worse than no QR.
   const token = (inv as { public_token?: string | null }).public_token;

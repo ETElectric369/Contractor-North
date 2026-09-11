@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Check, Copy, CreditCard, Loader2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
+import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp } from "@/app/(app)/billing/actions";
 
@@ -17,14 +17,16 @@ import { collectArtifacts, invoiceCollectStatus, recordPayment, settleUp } from 
  *   PAY NOW         → card. Opens the CARD CONTROL SCREEN: the balance, a QR the customer scans
  *                     into Stripe checkout on their phone, the same link to text or copy — and then
  *                     it WATCHES, polling the invoice until the webhook writes the payment, so the
- *                     tech sees "Paid" land without refreshing. Tap to Pay slots in here later.
+ *                     tech sees "Paid" land without refreshing. Tap to Pay slots in here.
  *   RECORD PAYMENT  → everything else. Cash, check, transfer, Venmo. Money that moves outside
  *                     Stripe and has to be written down by a person, with the date it happened
  *                     and a note (check #). Venmo shows the org's QR right here, then "They paid".
  *
- * They used to be one inline widget with five chips that defaulted to Cash → "Record It", sitting
- * INSIDE the invoice page's own record-payment form: two amount boxes, two record buttons, one
- * card, and a "Card" chip that either charged nothing or built a QR onto a draft's read-only view.
+ * Both are SHEETS, both the same size, both in the same row — the invoice header, the job hub,
+ * the appointment page. They used to be one inline widget with five chips that defaulted to
+ * Cash → "Record It", sitting INSIDE the invoice page's own record-payment form: two amount
+ * boxes, two record buttons, one card, and a "Card" chip that either charged nothing or built a
+ * QR onto a draft's read-only view.
  *
  * Two mounting modes, one plumbing:
  *   source: appointment/job — settles the chain first (invoice + line + sent + visit completed +
@@ -145,7 +147,7 @@ export function PayNowButton(props: Mode & {
   return (
     <>
       <Button
-        size="sm"
+        size={props.compact ? "sm" : "md"}
         variant={props.compact ? "outline" : "primary"}
         onClick={() => {
           setOpen(true);
@@ -234,7 +236,7 @@ export function PayNowButton(props: Mode & {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// RECORD PAYMENT — everything that isn't a card
+// RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 export function RecordPaymentButton(props: Mode & {
@@ -253,7 +255,6 @@ export function RecordPaymentButton(props: Mode & {
   const [amount, setAmount] = useState(props.source === "invoice" ? String(props.balance || "") : "");
   const [note, setNote] = useState("");
   const [paidAt, setPaidAt] = useState("");
-  const [details, setDetails] = useState(false);
   const source = props.methods?.length ? props.methods : ["Cash", "Check", "Venmo", "Other"];
   const chips = source.filter((m) => m.toLowerCase() !== "card");
   const [method, setMethod] = useState(chips[0] ?? "Cash");
@@ -261,6 +262,19 @@ export function RecordPaymentButton(props: Mode & {
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
   const key = method.toLowerCase();
+  const dirty = note.trim().length > 0 || paidAt.length > 0;
+
+  function reset() {
+    setNote("");
+    setPaidAt("");
+    setVenmo(null);
+    setAmount(props.source === "invoice" ? String(props.balance || "") : "");
+  }
+  function close() {
+    setOpen(false);
+    reset();
+    router.refresh();
+  }
 
   function go() {
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
@@ -283,12 +297,7 @@ export function RecordPaymentButton(props: Mode & {
       const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
       if (!id) return;
       toast(`Paid — ${money(amt())} ${method.toLowerCase()}. Done.`, "success");
-      setOpen(false);
-      setNote("");
-      setPaidAt("");
-      setDetails(false);
-      setAmount(props.source === "invoice" ? String(props.balance || "") : "");
-      router.refresh();
+      close();
     });
   }
 
@@ -299,35 +308,14 @@ export function RecordPaymentButton(props: Mode & {
       const r = await recordPayment({ invoice_id: venmo.invoiceId, amount: venmo.amount, method: "venmo", note, paid_at: paidAt || null });
       if (!r.ok) { toast(r.error ?? "Couldn't record that.", "error"); return; }
       toast(`Paid — ${money(venmo.amount)} Venmo. Done.`, "success");
-      setVenmo(null);
-      setOpen(false);
-      router.refresh();
+      close();
     });
   }
 
-  if (venmo) {
-    return (
-      <span className="inline-flex flex-col items-center gap-2 rounded-xl border border-brand/40 bg-white p-3 shadow-lg">
-        <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
-        <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />
-        <Button size="sm" onClick={venmoPaid} disabled={pending}>
-          {pending ? "Recording…" : "They paid — record it"}
-        </Button>
-        <button
-          type="button"
-          onClick={() => { setVenmo(null); setOpen(false); router.refresh(); }}
-          className="text-xs font-medium text-slate-500 hover:text-slate-800"
-        >
-          Close
-        </button>
-      </span>
-    );
-  }
-
-  if (!open) {
-    return (
+  return (
+    <>
       <Button
-        size="sm"
+        size={props.compact ? "sm" : "md"}
         variant={props.compact ? "outline" : "primary"}
         onClick={() => {
           if (props.source === "invoice") setAmount(String(props.balance || ""));
@@ -336,69 +324,84 @@ export function RecordPaymentButton(props: Mode & {
       >
         <BadgeDollarSign className="h-4 w-4" /> {props.label ?? "Record Payment"}
       </Button>
-    );
-  }
 
-  return (
-    <span className="inline-flex flex-col gap-1.5 rounded-xl border border-brand/40 bg-brand-light/30 p-1.5">
-      <span className="inline-flex flex-wrap items-center gap-1.5">
-        <input
-          autoFocus
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); go(); }
-            if (e.key === "Escape") setOpen(false);
-          }}
-          placeholder="$ amount"
-          aria-label="What they paid"
-          className="h-8 w-24 rounded-lg border border-slate-200 px-2 text-sm"
-        />
-        <span className="inline-flex overflow-hidden rounded-lg border border-slate-200">
-          {chips.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMethod(m)}
-              className={`inline-flex h-8 items-center px-2 text-xs font-semibold capitalize ${
-                method === m ? "bg-brand text-white" : "bg-white text-slate-500 hover:bg-slate-50"
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </span>
-        <Button size="sm" onClick={go} disabled={pending}>
-          {pending ? "Working…" : key === "venmo" ? "Show QR" : "Record It"}
-        </Button>
-        <button type="button" onClick={() => setOpen(false)} className="px-1 text-xs font-medium text-slate-500 hover:text-slate-800">
-          Cancel
-        </button>
-      </span>
-      {/* The two bookkeeping fields the old form had and the chips didn't: WHEN it was paid (a
-          check that arrived last Tuesday) and a note (the check number). Behind a link so the
-          everyday driveway tap stays one row. Date only means something on an existing invoice —
-          a visit being settled right now was paid right now. */}
-      {details ? (
-        <span className="inline-flex flex-wrap items-center gap-1.5">
-          {props.source === "invoice" && (
-            <input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} aria-label="Date paid" className="h-8 rounded-lg border border-slate-200 px-2 text-xs" />
-          )}
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Note — e.g. check #1042"
-            aria-label="Note"
-            className="h-8 min-w-40 flex-1 rounded-lg border border-slate-200 px-2 text-xs"
-          />
-        </span>
-      ) : (
-        <button type="button" onClick={() => setDetails(true)} className="self-start px-1 text-[11px] font-medium text-slate-500 hover:text-slate-800">
-          {props.source === "invoice" ? "Paid on another day, or add a note" : "Add a note"}
-        </button>
-      )}
-    </span>
+      <Modal
+        open={open}
+        onClose={close}
+        title="Record Payment"
+        size="sm"
+        portal
+        dirty={dirty}
+        footer={
+          venmo ? (
+            <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
+          ) : (
+            <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel={key === "venmo" ? "Show Venmo QR" : "Record It"} />
+          )
+        }
+      >
+        {venmo ? (
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
+            <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />
+            <p className="max-w-64 text-center text-xs text-slate-500">
+              They scan, they pay. Venmo can&apos;t tell the app when it lands — tap the button when it does.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-500">
+              Money that moved outside Stripe — cash, a check, a transfer, Venmo. Card payments go through Pay Now.
+            </p>
+            <div>
+              <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">Amount</label>
+              <input
+                id="rp-amount"
+                autoFocus
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }}
+                placeholder="$ amount"
+                className="h-11 w-full rounded-lg border border-slate-200 px-3 text-lg font-semibold tabular-nums"
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600">How they paid</div>
+              <div className="flex flex-wrap gap-1.5">
+                {chips.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMethod(m)}
+                    className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-semibold capitalize ${
+                      method === m ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* The two bookkeeping fields the old form had: WHEN it was paid (a check that arrived
+                last Tuesday) and a note (the check number). Date only means something on an
+                existing invoice — a visit being settled right now was paid right now. */}
+            <div className="grid grid-cols-2 gap-2">
+              {props.source === "invoice" && (
+                <div>
+                  <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">Date paid</label>
+                  <input id="rp-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+                </div>
+              )}
+              <div className={props.source === "invoice" ? "" : "col-span-2"}>
+                <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">Note</label>
+                <input id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }
 

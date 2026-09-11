@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { User, FileText, Printer, Banknote } from "lucide-react";
+import { User, FileText, Printer } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
-import { PayNowButton } from "@/components/settle-up-button";
+import { PayNowButton, RecordPaymentButton } from "@/components/settle-up-button";
 import { qboConfigured } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
@@ -146,16 +146,19 @@ export default async function InvoicePage({
               existed the only path was the OS share sheet on the PDF preview, which shipped the
               app's marketing blurb and a login URL. */}
           <ShareDocButton load={invoiceShareText.bind(null, inv.id)} />
-          {/* Record payment — THE gloves-on invoice verb — jumps to the existing
-              form (right column, several screens down at 375px). Like the in-body
-              form it only exists once the invoice has left draft. */}
-          {!isDraft && (
-            <a
-              href="#record-payment"
-              className="inline-flex items-center gap-2 rounded-lg bg-brand h-11 px-4 text-sm font-medium text-white hover:bg-brand-dark"
-            >
-              <Banknote className="h-4 w-4" /> Record Payment
-            </a>
+          {/* RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now,
+              in the same row. This used to be an anchor that scrolled to a form in the right
+              column, so the page had two Record Payment buttons and Pay Now sat inside the form.
+              Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments arrive
+              before the invoice goes out, and blocking them forced a fake workflow. */}
+          {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
+            <RecordPaymentButton
+              source="invoice"
+              invoiceId={inv.id}
+              balance={invoiceBalance(inv.total, inv.amount_paid)}
+              methods={paymentMethods}
+              venmoConfigured={Boolean(orgSettings.venmo_handle?.trim())}
+            />
           )}
           <Link
             href={`/print/pdf-preview?doc=invoice&id=${inv.id}&back=/billing/${inv.id}`}

@@ -28,7 +28,6 @@ import {
   setInvoiceDueDate,
   setInvoiceCustomerJob,
   recordPayment,
-  collectArtifacts,
   importQuoteItemsIntoInvoice,
   importLaborIntoInvoice,
   reimportFromScratch,
@@ -172,20 +171,6 @@ export function InvoiceDetail({
   const [price, setPrice] = useState(0);
 
   // payment state
-  const [payAmount, setPayAmount] = useState(balance > 0 ? balance : 0);
-  const [payMethod, setPayMethod] = useState(paymentMethods.find((m) => m.toLowerCase() !== "card") ?? "Check");
-  const [venmoQr, setVenmoQr] = useState<string | null>(null);
-  const [venmoBusy, setVenmoBusy] = useState(false);
-  async function showVenmoQr() {
-    setVenmoBusy(true);
-    const art = await collectArtifacts(invoice.id, payAmount).catch(() => null);
-    setVenmoBusy(false);
-    if (!art?.ok || !art.venmoQr) {
-      toast(art?.error ?? "Add your Venmo username in Settings → Payment methods first.", "error");
-      return;
-    }
-    setVenmoQr(art.venmoQr);
-  }
 
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
@@ -329,9 +314,6 @@ export function InvoiceDetail({
     });
   }
 
-  const [payNote, setPayNote] = useState("");
-  const [payDate, setPayDate] = useState("");
-  const [payError, setPayError] = useState<string | null>(null);
 
   function addItem() {
     if (!desc.trim()) return;
@@ -417,28 +399,6 @@ export function InvoiceDetail({
       const res = await reorderInvoiceItems(invoice.id, ids);
       if (!res?.ok) { toast(res?.error ?? "Couldn't group the lines — try again.", "error"); return; }
       toast("Grouped — labor first, then materials", "success");
-      refresh();
-    });
-  }
-
-  function pay() {
-    setPayError(null);
-    start(async () => {
-      const res = await recordPayment({
-        invoice_id: invoice.id,
-        amount: payAmount,
-        method: payMethod,
-        note: payNote,
-        paid_at: payDate,
-      });
-      if (!res.ok) {
-        setPayError(res.error ?? "Could not record payment.");
-        toast(res.error ?? "Couldn't record the payment — try again.", "error");
-        return;
-      }
-      toast("Payment recorded", "success");
-      setPayNote("");
-      setPayDate("");
       refresh();
     });
   }
@@ -930,92 +890,6 @@ export function InvoiceDetail({
               <span>Balance due</span>
               <span>{formatCurrency(balance)}</span>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* id + scroll-mt: the header's "Record payment" impulse button anchor-jumps
-            here (at 375px this card stacks below the whole line-items editor). */}
-        <Card id="record-payment" className="scroll-mt-24">
-          <CardContent className="space-y-3 py-5">
-            <h3 className="text-sm font-semibold text-slate-900">Record Payment</h3>
-            {/* EVERYTHING BUT CARD (Erik 2026-09-10: "the pay now button should have the credit
-                card stuff and the record payment is everything else"). Cash, check, transfer,
-                Venmo — money that moves outside Stripe and has to be written down by a person.
-                Card lives behind Pay Now in the header: the door that MOVES money. A "Card"
-                option here was how a $2.22 phantom got onto the ledger with nothing charged. */}
-            <p className="text-xs text-slate-500">
-              Cash, check, Venmo or transfer. Card payments go through{" "}
-              <span className="font-medium text-slate-700">Pay Now</span> at the top of the page.
-            </p>
-            {/* Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments
-                arrive before the invoice goes out, and blocking them here forced a fake
-                workflow. The soft note keeps the state honest; the sent invoice shows
-                the money as already paid. */}
-            {isDraft && (
-              <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                This invoice hasn&apos;t been sent yet — recording a prepayment (deposit,
-                Venmo) is fine; it&apos;ll show as already paid when you send it.
-              </p>
-            )}
-            {payError && <p className="text-sm text-red-600">{payError}</p>}
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label htmlFor="pay-amt">Amount</Label>
-                <NumberInput
-                  id="pay-amt"
-                  value={payAmount}
-                  onValueChange={setPayAmount}
-                />
-              </div>
-              <div>
-                <Label htmlFor="pay-method">Method</Label>
-                <Select
-                  id="pay-method"
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value)}
-                >
-                  {(paymentMethods.length ? paymentMethods : ["Check", "Cash", "Venmo"])
-                    .filter((m) => m.toLowerCase() !== "card")
-                    .map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <Label htmlFor="pay-date">Date</Label>
-                <Input id="pay-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="pay-note">Note</Label>
-                <Input
-                  id="pay-note"
-                  placeholder="e.g. check #1042"
-                  value={payNote}
-                  onChange={(e) => setPayNote(e.target.value)}
-                />
-              </div>
-            </div>
-            {/* Venmo can't tell the app when it lands, so the QR lives beside the form that
-                records it: show the code, they pay, tap Record Payment. */}
-            {payMethod.toLowerCase() === "venmo" && (
-              <div className="flex flex-col items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                {venmoQr ? (
-                  <>
-                    <img src={venmoQr} alt="Venmo QR code" className="h-48 w-48 rounded-lg" />
-                    <p className="text-xs text-slate-500">They scan, they pay — then tap Record Payment below.</p>
-                  </>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={showVenmoQr} disabled={venmoBusy}>
-                    {venmoBusy ? "Building…" : `Show Venmo QR for $${payAmount.toLocaleString()}`}
-                  </Button>
-                )}
-              </div>
-            )}
-            <Button className="w-full" onClick={pay} disabled={pending}>
-              {pending ? "Saving…" : "Record Payment"}
-            </Button>
           </CardContent>
         </Card>
 
