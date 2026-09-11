@@ -2,7 +2,8 @@
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
+import { after } from "next/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { firstThatWorks, kitsSelectRungs, kitLineCost, linkedItemOf } from "@/lib/kit-line";
@@ -11,6 +12,7 @@ import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createNotifications } from "@/lib/notifications";
+import { reportError } from "@/lib/observe";
 import { sendPushToProfiles } from "@/lib/push";
 import { createTask } from "@/app/(app)/tasks/actions";
 import { jobLabel } from "@/lib/schedule-options";
@@ -27,21 +29,75 @@ export interface DraftMaterial {
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
-/** Create a list and (optionally) seed it with items in one shot. */
+/** The three columns a tech never sees and never writes. Everything else on a line — what it is,
+ *  how many, the catalog #, whether it's been bought — is the crew's as much as the office's. */
+const MONEY_FIELDS = ["vendor", "est_cost", "is_tool"] as const;
+type Db = Awaited<ReturnType<typeof createClient>>;
+type Actor = { id: string; staff: boolean; orgId: string | null; name: string };
+
+/**
+ * WHO IS WRITING — resolved from the session's own profile row, the way requestMaterials resolves
+ * the person asking. Every action in this file is now shared by staff AND crew (Erik, 2026-09-11:
+ * "they should have an easy access to the same materials list per job (just one, the same one)"),
+ * and the only thing that differs between the two is the money. Migration 0254 pins est_cost /
+ * vendor / is_tool at the database for non-staff; this reads the role so the SERVER drops those
+ * fields before the trigger would have to. The tech's editor omits the columns, the write omits the
+ * columns, and the DB agrees — nothing is quietly nulled behind a value nobody typed.
+ *
+ * `null` means not signed in. Deactivation is not checked here on purpose: the write itself rides
+ * RLS, whose trust-root helpers (0158) already answer "no" for a cut seat, and this row only ever
+ * feeds the notify path that runs AFTER a write has provably landed.
+ */
+async function actorOf(supabase: Db): Promise<Actor | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+  const { data: me } = await supabase.from("profiles").select("role, org_id, full_name").eq("id", user.id).maybeSingle();
+  const p = (me ?? {}) as { role?: string | null; org_id?: string | null; full_name?: string | null };
+  return {
+    id: user.id,
+    staff: isStaffRole(p.role),
+    orgId: p.org_id ?? null,
+    name: p.full_name?.trim() || "A crew member",
+  };
+}
+
+/** Strip the money columns off a line for a non-staff writer. Returns a NEW object; the caller
+ *  never has to remember which three keys. */
+function withoutMoney(row: Record<string, unknown>, actor: Actor): Record<string, unknown> {
+  if (actor.staff) return row;
+  const out: Record<string, unknown> = { ...row };
+  for (const k of MONEY_FIELDS) delete out[k];
+  return out;
+}
+
 /**
  * THE SILENT-WRITE LAW, applied to every mutating path in this file.
  *
- * A zero-row UPDATE/DELETE is a 204, not an error. `material_lists` / `material_list_items` are
- * writable only by staff (0004_multitenancy: the write policy requires is_org_staff()), and a TECH
- * can reach this editor: the job page's "other lists" link sits OUTSIDE its viewerIsStaff branch,
- * /materials and /materials/[id] have no staff gate, and the item editor renders in full. So a tech
+ * A zero-row UPDATE/DELETE is a 204, not an error. `material_lists` / `material_list_items` were
+ * writable only by staff (0004_multitenancy: the write policy required is_org_staff()), and a TECH
+ * could reach this editor: the job page's "other lists" link sat OUTSIDE its viewerIsStaff branch,
+ * /materials and /materials/[id] had no staff gate, and the item editor rendered in full. So a tech
  * tapping "purchased" matched zero rows, got a 204, and every one of these actions returned
  * { ok: true }. The checkbox sprang back with no error and nothing was written.
  *
  * cn-v649 fixed exactly this shape on the job tab and stopped there. Rather than gate one more
  * page — which leaves the next reachable caller to rediscover it — every write here now proves it
  * touched a row. RLS was never the hole; the LIE about the write succeeding was.
+ *
+ * 2026-09-11: the crew WRITES here now, on purpose. Erik: "i want techs to have all of the job
+ * information available that is pertinent to them and they should have an easy access to the same
+ * materials list per job (just one, the same one) and honestly we probably wont ever be putting
+ * prices in those lines anyway." A tech adds, edits, removes and ticks lines on the job's ONE list
+ * through the SAME actions the office uses; migration 0254's policy and trigger are the boundary
+ * (a rule at one read path is a convention). What stays the office's: the money columns on a line
+ * (actorOf / withoutMoney above), and every list-level verb — create, rename, relink, delete,
+ * the quote take-off — plus POs, bills and the price book. The row-check sentence is the same for
+ * every writer, staff or not, because the reason is the same: the row is not yours to change.
  */
+/** Create a list and (optionally) seed it with items in one shot. A list-level verb: staff only,
+ *  and RLS says so — an insert that violates the policy is an error, never a 204. */
 export async function createMaterialList(input: {
   name: string;
   job_id: string | null;
@@ -76,10 +132,15 @@ export async function createMaterialList(input: {
       is_tool: it.is_tool ?? false,
       sort_order: idx,
     }));
-    const { error: itemsErr } = await supabase
+    // An INSERT that RLS refuses is an error, not a 204 — but the law is the law: prove the rows
+    // landed rather than reason about which write shapes can lie.
+    const { data: seeded, error: itemsErr } = await supabase
       .from("material_list_items")
-      .insert(rows);
-    if (itemsErr) return { ok: false, error: itemsErr.message };
+      .insert(rows)
+      .select("id");
+    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+    if ((seeded?.length ?? 0) !== rows.length)
+      return { ok: false, error: "The list was created but its items didn't save. Open it and add them again." };
   }
 
   revalidatePath("/materials");
@@ -91,7 +152,15 @@ export async function createMaterialList(input: {
  *  estimator's quote take-off, created on acceptance, is canonical when it exists);
  *  if the job has none, lazily creates an empty one named "Materials — {job_number}".
  *  Called on the first add-item from the job tab — merely VIEWING a job never
- *  creates data. Job lookup rides RLS, so a foreign job id can't be seeded. */
+ *  creates data. Job lookup rides RLS, so a foreign job id can't be seeded.
+ *
+ *  Idempotent for EVERY role, and the read has to be trusted for that to hold: a
+ *  failed lookup used to fall through to the insert, which is exactly how a job
+ *  grows a second list. Two lists can still exist (a quote take-off landing after
+ *  a hand-made one) — the newest is the list, here and on the job tab alike, so
+ *  the crew and the office are always reading the same rows. The create itself
+ *  rides 0254: a tech's first add on a list-less job is allowed to mint the one
+ *  list, and RLS refuses with an error (never a 204) if it isn't. */
 export async function ensureJobMaterialList(jobId: string): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -99,13 +168,14 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const { data: existing } = await supabase
+  const { data: existing, error: exErr } = await supabase
     .from("material_lists")
     .select("id")
     .eq("job_id", jobId)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (exErr) return { ok: false, error: dbError(exErr) };
   if (existing) return { ok: true, id: (existing as any).id };
 
   const { data: job, error: jErr } = await supabase
@@ -128,11 +198,82 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
   return { ok: true, id: list.id };
 }
 
+/** THE OFFICE HEARS ABOUT IT. Erik, on a tech adding a line: "so it passed right to me."
+ *
+ *  A line the crew adds is a line the office has to go buy, so it lands on every other active
+ *  staff member's bell the same way requestMaterials's ask does — with the job attached, deep-
+ *  linked to the tab that IS the list. The bell row is written for EVERY add, so nothing is
+ *  lost; the PUSH is debounced to one per (person, job) per 15 minutes, because a man walking a
+ *  panel and adding eight faceplates one at a time is one event to the boss, not eight buzzes
+ *  (NOT-ANNOYING). The ledger for that debounce is the notifications table itself: a row of this
+ *  type, for this job, with this person's name in the title, inside the window. The table carries
+ *  no actor column, so the name is the key — two crew with the identical full name on the same
+ *  job in the same quarter-hour would share a push, never lose a bell row. Read with the service
+ *  client because a notification is only ever readable by its recipient, and the person asking
+ *  is not one.
+ *
+ *  Only a JOB list has a boss to tell; a free-standing list (job_id null) is nobody's yet. Never
+ *  throws and never fails the add: the line is already on the list by the time this runs — it
+ *  runs behind after(), once the add has answered (see addMaterialItem), so nothing here is ever
+ *  on the tech's clock. */
+async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: string, item: DraftMaterial): Promise<void> {
+  try {
+    const { data: list } = await supabase.from("material_lists").select("job_id").eq("id", listId).maybeSingle();
+    const jobId = (list as { job_id?: string | null } | null)?.job_id;
+    if (!jobId || !actor.orgId) return;
+    const { data: job } = await supabase.from("jobs").select("id, job_number, name").eq("id", jobId).maybeSingle();
+    if (!job) return;
+    const label = jobLabel(job as { job_number?: string | null; name?: string | null });
+
+    // The same recipients requestMaterials picks — every OTHER active staff member — so a tech's
+    // ask and a tech's add reach the same desks.
+    const { data: staff } = await supabase.from("profiles").select("id, role").neq("id", actor.id).eq("active", true);
+    const bosses = (staff ?? [])
+      .filter((p) => isStaffRole((p as { role?: string }).role ?? ""))
+      .map((p) => (p as { id: string }).id);
+    if (!bosses.length) return;
+
+    const title = `${actor.name} added to ${label} materials`;
+    const qty = Number(item.quantity) || 1;
+    const body = `${qty} ${(item.unit || "ea").trim()} — ${item.description.trim()}`.slice(0, 140);
+    const url = `/jobs/${jobId}?tab=materials`;
+
+    // Look for the last push BEFORE this add's rows land, or the check would always find itself.
+    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data: recent } = await createServiceClient()
+      .from("notifications")
+      .select("id")
+      .eq("org_id", actor.orgId)
+      .eq("type", "materials_added")
+      .eq("url", url)
+      .eq("title", title)
+      .gte("created_at", since)
+      .limit(1);
+
+    await createNotifications(actor.orgId, bosses, { type: "materials_added", title, body, url });
+    // "assigned" is the kind for "something landed that is yours to deal with" — the same kind the
+    // ask uses, so it respects the same per-boss push toggle.
+    if (!recent?.length) await sendPushToProfiles(bosses, "assigned", { title, body, url }).catch(() => {});
+    // Still lands from behind after(): Next 15.5 runs after-callbacks under the request's work
+    // store (withExecuteRevalidates), so the job tab's list refreshes the same as before.
+    revalidatePath(`/jobs/${jobId}`);
+  } catch (e) {
+    /* best-effort — the line is saved; a notification must never unsave it — but a dead bell
+       is exactly what the daily error sweep exists to catch, so it is logged, not swallowed. */
+    reportError("materials.tellOfficeAboutAddition", e, { listId });
+  }
+}
+
 export async function addMaterialItem(
   listId: string,
   item: DraftMaterial,
 ): Promise<Result> {
   const supabase = await createClient();
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Not signed in." };
+  const description = String(item.description ?? "").trim();
+  if (!description) return { ok: false, error: "Say what the item is." };
+
   const { data: last } = await supabase
     .from("material_list_items")
     .select("sort_order")
@@ -140,19 +281,36 @@ export async function addMaterialItem(
     .order("sort_order", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const { error } = await supabase.from("material_list_items").insert({
-    list_id: listId,
-    description: item.description,
-    part_number: item.part_number,
-    quantity: item.quantity,
-    unit: item.unit || "ea",
-    vendor: item.vendor,
-    est_cost: item.est_cost,
-    is_tool: item.is_tool ?? false,
-    sort_order: ((last?.sort_order as number) ?? -1) + 1,
-  });
+  // A tech's row simply has no money keys: the columns take their defaults (null / null / false)
+  // instead of a value he was never shown. See actorOf.
+  const row = withoutMoney(
+    {
+      list_id: listId,
+      description,
+      part_number: item.part_number || null,
+      quantity: item.quantity || 1,
+      unit: item.unit || "ea",
+      vendor: item.vendor,
+      est_cost: item.est_cost,
+      is_tool: item.is_tool ?? false,
+      sort_order: ((last?.sort_order as number) ?? -1) + 1,
+    },
+    actor,
+  );
+  const { data: inserted, error } = await supabase.from("material_list_items").insert(row).select("id").maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
+  if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
+  // The office adds to its own list all day; only a crew addition is news to anyone. And the
+  // news travels AFTER the answer: the bell chain is five round trips plus a push, and awaiting
+  // it here made a man adding eight faceplates one at a time wait for it eight times. after()
+  // runs the chain once the row is proven and the response is out (the house shape at
+  // quotes/actions.ts); it never throws, so a dead push can't unsave the line. Everything it
+  // needs — the cookie-bound client, the actor, the line — is resolved HERE, in request scope.
+  if (!actor.staff) {
+    const added = { ...item, description };
+    after(() => tellOfficeAboutAddition(supabase, actor, listId, added));
+  }
   return { ok: true };
 }
 
@@ -162,14 +320,28 @@ export async function updateMaterialItem(
   patch: Partial<DraftMaterial>,
 ): Promise<Result> {
   const supabase = await createClient();
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Not signed in." };
   const clean: Record<string, unknown> = {};
-  if (patch.description !== undefined) clean.description = patch.description.trim();
+  if (patch.description !== undefined) {
+    const description = String(patch.description ?? "").trim();
+    if (!description) return { ok: false, error: "Say what the item is." };
+    clean.description = description;
+  }
   if (patch.part_number !== undefined) clean.part_number = patch.part_number || null;
   if (patch.quantity !== undefined) clean.quantity = patch.quantity || 1;
   if (patch.unit !== undefined) clean.unit = patch.unit || "ea";
-  if (patch.vendor !== undefined) clean.vendor = patch.vendor || null;
-  if (patch.est_cost !== undefined) clean.est_cost = patch.est_cost ?? null;
-  if (patch.is_tool !== undefined) clean.is_tool = patch.is_tool;
+  // Money only ever leaves the patch for a non-staff writer — never silently for anyone else.
+  if (actor.staff) {
+    if (patch.vendor !== undefined) clean.vendor = patch.vendor || null;
+    if (patch.est_cost !== undefined) clean.est_cost = patch.est_cost ?? null;
+    if (patch.is_tool !== undefined) clean.is_tool = patch.is_tool;
+  }
+  // A patch that was ONLY money, from someone who can't set it, has nothing left to write. Say so
+  // rather than return an ok for a no-op — the tech's editor never sends these, so reaching this
+  // means a caller assumed otherwise.
+  if (!Object.keys(clean).length)
+    return { ok: false, error: "Cost, vendor and the tool flag are the office's to set." };
   const { data, error } = await supabase.from("material_list_items").update(clean).eq("id", itemId).select("id");
   if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
   if (error) return { ok: false, error: dbError(error) };
@@ -195,13 +367,19 @@ export async function setMaterialItemPurchased(
 }
 
 /** Flag/unflag an item as a TOOL — tools sort above consumable materials so the
- *  crew loads what they own first, then shops for the rest. */
+ *  crew loads what they own first, then shops for the rest. The flag is one of the
+ *  three office-only columns (it decides what an order sheet carries), so the crew's
+ *  editor never renders the control; a call that reaches here anyway gets a sentence,
+ *  not a trigger quietly discarding it. */
 export async function setMaterialItemTool(
   itemId: string,
   listId: string,
   isTool: boolean,
 ): Promise<Result> {
   const supabase = await createClient();
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Not signed in." };
+  if (!actor.staff) return { ok: false, error: "Tools are marked by the office." };
   const { data, error } = await supabase.from("material_list_items").update({ is_tool: isTool }).eq("id", itemId).select("id");
   if (!error && !data?.length) return { ok: false, error: "You don't have permission to change this list." };
   if (error) return { ok: false, error: dbError(error) };
@@ -425,8 +603,10 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   }
 
   if (rows.length) {
-    const { error: itemsErr } = await supabase.from("material_list_items").insert(rows);
-    if (itemsErr) return { ok: false, error: itemsErr.message };
+    const { data: seeded, error: itemsErr } = await supabase.from("material_list_items").insert(rows).select("id");
+    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+    if ((seeded?.length ?? 0) !== rows.length)
+      return { ok: false, error: "The list was created but its lines didn't save. Open it and try again." };
   }
 
   revalidatePath("/materials");

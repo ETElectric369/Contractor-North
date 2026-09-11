@@ -215,8 +215,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // The current job's materials (needs its id), the "Needs action" inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
   const [mlRes, actionItems, kidsRes] = await Promise.all([
+    // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
+    // Materials button below lands on the ONE list the crew and the office both call "the"
+    // list. order("id") sorted UUIDs: arbitrary, and on a two-list job a different list from
+    // the one the job page shows (Erik: "just one, the same one").
     currentJob
-      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("id", { ascending: false }).limit(1).maybeSingle()
+      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("created_at", { ascending: false }).limit(1).maybeSingle()
       : Promise.resolve({ data: null }),
     // audit v921: the feeder's day cuts are calendar-day decisions — hand it the ORG tz so
     // "before today" means org midnight, not UTC's (a 5:30 PM visit surfaced a day late).
@@ -779,8 +783,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           </div>
 
           {/* NOW — the job you're on, folded in as the card's header block. The
-              full 2×2 action grid stays: Navigate / Open / Materials / Quick
-              cost are the field crew's #1 affordances. */}
+              action grid stays: Navigate / Open / Materials are the field crew's #1
+              affordances. Add Cost is the office's — createBill is requireStaff — so
+              it renders for staff only; a tech never fills a form that refuses on
+              save (NO DEAD ENDS). The other three doors are the crew's: the whole job,
+              and the job's one materials list, are theirs to read and work. */}
           {currentJob && (
             <div className="border-b border-brand/20 bg-brand-light/30 px-5 py-4">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
@@ -810,11 +817,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 >
                   Materials
                 </Link>
-                <QuickCostButton
-                  orgId={(org as any)?.id ?? ""}
-                  jobId={currentJob.id}
-                  className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                />
+                {isStaff && (
+                  <QuickCostButton
+                    orgId={(org as any)?.id ?? ""}
+                    jobId={currentJob.id}
+                    className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  />
+                )}
               </div>
             </div>
           )}

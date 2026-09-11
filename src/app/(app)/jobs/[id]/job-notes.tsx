@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Check, Camera, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,14 +10,21 @@ import { Textarea } from "@/components/ui/input";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { updateJobNotes, addDocument } from "../actions";
 
+/** The job's running notes. Staff edit them; a tech READS them (viewerIsStaff=false) —
+ *  updateJobNotes is requireStaff and jobs_write is staff-only at the policy, so a
+ *  textarea with a Save button was a control a tech could fill and be refused on. The
+ *  text stays, the form goes. Take Photo stays for everyone: documents_write (0013) is
+ *  any active member on purpose — techs snap the site from the truck. */
 export function JobNotes({
   jobId,
   orgId,
   notes,
+  viewerIsStaff = true,
 }: {
   jobId: string;
   orgId?: string;
   notes: string | null;
+  viewerIsStaff?: boolean;
 }) {
   const router = useRouter();
   const [value, setValue] = useState(notes ?? "");
@@ -64,7 +72,13 @@ export function JobNotes({
         size_bytes: file.size,
       });
       if (!res.ok) throw new Error(res.error);
-      setPhotoMsg("Photo saved to this job (Costs → Receipts & documents).");
+      // Point at a tab the viewer actually has: Costs is staff-only, so a tech is told
+      // where HE will find it.
+      setPhotoMsg(
+        viewerIsStaff
+          ? "Photo saved to this job (Costs → Receipts & documents)."
+          : "Photo saved to this job — it's on the Photos tab.",
+      );
       router.refresh();
     } catch (err: any) {
       setPhotoMsg(err?.message ?? "Photo upload failed.");
@@ -76,16 +90,34 @@ export function JobNotes({
 
   return (
     <div>
-      <Textarea
-        rows={Math.min(30, Math.max(4, value.split("\n").length + 1))}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Running notes for this job — site details, access, customer preferences, follow-ups…"
-      />
+      {viewerIsStaff ? (
+        <Textarea
+          rows={Math.min(30, Math.max(4, value.split("\n").length + 1))}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Running notes for this job — site details, access, customer preferences, follow-ups…"
+        />
+      ) : notes?.trim() ? (
+        <p className="whitespace-pre-wrap text-sm text-slate-700">{notes}</p>
+      ) : (
+        // A sentence, not a form — nothing here invites typing.
+        <p className="text-sm text-slate-400">No notes from the office yet.</p>
+      )}
+      {!viewerIsStaff && (
+        <p className="mt-2 text-xs text-slate-500">
+          The office writes these. Need materials? Add them on the{" "}
+          <Link href={`/jobs/${jobId}?tab=materials`} className="font-medium text-brand hover:underline">
+            Materials Tab
+          </Link>
+          .
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-3">
-        <Button size="sm" onClick={save} disabled={pending}>
-          {pending ? "Saving…" : "Save Notes"}
-        </Button>
+        {viewerIsStaff && (
+          <Button size="sm" onClick={save} disabled={pending}>
+            {pending ? "Saving…" : "Save Notes"}
+          </Button>
+        )}
         {orgId && (
           <>
             <Button size="sm" variant="outline" onClick={() => captureRef.current?.click()} disabled={photoBusy}>

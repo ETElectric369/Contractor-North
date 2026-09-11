@@ -92,8 +92,26 @@ function UrlSyncedTabs({ tabs, paramKey, maxVisible }: { tabs: TabDef[]; paramKe
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const fromUrl = searchParams.get(paramKey);
-  const initial = tabs.some((t) => t.id === fromUrl) ? (fromUrl as string) : tabs[0]?.id;
-  const [active, setActive] = useState(initial);
+  // The tab the URL names, when it's one this viewer can see — null otherwise (no param, or a
+  // staffOnly id a tech was linked to), in which case the strip keeps whatever it's showing.
+  const urlTab = fromUrl != null && tabs.some((t) => t.id === fromUrl) ? fromUrl : null;
+  const [active, setActive] = useState(urlTab ?? tabs[0]?.id);
+
+  // THE STRIP FOLLOWS THE URL. The initial state above is read once; without this, an in-page
+  // <Link href="?tab=materials"> (or a "← from lead" backlink to ?tab=job#activity) changed the
+  // URL and left the old panel showing. (Keying <Tabs> on the linked tab is the tempting fix
+  // and the wrong one: it remounts the whole tab tree — client state gone — on the first server
+  // refresh after any strip tap, and does nothing on the second click of the same link.)
+  // Next 15 routes window.history.replaceState through its router, so the strip's own taps
+  // (onSelect below) and a real <Link> navigation both arrive here as a changed
+  // useSearchParams(): a tap already set `active`, so this is a no-op; a link sets it.
+  // Deps are the URL's tab ONLY — never `active`: the router applies a replaceState inside a
+  // transition, so for a render or two after a tap the URL can still name the OLD tab, and an
+  // effect that also watched `active` would snap the strip back to it.
+  useEffect(() => {
+    if (urlTab == null) return;
+    setActive((cur) => (cur === urlTab ? cur : urlTab));
+  }, [urlTab]);
 
   function onSelect(id: string) {
     setActive(id);

@@ -692,11 +692,17 @@ export async function updateJobNotes(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
+  // A ZERO-ROW UPDATE IS A 204 (the silent-write law). When RLS refuses the row — a job that
+  // isn't this org's, or one deleted out from under the editor — Postgres answers "0 rows, no
+  // error", and this used to return { ok: true } so the Notes tab flashed "Saved" over text that
+  // never landed. Ask for the id back; an empty answer is the refusal it is.
+  const { data, error } = await supabase
     .from("jobs")
     .update({ notes: notes.trim() || null })
-    .eq("id", jobId);
+    .eq("id", jobId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "Nothing saved — that job isn't here, or this login can't edit it." };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
@@ -709,11 +715,14 @@ export async function updateJobDescription(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase
+  // Same zero-row rule as updateJobNotes: a refused write must not read as "Saved".
+  const { data, error } = await supabase
     .from("jobs")
     .update({ description: description.trim() || null })
-    .eq("id", jobId);
+    .eq("id", jobId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "Nothing saved — that job isn't here, or this login can't edit it." };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

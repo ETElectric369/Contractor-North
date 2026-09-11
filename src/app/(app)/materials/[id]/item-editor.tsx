@@ -22,8 +22,10 @@ interface Item {
   part_number: string | null;
   quantity: number;
   unit: string | null;
-  vendor: string | null;
-  est_cost: number | null;
+  /** Optional because a tech's page projection never selects them (see the
+   *  viewerIsStaff note below) — they simply aren't on the wire. */
+  vendor?: string | null;
+  est_cost?: number | null;
   purchased?: boolean;
   is_tool?: boolean;
 }
@@ -32,16 +34,29 @@ interface Item {
  *  Materials tab both render THIS (no forked row logic). The job tab passes
  *  listId: null when the job has no list yet: the editor still shows the add row,
  *  and the FIRST added item lazily ensures the job's canonical list
- *  (ensureJobMaterialList) — so viewing never creates data, adding does. */
+ *  (ensureJobMaterialList) — so viewing never creates data, adding does.
+ *
+ *  ONE LIST, TWO VIEWS (Erik, 2026-09-11): "techs should have easy access to the same
+ *  materials list per job (just one, the same one) and honestly we probably won't ever
+ *  be putting prices in those lines anyway." So a tech gets THIS editor, not a read-only
+ *  copy — add / edit / remove lines, tick purchased — and the only thing that differs is
+ *  that money is the office's: with viewerIsStaff=false there is no est. cost, no vendor,
+ *  no list total and no tool toggle. The DB pins those columns for techs anyway (a
+ *  trigger, not just the UI), so this isn't the boundary — it just keeps them off the
+ *  screen so nothing here is a control he can't use. Everything else is pixel-identical,
+ *  because the point is that it is visibly THE SAME list the office is looking at. */
 export function ItemEditor({
   listId,
   items,
   jobId,
+  viewerIsStaff = true,
 }: {
   listId: string | null;
   items: Item[];
   /** Enables the lazy list-ensure when listId is null (job Materials tab). */
   jobId?: string;
+  /** false = a tech: same list, same verbs, no money and no tool toggle. */
+  viewerIsStaff?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -77,13 +92,17 @@ export function ItemEditor({
           return setError(ensured.error ?? "Could not start the job's materials list.");
         lid = ensured.id;
       }
+      // A tech's line lands with no vendor and no cost — the office fills those in
+      // later if it ever wants to. The inputs don't exist on his screen, so the
+      // state is untouched anyway; nulls here make that explicit rather than relying
+      // on the initial "" / 0 happening to coerce.
       const res = await addMaterialItem(lid, {
         description: desc,
         part_number: part || null,
         quantity: qty || 1,
         unit: unit || "ea",
-        vendor: vendor || null,
-        est_cost: cost || null,
+        vendor: viewerIsStaff ? vendor || null : null,
+        est_cost: viewerIsStaff ? cost || null : null,
       });
       if (!res.ok) return setError(res.error ?? "Could not add the item.");
       setDesc("");
@@ -137,6 +156,8 @@ export function ItemEditor({
   // Within each group, CHECKED (purchased) items sink to the bottom — Erik's field
   // rule: what's left to buy stays on top as the live pick list; bought stuff drops
   // out of the way. filter() is stable, so order inside each half is untouched.
+  // The grouping itself is for the crew (load what you own, then shop), so a tech
+  // still sees it — he just can't move a line between the groups.
   const sinkPurchased = (arr: Item[]) => [
     ...arr.filter((i) => !i.purchased),
     ...arr.filter((i) => i.purchased),
@@ -154,9 +175,13 @@ export function ItemEditor({
         <div className="flex items-center gap-2">
           <NumberInput value={eQty} onValueChange={setEQty} className="w-16 text-center" />
           <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="w-16 shrink-0" />
-          <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="flex-1" placeholder="Vendor" />
-          <NumberInput value={eCost} onValueChange={setECost} className="flex-1 text-right" placeholder="Est. cost" />
-          <button onClick={saveEdit} disabled={pending} className="rounded-md bg-brand p-2 text-white disabled:opacity-50" aria-label="Save">
+          {viewerIsStaff && (
+            <>
+              <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="flex-1" placeholder="Vendor" />
+              <NumberInput value={eCost} onValueChange={setECost} className="flex-1 text-right" placeholder="Est. cost" />
+            </>
+          )}
+          <button onClick={saveEdit} disabled={pending} className={`rounded-md bg-brand p-2 text-white disabled:opacity-50 ${viewerIsStaff ? "" : "ml-auto"}`} aria-label="Save">
             <Check className="h-4 w-4" />
           </button>
           <button onClick={() => setEditId(null)} className="rounded-md p-2 text-slate-400 hover:bg-slate-100" aria-label="Cancel">
@@ -179,21 +204,25 @@ export function ItemEditor({
           <div className="text-xs text-slate-400">
             {it.part_number ? `#${it.part_number} · ` : ""}
             {it.quantity} {it.unit}
-            {it.est_cost != null ? ` × ${formatCurrency(it.est_cost)}` : ""}
+            {viewerIsStaff && it.est_cost != null ? ` × ${formatCurrency(it.est_cost)}` : ""}
           </div>
         </div>
-        <div className="shrink-0 font-medium text-slate-900">
-          {it.est_cost != null ? formatCurrency(it.est_cost * it.quantity) : "—"}
-        </div>
-        <button
-          onClick={() => toggleTool(it)}
-          disabled={pending}
-          className={`shrink-0 ${it.is_tool ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
-          aria-label={it.is_tool ? "Unmark tool" : "Mark as a tool"}
-          title={it.is_tool ? "Tool — tap to unmark" : "Mark as a tool (sorts to the top)"}
-        >
-          <Wrench className="h-4 w-4" />
-        </button>
+        {viewerIsStaff && (
+          <div className="shrink-0 font-medium text-slate-900">
+            {it.est_cost != null ? formatCurrency(it.est_cost * it.quantity) : "—"}
+          </div>
+        )}
+        {viewerIsStaff && (
+          <button
+            onClick={() => toggleTool(it)}
+            disabled={pending}
+            className={`shrink-0 ${it.is_tool ? "text-amber-500" : "text-slate-300 hover:text-amber-500"}`}
+            aria-label={it.is_tool ? "Unmark tool" : "Mark as a tool"}
+            title={it.is_tool ? "Tool — tap to unmark" : "Mark as a tool (sorts to the top)"}
+          >
+            <Wrench className="h-4 w-4" />
+          </button>
+        )}
         <button onClick={() => startEdit(it)} disabled={pending} className="shrink-0 text-slate-300 hover:text-slate-600" aria-label="Edit item">
           <Pencil className="h-4 w-4" />
         </button>
@@ -218,13 +247,15 @@ export function ItemEditor({
     if (!lid || !editId || !eDesc.trim()) return;
     setError(null);
     start(async () => {
+      // A tech's edit never carries vendor / est_cost: the patch is Partial, and a key
+      // that isn't sent isn't touched — so his fixing a typo in the description can't
+      // wipe a cost the office already put on the line (and can't trip the DB pin).
       const res = await updateMaterialItem(editId, lid, {
         description: eDesc,
         part_number: ePart || null,
         quantity: eQty || 1,
         unit: eUnit || "ea",
-        vendor: eVendor || null,
-        est_cost: eCost || null,
+        ...(viewerIsStaff ? { vendor: eVendor || null, est_cost: eCost || null } : {}),
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setEditId(null);
@@ -249,8 +280,12 @@ export function ItemEditor({
         <div className="flex flex-wrap items-center gap-2">
           <NumberInput value={qty} onValueChange={setQty} className="w-16 text-center" placeholder="Qty" />
           <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="w-16 shrink-0" placeholder="ea" />
-          <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="min-w-[7rem] flex-1" placeholder="Vendor" />
-          <NumberInput value={cost} onValueChange={setCost} className="min-w-[6rem] flex-1 text-right" placeholder="Est. cost" />
+          {viewerIsStaff && (
+            <>
+              <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="min-w-[7rem] flex-1" placeholder="Vendor" />
+              <NumberInput value={cost} onValueChange={setCost} className="min-w-[6rem] flex-1 text-right" placeholder="Est. cost" />
+            </>
+          )}
           <Button onClick={add} disabled={pending || !desc.trim()} className="ml-auto shrink-0">
             <Plus className="h-4 w-4" /> Add
           </Button>
@@ -270,10 +305,12 @@ export function ItemEditor({
         {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items yet — add one above.</li>}
       </ul>
 
+      {/* The footer's right-hand figure is the list's est. total — money, so it's the
+          office's. A tech's footer keeps the purchased tally alone. */}
       {items.length > 0 && (
         <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-sm">
           <span className="text-slate-500">{purchasedCount}/{items.length} purchased</span>
-          <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>
+          {viewerIsStaff && <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>}
         </div>
       )}
 

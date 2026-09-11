@@ -6,7 +6,7 @@ import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, type LucideIcon } from "lucide-react";
+import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat, type LucideIcon } from "lucide-react";
 // The More-panel chip icons must come through a "use client" re-export so the
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
@@ -37,6 +37,7 @@ import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
+import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
 import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
@@ -65,10 +66,11 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
-import { formatDateTz, todayStrInTz } from "@/lib/tz";
+import { formatDateTz, hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
+import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -107,7 +109,9 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
 
 /** Order the job tabs and tag each with its tier + cluster + staff-gating, so
  *  <Tabs> keeps the Work core visible and folds the rest into a clustered,
- *  bloom-skinned "More" menu (and hides money tabs from techs itself). */
+ *  bloom-skinned "More" menu. staffOnly is honored TWICE: the page drops those
+ *  tabs before passing them (so their content never serializes to a tech), and
+ *  <Tabs> filters again on the client. */
 function arrangeJobTabs(tabs: TabDef[]): TabDef[] {
   return [...tabs]
     .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
@@ -152,7 +156,9 @@ export default async function JobDetailPage({
     { data: staff },
     { data: bills },
     { data: tasks },
-    { data: permits },
+    {
+      data: { user },
+    },
     rates,
   ] = await Promise.all([
     supabase.from("quotes").select("id, quote_number, status, total, doc_type, created_at").eq("job_id", id),
@@ -197,11 +203,11 @@ export default async function JobDetailPage({
       .order("status", { ascending: true })
       .order("priority", { ascending: false })
       .order("due_date", { ascending: true, nullsFirst: false }),
-    supabase
-      .from("permits")
-      .select("id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, fee, notes, portal_url")
-      .eq("job_id", id)
-      .order("created_at", { ascending: false }),
+    // WHO IS LOOKING rides the first wave (cn-v945): the viewer's role picks the select list for
+    // the materials items and the permits below (projection law — a tech's rows never carry
+    // money), so the role read must land BEFORE those queries, and the role read needs the user.
+    // Fetched here, with nothing waiting on it, the user costs the page no extra round trip.
+    supabase.auth.getUser(),
     // Rides along in the wave instead of behind it (audit v921): it needs nothing from these
     // reads, and awaiting it separately cost the page a whole round trip on every job open.
     payRateMap(supabase),
@@ -227,9 +233,10 @@ export default async function JobDetailPage({
    * coverage that is the difference between a job opening and a tech giving up on it, and the
    * 60mph rule is the standing measure for this page.
    *
-   * Only two reads on this page genuinely depend on another: the canonical material list's items
-   * (needs the list) and the viewer's role (needs the user). Those follow in a second wave rather
-   * than dragging four unrelated queries along behind them.
+   * Only a few reads on this page genuinely depend on another. The viewer's role (needs the
+   * user, wave 1) rides here; the canonical material list's items (need the list from this wave
+   * AND the role, because the select list is role-shaped) and the permits (same reason) ride the
+   * third wave with the rest, rather than dragging unrelated queries along behind them.
    */
   const [
     { data: pendingProposal },
@@ -237,9 +244,7 @@ export default async function JobDetailPage({
     { data: jobLists },
     { data: jobAppts },
     { data: jobContactsRaw },
-    {
-      data: { user },
-    },
+    { data: meRow },
   ] = await Promise.all([
     supabase
       .from("schedule_proposals")
@@ -271,8 +276,9 @@ export default async function JobDetailPage({
       .select("id, role, customer_id, customers(name, phone)")
       .eq("job_id", j.id)
       .order("created_at"),
-    supabase.auth.getUser(),
+    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
   ]);
+  const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
 
   // THE job's materials list — Erik's rule: the Materials tab IS the list, not a
   // list-of-lists. Newest wins, which makes the estimate's take-off (created on
@@ -280,14 +286,6 @@ export default async function JobDetailPage({
   // renders the editor; the first added item lazily creates it server-side
   // (ensureJobMaterialList), so viewing a job never writes data.
   const canonicalList = ((jobLists ?? [])[0] ?? null) as { id: string; name: string } | null;
-  // WAVE 2 — the only two reads that genuinely need a wave-1 result.
-  const [{ data: canonicalItems }, { data: meRow }] = await Promise.all([
-    canonicalList
-      ? supabase.from("material_list_items").select("*").eq("list_id", canonicalList.id).order("sort_order")
-      : Promise.resolve({ data: null }),
-    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
-  ]);
-  const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
   // Merge the two directions into ONE entries list: shifts clocked on this job, plus shifts
   // clocked elsewhere that allocated hours here (deduped; the row math shows only this job's
   // share). laborCostForJob already attributes per-allocation, so totals stay exact.
@@ -309,7 +307,12 @@ export default async function JobDetailPage({
   // the invoices wave 1 already returned) — they ran one after another below, four extra serial
   // round trips on the most-opened page in the app. They ride this wave instead.
   const invoiceIds = (invoices ?? []).map((i: any) => i.id);
+  // PROJECTION LAW (cn-v945): the fee is money, and the read-only permit rows a tech gets are
+  // rendered from this same array — so the column is never selected for him, not dropped after.
+  const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, notes, portal_url";
   const [
+    { data: canonicalItems },
+    { data: permits },
     { data: techs },
     { data: jobCodes },
     { data: lists },
@@ -323,6 +326,22 @@ export default async function JobDetailPage({
     jobLevelRate,
     { data: refundRows },
   ] = await Promise.all([
+    // THE job's items, role-shaped (projection law): staff read every column, a tech reads
+    // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
+    // materials list shows the crew the same face through either door. This read used to sit in
+    // a wave of its own; it needs the list (wave 1) and the role (wave 2), both in hand here.
+    canonicalList
+      ? supabase
+          .from("material_list_items")
+          .select(viewerIsStaff ? "*" : TECH_ITEM_COLUMNS)
+          .eq("list_id", canonicalList.id)
+          .order("sort_order")
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("permits")
+      .select(viewerIsStaff ? `${PERMIT_COLUMNS}, fee` : PERMIT_COLUMNS)
+      .eq("job_id", id)
+      .order("created_at", { ascending: false }),
     // Staff get hourly_rate + bill_rate for the add-time/edit modals' pay-rate
     // anchor; NON-staff keep the narrow select. The gate matters here: this array
     // serializes into client-component props (RSC), so an unconditional enrichment
@@ -334,7 +353,11 @@ export default async function JobDetailPage({
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("organizations").select("address_line1, city, state, zip, settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
-    supabase.from("customers").select("id, name, type").order("name"),
+    // The customer book feeds the contacts editor, the appointment picker and the dock's Edit
+    // Job modal — every one a staff door — so a tech's page doesn't pay for the read.
+    viewerIsStaff
+      ? supabase.from("customers").select("id, name, type").order("name")
+      : Promise.resolve({ data: [] as any[] }),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("job_code_templates").select("id, name").order("name"),
     // The viewer's OPEN time entry (drives the action dock's 3-state TIME button).
@@ -393,6 +416,30 @@ export default async function JobDetailPage({
   // schedule writers use, threaded into the schedule/edit controls so their "blank
   // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
   const workDay = workDayWindowHm((org as any)?.settings);
+
+  // THE SCHEDULE AS A SENTENCE, for a tech (cn-v945). The date pickers save on change through
+  // setJobScheduleRanges, a staff-only writer — so for him they were inputs that quietly
+  // reverted. Segments are date-only strings (formatDate anchors them to noon UTC, so the day
+  // never shifts in Pacific); a start time shows only when it's an explicit one, i.e. not the
+  // org's all-day sentinel — the same rule the picker uses to decide whether to show a time.
+  const scheduleText: string | null = (() => {
+    const segs = (scheduleSegments ?? []) as { start_date: string; end_date: string }[];
+    const startTime =
+      j.scheduled_start && tzMinutesOfDay(j.scheduled_start, tz) !== hmToMin(workDay.start)
+        ? new Date(j.scheduled_start).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
+        : null;
+    const days = segs.length
+      ? segs
+          .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date) : `${formatDate(sg.start_date)} – ${formatDate(sg.end_date)}`))
+          .join(" · ")
+      : j.scheduled_start
+        ? j.scheduled_end && formatDateTz(j.scheduled_end, tz) !== formatDateTz(j.scheduled_start, tz)
+          ? `${formatDateTz(j.scheduled_start, tz)} – ${formatDateTz(j.scheduled_end, tz)}`
+          : formatDateTz(j.scheduled_start, tz)
+        : null;
+    if (!days) return null;
+    return startTime ? `${days} · starts ${startTime}` : days;
+  })();
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
@@ -539,7 +586,8 @@ export default async function JobDetailPage({
                         <Link href={`/crm/${j.customers.id}`} className="text-sm font-medium text-slate-900 hover:text-brand">
                           {j.customers.name}
                         </Link>
-                        <EditCustomerButton customer={j.customers as Customer} />
+                        {/* Editing the customer is a staff write; a tech gets the name and the phone. */}
+                        {viewerIsStaff && <EditCustomerButton customer={j.customers as Customer} />}
                       </>
                     ) : (
                       <span className="text-sm text-slate-400">—</span>
@@ -555,7 +603,19 @@ export default async function JobDetailPage({
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
                   <div className="mt-1">
-                    <JobStatusControl id={j.id} status={j.status} holdReason={(j as any).hold_reason ?? null} />
+                    {/* NO DEAD ENDS (cn-v945): setJobStatus is requireStaff, so for a tech the dropdown
+                        was a control he could move and watch snap back. He reads the status; the hold
+                        reason rides along, because "on hold" without its why is a shrug (0234). */}
+                    {viewerIsStaff ? (
+                      <JobStatusControl id={j.id} status={j.status} holdReason={(j as any).hold_reason ?? null} />
+                    ) : (
+                      <span className="inline-flex flex-wrap items-center gap-1.5">
+                        <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
+                        {j.status === "on_hold" && (j as any).hold_reason && (
+                          <span className="text-xs text-slate-500">— {(j as any).hold_reason}</span>
+                        )}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -575,11 +635,19 @@ export default async function JobDetailPage({
                 <div className="sm:col-span-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
                   <div className="mt-1">
-                    <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
+                    {viewerIsStaff ? (
+                      <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
+                    ) : (
+                      <span className={scheduleText ? "text-sm text-slate-700" : "text-sm text-slate-400"}>
+                        {scheduleText ?? "Not scheduled yet."}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
-              <JobDescription jobId={j.id} description={j.description} />
+              {/* A tech reads the description (his scope) and is pointed at the Materials tab —
+                  Brian typed a materials note into this box, which only staff can save. */}
+              <JobDescription jobId={j.id} description={j.description} viewerIsStaff={viewerIsStaff} />
             </CardContent>
           </Card>
 
@@ -600,7 +668,42 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
 
-          <JobContacts jobId={j.id} contacts={jobContacts} options={contactOptions} />
+          {/* SUBS & CONTACTS: the list is job information a tech needs (who the sub is, the
+              inspector's number); linking and unlinking are staff writes (job_contacts). The
+              office gets the editor, the crew gets the same rows with tap-to-call. The whole
+              customer book (allCustomers) is read for staff only, so neither contactOptions here
+              nor the dock's Edit Job modal ever serializes it to a tech's page — this comment
+              used to make that promise while the dock still handed the book to every viewer. */}
+          {viewerIsStaff ? (
+            <JobContacts jobId={j.id} contacts={jobContacts} options={contactOptions} />
+          ) : (
+            <Card className="p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <HardHat className="h-4 w-4 text-slate-400" /> Subs &amp; contacts
+              </div>
+              {jobContacts.length === 0 ? (
+                <p className="py-3 text-center text-xs text-slate-400">No subs or extra contacts on this job.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {jobContacts.map((c) => (
+                    <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2 text-sm">
+                      <Link href={`/crm/${c.customer_id}`} className="font-medium text-slate-800 hover:text-brand">
+                        {c.name}
+                      </Link>
+                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        {c.role}
+                      </span>
+                      {c.phone && (
+                        <a href={`tel:${c.phone}`} className="flex min-h-[44px] items-center gap-1 text-slate-600 hover:text-brand">
+                          <Phone className="h-3.5 w-3.5 text-slate-400" /> {c.phone}
+                        </a>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
           {/* ACTIVITY LOG — Erik's name for it, at the bottom where a history belongs: the page
               leads with what the job needs NOW, and how it got here reads back from the end.
               Every chapter is assembled from the rows themselves (lib/story); the "from lead"
@@ -638,7 +741,7 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobNotes jobId={j.id} orgId={j.org_id} notes={j.notes} />
+            <JobNotes jobId={j.id} orgId={j.org_id} notes={j.notes} viewerIsStaff={viewerIsStaff} />
           </CardContent>
         </Card>
       ),
@@ -674,7 +777,58 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobPermits jobId={j.id} permits={(permits ?? []) as any} />
+            {/* PERMITS: a tech needs the permit number, the inspection date and the city's
+                portal link on site; adding, editing and deleting are staff writes, and the
+                fee is a money figure. Same rows, read-only, fee omitted. */}
+            {viewerIsStaff ? (
+              <JobPermits jobId={j.id} permits={(permits ?? []) as any} />
+            ) : (
+              <div>
+                <div className="mb-3 text-sm text-slate-500">
+                  {(permits ?? []).length} permit{(permits ?? []).length === 1 ? "" : "s"}
+                </div>
+                {(permits ?? []).length === 0 ? (
+                  <p className="py-4 text-center text-sm text-slate-400">No permits on this job yet.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {(permits ?? []).map((p: any) => (
+                      <li key={p.id} className="rounded-lg border border-slate-200 p-3">
+                        <div className="flex items-start gap-3">
+                          <ClipboardCheck className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 text-sm">
+                              <span className="font-medium text-slate-900">{p.type}</span>
+                              {p.permit_number && <span className="font-mono text-xs text-slate-500">#{p.permit_number}</span>}
+                              {p.authority && <span className="text-xs text-slate-400">· {p.authority}</span>}
+                              {p.portal_url && (
+                                <a
+                                  href={p.portal_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                                >
+                                  Check with City ↗
+                                </a>
+                              )}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+                              {p.applied_date && <span>Applied {formatDate(p.applied_date)}</span>}
+                              {p.inspection_date && <span>Inspection {formatDate(p.inspection_date)}</span>}
+                              {p.inspector && <span>· {p.inspector}</span>}
+                            </div>
+                            {p.notes && <div className="mt-1 whitespace-pre-wrap text-xs text-slate-500">{p.notes}</div>}
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            <Badge tone={permitStatusTone(p.status)}>{String(p.status).replace("_", " ")}</Badge>
+                            <Badge tone={permitResultTone(p.inspection_result)}>{p.inspection_result}</Badge>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       ),
@@ -758,11 +912,16 @@ export default async function JobDetailPage({
       count: jobAppts?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            {/* Defaults matter: booked from the Miller job, it must land ON the Miller job. Without
-                these the component opened blank and the appointment was never linked back. */}
-            <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} defaultJobId={job.id} defaultCustomerId={job.customer_id ?? undefined} />
-          </div>
+          {/* Booking and editing are staff writes (appointments_write, 0227: "office only"), so
+              both doors are staff-only here. The visits themselves stay — a tech needs to know
+              when the inspector is coming. */}
+          {viewerIsStaff && (
+            <div className="flex justify-end">
+              {/* Defaults matter: booked from the Miller job, it must land ON the Miller job. Without
+                  these the component opened blank and the appointment was never linked back. */}
+              <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} defaultJobId={job.id} defaultCustomerId={job.customer_id ?? undefined} />
+            </div>
+          )}
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
               {(jobAppts ?? []).map((a: any) => {
@@ -784,12 +943,19 @@ export default async function JobDetailPage({
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <span className="text-slate-500">{formatDateTime(a.starts_at)}</span>
-                      <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} appointment={appt} />
+                      {viewerIsStaff && <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} appointment={appt} />}
                     </div>
                   </li>
                 );
               })}
-              {(!jobAppts || jobAppts.length === 0) && empty("appointments")}
+              {/* 0227: a tech sees only the visits assigned to him, so "No appointments yet"
+                  would be a claim about the job — the empty state says what HIS view holds. */}
+              {(!jobAppts || jobAppts.length === 0) &&
+                (viewerIsStaff ? (
+                  empty("appointments")
+                ) : (
+                  <p className="px-1 py-6 text-center text-sm text-slate-400">None assigned to you yet.</p>
+                ))}
             </ul>
           </Card>
         </div>
@@ -872,7 +1038,9 @@ export default async function JobDetailPage({
               list-of-lists, nothing to create or open. Checked items sink to the
               bottom inside the editor; the pick-list print and PO seed ride on
               top of the SAME list. */}
-          {canonicalList && (
+          {/* The pick-list print and the PO seed are office doors (a PO is money; the print
+              carries est_cost) — staff only. */}
+          {viewerIsStaff && canonicalList && (
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Link
                 href={`/print/pdf-preview?doc=material-list&id=${canonicalList.id}&back=/jobs/${j.id}?tab=materials`}
@@ -888,33 +1056,28 @@ export default async function JobDetailPage({
               />
             </div>
           )}
-          {/* A TECH GETS THE LIST READ-ONLY AND A WAY TO ASK. The editor's six writes all need
-              is_org_staff() at the policy, so rendering it for a tech was six buttons that
-              silently did nothing — Erik: "if a tech on a job says he needs materials for that
-              job, it should show up as an alert for the boss." */}
-          {viewerIsStaff ? (
-            <ItemEditor listId={canonicalList?.id ?? null} jobId={j.id} items={(canonicalItems ?? []) as any} />
-          ) : (
-            <div className="space-y-3">
-              {(canonicalItems ?? []).length > 0 && (
-                <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                  {((canonicalItems ?? []) as any[]).map((it) => (
-                    <li key={it.id} className="flex items-center gap-2 px-3 py-2 text-sm">
-                      <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-700"}>
-                        {it.description}
-                      </span>
-                      <span className="ml-auto shrink-0 text-xs text-slate-400">
-                        {it.quantity ?? ""} {it.unit ?? ""}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {/* He still needs to SEE the list, or he'll ask for something that's already in the van. */}
-              <NeedMaterials jobId={j.id} />
-            </div>
-          )}
-          {(jobLists ?? []).length > 1 && (
+          {/* ONE LIST, THE SAME EDITOR FOR EVERYONE (Erik, 2026-09-11): "techs should have easy
+              access to the same materials list per job (just one, the same one) and honestly we
+              probably won't ever be putting prices in those lines anyway." So the crew gets the
+              editor the office gets — add, edit, remove, tick purchased — and the SAME lazy
+              ensureJobMaterialList on the first add when the job has no list yet (never a second
+              list; the tab IS the list). What stays out of a tech's hands and eyes is the money:
+              viewerIsStaff=false hides est_cost / vendor / is_tool / the total inside the editor,
+              and a DB trigger pins those columns, so the UI is a convenience, not the boundary.
+              This replaces the read-only <ul> a tech used to get. */}
+          <ItemEditor
+            listId={canonicalList?.id ?? null}
+            jobId={j.id}
+            items={(canonicalItems ?? []) as any}
+            viewerIsStaff={viewerIsStaff}
+          />
+          {/* BELOW the editor, for a tech: the "anything else the office should know" door — a
+              task + bell + push to the boss's phone (requestMaterials), for what a list line
+              can't say ("I'm short for the far wall, can someone run it out?"). */}
+          {!viewerIsStaff && <NeedMaterials jobId={j.id} />}
+          {/* The list-of-lists is an office concern (which take-off is canonical); for the crew
+              the tab IS the list, so the door stays staff-only. */}
+          {viewerIsStaff && (jobLists ?? []).length > 1 && (
             <div className="text-right">
               <Link
                 href={`/materials?job=${j.id}`}
@@ -1067,9 +1230,12 @@ export default async function JobDetailPage({
       count: workOrders?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <NewWorkOrderButton jobs={thisJobOpt} techs={techs ?? []} defaultJob={j.id} autoOpen={false} />
-          </div>
+          {/* Issuing a work order is a staff write; the list of them is job information. */}
+          {viewerIsStaff && (
+            <div className="flex justify-end">
+              <NewWorkOrderButton jobs={thisJobOpt} techs={techs ?? []} defaultJob={j.id} autoOpen={false} />
+            </div>
+          )}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(workOrders ?? []).map((w: any) => (
@@ -1152,12 +1318,25 @@ export default async function JobDetailPage({
         isDrawBilled={(invoices ?? []).some(
           (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
         )}
-        customers={allCustomers ?? []}
+        /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */
+        customers={viewerIsStaff ? allCustomers ?? [] : []}
         templates={(codeTemplates ?? []) as { id: string; name: string }[]}
         workDay={workDay}
       />
 
-      <Tabs tabs={arrangeJobTabs(tabs)} viewerIsStaff={viewerIsStaff} urlSync />
+      {/* THE STRIP FOLLOWS THE URL (cn-v945). <Tabs urlSync> re-syncs its active tab whenever
+          ?tab= changes, so an in-page <Link href="?tab=materials"> (the tech's "Add them on the
+          Materials tab", the "← from lead" backlink) lands on the linked tab every time, and a
+          server refresh after a strip tap (any action's revalidatePath) leaves the tab tree
+          mounted — the alternative, keying <Tabs> on the linked tab, would remount the whole
+          tree on that refresh (client state gone, for staff too) and do nothing on a second
+          click of the same link. The staffOnly tabs are dropped HERE, before they're passed, so the money tabs' content
+          never serializes to a tech; <Tabs> filters once more on the client. */}
+      <Tabs
+        tabs={arrangeJobTabs(tabs).filter((t) => !t.staffOnly || viewerIsStaff)}
+        viewerIsStaff={viewerIsStaff}
+        urlSync
+      />
     </div>
   );
 }

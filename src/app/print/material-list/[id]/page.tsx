@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { PrintButton } from "@/components/print-button";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { DocHeader, templateFor } from "@/components/doc-templates";
@@ -20,7 +21,11 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 }
 
 /** A materials pick list with NO prices — for the field crew to pull/buy, or to
- *  send a supplier for a quote, without exposing cost or markup. */
+ *  send a supplier for a quote, without exposing cost or markup. The vendor column is
+ *  the office's as well (one of the three money fields the crew never sees — see
+ *  MONEY_FIELDS in materials/actions.ts: where it's bought is half of what it cost),
+ *  so it is selected and printed for staff only. A tech's sheet is the same list minus
+ *  that column, never a locked door: a pick list is a field convenience. */
 export default async function MaterialListPrintPage({
   params,
 }: {
@@ -29,20 +34,32 @@ export default async function MaterialListPrintPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: list } = await supabase
-    .from("material_lists")
-    .select(`name, created_at, jobs(job_number, name, ${SITE_COLS})`)
-    .eq("id", id)
-    .maybeSingle();
+  // Viewer role rides alongside the list read — the same shape as /materials/[id]. RLS is
+  // the boundary on the rows; the role only decides whether vendor is asked for at all.
+  const [{ data: list }, { data: { user } }] = await Promise.all([
+    supabase
+      .from("material_lists")
+      .select(`name, created_at, jobs(job_number, name, ${SITE_COLS})`)
+      .eq("id", id)
+      .maybeSingle(),
+    supabase.auth.getUser(),
+  ]);
   if (!list) notFound();
 
+  const [{ data: meRow }, { data: org }] = await Promise.all([
+    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("organizations").select("*").maybeSingle(),
+  ]);
+  const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+
+  // PROJECTION LAW: a column never selected cannot leak — the crew's sheet never asks for
+  // vendor, so it can't ride the RSC payload to a phone either.
   const { data: items } = await supabase
     .from("material_list_items")
-    .select("description, part_number, quantity, unit, vendor")
+    .select(viewerIsStaff ? "description, part_number, quantity, unit, vendor" : "description, part_number, quantity, unit")
     .eq("list_id", id)
     .order("sort_order");
 
-  const { data: org } = await supabase.from("organizations").select("*").maybeSingle();
   const company = companyFromOrg(org as Organization | null);
   const template = templateFor(org as Organization | null, "material_list");
   const l = list as any;
@@ -52,7 +69,7 @@ export default async function MaterialListPrintPage({
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
         <BackLink fallback={`/materials/${id}`} fallbackLabel="Back" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" />
-        <PrintButton label="Print pick list" />
+        <PrintButton label="Print Pick List" />
       </div>
 
       <div className="print-page mx-auto bg-white shadow-sm">
@@ -91,7 +108,7 @@ export default async function MaterialListPrintPage({
               <th className="py-2">Part #</th>
               <th className="w-16 py-2 pr-3 text-right">Qty</th>
               <th className="w-16 py-2">Unit</th>
-              <th className="py-2">Vendor</th>
+              {viewerIsStaff && <th className="py-2">Vendor</th>}
             </tr>
           </thead>
           <tbody>
@@ -104,12 +121,12 @@ export default async function MaterialListPrintPage({
                 <td className="py-2.5 pr-3 text-slate-500">{it.part_number || "—"}</td>
                 <td className="py-2.5 pr-3 text-right text-slate-800">{Number(it.quantity ?? 0)}</td>
                 <td className="py-2.5 text-slate-500">{it.unit || "ea"}</td>
-                <td className="py-2.5 text-slate-500">{it.vendor || "—"}</td>
+                {viewerIsStaff && <td className="py-2.5 text-slate-500">{it.vendor || "—"}</td>}
               </tr>
             ))}
             {!(items ?? []).length && (
               <tr>
-                <td colSpan={6} className="py-6 text-center text-slate-400">No items on this list.</td>
+                <td colSpan={viewerIsStaff ? 6 : 5} className="py-6 text-center text-slate-400">No items on this list.</td>
               </tr>
             )}
           </tbody>
