@@ -8,7 +8,7 @@ import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
-const TRIGGERS: { key: string; label: string; soon?: boolean }[] = [
+const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean }[] = [
   { key: "assigned", label: "Jobs & appointments assigned to me" },
   { key: "inquiry", label: "New inquiries / leads" },
   { key: "quote_accepted", label: "Quotes accepted by a customer" },
@@ -20,6 +20,14 @@ const TRIGGERS: { key: string; label: string; soon?: boolean }[] = [
   // job site while clocked in), so the toggle is real now.
   { key: "clock_out", label: "Clock-out reminder (left the job site)" },
   { key: "daily_report", label: "Daily reports from crew leads" },
+  // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
+  // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
+  // effect of muting an unrelated alert. The help line says what it actually covers.
+  {
+    key: "tap_to_pay",
+    label: "Tap to Pay on iPhone",
+    help: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
+  },
 ];
 const DEFAULTS: Record<string, boolean> = {
   assigned: true,
@@ -29,6 +37,7 @@ const DEFAULTS: Record<string, boolean> = {
   day_ahead: false,
   clock_out: true,
   daily_report: true,
+  tap_to_pay: true,
 };
 
 function urlB64ToUint8(base64String: string) {
@@ -237,6 +246,7 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
               {t.soon && (
                 <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-400">soon</span>
               )}
+              {t.help && <span className="block text-xs text-slate-500">{t.help}</span>}
             </span>
             <input
               type="checkbox"

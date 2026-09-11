@@ -12,10 +12,61 @@ import type Stripe from "stripe";
 export const runtime = "nodejs";
 
 /**
+ * WHY THE CARD SAID NO, IN WORDS A TECH CAN REPEAT TO A CUSTOMER (Apple 5.12 push body).
+ *
+ * decline_code is the issuer's reason and the most useful thing Stripe hands back; `message` is
+ * Stripe's cardholder-facing sentence ("Your card was declined.") — written to the CUSTOMER, so it
+ * reads wrong in a notification to the tech and is the fallback, not the lead. The map covers the
+ * codes a driveway actually sees; anything else falls through to the code with its underscores
+ * turned into spaces, which is still a plain phrase and never a blank.
+ */
+function declineReason(err: Stripe.PaymentIntent.LastPaymentError | null | undefined): string {
+  const code = err?.decline_code ?? "";
+  const WORDS: Record<string, string> = {
+    insufficient_funds: "the card has insufficient funds",
+    generic_decline: "the bank declined it without a reason",
+    do_not_honor: "the bank declined it (do not honor)",
+    expired_card: "the card is expired",
+    lost_card: "the card was reported lost",
+    stolen_card: "the card was reported stolen",
+    incorrect_pin: "the PIN was wrong",
+    pin_try_exceeded: "too many wrong PIN tries",
+    offline_pin_required: "the card wants a PIN entered",
+    online_or_offline_pin_required: "the card wants a PIN entered",
+    call_issuer: "the bank wants the cardholder to call them",
+    card_velocity_exceeded: "the card hit its spending limit",
+    withdrawal_count_limit_exceeded: "the card hit its daily limit",
+    transaction_not_allowed: "the card doesn't allow this kind of charge",
+    card_not_supported: "the card doesn't support this kind of charge",
+    currency_not_supported: "the card doesn't take US dollars",
+    fraudulent: "the bank flagged it as suspected fraud",
+    merchant_blacklist: "the bank blocks this business",
+    restricted_card: "the card is restricted",
+    revocation_of_all_authorizations: "the cardholder revoked charges from this business",
+    security_violation: "the bank flagged a security problem",
+    service_not_allowed: "the bank doesn't allow this charge",
+    stop_payment_order: "the cardholder placed a stop on it",
+    try_again_later: "the bank said try again later",
+    processing_error: "a processing error at the bank",
+    reenter_transaction: "the bank asked for the card to be tapped again",
+    testmode_decline: "test-mode decline",
+  };
+  if (code && WORDS[code]) return WORDS[code];
+  if (code) return code.replace(/_/g, " ");
+  if (err?.message) return err.message.replace(/\.$/, "");
+  if (err?.code) return String(err.code).replace(/_/g, " ");
+  return "the card was declined";
+}
+
+/**
  * Stripe webhook: keeps organizations.subscription_status / plan in sync.
  * Configure TWO endpoints at this URL in Stripe → Developers → Webhooks — "your account" (secret →
  * STRIPE_WEBHOOK_SECRET) and "connected accounts" (secret → STRIPE_CONNECT_WEBHOOK_SECRET).
- * Listens for subscription + checkout events on ours, invoice payments + account.updated on theirs.
+ * Listens for subscription + checkout events on ours; on theirs: checkout.session.completed,
+ * account.updated, charge.refunded, charge.dispute.created, AND — for Tap to Pay on iPhone —
+ * payment_intent.succeeded and payment_intent.payment_failed. Those two are not on the endpoint
+ * by default: a tap is charged but never booked (or never declines to the tech) until the
+ * "connected accounts" destination in the Stripe dashboard carries both. Added 2026-09-11.
  */
 export async function POST(req: Request) {
   // TWO SIGNING SECRETS. Stripe issues one per endpoint, and Connect needs two endpoints at this
@@ -482,8 +533,111 @@ export async function POST(req: Request) {
           event.id,
           pi.id,
           eventAccount,
-          { note: "Tap to Pay", said: "paid by card in person" },
+          { note: "Tap to Pay on iPhone", said: "paid by card in person" },
         );
+      }
+      break;
+    }
+    /**
+     * TAP TO PAY ON IPHONE — THE CARD WAS DECLINED AND THE TECH MAY NOT HAVE SEEN IT (Apple 5.12).
+     *
+     * Apple: "When a transaction is not approved but the user has already closed the app before
+     * seeing the result, ensure they receive a notification indicating this outcome." The phone
+     * confirms the PaymentIntent itself; if the tech pockets the phone mid-confirm, the app is
+     * backgrounded, the reader session ends, and the Declined screen is never on their eyes. Stripe
+     * still emits payment_intent.payment_failed on the connected account — this is the one signal
+     * that survives the app being closed, so it is the one that buzzes the phone.
+     *
+     * ONLY THE PERSON WHO HELD THE READER. metadata.user_id is stamped by createTapPaymentIntent
+     * from the caller's session; a decline is that tech's moment, not the office's. Gated EXACTLY
+     * like the succeeded branch above (connected account + tap marker + invoice kind + card_present)
+     * so a Checkout PI's failure — which fires the same event — never reaches this. The metadata is
+     * still a CLAIM (audit v921): the org must own the connected account the event came from, and
+     * the user must belong to that org, or a copied metadata blob could buzz another tenant's phone
+     * with an invoice number and a dollar figure.
+     *
+     * NEVER WRITES. Nothing was charged, so there is nothing to record; the invoice stays open and
+     * the tech's screen (if they are still on it) already shows the decline with a Try Again. The
+     * push is the whole effect — one per decline, which is also why it is not de-duplicated: a
+     * second tap that declines again is a second thing worth hearing. A courtesy that can never
+     * fail the webhook.
+     */
+    case "payment_intent.payment_failed": {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      const md = pi.metadata ?? {};
+      const isTap =
+        fromConnectedAccount &&
+        md.source === "tap_to_pay" &&
+        md.kind === "invoice_payment" &&
+        !!md.invoice_id &&
+        (pi.payment_method_types ?? []).includes("card_present");
+      if (!isTap) break;
+      try {
+        const userId = md.user_id;
+        if (!userId || !md.org_id) {
+          // A tap PI minted before user_id was stamped (a deploy-window straggler). Nothing to
+          // push to — but a decline nobody hears about is the exact silence 5.12 forbids, so it
+          // goes to the ops log rather than nowhere.
+          reportError("stripe:webhook:tap-declined-no-user", new Error("tap_to_pay PaymentIntent failed with no user_id in metadata"), {
+            paymentIntentId: pi.id,
+            invoiceId: md.invoice_id,
+            orgId: md.org_id ?? null,
+          });
+          break;
+        }
+        // The org must own the account the event came from …
+        const { data: owner } = await supabase
+          .from("organizations")
+          .select("id")
+          .eq("id", md.org_id)
+          .eq("stripe_account_id", eventAccount ?? "")
+          .maybeSingle();
+        if (!owner) {
+          reportError("stripe:webhook:tap-declined-account-org-mismatch", new Error("tap PaymentIntent names an org that doesn't own the connected account"), {
+            orgId: md.org_id,
+            invoiceId: md.invoice_id,
+            connectedAccount: eventAccount,
+          });
+          break;
+        }
+        // … the invoice must be the org's (and its number is what the push names) …
+        const { data: inv } = await supabase
+          .from("invoices")
+          .select("id, invoice_number")
+          .eq("id", md.invoice_id)
+          .eq("org_id", md.org_id)
+          .maybeSingle();
+        // … and the person must be in that org. sendPushToProfiles handles `active` and the
+        // per-user toggle; the org membership is the tenant boundary and is checked HERE.
+        const { data: who } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("id", userId)
+          .eq("org_id", md.org_id)
+          .maybeSingle();
+        if (!inv || !who) {
+          reportError("stripe:webhook:tap-declined-mismatch", new Error("tap PaymentIntent names an invoice or user outside its org"), {
+            orgId: md.org_id,
+            invoiceId: md.invoice_id,
+            userId,
+            invoiceFound: !!inv,
+            userFound: !!who,
+          });
+          break;
+        }
+        const number = (inv as { invoice_number?: string | null }).invoice_number;
+        // Its own notification kind (Settings → Notifications → "Tap to Pay on iPhone"), not
+        // "invoice_paid": 5.12 is an Apple requirement, and muting paid-invoice buzzes must not
+        // silently mute it too. Full name in the title — Apple allows "Tap to Pay" on a button
+        // only, and a lock-screen line is a sentence.
+        await sendPushToProfiles([userId], "tap_to_pay", {
+          title: "Card declined — Tap to Pay on iPhone",
+          body: `${formatCurrency((pi.amount ?? 0) / 100)} by Tap to Pay on iPhone on ${number ? `invoice ${number}` : "an invoice"} wasn't approved — ${declineReason(pi.last_payment_error)}. Nothing was charged; the invoice is still open.`,
+          url: `/billing/${md.invoice_id}`,
+        });
+      } catch (e) {
+        // Best effort: a push that can't go out must not 500 Stripe into retrying a decline.
+        reportError("stripe:webhook:tap-declined-push", e, { paymentIntentId: pi.id });
       }
       break;
     }

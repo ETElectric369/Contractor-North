@@ -38,7 +38,7 @@ export async function POST() {
   // The SDK asks for a fresh token per connect and again on every reconnect; thirty a minute is
   // more than a reader ever needs and less than a loop would want.
   if (await rateLimited(`terminal-token:${ctx.userId}`, 30, 60)) {
-    return NextResponse.json({ error: "Too many Tap to Pay sessions in a row — give it a minute." }, { status: 429 });
+    return NextResponse.json({ error: "Too many Tap to Pay on iPhone sessions in a row — give it a minute." }, { status: 429 });
   }
   if (!billingEnabled) {
     return NextResponse.json({ error: "Card payments aren't set up on this server yet." }, { status: 503 });
@@ -82,7 +82,7 @@ export async function POST() {
     reportError("stripe:terminal:token", e, { orgId: ctx.orgId });
     const said = e instanceof Error ? e.message : "";
     return NextResponse.json(
-      { error: `Stripe wouldn't start a Tap to Pay session${said ? ` — ${said}` : ""}.` },
+      { error: `Stripe wouldn't start a Tap to Pay on iPhone session${said ? ` — ${said}` : ""}.` },
       { status: 502 },
     );
   }

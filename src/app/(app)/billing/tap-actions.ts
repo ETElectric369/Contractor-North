@@ -1,10 +1,14 @@
 "use server";
+import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
+import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
 import { getStripe, billingEnabled } from "@/lib/stripe";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { reportError } from "@/lib/observe";
+import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
+import { STAFF_ROLES } from "@/lib/actions/perms";
 
 /**
  * TAP TO PAY ON IPHONE — the server half (2026-09-10, migration 0252).
@@ -27,6 +31,68 @@ import { reportError } from "@/lib/observe";
 
 const NOT_SET_UP =
   "Card payments aren't switched on for this company yet. Finish Stripe setup in Settings → Payments first.";
+
+/**
+ * WHO MAY ACCEPT APPLE'S TERMS (Apple 3.8): "Tap to Pay on iPhone Terms and Conditions must only
+ * be accepted by an administrator user or otherwise authorized party." Apple's own sample gates
+ * the sheet on "the user is an admin"; the T&C say the acceptor signs "on behalf of your company
+ * … as its authorized legal representative". In CN that is owner or admin — NOT office, even
+ * though office passes requireStaff: an office manager runs the books, they do not sign for the
+ * company. The SDK itself is not role-aware (Apple presents the sheet to whoever connects first),
+ * so this list is the whole gate, enforced in the app before connect is ever called.
+ */
+const ENABLE_ROLES = ["owner", "admin"];
+
+/**
+ * WHO IS "ELIGIBLE" TO BE TOLD (Apple 3.3: "all eligible users at least once"). Billing in CN is
+ * STAFF-ONLY — owner/admin/office. The dock hides Money from a tech, and requireStaff guards
+ * every money door in this file and the connection-token route, so a tech cannot take a tap and
+ * never reaches a Pay Now. An intro card shown to that tech would be a dead end: "here is Tap to
+ * Pay on iPhone" opening onto a staff-only wall. So eligible = exactly the people billing is
+ * open to — and it IS STAFF_ROLES rather than a parallel list, because the launch push
+ * (announceTapToPay → orgStaffIds) addresses that same set and two lists drift apart. Still
+ * wider than ENABLE_ROLES on purpose: hearing about the feature and signing Apple's terms for it
+ * are different rights (office hears; owner/admin signs).
+ */
+const ELIGIBLE_ROLES = STAFF_ROLES;
+
+/**
+ * A SIGNED-IN, ACTIVE MEMBER — the floor for the "tell me about myself" actions below, which read
+ * or stamp the caller's OWN profile row and touch no money. requireStaff would refuse a tech here
+ * with "staff-only", and Apple 3.8.1 wants exactly that person to get a real answer ("ask an
+ * admin"), not a wall. Deactivated is still a boundary (audit v921): the seat is gone, so is the
+ * intro, so is the role answer.
+ */
+async function requireMember(): Promise<
+  | { supabase: Awaited<ReturnType<typeof createClient>>; userId: string; orgId: string | null; role: string }
+  | { error: string }
+> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." };
+  const { data: me, error } = await supabase
+    .from("profiles")
+    .select("role, org_id, active")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (error) return { error: dbError(error) };
+  if (!me) return { error: "Your profile couldn't be found." };
+  const row = me as { role?: string | null; org_id?: string | null; active?: boolean | null };
+  if (row.active === false) return { error: "This account has been deactivated." };
+  return { supabase, userId: user.id, orgId: row.org_id ?? null, role: String(row.role ?? "") };
+}
+
+/**
+ * The caller's role, read fresh off their own row. requireStaff checks the role but hands back
+ * only { supabase, userId, orgId } — a second one-column read is cheaper than widening a guard
+ * that ~30 money actions share.
+ */
+async function callerRole(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<string> {
+  const { data } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+  return String((data as { role?: string | null } | null)?.role ?? "");
+}
 
 /**
  * Test keys → Stripe's SIMULATED Tap to Pay reader (works in the Simulator, needs no Apple
@@ -66,6 +132,13 @@ export type TapToPayContext =
       locationId: string | null;
       /** What the customer reads on the tap screen. */
       merchantDisplayName: string;
+      /**
+       * THIS caller may accept Apple's Terms and Conditions (Apple 3.8: owner/admin only). The
+       * bridge reads it BEFORE connectReader, because the SDK raises Apple's T&C sheet inside
+       * connect for whoever gets there first — the gate has to be ours. False means: warm up
+       * only if the account is already linked, and say "ask an admin" (3.8.1) otherwise.
+       */
+      canEnable: boolean;
     }
   | { ok: false; error: string };
 
@@ -77,11 +150,10 @@ export async function tapToPayContext(): Promise<TapToPayContext> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   if (!ctx.orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
-  const { data: org, error } = await ctx.supabase
-    .from("organizations")
-    .select(ORG_COLUMNS)
-    .eq("id", ctx.orgId)
-    .maybeSingle();
+  const [{ data: org, error }, role] = await Promise.all([
+    ctx.supabase.from("organizations").select(ORG_COLUMNS).eq("id", ctx.orgId).maybeSingle(),
+    callerRole(ctx.supabase, ctx.userId),
+  ]);
   if (error || !org) {
     return { ok: false, error: error ? dbError(error) : "Couldn't read this company's payment setup." };
   }
@@ -92,7 +164,189 @@ export async function tapToPayContext(): Promise<TapToPayContext> {
     livemode: stripeLivemode(),
     locationId: row.stripe_terminal_location_id ?? null,
     merchantDisplayName: (row.name ?? "").trim() || "Invoice payment",
+    canEnable: ENABLE_ROLES.includes(role),
   };
+}
+
+export type TapToPayRole = { ok: true; canEnable: boolean; role: string } | { ok: false; error: string };
+
+/**
+ * MAY THIS PERSON ACCEPT APPLE'S TERMS? (Apple 3.8 / 3.8.1.) One read of the caller's own role —
+ * nothing else — so a Settings card or a checkout button can decide between "Accept the Terms"
+ * and "Ask an owner or admin to enable Tap to Pay on iPhone" without a money action's gate in
+ * the way. Open to every active member on purpose: the person Apple wants told "contact an
+ * admin" is precisely the one requireStaff would turn away at the door.
+ *
+ * NOT the T&C status itself. Whether the merchant HAS accepted is Apple's fact (1.6), read from
+ * the SDK on the phone every time; this only answers who is allowed to try.
+ */
+export async function tapToPayRole(): Promise<TapToPayRole> {
+  const me = await requireMember();
+  if ("error" in me) return { ok: false, error: me.error };
+  return { ok: true, canEnable: ENABLE_ROLES.includes(me.role), role: me.role };
+}
+
+export type TapToPayIntroState =
+  | {
+      ok: true;
+      /** ISO timestamp of when this person was shown the intro, or null = not yet. */
+      seenAt: string | null;
+      /** Someone the intro is FOR: a member who could take a card, in a company that can take cards. */
+      eligible: boolean;
+    }
+  | { ok: false; error: string };
+
+/**
+ * HAS THIS PERSON BEEN SHOWN THE INTRO, AND SHOULD THEY BE? (Apple 3.1 / 3.3.)
+ *
+ * `eligible` is what "all eligible users" means for us: an active staff member (ELIGIBLE_ROLES —
+ * the roles billing is open to), in a company whose Stripe account can actually charge.
+ * A company that hasn't finished Stripe setup gets no intro — the card would open onto a wall,
+ * and the Set Up Card Payments door already tells them what comes first. `seenAt` is the once
+ * flag: null and eligible → show it, stamp it (tapToPayIntroSeen), never again. Reads the
+ * caller's own row and their own org only.
+ */
+export async function tapToPayIntroState(): Promise<TapToPayIntroState> {
+  const me = await requireMember();
+  if ("error" in me) return { ok: false, error: me.error };
+  const [{ data: prof, error: profErr }, { data: org, error: orgErr }] = await Promise.all([
+    me.supabase.from("profiles").select("tap_to_pay_intro_seen_at").eq("id", me.userId).maybeSingle(),
+    me.orgId
+      ? me.supabase
+          .from("organizations")
+          .select("stripe_account_id, stripe_account_status, stripe_charges_enabled")
+          .eq("id", me.orgId)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (profErr) return { ok: false, error: dbError(profErr) };
+  if (orgErr) return { ok: false, error: dbError(orgErr) };
+  const seenAt = (prof as { tap_to_pay_intro_seen_at?: string | null } | null)?.tap_to_pay_intro_seen_at ?? null;
+  const canAccept = !!org && billingEnabled && canAcceptPayments(connectStateFromOrg(org as never));
+  return { ok: true, seenAt, eligible: ELIGIBLE_ROLES.includes(me.role) && canAccept };
+}
+
+/**
+ * STAMP "SHOWN" ON THE CALLER'S OWN ROW — once. Checked (the silent-write law: a zero-row update
+ * is a 204), and guarded on the column still being null so a card dismissed on two devices at
+ * once keeps the FIRST time it was seen. Already stamped is not a failure: the card is gone
+ * either way, and "that didn't save" over a second dismissal would be the nag the flag exists
+ * to prevent.
+ */
+export async function tapToPayIntroSeen(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await requireMember();
+  if ("error" in me) return { ok: false, error: me.error };
+  const { data: stamped, error } = await me.supabase
+    .from("profiles")
+    .update({ tap_to_pay_intro_seen_at: new Date().toISOString() })
+    .eq("id", me.userId)
+    .is("tap_to_pay_intro_seen_at", null)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (stamped?.length) return { ok: true };
+  // Zero rows: either already stamped (fine) or the row wasn't ours to write (say so).
+  const { data: again } = await me.supabase
+    .from("profiles")
+    .select("tap_to_pay_intro_seen_at")
+    .eq("id", me.userId)
+    .maybeSingle();
+  if ((again as { tap_to_pay_intro_seen_at?: string | null } | null)?.tap_to_pay_intro_seen_at) return { ok: true };
+  return { ok: false, error: "That didn't save — the card will show again next time. Reload and try once more." };
+}
+
+/**
+ * THE ONE-SHOT LAUNCH PUSH (Apple 3.3 / 6.3: "an in-app push notification must be deployed to all
+ * eligible users" at launch). An owner or admin presses this once from Settings; the whole crew's
+ * phones say "Tap to Pay on iPhone is here" and where to find it. Owner/admin only because a
+ * launch announcement is the company speaking, and office passes requireStaff for the books, not
+ * for that.
+ *
+ * ONCE MEANS ONCE. The org row is CLAIMED with a null-guarded, checked write BEFORE anything is
+ * sent: two admins pressing the button in the same second race for one row, the loser matches
+ * zero rows and is told the date the winner already sent it. Sending first and recording second
+ * would be the double-buzz this column exists to prevent.
+ *
+ * Refused, with the fix named, when it would be a dead end: Stripe not finished (the push would
+ * point at a Pay Now that can't take cards) or push not configured on this server (the claim
+ * would land and nobody would hear a thing — a "sent" that never left is the silent failure).
+ *
+ * `sent` is how many people it was ADDRESSED to (active owner/admin/office — orgStaffIds, the
+ * same STAFF_ROLES that ELIGIBLE_ROLES is, so "eligible" and "announced to" cannot drift apart);
+ * delivery still honours each person's own notification toggle and whether they have a phone
+ * registered, which is theirs to decide. The toggle is the dedicated "Tap to Pay on iPhone" kind,
+ * shared with the decline push: Apple's launch requirement must not be switched off as a side
+ * effect of someone muting "Invoices paid". The words are Apple's own — the Marketing Guide's
+ * push-notification "Value proposition" block, verbatim, short disclaimer included — because 1.9
+ * says marketing copy comes from the toolkit, and a paraphrase is the thing App Review flags.
+ */
+export async function announceTapToPay(): Promise<{ ok: true; sent: number } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const orgId = ctx.orgId;
+  if (!orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
+  const supabase = ctx.supabase;
+  const role = await callerRole(supabase, ctx.userId);
+  if (!ENABLE_ROLES.includes(role)) {
+    return { ok: false, error: "Only an owner or admin can send the Tap to Pay on iPhone announcement." };
+  }
+  if (!pushConfigured()) {
+    return { ok: false, error: "Push notifications aren't configured on this server, so nobody would receive it. Nothing was sent." };
+  }
+
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .select("stripe_account_id, stripe_account_status, stripe_charges_enabled, tap_to_pay_announced_at")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) {
+    return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  }
+  const already = (org as { tap_to_pay_announced_at?: string | null }).tap_to_pay_announced_at ?? null;
+  if (already) return { ok: false, error: `Already announced on ${announcedOn(already)} — it only goes out once.` };
+  if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
+  if (!canAcceptPayments(connectStateFromOrg(org as never))) {
+    return {
+      ok: false,
+      error:
+        "Card payments aren't switched on for this company yet, so the announcement would point at nothing. Finish Stripe setup in Settings → Getting Paid first.",
+    };
+  }
+
+  // Claim the once, checked and null-guarded, BEFORE the send.
+  const { data: claimed, error: claimErr } = await supabase
+    .from("organizations")
+    .update({ tap_to_pay_announced_at: new Date().toISOString() })
+    .eq("id", orgId)
+    .is("tap_to_pay_announced_at", null)
+    .select("id");
+  if (claimErr) return { ok: false, error: dbError(claimErr) };
+  if (!claimed?.length) {
+    const { data: again } = await supabase
+      .from("organizations")
+      .select("tap_to_pay_announced_at")
+      .eq("id", orgId)
+      .maybeSingle();
+    const theirs = (again as { tap_to_pay_announced_at?: string | null } | null)?.tap_to_pay_announced_at;
+    if (theirs) return { ok: false, error: `Already announced on ${announcedOn(theirs)} — someone else just sent it.` };
+    return { ok: false, error: "That didn't save, so nothing was sent — check your access and try again." };
+  }
+
+  const ids = await orgStaffIds(orgId);
+  await sendPushToProfiles(ids, "tap_to_pay", {
+    title: "Accept in-person payments with Tap to Pay on iPhone.",
+    body: "You can accept all types of contactless payments right on your iPhone—from physical debit and credit cards to Apple Pay and other digital wallets. Terms apply.",
+    url: "/settings?tab=getpaid",
+  });
+  revalidatePath("/settings");
+  return { ok: true, sent: ids.length };
+}
+
+/** "Sep 11, 2026" — for the "already announced" sentence. */
+function announcedOn(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "an earlier date"
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export type TerminalLocationResult =
@@ -150,7 +404,7 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
     return {
       ok: false,
       error:
-        "Stripe needs your company's street address, city, state and ZIP to set up Tap to Pay. Add them in Settings → Company, then try again.",
+        "Stripe needs your company's street address, city, state and ZIP to set up Tap to Pay on iPhone. Add them in Settings → Company, then try again.",
     };
   }
 
@@ -176,7 +430,7 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
   } catch (e) {
     reportError("stripe:terminal:location", e, { orgId });
     const said = e instanceof Error ? e.message : "";
-    return { ok: false, error: `Stripe couldn't set up Tap to Pay for this company${said ? ` — ${said}` : ""}.` };
+    return { ok: false, error: `Stripe couldn't set up Tap to Pay on iPhone for this company${said ? ` — ${said}` : ""}.` };
   }
 
   // Checked, and guarded on the column still being null: two phones reaching for Tap to Pay in
@@ -325,8 +579,11 @@ export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaym
         description: invoiceNumber ? `Invoice ${invoiceNumber}` : "Invoice payment",
         // kind + invoice_id + org_id is what recordInvoicePayment needs; source is the Terminal-only
         // marker the webhook gates on. Keep all four — dropping any one either loses the booking or
-        // reopens the double-booking.
-        metadata: { kind: "invoice_payment", source: "tap_to_pay", invoice_id: inv.id, org_id: orgId },
+        // reopens the double-booking. user_id is the FIFTH, for Apple 5.12: a decline confirmed on
+        // the phone after the tech pocketed it reaches Stripe as payment_intent.payment_failed, and
+        // the webhook needs to know WHOSE phone to tell — the one person who was holding the card
+        // reader, not the whole office.
+        metadata: { kind: "invoice_payment", source: "tap_to_pay", invoice_id: inv.id, org_id: orgId, user_id: ctx.userId },
       },
       // THE line that makes it a direct charge on the tenant's account.
       { stripeAccount: connect.accountId! },
@@ -352,5 +609,49 @@ export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaym
     reportError("stripe:terminal:intent", e, { orgId, invoiceId });
     const said = e instanceof Error ? e.message : "";
     return { ok: false, error: `Stripe wouldn't start this card payment${said ? ` — ${said}` : ""}.` };
+  }
+}
+
+/**
+ * LET GO OF A DOOR NOBODY WALKED THROUGH (Apple 5.6). The Pay Now sheet mints the PaymentIntent
+ * when it OPENS on a phone that can tap, so the press goes straight to the reader; a sheet
+ * closed without a tap would otherwise leave one open PaymentIntent per look in the tenant's
+ * Stripe. Only a PaymentIntent that is still waiting for a card is cancelled — one that is
+ * processing or succeeded is left exactly as it is (Stripe refuses anyway; nothing here can
+ * un-charge). Own org only: the intent must carry this org's id and the Tap marker, on this
+ * org's connected account, or it is not ours to touch.
+ */
+export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const orgId = ctx.orgId;
+  if (!orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
+  if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ok: false, error: "That isn't a payment id." };
+
+  const { data: org, error: orgErr } = await ctx.supabase
+    .from("organizations")
+    .select("stripe_account_id")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  const accountId = (org as { stripe_account_id?: string | null }).stripe_account_id;
+  if (!accountId) return { ok: false, error: NOT_SET_UP };
+
+  try {
+    const pi = await getStripe().paymentIntents.retrieve(paymentIntentId, {}, { stripeAccount: accountId });
+    if (pi.metadata?.org_id !== orgId || pi.metadata?.source !== "tap_to_pay") {
+      return { ok: false, error: "That payment isn't this company's." };
+    }
+    const waiting = ["requires_payment_method", "requires_confirmation", "requires_action", "requires_capture"];
+    if (!waiting.includes(pi.status)) return { ok: true };
+    await getStripe().paymentIntents.cancel(paymentIntentId, {}, { stripeAccount: accountId });
+    return { ok: true };
+  } catch (e) {
+    // A cancel that loses a race with a late confirm is exactly the case Stripe refuses; it is
+    // logged, not surfaced — the sheet that asked is already closed.
+    reportError("stripe:terminal:cancel-intent", e, { orgId, paymentIntentId });
+    const said = e instanceof Error ? e.message : "";
+    return { ok: false, error: `Stripe wouldn't let go of that payment${said ? ` — ${said}` : ""}.` };
   }
 }

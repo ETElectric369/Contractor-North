@@ -53,7 +53,10 @@ export type PushKind =
   | "day_ahead"
   | "clock_out"
   | "daily_report"
-  | "booked"; // a customer picked a time on their /pick link — the work self-scheduled
+  | "booked" // a customer picked a time on their /pick link — the work self-scheduled
+  // Tap to Pay on iPhone: the one-shot launch announcement (Apple 3.3) and a card declined
+  // after the tech had already left the screen (Apple 5.12).
+  | "tap_to_pay";
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -70,6 +73,11 @@ const DEFAULTS: Record<PushKind, boolean> = {
   daily_report: true,
   // Work booking ITSELF is exactly the moment the boss asked to hear about.
   booked: true,
+  // Apple's Tap to Pay on iPhone requirements ride on this kind: the launch announcement must
+  // reach every eligible user (3.3), and a decline the tech never saw must buzz their phone
+  // (5.12). Its own kind, defaulted ON, so neither goes quiet as a side effect of someone
+  // muting "Invoices paid" — opting out of THIS, by name, is still each person's to do.
+  tap_to_pay: true,
 };
 
 /**

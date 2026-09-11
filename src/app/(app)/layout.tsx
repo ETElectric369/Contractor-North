@@ -15,6 +15,8 @@ import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
 import { BugReporter } from "@/components/bug-reporter";
 import { NativePushBridge } from "@/components/native-push-bridge";
+import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
+import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
 import { SectionSubnav } from "@/components/section-subnav";
 import { ToastProvider } from "@/components/toast";
 import { Suspense } from "react";
@@ -266,6 +268,11 @@ export default async function AppLayout({
       {/* In the App Store app: a tapped notification opens the thing it is about, and the APNs
           device token is refreshed on launch so alerts can't quietly stop. No-op on the web. */}
       <NativePushBridge />
+      {/* Tap to Pay on iPhone, in the App Store app only: the reader warms up at launch and on
+          every return to the foreground (Apple 1.5), and every eligible person gets the once-only
+          intro card (Apple 3.1–3.3). Both render nothing and no-op on the web. */}
+      <TapToPayWarmup />
+      <TapToPayAwareness />
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor

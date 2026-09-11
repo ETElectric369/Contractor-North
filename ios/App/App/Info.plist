@@ -31,7 +31,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>North uses the camera so you can photograph job sites, materials, receipts and documents and attach them to the job.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>North uses your location to stamp where you clocked in, verify you're at the job site, get local weather for scheduling, and to take Tap to Pay card payments — Apple requires a location fix to accept a card.</string>
+	<string>North uses your location to stamp where you clocked in, verify you're at the job site, get local weather for scheduling, and to take Tap to Pay on iPhone payments — Apple requires a location fix to accept a card.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>North uses the microphone for voice notes and hands-free dictation on the job.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

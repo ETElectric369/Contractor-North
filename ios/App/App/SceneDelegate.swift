@@ -8,7 +8,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // NorthBridgeViewController, not the stock CAPBridgeViewController: it is the one
+        // place the shell's local plugins (TapToPayEducation) get registered, and this
+        // assignment replaces whatever Main.storyboard instantiated.
+        window?.rootViewController = NorthBridgeViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)

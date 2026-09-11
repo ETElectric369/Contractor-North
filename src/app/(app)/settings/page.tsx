@@ -39,6 +39,7 @@ import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
+import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
@@ -532,6 +533,16 @@ export default async function SettingsPage({
                     </>
                   );
                 })()}
+              </Section>
+              {/* TAP TO PAY ON IPHONE sits directly under the Stripe card on purpose (Apple 3.4):
+                  where merchant onboarding ends — cards accepted — is where the phone-as-reader
+                  is switched on. isAdmin is Apple 3.8's gate (owner/admin accept the terms);
+                  canAccept is the same "can this company charge a card" fact the QR door uses. */}
+              <Section title="Tap to Pay on iPhone">
+                <TapToPaySettingsSection
+                  isAdmin={isAdmin}
+                  canAccept={billingEnabled && canAcceptPayments(connectStateFromOrg(org as any))}
+                />
               </Section>
               <Section title="Plan & subscription">
                 {billing === "success" && (
