@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { QrCode, Share2, Copy, Loader2 } from "lucide-react";
+// lucide `Share` is the box-with-arrow every phone already teaches (Erik: "tiny box with arrow
+// icon"); `Share2` was Android's three-dot node glyph. One share glyph app-wide.
+import { QrCode, Share, Copy, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
@@ -72,14 +74,19 @@ export function ShareQrButton() {
 
   return (
     <>
-      <button
+      {/* The same tiny square as every other share glyph in the app (Button's icon-sm: a 32px box
+          with the 44px finger bleed built in) instead of a hand-rolled bordered <button> with its
+          own padding — one share face app-wide. No label room, so aria-label + title carry it. */}
+      <Button
+        type="button"
+        variant="outline"
+        size="icon-sm"
         onClick={launch}
-        className="flex items-center rounded-lg border border-slate-200 px-2.5 py-2 text-slate-500 hover:bg-slate-50 sm:px-3"
-        title="Share your estimate QR"
         aria-label="Share your estimate QR"
+        title="Share your estimate QR"
       >
-        <QrCode className="h-4 w-4" />
-      </button>
+        <QrCode />
+      </Button>
       {/* PORTALED to <body> — the deliberate exception to the in-place Modal doctrine.
           This button's only mount is a row INSIDE the account-menu glass panel, and
           .glass/.glass-menu's backdrop-filter makes that panel the CONTAINING BLOCK for
@@ -113,9 +120,10 @@ export function ShareQrButton() {
                 </p>
                 <div className="flex gap-2">
                   <Button onClick={share} className="flex-1">
-                    <Share2 className="mr-1.5 h-4 w-4" /> Send the Link
+                    <Share className="mr-1.5 h-4 w-4" /> Send the Link
                   </Button>
-                  <Button onClick={copy} variant="outline" className="shrink-0">
+                  {/* Icon-only, so the name lives in aria-label (VoiceOver) + title (mouse hover). */}
+                  <Button onClick={copy} variant="outline" className="shrink-0" aria-label="Copy Link" title="Copy Link">
                     <Copy className="h-4 w-4" />
                   </Button>
                 </div>

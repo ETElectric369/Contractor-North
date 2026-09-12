@@ -701,6 +701,12 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       // mass-create — bounds the blast radius of the tier-1 write exposure.
       const MAX_WRITES = 3;
       let writeCount = 0;
+      // The model's text before a tool call and its text after it are two blocks the stream
+      // simply concatenated — "I'll pull that job's numbers.J-011, 13897 Herringbone" is what
+      // the 2026-09-11 transcript holds, and what the screen showed. One paragraph break between
+      // rounds, added only when text actually follows, keeps both the screen and the persisted
+      // transcript readable (and lets the sentence splitter in voice mode find the boundary).
+      let needsRoundBreak = false;
       try {
         for (let round = 0; round < MAX_ROUNDS; round++) {
           const turn = client.messages.stream({
@@ -736,10 +742,18 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               .split(DRAFT_CLOSE).join("")
               .split(HUD_OPEN).join("")
               .split(HUD_CLOSE).join("");
+            if (needsRoundBreak && clean.trim()) {
+              needsRoundBreak = false;
+              if (!/\s$/.test(assistantReply) && !/^\s/.test(clean)) {
+                assistantReply += "\n\n";
+                emit("\n\n");
+              }
+            }
             assistantReply += clean;
             emit(clean);
           });
           const final = await turn.finalMessage();
+          needsRoundBreak = assistantReply.length > 0;
           // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
           const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number; output_tokens?: number };
           cacheRead += u?.cache_read_input_tokens ?? 0;

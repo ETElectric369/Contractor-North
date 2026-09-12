@@ -3,7 +3,7 @@
 import { isValidElement, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, type LucideIcon } from "lucide-react";
+import { ChevronDown, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** A tab in the shared strip. `href` makes it a <Link> (server-rendered/link
@@ -24,12 +24,23 @@ export interface TabBarItem {
   /** Hidden from non-staff (techs). */
   staffOnly?: boolean;
   /** "overflow" tabs collapse into the "More" menu; "primary" stays visible.
-   *  If no tab sets a tier, the strip auto-overflows past `maxVisible`. */
+   *  If no tab sets a tier, the strip auto-overflows past `maxVisible`. (Underline look only.) */
   tier?: "primary" | "overflow";
+  /** Tiles look only: a pinned tab is a chip that STAYS PUT — never measured, never folded
+   *  into More (Erik, 2026-09-11: "overview - time - materials - invoices be seaglass buttons
+   *  that stay put and the little arrow drop down for more"). Unpinned tabs live behind the
+   *  More chip. Ignored by the underline look, which keeps measuring. */
+  pinned?: boolean;
 }
 
-/** A component reference (vs a rendered element) is menu-only chrome. Lucide icons
- *  are forwardRef exotics (objects, not functions), so check both shapes. */
+/** Two skins, one contract. "underline" is the measured strip every tabbed page mounts;
+ *  "tiles" is the job hub's row of dock-style sea-glass chips (opt-in, so no other mount
+ *  restyles by accident). */
+export type TabLook = "underline" | "tiles";
+
+/** A component reference (vs a rendered element) is menu chrome in the underline look and
+ *  the chip's own 18px glyph in the tiles look. Lucide icons are forwardRef exotics (objects,
+ *  not functions), so check both shapes. */
 function componentIcon(icon: TabBarItem["icon"]): LucideIcon | null {
   if (icon == null || typeof icon === "string" || typeof icon === "number" || typeof icon === "boolean") return null;
   if (isValidElement(icon) || Array.isArray(icon)) return null;
@@ -62,6 +73,7 @@ export function Tabs({
   paramKey = "tab",
   viewerIsStaff = true,
   maxVisible = 6,
+  look = "underline",
   activeId,
   onChange,
 }: {
@@ -70,6 +82,9 @@ export function Tabs({
   paramKey?: string;
   viewerIsStaff?: boolean;
   maxVisible?: number;
+  /** "tiles" = pinned sea-glass chips + a More chip (the job hub); default is the
+   *  measured underline strip, so every other mount is untouched. */
+  look?: TabLook;
   /** Controlled mode: the page owns the active id (and usually renders the
    *  panels itself). Pass both to take control; urlSync is ignored. */
   activeId?: string;
@@ -77,18 +92,18 @@ export function Tabs({
 }) {
   const shown = tabs.filter((t) => !t.staffOnly || viewerIsStaff);
   if (activeId !== undefined) {
-    return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} />;
+    return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} look={look} />;
   }
-  if (urlSync) return <UrlSyncedTabs tabs={shown} paramKey={paramKey} maxVisible={maxVisible} />;
-  return <StatefulTabs tabs={shown} maxVisible={maxVisible} />;
+  if (urlSync) return <UrlSyncedTabs tabs={shown} paramKey={paramKey} maxVisible={maxVisible} look={look} />;
+  return <StatefulTabs tabs={shown} maxVisible={maxVisible} look={look} />;
 }
 
-function StatefulTabs({ tabs, maxVisible }: { tabs: TabDef[]; maxVisible: number }) {
+function StatefulTabs({ tabs, maxVisible, look }: { tabs: TabDef[]; maxVisible: number; look: TabLook }) {
   const [active, setActive] = useState(tabs[0]?.id);
-  return <TabView tabs={tabs} activeId={active} onSelect={setActive} maxVisible={maxVisible} />;
+  return <TabView tabs={tabs} activeId={active} onSelect={setActive} maxVisible={maxVisible} look={look} />;
 }
 
-function UrlSyncedTabs({ tabs, paramKey, maxVisible }: { tabs: TabDef[]; paramKey: string; maxVisible: number }) {
+function UrlSyncedTabs({ tabs, paramKey, maxVisible, look }: { tabs: TabDef[]; paramKey: string; maxVisible: number; look: TabLook }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const fromUrl = searchParams.get(paramKey);
@@ -123,7 +138,7 @@ function UrlSyncedTabs({ tabs, paramKey, maxVisible }: { tabs: TabDef[]; paramKe
     window.history.replaceState(null, "", `${pathname}?${params.toString()}`);
   }
 
-  return <TabView tabs={tabs} activeId={active} onSelect={onSelect} maxVisible={maxVisible} />;
+  return <TabView tabs={tabs} activeId={active} onSelect={onSelect} maxVisible={maxVisible} look={look} />;
 }
 
 function TabView({
@@ -131,16 +146,18 @@ function TabView({
   activeId,
   onSelect,
   maxVisible,
+  look,
 }: {
   tabs: TabDef[];
   activeId?: string;
   onSelect: (id: string) => void;
   maxVisible: number;
+  look: TabLook;
 }) {
   const current = tabs.find((t) => t.id === activeId) ?? tabs[0];
   return (
     <div>
-      <TabBar items={tabs} activeId={current?.id} onSelect={onSelect} maxVisible={maxVisible} />
+      <TabBar items={tabs} activeId={current?.id} onSelect={onSelect} maxVisible={maxVisible} look={look} />
       {current?.content != null && <div>{current.content}</div>}
     </div>
   );
@@ -149,8 +166,9 @@ function TabView({
 /**
  * The shared tab STRIP — the single source of truth for tab styling. Used by the
  * client <Tabs> (onSelect) AND by server-rendered/link switchers (items carry an
- * `href`). Underline style, count badges, a "More" overflow menu, and edge-fades
- * so a phone never hides tabs off-screen.
+ * `href`). Two looks: the underline strip (count badges, a measured "More" overflow,
+ * edge-fades so a phone never hides tabs off-screen) and, opt-in, the tiles row.
+ * A dispatcher, not a body, so each look keeps its own hooks unconditional.
  */
 export function TabBar({
   items,
@@ -158,14 +176,36 @@ export function TabBar({
   onSelect,
   viewerIsStaff = true,
   maxVisible = 6,
+  look = "underline",
 }: {
   items: TabBarItem[];
   activeId?: string;
   onSelect?: (id: string) => void;
   viewerIsStaff?: boolean;
   maxVisible?: number;
+  look?: TabLook;
 }) {
   const shown = items.filter((t) => !t.staffOnly || viewerIsStaff);
+  return look === "tiles" ? (
+    <TileBar items={shown} activeId={activeId} onSelect={onSelect} />
+  ) : (
+    <UnderlineBar items={shown} activeId={activeId} onSelect={onSelect} maxVisible={maxVisible} />
+  );
+}
+
+/** The measured underline strip — unchanged behavior for every mount that doesn't opt
+ *  into tiles. */
+function UnderlineBar({
+  items: shown,
+  activeId,
+  onSelect,
+  maxVisible,
+}: {
+  items: TabBarItem[];
+  activeId?: string;
+  onSelect?: (id: string) => void;
+  maxVisible: number;
+}) {
   // `tier` is a PRIORITY hint — primaries prefer to stay visible, overflow prefer
   // the More menu — but the real split is MEASURED against the available width, so
   // the strip fits any screen (more tabs on a wide monitor, fewer on a phone) with
@@ -230,6 +270,99 @@ export function TabBar({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * THE TILES LOOK — the job hub's strip. Pinned tabs are sea-glass chips in the dock-tile
+ * grammar (section-subnav.tsx:81-89 / dock.tsx:218-233: an 18px icon over a 10px label,
+ * `.seaglass-active` when on, frosted glass at rest) that STAY PUT: nothing here is measured,
+ * so a count changing or a narrower phone can never fold a chip into More the way the
+ * underline strip's ghost-measure did (at 343px only ~3 of its four primaries ever fit, so
+ * Costs and Invoices lived behind More on every phone). Everything unpinned sits behind ONE
+ * sixth chip, "More ▾", which lights and wears the active overflow tab's icon + label instead
+ * of appending a seventh chip the phone has no room for.
+ */
+function TileBar({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
+  const pinned = items.filter((t) => t.pinned);
+  const overflow = items.filter((t) => !t.pinned);
+  const activeItem = items.find((t) => t.id === activeId);
+  const activeOverflow = activeItem && !activeItem.pinned ? activeItem : null;
+  return (
+    <div className="mb-5 flex w-full gap-1.5">
+      {pinned.map((t) => (
+        <Tile key={t.id} item={t} active={activeId === t.id} onSelect={onSelect} />
+      ))}
+      {overflow.length > 0 && (
+        <MoreMenu items={overflow} activeId={activeId} onSelect={onSelect} tile activeOverflow={activeOverflow} />
+      )}
+    </div>
+  );
+}
+
+// The chip recipe, from the section subnav / dock tiles. flex-1 everywhere so six chips share
+// the width evenly (375px → ~52px each; px-0.5 + tracking-tight keep "Materials" whole at
+// 10px); at sm+ a dock-tile CAP (max-w-24), so a wide monitor gets a row of 96px tiles, not six
+// slabs stretched across the page. A cap, not a fixed width: sm:w-24 + flex-none made the six
+// chips a rigid 606px row, and a desktop shell narrower than that (a split screen, a sidebar
+// open, the iPad app's half) scrolled the page sideways — the one thing the tiles look exists
+// to never do. `.glass-gloss` / `.seaglass-active` force position:relative + overflow:hidden —
+// content carries `relative z-10` to clear the sheen, and the count sits absolutely INSIDE the
+// chip for the same reason.
+//
+// THE COUNT HAS ITS OWN LANE (pt-3.5, not py-2). The dock's corner badge works on a 74px tile;
+// on a 52px chip the same top-right pill sat ON the icon (a "12" over the clock's shoulder).
+// The 14px top padding is the badge's row: the pill (12px, 1px from the top) ends where the
+// icon begins, so they can't overlap whatever the count's width — the icon's right shoulder
+// only has 16px of lane at 52px, which fits "12" but not "99+", and the label row is already
+// full ("Materials"), so beside-the-icon and after-the-label were both out.
+const TILE_CLS =
+  "relative flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl px-0.5 pt-3.5 pb-1.5 text-[10px] font-medium leading-none tracking-tight transition-colors sm:max-w-24";
+const tileCls = (active: boolean) =>
+  cn(TILE_CLS, active ? "seaglass-active" : "glass glass-gloss text-slate-600 hover:text-[color:rgb(var(--glass-ink))]");
+
+function Tile({ item, active, onSelect }: { item: TabBarItem; active: boolean; onSelect?: (id: string) => void }) {
+  const Icon = componentIcon(item.icon);
+  const inner = (
+    <>
+      {Icon ? (
+        <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
+      ) : (
+        item.icon != null && <span className="relative z-10 flex h-[18px] items-center">{inlineIcon(item.icon)}</span>
+      )}
+      <span className="relative z-10 max-w-full truncate whitespace-nowrap">{item.label}</span>
+      <TileCount count={item.count} active={active} />
+    </>
+  );
+  const cls = tileCls(active);
+  return item.href ? (
+    <Link href={item.href} scroll={false} className={cls} aria-current={active ? "page" : undefined}>
+      {inner}
+    </Link>
+  ) : (
+    <button type="button" onClick={() => onSelect?.(item.id)} className={cls} aria-current={active ? "page" : undefined}>
+      {inner}
+    </button>
+  );
+}
+
+/** The corner count — the dock badge's idea (dock.tsx:140-146), but NOT its amber: amber on
+ *  the dock means "needs you"; a tab's count (12 time entries, 40 items) is a size, not a
+ *  summons. Capped at 99+ (the dock's 9+ is for action items; here the exact figure is the
+ *  information). Sits in the chip's top lane (see TILE_CLS): 12px tall at top-px, so its
+ *  bottom edge meets the icon's top edge and never crosses it; right-1 keeps its rounded end
+ *  clear of the chip's rounded-xl corner, which overflow:hidden would otherwise nick. */
+function TileCount({ count, active }: { count?: number; active: boolean }) {
+  if (typeof count !== "number" || count <= 0) return null;
+  return (
+    <span
+      className={cn(
+        "absolute right-1 top-px z-10 flex h-3 min-w-[0.75rem] items-center justify-center rounded-full px-1 text-[8px] font-bold leading-none tabular-nums",
+        active ? "bg-white/90 text-[rgb(var(--glass-ink))]" : "bg-slate-100 text-slate-600",
+      )}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
 
@@ -317,10 +450,25 @@ function ScrollStrip({ items, activeId, onSelect }: { items: TabBarItem[]; activ
  *  Skinned with the glass-menu recipe (the + quick-add / ⋯ actions grammar); items
  *  with a `group` render under uppercase cluster headers — the dock rail's exact
  *  header style — ungrouped items first, groups in first-appearance order. */
-function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
+function MoreMenu({
+  items,
+  activeId,
+  onSelect,
+  tile = false,
+  activeOverflow = null,
+}: {
+  items: TabBarItem[];
+  activeId?: string;
+  onSelect?: (id: string) => void;
+  /** Tiles look: the trigger is the sixth chip, not an underline tab. */
+  tile?: boolean;
+  /** Tiles look: the overflow tab that is active, if any — the chip becomes it. */
+  activeOverflow?: TabBarItem | null;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const activeHere = items.some((t) => t.id === activeId);
+  const ActiveIcon = activeOverflow ? componentIcon(activeOverflow.icon) : null;
 
   useEffect(() => {
     if (!open) return;
@@ -364,22 +512,51 @@ function MoreMenu({ items, activeId, onSelect }: { items: TabBarItem[]; activeId
     );
 
   return (
-    <div ref={ref} className="relative shrink-0">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex items-center gap-1 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
-          // "More" mirrors the active tab: sea-glass ink underline + text when an overflow
-          // tab is active; ink-teal on hover otherwise. Never brand blue.
-          activeHere
-            ? "border-[rgb(var(--glass-ink))] text-[rgb(var(--glass-ink))]"
-            : "border-transparent text-slate-500 hover:text-[rgb(var(--glass-ink))]",
-        )}
-        aria-haspopup="menu"
-        aria-expanded={open}
-      >
-        More <ChevronDown className="h-3.5 w-3.5" />
-      </button>
+    // In the tiles look the wrapper IS a chip slot (same flex share as its siblings) and the
+    // panel still anchors to its right edge. The trigger's glass/backdrop-filter is a sibling
+    // of the panel, never an ancestor, so it can't become the panel's containing block.
+    <div ref={ref} className={cn("relative shrink-0", tile && "flex min-w-0 flex-1 sm:max-w-24")}>
+      {tile ? (
+        // The sixth chip. Resting: ⋯ over "More" with the little arrow (Erik's "little arrow
+        // drop down for more"). When an overflow tab is the active one the chip BECOMES that
+        // tab — lit, wearing its icon, label and count — so "where am I" reads off the strip
+        // without a seventh chip the phone has no room for.
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className={tileCls(activeHere)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-current={activeHere ? "page" : undefined}
+        >
+          {ActiveIcon ? (
+            <ActiveIcon className="relative z-10 h-[18px] w-[18px] shrink-0" />
+          ) : (
+            <MoreHorizontal className="relative z-10 h-[18px] w-[18px] shrink-0" />
+          )}
+          <span className="relative z-10 flex max-w-full items-center gap-0.5 whitespace-nowrap">
+            <span className="truncate">{activeOverflow?.label ?? "More"}</span>
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          </span>
+          {activeOverflow && <TileCount count={activeOverflow.count} active />}
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className={cn(
+            "flex items-center gap-1 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+            // "More" mirrors the active tab: sea-glass ink underline + text when an overflow
+            // tab is active; ink-teal on hover otherwise. Never brand blue.
+            activeHere
+              ? "border-[rgb(var(--glass-ink))] text-[rgb(var(--glass-ink))]"
+              : "border-transparent text-slate-500 hover:text-[rgb(var(--glass-ink))]",
+          )}
+          aria-haspopup="menu"
+          aria-expanded={open}
+        >
+          More <ChevronDown className="h-3.5 w-3.5" />
+        </button>
+      )}
       {open && (
         // position set inline because .glass-gloss forces position:relative, which
         // would override a Tailwind `absolute` (the SectionActionsMenu gotcha).

@@ -45,10 +45,17 @@ export const invoiceActions: Record<string, ActionDef> = {
       return {
         ok: true,
         data: { invoice_id: r.id },
-        // Don't claim "I pulled in the labor and materials" if an import actually FAILED — say so, so a
-        // hands-free tech doesn't send an under-billed invoice thinking everything's on it.
+        // SAY WHAT HAPPENED. `importWarning` is the note the caller must relay (misnamed by history —
+        // see CreateInvoiceForJobResult), and only SOME of those notes are warnings. "Opened the draft
+        // you already started, INV-063" and "Started INV-062 for what's new since INV-061 — 3 lines
+        // pulled in" are the deed itself, and prefixing them "heads up" told a hands-free tech
+        // something had gone wrong when nothing had. `partial` marks the real ones — an import that
+        // FAILED — and those still get the heads-up, so nobody sends an under-billed invoice
+        // thinking everything is on it.
         speak: r.importWarning
-          ? `Draft invoice created — but heads up: ${r.importWarning}`
+          ? r.partial
+            ? `Draft invoice created — but heads up: ${r.importWarning}`
+            : `${r.importWarning} Read it back before you send.`
           : "Draft invoice ready — I pulled in any logged labor and materials from the job. Read it back before you send.",
       };
     },

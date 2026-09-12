@@ -174,10 +174,41 @@ export function startListening(_lang?: string): boolean {
   return true;
 }
 
+// ── End-of-speech detection ──────────────────────────────────────────────────────────────
+// 2026-09-11, Erik on a job site inside the iOS shell: "Nord is not responding". The panel read
+// "Hearing you…" the whole time. The gate was ONE fixed number (rms > 0.01 = speech) and the mic
+// runs with autoGainControl, which pumps a quiet job site up to exactly that level — so ambient
+// noise fluttered across the line every second, every flutter reset the 2.4 s silence window,
+// and the turn never closed. He asked again into the same recording, gave up, and the 45 s cap
+// finally shipped BOTH questions as one message (the "doubled dictation" in the transcript).
+// The barge-in monitor (tts.ts) learned this lesson already: measure the room, then gate above
+// it. Same here — an ambient FLOOR learned from the first quiet moments and tracked slowly after,
+// speech = well above the floor, quiet = back near it (hysteresis, so the in-between band neither
+// counts as a pause nor cancels one), on a smoothed level so a single loud frame can't reset.
+const SPEAK_MIN_GATE = 0.012; // never call anything quieter than this "speech" (the old 0.01 gate + a hair)
+const QUIET_MIN_GATE = 0.008; // …and never count anything louder than this as a pause on a silent floor
+const FLOOR_CAP = 0.04; // the floor may not learn a shout as "the room" (AGC speech sits ~0.1–0.3)
+const FLOOR_LEARN_MS = 250; // the opening window that seeds the floor before the user speaks
+const PAUSE_MS = 2400; // ~2.4 s of quiet after speech = end of the utterance (see the history below)
+const STILL_LISTENING_MS = 12000; // after this long in one turn, say how to end it
+const TURN_CAP_MS = 45000; // never run a single turn forever (45 s holds a whole dictated scope)
+const NO_SPEECH_CAP_MS = 9000; // give up a turn with no speech at all
+
 function beginTurn() {
   if (!wantStream || !stream || !analyser) return;
+  // A turn is already recording — the Talk button re-tapped mid-turn, or a re-arm raced the
+  // previous turn. Replacing the live recorder here used to leak: the old recorder's final
+  // ondataavailable landed in the NEW turn's chunk list and its onstop shipped that audio as a
+  // turn of its own, while the new recorder kept rolling under the next turn — the same words
+  // transcribed twice. Listening is listening; there is nothing to restart.
+  if (active && recorder && recorder.state === "recording") return;
   try {
-    if (recorder && recorder.state !== "inactive") recorder.stop();
+    if (recorder && recorder.state !== "inactive") {
+      // Detach before stopping so a stale recorder can never feed or finish the next turn.
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.stop();
+    }
   } catch {
     /* ignore */
   }
@@ -209,8 +240,10 @@ function beginTurn() {
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let spoke = false;
   let silenceStart = 0;
+  let saidStillListening = false;
   const startedAt = Date.now();
-  const SPEAK = 0.01; // RMS that counts as speech (lowered — 0.018 may have been above a soft voice)
+  let smooth = 0; // ~50 ms exponential average of the RMS — one loud frame is not a word
+  let floor = 0; // the room: seeded in the opening window, then drifts slowly toward the quiet level
   const tick = () => {
     if (!active || !recorder || recorder.state === "inactive" || !analyser) return;
     analyser.getByteTimeDomainData(buf);
@@ -222,15 +255,26 @@ function beginTurn() {
     const rms = Math.sqrt(sum / buf.length);
     level = rms; // live meter — proves whether the mic is hearing ANYTHING
     const now = Date.now();
+    smooth += (rms - smooth) * 0.3;
+    const elapsed = now - startedAt;
+    // Learn the room. Opening window: the loudest quiet moment before anyone speaks (capped so a
+    // turn that starts mid-sentence can't seed the floor at speech level). After that the floor
+    // falls fast to any quieter reading and climbs only slowly — a truck idling up mid-turn is
+    // learned in a few seconds; a spoken sentence barely nudges it.
+    if (elapsed < FLOOR_LEARN_MS) floor = Math.min(FLOOR_CAP, Math.max(floor, smooth));
+    else if (smooth < floor) floor = smooth;
+    else floor = Math.min(FLOOR_CAP, floor + (smooth - floor) * 0.003);
+    const speakGate = Math.max(SPEAK_MIN_GATE, floor * 2.2 + 0.006);
+    const quietGate = Math.max(QUIET_MIN_GATE, floor * 1.5 + 0.003);
     if (muted) {
       silenceStart = 0;
-    } else if (rms > SPEAK) {
+    } else if (smooth > speakGate) {
       if (!spoke) status("Hearing you…");
       spoke = true;
       silenceStart = 0;
-    } else if (spoke) {
+    } else if (spoke && smooth < quietGate) {
       if (!silenceStart) silenceStart = now;
-      else if (now - silenceStart > 2400) {
+      else if (now - silenceStart > PAUSE_MS) {
         // ~2.4s of quiet after speech → end of the utterance. Was 1300 — a contractor pausing
         // to think mid-scope got CUT OFF and the tail of the sentence was never heard (Erik:
         // "cuts us off mid sentence… isnt catching everything").
@@ -238,9 +282,16 @@ function beginTurn() {
         return;
       }
     }
+    // (between the gates: neither a word nor a pause — the running silence window stands.)
+    // A long turn says how it ends, instead of "Hearing you…" for a minute (nothing silent).
+    if (spoke && !saidStillListening && elapsed > STILL_LISTENING_MS) {
+      saidStillListening = true;
+      status("Still listening — pause for a couple of seconds when you're done");
+    }
     // Safety caps: never run a single turn forever; give up a turn with no speech at all.
     // 18s truncated a real dictated scope — 45s holds a whole thought; Whisper is fine with it.
-    if (now - startedAt > 45000 || (!spoke && now - startedAt > 9000)) {
+    if (elapsed > TURN_CAP_MS || (!spoke && elapsed > NO_SPEECH_CAP_MS)) {
+      if (spoke) status("Sending what I heard — the mic never caught a pause…");
       stopTurn();
       return;
     }
@@ -292,11 +343,22 @@ async function finishTurn() {
   }
 }
 
-export function stopListening() {
+/**
+ * STOP. The in-page mic tap ("I'm done talking") stops the turn and the audio still ships — that
+ * is how a turn is ended by hand. `discard: true` is the other stop — the topbar STOP, End
+ * conversation, New chat, close — where the recorder's final onstop used to transcribe and SEND
+ * whatever it had anyway, so Nort answered a question after the user had said stop. Detach the
+ * recorder before stopping it and nothing of that turn goes anywhere.
+ */
+export function stopListening(opts?: { discard?: boolean }) {
   wantStream = false;
   active = false;
   cancelAnimationFrame(rafId);
   try {
+    if (recorder && opts?.discard) {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+    }
     if (recorder && recorder.state !== "inactive") recorder.stop();
   } catch {
     /* ignore */

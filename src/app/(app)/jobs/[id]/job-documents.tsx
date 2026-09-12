@@ -4,7 +4,6 @@ import { useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -12,9 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { CameraCapture } from "@/components/camera-capture";
 import { MediaLightbox } from "@/components/media-lightbox";
-import { prepareImageForUpload } from "@/lib/image-prep";
-import { addDocument, deleteDocument, updateDocument } from "../actions";
-import { billJobReceipt } from "../../organize/actions";
+import { captureReceipt, prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { deleteDocument, updateDocument } from "../actions";
 
 const COSTABLE = (c: string | null) => c === "Receipt" || c === "Bill";
 
@@ -33,13 +31,6 @@ interface Doc {
 const isImage = (d: Doc) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
 const isPdf = (d: Doc) => /\.pdf($|\?)/i.test(d.signedUrl ?? d.name);
 
-function prettySize(n: number | null) {
-  if (!n) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function onPhone() {
   return (
     typeof navigator !== "undefined" &&
@@ -47,6 +38,23 @@ function onPhone() {
   );
 }
 
+/** What the reader said about one document, under its row. `done` = a bill exists for it (created
+ *  now, or found already), so the Record as Cost verb goes away — a warning tone can still ride a
+ *  done note (the reader's lines didn't add up; the bill is in, the notes carry the warning). */
+type BillNote = { text: string; done: boolean; tone: ReceiptTone };
+
+const NOTE_COLOR: Record<ReceiptTone, string> = {
+  ok: "text-emerald-600",
+  warn: "text-amber-600",
+  fail: "text-red-600",
+};
+
+/**
+ * The job's filing cabinet (plans, permits, every receipt). Uploads run THE receipt pipeline
+ * (lib/receipt-capture — the same one the Costs tab's Snap the Bill and the Add Cost sheet
+ * run): a Receipt or Bill is filed and then read into a job cost; anything else is only filed.
+ * A file the reader can't take is still filed and its row says why; "Record as Cost" is the retry.
+ */
 export function JobDocuments({
   orgId,
   jobId,
@@ -73,82 +81,49 @@ export function JobDocuments({
   const [savingEdit, setSavingEdit] = useState(false);
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
-  const [billMsg, setBillMsg] = useState<Record<string, string>>({});
+  const [billMsg, setBillMsg] = useState<Record<string, BillNote>>({});
+
+  const note = (docId: string, n: BillNote | null) =>
+    setBillMsg((m) => {
+      const next = { ...m };
+      if (n) next[docId] = n;
+      else delete next[docId];
+      return next;
+    });
 
   async function uploadFiles(files: File[]) {
     if (!files.length) return;
     setError(null);
     setBusy(true);
-    try {
-      const supabase = createClient();
-      for (const raw of files) {
-        // Normalize: HEIC → JPEG, downscale huge phone shots.
-        const file = await prepareImageForUpload(raw);
-        if (file.size > 15 * 1024 * 1024) {
-          setError(`${file.name} is over 15 MB.`);
-          continue;
-        }
-        const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = `${orgId}/${jobId}/${Date.now()}-${safe}`;
-        const { error: upErr } = await supabase.storage
-          .from("documents")
-          .upload(path, file, { upsert: false });
-        if (upErr) throw upErr;
-        const res = await addDocument({
-          job_id: jobId,
-          name: file.name,
-          category,
-          file_url: path,
-          size_bytes: file.size,
-        });
-        if (!res.ok) throw new Error(res.error);
-        // Receipts & bills become job costs automatically — AI reads the total.
-        if (COSTABLE(category) && res.id) {
-          const docId = res.id;
-          try {
-            const billed = await billJobReceipt(docId);
-            if (billed.ok && !billed.already) {
-              setBillMsg((m) => ({
-                ...m,
-                [docId]:
-                  `Recorded${billed.amount != null ? ` $${billed.amount.toFixed(2)}` : ""} as a job cost.` +
-                  (billed.warning ? ` ${billed.warning}` : ""),
-              }));
-            } else if (!billed.ok) {
-              setBillMsg((m) => ({ ...m, [docId]: billed.error ?? "Saved — add the cost manually." }));
-            }
-          } catch {
-            /* never let a costing hiccup fail the upload */
-          }
-        }
+    // Every file gets its turn: one that won't upload is reported by name and the rest still
+    // go through (the old loop threw on the first failure and quietly abandoned the others).
+    const lost: string[] = [];
+    let touched = false;
+    for (const raw of files) {
+      const out = await captureReceipt({ orgId, jobId, file: raw, category, read: COSTABLE(category) });
+      if (out.kind === "lost") {
+        lost.push(`${raw.name || "File"}: ${out.sentence}`);
+        continue;
       }
-      router.refresh();
-    } catch (err: any) {
-      setError(err?.message ?? "Upload failed.");
-    } finally {
-      setBusy(false);
+      touched = true;
+      // Paper that isn't a cost (a Plan, a Permit) is simply filed — its row is the confirmation.
+      if (out.kind === "filed" && out.why === "not_asked") continue;
+      note(out.docId, { text: out.sentence, done: out.kind !== "filed", tone: out.tone });
     }
+    if (lost.length) setError(lost.join(" "));
+    setBusy(false);
+    if (touched) router.refresh();
   }
 
-  // Convert an already-uploaded receipt/bill into a job cost on demand.
+  // Convert an already-filed receipt/bill into a job cost on demand — the retry for anything
+  // the upload-time read refused.
   async function recordCost(d: Doc) {
     setBilling(d.id);
-    setBillMsg((m) => ({ ...m, [d.id]: "" }));
+    note(d.id, null);
     try {
-      const res = await billJobReceipt(d.id);
-      if (!res.ok) {
-        setBillMsg((m) => ({ ...m, [d.id]: res.error ?? "Couldn't record this as a cost." }));
-      } else if (res.already) {
-        setBillMsg((m) => ({ ...m, [d.id]: "Already recorded as a job cost." }));
-      } else {
-        setBillMsg((m) => ({
-          ...m,
-          [d.id]:
-            `Recorded${res.amount != null ? ` $${res.amount.toFixed(2)}` : ""} as a job cost.` +
-            (res.warning ? ` ${res.warning}` : ""),
-        }));
-        router.refresh();
-      }
+      const out = await readReceiptDocument(d.id);
+      note(d.id, { text: out.sentence, done: out.kind !== "filed", tone: out.tone });
+      if (out.kind === "billed") router.refresh();
     } finally {
       setBilling(null);
     }
@@ -290,7 +265,7 @@ export function JobDocuments({
       ) : (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
           {docs.map((d) => {
-            const recorded = /^Recorded|^Already/.test(billMsg[d.id] ?? "");
+            const n = billMsg[d.id];
             return (
             <li key={d.id} className="flex flex-col gap-1.5 px-3 py-2.5">
               <div className="flex items-center gap-3">
@@ -308,15 +283,15 @@ export function JobDocuments({
                   <div className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</div>
                   <div className="text-xs text-slate-400">
                     {formatDate(d.created_at)}
-                    {d.size_bytes ? ` · ${prettySize(d.size_bytes)}` : ""}
+                    {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
                   </div>
                 </button>
-                {COSTABLE(d.category) && !recorded && (
+                {COSTABLE(d.category) && !n?.done && (
                   <button
                     onClick={() => recordCost(d)}
                     disabled={billing === d.id}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
-                    title="AI reads the receipt and adds it to this job's costs"
+                    title="Nort reads the receipt and adds it to this job's costs"
                   >
                     {billing === d.id ? (
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
@@ -343,9 +318,9 @@ export function JobDocuments({
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
-              {billMsg[d.id] && (
-                <div className={`pl-15 text-xs ${recorded ? "text-emerald-600" : "text-amber-600"}`}>
-                  {billMsg[d.id]}
+              {n && (
+                <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
+                  {n.text}
                 </div>
               )}
             </li>

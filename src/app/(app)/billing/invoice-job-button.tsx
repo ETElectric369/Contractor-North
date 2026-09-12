@@ -2,11 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/components/toast";
 import { createInvoiceForJob } from "../jobs/actions";
 
-/** One tap from "done, not invoiced" → a draft invoice (labor + materials pulled in), then straight to it. */
+/** One tap from "done, not invoiced" → a draft invoice (labor + materials pulled in), then straight
+ *  to it. The server's note — an existing draft opened, an import that couldn't run — is toasted
+ *  BEFORE the redirect (this row used to drop it, so why you landed where you landed was never
+ *  said). A refusal stays on the row; when everything is already billed on one invoice, the toast
+ *  carries the door to it instead of a dead sentence. */
 export function InvoiceJobButton({ jobId }: { jobId: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   return (
@@ -17,8 +23,17 @@ export function InvoiceJobButton({ jobId }: { jobId: string }) {
           start(async () => {
             setError(null);
             const res = await createInvoiceForJob(jobId);
-            if (res.ok && res.id) router.push(`/billing/${res.id}`);
-            else setError(res.error ?? "Couldn't create it.");
+            if (!res.ok || !res.id) {
+              const door = res.billedOn;
+              if (door) {
+                toast(res.error ?? "Nothing new to bill.", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
+              } else {
+                setError(res.error ?? "Couldn't create it.");
+              }
+              return;
+            }
+            if (res.importWarning) toast(res.importWarning, "info");
+            router.push(`/billing/${res.id}`);
           })
         }
         disabled={pending}

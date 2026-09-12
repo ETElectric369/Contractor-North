@@ -27,8 +27,9 @@ export function onListeningState(cb: (listening: boolean) => void): () => void {
 export function isListening(): boolean {
   return backend().isListening();
 }
-export function stopListening() {
-  backend().stopListening();
+/** `discard: true` = STOP means stop: the turn being recorded is dropped, not transcribed and sent. */
+export function stopListening(opts?: { discard?: boolean }) {
+  backend().stopListening(opts);
 }
 export function setMuted(b: boolean) {
   // Both expose setMuted; call the active one (calling both is harmless).

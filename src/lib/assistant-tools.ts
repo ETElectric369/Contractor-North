@@ -15,6 +15,8 @@ import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { searchPriceBook } from "@/lib/pricing/price-book-search";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { getJobFinancials, getJobBudgetVsActual, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
+import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { reportError } from "@/lib/observe";
 import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
 import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 
@@ -216,7 +218,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job_financials",
     description:
-      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (labor at pay rate + materials) — PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'.",
+      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (labor at pay rate + materials) — PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'. ALSO returns `unbilled` — the running total of work NO invoice holds yet (hours + labor $ at bill rate, bills/POs marked up, the total, and the last invoice number): the same figure as the job page's Unbilled card, so use it for 'what's unbilled on Whitney' / 'can I invoice this job' — total 0 means everything worked is already on an invoice.",
     input_schema: {
       type: "object",
       properties: { job_id: { type: "string", description: "The job's id (from list_jobs)." } },
@@ -1806,7 +1808,16 @@ export async function runDataTool(
         if (!jobId) return JSON.stringify({ error: "Provide a job_id (use list_jobs to find it)." });
         const f = await getJobFinancials(supabase, jobId);
         if (!f) return JSON.stringify({ error: "Job not found." });
-        const budgetVsActual = await getJobBudgetVsActual(supabase, jobId);
+        // The Unbilled card's own arithmetic (unbilledWorkForJob), not a re-derivation: Nort and the
+        // job Overview can never disagree about what is still open to bill. A failed read is SAID
+        // (unbilled: null + why), never reported as $0 — "nothing to bill" is a money statement.
+        const [budgetVsActual, unbilled] = await Promise.all([
+          getJobBudgetVsActual(supabase, jobId),
+          unbilledWorkForJob(supabase, jobId).catch((e: unknown) => {
+            reportError("assistant.get_job_financials.unbilled", e, { jobId });
+            return null;
+          }),
+        ]);
         return JSON.stringify({
           job_number: f.job_number,
           name: f.name,
@@ -1821,6 +1832,22 @@ export async function runDataTool(
           remaining_vs_estimate: f.remaining,
           percent_of_estimate_spent: f.burnPct,
           over_budget: f.overBudget,
+          // WORK NO INVOICE HOLDS YET — hours and labor $ at BILL rate (what the customer would be
+          // charged, unlike `cost` above), bills + live POs with markup, and the invoice it would
+          // follow. Same figure as the job page's Unbilled card (unbilledWorkForJob).
+          unbilled: unbilled
+            ? {
+                hours: unbilled.hours,
+                labor_amount: unbilled.laborAmount,
+                bills_billed: unbilled.billsBilled,
+                total: unbilled.total,
+                last_invoice_number: unbilled.lastInvoiceNumber,
+                by_person: unbilled.laborByPerson,
+                ...(unbilled.claimedOn.length ? { already_billed_on: unbilled.claimedOn } : {}),
+                ...(unbilled.schemaReady ? {} : { caveat: "Billing is mid-upgrade — labor claims can't be read for a few minutes, so hours may show as unbilled that are already invoiced." }),
+              }
+            : null,
+          ...(unbilled ? {} : { unbilled_error: "Couldn't read the unbilled work right now — say so rather than quoting $0." }),
           // Per-scope BUDGET-VS-ACTUAL: each scope (Framing, Decking, Electrical…) with its
           // estimate budget, actual cost (AI-scoped receipts/bills), remaining, burnPct, and
           // overBudget. THIS is what catches the masked overrun — a whole-job total that looks

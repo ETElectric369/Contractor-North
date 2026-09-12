@@ -13,7 +13,7 @@ import {
   CONFIRM_MARKER, OPEN_MARKER, PICK_MARKER, STATUS_OPEN, STATUS_CLOSE, DRAFT_OPEN, DRAFT_CLOSE, HUD_OPEN, HUD_CLOSE,
   type AgentConfirm, type AgentOpen, type AgentPick, type AgentDraft, type AgentHudCard,
 } from "@/lib/assistant-protocol";
-import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, type PickerContact } from "./actions";
+import { confirmAgentAction, saveQuoteFromDraft, loadConversation, saveConversation, clearConversation, recoverTurn, type PickerContact } from "./actions";
 import { ContactPicker } from "./contact-picker";
 import { DriverCard } from "@/components/driver-card";
 import { estimatorStore } from "@/lib/estimator-store";
@@ -121,6 +121,132 @@ function LiveQuote({ draft, onSave, onDismiss, saving }: { draft: AgentDraft; on
 interface Msg {
   role: "user" | "assistant";
   content: string;
+  /** "reload" — the line names a door: the answer may exist on the server and a reload shows it. */
+  hint?: "reload";
+}
+
+// ── The turn in flight, kept outside React ─────────────────────────────────────────────────
+// Inside the iOS shell a WKWebView that goes to the background loses its socket ("Load failed")
+// and a jettisoned WebContent process comes back as a cold page load — while the chat route,
+// which never noticed, finishes the turn and persists the reply. This marker is how the screen
+// finds that reply again: the question and when it was sent. Written before the fetch; a marker
+// that outlives its page is a reload mid-turn. It is forgotten only once the reply is IN HAND
+// (streamed to the end, or recovered), the server refused the turn (nothing to recover), the
+// user moves on (a new question writes its own; New chat wipes it), or the server's turn is
+// provably over with nothing to show. Never on a residual "Reload to check" line — the marker
+// is the only thing that makes a reload check, so clearing it there made that door a dead one.
+const PENDING_KEY = "cn:nort:pending";
+const PENDING_MAX_AGE_MS = 15 * 60_000;
+type PendingTurn = { content: string; at: string; voice: boolean };
+function readPendingTurn(): PendingTurn | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<PendingTurn>;
+    if (!p?.content || !p?.at || Date.now() - Date.parse(p.at) > PENDING_MAX_AGE_MS) {
+      localStorage.removeItem(PENDING_KEY);
+      return null;
+    }
+    return { content: p.content, at: p.at, voice: !!p.voice };
+  } catch {
+    return null;
+  }
+}
+function writePendingTurn(p: PendingTurn | null) {
+  try {
+    if (p) localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* storage can be unavailable (private mode) — recovery then has no marker, nothing else changes */
+  }
+}
+/** Forget the marker — but only if it is still THIS turn's. A newer question may have written its
+ *  own while an older turn's catch-up was still out; that one must survive. */
+function clearPendingTurn(at: string) {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (raw && (JSON.parse(raw) as Partial<PendingTurn>)?.at === at) localStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* same as above: no storage, no marker */
+  }
+}
+/** A wait that ends the moment `signal` fires — STOP ends a recovery loop now, not after its sleep. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((res) => {
+    if (signal?.aborted) { res(); return; }
+    const timer = setTimeout(finish, ms);
+    signal?.addEventListener("abort", finish, { once: true });
+    function finish() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      res();
+    }
+  });
+}
+/** The phone says it has no network at all. `onLine === false` is the one reliable direction of
+ *  that flag (true only means "some interface is up"), so this never claims to be online. */
+function isOffline(): boolean {
+  return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+/** How many recovery probes a drop earns. Bytes arrived = the server HAS the turn and is very
+ *  likely still finishing it, so the transcript is worth waiting on. Not one byte = the question
+ *  most likely never reached the route (the fetch died on the way out); two quick looks cover the
+ *  case where it did, and the phone is not held ~19 s staring at "catching up" for nothing. */
+const RECOVERY_TRIES_FULL = 8;
+const RECOVERY_TRIES_NO_BYTE = 2;
+/** Ask the server for the reply it may have finished without us — a few times, because the
+ *  route's turn can still be RUNNING (the phone dropped; the server did not) and its transcript
+ *  lands only in the route's finally. ~19 s at the full budget; never throws. Returns null the
+ *  instant the phone reports itself OFFLINE — every probe would fail the same way, and the caller
+ *  has a truer sentence to show than a wait — or the instant `signal` fires (STOP): the caller
+ *  checks the signal and says nothing, rather than landing a line the user just refused. */
+async function fetchRecoveredReply(content: string, at: string, tries = RECOVERY_TRIES_FULL, signal?: AbortSignal): Promise<string | null> {
+  for (let i = 0; i < tries; i++) {
+    if (signal?.aborted || isOffline()) return null;
+    try {
+      const r = await recoverTurn(content, at);
+      if (r.reply) return r.reply;
+    } catch {
+      /* the probe itself failed — the next try may not */
+    }
+    // No sleep after the last miss: the answer is "not there", and waiting on changes nothing.
+    if (i < tries - 1) await sleep(i === 0 ? 800 : 3000, signal);
+  }
+  return null;
+}
+/** Past this age a marker's turn is provably finished on the server: the chat route's
+ *  `maxDuration` is 120 s (its transcript write is inside that), plus the 30 s of clock slack
+ *  recoverTurn already allows. One probe then tells the whole truth — the reply is there, or it
+ *  never will be — and "Reload to check" would be a door onto nothing. */
+const TURN_MAX_MS = 150_000;
+/** No bytes for this long mid-reply = the socket is dead but WebKit hasn't said so. Well past the
+ *  longest silent tool round (a web search) so a slow answer is never mistaken for a lost one. */
+const STREAM_STALL_MS = 90_000;
+const DROPPED_SENTENCE = "The connection dropped before Nort's answer arrived — Reload to check for it, or ask again.";
+/** Offline is a different fact from "dropped": nothing can be checked right now, and saying so at
+ *  once beats a probe that cannot succeed. Reload is still the door — the server keeps the turn. */
+const OFFLINE_SENTENCE = "You're offline — Nort may still have answered. Reload when you have bars to check, or ask again.";
+/** The reload-time versions. The question text is deliberately not echoed by any of them: the
+ *  marker is per-device, the reply lookup is per-user — only a found reply proves the question was
+ *  this user's. Offline, the lookup never ran, so "didn't get an answer" would be a guess. */
+const RELOAD_OFFLINE_SENTENCE = "You're offline — couldn't check whether your last question got an answer. Reload when you have bars, or ask it again.";
+/** Young marker, nothing on the server yet: the route's turn may still be running (a web search
+ *  round is silent for a while), so Reload stays a live door. */
+const RELOAD_PENDING_SENTENCE = "No answer to your last question yet — Nort may still be working on it. Reload in a moment to check, or ask it again.";
+/** The server's turn is over and there is nothing: the only honest door left is asking again. */
+const RELOAD_UNANSWERED_SENTENCE = "Your last question didn't get an answer before the app reloaded — ask it again.";
+/** Every residual line the recovery paths can leave. A restored transcript loses the `hint`
+ *  (saveConversation keeps role + content only), so content is how a residual line is recognised
+ *  again after a reload — it is REPLACED by the next attempt's line, never stacked under it. */
+const RESIDUAL_SENTENCES = new Set([DROPPED_SENTENCE, OFFLINE_SENTENCE, RELOAD_OFFLINE_SENTENCE, RELOAD_PENDING_SENTENCE, RELOAD_UNANSWERED_SENTENCE]);
+function dropResidualTail(list: Msg[]): Msg[] {
+  const last = list[list.length - 1];
+  return last?.role === "assistant" && RESIDUAL_SENTENCES.has(last.content.trim()) ? list.slice(0, -1) : list;
+}
+/** One residual line at the tail — replacing the previous attempt's, so a second reload never
+ *  reads as a second failure. */
+function withResidual(list: Msg[], line: Msg): Msg[] {
+  return [...dropResidualTail(list), line];
 }
 
 const SUGGESTIONS = [
@@ -129,6 +255,20 @@ const SUGGESTIONS = [
   "Which invoices are still unpaid?",
   "Show me my open estimates and their totals.",
 ];
+
+/** The door a dropped-connection line names: the shell has no address bar and no pull-to-refresh,
+ *  so "Reload" has to be a thing you can tap. */
+function ReloadDoor() {
+  return (
+    <button
+      type="button"
+      onClick={() => window.location.reload()}
+      className="ml-1.5 inline-flex items-center rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-brand hover:bg-brand-light/40"
+    >
+      Reload
+    </button>
+  );
+}
 
 /** The chat-style "voice mode" waveform — bars that bounce while it's live. */
 function VoiceWave({ active }: { active?: boolean }) {
@@ -193,7 +333,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // Tear the voice session down on unmount (close), so a live recognizer + any in-flight speech
   // (streaming queue / barge-in monitor) never outlive the panel.
   useEffect(() => () => {
-    speech.stopListening();
+    speech.stopListening({ discard: true }); // the panel is gone — a half-recorded turn goes nowhere
     speech.setResultHandler(null);
     try { bargeStopRef.current?.(); } catch {}
     try { speakQueueRef.current?.stop(); } catch {}
@@ -206,10 +346,27 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // in-flight stream, cut TTS, AND stop the mic + leave voice mode — so "stop" deterministically
   // means stop (no orphaned recognizer, no auto-re-listen loop left armed).
   const abortRef = useRef<AbortController | null>(null);
+  // The turn in flight, read synchronously. `streaming` is render-time state: two transcripts
+  // landing in one tick (a re-armed mic racing a late transcription) both saw it false and both
+  // sent — the second one a repeat of the first. A ref answers before React re-renders.
+  const inFlightRef = useRef(false);
+  // The reload-time catch-up in flight (see catchUp). STOP / Close / a new question abort it, so
+  // it can never land its line after the screen has moved on.
+  const catchUpAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     const stop = () => {
+      // abortRef points at the live fetch — or, during a drop-recovery loop, at that loop's own
+      // controller (the fetch's is already spent by then). Either way STOP reaches what is running.
       try { abortRef.current?.abort(); } catch {}
-      speech.stopListening();
+      try { catchUpAbortRef.current?.abort(); } catch {}
+      catchUpAbortRef.current = null;
+      // Free the screen NOW, not when the stopped probe returns: a question typed in that gap hit
+      // `inFlightRef` still true and returned silently. send()'s finally resets the shared flags
+      // only while it still owns the screen, so a newer turn is safe from the old one's cleanup.
+      inFlightRef.current = false;
+      // discard: the recorder's final onstop used to transcribe and SEND the half-turn anyway, so
+      // Nort answered a question after the user had said stop. STOP means stop.
+      speech.stopListening({ discard: true });
       killSpeech(); // tears down the streaming speak queue + barge-in monitor, then cuts TTS
       setStreaming(false);
       setSpeaking(false);
@@ -246,6 +403,19 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     return () => clearInterval(id);
   }, [streaming]);
   const router = useRouter();
+
+  // Put text into the LAST assistant line (the placeholder a turn appends, possibly half-filled),
+  // or append one if the tail isn't an assistant line.
+  function setAssistantTail(content: string, hint?: Msg["hint"]) {
+    setMessages((m) => {
+      const c = [...m];
+      const last = c[c.length - 1];
+      const line: Msg = hint ? { role: "assistant", content, hint } : { role: "assistant", content };
+      if (last?.role === "assistant") c[c.length - 1] = line;
+      else c.push(line);
+      return c;
+    });
+  }
 
   // Finalize the live draft → real quote, then flip to the actual quote page (filled out).
   async function saveDraft() {
@@ -408,15 +578,88 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // The preview drawer (glass) opens FRESH — last session's chatter isn't shown again (CIB
         // keeps what matters as memory facts; an OPEN draft is still restored so an estimate-in-
         // progress comes back). The full /assistant page keeps the scroll-back history.
-        if (m && m.length && !glass) setMessages(m as Msg[]);
+        const restored = m && m.length && !glass ? (m as Msg[]) : [];
+        // A turn can already be streaming when this lands (the drawer hands its typed question
+        // straight in; the page's ?q=): its user line + placeholder are on screen. History goes
+        // BEFORE them — replacing the list wholesale dropped the question and let the stream
+        // overwrite the last line of history instead of its own placeholder.
+        if (restored.length) setMessages((cur) => (cur.length ? [...restored, ...cur] : restored));
         if (d) setDraft(d);
+        // That in-flight turn wrote the marker itself — it is live, not orphaned: nothing to catch up.
+        if (inFlightRef.current) return;
+        const p = readPendingTurn();
+        if (p) void catchUp(p);
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A RELOAD MID-TURN (the shell's WebContent process was jettisoned, or the user reloaded while
+  // Nort was answering): the marker outlived its page. The answer is very likely on the server —
+  // show it, rather than opening on nothing as if the question was never asked. The marker is
+  // forgotten only once the reply is in hand (or provably never coming): the residual line names
+  // Reload as the door, and the marker is the one thing that makes a reload check.
+  async function catchUp(p: PendingTurn) {
+    const ctrl = new AbortController();
+    catchUpAbortRef.current = ctrl;
+    // Past the route's maxDuration the server's turn is over: one look is the whole truth, and the
+    // phone is not held on "catching up" for a reply that cannot still be on its way.
+    const turnOver = Date.now() - Date.parse(p.at) > TURN_MAX_MS;
+    setStatus("Catching up with Nort…");
+    const reply = await fetchRecoveredReply(p.content, p.at, turnOver ? 1 : 3, ctrl.signal);
+    if (ctrl.signal.aborted) return; // STOP / Close / a new question owns the screen now — say nothing
+    catchUpAbortRef.current = null;
+    setStatus(null);
+    if (reply) {
+      clearPendingTurn(p.at);
+      const q = p.content.trim();
+      setMessages((cur) => {
+        // While the marker stood, whatever the stored transcript holds after this question is at
+        // best a half-streamed reply or a residual "didn't get an answer" line — never the answer
+        // (a finished turn clears the marker in the same breath it persists). The recovered reply
+        // REPLACES that tail: the turn never gets a second bubble.
+        let ui = -1;
+        for (let i = cur.length - 1; i >= 0; i--) {
+          if (cur[i].role === "user" && cur[i].content.trim() === q) { ui = i; break; }
+        }
+        if (ui >= 0 && cur.slice(ui + 1).every((x) => x.role === "assistant")) {
+          return [...cur.slice(0, ui + 1), { role: "assistant", content: reply }];
+        }
+        // The question never reached the transcript (the reload came before the stream ended, or
+        // the drawer opened fresh): the pair is appended — over any residual line a prior attempt left.
+        return [...dropResidualTail(cur), { role: "user", content: p.content }, { role: "assistant", content: reply }];
+      });
+      // Opened by the Talk button: the reply is read out, as it would have been.
+      if (autoStart) say(reply.replace(/\s*\[[^\]]*\]\s*$/, ""), () => { if (voiceModeRef.current) startMic(); });
+    } else {
+      const offline = isOffline();
+      // Online, and the server's turn is provably over with nothing there: the marker would only
+      // re-ask on every open for the rest of its 15 minutes and find the same nothing. Offline, or
+      // with the turn possibly still running, it stays — Reload is a live door in both.
+      if (!offline && turnOver) clearPendingTurn(p.at);
+      const line: Msg = offline
+        ? { role: "assistant", content: RELOAD_OFFLINE_SENTENCE, hint: "reload" }
+        : turnOver
+          ? { role: "assistant", content: RELOAD_UNANSWERED_SENTENCE }
+          : { role: "assistant", content: RELOAD_PENDING_SENTENCE, hint: "reload" };
+      setMessages((cur) => withResidual(cur, line));
+    }
+    scrollToBottom();
+  }
+
+  // The empty assistant placeholder a turn appends before its first byte: after STOP it would sit
+  // there spinning as if a reply were still coming. What did stream is left as it is.
+  function dropEmptyTail() {
+    setMessages((m) => (m[m.length - 1]?.role === "assistant" && !m[m.length - 1].content ? m.slice(0, -1) : m));
+  }
 
   // ...and auto-persist (debounced) so nothing is ever lost.
   useEffect(() => {
     if (messages.length === 0 && !draft) return;
+    // Not while a reply is streaming: a half-arrived tail saved here read, after a reload, as the
+    // answer — and the catch-up (which trusts the stored transcript) skipped the turn. The save
+    // runs when the stream ends: `streaming` flips and this effect re-fires with the whole turn.
+    if (streaming) return;
     // A failed save is SAID, not swallowed (audit v921): a zero-row write and a rejected promise
     // both mean the draft on screen is the only copy there is.
     const t = setTimeout(() => {
@@ -425,10 +668,16 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         .catch(() => setSaveFailed(true));
     }, 800);
     return () => clearTimeout(t);
-  }, [messages, draft]);
+  }, [messages, draft, streaming]);
 
   function newChat() {
     stopVoice();
+    // Starting fresh is the user moving on from any turn still owed an answer: the catch-up (if
+    // one is probing) is dropped and the marker goes with the conversation.
+    try { catchUpAbortRef.current?.abort(); } catch {}
+    catchUpAbortRef.current = null;
+    writePendingTurn(null);
+    setStatus(null);
     setMessages([]);
     setDraft(null);
     setCard(null);
@@ -440,7 +689,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // speech mid-sentence (streaming queue + barge-in monitor included), and leave voice mode.
   function stopVoice() {
     setVoiceMode(false);
-    speech.stopListening();
+    speech.stopListening({ discard: true }); // End conversation: the half-turn is dropped, not sent
     killSpeech();
     setSpeaking(false);
     setListening(false);
@@ -454,7 +703,15 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
 
   async function send(text: string, viaVoice = false) {
     const content = text.trim();
-    if (!content || streaming) return;
+    if (!content || streaming || inFlightRef.current) return;
+    inFlightRef.current = true;
+    // A new question is the user moving on: a reload-time catch-up still probing for the last one
+    // would otherwise land its line under THIS question, and its marker is replaced below anyway.
+    if (catchUpAbortRef.current) {
+      try { catchUpAbortRef.current.abort(); } catch {}
+      catchUpAbortRef.current = null;
+      setStatus(null);
+    }
     if (!viaVoice) setVoiceMode(false); // typing leaves voice mode
     // Mute the (still-live) MediaStream while we process this turn so background noise / the user
     // thinking out loud during the reply isn't captured as the next turn. The active backend RECORDS
@@ -472,7 +729,54 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     setTokens(0);
     scrollToBottom();
 
-    abortRef.current = new AbortController();
+    // Hoisted out of the try: the catch block reads them to finish a dropped turn (what was on
+    // screen already, and how much of it the speak queue had).
+    let full = ""; // the whole reply so far, which may END with a CONFIRM proposal
+    let spokenLen = 0; // how much of the visible text has been handed to the speak queue
+    const stripTrailingTag = (s: string) => s.replace(/\s*\[[^\]]*\]\s*$/, "");
+    const myAbort = new AbortController();
+    abortRef.current = myAbort;
+    // Whether the marker written below may be forgotten in `finally`: true once the reply is in
+    // hand (streamed to the end, or recovered) or the server refused the turn (nothing to recover).
+    // A dropped turn whose recovery came up empty KEEPS it — the residual line names Reload as the
+    // door, and the marker is what makes a reload check. So does a STOP: it ends the stream, not
+    // the question; the server still finishes, and the next open shows what it said.
+    let turnSettled = false;
+    // The controller the topbar STOP reaches during a drop-recovery loop. The fetch's own is
+    // already spent by then (dropStream fired it), so the loop needs a live one of its own.
+    let recoverAbort: AbortController | null = null;
+    // WHEN THE PHONE LOSES THE STREAM. Three ways the shell drops a reply the server still
+    // finishes: WebKit rejects the read ("Load failed") after a stint in the background; the
+    // socket dies silently and the read just never resolves; or the page reloads cold (the marker
+    // above). `dropReason` tells the catch block a stop was OURS (recover) and not the user's
+    // (leave the partial alone); `recoveredEarly` carries a reply the foreground probe found.
+    const sentAt = new Date().toISOString();
+    let lastByteAt = Date.now();
+    let dropReason: "stalled" | "found" | null = null;
+    let recoveredEarly: string | null = null;
+    const dropStream = (why: "stalled" | "found") => {
+      dropReason = why;
+      try { myAbort.abort(); } catch {}
+    };
+    const stallWatch = setInterval(() => {
+      if (Date.now() - lastByteAt > STREAM_STALL_MS) dropStream("stalled");
+    }, 5_000);
+    // Back on screen after the background, with the stream quiet for a while: iOS may have cut the
+    // socket without a word. Ask the server whether the answer is already there; if it is, the
+    // dead read is abandoned and the reply rendered — no waiting for a timeout that may never come.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || Date.now() - lastByteAt < 8_000) return;
+      void recoverTurn(content, sentAt)
+        .then((r) => {
+          if (r.reply && abortRef.current === myAbort && !myAbort.signal.aborted) {
+            recoveredEarly = r.reply;
+            dropStream("found");
+          }
+        })
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    writePendingTurn({ content, at: sentAt, voice: viaVoice });
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -485,6 +789,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       });
 
       if (!res.ok || !res.body) {
+        turnSettled = true; // the route refused the turn — there is no reply to come back for
         const errText = await res.text().catch(() => "Request failed.");
         setMessages((m) => [...m, { role: "assistant", content: errText }]);
         setStreaming(false);
@@ -502,9 +807,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // of the visible text we've already handed to the queue. `noStream` disables streamed speech for
       // this turn if anything goes wrong, so we fall back to speaking the whole reply once at the end.
       let stream: { feed: (c: string) => void; finish: () => void } | null = null;
-      let spokenLen = 0;
+      spokenLen = 0;
       let noStream = false;
-      const stripTrailingTag = (s: string) => s.replace(/\s*\[[^\]]*\]\s*$/, "");
       const feedSentences = (visible: string, final: boolean) => {
         if (!viaVoice || noStream) return;
         try {
@@ -532,10 +836,11 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         }
       };
 
-      let full = ""; // the whole reply, which may END with a CONFIRM proposal
+      full = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        lastByteAt = Date.now();
         full += decoder.decode(value, { stream: true });
         const { text: visible, draft: liveDraft, card: liveCard, status: liveStatus } = parseStream(full);
         // `cleared` = the agent just saved the estimate → wipe the preview so it stops
@@ -557,6 +862,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         feedSentences(visible, false);
         scrollToBottom();
       }
+      turnSettled = true; // every byte arrived — the marker has done its job
       setStatus(null);
 
       // Directive markers (confirm / open-maps / contact-pick) come at the very end of the stream.
@@ -622,19 +928,71 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         else if (voiceModeRef.current) startMic();
       }
     } catch (e: any) {
-      // A user-initiated stop (abort) is not an error — leave the partial reply as-is.
-      if (e?.name !== "AbortError") {
-        // Cut any streamed speech first so its queue can't also re-arm (double startMic), then
-        // re-open the mic so a voice turn is never left muted/stuck.
+      // A user-initiated stop (abort) is not an error — leave the partial reply as-is (an empty
+      // placeholder is not a reply; it goes, or it spins forever).
+      const userStop = e?.name === "AbortError" && !dropReason;
+      if (userStop) {
+        dropEmptyTail();
+      } else {
+        // Cut any streamed speech first so its queue can't also re-arm (double startMic).
         killSpeech();
         speech.setMuted(false);
         setSpeaking(false);
-        setMessages((m) => [...m, { role: "assistant", content: `Error: ${e?.message ?? "unknown"}` }]);
-        if (viaVoice && voiceModeRef.current) startMic();
+        // THE REPLY THE SCREEN MISSED. The server finishes the turn and persists it whether or
+        // not this phone was still listening — so a dead socket is not "Error: Load failed" and
+        // a lost answer; it is a short wait for the transcript, then the answer itself. Whatever
+        // streamed before the drop is on screen already; only the rest is spoken.
+        const partial = parseStream(full).text;
+        // `full` is every byte the route sent; empty = nothing ever arrived, so the short budget.
+        const tries = full.length ? RECOVERY_TRIES_FULL : RECOVERY_TRIES_NO_BYTE;
+        recoverAbort = new AbortController();
+        abortRef.current = recoverAbort; // what the topbar STOP aborts from here on
+        if (!recoveredEarly && !isOffline()) setStatus("The connection dropped — catching up with Nort…");
+        const reply = recoveredEarly ?? (await fetchRecoveredReply(content, sentAt, tries, recoverAbort.signal));
+        if (recoverAbort.signal.aborted) {
+          // STOP mid-catch-up: no line lands after the user said stop. Same as a stop mid-stream —
+          // what streamed stays, an empty placeholder goes, the marker stays.
+          dropEmptyTail();
+        } else {
+          setStatus(null);
+          if (reply) {
+            turnSettled = true;
+            setAssistantTail(reply);
+            if (viaVoice) {
+              const unspoken = stripTrailingTag(partial && reply.startsWith(partial) ? reply.slice(spokenLen) : reply).trim();
+              if (unspoken) say(unspoken, () => { if (voiceModeRef.current) startMic(); });
+              else if (voiceModeRef.current) startMic();
+            }
+          } else {
+            // Nothing on the server (yet) — or no way to ask it. The residual sentence names the
+            // true state (offline vs dropped) and both doors. The marker stays (turnSettled is
+            // still false): the Reload it names only checks while the marker exists.
+            const offline = isOffline();
+            const sentence = offline ? OFFLINE_SENTENCE : DROPPED_SENTENCE;
+            if (partial.trim()) setMessages((m) => [...m, { role: "assistant", content: sentence, hint: "reload" }]);
+            else setAssistantTail(sentence, "reload");
+            if (viaVoice) {
+              say(
+                offline ? "You're offline — ask me again when you have bars." : "The connection dropped before I could answer — ask me again.",
+                () => { if (voiceModeRef.current) startMic(); },
+              );
+            }
+          }
+        }
       }
     } finally {
-      setStreaming(false);
-      setStatus(null);
+      clearInterval(stallWatch);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (turnSettled) clearPendingTurn(sentAt);
+      // STOP frees the screen at once (its handler clears inFlightRef), so a NEWER turn may own it
+      // by the time a stopped probe returns: only the turn still holding abortRef resets the shared
+      // flags — otherwise this cleanup would cut the newer reply off mid-stream.
+      const owns = abortRef.current === myAbort || (recoverAbort !== null && abortRef.current === recoverAbort);
+      if (owns) {
+        inFlightRef.current = false;
+        setStreaming(false);
+        setStatus(null);
+      }
       scrollToBottom();
     }
   }
@@ -695,7 +1053,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     const c = confirmRef.current;
     confirmRef.current = null;
     setPendingConfirm(null);
-    speech.stopListening();
+    speech.stopListening({ discard: true }); // the yes/no is already decided — nothing else to send
     setListening(false);
     if (!c) return;
     if (!yes) {
@@ -793,7 +1151,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           {statusText ? (
             <div className="flex shrink-0 items-center gap-2 px-3 py-2">
               <Sparkles className="h-4 w-4 shrink-0 animate-pulse text-orange-500" />
-              <span className="truncate text-sm text-slate-500">{elapsedStr} · {tokens} tokens · {statusText}</span>
+              {/* The elapsed/token readout belongs to a reply in progress; while the mic is the
+                  thing working, "0s · 0 tokens · Hearing you…" (Erik's 2026-09-11 screenshot)
+                  reads as a reply that isn't coming. */}
+              <span className="truncate text-sm text-slate-500">{streaming ? `${elapsedStr} · ${tokens} tokens · ${statusText}` : statusText}</span>
             </div>
           ) : !draft && messages.length === 0 && !voiceMode ? (
             <div className="px-3 py-2.5 text-sm text-slate-400">What can I help you with?</div>
@@ -813,13 +1174,18 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             </div>
           )}
           {messages.length > 0 && (
-            <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-2 pt-0.5">
+            // overscroll-contain: on iOS, scrolling past the end of this list used to carry on
+            // into the page behind the floating panel.
+            <div ref={scrollRef} className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 pb-2 pt-0.5">
               {messages.map((m, i) => (
                 <div key={i} className="flex items-baseline gap-1.5 text-xs leading-snug">
                   <span className={`shrink-0 font-semibold ${m.role === "user" ? "text-brand" : "text-slate-300"}`}>
                     {m.role === "user" ? "›" : "↳"}
                   </span>
-                  <span className="whitespace-pre-wrap break-words text-slate-600">{m.content || "…"}</span>
+                  <span className="whitespace-pre-wrap break-words text-slate-600">
+                    {m.content || "…"}
+                    {m.hint === "reload" ? <ReloadDoor /> : null}
+                  </span>
                 </div>
               ))}
             </div>
@@ -836,7 +1202,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               <button onClick={newChat} className="text-xs font-medium text-slate-400 hover:text-brand">+ New chat</button>
             </div>
           )}
-          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
             {messages.length === 0 ? (
               glass ? null : (
                 <div className="flex h-full flex-col items-center justify-center text-center">
@@ -873,6 +1239,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                     }
                   >
                     {m.content || <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
+                    {m.hint === "reload" ? <ReloadDoor /> : null}
                   </div>
                 </div>
               ))

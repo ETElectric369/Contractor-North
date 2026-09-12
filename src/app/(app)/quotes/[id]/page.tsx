@@ -13,10 +13,11 @@ import { CircuitScheduleCard } from "./circuit-schedule-card";
 import { CustomerSelect } from "./customer-select";
 import { DuplicateQuoteButton } from "./duplicate-quote-button";
 import { EmailButton } from "@/components/email-button";
+import { ShareIconButton } from "@/components/share-icon-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
-import { createJobFromQuote, deleteQuote } from "../actions";
+import { createJobFromQuote, deleteQuote, quoteShareText } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
 import { createInvoiceFromQuote } from "../../billing/actions";
@@ -124,10 +125,28 @@ export default async function QuoteDetailPage({
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-slate-900">{q.quote_number}</h1>
-            <Badge tone={statusTone(q.status)}>{q.status}</Badge>
-            <QuoteTypeToggle id={q.id} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
+          {/* TWO LAYERS, NOT ONE ROW. The share is a sibling of the wrapping group, not its last
+              member: the type toggle is ~250px of nowrap pill (two labelled segments) that cannot
+              shrink, so as one flat row at 375–402px (343–370px of content inside main's p-4)
+              number + badge + toggle already ran ~440px and pushed the share clean off the right
+              edge. Wrapping that flat row would have carried the share down to the toggle's line.
+              Here the group takes the remaining width (flex-1 min-w-0) and wraps INSIDE itself —
+              number + badge on the first line, the toggle dropping under them — while the share
+              stays parked top-right on the first line at every width (items-start; its 32px box
+              matches the h1's 32px line). Narrowest case, 375px: 343 − 12 gap − 32 share = 299px
+              for the group; "EST-0042" + badge ≈ 175px fits line one, the ~250px toggle fits line
+              two, nothing scrolls sideways. */}
+          <div className="flex items-start gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+              <h1 className="min-w-0 text-2xl font-bold text-slate-900">{q.quote_number}</h1>
+              <Badge tone={statusTone(q.status)}>{q.status}</Badge>
+              <QuoteTypeToggle id={q.id} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
+            </div>
+            {/* The estimate page had NO share at all — only Email and Text, both of which need a
+                number or an address on file. Same tiny box-with-arrow as the invoice, same corner
+                (the right end of the title line — the page's true top-right once the verb row
+                wraps on a phone), same draft dance: a draft asks, then flips to sent as it goes. */}
+            <ShareIconButton load={quoteShareText.bind(null, q.id)} className="ml-auto shrink-0" />
           </div>
           {q.title && <p className="mt-1 text-slate-600">{q.title}</p>}
           {/* Provenance backlink — the lead this estimate was seeded from. */}

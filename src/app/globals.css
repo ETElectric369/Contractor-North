@@ -94,6 +94,50 @@ main {
   overscroll-behavior-y: contain;
 }
 
+/* ── The iOS shell (Capacitor WKWebView, full-bleed) ─────────────────────────
+   The app shell's root is h-dvh + overflow-hidden, so the DOCUMENT never scrolls —
+   yet WKWebView still rubber-bands the whole document when a drag lands on the
+   topbar, the dock, or a fixed panel, exposing the native background beneath the
+   app. Tell the document scroller not to (WebKit honours overscroll-behavior on
+   the root since Safari 16). Scoped by :has() to pages that carry the app shell,
+   so the public site and the login page keep their normal document scroll and
+   pull-to-refresh; browsers without :has() ignore the rule. Desktop is unaffected:
+   the app root can't overscroll there either. */
+html:has(.app-backdrop),
+html:has(.app-backdrop) body {
+  overscroll-behavior-y: none;
+}
+
+/* Touch devices (the shell first, the PWA and Safari too): a fast second tap on a
+   control is a second tap, not double-tap-to-zoom, and the 300 ms tap delay never
+   returns for a control. `manipulation` keeps pinch-zoom and pan. No effect on a
+   mouse, so desktop is untouched. */
+@media (pointer: coarse) {
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"] {
+    touch-action: manipulation;
+  }
+  /* Long-pressing a dock tile or topbar control in the WKWebView pops the text
+     selection callout over its label (there is no link preview any more — the
+     shell turns it off; this is the OS text handle). Chrome labels aren't prose. */
+  .app-bottom-nav,
+  [data-tour="dock"],
+  button,
+  [role="button"] {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
 /* ── Liquid-glass skin (sea-glass teal) ─────────────────────────────────────
    Frosted, translucent chrome with a glossy front face. The tint follows
    --glass-tint (chrome only — quotes/invoices keep the brand color). The app

@@ -12,7 +12,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { InvoiceDetail } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
-import { ShareDocButton } from "@/components/share-doc-button";
+import { ShareIconButton } from "@/components/share-icon-button";
 import { EmailButton } from "@/components/email-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
@@ -100,6 +100,14 @@ export default async function InvoicePage({
             {inv.invoice_number}
           </h1>
           <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
+          {/* Text it, AirDrop it, WhatsApp it — the way a contractor in a driveway actually sends
+              things. Sends the customer's own token link on this business's domain; before this
+              existed the only path was the OS share sheet on the PDF preview, which shipped the
+              app's marketing blurb and a login URL. It rides the RIGHT END OF THE TITLE LINE, not
+              the verb row (Erik 2026-09-11: "super tiny box with arrow icon… positioned
+              intuitively"): on a phone the verb row wraps under the title, so this corner is the
+              page's true top-right, where every phone already puts Share. */}
+          <ShareIconButton load={invoiceShareText.bind(null, inv.id)} className="ml-auto" />
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
           {inv.title && <span className="text-slate-600">{inv.title}</span>}
@@ -141,11 +149,6 @@ export default async function InvoicePage({
             customerName={inv.customers?.name ?? null}
             amount={Number(inv.total)}
           />
-          {/* Text it, AirDrop it, WhatsApp it — the way a contractor in a driveway actually sends
-              things. Sends the customer's own token link on this business's domain; before this
-              existed the only path was the OS share sheet on the PDF preview, which shipped the
-              app's marketing blurb and a login URL. */}
-          <ShareDocButton load={invoiceShareText.bind(null, inv.id)} />
           {/* RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now,
               in the same row. This used to be an anchor that scrolled to a form in the right
               column, so the page had two Record Payment buttons and Pay Now sat inside the form.

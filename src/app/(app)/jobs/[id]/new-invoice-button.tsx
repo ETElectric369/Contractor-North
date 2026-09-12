@@ -8,11 +8,17 @@ import { useToast } from "@/components/toast";
 import { createInvoiceForJob } from "../actions";
 
 /**
- * "New invoice" — the plain standard invoice, front-and-center on the Invoices tab (it used to hide
+ * "New Invoice" — the plain standard invoice, front-and-center on the Invoices tab (it used to hide
  * in the Manage ⋯ menu, so on a T&M job you'd only see "Progress payment" and think you couldn't
- * bill straight). Pulls the job's logged labor + materials into a draft. It's now IDEMPOTENT: if the
- * job already has a standard invoice it opens THAT one instead of spawning a duplicate that re-bills
- * the same hours (the accountability fix), telling you so when the existing one was already sent.
+ * bill straight). Pulls the job's logged labor + materials into a draft — only the hours and bills
+ * not already on another invoice, so a job can be invoiced AGAIN for what is new since the last one
+ * (85 Whitney, 2026-09-11: a PAID invoice used to capture this click and open itself, locked, while
+ * the new time and bills had no door). An open DRAFT on the job is opened instead of a second one,
+ * and the note says so.
+ *
+ * NOTHING SILENT: the server's note (opened the draft / what was pulled in / what couldn't be) is
+ * toasted BEFORE the redirect, and a refusal carries its own door — "Open INV-0xx" when everything
+ * is already billed there.
  */
 export function NewInvoiceButton({ jobId }: { jobId: string }) {
   const router = useRouter();
@@ -23,7 +29,12 @@ export function NewInvoiceButton({ jobId }: { jobId: string }) {
     start(async () => {
       const res = await createInvoiceForJob(jobId);
       if (!res.ok || !res.id) {
-        toast(res.error ?? "Could not create the invoice.", "error");
+        const door = res.billedOn;
+        toast(
+          res.error ?? "Could not create the invoice.",
+          "error",
+          door ? { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) } : undefined,
+        );
         return;
       }
       if (res.importWarning) toast(res.importWarning, "info");

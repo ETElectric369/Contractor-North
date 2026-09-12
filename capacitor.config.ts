@@ -20,11 +20,19 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: "never",
     appendUserAgent: "CNShell/1 (iOS)",
-    backgroundColor: "#0b0f12",
+    // The WebView's own paint — what shows at launch before the first page paints and in the
+    // band a rubber-band drag exposes. The launch screen is systemBackground (white) and the app
+    // ground is --background #f8fafc (globals.css); the old near-black here was a black flash
+    // between them and a black stripe on every overscroll. Same ground = no flash, no stripe.
+    backgroundColor: "#f8fafc",
+    // WKWebView's long-press "peek" renders a preview of the tapped link (an app page, inside a
+    // native app) with Open-in-Safari options. A tab-less shell has no use for it, and it stole
+    // the long press from every dock tile and list row.
+    allowsLinkPreview: false,
   },
   android: {
     appendUserAgent: "CNShell/1 (Android)",
-    backgroundColor: "#0b0f12",
+    backgroundColor: "#f8fafc",
   },
 };
 

@@ -35,6 +35,7 @@ import {
   importChangeOrdersIntoInvoice,
   updatePayment,
   deletePayment,
+  type ImportStats,
 } from "../actions";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { AddLineItems } from "@/components/add-line-items";
@@ -239,19 +240,30 @@ export function InvoiceDetail({
       // Say what actually happened. An import that left five negotiated lines alone and added
       // two new ones is a very different event from "imported", and the office needs to know
       // which — that ambiguity is what made the old behaviour feel like force-feeding.
-      const st = (res as { stats?: { inserted: number; updated: number; kept_edited: number; removed: number } }).stats;
-      const said = st
+      const st = (res as { stats?: Partial<ImportStats> }).stats;
+      const lines = st
         ? [
             st.inserted ? `${st.inserted} added` : "",
             st.updated ? `${st.updated} updated` : "",
             st.kept_edited ? `${st.kept_edited} of your edits kept` : "",
             st.removed ? `${st.removed} removed` : "",
-          ].filter(Boolean).join(" · ") || "nothing changed"
+          ].filter(Boolean).join(" · ")
         : "";
+      // THE CLAIM HALF OF THE SENTENCE (0255). `summary` is the importer's own account of the
+      // source rows — "5 time entries pulled in · 9 already on INV-061 skipped" — and it is the
+      // only place the office learns that this run deliberately LEFT work on another invoice.
+      // Without it a labor import that skipped every claimed hour read as "nothing changed",
+      // which is the exact sentence that sends someone hunting for a bug (or re-billing by hand
+      // what INV-061 already carries). Source sentence first, the line counters after it.
+      const said = [st?.summary, lines].filter(Boolean).join(" · ") || (st ? "nothing changed" : "");
       // "nothing changed" is the sentence that sent Erik looking for a bug (8/18). When an
       // import genuinely can't touch anything — every line edited, or the ones he deleted are
-      // tombstoned — say WHY, and put the way out right next to it.
-      const stuck = !!st && !st.inserted && !st.updated && !st.removed;
+      // tombstoned — say WHY, and put the way out right next to it. "Stuck" means the run HAD
+      // rows to land (pulled_in > 0) and the RPC could place none of them; a run that had nothing
+      // free to pull — the source is empty, or another invoice claims all of it — is not stuck,
+      // its summary already says why, and arming Start It Over would only offer to rebuild
+      // nothing. Stats from before 0255 carry no pulled_in, so they keep the old rule.
+      const stuck = !!st && !st.inserted && !st.updated && !st.removed && (st.pulled_in == null || st.pulled_in > 0);
       setStuckSource(stuck ? sourceKey : null);
       setImportMsg(said ? `${label}: ${said}.` : `${label} imported.`);
       toast(said ? `${label} — ${said}` : `${label} imported`, "success");

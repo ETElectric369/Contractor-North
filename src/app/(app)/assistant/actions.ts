@@ -64,6 +64,44 @@ export async function saveConversation(messages: StoredMsg[], draft: AgentDraft 
   return { ok: !error };
 }
 
+/**
+ * THE REPLY THE SCREEN MISSED. The chat route persists every finished turn (user line + Nort's
+ * reply, one insert, same created_at) in its `finally` — whether or not the phone was still
+ * reading the stream. Inside the iOS shell a backgrounded WKWebView loses its socket ("Load
+ * failed"), and a jettisoned WebContent process reloads the page cold: either way the answer
+ * exists on the server and the screen shows nothing. This is the door back to it: the user's own
+ * text + when it was sent → the assistant row persisted beside it. RLS (messages_owner) scopes
+ * the read to this user; nothing here is a write.
+ */
+export async function recoverTurn(userText: string, sinceIso: string): Promise<{ reply: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { reply: null };
+  const wanted = String(userText ?? "").trim().slice(0, 8000);
+  const sinceMs = Date.parse(sinceIso);
+  if (!wanted || !Number.isFinite(sinceMs)) return { reply: null };
+  // Clock skew between the phone and the server is the only reason for the 30 s slack.
+  const since = new Date(sinceMs - 30_000).toISOString();
+  const { data: convos } = await supabase.from("conversations").select("id").eq("user_id", user.id).order("created_at", { ascending: false }).limit(3);
+  const ids = (convos ?? []).map((c) => (c as { id: string }).id);
+  if (!ids.length) return { reply: null };
+  const { data: rows } = await supabase
+    .from("messages")
+    .select("role, content, created_at")
+    .in("conversation_id", ids)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(40);
+  // The pair shares one created_at (one insert). Find the newest user row that IS this question
+  // and hand back the assistant row stamped with the same instant.
+  type Row = { role: string; content: string; created_at: string };
+  const list = (rows ?? []) as Row[];
+  const mine = list.find((r) => r.role === "user" && r.content.trim() === wanted);
+  if (!mine) return { reply: null };
+  const reply = list.find((r) => r.role === "assistant" && r.created_at === mine.created_at);
+  return { reply: reply?.content?.trim() || null };
+}
+
 /** Start fresh — forget the current conversation (memory facts are kept). */
 export async function clearConversation(): Promise<{ ok: boolean }> {
   const supabase = await createClient();

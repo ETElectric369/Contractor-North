@@ -2,7 +2,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 type Variant = "primary" | "secondary" | "outline" | "ghost" | "destructive";
-type Size = "sm" | "md" | "lg" | "icon";
+type Size = "sm" | "md" | "lg" | "icon" | "icon-sm";
 
 const variants: Record<Variant, string> = {
   // Primary CTA is sea-glass, not brand blue: a SOLID dark-teal fill (--glass-ink) so the
@@ -34,6 +34,15 @@ const sizes: Record<Size, string> = {
   lg: "h-12 px-6 text-base [&_svg]:size-5",
   // Icon buttons sit at the same 44px touch target so a tap doesn't miss.
   icon: "h-11 w-11 [&_svg]:size-5",
+  // icon-sm is THE TINY SQUARE (Erik 2026-09-11: "share can be this super tiny box with arrow
+  // icon") — a 32px box for the eye that still obeys the 44px law above: a transparent ::before
+  // bleeds 6px past every edge, so the finger lands on 44px while the eye sees 32. It is ::before,
+  // not ::after, because .btn-gloss::after is the specular sheen; and `overflow-visible!` carries
+  // !important because .btn-gloss is unlayered CSS that sets overflow:hidden — which would clip
+  // the bleed, and an unlayered rule beats any plain utility. Outline/ghost callers only; it has
+  // no label room, so the caller MUST pass aria-label + title.
+  "icon-sm":
+    "relative h-8 w-8 overflow-visible! [&_svg]:size-4 before:absolute before:-inset-1.5 before:content-['']",
 };
 
 export interface ButtonProps

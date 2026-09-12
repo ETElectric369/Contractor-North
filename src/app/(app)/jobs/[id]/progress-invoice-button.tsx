@@ -20,7 +20,13 @@ type DrawKind = "deposit" | "progress" | "final";
  *  actual work, invoiced, paid, balance) and runs every billing flow through one
  *  path: RECORD A PAYMENT against an open invoice, or create a billing DRAW
  *  (deposit / progress / final). On a Time & Material job the estimate is a
- *  reference, not a cap — "work to date" tells you if you're tracking over. */
+ *  reference, not a cap — "work to date" tells you if you're tracking over.
+ *
+ *  THE GAUGE IS LABELLED FOR WHAT IT IS. `invoiced` is the total of every sent invoice on the
+ *  job — hand-typed lines included (85 Whitney's INV-061 carries a $400 referral). "Work to
+ *  date − invoiced" is therefore a rough "not yet invoiced", never "due this draw": the draw
+ *  itself bills exactly the hours and bills not yet on an invoice, and ITS total is the real
+ *  figure (MONEY law: never invent one). */
 export function ProgressInvoiceButton({
   jobId,
   billingType = "fixed",
@@ -55,9 +61,11 @@ export function ProgressInvoiceButton({
     scheduleActive || (balanceDue > 0 && openInvoices.length) ? "payment" : "invoice",
   );
 
-  // New-invoice (draw) state
+  // New-invoice (draw) state. No estimate on the job → a percent of it can only fail ("Add a
+  // quote/estimate…"), so that choice is never offered and the default is a fixed amount.
+  const canPercent = estimate > 0;
   const [kind, setKindState] = useState<DrawKind>("progress");
-  const [billMode, setBillMode] = useState<"percent" | "fixed" | "actuals">(isTM ? "actuals" : "percent");
+  const [billMode, setBillMode] = useState<"percent" | "fixed" | "actuals">(isTM ? "actuals" : canPercent ? "percent" : "fixed");
   const [pct, setPct] = useState(50);
   const [fixed, setFixed] = useState(0);
   const newAmount =
@@ -76,6 +84,8 @@ export function ProgressInvoiceButton({
     } else if (k === "final") {
       setBillMode("fixed");
       setFixed(remainingToEstimate);
+    } else if (!canPercent) {
+      setBillMode("fixed");
     } else {
       setBillMode("percent");
       setPct(50);
@@ -121,7 +131,9 @@ export function ProgressInvoiceButton({
             ? await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind)
             : await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
         if (!res.ok || !res.id) return setError(res.error ?? "Could not create the invoice.");
-        toast("Invoice created", "success");
+        // The actuals draw's total IS the unbilled work (not the modal's rough gauge) — say so; a
+        // percent / fixed draw is the amount typed, nothing to explain.
+        toast(billMode === "actuals" ? "Draft created — its total is the work not yet billed" : "Draft created", "success");
         router.push(`/billing/${res.id}`);
       }
     });
@@ -182,7 +194,7 @@ export function ProgressInvoiceButton({
 
           {scheduleActive ? (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-              This job bills on a payment schedule — create draws with <strong>Request next payment</strong> above. Use this to record a customer&apos;s payment.
+              This job bills on a payment schedule — create draws with <strong>Request Next Payment</strong> on the schedule card below. Use this to record a customer&apos;s payment.
             </p>
           ) : (
             <SegmentedControl
@@ -198,7 +210,7 @@ export function ProgressInvoiceButton({
           {mode === "payment" ? (
             openInvoices.length === 0 ? (
               <p className="text-sm text-slate-500">
-                No open invoices on this job. Switch to <strong>New invoice</strong> to bill the customer first, then
+                No open invoices on this job. Switch to <strong>New Invoice</strong> to bill the customer first, then
                 record their payment here.
               </p>
             ) : (
@@ -269,18 +281,17 @@ export function ProgressInvoiceButton({
               <SegmentedControl
                 activeId={billMode}
                 onSelect={(id) => setBillMode(id as "percent" | "fixed" | "actuals")}
-                items={
-                  showActuals
-                    ? [
-                        { id: "actuals", label: "Actual T&M" },
-                        { id: "percent", label: "% of Est." },
-                        { id: "fixed", label: "Fixed" },
-                      ]
-                    : [
-                        { id: "percent", label: "% of Remaining" },
-                        { id: "fixed", label: "Fixed Amount" },
-                      ]
-                }
+                items={(showActuals
+                  ? [
+                      { id: "actuals", label: "Actual T&M" },
+                      { id: "percent", label: "% of Est." },
+                      { id: "fixed", label: "Fixed" },
+                    ]
+                  : [
+                      { id: "percent", label: "% of Remaining" },
+                      { id: "fixed", label: "Fixed Amount" },
+                    ]
+                ).filter((i) => i.id !== "percent" || canPercent)}
               />
 
               {billMode === "actuals" ? (
@@ -290,15 +301,16 @@ export function ProgressInvoiceButton({
                     <span className="font-medium text-slate-800">{formatCurrency(worked)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Less previously billed</span>
+                    <span className="text-slate-500">Invoiced so far (every line, hand-typed ones too)</span>
                     <span className="font-medium text-slate-500">−{formatCurrency(invoiced)}</span>
                   </div>
                   <div className="flex justify-between border-t border-slate-200 pt-1">
-                    <span className="font-medium text-slate-700">Due this {kind === "final" ? "final" : "draw"}</span>
+                    <span className="font-medium text-slate-700">Not yet invoiced (rough)</span>
                     <span className="font-bold text-brand">{formatCurrency(unbilledWork)}</span>
                   </div>
                   <p className="pt-1 text-xs text-slate-400">
-                    Builds an itemized progress report — all labor + materials to date, less the deposit — a statement you can send as the payment request.
+                    The {kind === "final" ? "final" : "draw"} bills the hours and bills not yet on any invoice — its total is the real figure. A
+                    hand-typed line on an earlier invoice (a referral, a discount) isn&apos;t work, so this gauge can read low or high.
                   </p>
                 </div>
               ) : billMode === "percent" ? (
@@ -333,7 +345,7 @@ export function ProgressInvoiceButton({
                     )}
                     {isTM && unbilledWork > 0 && (
                       <button type="button" onClick={() => setFixed(unbilledWork)} className="rounded-full border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-                        Work to Date ({formatCurrency(unbilledWork)})
+                        Not Yet Invoiced ({formatCurrency(unbilledWork)})
                       </button>
                     )}
                   </div>

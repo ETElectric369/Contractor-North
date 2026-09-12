@@ -15,9 +15,12 @@ import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress } fr
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
-import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
+import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
+import { revalidatePath } from "next/cache";
+import { dbError } from "@/lib/db-error";
 import { YourList } from "./your-list";
+import { WhichJob, type WhichJobResult } from "./which-job";
 import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
@@ -29,6 +32,78 @@ import { QuickCostButton } from "@/components/quick-cost-button";
 export const dynamic = "force-dynamic";
 
 const fmtTime = (iso: string) => formatTime(iso);
+
+/**
+ * PUT THE OPEN PUNCH ON A JOB — the write behind the "Which job are you on?" block.
+ *
+ * Sets job_id on the caller's OWN, OPEN, still job-less time entry, so every hour since the
+ * punch lands on the job (and the Now block's doors come back). Why this is its own small
+ * action and not one of the two that already exist:
+ *   · switchJob records the OUTGOING segment first, and on a job-less punch that segment is
+ *     written with job_id NULL — the morning is banked to nothing and the job gets only the
+ *     minutes after the tap (timeclock-panel.tsx says so above its own "no job" line).
+ *   · updateTimeEntry is the Timecards edit path — it demands clock_out and writes
+ *     status 'closed', so on an OPEN punch it would clock the person out to name the job.
+ * Self-scoped like switchJob (own entry, status open), job visible to the caller's RLS-scoped
+ * client (the visibleJobIdOrNull read, plus the status the picker promised), and ONLY a punch
+ * with no job: moving one that already carries a job stays the office's Timecards correction.
+ * That is also why it is open to every role — a member naming the site they are standing on
+ * is the same fact the resolver would have attached at clock-in, not an after-the-fact edit;
+ * the DB guard (0143/0154) freezes clock_in/rate/person for a tech, never job_id.
+ * Checked write (the silent-write law): a zero-row UPDATE is a refusal with a sentence.
+ */
+async function putPunchOnJob(entryId: string, jobId: string): Promise<WhichJobResult> {
+  "use server";
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data: entry } = await supabase
+    .from("time_entries")
+    .select("id, job_id")
+    .eq("id", entryId)
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .maybeSingle();
+  const open = entry as { id: string; job_id: string | null } | null;
+  // `stale` refusals: the punch is not what the screen shows. The shell has no pull-to-refresh,
+  // so the sentence never asks for one — WhichJob re-renders the block from the server itself.
+  if (!open) return { ok: false, stale: true, error: "That punch isn't open any more — My Day is catching up." };
+  if (open.job_id) {
+    return { ok: false, stale: true, error: "This punch already carries a job — My Day is catching up. The office moves it from Timecards." };
+  }
+
+  // A foreign/stray id resolves to nothing under RLS; a finished job is not a site to be on.
+  const { data: jobRow } = await supabase.from("jobs").select("id, status").eq("id", jobId).maybeSingle();
+  const job = jobRow as { id: string; status: string | null } | null;
+  if (!job) return { ok: false, error: "That job isn't available." };
+  if (job.status !== "in_progress") {
+    return { ok: false, error: "That job isn't in progress — pick one that is, or start it from Timeclock." };
+  }
+
+  // The predicates repeat the checks above ON the write itself, so a punch that closed or got a
+  // job between the read and the update is a zero-row UPDATE — reported, never assumed landed.
+  const { data: hit, error } = await supabase
+    .from("time_entries")
+    .update({ job_id: job.id })
+    .eq("id", open.id)
+    .eq("profile_id", user.id)
+    .eq("status", "open")
+    .is("job_id", null)
+    .select("id")
+    .maybeSingle();
+  if (error) return { ok: false, error: dbError(error) };
+  if (!hit) return { ok: false, stale: true, error: "Nothing changed — the punch closed or got a job in the meantime. My Day is catching up." };
+
+  revalidatePath("/planner"); // the Now block's doors
+  revalidatePath("/timeclock"); // the running banner's job name
+  revalidatePath("/timecards"); // the crew strip + week grid
+  revalidatePath(`/jobs/${job.id}`); // the job's Time tab + labor totals
+  revalidatePath("/jobs");
+  return { ok: true };
+}
 
 export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; actions?: string; week?: string }> }) {
   const { view: viewRaw, actions: actionsRaw, week: weekRaw } = await searchParams;
@@ -128,10 +203,18 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
   // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
-  const [curJobRes, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
+  const [curJobRes, whichJobsR, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
+    // The open punch has NO job: the Now block asks "Which job are you on?" and needs the jobs
+    // it may be put on — the org's jobs in progress, RLS-scoped, in /timeclock's picker
+    // projection and order with NO cap (its .limit(50) once hid the oldest long-running jobs,
+    // the very ones a crew is on). in_progress only: a punch lands on a scheduled/on-hold job
+    // through clockIn/switchJob, which promote it to in_progress on the way; this door doesn't.
+    openEntry && !openEntry.job_id
+      ? supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("status", "in_progress").order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] as any[] }),
     // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
     // under their parent and never count; children fetch below).
     mineCut(
@@ -188,6 +271,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     profiles: { full_name: string | null } | null;
   }[]);
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
+  // Options for the job-less punch's picker, labelled the way /timeclock's picker labels them
+  // (its optionLabel): codes on → the job name; codes off → customer · street address.
+  const jobCodesOn = getOrgSettings((orgRow as any)?.settings).timeclock_job_codes;
+  const whichJobs = (((whichJobsR as any)?.data ?? []) as any[]).map((j) => ({
+    id: j.id as string,
+    label: jobCodesOn ? jobLabel(j) : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null }),
+  }));
   // Navigate target for the "Now" hero: structured address → customer address → job
   // name (so the button never vanishes when the address lives in the name). Same rule
   // the job dock uses (directionsTarget).
@@ -787,7 +877,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               affordances. Add Cost is the office's — createBill is requireStaff — so
               it renders for staff only; a tech never fills a form that refuses on
               save (NO DEAD ENDS). The other three doors are the crew's: the whole job,
-              and the job's one materials list, are theirs to read and work. */}
+              and the job's one materials list, are theirs to read and work.
+              The block is keyed to the OPEN PUNCH's job. A punch that carries none (the
+              resolver found nothing to attach) used to drop the whole block silently — the
+              four doors gone with no sentence (Erik 2026-09-11, "what happened to my materials
+              button"). Now that punch gets the WhichJob block below instead: one pick puts the
+              whole entry on the job and this block takes its place on the refresh. */}
           {currentJob && (
             <div className="border-b border-brand/20 bg-brand-light/30 px-5 py-4">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
@@ -826,6 +921,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 )}
               </div>
             </div>
+          )}
+          {/* On the clock with NO job on the punch: ask, don't vanish. Keyed on the punch's own
+              job_id being empty — a punch that carries a job never lands here. */}
+          {openEntry && !openEntry.job_id && (
+            <WhichJob entryId={openEntry.id} jobs={whichJobs} isStaff={isStaff} onPick={putPunchOnJob} />
           )}
 
           {nextAgenda.length === 0 && laterAgenda.length === 0 && earlierAgenda.length === 0 ? (

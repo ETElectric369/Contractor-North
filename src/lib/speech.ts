@@ -139,14 +139,22 @@ export function startListening(lang = "en-US"): boolean {
   }
 }
 
-export function stopListening() {
+/** `discard: true` (the topbar STOP / End conversation / close) drops the final result the
+ *  recognizer hands back on stop() — same contract as voice-stream, so STOP means stop on both
+ *  backends. Without it, a plain stop still delivers what was heard (the in-page mic tap). */
+export function stopListening(opts?: { discard?: boolean }) {
   wantActive = false; // a real stop — don't auto-revive
+  const r = recog;
+  recog = null;
+  if (r && opts?.discard) {
+    // The final onresult fires asynchronously after stop() — point it at nothing.
+    r.onresult = null;
+  }
   try {
-    recog?.stop();
+    r?.stop();
   } catch {
     /* ignore */
   }
-  recog = null;
   listeningNow = false;
   muted = false;
   emit();

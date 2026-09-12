@@ -160,19 +160,27 @@ export function shouldBlockStandardImport(invoiceKind: string | null | undefined
   return (invoiceKind ?? "standard") === "standard" && hasOtherDraws;
 }
 
-/** H4, the REVERSE direction: a job already being billed on a STANDARD invoice that
- *  CARRIES CONTENT (line items / a non-zero total) must NOT also get a progress draw —
- *  the draw re-bills the same labor / materials / scope, double-charging the customer.
- *  The mirror of shouldBlockStandardImport: that one blocks standard content when a
- *  draw exists; this one blocks a draw when standard content exists. A blank standard
- *  invoice (no lines, $0) carries nothing yet, so it never blocks. */
+/** H4, the REVERSE direction — NARROWED (0255, Erik's 85 Whitney evening).
+ *
+ *  It used to read: a job being billed on ANY content-carrying standard invoice must not also get
+ *  a progress draw. That was the only way to stop a draw re-billing the same hours when labor
+ *  lines had no row identity — and it also meant a PAID invoice blocked billing anything NEW for
+ *  the rest of the job's life ("i tried progress payments and nothing"). Now every labor line
+ *  claims its entries (source_ids) and a draw imports only UNCLAIMED rows, so a sent/paid
+ *  standard invoice is finished business, not a blocker.
+ *
+ *  What still blocks: a DRAFT standard invoice that carries content — it is the open door new
+ *  work should go through ("finish INV-0xx first"), and two open documents billing the same job
+ *  at once is how lines get typed on both. A blank draft (no lines, $0) carries nothing, so it
+ *  never blocks. Draws never block: they ARE the billing path. */
 export function isStandardBillingBlocker(
   invoiceKind: string | null | undefined,
+  status: string | null | undefined,
   total: number,
   lineItemCount: number,
 ): boolean {
   const isStandard = (invoiceKind ?? "standard") === "standard";
-  return isStandard && (fin(total) > 0.005 || fin(lineItemCount) > 0);
+  return isStandard && status === "draft" && (fin(total) > 0.005 || fin(lineItemCount) > 0);
 }
 
 /** Progress-report summary for a draw: % of the estimate completed (0 when there's

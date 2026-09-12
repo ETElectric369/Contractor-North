@@ -177,12 +177,31 @@ export function MyDayClock({
               <div className="text-xl font-bold tabular-nums text-slate-900" suppressHydrationWarning>
                 {fmtHms(liveMs)}
               </div>
-              <div className="truncate text-xs text-slate-500">
-                On the clock{jobLabel ? ` · ${jobLabel}` : ""} ·{" "}
-                <Link href="/timeclock" className="font-medium text-brand hover:underline">
-                  Timeclock →
-                </Link>
-              </div>
+              {jobLabel ? (
+                <div className="truncate text-xs text-slate-500">
+                  On the clock · {jobLabel} ·{" "}
+                  <Link href="/timeclock" className="font-medium text-brand hover:underline">
+                    Timeclock →
+                  </Link>
+                </div>
+              ) : (
+                /* A job-less punch is a real outcome (the server resolver found nothing to attach),
+                   but a bare "On the clock" with the label silently missing read as a broken app and
+                   took the Now block's four doors with it. Say it, and point at the ONE control that
+                   fixes it: the "Which job are you on?" picker on the Today card (the anchor lives on
+                   the day view, so the link carries the route for a tech paging the week). Wraps
+                   rather than truncates — the sentence is the point. */
+                <div className="text-xs text-slate-500">
+                  On the clock · no job on this punch yet —{" "}
+                  <Link href="/planner#which-job" className="font-medium text-brand hover:underline">
+                    Put It on the Job
+                  </Link>{" "}
+                  ·{" "}
+                  <Link href="/timeclock" className="font-medium text-brand hover:underline">
+                    Timeclock →
+                  </Link>
+                </div>
+              )}
               {/* The one lunch question, off by default — this card is where most days end,
                   so it has to be answerable here and not only on /timeclock. */}
               <label htmlFor="md-lunch" className="mt-1.5 flex cursor-pointer items-center gap-2 text-xs text-slate-600">

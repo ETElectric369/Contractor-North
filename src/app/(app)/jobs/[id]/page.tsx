@@ -32,6 +32,10 @@ import {
   formatFullAddress,
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
+import { JobCostCapture } from "./job-cost-capture";
+import { UnbilledCard, type UnbilledView } from "./unbilled-card";
+import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { reportError } from "@/lib/observe";
 import { JobPhotos } from "./job-photos";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
@@ -75,19 +79,25 @@ import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-// In-page nav order — the lifecycle-honest strip. The Work core (Overview, Time,
-// Materials, Photos) prefers to stay inline (TIME rides 2nd so it never hides in
-// "More" on a phone); everything financial/closeout clusters into the More menu.
+// In-page nav order — the lifecycle-honest strip. The pinned chips (per role, below)
+// lead in this order; everything else clusters into the More chip in this order.
 const JOB_TAB_ORDER = [
-  "job", "time", "materials", "photos", "tasks", "appointments", "notes",
-  "quotes", "costs", "invoices", "change-orders", "permits", "wos",
+  "job", "time", "materials", "costs", "invoices", "photos", "tasks", "appointments",
+  "notes", "quotes", "change-orders", "permits", "wos",
 ];
-const JOB_PRIMARY = new Set(["job", "time", "materials", "photos"]);
+// THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
+// seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
+// because the money chips can't render for a tech (tech-job-access: a control a role
+// can't use must not render) — his fourth chip is Photos, the crew's other one-tap door.
+// Pinned chips are never measured or folded (<Tabs look="tiles">), which is what ends
+// Costs and Invoices living behind More on every phone: the old measured strip fit ~3
+// of its four "primaries" at 343px, so the money tabs never once stayed inline.
+const JOB_PINNED_STAFF = new Set(["job", "time", "materials", "costs", "invoices"]);
+const JOB_PINNED_TECH = new Set(["job", "time", "materials", "photos"]);
 const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
 
-// The More panel's mini-map: cluster header + chamfered glass chip icon per tab.
-// A LucideIcon COMPONENT reference renders ONLY in the More panel (width-neutral
-// for the strip and its measuring ghost — the 375px fit is untouched). The whole
+// Cluster header + icon per tab. The LucideIcon COMPONENT reference is the chip's own
+// 18px glyph on the strip AND the chamfered glass chip in the More panel. The whole
 // Money cluster is staffOnly, so it vanishes for techs as a unit.
 const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   job: { icon: LayoutDashboard },
@@ -107,18 +117,19 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   permits: { group: "Docs", icon: Stamp },
 };
 
-/** Order the job tabs and tag each with its tier + cluster + staff-gating, so
- *  <Tabs> keeps the Work core visible and folds the rest into a clustered,
- *  bloom-skinned "More" menu. staffOnly is honored TWICE: the page drops those
- *  tabs before passing them (so their content never serializes to a tech), and
- *  <Tabs> filters again on the client. */
-function arrangeJobTabs(tabs: TabDef[]): TabDef[] {
+/** Order the job tabs and tag each with its pin + cluster + staff-gating, so
+ *  <Tabs look="tiles"> keeps the role's five (four) chips put and folds the rest
+ *  into a clustered, bloom-skinned "More" chip. staffOnly is honored TWICE: the
+ *  page drops those tabs before passing them (so their content never serializes
+ *  to a tech), and <Tabs> filters again on the client. */
+function arrangeJobTabs(tabs: TabDef[], viewerIsStaff: boolean): TabDef[] {
+  const pinned = viewerIsStaff ? JOB_PINNED_STAFF : JOB_PINNED_TECH;
   return [...tabs]
     .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
     .map((t) => ({
       ...t,
       ...(JOB_TAB_META[t.id] ?? {}),
-      tier: JOB_PRIMARY.has(t.id) ? ("primary" as const) : ("overflow" as const),
+      pinned: pinned.has(t.id),
       staffOnly: JOB_STAFF_ONLY.has(t.id),
     }));
 }
@@ -310,6 +321,15 @@ export default async function JobDetailPage({
   // PROJECTION LAW (cn-v945): the fee is money, and the read-only permit rows a tech gets are
   // rendered from this same array — so the column is never selected for him, not dropped after.
   const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, notes, portal_url";
+  // THE CARD'S MONEY IS THE DOOR'S MONEY (MONEY law). createInvoiceForJob pulls the job's actuals
+  // (unclaimed hours + bills) only when the job has no live quote — a declined or expired one
+  // doesn't count, the same rule as the door's (invoice-import-rule: the contract decides) — and
+  // refuses outright on a payment schedule (draws bill that job). A fixed-bid job bills its
+  // contract. On any of those, "Create Invoice for $X" would not draft $X, so the Overview carries
+  // no UnbilledCard at all (a quoted job's "time since INV-061" would also be every hour ever
+  // worked, since no labor line ever claims them) and the page skips the read.
+  const liveQuotes = (quotes ?? []).filter((q: any) => q.status !== "declined" && q.status !== "expired");
+  const billsActuals = j.billing_type === "tm" && liveQuotes.length === 0 && (paymentMilestones ?? []).length === 0;
   const [
     { data: canonicalItems },
     { data: permits },
@@ -325,6 +345,7 @@ export default async function JobDetailPage({
     laborRows,
     jobLevelRate,
     { data: refundRows },
+    unbilled,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -376,7 +397,34 @@ export default async function JobDetailPage({
     invoiceIds.length
       ? supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
       : Promise.resolve({ data: [] as any[] }),
+    // THE RUNNING TOTAL for the Overview's UnbilledCard — the hours and bills no non-void
+    // invoice has claimed, the arithmetic Nort's job-numbers tool speaks. Rides this wave
+    // (it needs only the job id) and only on a job that BILLS its actuals (billsActuals, above):
+    // anywhere else the figure isn't what the door would draft, so the page doesn't read it. A
+    // failure here must not take the job page down with it (the 60mph rule): logged, and the
+    // card says it couldn't total and names the tabs.
+    billsActuals
+      ? unbilledWorkForJob(supabase, id).catch((e) => {
+          reportError("jobs.[id].unbilledWork", e, { jobId: id });
+          return null;
+        })
+      : Promise.resolve(null),
   ]);
+  // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
+  // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
+  // so the figures never reach his props (tech-job-access). Before migration 0255 lands the labor
+  // claims are unknowable (schemaReady:false) and the hours would count every shift ever worked:
+  // MONEY law, never invent a figure — the card says it couldn't total rather than show that.
+  const unbilledView: UnbilledView | null = !unbilled || !unbilled.schemaReady
+    ? null
+    : viewerIsStaff
+      ? { kind: "staff", ...unbilled }
+      : {
+          kind: "tech",
+          hours: unbilled.hours,
+          lastInvoiceNumber: unbilled.lastInvoiceNumber,
+          lastInvoiceAt: unbilled.lastInvoiceAt,
+        };
   const oe = openEntryRow as any;
   const openEntry = oe
     ? {
@@ -575,6 +623,13 @@ export default async function JobDetailPage({
       label: "Overview",
       content: (
         <div className="space-y-4">
+          {/* THE RUNNING TOTAL leads (Erik: "a running total of open time and materials on the
+              overview") — what's been worked and bought since the last invoice, with the door
+              that bills it. T&M jobs only (billsActuals — the door's own rule); a tech's card is
+              hours only (unbilledView is projected above). */}
+          {billsActuals && (
+            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} />
+          )}
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -966,6 +1021,11 @@ export default async function JobDetailPage({
       label: "Costs",
       content: (
         <div className="space-y-4">
+          {/* THE ADD COST DOOR, camera first, at the top of the tab where the dock's Add Cost
+              used to be a slot away (Erik: "combine costs with add cost on that upper button
+              and get rid of it below… make it able to take a photo of a bill"). Snap the Bill
+              runs the receipt reader per photo and the Supplier bills list below refreshes. */}
+          <JobCostCapture orgId={j.org_id} jobId={j.id} billsTotal={billsCost} />
           <Card>
             <CardContent className="py-5">
               {/* auto-fit, not viewport breakpoints: at ~675px the window LOOKS "tablet" to sm:
@@ -1019,8 +1079,9 @@ export default async function JobDetailPage({
               <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
             </div>
             <CardContent className="py-5">
-              {/* Photograph or upload a receipt right here in Costs — receipts
-                  tagged Receipt/Bill auto-post as a job cost. */}
+              {/* The job's documents list (plans, permits, every receipt). Its cost role moved up
+                  to the tab's header (Snap the Bill); a receipt uploaded here still auto-posts
+                  as a job cost (same reader, idempotent), and "Record as Cost" is the retry. */}
               <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
             </CardContent>
           </Card>
@@ -1302,7 +1363,8 @@ export default async function JobDetailPage({
       </div>
 
       {/* The action dock — one sticky glass bar replacing the old 7-control row:
-          TIME (the only filled button) · Add cost · Photo · Call · Navigate · Manage ⋯ */}
+          TIME (the only filled button) · Photo · Call · Navigate · Manage ⋯ (Add Cost
+          moved to the Costs tab's header, one chip away). */}
       <JobActionDock
         job={j}
         viewerIsStaff={viewerIsStaff}
@@ -1331,11 +1393,13 @@ export default async function JobDetailPage({
           mounted — the alternative, keying <Tabs> on the linked tab, would remount the whole
           tree on that refresh (client state gone, for staff too) and do nothing on a second
           click of the same link. The staffOnly tabs are dropped HERE, before they're passed, so the money tabs' content
-          never serializes to a tech; <Tabs> filters once more on the client. */}
+          never serializes to a tech; <Tabs> filters once more on the client.
+          look="tiles": the role's pinned chips stay put, the rest ride the More chip. */}
       <Tabs
-        tabs={arrangeJobTabs(tabs).filter((t) => !t.staffOnly || viewerIsStaff)}
+        tabs={arrangeJobTabs(tabs, viewerIsStaff).filter((t) => !t.staffOnly || viewerIsStaff)}
         viewerIsStaff={viewerIsStaff}
         urlSync
+        look="tiles"
       />
     </div>
   );

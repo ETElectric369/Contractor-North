@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Share2, Loader2 } from "lucide-react";
+import { Share, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 
 /**
- * SHARE A CUSTOMER DOCUMENT — the button that wasn't there.
+ * SHARE A CUSTOMER DOCUMENT — the tiny box-with-arrow at the corner of a document's title.
  *
  * The invoice screen offered Email, Collect Payment, Record Payment and Preview/Print. Nothing
  * for "text this to her" or "AirDrop it", which is how a contractor standing in a driveway
@@ -20,13 +21,23 @@ import { useToast } from "@/components/toast";
  *
  * `load` is a server action rather than props because the message carries a live balance — a
  * button rendered an hour ago must not text yesterday's number.
+ *
+ * WHY A TINY ICON, when the 60mph rule says an unlabeled glyph is a guess: this one glyph is
+ * the OS's own — the box with the up-arrow every phone already teaches — and it was a full
+ * labelled 44px button elbowing through the verb row (Erik 2026-09-11: "everywhere, things
+ * like share can be this super tiny box with arrow icon… positioned intuitively"). It keeps
+ * aria-label + title so VoiceOver and a mouse hover still say "Share", and Button's icon-sm
+ * keeps the 44px finger target under the 32px box. It is a PURE share-sheet trigger: Text and
+ * Email stay their own doors, the QR modal keeps its own menu.
  */
-export function ShareDocButton({
+export function ShareIconButton({
   load,
   label = "Share",
+  className,
 }: {
   load: (opts?: { sendIt?: boolean }) => Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }>;
   label?: string;
+  className?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -75,12 +86,17 @@ Mark it sent and share the link now?`);
   }
 
   return (
-    <button
+    <Button
+      type="button"
+      variant="outline"
+      size="icon-sm"
+      aria-label={label}
+      title={label}
       onClick={go}
       disabled={busy}
-      className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+      className={className}
     >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />} {label}
-    </button>
+      {busy ? <Loader2 className="animate-spin" /> : <Share />}
+    </Button>
   );
 }

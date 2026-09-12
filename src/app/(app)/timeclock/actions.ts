@@ -22,8 +22,9 @@ import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 import { clampCloseAtMs, tailAllocationHours } from "./close-math";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
+import { claimedMoveRefusal, entryClaimCarry, planAllocationEdit, type ClaimHolder, type ClaimIndex, type NextAllocation, type StoredAllocation } from "./allocation-claims";
 
-export type ClockResult = { ok: boolean; error?: string };
+export type ClockResult = { ok: boolean; error?: string; warning?: string };
 
 /**
  * The simple clock-in flow's server-side job resolution: the DEFAULT punch carries no
@@ -430,6 +431,10 @@ export async function switchJob(input: {
 }
 
 export interface JobAllocationInput {
+  /** The stored time_allocations row this edits, when the caller knows it. updateTimeEntry
+   *  edits a row IN PLACE so the invoice that billed it keeps its claim (0255); a row sent
+   *  without an id is matched to the stored row on the same job, in order. */
+  id?: string | null;
   job_id: string | null;
   job_code: string | null;
   hours: number;
@@ -928,14 +933,95 @@ export async function completeAutoClockOut(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, clock_in, clock_out")
+    .select("id, clock_in, clock_out, job_id")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .eq("status", "closed")
     .maybeSingle();
   if (!entry) return { ok: false, error: "Entry not found." };
-
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
+
+  // THE INVOICE THAT ALREADY BILLED THIS SHIFT KEEPS ITS CLAIM (0255) — the same law updateTimeEntry
+  // lives under, on the tech's own door. The office can invoice between a geofence close and the
+  // tech's debrief (Erik bills at the end of the day, from the truck), and this action used to
+  // rewrite the CLOSED entry's split through replace_time_allocations — delete + insert, new ids —
+  // whenever the confirmed lunch shrank the shift. The invoice's claimed allocation ids vanished,
+  // the fresh rows read as unbilled, and the next New Invoice billed those hours a second time.
+  // So: the stored rows and every claim on them are read up front, the debrief is PLANNED against
+  // them (allocation-claims.ts — pure, unit-tested; stored rows pair by id and are edited in
+  // place, the tech's new rows append, nothing is removed), and any refusal happens before a
+  // single write — "Nothing was changed" is in the sentence, and has to be true.
+  const { data: storedRows, error: allocReadErr } = await supabase
+    .from("time_allocations")
+    .select("id, job_id, job_code, hours, description, sort_order")
+    .eq("time_entry_id", input.entry_id)
+    .order("sort_order", { ascending: true });
+  // A FAILED READ IS NOT AN EMPTY SPLIT: planning against [] would append on top of rows we can't see.
+  if (allocReadErr) return { ok: false, error: dbError(allocReadErr) };
+  const stored = (storedRows ?? []) as StoredAllocation[];
+  const claims = await claimsOnSources(supabase, [input.entry_id, ...stored.map((a) => a.id)]);
+  if ("error" in claims) return { ok: false, error: claims.error };
+
+  const closed = !!entry.clock_in && !!entry.clock_out;
+  const workedNow = closed ? hoursBetween(entry.clock_in, entry.clock_out, lunch) : null;
+  const already = stored.reduce((s, a) => s + (Number(a.hours) || 0), 0);
+
+  // A meal confirmed HERE, AFTER the switch segments + tail were recorded (the switched geofence
+  // auto-close deducted no lunch, so those rows summed to GROSS), would leave the BILLED hours
+  // above the now-reduced PAID hours. Trim the recorded rows to the worked total so billing can
+  // never exceed payroll (the C7 no-over-bill law) — BY ID, so a claimed row stays the row the
+  // invoice claims. Only when the confirmed lunch actually pushed worked below what's recorded.
+  const trimmed = new Map<string, number>();
+  if (workedNow != null && stored.length && already > workedNow + 0.01) {
+    for (const r of clampAllocationHours(stored.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })), workedNow)) trimmed.set(r.id, r.hours);
+  }
+  const kept = trimmed.size ? [...trimmed.values()].reduce((s, h) => s + h, 0) : already;
+
+  let allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
+  // C7: clamp the post-hoc split to the hours still UNALLOCATED. The geofence locked the clock
+  // in/out times and lunch can only reduce hours, so bill/cost can't exceed payroll — and
+  // clamping against the full shift (rather than the remainder) would let an entry's recorded
+  // switch segments be billed a second time on top.
+  if (allocations.length && workedNow != null) allocations = clampAllocationHours(allocations, Math.max(0, workedNow - kept));
+  const appended: NextAllocation[] = await Promise.all(
+    allocations.map(async (a) => ({
+      id: null,
+      job_id: await visibleJobIdOrNull(supabase, a.job_id),
+      job_code: a.job_code || null,
+      hours: a.hours || 0,
+      description: a.description || null,
+    })),
+  );
+  // Every stored row is re-submitted AS ITSELF (same id, same job, trimmed hours), so the plan
+  // pairs it in place; the tech's rows carry no id and insert after it — the sort order the old
+  // insert-alongside produced, with nothing replaced.
+  const next: NextAllocation[] = [
+    ...stored.map((r) => ({ id: r.id, job_id: r.job_id, job_code: r.job_code, hours: trimmed.get(r.id) ?? (Number(r.hours) || 0), description: r.description })),
+    ...appended,
+  ];
+  const plan = planAllocationEdit(stored, next, claims);
+  if (!plan.ok) return { ok: false, error: plan.error };
+  // An un-split shift billed by its ENTRY id: the debrief's first split moves billing onto the
+  // rows, so the invoice's claim is carried onto them — or refused, naming the invoice, when a
+  // row is headed to another job (those hours went out on THIS job's invoice).
+  const carry = entryClaimCarry({ entryId: input.entry_id, entryJobId: entry.job_id ?? null, stored, next, claims });
+  if (!carry.ok) return { ok: false, error: carry.error };
+
+  // WRITES, in the one order that both keeps every claim and passes the tech's own guards:
+  //   1. the trims, in place, BEFORE the lunch lands. guard_time_allocation checks each row against
+  //      the shift's worked hours AT ITS STORED LUNCH; written after the lunch, every single-row
+  //      reduction still overshoots the new ceiling until the last one (which is why 0244 reached
+  //      for the replace RPC — and why that RPC, minting new ids, can't be used on a claimed
+  //      split). Written before it, each reduction lands under the old, larger ceiling.
+  //   2. the lunch (a tech may only lengthen it on a closed shift — guard_paid_time_entry).
+  //   3. the new rows, then the entry-level claim carried onto them.
+  // Every write is checked: a 204 here is a debrief that silently didn't happen (silent-write law).
+  for (const u of plan.update) {
+    if (!trimmed.has(u.id)) continue; // unchanged row — nothing to write
+    const { data: upd, error: uErr } = await supabase.from("time_allocations").update({ hours: u.row.hours }).eq("id", u.id).select("id");
+    if (uErr) return { ok: false, error: dbError(uErr) };
+    if (!upd?.length) return { ok: false, error: "Couldn't trim this shift's split to the lunch — reload and try again. Nothing else was saved." };
+  }
   const { data: lunchUpd, error: lunchErr } = await supabase
     .from("time_entries")
     .update({ lunch_minutes: lunch })
@@ -946,70 +1032,26 @@ export async function completeAutoClockOut(input: {
   if (lunchErr || !lunchUpd?.length) {
     return { ok: false, error: lunchErr ? dbError(lunchErr) : "That shift didn't take the lunch — reload and try again." };
   }
-
-  // Whatever the entry already carries. This action INSERTS alongside those rows (it
-  // never replaces them), so both the clamp ceiling and the sort order have to start
-  // from what's there — a mid-shift switch's segments now SURVIVE the geofence close.
-  const { data: existing } = await supabase
-    .from("time_allocations")
-    .select("id, hours, job_id, job_code, description, sort_order")
-    .eq("time_entry_id", input.entry_id);
-  const existingRows = (existing ?? []) as { id: string; hours: number | null; job_id: string | null; job_code: string | null; description: string | null; sort_order: number | null }[];
-  let already = existingRows.reduce((s, a) => s + (Number(a.hours) || 0), 0);
-
-  // A meal confirmed HERE, AFTER the switch segments + tail were recorded (the switched
-  // geofence auto-close deducted no lunch, so those rows summed to GROSS), would leave the
-  // BILLED hours above the now-reduced PAID hours. Scale the recorded rows down to the
-  // worked total so billing can never exceed payroll (the C7 no-over-bill law) — only when
-  // the confirmed lunch actually pushed worked below what's already on the entry.
-  if (entry.clock_in && entry.clock_out && existingRows.length) {
-    const workedNow = hoursBetween(entry.clock_in, entry.clock_out, lunch);
-    if (already > workedNow + 0.01) {
-      const scaled = clampAllocationHours(
-        existingRows.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })),
-        workedNow,
-      );
-      // Same atomic replace as clockOut (0244) — the per-row loop here was refused by
-      // guard_time_allocation for techs and its errors were discarded (audit v921 high).
-      const byId = new Map(scaled.map((r) => [r.id, r.hours]));
-      const { error: scaleErr } = await supabase.rpc("replace_time_allocations", {
-        p_entry: input.entry_id,
-        p_rows: existingRows.map((r, idx) => ({
-          job_id: r.job_id ?? null,
-          job_code: r.job_code ?? null,
-          hours: byId.get(r.id) ?? (Number(r.hours) || 0),
-          description: r.description ?? null,
-          sort_order: r.sort_order ?? idx,
-        })),
-      });
-      if (scaleErr) reportError("completeAutoClockOut:scale", scaleErr, { entryId: input.entry_id });
-      else already = scaled.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+  if (plan.insert.length) {
+    const { data: ins, error: insErr } = await supabase
+      .from("time_allocations")
+      .insert(plan.insert.map((r) => ({ time_entry_id: input.entry_id, ...r })))
+      .select("id");
+    if (insErr) return { ok: false, error: dbError(insErr) };
+    const insertedIds = ((ins ?? []) as { id: string }[]).map((r) => r.id);
+    if (insertedIds.length !== plan.insert.length) return { ok: false, error: "Saved the lunch, but the split didn't all land — reload and check it." };
+    if (carry.carry && insertedIds.length) {
+      const carried = await carryEntryClaim(supabase, input.entry_id, insertedIds);
+      if (!carried.ok) {
+        // Back to an un-split shift claimed by its id (bills once) rather than a split with
+        // unclaimed rows (bills twice). The delete is checked for the same reason the insert was.
+        const { error: undoErr } = await supabase.from("time_allocations").delete().in("id", insertedIds).select("id");
+        if (undoErr) reportError("completeAutoClockOut.carryUndo", undoErr, { entryId: input.entry_id, insertedIds });
+        return { ok: false, error: carried.error };
+      }
     }
   }
-
-  let allocations = (input.allocations ?? []).filter((a) => a.job_code || a.hours);
-  // C7: clamp the post-hoc split to the hours still UNALLOCATED. The geofence locked the
-  // clock in/out times and lunch can only reduce hours, so bill/cost can't exceed payroll —
-  // and clamping against the full shift (rather than the remainder) would let an entry's
-  // recorded switch segments be billed a second time on top.
-  if (allocations.length && entry.clock_in && entry.clock_out) {
-    const remaining = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunch) - already);
-    allocations = clampAllocationHours(allocations, remaining);
-  }
-  if (allocations.length) {
-    const rows = await Promise.all(
-      allocations.map(async (a, idx) => ({
-        time_entry_id: input.entry_id,
-        job_id: await visibleJobIdOrNull(supabase, a.job_id),
-        job_code: a.job_code || null,
-        hours: a.hours || 0,
-        description: a.description || null,
-        sort_order: existingRows.length + idx,
-      })),
-    );
-    const { error: insErr } = await supabase.from("time_allocations").insert(rows);
-    if (insErr) return { ok: false, error: insErr.message };
-  }
+  for (const jid of new Set([entry.job_id, ...next.map((r) => r.job_id)].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // auto clock-out changes who's on the clock on My Day
   return { ok: true };
@@ -1220,11 +1262,83 @@ export async function updateTimeEntry(input: {
     return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
   }
 
-  const { error } = await supabase
+  // THE INVOICE THAT BILLED THIS SHIFT KEEPS ITS CLAIM (0255). A labor line claims the entry /
+  // allocation ids it billed, and the importers skip a claimed id — that is the whole "never the
+  // same hour twice" guarantee, and it only holds while the ids hold still. This door used to
+  // REPLACE the split (delete + insert, new ids) on every save, so one description fix on a paid
+  // entry orphaned INV-061's claims and the next New Invoice billed the hours again. Now the
+  // stored rows and every claim on them are read up front, the edit is PLANNED against them
+  // (allocation-claims.ts — pure, unit-tested), and any refusal happens before a single write:
+  //   • a matched row is edited in place (same id → same claim);
+  //   • a claimed row nothing matches is never deleted — the edit is refused, naming the invoice;
+  //   • a claimed entry, or a claimed unlabeled row (billed to the entry's job), may not move
+  //     to another job — its hours went out on THIS job's invoice; the office voids or adjusts
+  //     the invoice first, and is told so.
+  const { data: storedAllocRows, error: allocReadErr } = await supabase
+    .from("time_allocations")
+    .select("id, job_id, job_code, hours, description, sort_order")
+    .eq("time_entry_id", input.id)
+    .order("sort_order", { ascending: true });
+  // A FAILED READ IS NOT AN EMPTY SPLIT: planning against [] would insert duplicates of every row.
+  if (allocReadErr) return { ok: false, error: dbError(allocReadErr) };
+  const storedAllocs = (storedAllocRows ?? []) as StoredAllocation[];
+  const claims = await claimsOnSources(supabase, [input.id, ...storedAllocs.map((a) => a.id)]);
+  if ("error" in claims) return { ok: false, error: claims.error };
+  // HOURS ON A BILLED SHIFT CAN CHANGE — but never silently. The invoice keeps the figure it went
+  // out with (a claim is "these rows are billed", not "at this many hours"); an office fix that
+  // moves the times or the lunch on a claimed shift is allowed (a typo is a typo) and the answer
+  // names the invoice and both figures, so the office adjusts the document by hand if the
+  // customer should pay for the difference. Refusing here would block every honest correction.
+  const billedBy = claims.get(input.id) ?? null;
+  const hoursBefore = stored.clock_out ? hoursBetween(stored.clock_in, stored.clock_out, stored.lunch_minutes ?? 0) : null;
+  const hoursAfter = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
+  const billedHoursMoved = !!billedBy && hoursBefore != null && Math.abs(hoursBefore - hoursAfter) >= 0.01;
+  const nextJobId: string | null = input.job_id !== undefined ? (input.job_id ?? null) : oldJobId;
+  if (input.job_id !== undefined && (input.job_id ?? null) !== (oldJobId ?? null)) {
+    const holder =
+      claims.get(input.id) ??
+      // An unlabeled row (no job, no code) bills to the ENTRY's job — moving the entry moves it.
+      storedAllocs.filter((a) => !a.job_id && !a.job_code).map((a) => claims.get(a.id)).find(Boolean);
+    if (holder) return { ok: false, error: claimedMoveRefusal(holder) };
+  }
+
+  // The split, PLANNED before the entry is touched: a refusal must leave the whole edit unsaved
+  // ("Nothing was changed" is in every refusal sentence, and has to be true).
+  let plan: ReturnType<typeof planAllocationEdit> | null = null;
+  let carryEntryClaimToInserts = false;
+  let touched = new Set<string>();
+  if (input.allocations !== undefined) {
+    let allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
+    // C7: clamp the split to the entry's worked hours server-side (the client guard in
+    // edit-entry-button.tsx is advisory — voice/registry/crafted calls bypass it). Worked
+    // hours come from the times we just validated above (ci/co + lunch), same as payroll.
+    const workedHrs = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
+    allocs = clampAllocationHours(allocs, workedHrs);
+    const resolved = await Promise.all(
+      allocs.map(async (a) => ({
+        id: a.id ?? null,
+        job_id: await visibleJobIdOrNull(supabase, a.job_id),
+        job_code: a.job_code || null,
+        hours: a.hours || 0,
+        description: a.description || null,
+      })),
+    );
+    plan = planAllocationEdit(storedAllocs, resolved, claims);
+    if (!plan.ok) return { ok: false, error: plan.error };
+    const carry = entryClaimCarry({ entryId: input.id, entryJobId: nextJobId, stored: storedAllocs, next: resolved, claims });
+    if (!carry.ok) return { ok: false, error: carry.error };
+    carryEntryClaimToInserts = carry.carry;
+    touched = new Set<string>([...storedAllocs.map((a) => a.job_id), ...resolved.map((r) => r.job_id)].filter(Boolean) as string[]);
+  }
+
+  const { data: entryUpd, error } = await supabase
     .from("time_entries")
     .update(patch)
-    .eq("id", input.id);
+    .eq("id", input.id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // The silent-write law: a zero-row update is a 204, not a saved edit.
+  if (!entryUpd?.length) return { ok: false, error: "That entry didn't take the edit — reload and try again." };
 
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
@@ -1236,53 +1350,141 @@ export async function updateTimeEntry(input: {
     revalidatePath("/jobs");
   }
 
-  // Split across jobs — REPLACE this entry's allocations with the submitted set.
-  // Insert the new rows BEFORE deleting the old (a failed insert can't wipe the
-  // split), and refresh every job touched on either side so labor totals move.
-  if (input.allocations !== undefined) {
-    let allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
-    // C7: clamp the split to the entry's worked hours server-side (the client guard in
-    // edit-entry-button.tsx is advisory — voice/registry/crafted calls bypass it). Worked
-    // hours come from the times we just validated above (ci/co + lunch), same as payroll.
-    const workedHrs = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
-    allocs = clampAllocationHours(allocs, workedHrs);
-    const { data: oldAllocs } = await supabase.from("time_allocations").select("id, job_id").eq("time_entry_id", input.id);
-    const oldIds = (oldAllocs ?? []).map((a: { id: string }) => a.id);
-    const touched = new Set<string>((oldAllocs ?? []).map((a: { job_id: string | null }) => a.job_id).filter(Boolean) as string[]);
-    if (allocs.length) {
-      const rows = await Promise.all(
-        allocs.map(async (a, idx) => ({
-          time_entry_id: input.id,
-          job_id: await visibleJobIdOrNull(supabase, a.job_id),
-          job_code: a.job_code || null,
-          hours: a.hours || 0,
-          description: a.description || null,
-          sort_order: idx,
-        })),
-      );
-      for (const r of rows) if (r.job_id) touched.add(r.job_id);
-      const { error: aErr } = await supabase.from("time_allocations").insert(rows);
-      if (aErr) return { ok: false, error: aErr.message };
+  if (plan && plan.ok) {
+    // Apply the plan in the order that can never lose a claim: edits in place, then the new rows,
+    // then the entry-level claim carried onto them, and only then the removals (all unclaimed by
+    // construction). Every write is checked — a 204 here would be a split that silently drifted
+    // from what the office saw on screen.
+    for (const u of plan.update) {
+      const { data: upd, error: uErr } = await supabase.from("time_allocations").update(u.row).eq("id", u.id).select("id");
+      if (uErr) return { ok: false, error: dbError(uErr) };
+      if (!upd?.length) return { ok: false, error: "Saved the times, but part of the split didn't take — reload the entry and check the split." };
     }
-    if (oldIds.length) await supabase.from("time_allocations").delete().in("id", oldIds);
+    let insertedIds: string[] = [];
+    if (plan.insert.length) {
+      const { data: ins, error: iErr } = await supabase
+        .from("time_allocations")
+        .insert(plan.insert.map((r) => ({ time_entry_id: input.id, ...r })))
+        .select("id");
+      if (iErr) return { ok: false, error: dbError(iErr) };
+      insertedIds = ((ins ?? []) as { id: string }[]).map((r) => r.id);
+      if (insertedIds.length !== plan.insert.length) return { ok: false, error: "Saved the times, but the new split rows didn't all land — reload the entry and check the split." };
+    }
+    if (carryEntryClaimToInserts && insertedIds.length) {
+      // Billing switches from "the entry, gross" to "its rows" the moment a split exists, so the
+      // invoice that billed the entry must claim the rows too — or they bill again next import.
+      const carried = await carryEntryClaim(supabase, input.id, insertedIds);
+      if (!carried.ok) {
+        // Put it back the way it was: an un-split entry claimed by its id bills once; a split with
+        // unclaimed rows bills twice. The delete is checked for the same reason the insert was.
+        const { error: undoErr } = await supabase.from("time_allocations").delete().in("id", insertedIds).select("id");
+        if (undoErr) reportError("updateTimeEntry.carryUndo", undoErr, { entryId: input.id, insertedIds });
+        return { ok: false, error: carried.error };
+      }
+    }
+    if (plan.remove.length) {
+      const { data: gone, error: dErr } = await supabase.from("time_allocations").delete().in("id", plan.remove).select("id");
+      if (dErr) return { ok: false, error: dbError(dErr) };
+      if ((gone ?? []).length !== plan.remove.length) {
+        reportError("updateTimeEntry.removeAllocs", "fewer rows deleted than planned", { entryId: input.id, planned: plan.remove, gone: (gone ?? []).length });
+        return { ok: false, error: "Saved the split, but an old row wouldn't go — reload the entry and check it." };
+      }
+    }
     for (const jid of touched) revalidatePath(`/jobs/${jid}`);
     revalidatePath("/jobs");
   } else {
     // Allocations OMITTED but the shift may have been shortened ("Brian actually left at
     // 2:30"): the stored split still bills the old, longer total, so billed hours exceed
     // paid hours with nothing to re-check the invariant. Rescale the existing rows to the
-    // new worked hours — same C7 law as the submitted-set branch above.
+    // new worked hours — same C7 law as the submitted-set branch above — IN PLACE, by id:
+    // the 0244 replace RPC mints new ids, which is exactly the claim-killing write this door
+    // is no longer allowed to make. (Staff pass guard_time_allocation, so row-by-row is safe
+    // here; the RPC remains the tech path's atomic tool.)
     const workedHrs = hoursBetween(input.clock_in, input.clock_out, input.lunch_minutes || 0);
-    const { data: existingAllocs } = await supabase
-      .from("time_allocations")
-      .select("id, job_id, hours")
-      .eq("time_entry_id", input.id);
-    const rows = (existingAllocs ?? []) as { id: string; job_id: string | null; hours: number | null }[];
-    const before = rows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+    const before = storedAllocs.reduce((s, r) => s + (Number(r.hours) || 0), 0);
     if (before > workedHrs + 0.01) {
-      await scaleRecordedToWorked(supabase, input.id, rows, workedHrs);
-      for (const jid of new Set(rows.map((r) => r.job_id).filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
+      const scaled = clampAllocationHours(storedAllocs.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })), workedHrs);
+      for (const r of scaled) {
+        const { data: upd, error: sErr } = await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id).select("id");
+        if (sErr || !upd?.length) {
+          reportError("updateTimeEntry.scaleInPlace", sErr ?? "zero rows updated", { entryId: input.id, allocationId: r.id });
+          return { ok: false, error: "Saved the times, but the split couldn't be trimmed to the shorter shift — open the entry and fix the split by hand." };
+        }
+      }
+      for (const jid of new Set(storedAllocs.map((r) => r.job_id).filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
       revalidatePath("/jobs");
+    }
+  }
+  if (billedHoursMoved && billedBy) {
+    const fmt = (h: number) => `${(Math.round(h * 100) / 100).toString()} h`;
+    return {
+      ok: true,
+      warning: `${billedBy.invoice_number ?? "An invoice"} billed this shift at ${fmt(hoursBefore ?? 0)} — it now reads ${fmt(hoursAfter)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * Which non-void invoice bills each of these source rows (time_entry / time_allocation ids), via
+ * invoice_items.source_ids (0255). The EARLIEST claimant wins a contested id, matching foldClaims.
+ * Tolerates 0255 not being applied yet (a push deploys before its migration runs): with no
+ * source_ids column there are no labor claims to protect, so the answer is "none" — while any
+ * OTHER failure refuses, because editing blind is how a claim gets lost.
+ */
+async function claimsOnSources(supabase: SupabaseClient, ids: string[]): Promise<ClaimIndex | { error: string }> {
+  if (!ids.length) return new Map();
+  const { data, error } = await supabase
+    .from("invoice_items")
+    .select("source_ids, invoices!inner(id, invoice_number, status, created_at)")
+    .overlaps("source_ids", ids)
+    .neq("invoices.status", "void");
+  if (error) {
+    const code = String((error as { code?: string })?.code ?? "");
+    const msg = String((error as { message?: string })?.message ?? "");
+    if (code === "42703" || /source_ids/i.test(msg) || /does not exist/i.test(msg)) return new Map();
+    reportError("claimsOnSources", error, { ids });
+    return { error: "Couldn't check which invoice bills this shift — nothing was changed. Try again in a moment." };
+  }
+  const wanted = new Set(ids);
+  const out = new Map<string, ClaimHolder & { created_at: string }>();
+  for (const row of (data ?? []) as { source_ids?: string[] | null; invoices?: unknown }[]) {
+    const raw = row.invoices;
+    const inv = (Array.isArray(raw) ? raw[0] : raw) as { id: string; invoice_number: string | null; created_at: string } | undefined;
+    if (!inv) continue;
+    for (const sid of row.source_ids ?? []) {
+      if (!wanted.has(sid)) continue;
+      const cur = out.get(sid);
+      if (!cur || inv.created_at < cur.created_at) out.set(sid, { id: inv.id, invoice_number: inv.invoice_number ?? null, created_at: inv.created_at });
+    }
+  }
+  return out;
+}
+
+/**
+ * Add the new allocation ids to every non-void invoice line that claims the entry. The entry id
+ * STAYS in the claim (a claim is never narrowed here): an entry skipped by id and rows skipped by
+ * id both bill nothing, and if the split is ever cleared again the entry-level claim still holds.
+ */
+async function carryEntryClaim(supabase: SupabaseClient, entryId: string, newIds: string[]): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { data: items, error } = await supabase
+    .from("invoice_items")
+    .select("id, source_ids, invoices!inner(status)")
+    .contains("source_ids", [entryId])
+    .neq("invoices.status", "void");
+  // Both sentences are exact about the state they leave: the entry's times are already saved (and
+  // stay), and the caller removes the rows it just inserted — an un-split shift claimed by its id
+  // bills once, which is the safe side to land on.
+  if (error) {
+    reportError("carryEntryClaim.read", error, { entryId });
+    return { ok: false, error: "Saved the times, but couldn't check the invoice's claim on this shift, so the split was not added. Try again in a moment." };
+  }
+  for (const it of (items ?? []) as { id: string; source_ids?: string[] | null }[]) {
+    const next = [...new Set([...(it.source_ids ?? []), ...newIds])];
+    const { data: upd, error: uErr } = await supabase.from("invoice_items").update({ source_ids: next }).eq("id", it.id).select("id");
+    if (uErr || !upd?.length) {
+      reportError("carryEntryClaim.write", uErr ?? "zero rows updated", { entryId, itemId: it.id });
+      return { ok: false, error: "Saved the times, but couldn't move the invoice's claim onto the new split, so the split was not added. Try again in a moment." };
     }
   }
   return { ok: true };
@@ -1295,14 +1497,38 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   // books. No bypass for any caller: Undo the period on /payroll first.
   const { data: locked } = await supabase
     .from("time_entries")
-    .select("paid_at, mileage_paid_at")
+    .select("paid_at, mileage_paid_at, job_id")
     .eq("id", id)
     .maybeSingle();
-  const lock = locked as { paid_at: string | null; mileage_paid_at: string | null } | null;
+  const lock = locked as { paid_at: string | null; mileage_paid_at: string | null; job_id: string | null } | null;
   if (lock?.paid_at) return { ok: false, error: "Entry is in a paid period — Undo on Payroll first." };
   if (lock?.mileage_paid_at) return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
-  const { error } = await supabase.from("time_entries").delete().eq("id", id);
+
+  // AN INVOICE THAT BILLED THIS SHIFT HOLDS IT (0255). The delete cascades to the allocations, and
+  // a labor line's claim (invoice_items.source_ids) names those ids: with the rows gone, the
+  // invoice's claim points at nothing, the customer was billed hours that no longer exist on the
+  // timecard, and payroll and billing disagree with no record of why. Same refusal shape as the
+  // edit door — the office voids or adjusts the invoice first, and is told which one.
+  const { data: allocRows, error: allocErr } = await supabase.from("time_allocations").select("id").eq("time_entry_id", id);
+  if (allocErr) return { ok: false, error: dbError(allocErr) };
+  const claims = await claimsOnSources(supabase, [id, ...((allocRows ?? []) as { id: string }[]).map((a) => a.id)]);
+  if ("error" in claims) return { ok: false, error: claims.error };
+  const holders = [...new Map([...claims.values()].map((h) => [h.id, h] as const)).values()];
+  if (holders.length) {
+    const numbers = holders.map((h) => h.invoice_number ?? "an invoice");
+    const list = numbers.length === 1 ? numbers[0] : `${numbers.slice(0, -1).join(", ")} and ${numbers[numbers.length - 1]}`;
+    return {
+      ok: false,
+      error: `${list} ${holders.length === 1 ? "bills" : "bill"} this shift — void or adjust ${holders.length === 1 ? "it" : "them"} first. Nothing was changed.`,
+    };
+  }
+
+  // The silent-write law: a delete that hits zero rows (a cross-org or already-gone id) is a 204,
+  // not a deleted entry.
+  const { data: gone, error } = await supabase.from("time_entries").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: "That entry didn't delete — reload and try again." };
+  if (lock?.job_id) revalidatePath(`/jobs/${lock.job_id}`); // the job's Time tab and its unbilled total
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // a deleted entry changes My Day's hours/clock state

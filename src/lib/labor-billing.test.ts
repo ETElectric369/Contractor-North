@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobLaborBilling, laborCostForJob } from "@/lib/labor-billing";
+import { computeJobLaborBilling, laborCostForJob, withoutClaimedLabor } from "@/lib/labor-billing";
 
 describe("laborCostForJob — allocation-aware pay cost (job hub == analytics)", () => {
   const prof = (hourly: number) => ({ hourly_rate: hourly });
@@ -306,5 +306,95 @@ describe("laborCostForJob — unrated hours are reported, never swallowed (v800 
       profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
     };
     expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0 });
+  });
+});
+
+/**
+ * THE CLAIM (0255). A labor line now carries the entry / allocation ids it bills, and a second
+ * invoice on the job imports only the rows nobody holds. These pin the two halves: computeJob-
+ * LaborBilling folds the ids into each person's line, and withoutClaimedLabor drops what another
+ * invoice claims — including the trap where a split shift whose rows are all claimed must vanish
+ * rather than fall through as an un-split (GROSS-hours) entry.
+ */
+describe("labor lines claim their hours (0255)", () => {
+  const brianP = { id: "b", full_name: "Brian", bill_rate: 75 };
+  const erikP = { id: "e", full_name: "Erik", bill_rate: 111 };
+  const punch = (id: string, profiles: any, hours: number, time_allocations: any[] = []) => ({
+    id,
+    clock_in: "2026-09-10T18:05:00Z",
+    clock_out: new Date(Date.parse("2026-09-10T18:05:00Z") + hours * 3_600_000).toISOString(),
+    lunch_minutes: 0,
+    profiles,
+    time_allocations,
+  });
+
+  it("folds each entry id into the person's line — one claim per row billed", () => {
+    const { lines } = computeJobLaborBilling([punch("e1", brianP, 8), punch("e2", brianP, 5.22)], [], 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].sourceIds).toEqual(["e1", "e2"]);
+    expect(lines[0].quantity).toBe(13.25);
+  });
+
+  it("claims ALLOCATION ids for split shifts (labeled via jobAllocs, unlabeled via the entry), never the entry", () => {
+    const split = punch("e1", brianP, 8, [
+      { id: "a1", job_id: "J", hours: 5 },
+      { id: "a2", job_id: null, hours: 2 },
+      { id: "a3", job_id: "OTHER", hours: 1 },
+    ]);
+    const { lines } = computeJobLaborBilling([split], [{ id: "a1", hours: 5, time_entries: { profiles: brianP } }], 0);
+    expect(lines[0].sourceIds.sort()).toEqual(["a1", "a2"]); // a3 is another job's; e1 itself is not the claim
+    expect(lines[0].quantity).toBe(7);
+  });
+
+  it("a row that bills nothing claims nothing (an unbillable SHOP allocation)", () => {
+    const { lines } = computeJobLaborBilling([], [{ id: "a1", hours: 3, job_code: "SHOP", time_entries: { profiles: brianP } }], 0, null, new Set(["SHOP"]));
+    expect(lines).toEqual([]);
+  });
+
+  it("withoutClaimedLabor: the 85 Whitney case — INV-061 holds nine entries, Brian's 09-10 entry stays free", () => {
+    const held = ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9"];
+    const entries = [...held.map((id, i) => punch(id, i % 2 ? brianP : erikP, 8)), punch("e10", brianP, 5.22)];
+    const free = withoutClaimedLabor(entries, [], new Set(held));
+    expect(free.jobEntries.map((e) => e.id)).toEqual(["e10"]);
+    expect(free.skippedIds).toEqual(held);
+    const { lines, total } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ name: "Brian", quantity: 5.25, amount: 393.75, sourceIds: ["e10"] });
+    expect(total).toBe(393.75);
+  });
+
+  it("withoutClaimedLabor: a split shift whose rows are ALL claimed disappears — it must not fall through as gross hours", () => {
+    const split = punch("e1", brianP, 8, [{ id: "a1", job_id: null, hours: 2 }]);
+    const free = withoutClaimedLabor([split], [], new Set(["a1"]));
+    expect(free.jobEntries).toEqual([]);
+    expect(free.skippedIds).toEqual(["a1"]);
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).total).toBe(0); // NOT 8h × $75
+  });
+
+  it("withoutClaimedLabor: a split shift keeps only its unclaimed rows", () => {
+    const split = punch("e1", brianP, 8, [
+      { id: "a1", job_id: null, hours: 2 },
+      { id: "a2", job_id: null, hours: 3 },
+    ]);
+    const free = withoutClaimedLabor([split], [], new Set(["a1"]));
+    expect(free.jobEntries[0].time_allocations.map((a: any) => a.id)).toEqual(["a2"]);
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).total).toBe(225); // 3h × $75
+  });
+
+  it("withoutClaimedLabor: claimed cross-job allocations are dropped from jobAllocs", () => {
+    const allocs = [
+      { id: "a1", hours: 5, time_entries: { profiles: brianP } },
+      { id: "a2", hours: 1.5, time_entries: { profiles: brianP } },
+    ];
+    const free = withoutClaimedLabor([], allocs, new Set(["a1"]));
+    expect(free.jobAllocs.map((a) => a.id)).toEqual(["a2"]);
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).lines[0].quantity).toBe(1.5);
+  });
+
+  it("withoutClaimedLabor: nothing claimed → the rows pass through untouched (the first invoice on a job)", () => {
+    const entries = [punch("e1", brianP, 8)];
+    const free = withoutClaimedLabor(entries, [], new Set());
+    expect(free.jobEntries).toEqual(entries);
+    expect(free.skippedIds).toEqual([]);
   });
 });

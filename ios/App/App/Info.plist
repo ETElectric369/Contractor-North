@@ -4,6 +4,11 @@
 <dict>
 	<key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
+	<!-- ProMotion. Without this key iOS caps an app's frame rate at 60 Hz on 120 Hz iPhones
+	     (Erik's 16 Pro) — Safari scrolls at 120, a WKWebView inside a third-party app does not
+	     unless the app opts in. Scroll, momentum and the glass dock's motion get the full rate. -->
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>

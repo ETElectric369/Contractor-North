@@ -462,7 +462,8 @@ export type TapFailKind =
   | "phone-call"
   | "location"
   | "background"
-  | "network";
+  | "network"
+  | "busy";
 
 const OS_SENTENCE =
   "This iPhone's iOS is too old for Tap to Pay on iPhone — update it in Settings › General › Software Update, then try again. Until then, send the customer the pay link.";
@@ -478,10 +479,50 @@ const TERMS_DECLINED_SENTENCE =
 const TERMS_UNKNOWN_SENTENCE =
   "This iPhone couldn't confirm that Apple's Tap to Pay on iPhone terms are accepted for this company, so nothing was connected — ask an owner or admin to enable it in Settings › Getting Paid › Enable Tap to Pay on iPhone, then try again.";
 const NETWORK_SENTENCE = "Couldn't reach Stripe from this phone — check the internet connection and try again.";
+const BUSY_SENTENCE =
+  "The Tap to Pay on iPhone reader on this phone is still busy with its last request — it's usually still warming up. Wait a few seconds, then try again; if it keeps saying that, fully close the North app and reopen it.";
+
+/**
+ * Apple's reader errors reach JS with NO words at all — Erik's 2026-09-11 console:
+ * "The operation couldn't be completed. (SCPTapToPayReaderErrorDomain error 20.)". The SDK
+ * passes ProximityReader's failure through under its own domain, and the code is the ONLY
+ * information. The numbers are the SDK 5.7.0 `TapToPayReaderErrorCode` enum (StripeTerminal
+ * .swiftinterface: `case unknown = 0` then implicit, so the raw value is the case's position).
+ * Only the codes a person can act on are named; the rest fall to the stage's generic sentence.
+ */
+const READER_CODE: Record<number, { kind: TapFailKind; sentence: string }> = {
+  3: { kind: "passcode", sentence: "Tap to Pay on iPhone needs a passcode on this iPhone — set one in Settings › Face ID & Passcode, then try again." }, // passcodeDisabled
+  5: { kind: "background", sentence: "The app went to the background before the tap finished — keep the app on screen and try again." }, // backgroundRequestNotAllowed
+  6: { kind: "device", sentence: DEVICE_SENTENCE }, // unsupported
+  7: { kind: "os", sentence: OS_SENTENCE }, // osVersionNotSupported
+  8: { kind: "device", sentence: DEVICE_SENTENCE }, // modelNotSupported
+  9: { kind: "network", sentence: NETWORK_SENTENCE }, // networkError
+  10: { kind: "network", sentence: NETWORK_SENTENCE }, // networkAuthenticationError
+  11: { kind: "network", sentence: NETWORK_SENTENCE }, // serviceConnectionError
+  12: { kind: "busy", sentence: "Tap to Pay on iPhone is still getting ready on this phone — give it a moment, then try again." }, // notReady
+  18: { kind: "blocked", sentence: "Apple has banned this iPhone from Tap to Pay on iPhone — contact Stripe support." }, // deviceBanned
+  20: { kind: "busy", sentence: BUSY_SENTENCE }, // readerBusy
+  21: { kind: "terms-needed", sentence: TERMS_NEEDED_SENTENCE }, // accountNotLinked
+  23: { kind: "apple-account", sentence: "Accepting Apple's Tap to Pay on iPhone terms needs an Apple Account signed in on this iPhone — sign in at the top of Settings, then tap Enable Tap to Pay on iPhone again." }, // accountLinkingRequiresiCloudSignIn
+  24: { kind: "terms-declined", sentence: TERMS_DECLINED_SENTENCE }, // accountLinkingCancelled
+  27: { kind: "blocked", sentence: "Apple has blocked this company's account for Tap to Pay on iPhone — contact Stripe support." }, // merchantBlocked
+  29: { kind: "background", sentence: "The tap was interrupted before it finished — keep the app on screen and try again." }, // requestInterrupted
+  35: { kind: "background", sentence: "The app went to the background before the tap finished — keep the app on screen and try again." }, // readFromBackgroundError
+  43: { kind: "busy", sentence: BUSY_SENTENCE }, // readerSessionBusy
+  47: { kind: "device", sentence: "NFC is turned off on this iPhone, so it can't read a card — turn it on in Settings, then try again." }, // nfcDisabled
+  48: { kind: "phone-call", sentence: "Tap to Pay on iPhone can't run during a phone call — end the call, then try again." }, // readNotAllowedDuringCall
+};
 
 function classify(e: unknown): { kind: TapFailKind; sentence: string } | null {
   const m = said(e);
   if (!m) return null;
+  // The wordless pass-through: "(SCPTapToPayReaderErrorDomain error N.)" — decode N first,
+  // since none of the phrase matches below can see anything in it.
+  const rc = /SCPTapToPayReaderErrorDomain error (\d+)/i.exec(m);
+  if (rc) {
+    const known = READER_CODE[Number(rc[1])];
+    if (known) return known;
+  }
   // [2910] "Unsupported mobile device configuration. Ensure the device is running a supported
   // version of iOS and it has the hardware capability…" — ONE string for two causes. Apple's own
   // model answer (education plugin) splits them; without it the OS is the suspect Apple's 1.4

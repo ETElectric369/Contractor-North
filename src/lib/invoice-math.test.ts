@@ -172,28 +172,35 @@ describe("shouldBlockStandardImport (H4 — one billing path per job)", () => {
   });
 });
 
-describe("isStandardBillingBlocker (H4 reverse — block a draw on a standard-billed job)", () => {
-  it("blocks a draw when a STANDARD invoice already carries a non-zero total", () => {
-    expect(isStandardBillingBlocker("standard", 5000, 0)).toBe(true);
-    expect(isStandardBillingBlocker(null, 5000, 0)).toBe(true); // null kind = standard
+describe("isStandardBillingBlocker (H4 reverse, narrowed 0255 — only an OPEN DRAFT with content blocks a draw)", () => {
+  it("blocks a draw while a DRAFT standard invoice already carries a non-zero total", () => {
+    expect(isStandardBillingBlocker("standard", "draft", 5000, 0)).toBe(true);
+    expect(isStandardBillingBlocker(null, "draft", 5000, 0)).toBe(true); // null kind = standard
   });
-  it("blocks a draw when a STANDARD invoice carries line items even at $0 total", () => {
-    expect(isStandardBillingBlocker("standard", 0, 2)).toBe(true);
+  it("blocks a draw while a DRAFT standard invoice carries line items even at $0 total", () => {
+    expect(isStandardBillingBlocker("standard", "draft", 0, 2)).toBe(true);
   });
-  it("does NOT block on a blank standard invoice (no lines, $0) — nothing billed yet", () => {
-    expect(isStandardBillingBlocker("standard", 0, 0)).toBe(false);
+  it("does NOT block on a blank draft (no lines, $0) — nothing billed yet", () => {
+    expect(isStandardBillingBlocker("standard", "draft", 0, 0)).toBe(false);
+  });
+  // THE 85 WHITNEY CASE (Erik 2026-09-11): INV-061 is PAID. Its rows are claimed, a draw imports only
+  // what's unclaimed, so a finished invoice must never again refuse the next progress payment.
+  it("a SENT / PARTIAL / PAID / OVERDUE standard invoice is finished business, never a blocker", () => {
+    for (const status of ["sent", "partial", "paid", "overdue"]) {
+      expect(isStandardBillingBlocker("standard", status, 8432.15, 27)).toBe(false);
+    }
   });
   it("never blocks because of a DRAW invoice (draws are the billing path, not a blocker)", () => {
-    expect(isStandardBillingBlocker("deposit", 5000, 3)).toBe(false);
-    expect(isStandardBillingBlocker("progress", 5000, 3)).toBe(false);
-    expect(isStandardBillingBlocker("final", 5000, 3)).toBe(false);
+    expect(isStandardBillingBlocker("deposit", "draft", 5000, 3)).toBe(false);
+    expect(isStandardBillingBlocker("progress", "draft", 5000, 3)).toBe(false);
+    expect(isStandardBillingBlocker("final", "draft", 5000, 3)).toBe(false);
   });
   it("treats float-dust / non-finite totals as no content (a poisoned total can't false-block)", () => {
-    expect(isStandardBillingBlocker("standard", 0.004, 0)).toBe(false);
-    expect(isStandardBillingBlocker("standard", NaN, 0)).toBe(false);
-    expect(isStandardBillingBlocker("standard", Infinity, 0)).toBe(false);
+    expect(isStandardBillingBlocker("standard", "draft", 0.004, 0)).toBe(false);
+    expect(isStandardBillingBlocker("standard", "draft", NaN, 0)).toBe(false);
+    expect(isStandardBillingBlocker("standard", "draft", Infinity, 0)).toBe(false);
     // ...but real line items still block even when the total is non-finite.
-    expect(isStandardBillingBlocker("standard", NaN, 1)).toBe(true);
+    expect(isStandardBillingBlocker("standard", "draft", NaN, 1)).toBe(true);
   });
 });
 

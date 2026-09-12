@@ -1,8 +1,61 @@
 import { hoursBetween } from "@/lib/utils";
 import { payRateForEntry } from "@/lib/payroll-math";
 
-/** One billable-labor line for a worker on a job. */
-export type LaborLine = { personId: string; name: string; rate: number; rawHours: number; quantity: number; amount: number };
+/** One billable-labor line for a worker on a job. `sourceIds` are the time_entry / time_allocation
+ *  ids whose hours this line bills — the line's CLAIM on them (0255). A claim is what lets a second
+ *  invoice bill only what is new: the hours a line holds are never imported onto another one. */
+export type LaborLine = { personId: string; name: string; rate: number; rawHours: number; quantity: number; amount: number; sourceIds: string[] };
+
+/**
+ * DROP THE HOURS ANOTHER INVOICE ALREADY BILLS (0255 — "the invariant moves to the row").
+ *
+ * Erik, 2026-09-11: "i couldnt even make an invoice for 85 whitney… kept referring to the old
+ * invoice even though i have new time and new bills". The old rule stopped double-billing by
+ * forbidding a SECOND invoice on the job, because labor had no row identity — nothing said WHICH
+ * hours INV-061 covered. Now each labor line claims its entry/allocation ids, so the rule can be
+ * what it always meant: an hour is billed on at most ONE non-void invoice. This is the filter that
+ * enforces it on the way in — feed it `claimed` (every source id held by the job's OTHER non-void
+ * invoices) and it returns the rows still free to bill, in the exact shape computeJobLaborBilling
+ * takes, so the arithmetic downstream is untouched.
+ *
+ * The one trap: a SPLIT entry whose allocation rows were all claimed must vanish entirely, never
+ * fall through as "un-split" — path (3) of computeJobLaborBilling bills an un-split entry's GROSS
+ * hours, which would re-bill the whole shift. So an entry keeps its allocation list (filtered), and
+ * an entry left with none is dropped.
+ */
+export function withoutClaimedLabor(
+  jobEntries: any[],
+  jobAllocs: any[],
+  claimed: ReadonlySet<string>,
+): { jobEntries: any[]; jobAllocs: any[]; skippedIds: string[] } {
+  const skippedIds: string[] = [];
+  const isClaimed = (id: unknown) => !!id && claimed.has(String(id));
+  const allocs = (jobAllocs ?? []).filter((a) => {
+    if (!isClaimed(a?.id)) return true;
+    skippedIds.push(String(a.id));
+    return false;
+  });
+  const entries: any[] = [];
+  for (const e of jobEntries ?? []) {
+    if (isClaimed(e?.id)) {
+      skippedIds.push(String(e.id));
+      continue;
+    }
+    const split = e?.time_allocations ?? [];
+    if (!split.length) {
+      entries.push(e);
+      continue;
+    }
+    const free = split.filter((a: any) => {
+      if (!isClaimed(a?.id)) return true;
+      skippedIds.push(String(a.id));
+      return false;
+    });
+    if (!free.length) continue; // every row of this split shift is billed elsewhere — nothing left, and NOT gross hours
+    entries.push({ ...e, time_allocations: free });
+  }
+  return { jobEntries: entries, jobAllocs: allocs, skippedIds };
+}
 
 /**
  * Per-job LABOR COST (what we PAY) — the one allocation-aware implementation shared by the job
@@ -116,8 +169,10 @@ export function computeJobLaborBilling(
   // Track the best REAL rate seen for a person (NOT frozen on first-seen — the alloc
   // and entry queries can carry different rate snapshots). Key on id, falling back
   // to name so two distinct rate-less workers don't collapse into one bucket.
-  const perPerson = new Map<string, { name: string; realRate: number; hours: number }>();
-  const addHours = (prof: any, hrs: number) => {
+  const perPerson = new Map<string, { name: string; realRate: number; hours: number; sourceIds: string[] }>();
+  // `sourceId` is the entry/allocation row the hours came from — folded into the person's line as
+  // its claim (0255). A row that adds no hours claims nothing: nothing was billed off it.
+  const addHours = (prof: any, hrs: number, sourceId?: unknown) => {
     if (!(hrs > 0)) return;
     const key = String(prof?.id ?? prof?.full_name ?? "unknown");
     // BILL rate (what the customer is charged), NOT pay. A time entry's rate_override is a
@@ -129,8 +184,9 @@ export function computeJobLaborBilling(
     if (cur) {
       cur.hours += hrs;
       if (realRate > cur.realRate) cur.realRate = realRate;
+      if (sourceId) cur.sourceIds.push(String(sourceId));
     } else {
-      perPerson.set(key, { name: prof?.full_name ?? "Crew", realRate, hours: hrs });
+      perPerson.set(key, { name: prof?.full_name ?? "Crew", realRate, hours: hrs, sourceIds: sourceId ? [String(sourceId)] : [] });
     }
   };
   // (1) exact hours allocated to this job (handles split shifts)
@@ -142,7 +198,7 @@ export function computeJobLaborBilling(
     // A row can carry BOTH a job and a code — switchJob writes exactly that shape, and so does
     // the clock-out breakdown, whose Job and Code selects are not mutually exclusive.
     if (unbillable(a.job_code)) continue;
-    addHours(a.time_entries?.profiles, Number(a.hours ?? 0));
+    addHours(a.time_entries?.profiles, Number(a.hours ?? 0), a.id);
   }
   for (const e of jobEntries ?? []) {
     const allocs = e.time_allocations ?? [];
@@ -159,7 +215,7 @@ export function computeJobLaborBilling(
         // (Cost still counts them: we DID pay for that hour, so it shows as unbilled cost.)
         if (a.job_code) continue;
         if (a.id && billedAllocIds.has(String(a.id))) continue;
-        addHours(e.profiles, Number(a.hours ?? 0));
+        addHours(e.profiles, Number(a.hours ?? 0), a.id);
       }
       continue;
     }
@@ -168,13 +224,13 @@ export function computeJobLaborBilling(
     if (!e.clock_out) continue;
     if (unbillable(e.job_code)) continue;
     const lunch = Math.max(0, Number(e.lunch_minutes) || 0); // a negative lunch can't add billable time
-    addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60);
+    addHours(e.profiles, (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - lunch / 60, e.id);
   }
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
     const personal = p.realRate > 0 ? p.realRate : 0;
     const rate = personal > 0 ? (level > 0 ? Math.min(personal, level) : personal) : level > 0 ? level : def;
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
-    return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100 };
+    return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100, sourceIds: p.sourceIds };
   });
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   return { lines, total };
@@ -195,7 +251,9 @@ export async function fetchJobLaborRows(
       // charges to the job — selecting only ids is what hid a whole unbilled week.
       // job_code on the ENTRY, not only on its allocations: an un-split punch carries its code
       // here and nowhere else. Not selecting it is why path (3) could not see one.
-      .select("clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name), time_allocations(id, job_id, job_code, hours)")
+      // `id` (0255): the row's identity is what a labor line CLAIMS. Without it there was nothing
+      // to say which hours an invoice covered — the projection law, again: the fix was a select list.
+      .select("id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name), time_allocations(id, job_id, job_code, hours)")
       .eq("job_id", jobId)
       .eq("status", "closed"),
     supabase

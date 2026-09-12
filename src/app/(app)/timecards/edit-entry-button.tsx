@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useToast } from "@/components/toast";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,7 @@ export function EditEntryButton({
   onClosed?: () => void;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
@@ -188,7 +190,7 @@ export function EditEntryButton({
       // A REJECTED action must not tear the page down (v800). The office edits timecards on a
       // laptop in a truck as often as at a desk; an unhandled throw inside a transition drops
       // them on the error boundary and the edit is gone.
-      let res: { ok: boolean; error?: string };
+      let res: { ok: boolean; error?: string; warning?: string };
       try {
         res = await updateTimeEntry({
         id: entry.id,
@@ -210,6 +212,8 @@ export function EditEntryButton({
         return setError("No connection — that didn't go through. Try again in a moment.");
       }
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      // A saved edit can still carry a warning (a billed shift whose hours changed) — said, not swallowed.
+      if (res.warning) toast(res.warning, "info");
       close();
       router.refresh();
     });
@@ -218,7 +222,7 @@ export function EditEntryButton({
   function remove() {
     if (!confirm("Delete this time entry? This can't be undone.")) return;
     start(async () => {
-      let res: { ok: boolean; error?: string };
+      let res: { ok: boolean; error?: string; warning?: string };
       try {
         res = await deleteTimeEntry(entry.id);
       } catch {

@@ -183,9 +183,16 @@ export async function createProgressInvoice(
     return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
   }
 
-  // H4 (reverse): don't open a draw on a job that's already being billed on a standard
-  // invoice carrying content — the draw would re-bill the same work (here, a % of the
-  // estimate on top of the standard invoice's lines). Mirrors the forward import guard.
+  // H4 (reverse): don't open a %/fixed draw beside a standard DRAFT that already carries content —
+  // a percent of the estimate on top of that draft's lines bills the same work twice. Mirrors the
+  // forward import guard. The blocker is DRAFT-ONLY now (0255: a sent or paid invoice's rows are
+  // claimed, so a later draw bills only the delta — 85 Whitney's paid INV-061 no longer refuses
+  // every draw for the rest of the job's life), and the sentence is the SHARED one, so this door
+  // and createProgressReportInvoice refuse in the same words and name the same way out: finish
+  // that draft (send it, or delete it). The local wording this replaced — "Invoice INV-0xx already
+  // bills its time and materials … use New Invoice" — described the old any-status blocker; on an
+  // open draft, New Invoice lands on that same draft, so it was one more refusal pointing at a
+  // door that leads straight back here.
   const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
 

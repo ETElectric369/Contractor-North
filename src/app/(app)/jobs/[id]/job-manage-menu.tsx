@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Receipt, Users, List, Trash2 } from "lucide-react";
 import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
+import { useToast } from "@/components/toast";
 
 /** The one menu-row style — shared with the modal-owning items (Edit / Propose /
  *  Finish) composed in as children, so every row in the panel looks identical. */
@@ -39,8 +40,16 @@ export function JobManageMenu({
   isStaff: boolean;
   customerId?: string | null;
   jobNumber: string;
-  /** Bound server action — creates the invoice, returns its id (staff). */
-  createInvoice?: () => Promise<{ ok: boolean; error?: string; id?: string }>;
+  /** Bound server action — creates the invoice, returns its id (staff). `importWarning` is the
+   *  note the user must see before landing there; `billedOn` is the door a "nothing new to
+   *  bill" refusal offers. (The dock binds createInvoiceForJob, which returns both.) */
+  createInvoice?: () => Promise<{
+    ok: boolean;
+    error?: string;
+    id?: string;
+    importWarning?: string;
+    billedOn?: { id: string; number: string };
+  }>;
   /** Bound server action — deletes the job (staff). Called twice when the job has
    *  cascade children: once to LEARN what would be destroyed, then with
    *  confirmDestructive once the user has seen the real list and agreed. */
@@ -55,6 +64,7 @@ export function JobManageMenu({
   children?: React.ReactNode;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -92,8 +102,21 @@ export function JobManageMenu({
     try {
       const res = await createInvoice();
       if (res.ok && res.id) {
+        // THE NOTE GOES FIRST (09-10: "it hid it somewhere"). This row redirected and dropped the
+        // server's sentence — "opened the draft you already started", "labor couldn't be pulled
+        // in" — so the office landed on an invoice with no idea why it looked the way it did.
+        // Toast, then close, then go.
+        if (res.importWarning) toast(res.importWarning, "info");
         setOpen(false);
         router.push(`/billing/${res.id}`);
+        return;
+      }
+      // A refusal names its door. When every hour and bill is already on one invoice, the panel
+      // would only show a sentence; the toast carries the button to that invoice instead.
+      const door = res.billedOn;
+      if (door) {
+        setOpen(false);
+        toast(res.error ?? "Nothing new to bill.", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
         return;
       }
       setErr(res.error ?? "Couldn't create the invoice.");

@@ -17,9 +17,10 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
-import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
+import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
-import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
+import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, DRAW_KINDS } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
@@ -381,9 +382,140 @@ export type Result = { ok: boolean; error?: string; id?: string };
 
 /** What an import actually did (migration 0175), so the UI can say it plainly instead of
  *  "imported" — the ambiguity of that one word is most of why the old behaviour felt like
- *  force-feeding. `kept_edited` is the number the office cares about: their negotiated prices. */
-export type ImportStats = { inserted: number; updated: number; kept_edited: number; removed: number };
+ *  force-feeding. `kept_edited` is the number the office cares about: their negotiated prices.
+ *  0255 adds the other half of the sentence: what this run deliberately LEFT on another invoice. */
+export type ImportStats = {
+  inserted: number;
+  updated: number;
+  kept_edited: number;
+  removed: number;
+  /** Source rows this run pulled in — time entries/allocations, bills + orders, change orders,
+   *  estimate lines — that were NOT on the invoice before it: a refresh that re-wrote a line's
+   *  claims unchanged, or an id an edited line already held, is not "pulled in". */
+  pulled_in: number;
+  /** Offered source rows that did NOT land: they belong on a line the office edited (which keeps
+   *  its own numbers) or one it deleted (tombstoned, 0175). The count Start It Over is for — the
+   *  run had rows to place and the RPC could place none of them. */
+  held_back: number;
+  /** Source rows skipped because another non-void invoice on this job already bills them (their claim). */
+  skipped_claimed: number;
+  /** The invoice numbers holding those claims, oldest first — e.g. ["INV-061"]. */
+  claimed_on: string[];
+  /** The sentence, ready to show: "5 time entries pulled in · 9 already on INV-061 skipped". */
+  summary: string;
+};
 type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
+type RpcStats = { inserted: number; updated: number; kept_edited: number; removed: number };
+
+/** Migration 0255 hasn't landed yet (a push deploys before its migration runs): claims are
+ *  unknowable, so for those few minutes the old rule has to hold — never bill a second invoice's
+ *  rows blind. ONE sentence for every importer, so labor and materials refuse alike, and it says
+ *  how long. */
+function midUpgradeRefusal(claims: ClaimedSources): Result {
+  const other = claims.invoices[0];
+  return {
+    ok: false,
+    error: `Billing is mid-upgrade for a few minutes — this job's time and materials can't be split across ${other?.invoice_number ?? "two invoices"} and this one until it finishes. Try again shortly.`,
+  };
+}
+
+/**
+ * WHAT ACTUALLY LANDED — the source ids the invoice's lines for `source` hold after the RPC ran.
+ *
+ * An EDITED line keeps its own claims and takes none of the new ones (0255), so what the RPC took
+ * can be fewer than what it was handed; a stat that counted the offer would tell the office five
+ * entries went on when two of them are still free. Before 0255 (no source_ids column) the same
+ * answer comes from `edited` (0175): an unedited line for an offered key took that key's whole
+ * offer. Returns null only when the read-back itself fails — the import DID land, so the caller
+ * reports from the RPC's own counters instead of failing a write that succeeded.
+ */
+async function landedSourceIds(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string,
+  source: string,
+  offered: ImportRow[],
+): Promise<Set<string> | null> {
+  const read = (withClaims: boolean) =>
+    supabase.from("invoice_items").select(`import_key, edited${withClaims ? ", source_ids" : ""}`).eq("invoice_id", invoiceId).eq("import_source", source);
+  let withClaims = true;
+  let res: { data: unknown[] | null; error: unknown | null } = await read(true);
+  if (res.error && isMissingColumn(res.error, "source_ids")) {
+    withClaims = false;
+    res = await read(false);
+  }
+  if (res.error) {
+    reportError("landedSourceIds", res.error, { invoiceId, source });
+    return null;
+  }
+  const offer = new Map(offered.map((r) => [r.import_key, r.source_ids ?? []] as const));
+  const landed = new Set<string>();
+  for (const line of (res.data ?? []) as { import_key?: string | null; edited?: boolean | null; source_ids?: string[] | null }[]) {
+    if (withClaims) for (const sid of line.source_ids ?? []) landed.add(String(sid));
+    else if (!line.edited) for (const sid of offer.get(String(line.import_key ?? "")) ?? []) landed.add(sid);
+  }
+  return landed;
+}
+
+/** landedSourceIds' answer from each side of the RPC — the two reads withClaimStats diffs. */
+type LandedDiff = { before: Set<string>; after: Set<string> };
+
+/** Both reads have to succeed for the diff to mean anything: a missing side would count every id
+ *  as new (or none), so the RPC's own line counters speak instead. */
+const landedDiff = (before: Set<string> | null, after: Set<string> | null): LandedDiff | null => (before && after ? { before, after } : null);
+
+/** Fold the RPC's four counters together with what the claim filter did and what LANDED, and write
+ *  the toast's sentence in the source's own noun ("time entries", "bills", "change orders",
+ *  "estimate lines"). `offered` is what the app handed the RPC; `landed` is landedSourceIds'
+ *  answer from BEFORE the RPC and AFTER it (null = a read-back failed, so only the RPC's own line
+ *  counters may speak). pulled_in counts offered ids that are NEW to the invoice this run — never
+ *  the offer itself, and never an id that was already there: an edited line keeps the ids it holds
+ *  through every re-import, and a refresh re-writes an unedited line's ids unchanged, so counting
+ *  "landed" alone told the office "5 time entries pulled in" on a tap that added nothing. That is
+ *  the sentence that sends someone looking for the five. */
+function withClaimStats(rpc: RpcStats | undefined, offered: ImportRow[], landed: LandedDiff | null, skippedIds: string[], claims: ClaimedSources, noun: string): ImportStats {
+  const claimed_on = claimantNumbers(claims, skippedIds);
+  const offer = [...new Set(offered.flatMap((r) => r.source_ids ?? []))];
+  // Three buckets of the offer: on the invoice now, of which NEW since before the RPC; and not on it.
+  const onInvoice = landed ? offer.filter((id) => landed.after.has(id)) : [];
+  const took = landed ? onInvoice.filter((id) => !landed.before.has(id)).length : (rpc?.inserted ?? 0) + (rpc?.updated ?? 0);
+  const heldBack = landed ? offer.length - onInvoice.length : 0;
+  const skipped = skippedIds.length ? `${skippedIds.length} already on ${joinNumbers(claimed_on) || "another invoice"} skipped` : "";
+  const parts = landed
+    ? [
+        took ? `${took} ${noun} pulled in` : `no new ${noun}`,
+        // The RPC left an edited line alone, so the rows offered for it did not land (0255) and stay
+        // free for the next invoice. Said, with the door out: Start It Over rebuilds the source.
+        heldBack ? `${heldBack} not added — ${heldBack === 1 ? "it belongs" : "they belong"} on a line you edited, which keeps its own numbers (Start It Over rebuilds it)` : "",
+        skipped,
+      ]
+    : [
+        // The read-back failed: the only honest count is what the RPC itself reported, in lines.
+        `${took} ${took === 1 ? "line" : "lines"} added or refreshed`,
+        rpc?.kept_edited ? `${rpc.kept_edited} edited ${rpc.kept_edited === 1 ? "line" : "lines"} left alone` : "",
+        skipped,
+      ];
+  return {
+    inserted: 0,
+    updated: 0,
+    kept_edited: 0,
+    removed: 0,
+    ...(rpc ?? {}),
+    pulled_in: took,
+    held_back: heldBack,
+    skipped_claimed: skippedIds.length,
+    claimed_on,
+    summary: parts.filter(Boolean).join(" · "),
+  };
+}
+
+/** A push deploys before its migration runs (cn-v576 lesson): a write naming a column that isn't
+ *  there yet fails the whole statement. This recognises exactly that shape — Postgres 42703 and
+ *  PostgREST's schema-cache miss — and nothing else, so a real error still surfaces. */
+function isMissingColumn(err: unknown, column: string): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42703" || code === "PGRST204" || (msg.includes(column) && /does not exist|could not find/i.test(msg));
+}
 
 /** Default invoice due date = today (in the org tz) + the org's net terms, stamped to
  *  NOON in the org tz (same convention as setInvoiceDueDate / payment dates). Without a
@@ -408,12 +540,16 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     .maybeSingle();
   if (qErr || !quote) return { ok: false, error: "Quote not found." };
 
-  // Idempotent: a quote maps to one invoice. Re-tapping "Create invoice" returns
-  // the existing one instead of billing the customer twice.
+  // Idempotent: a quote maps to one LIVE invoice. Re-tapping "Create invoice" returns the
+  // existing one instead of billing the customer twice. A VOID one is not "the" invoice — voiding
+  // released its claims, and a quote whose invoice was voided can be billed again; handing the
+  // void row back opened a dead document and made the estimate unbillable for good.
   const { data: existingInv } = await supabase
     .from("invoices")
     .select("id")
     .eq("quote_id", quoteId)
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   if (existingInv) return { ok: true, id: existingInv.id };
@@ -471,18 +607,24 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     // the invoice total with no warning (the confirm counts rows by import_source, so it read
     // "0 replacing" and never fired). Keyed identically to importQuoteItemsIntoInvoice, a
     // re-import now refreshes these rows in place.
-    const { error: itemsErr } = await supabase.from("invoice_items").insert(
-      items.map((it: any) => ({
-        invoice_id: invoice.id,
-        description: it.description,
-        quantity: it.quantity,
-        unit: it.unit,
-        unit_price: it.unit_price,
-        sort_order: it.sort_order,
-        import_source: "quote",
-        import_key: `quote:${it.id}`,
-      })),
-    );
+    const copies = items.map((it: any) => ({
+      invoice_id: invoice.id,
+      description: it.description,
+      quantity: it.quantity,
+      unit: it.unit,
+      unit_price: it.unit_price,
+      sort_order: it.sort_order,
+      import_source: "quote",
+      import_key: `quote:${it.id}`,
+      // THE CLAIM (0255): this line bills that estimate line, so no other invoice on the job pulls it in.
+      source_ids: [String(it.id)],
+    }));
+    let itemsErr = (await supabase.from("invoice_items").insert(copies)).error;
+    // 0255 not applied yet: land the lines without their claim rather than fail the whole invoice —
+    // the key still names the source, and the backfill (0256) derives the claim from it.
+    if (itemsErr && isMissingColumn(itemsErr, "source_ids")) {
+      itemsErr = (await supabase.from("invoice_items").insert(copies.map(({ source_ids: _claim, ...rest }) => rest))).error;
+    }
     if (itemsErr) return { ok: false, error: dbError(itemsErr) };
   }
 
@@ -684,8 +826,10 @@ export async function addInvoiceItem(
  *  re-importing REFRESHES the lines (current total) instead of duplicating them. Delegates
  *  to the atomic, advisory-locked RPC (0156) so two overlapping imports can't both land.
  *  Hand-entered rows (import_source null) and other sources are never touched. */
-/** An imported line, carrying the stable identity of the thing it represents. */
-type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number };
+/** An imported line, carrying the stable identity of the thing it represents — and, since 0255,
+ *  its CLAIM: the source row ids it bills (time entry / allocation / bill / PO / change order /
+ *  estimate line). Another invoice on the job never imports a claimed row. */
+type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number; source_ids?: string[] };
 
 /**
  * ADDITIVE import (migration 0175). Matches incoming rows against what is already on the
@@ -706,14 +850,14 @@ async function upsertImportedItems(
   invoiceId: string,
   source: string,
   rows: ImportRow[],
-): Promise<{ error?: string; stats?: { inserted: number; updated: number; kept_edited: number; removed: number } }> {
+): Promise<{ error?: string; stats?: RpcStats }> {
   const { data, error } = await supabase.rpc("upsert_imported_invoice_items", {
     p_invoice_id: invoiceId,
     p_source: source,
     p_rows: rows,
   });
   if (error) return { error: dbError(error) };
-  return { stats: (data ?? undefined) as never };
+  return { stats: (data ?? undefined) as RpcStats | undefined };
 }
 
 /** Import the linked job's quote line items into this invoice (idempotent). */
@@ -732,13 +876,6 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: don't re-bill quoted scope onto a standard invoice on a draw job
-    // The same second-standard-invoice guard labor/costs/change orders already carry (GAP B): a
-    // job's quoted scope must not land on TWO standard invoices. Draws are exempt — they re-itemize
-    // and net via a credit line. This importer was the only one of the four without it.
-    if (!isDrawKind((inv as any).invoice_kind)) {
-      const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "quote");
-      if (clash) return { ok: false, error: `This job's quoted scope is already billed on ${clash}. Edit that invoice, or bill extra work as a progress payment.` };
-    }
   }
 
   let quoteId = inv.quote_id;
@@ -760,26 +897,36 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
     .eq("quote_id", quoteId)
     .order("sort_order");
   if (!items?.length) return { ok: false, error: "The quote has no line items." };
+  // An estimate line already on another non-void invoice of this job stays there (0255): this
+  // invoice takes only what nobody billed yet, instead of being refused outright as under cn-v479.
+  // Read by id as well as by job, so a line billed before the quote moved is still seen as claimed.
+  const claims = await claimedSourcesOnJob(supabase, inv.job_id ?? null, invoiceId, (items as any[]).map((it) => String(it.id)));
+  const skippedIds = (items as any[]).filter((it) => claims.owner.has(String(it.id))).map((it) => String(it.id));
+  const free = (items as any[]).filter((it) => !claims.owner.has(String(it.id)));
+  if (!free.length) {
+    return { ok: false, empty: true, error: `Every line of that estimate is already on ${joinNumbers(claimantNumbers(claims, skippedIds))} — nothing new to pull in.` };
+  }
 
-  const rep = await upsertImportedItems(
-    supabase,
-    invoiceId,
-    "quote",
-    items.map((it: any) => ({
-      import_key: `quote:${it.id}`,
-      description: it.description,
-      quantity: Number(it.quantity),
-      unit: it.unit,
-      unit_price: Number(it.unit_price),
-    })),
-  );
+  const rows: ImportRow[] = free.map((it: any) => ({
+    import_key: `quote:${it.id}`,
+    description: it.description,
+    quantity: Number(it.quantity),
+    unit: it.unit,
+    unit_price: Number(it.unit_price),
+    source_ids: [String(it.id)],
+  }));
+  // What the invoice's estimate lines claim BEFORE the RPC, so the toast counts only what this tap
+  // added (withClaimStats diffs it against the read-back after).
+  const before = await landedSourceIds(supabase, invoiceId, "quote", rows);
+  const rep = await upsertImportedItems(supabase, invoiceId, "quote", rows);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
-  // different sentence from "Materials imported", and it is the one that tells the office whether
-  // their negotiated prices survived.
-  return { ok: true, stats: rep.stats };
+  // Report what actually happened — counted from the lines that LANDED, not the offer. "3 added,
+  // 2 updated, 5 of your edited lines left alone" is a different sentence from "Materials imported",
+  // and it is the one that tells the office whether their negotiated prices survived.
+  const after = await landedSourceIds(supabase, invoiceId, "quote", rows);
+  return { ok: true, stats: withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "estimate lines") };
 }
 
 // ── H4: one billing path per job ────────────────────────────────────────────
@@ -839,34 +986,19 @@ async function blockStandardCreateOnDrawJob(supabase: any, jobId: string | null 
   return draw ? drawConflictError(draw) : null;
 }
 
-/** Import labor from the job's closed time entries: one line per person,
- *  hours × their hourly rate (falls back to the org default labor rate). */
-
-/**
- * GAP B — a job's labor (resp. materials) must live on exactly ONE non-draw invoice. Draws
- * (deposit/progress/final) re-itemize actuals BY DESIGN and net them with a "Less previous billings"
- * credit line, so they're exempt — only OTHER *standard* invoices count as a clash. Returns the
- * clashing invoice number, or null. THIS is what stops "finish the job" (or a second Create Invoice)
- * from re-billing hours already sitting on another invoice — the Tao chandelier double.
- */
-async function billedOnAnotherStandardInvoice(
-  supabase: any,
-  jobId: string,
-  thisInvoiceId: string,
-  source: "labor" | "costs" | "change_orders" | "quote",
-): Promise<string | null> {
-  const { data } = await supabase
-    .from("invoices")
-    .select("invoice_number, invoice_items(import_source)")
-    .eq("job_id", jobId)
-    .eq("invoice_kind", "standard")
-    .neq("status", "void")
-    .neq("id", thisInvoiceId);
-  for (const inv of (data ?? []) as any[]) {
-    if (((inv.invoice_items ?? []) as any[]).some((it) => it.import_source === source)) return inv.invoice_number as string;
-  }
-  return null;
-}
+// ── The invariant lives on the ROW now (0255) ───────────────────────────────────────────────
+// cn-v479's GAP B guard (billedOnAnotherStandardInvoice) refused to import labor / materials /
+// change orders / estimate lines onto a second standard invoice for the job — "already billed on
+// INV-061. Edit that invoice, or bill extra work as a progress payment." It was the only way to
+// stop the Tao chandelier double while a labor line could not say WHICH hours it held, and it
+// made billing anything NEW after the first invoice went out impossible: Erik, 85 Whitney,
+// 2026-09-11 — three refusal sentences pointing at each other, none naming a door that worked.
+// Each importer now reads the job's claims (claimedSourcesOnJob), skips the rows another non-void
+// invoice holds, writes its own claims (invoice_items.source_ids + import_key), and reports
+// "N pulled in · M already on INV-0xx skipped" instead of refusing. Draws claim too: a delta draw
+// and a standard invoice are the same kind of claimant, so they can follow each other on one job
+// without a row ever being billed twice. The claim dies with the line — delete it, void the
+// invoice, or start the import over (0204) and the rows are free again.
 
 /**
  * START ONE IMPORT SOURCE OVER (0204) — the release for 0175's three protections.
@@ -926,50 +1058,64 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   // so this never blocks legitimate progress billing.
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock;
-  // GAP B: don't bill this job's labor on a SECOND standard invoice. Importing into a DRAW is exempt
-  // (draws re-itemize + net via a credit line), so this only guards standard→standard.
-  if (!isDrawKind((inv as any).invoice_kind)) {
-    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "labor");
-    if (clash) return { ok: false, error: `This job's labor is already billed on ${clash}. Edit that invoice, or bill extra work as a progress payment.` };
-  }
 
-  // Bill the EXACT time on this job via the shared labor-billing helper (so the
-  // billed lines reconcile to the penny with the progress-report "work to date").
+  // Bill the EXACT time on this job via the shared labor-billing helper (so the billed lines
+  // reconcile to the penny with the "work to date" every panel shows) — MINUS every entry and
+  // allocation another non-void invoice on the job already CLAIMS (0255). Re-importing into THIS
+  // draft excludes only OTHER invoices' claims, so a refresh still works exactly as 0175 promised.
   const [labor, { data: org }, levelRate] = await Promise.all([
     fetchJobLaborRows(supabase, inv.job_id),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     customerLaborRateForJob(supabase, inv.job_id),
   ]);
+  // Claims AFTER the rows, never beside them: the read looks every candidate up BY ID as well as by
+  // job, so an entry billed on another job and moved here since is still seen as claimed.
+  const claims = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, laborRowIds(labor));
+  // Migration 0255 hasn't landed yet: labor claims are unknowable, so for these few minutes the
+  // old rule has to hold — never bill a second invoice's labor blind (one sentence with costs).
+  if (!claims.schemaReady && claims.invoices.length) return midUpgradeRefusal(claims);
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
-  const { lines } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
-  if (lines.length === 0) return { ok: false, error: "No billable hours on this job yet.", empty: true };
+  const free = withoutClaimedLabor(labor.jobEntries, labor.jobAllocs, new Set(claims.owner.keys()));
+  const { lines } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
+  if (lines.length === 0) {
+    // Nothing free to bill — and the reason is the difference between "no hours yet" and "every
+    // hour is already on INV-061". Only the second one should send the office looking elsewhere.
+    return free.skippedIds.length
+      ? { ok: false, empty: true, error: `Every hour on this job is already on ${joinNumbers(claimantNumbers(claims, free.skippedIds))} — nothing new to bill.` }
+      : { ok: false, error: "No billable hours on this job yet.", empty: true };
+  }
 
-  const rep = await upsertImportedItems(
-    supabase,
-    invoiceId,
-    "labor",
-    lines.map((l) => ({
-      // Keyed by PERSON: the importer aggregates a job's time per head, so "Erik" is one
-      // line whose hours grow. Re-importing refreshes it — unless the office negotiated
-      // the number, in which case `edited` protects it and a NEW person still appends.
-      import_key: `labor:${l.personId}`,
-      // THE RATE'S PROVENANCE, ON THE LINE. Erik, staring at an import: "still importing at 150"
-      // — the number was his tech's own bill_rate doing exactly its job, and nothing said so, so
-      // it read as a bug. A line that names its source explains itself; one that doesn't becomes
-      // a report.
-      description: `Labor — ${l.name}${levelRate && levelRate > 0 ? " (customer rate)" : l.rate !== defaultRate ? ` (${l.name}'s bill rate)` : ""}`,
-      quantity: l.quantity,
-      unit: "hr",
-      unit_price: l.rate,
-    })),
-  );
+  const rows: ImportRow[] = lines.map((l) => ({
+    // Keyed by PERSON: the importer aggregates a job's time per head, so "Erik" is one
+    // line whose hours grow. Re-importing refreshes it — unless the office negotiated
+    // the number, in which case `edited` protects it and a NEW person still appends.
+    import_key: `labor:${l.personId}`,
+    // THE RATE'S PROVENANCE, ON THE LINE. Erik, staring at an import: "still importing at 150"
+    // — the number was his tech's own bill_rate doing exactly its job, and nothing said so, so
+    // it read as a bug. A line that names its source explains itself; one that doesn't becomes
+    // a report.
+    description: `Labor — ${l.name}${levelRate && levelRate > 0 ? " (customer rate)" : l.rate !== defaultRate ? ` (${l.name}'s bill rate)` : ""}`,
+    quantity: l.quantity,
+    unit: "hr",
+    unit_price: l.rate,
+    // THE CLAIM: the entry/allocation ids behind this line ride with it and die with it. An
+    // `edited` line keeps the claims it already holds and takes no new ones — its hours were
+    // negotiated, and hours that arrive later are not on it, so they stay free for the next bill.
+    source_ids: l.sourceIds,
+  }));
+  // What the invoice's labor lines claim BEFORE the RPC, so the toast counts only the entries this
+  // tap added — a re-import that refreshed Erik's line with the same nine entries pulled in none.
+  const before = await landedSourceIds(supabase, invoiceId, "labor", rows);
+  const rep = await upsertImportedItems(supabase, invoiceId, "labor", rows);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
-  // different sentence from "Materials imported", and it is the one that tells the office whether
-  // their negotiated prices survived.
-  return { ok: true, stats: rep.stats };
+  // Report what actually happened, in time entries, counted from the lines that LANDED (an edited
+  // line takes none of the offer): "5 time entries pulled in · 9 already on INV-061 skipped" tells
+  // the office what this invoice carries and what it deliberately left where it was — a different
+  // sentence from "Labor imported".
+  const after = await landedSourceIds(supabase, invoiceId, "labor", rows);
+  return { ok: true, stats: withClaimStats(rep.stats, rows, landedDiff(before, after), free.skippedIds, claims, "time entries") };
 }
 
 /**
@@ -1012,14 +1158,6 @@ export async function importChangeOrdersIntoInvoice(invoiceId: string): Promise<
   if (conflict) return conflict;
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock;
-  if (!isDrawKind((inv as { invoice_kind?: string }).invoice_kind)) {
-    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "change_orders");
-    if (clash)
-      return {
-        ok: false,
-        error: `This job's change orders are already billed on ${clash}. Edit that invoice, or bill new work as a progress payment.`,
-      };
-  }
 
   const { data: cos, error: readErr } = await supabase
     .from("change_orders")
@@ -1031,19 +1169,33 @@ export async function importChangeOrdersIntoInvoice(invoiceId: string): Promise<
   // error, and treating that as "no change orders" would tell the office there is nothing to bill
   // on a job that has thousands of dollars of approved extras.
   if (readErr) return { ok: false, error: dbError(readErr) };
+  // Claims AFTER the read: looked up by id as well as by job (claimedSourcesOnJob).
+  const claims = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, ((cos ?? []) as ChangeOrderRow[]).map((c) => String(c.id)));
   // The two decisions worth pinning — which ones count as money, and what the customer reads —
   // live in lib/change-order-billing where they are unit-tested. A credit (negative amount) is a
   // real change order and passes straight through; only $0 is dropped.
   const rows = (cos ?? []) as ChangeOrderRow[];
-  const lines = changeOrderLines(rows);
-  if (!lines.length) return { ok: false, error: noChangeOrdersReason(rows), empty: true };
+  // A change order already on another non-void invoice of this job stays there (0255) — its claim
+  // is the record that it was billed, which is why the change order itself needs no "billed" flag.
+  const skippedIds = rows.filter((c) => claims.owner.has(String(c.id))).map((c) => String(c.id));
+  const free = rows.filter((c) => !claims.owner.has(String(c.id)));
+  const lines = changeOrderLines(free);
+  if (!lines.length) {
+    return skippedIds.length
+      ? { ok: false, empty: true, error: `Every approved change order on this job is already on ${joinNumbers(claimantNumbers(claims, skippedIds))} — nothing new to pull in.` }
+      : { ok: false, error: noChangeOrdersReason(rows), empty: true };
+  }
 
-  const rep = await upsertImportedItems(supabase, invoiceId, "change_orders", lines);
+  const offer: ImportRow[] = lines.map((l) => ({ ...l, source_ids: [l.import_key.replace(/^co:/, "")] }));
+  // Claims before the RPC, so the toast counts only the change orders this tap added.
+  const before = await landedSourceIds(supabase, invoiceId, "change_orders", offer);
+  const rep = await upsertImportedItems(supabase, invoiceId, "change_orders", offer);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidatePath("/change-orders");
-  return { ok: true, stats: rep.stats };
+  const after = await landedSourceIds(supabase, invoiceId, "change_orders", offer);
+  return { ok: true, stats: withClaimStats(rep.stats, offer, landedDiff(before, after), skippedIds, claims, "change orders") };
 }
 
 /** Import materials from the job's costs: purchase orders + supplier bills,
@@ -1079,27 +1231,38 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   if (conflict) return conflict;
   const draftBlock = await requireDraftInvoice(supabase, invoiceId);
   if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
-  if (!isDrawKind((inv as any).invoice_kind)) {
-    const clash = await billedOnAnotherStandardInvoice(supabase, inv.job_id, invoiceId, "costs");
-    if (clash) return { ok: false, error: `This job's materials are already billed on ${clash}. Edit that invoice, or bill extra on a progress payment.` }; // GAP B
-  }
 
+  // Bills and orders another non-void invoice on this job already claims stay there (0255): the
+  // loops below skip them and the stats say so. This replaces cn-v479's refusal ("materials are
+  // already billed on INV-061"), which made a second invoice impossible once the first went out.
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("id, po_number, vendor, total, status").eq("job_id", inv.job_id),
     supabase.from("bills").select("id, supplier, bill_number, amount, po_id").eq("job_id", inv.job_id),
   ]);
-  // The itemized lines behind each bill (the receipt-reader stores every receipt line).
-  // A bill WITH lines goes onto the invoice item-by-item — real descriptions, quantities,
-  // and per-item prices — instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill
-  // without lines (hand-entered) still imports as its lump.
-  const billIds = ((bills ?? []) as any[]).map((b) => b.id);
-  const { data: blis } = billIds.length
-    ? await supabase
-        .from("bill_line_items")
-        .select("id, bill_id, description, quantity, unit_price, amount, category, sort_order")
-        .in("bill_id", billIds)
-        .order("sort_order")
-    : { data: [] as any[] };
+  const billIds = ((bills ?? []) as any[]).map((b) => String(b.id));
+  // Claims AFTER the rows, never beside them: the read looks every bill and order up BY ID as well
+  // as by job, so one billed before it was moved to this job is still seen as claimed. The itemized
+  // lines behind each bill ride along (the receipt-reader stores every receipt line): a bill WITH
+  // lines goes onto the invoice item-by-item — real descriptions, quantities, per-item prices —
+  // instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill without lines (hand-entered)
+  // still imports as its lump.
+  const [claims, { data: blis }] = await Promise.all([
+    claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [...((pos ?? []) as any[]).map((p) => String(p.id)), ...billIds]),
+    billIds.length
+      ? supabase
+          .from("bill_line_items")
+          .select("id, bill_id, description, quantity, unit_price, amount, category, sort_order")
+          .in("bill_id", billIds)
+          .order("sort_order")
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+  // THE DEPLOY WINDOW (0255 not applied): a claim written by id — every labor line, and every cost
+  // line since 0255 — is unreadable, so a bill another invoice holds could be billed again here.
+  // The same refusal labor gives, for the same few minutes; keys alone are not a boundary.
+  if (!claims.schemaReady && claims.invoices.length) return midUpgradeRefusal(claims);
+  const skippedIds: string[] = [];
+  /** Bills whose PO is already billed elsewhere: the delivery was charged through the order. */
+  const poCovered: { billId: string; poId: string }[] = [];
   const linesByBill = new Map<string, any[]>();
   for (const l of (blis ?? []) as any[]) {
     if (!linesByBill.has(l.bill_id)) linesByBill.set(l.bill_id, []);
@@ -1114,7 +1277,12 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   // never a real cost, and a PO whose supplier bill has arrived is superseded by that
   // bill — otherwise one CED delivery goes out on the invoice as two material charges.
   for (const p of livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[])) {
-    if (Number(p.total) > 0) rows.push({ import_key: `po:${p.id}`, description: `Materials — ${p.vendor} (PO ${p.po_number})`, quantity: 1, unit: "lot", unit_price: mark(Number(p.total)) });
+    if (!(Number(p.total) > 0)) continue;
+    if (claims.owner.has(String(p.id))) {
+      skippedIds.push(String(p.id));
+      continue;
+    }
+    rows.push({ import_key: `po:${p.id}`, description: `Materials — ${p.vendor} (PO ${p.po_number})`, quantity: 1, unit: "lot", unit_price: mark(Number(p.total)), source_ids: [String(p.id)] });
   }
   // ── THE ANCHOR INVARIANT (adversarial-review fix, 7/24) ──────────────────────────────
   // Each bill's itemized rows must sum to EXACTLY mark(bill.amount) — the same figure the
@@ -1137,6 +1305,17 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   //    bill.amount always wins over stale lines.
   for (const b of (bills ?? []) as any[]) {
     if (!(Number(b.amount) > 0)) continue;
+    if (claims.owner.has(String(b.id))) {
+      skippedIds.push(String(b.id));
+      continue;
+    }
+    // The delivery this bill is for was already billed through its PO on another invoice. Billing
+    // the bill too charges the same delivery twice; if it came in higher than the order, that
+    // difference is the office's call, by hand — never invented here. Counted and said below.
+    if (typeof b.po_id === "string" && b.po_id && claims.owner.has(b.po_id)) {
+      poCovered.push({ billId: String(b.id), poId: b.po_id });
+      continue;
+    }
     const target = mark(Number(b.amount));
     const lines = (linesByBill.get(b.id) ?? []).filter((l) => !/tax/i.test(String(l.category ?? "")));
     const billRows: typeof rows = [];
@@ -1165,32 +1344,65 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
       }
     }
     const remainder = Math.round((target - emitted) * 100) / 100;
+    // Every row of a bill claims the BILL (0255): a bill is billed as a unit (its rows sum to
+    // mark(bill.amount) — the anchor invariant), so the claim is at bill level, not per line.
     if (!billRows.length) {
-      rows.push({ import_key: `bill:${b.id}`, description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target });
+      rows.push({ import_key: `bill:${b.id}`, description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target, source_ids: [String(b.id)] });
       continue;
     }
     if (Math.abs(remainder) >= 0.01) {
       billRows.push({ import_key: `bill:${b.id}:remainder`, description: `Supplies & tax — ${b.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
     }
-    rows.push(...billRows);
+    rows.push(...billRows.map((r) => ({ ...r, source_ids: [String(b.id)] })));
   }
-  if (!rows.length) return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
+  if (!rows.length) {
+    const held = [...skippedIds, ...poCovered.map((c) => c.poId)];
+    return held.length
+      ? { ok: false, empty: true, error: `Every bill and order on this job is already on ${joinNumbers(claimantNumbers(claims, held))} — nothing new to bill.` }
+      : { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
+  }
 
+  // What the invoice's materials lines claim BEFORE the RPC, so the toast counts only the bills
+  // and orders this tap added (withClaimStats diffs it against the read-back after).
+  const before = await landedSourceIds(supabase, invoiceId, "costs", rows);
   const rep = await upsertImportedItems(supabase, invoiceId, "costs", rows);
   if (rep.error) return { ok: false, error: rep.error };
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  // Report what actually happened. "3 added, 2 updated, 5 of your edited lines left alone" is a
-  // different sentence from "Materials imported", and it is the one that tells the office whether
-  // their negotiated prices survived.
-  return { ok: true, stats: rep.stats };
+  // Report what actually happened, in bills, counted from the lines that LANDED: "2 bills pulled
+  // in · 3 already on INV-061 skipped" is a different sentence from "Materials imported", and it is
+  // the one that tells the office what this invoice now carries and what it deliberately left
+  // where it was.
+  const after = await landedSourceIds(supabase, invoiceId, "costs", rows);
+  const stats = withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "bills");
+  if (poCovered.length) {
+    const n = poCovered.length;
+    stats.skipped_claimed += n;
+    stats.summary += ` · ${n} ${n === 1 ? "bill" : "bills"} left off — the order ${n === 1 ? "it names is" : "they name are"} already on ${joinNumbers(claimantNumbers(claims, poCovered.map((c) => c.poId)))}; bill any difference by hand`;
+  }
+  return { ok: true, stats };
 }
 
-/** Create a progress/final DRAW that doubles as a progress report: itemizes all
- *  actual labor (at bill rate) + materials (with markup) to date, then credits
- *  prior billings (deposit + earlier draws) so the balance due is just the new
- *  work since the last bill — the standard cumulative (AIA-style) progress format.
- *  The single invoice shows the customer the running tally AND the amount owed. */
+/**
+ * A PROGRESS / FINAL DRAW IS THE DELTA (0255) — the work logged since the last bill, itemized.
+ *
+ * It used to be cumulative (AIA-style): re-itemize ALL of the job's labor + materials every time,
+ * then credit every prior invoice's subtotal so the balance came out to the new work. That was the
+ * only honest build while a labor line could not say which hours it held — and it is why Erik's
+ * "Progress Payment" and "Request Next Payment" on 85 Whitney both refused: a paid standard
+ * invoice on the job made the re-itemization a double bill, so the guard forbade the draw.
+ *
+ * Now every imported row carries its claim, so the draw imports ONLY the rows no non-void invoice
+ * on the job holds (labor at bill rate, materials with markup) and credits ONLY money paid against
+ * work rather than for itemized work — a fixed-$ / %-of-estimate deposit not yet netted
+ * (fixedBillingsNotYetNetted). Prior standard invoices and prior delta draws are not credited:
+ * nothing on them is on this document. On J-028 that is Brian's 5.25 hr and the two CED bills,
+ * and nothing else — and "New Invoice", "Progress Payment → Actual T&M" and "Request Next Payment"
+ * all produce that same draft.
+ *
+ * When nothing is unclaimed it says so and names where the work is ("Everything worked so far is
+ * already on INV-061.") instead of minting an empty draw.
+ */
 export async function createProgressReportInvoice(
   jobId: string,
   kind: "progress" | "final",
@@ -1216,10 +1428,24 @@ export async function createProgressReportInvoice(
   if (existingDraft) {
     return { ok: false, error: `Draft ${(existingDraft as any).invoice_number} is still open on this job — send or delete it before creating another draw.` };
   }
-  // H4 (reverse): if a standard invoice already bills this job's labor/materials, a
-  // draw here would re-import and double-bill the same work. Block before creating it.
+  // H4 (reverse), narrowed (0255): only a DRAFT standard invoice with content blocks — it is the
+  // open door new work belongs on. A sent/paid one is finished business; the delta below bills
+  // only what it (and every other non-void invoice) doesn't already claim.
   const stdBlocker = await standardBillingBlockerOnJob(supabase, jobId);
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
+  // THE DELTA, decided before a row is written. unbilledWorkForJob is the same arithmetic the
+  // importers run below, so "nothing unclaimed" is known up front and no empty draft is minted.
+  const [unbilled, fixedToNet] = await Promise.all([unbilledWorkForJob(supabase, jobId), fixedBillingsNotYetNetted(supabase, jobId)]);
+  if (!unbilled.schemaReady) {
+    return { ok: false, error: "Billing is mid-upgrade for a few minutes — a progress payment can't tell new time from billed time until it finishes. Try again shortly." };
+  }
+  if (unbilled.total <= 0.005) {
+    const on = unbilled.claimedOn.length ? joinNumbers(unbilled.claimedOn) : unbilled.lastInvoiceNumber;
+    return {
+      ok: false,
+      error: on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.",
+    };
+  }
   const settings = getOrgSettings((org as any)?.settings);
   // Seed from the customer's pricing level (falling back to the org default) — the same
   // resolver the manual import box and the work-to-date panel use, so a draw can't bill a
@@ -1249,35 +1475,27 @@ export async function createProgressReportInvoice(
     return { ok: false, error: dbError(error) };
   }
 
-  // Itemize the actual work to date (labor at bill rate + materials with markup). A real import failure
-  // here would silently understate the draw — log it instead of swallowing (empty:true = nothing to bill).
+  // Itemize the UNCLAIMED work (labor at bill rate + materials with markup): both importers drop
+  // the rows another non-void invoice claims. A real import failure here would silently understate
+  // the draw — log it instead of swallowing (empty:true = nothing to bill on that side).
   const pLabor = await importLaborIntoInvoice(inv.id);
   if (!pLabor.ok && !pLabor.empty) reportError("createProgressReportInvoice.labor", pLabor.error, { jobId, invoiceId: inv.id });
   const pCosts = await importCostsIntoInvoice(inv.id, markup);
   if (!pCosts.ok && !pCosts.empty) reportError("createProgressReportInvoice.costs", pCosts.error, { jobId, invoiceId: inv.id });
 
-  const { data: afterImport } = await supabase.from("invoices").select("total").eq("id", inv.id).maybeSingle();
-  const importedTotal = Number(afterImport?.total ?? 0);
-
-  // Prior billings actually SENT to the customer (deposit + earlier sent draws;
-  // drafts and void excluded) so they only pay for work since the last bill.
-  const { data: priorInvs } = await supabase
-    .from("invoices")
-    .select("subtotal, status")
-    .eq("job_id", jobId)
-    .neq("id", inv.id);
   // SUBTOTAL, not total (audit 8): the credit line is inserted INSIDE this draw's subtotal, so
-  // netting a tax-INCLUSIVE prior against pre-tax work credited the customer their own tax and
-  // then taxed the inflated remainder — the draw came out over the true cumulative bill.
-  const priorBilled = (priorInvs ?? []).reduce(
-    (s: number, i: any) => (i.status !== "void" && i.status !== "draft" ? s + Number(i.subtotal ?? 0) : s),
-    0,
-  );
+  // netting a tax-INCLUSIVE figure against pre-tax work credited the customer their own tax.
+  const { data: afterImport } = await supabase.from("invoices").select("subtotal").eq("id", inv.id).maybeSingle();
+  const importedTotal = Number(afterImport?.subtotal ?? 0);
 
-  // H1: a draw must never go negative. The pure, unit-tested resolveDrawCredit
-  // decides whether to bail (nothing logged / prior billings already cover it) or
-  // how much to credit (floored so the balance never drops below $0).
-  const decision = resolveDrawCredit(importedTotal, priorBilled);
+  // What still has to be netted is ONLY money paid against work rather than for itemized work — a
+  // fixed-$ / %-of-estimate deposit not yet credited. Prior standard invoices and prior delta draws
+  // are NOT credited: nothing on them is re-itemized here, so there is nothing to net. (The old
+  // cumulative credit against every prior subtotal is what read the $400 referral hand line on
+  // INV-061 as "previously billed work" and left the modal $400 low.)
+  // H1: a draw must never go negative. The pure, unit-tested resolveDrawCredit decides whether to
+  // bail (nothing new / the deposit still covers it) or how much to credit (floored at $0 owed).
+  const decision = resolveDrawCredit(importedTotal, fixedToNet);
   if (!decision.ok) {
     await supabase.from("invoices").delete().eq("id", inv.id);
     return {
@@ -1285,7 +1503,7 @@ export async function createProgressReportInvoice(
       error:
         decision.reason === "no-work"
           ? "No labor or materials are logged on this job yet to bill."
-          : "Prior billings already cover the work logged so far — nothing new to bill yet.",
+          : `The deposit already covers the ${formatCurrency(importedTotal)} worked since the last bill — nothing new to bill yet.`,
     };
   }
   if (decision.credit > 0.005) {
@@ -1611,6 +1829,92 @@ async function requireDraftInvoice(supabase: any, invoiceId: string): Promise<Re
 
 const INVOICE_STATUSES = ["draft", "sent", "partial", "paid", "overdue", "void"];
 
+/** The invoice a status change is about, with the lines that carry its claims. */
+type StatusRow = {
+  id: string;
+  status: string;
+  job_id: string | null;
+  invoice_number: string | null;
+  amount_paid: number | null;
+  invoice_items: { import_source?: string | null; import_key?: string | null; source_ids?: string[] | null }[] | null;
+};
+
+/** One read, tolerant of the 0255 deploy window (a select naming a missing column fails whole). */
+async function invoiceForStatusChange(supabase: Awaited<ReturnType<typeof createClient>>, id: string): Promise<{ row: StatusRow | null; error?: string }> {
+  const read = (withClaims: boolean) =>
+    supabase
+      .from("invoices")
+      .select(`id, status, job_id, invoice_number, amount_paid, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
+      .eq("id", id)
+      .maybeSingle();
+  let res: { data: unknown; error: unknown | null } = await read(true);
+  if (res.error && isMissingColumn(res.error, "source_ids")) res = await read(false);
+  if (res.error) return { row: null, error: dbError(res.error) };
+  return { row: (res.data ?? null) as StatusRow | null };
+}
+
+
+/**
+ * UN-VOID MUST NOT RESURRECT A CLAIM ANOTHER INVOICE NOW HOLDS.
+ *
+ * Voiding releases every row the invoice billed (claimedSourcesOnJob reads non-void only — that is
+ * the whole design of 0255: the claim dies with the invoice, no tidy-up). The next invoice on the
+ * job may have picked those rows up since. Flipping this one back would put the same hours and
+ * bills on two live invoices — the exact double 0255 exists to end, reached through the status
+ * menu instead of an importer. So the way back is closed while another non-void invoice holds
+ * any of them, and the sentence names it. Nort's invoice.setStatus lands here too, so the rule
+ * holds whichever door asks. Looked up by id as well as by job, so a claimant on another job (the
+ * entry moved after it was billed) counts and is named with its job.
+ *
+ * A LABOR LINE THAT CLAIMS NOTHING IS A LEGACY LINE, and it closes the way back too. 0256 stamped
+ * claims onto NON-VOID invoices only, so an invoice voided before 0255 carries labor lines with
+ * empty source_ids — nothing says which entries they billed. The held-ids check below cannot see
+ * a conflict for an id that was never written, which is exactly how such an invoice would walk
+ * back through this guard and put its hours beside whatever the job's live invoices now bill.
+ * With any other non-void invoice on the job, the only safe door is a fresh invoice (the
+ * importers pull in only unclaimed rows); with none, un-voiding restores the state 0256 handles.
+ */
+async function unvoidConflict(supabase: Awaited<ReturnType<typeof createClient>>, inv: StatusRow): Promise<Result | null> {
+  const items = inv.invoice_items ?? [];
+  const mine = claimedIdsOfLines(items);
+  // ANY imported line that claims nothing is a legacy line — labor, or a cost line from before
+  // 0255 whose only key was bli:<line> (no bill id anywhere on it). Both walk past the held-ids
+  // check the same way, so both close the way back while another invoice is live on the job.
+  const legacyLabor = items.some((it) => !!it.import_source && !it.source_ids?.length && !claimedIdsOfLines([it]).length);
+  if (!mine.length && !legacyLabor) return null; // hand-typed lines only: nothing on it can be on another invoice
+  const claims = await claimedSourcesOnJob(supabase, inv.job_id ?? null, inv.id, mine);
+  const label = inv.invoice_number ?? "this invoice";
+  const Label = label.charAt(0).toUpperCase() + label.slice(1);
+  if (!claims.schemaReady && claims.invoices.length) {
+    return {
+      ok: false,
+      error: `Billing is mid-upgrade for a few minutes — ${label} can't come back from void until it's certain no other invoice bills its hours and materials. Try again shortly.`,
+    };
+  }
+  if (legacyLabor && claims.invoices.length) {
+    // Named oldest first — the job's own live invoices, any of which may now bill those hours.
+    const live = joinNumbers([...claims.invoices].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((i) => i.invoice_number ?? "an unnumbered invoice"));
+    return {
+      ok: false,
+      error: `${Label} can't come back from void: it was built before an invoice's lines recorded which hours and bills they bill, so nothing can check it against ${live} — un-voiding it could bill the same work twice. Leave ${label} void and bill the work on a fresh invoice instead; New Invoice on the job pulls in only the hours and bills nobody has billed yet.`,
+    };
+  }
+  const held = mine.filter((sid) => claims.owner.has(sid));
+  if (!held.length) return null;
+  // Say WHAT is held in the office's words — hours, materials, change orders, estimate lines.
+  const what = new Set<string>();
+  for (const it of items) {
+    if (!claimedIdsOfLines([it]).some((sid) => claims.owner.has(sid))) continue;
+    const src = it.import_source ?? null;
+    what.add(src === "labor" ? "hours" : src === "costs" ? "materials" : src === "change_orders" ? "change orders" : src === "quote" ? "estimate lines" : "lines");
+  }
+  const on = joinNumbers(claimantNumbers(claims, held));
+  return {
+    ok: false,
+    error: `${Label} can't come back from void: the ${joinNumbers([...what])} on it are already billed on ${on}, so un-voiding it would bill them twice. Void ${on} first, or leave ${label} void — the work is billed there.`,
+  };
+}
+
 export async function setInvoiceStatus(
   id: string,
   status: string,
@@ -1622,11 +1926,16 @@ export async function setInvoiceStatus(
   // is line-editable and off the AR list, so demoting a paid/partial invoice hides real revenue
   // and lets its lines change under recorded payments.
   if (!INVOICE_STATUSES.includes(status)) return { ok: false, error: "That isn't a valid invoice status." };
-  if (status === "draft") {
-    const { data: paidRow } = await supabase.from("invoices").select("amount_paid").eq("id", id).maybeSingle();
-    if (Number((paidRow as { amount_paid?: number } | null)?.amount_paid ?? 0) > 0) {
-      return { ok: false, error: "This invoice has payments — it can't go back to Draft. Void it instead." };
-    }
+  const { row: cur, error: readErr } = await invoiceForStatusChange(supabase, id);
+  if (readErr) return { ok: false, error: readErr };
+  if (!cur) return { ok: false, error: "Invoice not found." };
+  if (status === "draft" && Number(cur.amount_paid ?? 0) > 0) {
+    return { ok: false, error: "This invoice has payments — it can't go back to Draft. Void it instead." };
+  }
+  // Leaving "void" resurrects this invoice's claims — refused while another invoice holds any.
+  if (cur.status === "void" && status !== "void") {
+    const back = await unvoidConflict(supabase, cur);
+    if (back) return back;
   }
   const { data: wroteS, error } = await supabase.from("invoices").update({ status }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };

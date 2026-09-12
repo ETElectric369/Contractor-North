@@ -110,6 +110,69 @@ export async function textQuote(
   return { ok: true };
 }
 
+/**
+ * SHARE SHEET payload for an estimate — the twin of invoiceShareText (billing/actions.ts).
+ *
+ * The invoice grew a share payload after Erik fell back to the iOS share sheet on the PDF preview
+ * and the customer received the app's marketing blurb and a login URL. The estimate page never got
+ * the twin: its only doors were Email and Text, both of which refuse until a number or an address
+ * is on file — and a share sheet is exactly the door for the customer who has neither. What goes
+ * out is the customer's own /q/<token> link on this business's domain, worded exactly like
+ * textQuote above: one message, whichever way it leaves.
+ *
+ * A DRAFT'S LINK IS A 404. public_quote serves only sent/accepted/declined/expired
+ * (CUSTOMER_VISIBLE_STATUSES in lib/pdf-cache), so a draft's link would land the customer on
+ * "Not found". Every other egress flips draft→sent on the way past (textQuote, emailQuote); the
+ * share sheet has no send step to hang that on, so it ASKS — needsSend → the button's plain-words
+ * confirm — and flips only on that explicit yes. STAMP FOLLOWS DEED, and NOTHING SILENT.
+ */
+export async function quoteShareText(
+  id: string,
+  opts?: { sendIt?: boolean },
+): Promise<{ ok: boolean; error?: string; needsSend?: boolean; title?: string; text?: string; url?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: quote } = await supabase
+    .from("quotes")
+    .select("quote_number, total, public_token, doc_type, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!quote) return { ok: false, error: "That estimate could not be found." };
+  const label = docLabel(quote as { doc_type?: string | null });
+  const token = (quote as { public_token?: string | null }).public_token;
+  if (!token) return { ok: false, error: `This ${label.toLowerCase()} has no customer link yet — send it by Email or Text instead.` };
+
+  if (String((quote as { status?: string | null }).status ?? "") === "draft") {
+    if (!opts?.sendIt) {
+      return {
+        ok: false,
+        needsSend: true,
+        error: `Sharing marks ${quote.quote_number} as sent — the customer link only works on a sent ${label.toLowerCase()}.`,
+      };
+    }
+    // SILENT-WRITE LAW: a zero-row UPDATE is a 204. Read the row back before handing out a link
+    // that would 404 on a document still stuck at draft.
+    const { data: wrote, error } = await supabase.from("quotes").update({ status: "sent" }).eq("id", id).select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (!wrote?.length) return { ok: false, error: `Couldn't mark ${quote.quote_number} as sent — send it by Email or Text instead.` };
+    revalidatePath(`/quotes/${id}`);
+    revalidatePath("/quotes");
+  }
+
+  // One org query for both the name and the link base — textQuote's shape, so the link is built
+  // from the ORG's settings (its own domain), never NEXT_PUBLIC_SITE_URL.
+  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+  const who = org?.name ?? "Your contractor";
+  const url = orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "q", token);
+  return {
+    ok: true,
+    title: `${label} ${quote.quote_number} — ${who}`,
+    text: `${who}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View:`,
+    url,
+  };
+}
+
 export async function emailQuote(
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
