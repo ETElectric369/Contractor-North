@@ -175,6 +175,12 @@ d("billing draw invariants (DB integration)", () => {
          values ($1,$2,$3,'2026-09-10T18:05:00Z','2026-09-10T23:18:00Z','closed') returning id`,
         [orgId, person.id, jobId],
       );
+      // A third shift nobody bills until the edited-line step below offers it.
+      const { rows: [e3] } = await client.query(
+        `insert into time_entries (org_id, profile_id, job_id, clock_in, clock_out, status)
+         values ($1,$2,$3,'2026-09-11T15:00:00Z','2026-09-11T19:00:00Z','closed') returning id`,
+        [orgId, person.id, jobId],
+      );
 
       // INV-A bills e1 through the RPC, claiming it.
       const { rows: [invA] } = await client.query(
@@ -249,16 +255,33 @@ d("billing draw invariants (DB integration)", () => {
       expect(claims.owner.get(e1.id)?.invoice_number).toBe("TEST-INV-A");
       expect(claims.owner.get(e2.id)?.invoice_number).toBe("TEST-INV-B");
 
-      // An EDITED line keeps the claims it has and takes no new ones: a re-import offering e1+e2 leaves it at [e2].
-      await client.query(`update invoice_items set quantity = 4 where invoice_id=$1 and import_key=$2`, [invB.id, `labor:${person.id}`]);
+      // THE BOUNDARY (0258): a row another live invoice holds cannot be claimed here even by a caller
+      // that skipped the app's claim read — the RPC's own write is refused, naming the holder. Under
+      // a savepoint so the refusal doesn't abort the transaction the rest of this case runs in.
+      await client.query("savepoint offer_held");
+      let refusal: { code?: string; message?: string } | null = null;
+      try {
+        await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb)`, [invB.id, laborRow([e1.id, e2.id], 13.25)]);
+      } catch (e) {
+        refusal = e as { code?: string; message?: string };
+      }
+      await client.query("rollback to savepoint offer_held");
+      expect(refusal?.code).toBe("P0001");
+      expect(refusal?.message).toMatch(/hours already billed on TEST-INV-A/);
+      expect((await claimsFor("00000000-0000-0000-0000-000000000000")).owner.get(e1.id)?.invoice_number).toBe("TEST-INV-A"); // still INV-A's, untouched by the refusal
+
+      // An EDITED line keeps the claims it has and takes no new ones: a re-import offering e2+e3 (both
+      // free of any OTHER invoice) leaves it at [e2] — the office's figure on that line stands.
+      await client.query(`update invoice_items set quantity = 4, edited = true where invoice_id=$1 and import_key=$2`, [invB.id, `labor:${person.id}`]);
       const { rows: [rep3] } = await client.query(
         `select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb) as r`,
-        [invB.id, laborRow([e1.id, e2.id], 13.25)],
+        [invB.id, laborRow([e2.id, e3.id], 9.25)],
       );
       expect(rep3.r.kept_edited).toBe(1);
       const { rows: [lineB] } = await client.query(`select source_ids, edited from invoice_items where invoice_id=$1`, [invB.id]);
       expect(lineB.edited).toBe(true);
       expect(lineB.source_ids).toEqual([e2.id]);
+      expect((await claimsFor(invB.id)).owner.has(e3.id)).toBe(false); // e3 stays free — the edited line took nothing new
 
       // VOID releases: a void INV-A holds nothing.
       await client.query(`update invoices set status='void' where id=$1`, [invA.id]);
