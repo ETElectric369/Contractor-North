@@ -153,9 +153,27 @@ export async function connectPayments() {
     let accountId = org.stripe_account_id as string | null;
 
     if (!accountId) {
-      // ONE ORG, ONE EXPRESS ACCOUNT (audit v921). A double-tap, a second tab or a retry after a
-      // failed link write each minted another acct_…; keyed on the org, Stripe replays the first
-      // account instead of creating a second one.
+      /**
+       * THE KEY MUST DEDUPE A DOUBLE-TAP WITHOUT OUTLIVING A FAILURE (cn-v950).
+       *
+       * ONE ORG, ONE EXPRESS ACCOUNT (audit v921): a double-tap, a second tab, or a retry after a
+       * failed link write each minted another acct_…, so the call was keyed on the org and Stripe
+       * replayed the first account instead of creating a second one. That part worked.
+       *
+       * What it also did, which nobody asked for: Stripe stores the response to an idempotency key
+       * for about a day, AND IT STORES FAILURES. ET Electric's first live attempt was refused
+       * because the platform profile had not yet declared who carries losses on connected accounts.
+       * The next four attempts — the last of them twenty hours later — were replays of that stored
+       * 400, verbatim, out of Stripe's cache. Completing the platform profile changed nothing the
+       * app could see: it kept reading back an answer from before the fix, and the account could
+       * not be created until the key aged out. A permanently deterministic key turns one bad
+       * minute into a locked-out day for a brand new contractor.
+       *
+       * So the key now rotates on a short window. Two taps a second apart still share a window and
+       * still dedupe, which is the hazard v921 was actually about. A retry by someone who has gone
+       * away and fixed something gets a fresh key, and therefore a fresh answer.
+       */
+      const mintWindow = Math.floor(Date.now() / (15 * 60 * 1000));
       const account = await stripe.accounts.create({
         type: "express",
         email: org.email ?? undefined,
@@ -166,7 +184,7 @@ export async function connectPayments() {
         },
         capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
         metadata: { org_id: org.id },
-      }, { idempotencyKey: `connect-account-${org.id}` });
+      }, { idempotencyKey: `connect-account-${org.id}-${mintWindow}` });
       accountId = account.id;
       // Service-role write: 0161 pins these columns against the client on purpose.
       // AND CHECKED (audit v921) — this was a bare await, the very pattern startCheckout's comment
