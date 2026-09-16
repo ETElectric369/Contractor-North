@@ -195,25 +195,33 @@ export async function connectPayments() {
   redirect(url ?? "/settings");
 }
 
-/** Open the contractor's own Stripe dashboard (payouts, refunds, disputes). */
-export async function openPayoutsDashboard() {
+/**
+ * A LINK TO the contractor's own Stripe dashboard (payouts, refunds, disputes) — RETURNED, NOT
+ * FOLLOWED.
+ *
+ * Erik, after finding the money: "i couldnt get back to the app from stripe screen."
+ *
+ * Every other door out of this app hands Stripe or Google a way home — checkout has
+ * success_url/cancel_url, the billing portal has return_url, Connect onboarding has
+ * return_url AND refresh_url, both OAuth callbacks land back on /settings. THIS one had none,
+ * because Stripe's Express dashboard takes no return parameter and offers no link back: it is a
+ * destination, not a detour. Redirecting the tab into it therefore replaced the app with a page
+ * that cannot return — the NO DEAD ENDS law broken by the one door that had no way to obey it.
+ *
+ * So the app stops walking through this door. The action mints the link and hands it back; the
+ * button opens it in a NEW tab (PayoutsLinkButton) and the app stays exactly where it was. On the
+ * native shell connect.stripe.com is not in allowNavigation, so the same call hands it to the
+ * system browser — again leaving the app running behind it.
+ */
+export async function payoutsDashboardLink(): Promise<{ url?: string; error?: string }> {
   const { org } = await loadOwnerOrg();
-  let url: string | null = null;
-  let errMsg: string | null = null;
-
-  if (!org.stripe_account_id) {
-    errMsg = "Connect a Stripe account first.";
-  } else {
-    try {
-      const link = await getStripe().accounts.createLoginLink(org.stripe_account_id);
-      url = link.url;
-    } catch (e: any) {
-      errMsg = e?.message ?? "Stripe error";
-    }
+  if (!org.stripe_account_id) return { error: "Connect a Stripe account first." };
+  try {
+    const link = await getStripe().accounts.createLoginLink(org.stripe_account_id as string);
+    return { url: link.url };
+  } catch (e: any) {
+    return { error: e?.message ?? "Stripe error" };
   }
-
-  if (errMsg) redirect(`/settings?tab=getpaid&billing_error=${encodeURIComponent(errMsg)}`);
-  redirect(url ?? "/settings");
 }
 
 /**

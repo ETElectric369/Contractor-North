@@ -66,7 +66,8 @@ import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { trialDaysLeft } from "@/lib/subscription";
-import { startCheckout, openPortal, connectPayments, openPayoutsDashboard } from "./billing-actions";
+import { startCheckout, openPortal, connectPayments } from "./billing-actions";
+import { PayoutsLinkButton } from "./payouts-link-button";
 import { connectStateFromOrg, connectStatusLabel, canAcceptPayments } from "@/lib/stripe-connect";
 import { disconnectQuickbooks, getDocCounters } from "./actions";
 import type { Organization, Profile } from "@/lib/types";
@@ -510,11 +511,11 @@ export default async function SettingsPage({
                       {billingEnabled ? (
                         <div className="mt-4 flex flex-wrap gap-2">
                           {canAcceptPayments(st) ? (
-                            <form action={openPayoutsDashboard}>
-                              {/* FormSubmit, not Button (audit v921): these four forms mint Stripe
-                                  objects, and a plain button stays live through the 1-3s round trip. */}
-                              <FormSubmit variant="outline">View Payouts</FormSubmit>
-                            </form>
+                            /* NOT a form action (cn-v948): the Express dashboard has no way back,
+                               so this one opens Stripe BESIDE the app instead of navigating into
+                               it. The button disables itself for the round trip the same way
+                               FormSubmit does. */
+                            <PayoutsLinkButton />
                           ) : (
                             <form action={connectPayments}>
                               <FormSubmit>{st.accountId ? "Finish Setup" : "Set Up Card Payments"}</FormSubmit>
