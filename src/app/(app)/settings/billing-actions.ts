@@ -6,6 +6,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getStripe, STRIPE_PRICE_ID } from "@/lib/stripe";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { planByTier, priceIdFor, type PlanTier } from "@/lib/plans";
+import { reportError } from "@/lib/observe";
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
@@ -92,6 +93,11 @@ export async function startCheckout(formData?: FormData) {
       });
       url = session.url;
     } catch (e: any) {
+      // SAY IT SOMEWHERE THAT KEEPS (cn-v949). Stripe's own Health panel showed a failed
+      // POST /v1/accounts that this app had no record of: every Stripe refusal on this page
+      // went into a query string that the next click erased. The person still sees the
+      // message; now the ops log does too.
+      reportError("stripe:checkout:create", e, { orgId: org.id, priceId });
       errMsg = e?.message ?? "Stripe error";
     }
   }
@@ -117,6 +123,7 @@ export async function openPortal() {
       });
       url = session.url;
     } catch (e: any) {
+      reportError("stripe:portal:create", e, { orgId: org.id, customerId: org.stripe_customer_id });
       errMsg = e?.message ?? "Stripe error";
     }
   }
@@ -188,6 +195,9 @@ export async function connectPayments() {
     });
     url = link.url;
   } catch (e: any) {
+    // THE ONE FAILURE A CONTRACTOR CANNOT WORK AROUND: no Express account, no card payments,
+    // no Tap to Pay on iPhone. It is also the exact call Stripe's Health panel caught failing.
+    reportError("stripe:connect:onboard", e, { orgId: org.id, accountId: org.stripe_account_id ?? null });
     errMsg = e?.message ?? "Stripe error";
   }
 
@@ -220,6 +230,7 @@ export async function payoutsDashboardLink(): Promise<{ url?: string; error?: st
     const link = await getStripe().accounts.createLoginLink(org.stripe_account_id as string);
     return { url: link.url };
   } catch (e: any) {
+    reportError("stripe:connect:login-link", e, { orgId: org.id, accountId: org.stripe_account_id });
     return { error: e?.message ?? "Stripe error" };
   }
 }
