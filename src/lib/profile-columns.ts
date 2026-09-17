@@ -46,17 +46,38 @@ export function payById(rows: ProfilePayRow[] | null | undefined): Map<string, P
 export async function payRateMap(
   supabase: any,
 ): Promise<Map<string, { hourly_rate: number | null; bill_rate: number | null; commute_baseline_miles: number | null }>> {
-  const { data } = await supabase.from("profile_pay").select("id, hourly_rate, bill_rate, commute_baseline_miles");
+  return (await payRateMapRead(supabase)).rates;
+}
+
+/**
+ * THE SAME READ, WITH ITS FAILURE STILL ATTACHED (2026-09-17).
+ *
+ * payRateMap swallows the error and hands back an empty Map, which for most callers is a display
+ * that goes quiet. On the Pay page it is not: the rate MULTIPLIES every live dollar, so a dropped
+ * read prices every unlocked hour at zero, and a man owed thousands reads "Paid Up". That page's
+ * own rule is that the money reads come back whole or it shows no amount at all, and this read was
+ * the one left outside it. Callers that only decorate a screen keep using payRateMap; anything
+ * computing money asks for the problem too and refuses with it.
+ */
+export async function payRateMapRead(
+  supabase: any,
+): Promise<{
+  rates: Map<string, { hourly_rate: number | null; bill_rate: number | null; commute_baseline_miles: number | null }>;
+  problem: string | null;
+}> {
+  const { data, error } = await supabase.from("profile_pay").select("id, hourly_rate, bill_rate, commute_baseline_miles");
   const m = new Map<string, { hourly_rate: number | null; bill_rate: number | null; commute_baseline_miles: number | null }>();
-  for (const r of (data ?? []) as ProfilePayRow[]) {
+  if (error || !Array.isArray(data)) return { rates: m, problem: "the pay rates could not be read" };
+  for (const r of data as ProfilePayRow[]) {
     if (r?.id) m.set(String(r.id), {
       hourly_rate: r.hourly_rate ?? null,
       bill_rate: r.bill_rate ?? null,
       commute_baseline_miles: r.commute_baseline_miles ?? null,
     });
   }
-  return m;
+  return { rates: m, problem: null };
 }
+
 
 /** Merge those rates onto rows whose embedded `profiles` no longer carries them.
  *  `pick` returns the row's profile id and the object holding the embedded profile. */

@@ -1,5 +1,6 @@
 import { hoursBetween } from "@/lib/utils";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { todayStrInTz } from "@/lib/tz";
 
 /** Coerce to a finite number, else 0 — payroll feeds real wages; one bad row must
  *  not poison gross pay or an employee's hours. */
@@ -161,4 +162,354 @@ export function aggregatePayrollEntries(
       return row;
     })
     .sort((a, b) => b.unpaidHours - a.unpaidHours || b.paidHours - a.paidHours);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OWED = EARNED − PAID  (migration 0264, "a payment is an amount, not a checkbox")
+//
+// Erik, 2026-09-17: "i need an easy way to be able to see how much i owe each employee and be able
+// to enter an amount i paid them instead of just a checkbox for each pay period", and the reason:
+// "i have paid brian a large chunk of that and thats why im having trouble becuase theres been no
+// way for me to record it properly… sometimes i need to throw his a few hundred or an off ammount."
+//
+// Everything below is PURE. The Pay page and the server actions both read their figures from
+// balanceForPerson() and nothing else, so the number on screen and the number a payment is measured
+// against cannot disagree — the two-renderers class of bug this codebase keeps paying for.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const r2 = (n: number) => Math.round(fin(n) * 100) / 100;
+
+export type PayMethod = "cash" | "check" | "transfer" | "other";
+
+/** The four the DB check constraint allows (0264). One list, so no surface invents a fifth. */
+export const PAY_METHODS: PayMethod[] = ["cash", "check", "transfer", "other"];
+
+export function isPayMethod(v: unknown): v is PayMethod {
+  return typeof v === "string" && (PAY_METHODS as string[]).includes(v);
+}
+
+/** One recorded payment, camel-cased for the app. `voided` is a FACT derived from voided_at:
+ *  a voided row still exists and still shows (void, never delete — the undo-trail law), it just
+ *  stops counting. */
+export type PayPaymentRow = {
+  id: string;
+  profileId: string;
+  amount: number;
+  paidOn: string; // YYYY-MM-DD, the ORG's day
+  method: PayMethod;
+  reference: string | null;
+  note: string | null;
+  needsCheck: boolean;
+  voided: boolean;
+};
+
+/** THE one mapper from a pay_payments row to the app's shape. Both the page and the actions use
+ *  it, so `voided` can never be read as `voided_at` truthiness on one surface and something else
+ *  on the other. */
+export function toPayPaymentRow(row: any): PayPaymentRow {
+  const method = isPayMethod(row?.method) ? row.method : "other";
+  return {
+    id: String(row?.id ?? ""),
+    profileId: String(row?.profile_id ?? ""),
+    amount: r2(row?.amount),
+    paidOn: String(row?.paid_on ?? ""),
+    method,
+    reference: row?.reference ?? null,
+    note: row?.note ?? null,
+    needsCheck: !!row?.needs_check,
+    voided: !!row?.voided_at,
+  };
+}
+
+export type PersonBalance = {
+  profileId: string;
+  name: string;
+  earned: number; // frozen gross for locked periods + live gross for unlocked closed entries
+  paid: number; // sum of non-voided payments, all time
+  owed: number; // earned - paid; NEGATIVE means the person is ahead
+  unpaidHours: number; // hours on closed, not-yet-locked entries
+  oldestUnpaid: string | null; // YYYY-MM-DD org-local, or null
+  lastPayment: { amount: number; paidOn: string; method: PayMethod } | null;
+  hasOpenShift: boolean; // a shift still running: its hours are NOT in earned, and the page says so
+  needsCheckCount: number; // imported payments not yet confirmed
+  heldMiles: number;
+  loggedMiles: number; // business / logged miles not yet settled
+};
+
+/** Money actually handed over: non-voided rows only, all time. A voided row is still on the
+ *  screen and contributes nothing — that is the whole point of voiding instead of deleting. */
+export function sumPayments(payments: PayPaymentRow[] | null | undefined): number {
+  let cents = 0;
+  for (const p of payments ?? []) if (p && !p.voided) cents += Math.round(fin(p.amount) * 100);
+  return cents / 100;
+}
+
+/** The FROZEN side of earned: what payroll_runs said each locked period came to at the moment it
+ *  locked. MILEAGE RUNS ARE NOT WAGES (0095's two-lock rule): a kind='mileage' row carries gross 0
+ *  by constraint, but the guard is written out anyway so nobody can hand this reimbursement
+ *  dollars and have them quietly land in a wages balance. */
+export function sumLockedGross(
+  runs: { period_start: string; period_end: string; gross: number; kind?: string }[] | null | undefined,
+): number {
+  let cents = 0;
+  for (const r of runs ?? []) {
+    if (r?.kind && r.kind !== "base") continue;
+    cents += Math.round(fin(r?.gross) * 100);
+  }
+  return cents / 100;
+}
+
+/** What is left over after every payment has been applied to every period already locked.
+ *  POSITIVE = money that has not bought a lock yet (it is what the lock rule spends, oldest
+ *  period first); NEGATIVE = locked periods the payments don't cover, which is what voidPayment
+ *  has to unwind. */
+export function runningCredit(
+  payments: PayPaymentRow[] | null | undefined,
+  lockedRuns: { period_start: string; period_end: string; gross: number; kind?: string }[] | null | undefined,
+): number {
+  return r2(sumPayments(payments) - sumLockedGross(lockedRuns));
+}
+
+/**
+ * ONE person's money picture, from rows already fetched. PURE — no I/O — so the page, the actions
+ * and any future surface compute it the same way and a test can pin it.
+ *
+ * EARNED is the subtle half, and it fixes a live bug. payRateForEntry falls back to the profile's
+ * CURRENT hourly_rate, an undated editable field, so a raise silently restated what last month
+ * paid. Erik's decision, asked and answered 2026-09-17: a raise applies FORWARD ONLY. So:
+ *   · a LOCKED pay period reads the FROZEN payroll_runs.gross written when it locked, and
+ *   · everything not yet locked is aggregated LIVE at today's rates (per-entry rate_override
+ *     honored, lunch deducted by the lunch rule).
+ * NEVER BOTH: an entry with paid_at set belongs to the frozen half, and aggregatePayrollEntries
+ * files it in the PAID bucket, which this function ignores. That is the no-double-count seam.
+ *
+ * OPEN SHIFTS pay nothing. A running shift has no clock_out, so its hours are unknowable until it
+ * closes; it is left out of earned entirely and flagged in hasOpenShift so the page can say out
+ * loud that a number is still moving, instead of quietly under-counting a whole day (the 48.50
+ * lesson from /payroll).
+ *
+ * `entries` must carry clock_in, clock_out, lunch_minutes, rate_override, miles, paid_at,
+ * mileage_paid_at — the projection law: a missing field here is a missing select, and it reads as
+ * zero hours or a phantom open shift. `lockedRuns` is this person's kind='base' runs, all time.
+ * `fallbackRate` is the profile's hourly rate for rows fetched without a joined profile.
+ */
+export function balanceForPerson(input: {
+  profileId: string;
+  name: string;
+  entries: any[];
+  lockedRuns: { period_start: string; period_end: string; gross: number }[];
+  payments: PayPaymentRow[];
+  tz: string;
+  fallbackRate?: number;
+}): PersonBalance {
+  const profileId = String(input.profileId);
+  // Take only this person's rows, and stamp the id on rows that came from a per-person query with
+  // no profile_id selected, so the aggregator groups them into exactly one row.
+  const mine = (input.entries ?? [])
+    .filter((e) => e && (e.profile_id == null || String(e.profile_id) === profileId))
+    .map((e) => ({ ...e, profile_id: profileId }));
+
+  const hasOpenShift = mine.some((e) => !e.clock_out);
+  const closed = mine.filter((e) => !!e.clock_out);
+
+  const [agg] = aggregatePayrollEntries(closed, input.tz, input.fallbackRate);
+  const frozen = sumLockedGross(input.lockedRuns);
+  const live = agg?.unpaidGross ?? 0; // the PAID bucket is deliberately dropped: it is the frozen half
+  const earned = r2(frozen + live);
+  const paid = sumPayments(input.payments);
+
+  // The oldest day that still owes money. Zero-hour rows are skipped: a 0193 auto-closed ghost
+  // (clock_out = clock_in) would otherwise date the debt to a day that owes nothing, and "going
+  // back to" is the sentence Erik reads to decide who to pay first.
+  let oldestUnpaid: string | null = null;
+  let unsettledLogged = 0;
+  for (const e of closed) {
+    const t = Date.parse(e.clock_in);
+    if (!e.mileage_paid_at) unsettledLogged += fin(e.miles);
+    if (e.paid_at || !Number.isFinite(t)) continue;
+    if (hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) <= 0) continue;
+    const day = todayStrInTz(input.tz, new Date(t));
+    if (!oldestUnpaid || day < oldestUnpaid) oldestUnpaid = day;
+  }
+
+  // Latest payment by the day Erik says he paid it. A same-day tie falls to whichever row the
+  // caller listed last — both are true, and the amount is what he is checking anyway.
+  let lastPayment: PersonBalance["lastPayment"] = null;
+  for (const p of input.payments ?? []) {
+    if (!p || p.voided) continue;
+    if (!lastPayment || p.paidOn >= lastPayment.paidOn) {
+      lastPayment = { amount: r2(p.amount), paidOn: p.paidOn, method: p.method };
+    }
+  }
+
+  return {
+    profileId,
+    name: input.name,
+    earned,
+    paid,
+    owed: r2(earned - paid),
+    unpaidHours: agg?.unpaidHours ?? 0,
+    oldestUnpaid,
+    lastPayment,
+    hasOpenShift,
+    // A voided import has nothing left to confirm.
+    needsCheckCount: (input.payments ?? []).filter((p) => p && p.needsCheck && !p.voided).length,
+    heldMiles: agg?.heldMiles ?? 0,
+    loggedMiles: round1(unsettledLogged),
+  };
+}
+
+// ── THE SENTENCES ────────────────────────────────────────────────────────────
+// These come back from the actions and get read on screen, so they are built here where a test
+// can hold them to being true. Plain words, no jargon, and no em-dashes.
+
+/** How a person is spoken to on this page: "Brian", not "Brian Taylor" and never "the employee". */
+export function firstName(full: string | null | undefined): string {
+  const first = String(full ?? "").trim().split(/\s+/)[0];
+  return first || "this person";
+}
+
+/** Money as a person says it out loud: "$400", "$1,012.50". Deliberately not formatCurrency —
+ *  a column of figures keeps its cents lined up, a sentence does not say "and zero cents". */
+export function sayMoney(n: number): string {
+  const v = Math.abs(r2(n));
+  const cents = Math.round(v * 100) % 100;
+  return `$${v.toLocaleString("en-US", {
+    minimumFractionDigits: cents === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+const shortDay = (ymd: string) =>
+  new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+/** A pay period the way it is spoken: "Aug 16 to Aug 31". `end` is EXCLUSIVE everywhere in this
+ *  app (the next period's first day), so the label names the last day actually inside it. */
+export function periodLabel(start: string, endExclusive: string): string {
+  const last = new Date(new Date(`${endExclusive}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+  return `${shortDay(start)} to ${shortDay(last)}`;
+}
+
+/** "today" / "yesterday" / "on Aug 14", relative to the ORG's day. */
+export function dayPhrase(ymd: string, today: string): string {
+  if (ymd === today) return "today";
+  const y = new Date(new Date(`${today}T12:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+  if (ymd === y) return "yesterday";
+  return `on ${shortDay(ymd)}`;
+}
+
+const joinLabels = (periods: { start: string; end: string }[]): string => {
+  const labels = periods.map((p) => periodLabel(p.start, p.end));
+  if (labels.length <= 1) return labels[0] ?? "";
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+};
+
+/** Where a balance leaves a person, in his own words. */
+function balancePhrase(name: string, owed: number): string {
+  const v = r2(owed);
+  if (v > 0) return `${sayMoney(v)} left.`;
+  if (v < 0) return `${firstName(name)} is ${sayMoney(-v)} ahead now.`;
+  return "Nothing left owing.";
+}
+
+/** What recordPayment says back. Every clause is a fact the caller just wrote or read:
+ *  what moved, what locked as a result, what could not lock and why, and what is left.
+ *
+ *  `owed` IS NULLABLE ON PURPOSE. The balance is only spoken when it was actually read back. If the
+ *  reads that price the pay periods did not come back whole, the money is still recorded (its own
+ *  row, its own row check) but every figure downstream of those reads is a guess, and a guessed
+ *  figure read aloud as "what you still owe" is the one thing this page must never do. `unchecked`
+ *  says so out loud and sends him to a reload, instead of the screen going quiet.
+ *
+ *  `inactive` states a fact rather than blocking on it: settling up with someone who has left is
+ *  the most ordinary version of Erik's complaint, and it has to be writable. */
+export function paymentSentence(input: {
+  name: string;
+  amount: number;
+  method: PayMethod;
+  paidOn: string;
+  today: string;
+  locked: { start: string; end: string }[];
+  blocked?: { start: string; end: string; reason: string } | null;
+  owed: number | null;
+  unchecked?: boolean;
+  inactive?: boolean;
+}): string {
+  const who = firstName(input.name);
+  // "other" is not a word anyone says about money leaving their hand, so it is simply left out.
+  const method = input.method === "other" ? "" : `, ${input.method}`;
+  const parts = [`Recorded ${sayMoney(input.amount)} to ${who}${method}, ${dayPhrase(input.paidOn, input.today)}.`];
+  if (input.locked.length) {
+    parts.push(`That covers ${joinLabels(input.locked)} in full, so those hours are locked now.`);
+  }
+  if (input.blocked) {
+    parts.push(
+      `${periodLabel(input.blocked.start, input.blocked.end)} could not be locked yet. ${input.blocked.reason} The money is recorded either way, and it will lock on the next payment once that is fixed.`,
+    );
+  }
+  if (input.inactive) {
+    parts.push(`${who} is switched off in People, so this is on the books but he will not see it in the app.`);
+  }
+  if (input.unchecked) {
+    parts.push(
+      `The pay periods could not be checked just now, so nothing else was locked. The payment is saved. Reload the page to see where it leaves things.`,
+    );
+  }
+  if (input.owed != null && Number.isFinite(input.owed)) parts.push(balancePhrase(input.name, input.owed));
+  return parts.join(" ");
+}
+
+/** What voidPayment says back. A void is an undo, so it says what it took back AND what that
+ *  re-opened, because hours quietly staying locked behind a cancelled payment is exactly the kind
+ *  of silence this page exists to end. */
+export function voidSentence(input: {
+  name: string;
+  amount: number;
+  paidOn: string;
+  today: string;
+  unlocked: { start: string; end: string }[];
+  blocked?: { start: string; end: string; reason: string } | null;
+  /** Null when the reads that price the periods did not come back whole: see paymentSentence. The
+   *  void itself is already written and row-checked, so it is stated as fact either way. */
+  owed: number | null;
+  unchecked?: boolean;
+}): string {
+  const parts = [
+    `Voided the ${sayMoney(input.amount)} payment to ${firstName(input.name)} from ${dayPhrase(input.paidOn, input.today)}.`,
+  ];
+  if (input.unlocked.length) {
+    parts.push(`${joinLabels(input.unlocked)} is unlocked again, so those hours are back on the open list.`);
+  }
+  if (input.blocked) {
+    parts.push(
+      `${periodLabel(input.blocked.start, input.blocked.end)} could not be unlocked. ${input.blocked.reason} The payment is voided either way, but those hours are still marked paid, so undo that period on Payroll once that is sorted.`,
+    );
+  }
+  if (input.unchecked) {
+    parts.push(
+      `The pay periods could not be checked just now, so any hours this payment had locked are still locked. The void is saved. Reload the page and check that person's periods.`,
+    );
+  }
+  if (input.owed != null && Number.isFinite(input.owed)) parts.push(balancePhrase(input.name, input.owed));
+  return parts.join(" ");
+}
+
+/** WHY A PERIOD WOULD NOT LOCK, said the way Erik talks.
+ *
+ *  markPeriodPaid / unmarkPeriodPaid are the race-safe lockers and they refuse for good reasons,
+ *  but their sentences were written for the Payroll approval screen ("close it on Timecards
+ *  first"). This turns the two refusals a payment can actually run into on this page into plain
+ *  words that fit inside a payment's own sentence. ANYTHING ELSE IS FORWARDED VERBATIM: an
+ *  unrecognized refusal is still the truest thing we know, and swallowing it would be the silence
+ *  this page exists to end. */
+export function lockRefusalReason(raw: string | null | undefined): string {
+  const r = String(raw ?? "").trim();
+  if (/open entry/i.test(r)) return "A shift in it is still on the clock. Close it on Timecards.";
+  if (/auto-closed/i.test(r))
+    return "It holds a shift the app closed by itself, so nobody has checked those hours. Fix it on Timecards.";
+  if (/filed under the pay period|pay schedule changed/i.test(r))
+    return "Those hours are filed under a different pay period because the pay schedule changed. Put the old schedule back in Settings, undo there, then change it again.";
+  if (/just marked paid by someone else|just settled by someone else/i.test(r))
+    return "Someone else locked it a moment ago. Reload the page.";
+  return r || "Something stopped it.";
 }

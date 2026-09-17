@@ -6,8 +6,23 @@ import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzDayStartUtc } from "@/lib/tz";
-import { aggregatePayrollEntries } from "@/lib/payroll-math";
+import { payPeriodBounds, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import {
+  aggregatePayrollEntries,
+  balanceForPerson,
+  dayPhrase,
+  firstName,
+  isPayMethod,
+  lockRefusalReason,
+  paymentSentence,
+  sayMoney,
+  sumLockedGross,
+  toPayPaymentRow,
+  voidSentence,
+  type PayMethod,
+  type PayPaymentRow,
+  type PersonBalance,
+} from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 
 export type Result = { ok: boolean; error?: string };
@@ -470,4 +485,651 @@ export async function unsettleMileage(input: {
   revalidatePath("/payroll");
   revalidatePath("/timecards");
   return { ok: true };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PAYMENTS (0264/0265) — "an amount i paid them instead of just a checkbox"
+//
+// Erik, 2026-09-17: "i have paid brian a large chunk of that and thats why im having trouble
+// becuase theres been no way for me to record it properly… sometimes i need to throw his a few
+// hundred or an off ammount."
+//
+// The word "paid" splits in two here, and each half stays honest:
+//   · A PAYMENT is money that left his hand. It is typed, never computed (the mileage law from
+//     0095, same reason), and it is voided, never deleted.
+//   · A LOCK is still time_entries.paid_at, still stamped ONLY by markPeriodPaid below. It now
+//     happens as a CONSEQUENCE of payments covering a period in full, oldest first — Erik's
+//     choice, asked and answered today: a half-paid week stays correctable.
+//
+// markPeriodPaid / unmarkPeriodPaid are NOT reimplemented or inlined anywhere below. They are the
+// race-safe lockers (claim-only-still-unpaid, row checks, compensating rollback, the open-entry
+// and auto-closed refusals) and calling them is the entire point.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What a payment action gives back. The sentence is read on screen, and the numbers ride along so
+ *  the page can render the new balance without going back to the database for it. */
+export type PayResult = Result & {
+  message?: string;
+  paymentId?: string;
+  earned?: number;
+  paid?: number;
+  owed?: number;
+  lockedPeriods?: { start: string; end: string }[];
+  unlockedPeriods?: { start: string; end: string }[];
+  blocked?: { start: string; end: string; reason: string } | null;
+};
+
+const cents = (n: number) => Math.round((Number(n) || 0) * 100);
+
+/** The org's day + pay cycle, from the one place that holds them. */
+async function orgPay(supabase: any) {
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const s = getOrgSettings(org?.settings);
+  return { tz: s.timezone, schedule: s.pay_schedule, anchor: s.pay_anchor };
+}
+
+/** A read that did not come back whole: `what` in plain words for the screen, `cause` for the log. */
+type PayReadFailure = { what: string; cause: unknown };
+
+/** HOW BIG A LIST MAY BE BEFORE WE STOP BELIEVING IT.
+ *
+ *  These reads do not just decorate a sentence, they decide what gets LOCKED, and a lock is Erik's
+ *  "never the same hour twice" boundary. The danger is not only a read that errors. A list quietly
+ *  cut short comes back as a SMALLER total with no error at all, and every way it can be short is
+ *  the same bug:
+ *    · short payroll_runs  ⇒ lockedCents reads LOW while paidCents is still the full all-time total,
+ *      so the credit is money already spent on existing locks, and it gets spent a second time.
+ *    · short time_entries  ⇒ the period prices LOW, so "the credit covers it IN FULL" passes on a
+ *      figure smaller than the one markPeriodPaid then freezes from the database.
+ *  Both end the same way: a pay period frozen that the money never covered. That is decision (2)
+ *  inverted (a half-paid week has to stay correctable) and it makes decision (3) bite, because
+ *  frozen hours stop re-pricing.
+ *
+ *  So every list is asked for with an explicit ceiling, and a list that comes back AT its ceiling is
+ *  treated exactly like an error. The caps sit far above a real shop (three people, years of shifts)
+ *  and exist to make truncation LOUD instead of arithmetic. */
+/** A CEILING CANNOT SEE A CUT BELOW IT (2026-09-17). The guard under this used to ask for N rows
+ *  and treat "came back with N" as truncation — but PostgREST enforces its OWN max-rows, and when
+ *  that is lower than the number we ask for, the response never reaches our figure and the cut
+ *  stays invisible. The list reads short, the period prices low, "the credit covers it in full"
+ *  passes on a number smaller than the one markPeriodPaid then freezes, and a pay period is locked
+ *  that the money never covered. So these reads are PAGED to the end, advancing by the rows
+ *  actually returned and stopping only on an empty page — the same contract payroll/page.tsx and
+ *  storage-sweep use, for the same reason. MAX_PAGES is a stated bound that refuses OUT LOUD. */
+const PAGE_ROWS = 1000;
+const MAX_PAGES = 12;
+
+/** Every row of a list, or an explicit failure. `what` is a bare plural noun in Erik's words. */
+async function readEvery<T>(
+  what: string,
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<{ rows: T[]; failure: PayReadFailure | null }> {
+  const out: T[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await page(from, from + PAGE_ROWS - 1);
+    if (error) return { rows: [], failure: { what, cause: error } };
+    if (!Array.isArray(data)) return { rows: [], failure: { what, cause: new Error(`${what}: read returned no rows array`) } };
+    if (!data.length) return { rows: out, failure: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], failure: { what, cause: new Error(`${what}: more rows than this page can read at once`) } };
+}
+
+/** The first of these reads that errored or came back as a non-list. Null means every list is
+ *  trustworthy enough to decide a lock on. Truncation is no longer one of the arms here: a row
+ *  ceiling cannot detect a cut made BELOW it, so every list that decides a lock is paged to the
+ *  end by readEvery instead of asked for in one bounded gulp. */
+function payReadFailure(
+  reads: [string, { data: any; error: any } | null | undefined][],
+): PayReadFailure | null {
+  for (const [what, res] of reads) {
+    if (!res) return { what, cause: new Error(`${what}: read returned nothing`) };
+    if (res.error) return { what, cause: res.error };
+    // `data ?? []` is what hid this class: a null payload read as "no rows" and priced as zero.
+    if (!Array.isArray(res.data)) return { what, cause: new Error(`${what}: read returned no rows array`) };
+  }
+  return null;
+}
+
+/** Everything ONE person's balance is made of, read fresh — or an explicit failure.
+ *
+ *  THE PROJECTION LAW: the select lists below carry every field balanceForPerson reads — a missing
+ *  one here reads on screen as zero hours or a phantom open shift, not as an error.
+ *
+ *  Entries are narrowed to rows where at least one lock is still open. A base-paid, mileage-settled
+ *  entry contributes nothing to either half of this math (its wages are in the frozen run, its
+ *  miles are settled), so leaving it out keeps this query small forever instead of growing with
+ *  every shift the crew ever worked. */
+async function payContext(
+  supabase: any,
+  profileId: string,
+  name: string,
+  tz: string,
+): Promise<
+  | {
+      ok: true;
+      payments: PayPaymentRow[];
+      lockedRuns: { period_start: string; period_end: string; gross: number }[];
+      entries: any[];
+      fallbackRate: number;
+      balance: PersonBalance;
+    }
+  | { ok: false; failure: PayReadFailure }
+> {
+  // Ordered by a primary key so the pages tile exactly, with no row read twice or skipped.
+  const [paymentsRead, runsRead, entriesRead, profRes] = await Promise.all([
+    readEvery<any>("payments", (from, to) =>
+      supabase
+        .from("pay_payments")
+        .select("id, profile_id, amount, paid_on, method, reference, note, needs_check, voided_at")
+        .eq("profile_id", profileId)
+        .order("id")
+        .range(from, to),
+    ),
+    readEvery<any>("payroll records", (from, to) =>
+      supabase
+        .from("payroll_runs")
+        .select("id, period_start, period_end, gross")
+        .eq("profile_id", profileId)
+        .eq("kind", "base")
+        .order("id")
+        .range(from, to),
+    ),
+    readEvery<any>("hours", (from, to) =>
+      supabase
+        .from("time_entries")
+        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override")
+        .eq("profile_id", profileId)
+        .or("paid_at.is.null,mileage_paid_at.is.null")
+        .order("id")
+        .range(from, to),
+    ),
+    supabase.from("profile_pay").select("hourly_rate").eq("id", profileId).maybeSingle(),
+  ]);
+  const paymentsRes = { data: paymentsRead.rows, error: null as any };
+  const runsRes = { data: runsRead.rows, error: null as any };
+  const entriesRes = { data: entriesRead.rows, error: null as any };
+  const pagedFailure = paymentsRead.failure ?? runsRead.failure ?? entriesRead.failure;
+  if (pagedFailure) return { ok: false, failure: pagedFailure };
+
+  const failure =
+    payReadFailure([
+      ["payments", paymentsRes],
+      ["locked pay periods", runsRes],
+      ["time entries", entriesRes],
+    ]) ??
+    // The rate matters as much as the rows: a fallback of 0 prices an unlocked period at nothing,
+    // which skips it and lets a LATER period lock out of turn. Oldest first is the rule.
+    (profRes?.error ? { what: "pay rate", cause: profRes.error } : null);
+  if (failure) return { ok: false, failure };
+
+  const payments = (paymentsRes.data as any[]).map(toPayPaymentRow);
+  const lockedRuns = runsRes.data as { period_start: string; period_end: string; gross: number }[];
+  const entries = entriesRes.data as any[];
+  const fallbackRate = Number((profRes.data as any)?.hourly_rate ?? 0);
+  const balance = balanceForPerson({ profileId, name, entries, lockedRuns, payments, tz, fallbackRate });
+  return { ok: true, payments, lockedRuns, entries, fallbackRate, balance };
+}
+
+/** THE LOCK RULE, exactly as Erik chose it: a payment locks only the periods it covers IN FULL,
+ *  oldest first, so a half-paid week stays correctable.
+ *
+ *  The credit is every non-voided payment MINUS every period already locked — not just the payment
+ *  that was entered a second ago. Two $300 drops that between them cover a $520 week lock that week
+ *  on the second one, which is exactly how Erik pays: "sometimes i need to throw his a few hundred".
+ *
+ *  It stops at the FIRST period the credit cannot cover (never skipping ahead to a cheaper later
+ *  one — money pays off the oldest debt first), and at the first period markPeriodPaid REFUSES. A
+ *  refusal is not a failure of the payment: the money moved, the lock did not, and the sentence
+ *  says both. */
+async function lockedGrossCents(
+  supabase: any,
+  profileId: string,
+): Promise<{ ok: true; cents: number } | { ok: false; failure: PayReadFailure }> {
+  // Paged to the end for the same reason as every read above, and a stronger one: this figure is
+  // SUBTRACTED from what has been paid, so reading it short hands out a credit already spent — and
+  // a short read is exactly what a row ceiling cannot see.
+  const read = await readEvery<any>("locked pay periods", (from, to) =>
+    supabase
+      .from("payroll_runs")
+      .select("id, gross")
+      .eq("profile_id", profileId)
+      .eq("kind", "base")
+      .order("id")
+      .range(from, to),
+  );
+  if (read.failure) return { ok: false, failure: read.failure };
+  return { ok: true, cents: read.rows.reduce((sum, r) => sum + cents(r?.gross), 0) };
+}
+
+async function applyLocks(
+  supabase: any,
+  input: { profileId: string; tz: string; schedule: any; anchor: string; fallbackRate: number; entries: any[]; paidCents: number; lockedCents: number },
+): Promise<{
+  locked: { start: string; end: string }[];
+  blocked: { start: string; end: string; reason: string } | null;
+  /** A read stopped the walk partway. Whatever locked, locked; the rest was never looked at. */
+  unchecked: boolean;
+}> {
+  const locked: { start: string; end: string }[] = [];
+  let blocked: { start: string; end: string; reason: string } | null = null;
+  let unchecked = false;
+  let credit = input.paidCents - input.lockedCents;
+  if (credit <= 0) return { locked, blocked, unchecked };
+
+  // Bucket the still-unlocked closed hours into the org's pay periods — the SAME windowing the
+  // payroll page reads through (payPeriodBounds under payPeriodForOffset), so a period here is the
+  // period Erik sees there. Open shifts are left out on purpose: markPeriodPaid refuses a period
+  // holding one, and that refusal is the message we want, not a silent skip.
+  const periods = new Map<string, { start: string; end: string; entries: any[] }>();
+  for (const e of input.entries) {
+    // The same three conditions markPeriodPaid's own query uses (closed, clocked out, unpaid), so
+    // the rows priced here are the rows it will lock.
+    if (e.paid_at || !e.clock_out || e.status !== "closed") continue;
+    const t = Date.parse(e.clock_in);
+    if (!Number.isFinite(t)) continue;
+    const p = payPeriodBounds(input.schedule, input.anchor, todayStrInTz(input.tz, new Date(t)));
+    const key = `${p.start}|${p.end}`;
+    const bucket = periods.get(key) ?? { start: p.start, end: p.end, entries: [] };
+    bucket.entries.push(e);
+    periods.set(key, bucket);
+  }
+
+  const oldestFirst = [...periods.values()].sort((a, b) => a.start.localeCompare(b.start));
+  for (const p of oldestFirst) {
+    // The gross is computed by the SAME function markPeriodPaid freezes with, on the same rows and
+    // the same fallback rate, so what we subtract from the credit is what the snapshot will say.
+    const [agg] = aggregatePayrollEntries(p.entries, input.tz, input.fallbackRate);
+    const grossCents = cents(agg?.unpaidGross ?? 0);
+    // A period whose hours come to nothing (a zero-hour auto-closed ghost) owes nothing, so there
+    // is nothing for a payment to cover. Leave it open for Timecards to fix.
+    if (grossCents <= 0) continue;
+    if (credit < grossCents) break; // IN FULL or not at all
+    const res = await markPeriodPaid({ profileId: input.profileId, periodStart: p.start, periodEnd: p.end });
+    if (!res.ok) {
+      blocked = { start: p.start, end: p.end, reason: lockRefusalReason(res.error) };
+      break;
+    }
+    locked.push({ start: p.start, end: p.end });
+    // SPEND WHAT WAS ACTUALLY FROZEN, not what was predicted a moment ago. markPeriodPaid prices
+    // the period from the database at the instant it runs, so an entry that landed in between (or
+    // a row a concurrent lock took) makes the real snapshot differ from the figure above. Re-reading
+    // the locked total is what keeps "covers it IN FULL" literally true for the NEXT period, which
+    // is Erik's whole rule: a half-paid week has to stay correctable.
+    //
+    // And if THAT read does not come back whole, the walk stops here rather than carrying on with a
+    // stale credit. The period just locked is real and is reported; nothing further is guessed at.
+    const reread = await lockedGrossCents(supabase, input.profileId);
+    if (!reread.ok) {
+      reportError("payroll:applyLocks:reread", reread.failure.cause, {
+        profileId: input.profileId,
+        what: reread.failure.what,
+        lockedSoFar: locked,
+      });
+      unchecked = true;
+      break;
+    }
+    credit = input.paidCents - reread.cents;
+  }
+  return { locked, blocked, unchecked };
+}
+
+/** Both payroll surfaces, plus the Pay page wherever it lives. A path with no page is a no-op. */
+function revalidatePay() {
+  revalidatePath("/payroll");
+  revalidatePath("/pay");
+  revalidatePath("/timecards");
+}
+
+/** RECORD MONEY THAT LEFT ERIK'S HAND. The amount is his, never defaulted and never computed; the
+ *  date is his too (he pays early and he pays late). Then the lock rule runs, and the sentence
+ *  says what happened: what moved, what locked, what could not lock and why, what is left. */
+export async function recordPayment(input: {
+  profileId: string;
+  amount: number;
+  paidOn: string; // YYYY-MM-DD, the ORG's day
+  method: PayMethod;
+  reference?: string;
+  note?: string;
+}): Promise<PayResult> {
+  const ctx = await staffClient();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
+
+  // THE AMOUNT IS REQUIRED AND NEVER DEFAULTED (settleMileage's discipline). Rounded to cents
+  // first, so a figure that rounds away to nothing is refused here instead of by a DB constraint.
+  const raw = Number(input.amount);
+  const amount = Math.round((Number.isFinite(raw) ? raw : 0) * 100) / 100;
+  if (!Number.isFinite(raw) || amount <= 0) return { ok: false, error: "Enter an amount above $0." };
+  if (amount > 9_999_999) {
+    return { ok: false, error: "That amount is bigger than this app can record. Check the figure and enter it again." };
+  }
+
+  const method: PayMethod = (input.method ?? "cash") || "cash";
+  if (!isPayMethod(method)) return { ok: false, error: "Pick how you paid: cash, check, transfer or other." };
+
+  const { tz, schedule, anchor } = await orgPay(supabase);
+  const today = todayStrInTz(tz);
+  // Days are ORG-local. An empty date means today, which is what the form shows; a date that isn't
+  // a date is refused rather than quietly filed on the wrong day.
+  const paidOn = String(input.paidOn ?? "").trim() || today;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidOn) || Number.isNaN(Date.parse(`${paidOn}T00:00:00Z`))) {
+    return { ok: false, error: "That date didn't read as a day. Pick the day you paid and try again." };
+  }
+
+  // WHO IS BEING PAID. RLS scopes profiles to the caller's org, so a row that does not come back is
+  // not this shop's person. A read that ERRORED is a different fact and says so: refusing with the
+  // wrong reason is its own dead end.
+  const { data: person, error: personErr } = await supabase
+    .from("profiles")
+    .select("id, full_name, active")
+    .eq("id", input.profileId)
+    .maybeSingle();
+  if (personErr) {
+    return { ok: false, error: `Looking that person up didn't go through, so nothing was recorded. ${dbError(personErr)}` };
+  }
+  if (!person) return { ok: false, error: "That person isn't on this shop's list. Reload the page and pick them again." };
+  const name = (person as any).full_name ?? "";
+
+  // SWITCHED OFF IS NOT A REFUSAL. Settling up with someone who has LEFT is the most ordinary
+  // version of Erik's complaint ("i have paid brian a large chunk of that... theres been no way for
+  // me to record it properly"), and a person who is switched off still shows on the owed board with
+  // a real figure, because page.tsx builds its list from entries, runs and payments and profile_pay
+  // carries `active` without filtering on it. Bouncing the payment there is a dead end on a row the
+  // page itself put in front of him.
+  //
+  // And the remedy a refusal would have to name is worse than the problem: per 0158, profiles.active
+  // is the trust root under auth_org_id / is_org_staff / is_staff / app_user_role, so "switch them
+  // back on and it will save" means handing a former employee the org's customers, jobs, schedule
+  // and timeclock back to write down cash that already changed hands. Nothing in 0264 asks for this
+  // check either: its RLS is org + staff on the WRITER and says nothing about the payee.
+  //
+  // So it records, and the sentence STATES the fact instead of blocking on it.
+  const inactive = (person as any).active === false;
+
+  // org_id is stamped by the set_org_id trigger — never sent from here.
+  // THE SILENT-WRITE LAW: a zero-row insert is a 204, so the row comes back and gets checked.
+  const { data: inserted, error: insErr } = await supabase
+    .from("pay_payments")
+    .insert({
+      profile_id: input.profileId,
+      amount,
+      paid_on: paidOn,
+      method,
+      reference: String(input.reference ?? "").trim() || null,
+      note: String(input.note ?? "").trim() || null,
+      created_by: userId,
+    })
+    .select("id");
+  if (insErr) return { ok: false, error: `That payment didn't save, so nothing was recorded. ${dbError(insErr)}` };
+  if (!inserted?.length) {
+    reportError("payroll:recordPayment", new Error("payment insert wrote no rows"), {
+      profileId: input.profileId,
+      amount,
+      paidOn,
+    });
+    return { ok: false, error: "That payment didn't save, so nothing was recorded. Try it again." };
+  }
+  const paymentId = String((inserted[0] as any).id);
+
+  // Read the whole picture back, INCLUDING the row just written, then spend the credit on locks.
+  //
+  // THE PAYMENT IS ALREADY SAVED AND ROW-CHECKED. What comes next only decides what gets LOCKED, and
+  // a lock made from a partial picture is money spent twice: the credit walks off a runs total that
+  // read low, or a period prices low and gets frozen for less than it is worth. So a read that did
+  // not come back whole stops the lock rule dead. Nothing is undone, nothing is guessed, and the
+  // sentence says the money is recorded and the periods were not checked.
+  const state = await payContext(supabase, input.profileId, name, tz);
+  if (!state.ok) {
+    reportError("payroll:recordPayment:read", state.failure.cause, {
+      profileId: input.profileId,
+      paymentId,
+      what: state.failure.what,
+    });
+    revalidatePay();
+    return {
+      ok: true,
+      paymentId,
+      message: paymentSentence({
+        name,
+        amount,
+        method,
+        paidOn,
+        today,
+        locked: [],
+        blocked: null,
+        owed: null,
+        unchecked: true,
+        inactive,
+      }),
+      lockedPeriods: [],
+      blocked: null,
+    };
+  }
+
+  const { locked, blocked, unchecked } = await applyLocks(supabase, {
+    profileId: input.profileId,
+    tz,
+    schedule,
+    anchor,
+    fallbackRate: state.fallbackRate,
+    entries: state.entries,
+    paidCents: cents(state.balance.paid),
+    lockedCents: cents(sumLockedGross(state.lockedRuns)),
+  });
+
+  // A LOCK SHOULD NOT MOVE EARNED: markPeriodPaid freezes the same gross this figure already
+  // counted live, with the same function on the same rows. "Should not" is not "cannot" (a shift
+  // entered between the two reads prices differently), and this number is read aloud as what Erik
+  // still owes, so when something actually locked it is read again instead of assumed. When
+  // nothing locked, nothing moved, and the page gets its numbers without another round trip.
+  let balance: PersonBalance | null = state.balance;
+  if (locked.length) {
+    const after = await payContext(supabase, input.profileId, name, tz);
+    if (after.ok) {
+      balance = after.balance;
+    } else {
+      // The locks are real and are reported. The BALANCE is not known, so it is not spoken.
+      reportError("payroll:recordPayment:reread", after.failure.cause, {
+        profileId: input.profileId,
+        paymentId,
+        what: after.failure.what,
+      });
+      balance = null;
+    }
+  }
+
+  revalidatePay();
+  return {
+    ok: true,
+    paymentId,
+    message: paymentSentence({
+      name,
+      amount,
+      method,
+      paidOn,
+      today,
+      locked,
+      blocked,
+      owed: balance ? balance.owed : null,
+      unchecked: unchecked || !balance,
+      inactive,
+    }),
+    earned: balance?.earned,
+    paid: balance?.paid,
+    owed: balance?.owed,
+    lockedPeriods: locked,
+    blocked,
+  };
+}
+
+/** UNDO A PAYMENT. Voided, never deleted (the undo-trail law): the row stays on screen and stops
+ *  counting. And because a lock was a CONSEQUENCE of payments covering a period, taking the money
+ *  back has to take the lock back too — newest locked period first, until what is still locked is
+ *  covered again by what is still paid. Hours quietly staying locked behind a cancelled payment is
+ *  exactly the silence this page exists to end. */
+export async function voidPayment(id: string): Promise<PayResult> {
+  const ctx = await staffClient();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, userId } = ctx;
+
+  const { data: row } = await supabase
+    .from("pay_payments")
+    .select("id, profile_id, amount, paid_on, method, voided_at")
+    .eq("id", String(id ?? ""))
+    .maybeSingle();
+  if (!row) return { ok: false, error: "That payment isn't here anymore. Reload the page." };
+  if ((row as any).voided_at) return { ok: false, error: "That payment is already voided, so there is nothing to undo." };
+
+  const profileId = String((row as any).profile_id);
+  const amount = Number((row as any).amount ?? 0);
+  const paidOn = String((row as any).paid_on ?? "");
+
+  const { tz } = await orgPay(supabase);
+  const today = todayStrInTz(tz);
+  const { data: person } = await supabase.from("profiles").select("full_name").eq("id", profileId).maybeSingle();
+  const name = (person as any)?.full_name ?? "";
+
+  // Claim the void: only a row still live can be voided, and the row check means a second tap on a
+  // slow connection reports the truth instead of a second success.
+  const { data: voided, error: vErr } = await supabase
+    .from("pay_payments")
+    .update({ voided_at: new Date().toISOString(), voided_by: userId })
+    .eq("id", String(id ?? ""))
+    .is("voided_at", null)
+    .select("id");
+  if (vErr) return { ok: false, error: `That void didn't go through, so the payment still stands. ${dbError(vErr)}` };
+  if (!voided?.length) return { ok: false, error: "Someone else just voided that payment. Reload the page." };
+
+  // What is left paid, against what is still locked. Periods come off NEWEST first — the mirror of
+  // the oldest-first lock rule, so the oldest debt stays settled and the most recent lock is the
+  // one that gives way.
+  //
+  // The void itself is written and row-checked, so it stands whatever happens here. But UNLOCKING is
+  // decided by the same two totals the lock rule uses, and a partial read gets it wrong in both
+  // directions: a short runs list leaves hours locked behind money that is gone, a short payments
+  // list unlocks periods that are still covered. Neither is worth guessing at, so it stops and says
+  // so, and the hours stay exactly as they are until someone can look.
+  const after = await payContext(supabase, profileId, name, tz);
+  if (!after.ok) {
+    reportError("payroll:voidPayment:read", after.failure.cause, {
+      profileId,
+      paymentId: String(id ?? ""),
+      what: after.failure.what,
+    });
+    revalidatePay();
+    return {
+      ok: true,
+      message: voidSentence({ name, amount, paidOn, today, unlocked: [], blocked: null, owed: null, unchecked: true }),
+      unlockedPeriods: [],
+      blocked: null,
+    };
+  }
+
+  const groups = new Map<string, { start: string; end: string; cents: number }>();
+  for (const r of after.lockedRuns) {
+    const key = `${r.period_start}|${r.period_end}`;
+    const g = groups.get(key) ?? { start: r.period_start, end: r.period_end, cents: 0 };
+    g.cents += cents(r.gross); // a late entry locked later adds a SECOND run for the same period
+    groups.set(key, g);
+  }
+  let lockedCents = [...groups.values()].reduce((s, g) => s + g.cents, 0);
+  const paidCents = cents(after.balance.paid);
+  const unlocked: { start: string; end: string }[] = [];
+  let blocked: { start: string; end: string; reason: string } | null = null;
+  for (const g of [...groups.values()].sort((a, b) => b.start.localeCompare(a.start))) {
+    if (lockedCents <= paidCents) break; // still covered: leave it locked
+    const res = await unmarkPeriodPaid({ profileId, periodStart: g.start, periodEnd: g.end });
+    if (!res.ok) {
+      blocked = { start: g.start, end: g.end, reason: lockRefusalReason(res.error) };
+      reportError("payroll:voidPayment:unlock", new Error(res.error ?? "unmarkPeriodPaid refused"), {
+        profileId,
+        paymentId: String(id ?? ""),
+        periodStart: g.start,
+        periodEnd: g.end,
+      });
+      break;
+    }
+    lockedCents -= g.cents;
+    unlocked.push({ start: g.start, end: g.end });
+  }
+
+  // Unlocking moves hours from the FROZEN half of earned back to the live half, and a raise since
+  // then means those two figures differ on purpose (forward only). So the balance is read again
+  // rather than assumed — and if that read does not come back whole, the unlocks are still reported
+  // as the facts they are and the balance simply is not spoken.
+  let balance: PersonBalance | null = after.balance;
+  if (unlocked.length) {
+    const final = await payContext(supabase, profileId, name, tz);
+    if (final.ok) {
+      balance = final.balance;
+    } else {
+      reportError("payroll:voidPayment:reread", final.failure.cause, {
+        profileId,
+        paymentId: String(id ?? ""),
+        what: final.failure.what,
+      });
+      balance = null;
+    }
+  }
+
+  revalidatePay();
+  return {
+    ok: true,
+    message: voidSentence({
+      name,
+      amount,
+      paidOn,
+      today,
+      unlocked,
+      blocked,
+      owed: balance ? balance.owed : null,
+      unchecked: !balance,
+    }),
+    earned: balance?.earned,
+    paid: balance?.paid,
+    owed: balance?.owed,
+    unlockedPeriods: unlocked,
+    blocked,
+  };
+}
+
+/** 0265 imported every old Mark Paid tick as a payment and flagged it "check this", because an
+ *  imported figure is a RECONSTRUCTION, not a receipt: the amount is what the app said the period
+ *  came to, and the date is the period's last day because a tick never recorded one. This is Erik
+ *  saying he has looked at one and it is right. */
+export async function confirmImportedPayment(id: string): Promise<PayResult> {
+  const ctx = await staffClient();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase } = ctx;
+
+  const paymentId = String(id ?? "");
+  const { data: row } = await supabase
+    .from("pay_payments")
+    .select("id, profile_id, amount, paid_on, needs_check, voided_at")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (!row) return { ok: false, error: "That payment isn't here anymore. Reload the page." };
+  if (!(row as any).needs_check) return { ok: false, error: "That payment is already checked off." };
+
+  const { data: cleared, error } = await supabase
+    .from("pay_payments")
+    .update({ needs_check: false })
+    .eq("id", paymentId)
+    .eq("needs_check", true)
+    .select("id");
+  if (error) return { ok: false, error: `That didn't save, so it is still flagged. ${dbError(error)}` };
+  if (!cleared?.length) return { ok: false, error: "Someone else just checked that one off. Reload the page." };
+
+  const { tz } = await orgPay(supabase);
+  const { data: person } = await supabase.from("profiles").select("full_name").eq("id", String((row as any).profile_id)).maybeSingle();
+  const name = firstName((person as any)?.full_name);
+
+  revalidatePay();
+  return {
+    ok: true,
+    paymentId,
+    message: `Checked off: the ${sayMoney(Number((row as any).amount ?? 0))} payment to ${name} from ${dayPhrase(String((row as any).paid_on ?? ""), todayStrInTz(tz))}.`,
+  };
 }
