@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
-import { ACTIVE_JOB_STATUSES, pickMemberCurrentJob } from "@/lib/job-status";
-import { payPeriodBounds, todayBoundsInTz, todayStrInTz, tzDayStartUtc, weekDayStrs } from "@/lib/tz";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { payPeriodBounds, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -9,9 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
-import { listWeekAssignments, setCrewDayAssignment } from "./crew-actions";
-import { CrewWeekGrid } from "./crew-week-grid";
-import { pickScheduledJobForDay, type CrewAutoPlan } from "./crew-plan";
 import { getOrgSettings } from "@/lib/org-settings";
 import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
@@ -30,15 +27,20 @@ export default async function TimeclockPage() {
 
   const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
 
-  // hourly_rate = the caller's OWN pay rate (self-row read), feeding the tech's
-  // "My pay period" summary below — no one else's rate ever loads here.
-  // The caller's own row. home_address is the MILEAGE ORIGIN, and it lives behind the
-  // profile_pay view now (0216 revoked it from the authenticated role) — narrowing this select
-  // without a second read silently blanked it, so the tech's drive started from nowhere.
-  // profile_pay is staff-or-SELF, so a tech reading their own address is exactly what it allows.
+  // The caller's OWN row, read twice over. `profiles` carries the plain fields (language,
+  // role); home_address (the MILEAGE ORIGIN) and hourly_rate live behind the profile_pay view,
+  // because 0216 revoked those columns from the authenticated role. profile_pay is staff-or-SELF,
+  // so a person reading their own address and rate is exactly what it allows, and nobody else's
+  // ever loads here.
+  //
+  // hourly_rate MUST come from THIS read. "My pay period" below hands it to
+  // aggregatePayrollEntries as the fallback pay rate, and it was being read off `prof` — a select
+  // that asks for language and role only, on a table whose rate column is revoked twice over. The
+  // fallback was therefore 0, so a tech with no per-entry rate_override saw a real week of work
+  // priced at $0.00 under an "unpaid" badge. A wrong number on a pay screen is worse than none.
   const [{ data: prof }, { data: selfPay }] = await Promise.all([
     supabase.from("profiles").select("language, role").eq("id", user?.id ?? "").maybeSingle(),
-    supabase.from("profile_pay").select("home_address").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profile_pay").select("home_address, hourly_rate").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const lang = prof?.language ?? "en";
   const t = translator(lang);
@@ -56,7 +58,7 @@ export default async function TimeclockPage() {
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };
 
-  const [openRes, codesRes, jobsRes, weekRes, orgRes, crewJobsRes, leadRes] = await Promise.all([
+  const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes] = await Promise.all([
     supabase
       .from("time_entries")
       // Include any mid-shift switch segments already recorded on the open entry,
@@ -88,12 +90,6 @@ export default async function TimeclockPage() {
       .gte("clock_in", weekAgo)
       .order("clock_in", { ascending: false }),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    // Staff crew-assignment board: which active job carries each member. Fetched
-    // ONLY here (staff) so crew rosters never serialize into a tech's page props.
-    // status/scheduled_start/created_at feed the board's priority pick below.
-    isStaff
-      ? supabase.from("jobs").select("id, assigned_to, status, scheduled_start, created_at").in("status", ACTIVE_JOB_STATUSES)
-      : Promise.resolve({ data: [] as { id: string; assigned_to: string[] | null }[] }),
     // crew_lead is selected SEPARATELY (not in the profile select above) so this page
     // keeps working even if migration 0128 hasn't landed yet — an unknown column
     // would fail the whole profile read and de-staff the page.
@@ -105,78 +101,14 @@ export default async function TimeclockPage() {
   // any timeclock surface, and job labels lead with customer · street address.
   const jobCodesOn = orgSettings.timeclock_job_codes;
 
-  // Each member's current assignment for the staff crew-assignment board — the SAME
-  // priority the clock-in job resolution uses (the shared pick in lib/job-status):
-  // TIER 0 the explicit crew DAY-assignment for the org-local today (0139 — the
-  // precedence law: a planned day-assignment WINS and pushes everywhere) →
-  // scheduled TODAY (segment covering the org-local day, or scheduled_start
-  // inside it) → in_progress → newest other active job. The old `.find()` over an
-  // UNORDERED query pointed a member on several jobs at an arbitrary one (e.g. a
-  // stale on_hold job). One batched segments read — no N+1.
-  const crewJobs = ((crewJobsRes.data ?? []) as {
-    id: string;
-    assigned_to: string[] | null;
-    status?: string | null;
-    scheduled_start?: string | null;
-    created_at?: string | null;
-  }[]);
-  const { todayStr } = todayBoundsInTz(orgSettings.timezone);
-  // The current org week's 7 day-strings — bounds for the schedule read that
-  // feeds the planner's muted "auto" hints below (today + future days only).
-  const thisWeekDays = weekDayStrs(todayStr, orgSettings.week_start, 0);
-  /**
-   * NO SUGGESTED ASSIGNMENTS (cn-v590). This used to infer a job per member per day and draw it on
-   * the board as a dashed pill. Erik: "honestly i dont think we should suggest crew assignments,
-   * theres too much complication going on here and its confusing with the pills and suggestions."
-   *
-   * He's right, and it was never worth what it cost. It saved nothing, vanished on refresh, made
-   * every cell ambiguous — planned, or guessed? — and made plan-vs-actual impossible, because you
-   * cannot diff reality against an opinion. An EMPTY cell means nobody has decided, which is TRUE,
-   * and a truthful blank beats a confident guess.
-   *
-   * The crew calendar is the single source of truth for who works which job on which day, and
-   * everything on it is now a decision somebody made.
-   */
-
-  // The week grid's data (staff render) — the same read the grid's client paging uses
-  // (listWeekAssignments, offset 0 = this week), called server-side so the grid hydrates with
-  // the current week instead of flashing empty — TOGETHER with the code templates below, which
-  // never depended on it (2026-09-08 phone-lag sweep: two round trips one after the other).
-  const [weekAssignments, { data: tmplData }] = await Promise.all([
-    isStaff ? listWeekAssignments(0) : Promise.resolve(null),
-    // Attach each job's template codes so the code picker can narrow to the right codes.
-    supabase.from("job_code_templates").select("id, codes"),
-  ]);
+  // Attach each job's template codes so the code picker can narrow to the right codes.
+  const { data: tmplData } = await supabase.from("job_code_templates").select("id, codes");
   const tmplMap = new Map((tmplData ?? []).map((t: any) => [t.id as string, (t.codes ?? []) as string[]]));
   const jobOptions = ((jobsRes.data ?? []) as any[]).map((j) => ({
     ...j,
     customer_name: (j.customers?.name as string | undefined) ?? null,
     codes: j.code_template_id ? tmplMap.get(j.code_template_id) : undefined,
   }));
-
-  // The crew calendar's props (staff only). ONE surface now — the day-picker board that used to
-  // sit in the right column was a second way to edit the same rows, which is exactly the
-  // "too much complication" the owner named. Two controls for one fact is the complication.
-  // current-week rows server-fetched above, week paging + saves through the
-  // crew-actions pair, labels per the org's codes flag.
-  const crewPlan = isStaff
-    ? {
-        members: (members ?? []).map((m: any) => ({ id: m.id as string, full_name: (m.full_name ?? null) as string | null })),
-        jobs: jobOptions.map((j: any) => ({
-          id: j.id as string,
-          job_number: (j.job_number ?? null) as string | null,
-          name: (j.name ?? null) as string | null,
-          address: (j.address ?? null) as string | null,
-          customer_name: (j.customer_name ?? null) as string | null,
-        })),
-        weekRows: weekAssignments?.rows ?? [],
-        tz: orgSettings.timezone,
-        weekStart: orgSettings.week_start,
-        jobCodesEnabled: jobCodesOn,
-        setCrewDayAssignment,
-        listWeekAssignments,
-      }
-    : null;
 
   // The label a week-old entry's JOB shows on this page. Entries can point at finished jobs, so
   // this reads the entry's own join, not the active-jobs options.
@@ -283,24 +215,23 @@ export default async function TimeclockPage() {
   // The old "Recent entries" table lived here — removed by Erik's call (2026-07 notes):
   // entries already live on /timecards, so the clock page stays a clock, not a ledger.
 
-  // Aggregate the week's hours (closed entries only) — per job CODE (codes on,
-  // unchanged), or per JOB identity when the org turned codes off (every badge
-  // would otherwise read "—").
-  const perCode = new Map<string, number>();
+  // THE WEEK TOTAL (closed entries only) — the one number that survived the right-hand
+  // "This week" card. That card broke the week down per job CODE, which is the exact shape
+  // Erik threw off /timecards: "analytics territory, clutter on a payroll review page". It
+  // was no less clutter here, and it spoke in codes (J-009, J-013) on a page he steers by
+  // job NAME. The total now sits inside "My timecard", against the seven days it totals.
   let weekTotal = 0;
   for (const e of week) {
     if (e.status !== "closed" || !e.clock_out) continue;
-    const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-    weekTotal += h;
-    const key = (jobCodesOn ? e.job_code : weekJobTag(e)) ?? "—";
-    perCode.set(key, (perCode.get(key) ?? 0) + h);
+    weekTotal += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
   }
 
-  // MY TIMECARD (techs only) — the same week of the caller's entries, grouped by
-  // org-local day for the read-only card below the clock panel. Techs can't reach
-  // /timecards (office-only), so this is their view of their own hours; edits stay
-  // office work on purpose (no edit affordances here). Staff skip it — they have
-  // the full crew ledger at /timecards.
+  // MY TIMECARD (everyone) — the caller's OWN week of entries, grouped by org-local day for
+  // the read-only card below the clock panel, ending in the week total above. Techs can't
+  // reach /timecards (office-only), so this is the only place they see their own hours.
+  // Staff read it too now: the right-hand card that used to carry their week total is gone,
+  // and the office punches a clock as well. Edits stay office work on purpose (no edit
+  // affordances here) — staff have the door to the whole crew's ledger above.
   type MyTimecardRow = {
     id: string;
     in: string;
@@ -310,7 +241,7 @@ export default async function TimeclockPage() {
     jobTag: string | null; // job number (codes on) or customer · address (codes off)
   };
   const myTimecard: { day: string; label: string; rows: MyTimecardRow[]; total: number }[] = [];
-  if (!isStaff) {
+  if (user) {
     const tz = orgSettings.timezone;
     const byDay = new Map<string, { label: string; rows: MyTimecardRow[]; total: number }>();
     for (const e of week) {
@@ -378,7 +309,9 @@ export default async function TimeclockPage() {
     const [row] = aggregatePayrollEntries(
       (periodEntries ?? []) as any[],
       tz,
-      Number((prof as any)?.hourly_rate ?? 0),
+      // The caller's own rate, off profile_pay (see the read at the top) — NOT off `prof`,
+      // whose table no longer carries the column.
+      Number((selfPay as any)?.hourly_rate ?? 0),
     );
     if (row) {
       // Inclusive last day as a date STRING so formatDate prints it literally.
@@ -411,157 +344,154 @@ export default async function TimeclockPage() {
         />
       </PageHeader>
 
-      {/* min-w-0 on BOTH columns is load-bearing: the CrewWeekGrid's fixed-min-width
-          scroller lives inside these grid items, and a grid item's automatic minimum
-          (min-width:auto) would otherwise size the item to the scroller's full
-          content width — stretching the whole page sideways on phones and pushing
-          the columns past the viewport on desktop (the cn-v523 fallout). With
-          min-w-0 the wide grid scrolls INSIDE its own overflow-x container, the
-          /timecards pattern. */}
-      <div className="grid gap-6 lg:grid-cols-5">
-        <div className="min-w-0 lg:col-span-3">
-          {autoPrompt && (
-            <AutoClockoutPrompt
-              entry={autoPrompt}
-              jobCodes={(codesRes.data ?? []) as JobCode[]}
-              jobs={jobOptions}
-              jobCodesEnabled={jobCodesOn}
-            />
-          )}
-          <TimeclockPanel
-            openEntry={openEntry}
-            openAllocations={openAllocations}
+      <div className="space-y-6">
+        {autoPrompt && (
+          <AutoClockoutPrompt
+            entry={autoPrompt}
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobOptions}
-            lang={lang}
-            homeAddress={(selfPay as { home_address?: string | null } | null)?.home_address ?? ""}
-            isStaff={isStaff}
-            crewLead={crewLead}
             jobCodesEnabled={jobCodesOn}
           />
+        )}
+        <TimeclockPanel
+          openEntry={openEntry}
+          openAllocations={openAllocations}
+          jobCodes={(codesRes.data ?? []) as JobCode[]}
+          jobs={jobOptions}
+          lang={lang}
+          homeAddress={(selfPay as { home_address?: string | null } | null)?.home_address ?? ""}
+          isStaff={isStaff}
+          crewLead={crewLead}
+          jobCodesEnabled={jobCodesOn}
+        />
 
-          {/* THE CREW WEEK — directly under the timeclock (staff only): the org week
-              as a timecards-style grid showing ONLY the day-assignments (job pill +
-              ★ lead per member per day). A cell tap opens its inline editor. */}
-          {crewPlan && <CrewWeekGrid {...crewPlan} />}
+        {/* WHERE THE CREW WEEK BOARD STOOD — three doors, staff only.
+         *
+         *  Erik: "we have this time off box that was showing the scheduled jobs too but then
+         *  stopped and now its just in the way and doesnt show anything so we still need the
+         *  functionality", and then: "do we need the crew week? lets try and mold as much
+         *  together as possible and simplify, i lean towards the schedule".
+         *
+         *  The board is deleted, not moved. It was a SECOND per-day editor for
+         *  crew_day_assignments, and cn-v590 took away the two things that ever filled it (the
+         *  dashed schedule pill and the "Fill from the schedule" button) on his own instruction —
+         *  so for seven weeks a correctly-empty grid and a dead one looked exactly alike. The
+         *  schedule's Everyone's Day already answers who is on what, off real assignments and
+         *  segments, so this page goes back to its one job: am I on the clock.
+         *
+         *  WHAT SURVIVES THE BOARD: the crew_day_assignments ROWS, and the writers in
+         *  crew-actions.ts that make them. A day-assignment is still tier 0 of the job-less
+         *  clock-in (timeclock/actions.ts, migration 0139 — the precedence law) and still feeds
+         *  plan-vs-actual on /timecards. Deleting those writers would break a punch, not a board.
+         *
+         *  NOTHING SILENT / NO DEAD ENDS: a door that closes gets another named where it stood,
+         *  and the whole row is the target (44px, easier to hit than a link inside it). */}
+        {isStaff && (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Link
+              href="/schedule?view=crew"
+              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+            >
+              {/* TODAY, not "this week" — the door is named for what it OPENS. /schedule?view=crew
+                *  renders CrewBoardPanel, which is Everyone's DAY: one day, paged a day at a time
+                *  (crew-board-panel.tsx prevHref/nextHref shift by one). A door promising a week
+                *  and opening a day is the same small lie Erik reported about the box this row
+                *  replaces, and it is the thing NOT-ANNOYING and NOTHING SILENT exist to stop. */}
+              <span className="text-sm font-semibold text-slate-900">Who&apos;s On What Today</span>
+              <span className="text-xs text-slate-500">Everyone&apos;s Day on the schedule, one lane per person</span>
+            </Link>
+            <Link
+              href="/timecards"
+              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+            >
+              <span className="text-sm font-semibold text-slate-900">Crew Hours</span>
+              <span className="text-xs text-slate-500">The whole crew&apos;s week, and what needs a human</span>
+            </Link>
+            <Link
+              href="/payroll"
+              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+            >
+              <span className="text-sm font-semibold text-slate-900">Pay</span>
+              <span className="text-xs text-slate-500">What everyone is owed, and marking it paid</span>
+            </Link>
+          </div>
+        )}
 
-          {/* MY TIMECARD (techs only) — the week's punches, grouped by day, read-only:
-              date, in–out, lunch, hours, job number, + the week total. Edits are office
-              work (/timecards), which techs can't reach — so no edit buttons here. */}
-          {!isStaff && myTimecard.length > 0 && (
-            <Card className="mt-6">
-              <CardContent className="py-5">
-                <div className="mb-1 flex items-baseline justify-between">
-                  <h3 className="text-sm font-semibold text-slate-900">My timecard</h3>
-                  <span className="text-xs text-slate-400">Last 7 days</span>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {myTimecard.map((d) => (
-                    <div key={d.day} className="py-2.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold uppercase tracking-wide text-slate-500">{d.label}</span>
-                        {d.total > 0 && <span className="font-medium text-slate-500">{formatDuration(d.total)}</span>}
-                      </div>
-                      {d.rows.map((r) => (
-                        <div key={r.id} className="mt-1 flex items-center justify-between gap-3 text-sm">
-                          <span className="min-w-0 truncate text-slate-700">
-                            {r.in}–{r.out ?? "now"}
-                            {r.lunch > 0 ? ` · ${r.lunch}m lunch` : ""}
-                            {r.jobTag ? ` · ${r.jobTag}` : ""}
-                          </span>
-                          <span className="shrink-0 text-slate-600">
-                            {r.hours != null ? formatDuration(r.hours) : "on the clock"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
-                  <span className="font-semibold text-slate-900">Week total</span>
-                  <span className="font-bold text-slate-900">{formatDuration(weekTotal)}</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* MY PAY PERIOD (techs only) — hours + base pay + paid state for the
-              current period, mirroring what the office sees on /timecards.
-              Mileage $ is deliberately absent (settled by a human on /payroll). */}
-          {!isStaff && myPeriod && (
-            <Card className="mt-4">
-              <CardContent className="py-4">
-                <div className="mb-1 flex items-baseline justify-between">
-                  <h3 className="text-sm font-semibold text-slate-900">My pay period</h3>
-                  <span className="text-xs text-slate-400">{myPeriod.label}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-600">{formatDuration(myPeriod.hours)}</span>
-                  <span className="flex items-center gap-2">
-                    <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross)}</span>
-                    {myPeriod.state === "paid" ? (
-                      <Badge tone="green">paid</Badge>
-                    ) : myPeriod.state === "partly" ? (
-                      <Badge tone="amber">partly paid</Badge>
-                    ) : (
-                      <Badge tone="slate">unpaid</Badge>
-                    )}
-                  </span>
-                </div>
-                {myPeriod.openNotCounted && (
-                  <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-                    Your current shift is still on the clock and not counted yet — these totals update
-                    when you clock out.
-                  </p>
-                )}
-                <p className="mt-1.5 text-xs text-slate-400">
-                  Base pay only — mileage is tracked in miles and settled separately by the office.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        <div className="min-w-0 space-y-6 lg:col-span-2">
-          {/* The office's day-planner board — day strip + per-member job/★-lead lines.
-              A day row here WINS: the tech's job-less Clock In resolves to it (with
-              autoPlan as the inferred fallback, shown as "auto"). Staff only. */}
+        {/* MY TIMECARD (everyone) — the caller's own week of punches, grouped by day, read-only:
+            date, in-out, lunch, hours, the job by NAME, and the week total that used to live in
+            the right-hand card. Edits are office work (/timecards), so no edit buttons here. */}
+        {myTimecard.length > 0 && (
           <Card>
             <CardContent className="py-5">
-              <h3 className="mb-3 text-sm font-semibold text-slate-900">
-                {t("tc_thisWeek")}
-              </h3>
-              <div className="mb-3 text-3xl font-bold text-slate-900">
-                {formatDuration(weekTotal)}
+              <div className="mb-1 flex items-baseline justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">My timecard</h3>
+                <span className="text-xs text-slate-400">Last 7 days</span>
               </div>
-              <div className="space-y-1.5">
-                {[...perCode.entries()].map(([code, h]) => (
-                  <div
-                    key={code}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <Badge tone="slate">{code}</Badge>
-                    <span className="text-slate-600">{formatDuration(h)}</span>
+              <div className="divide-y divide-slate-100">
+                {myTimecard.map((d) => (
+                  <div key={d.day} className="py-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold uppercase tracking-wide text-slate-500">{d.label}</span>
+                      {d.total > 0 && <span className="font-medium text-slate-500">{formatDuration(d.total)}</span>}
+                    </div>
+                    {d.rows.map((r) => (
+                      <div key={r.id} className="mt-1 flex items-center justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate text-slate-700">
+                          {r.in}–{r.out ?? "now"}
+                          {r.lunch > 0 ? ` · ${r.lunch}m lunch` : ""}
+                          {r.jobTag ? ` · ${r.jobTag}` : ""}
+                        </span>
+                        <span className="shrink-0 text-slate-600">
+                          {r.hours != null ? formatDuration(r.hours) : "on the clock"}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 ))}
-                {perCode.size === 0 && (
-                  <p className="text-sm text-slate-400">No closed entries yet.</p>
-                )}
               </div>
-              {/* The Recent-entries table left this page (it duplicated /timecards) — keep the
-                  door to the ledger for STAFF only: /timecards bounces non-staff right back
-                  here, so a tech's "My timecard →" link was a dead loop. Techs see their
-                  week's numbers above; no link. */}
-              {isStaff && (
-                <div className="mt-4 border-t border-slate-100 pt-3">
-                  <Link href="/timecards" className="text-sm font-medium text-brand hover:underline">
-                    Crew Hours →
-                  </Link>
-                </div>
-              )}
+              <div className="mt-2 flex items-center justify-between border-t border-slate-200 pt-3 text-sm">
+                <span className="font-semibold text-slate-900">Week total</span>
+                <span className="font-bold text-slate-900">{formatDuration(weekTotal)}</span>
+              </div>
             </CardContent>
           </Card>
-        </div>
+        )}
+
+        {/* MY PAY PERIOD (techs only) — hours + base pay + paid state for the
+            current period, mirroring what the office sees on /timecards.
+            Mileage $ is deliberately absent (settled by a human on /payroll). */}
+        {!isStaff && myPeriod && (
+          <Card>
+            <CardContent className="py-4">
+              <div className="mb-1 flex items-baseline justify-between">
+                <h3 className="text-sm font-semibold text-slate-900">My pay period</h3>
+                <span className="text-xs text-slate-400">{myPeriod.label}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">{formatDuration(myPeriod.hours)}</span>
+                <span className="flex items-center gap-2">
+                  <span className="font-bold text-slate-900">{formatCurrency(myPeriod.gross)}</span>
+                  {myPeriod.state === "paid" ? (
+                    <Badge tone="green">paid</Badge>
+                  ) : myPeriod.state === "partly" ? (
+                    <Badge tone="amber">partly paid</Badge>
+                  ) : (
+                    <Badge tone="slate">unpaid</Badge>
+                  )}
+                </span>
+              </div>
+              {myPeriod.openNotCounted && (
+                <p className="mt-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">
+                  Your current shift is still on the clock and not counted yet — these totals update
+                  when you clock out.
+                </p>
+              )}
+              <p className="mt-1.5 text-xs text-slate-400">
+                Base pay only — mileage is tracked in miles and settled separately by the office.
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

@@ -6,7 +6,7 @@ import { CalendarOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { setCrewOffRange, clearCrewOffRange } from "./crew-actions";
+import { setCrewOffRange, clearCrewOffRange } from "../timeclock/crew-actions";
 
 /**
  * TIME OFF — one action for a whole stretch.
@@ -19,6 +19,13 @@ import { setCrewOffRange, clearCrewOffRange } from "./crew-actions";
  * A man out until the 7th is ONE fact about a PERSON. So it's one form: who, from, to, why. It
  * writes a day row per working day — the same OFF rows the board and the punch already respect
  * (0170) — and `jobs.assigned_to` is never touched, because he hasn't left the crew.
+ *
+ * IT LIVES BESIDE EVERYONE'S DAY NOW (cn-v951). It used to sit in the /timeclock crew box that
+ * Erik reported dead ("we have this time off box that was showing the scheduled jobs too but then
+ * stopped and now its just in the way and doesnt show anything so we still need the
+ * functionality"). The grid that box wrapped is gone; this was the one piece of it with nowhere
+ * else to live, so it moved to the board that DRAWS the rows it writes — a range here, a single
+ * day by tapping the person's lane. Behaviour is unchanged.
  */
 export function TimeOffButton({
   members,
@@ -83,8 +90,15 @@ export function TimeOffButton({
         >
           <div className="space-y-3">
             <p className="text-sm text-slate-500">
-              Marks these days off on the crew board. They stay on their jobs&rsquo; crews — this only says
-              they&rsquo;re not there — and their Clock In won&rsquo;t land on a job by mistake.
+              Marks these days off on the crew board. They stay on their jobs&rsquo; crews. This only says
+              they are not there, and their Clock In will not land on a job by mistake.
+            </p>
+            {/* SAY WHAT IT DOES NOT DO. setJobCrew tells a person when they are put ON a job; nothing
+                tells them when they are marked OFF, so this form was quietly deciding somebody is not
+                working and letting him find out on his own. Until that notification exists, the form
+                says so rather than letting the silence pass for an arrangement. */}
+            <p className="text-sm font-medium text-amber-700">
+              They are not told. Let them know yourself.
             </p>
             <div>
               <Label htmlFor="to-who">Who</Label>
