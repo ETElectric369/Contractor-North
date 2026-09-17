@@ -729,10 +729,13 @@ export function PayNowButton(props: Mode & {
   const smsBody = art?.payUrl
     ? encodeURIComponent(`${art.invoiceNumber ? `Invoice ${art.invoiceNumber} — ` : ""}${money(amount)}. Pay by card here: ${art.payUrl}`)
     : "";
-  /** Try Again only where the same PaymentIntent can take another card (Apple 5.9's declined);
-   *  a timeout may already be through (see TapOutcomeBox), and every other outcome's sentence
-   *  names its own fix — and Tap to Pay is right there. */
-  const retry = tap.kind === "error" && tapStarted && tap.outcome === "declined" ? () => void tapToPay() : null;
+  /** Try Again where the same PaymentIntent can take another card: a declined card (Apple 5.9),
+   *  and a tap the reader refused before any card was read ("failed": a busy reader, a
+   *  connection still finishing, a Stripe session that didn't start) — the PaymentIntent is
+   *  untouched either way, and Stripe says re-use it (Erik's 2026-09-16: five refusals in a row,
+   *  each one a fresh Pay Now). A timeout may already be through (see TapOutcomeBox); "setup" and
+   *  "not enabled" sentences name their own door. */
+  const retry = tap.kind === "error" && tapStarted && (tap.outcome === "declined" || tap.outcome === "failed") ? () => void tapToPay() : null;
   const declinedReceipt =
     tap.kind === "error" && tap.outcome === "declined" && invoiceId ? (
       <ReceiptRow outcome="declined" receipt={receipt} invoiceId={invoiceId} amount={balanceRef.current} toast={toast} />

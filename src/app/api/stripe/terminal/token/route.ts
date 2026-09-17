@@ -27,21 +27,43 @@ export const runtime = "nodejs";
  * caller's own org row through their own session (RLS is the boundary), never from the request:
  * there is no way to ask for another org's token because there is no way to name one.
  */
+/**
+ * EVERY WAY THIS ROUTE ANSWERS WITHOUT A TOKEN, for the bridge that has to turn it into a fix
+ * (native-tap.ts fetchToken keys on the status; `code` is the same fact in a word, for a reader):
+ *   401 signed_out     no session cookie the server accepts (expired, revoked, a fresh WebView)
+ *   403 not_staff      a technician's shell, or a deactivated seat
+ *   400 no_org         the profile has no company
+ *   429 rate_limited   more than thirty in a minute for this person
+ *   503 not_configured no Stripe keys on this server
+ *   500 read_failed    the org row couldn't be read
+ *   400 not_enabled    Stripe not finished for this company (no account, or charges off)
+ *   502 stripe_refused Stripe wouldn't mint the token (logged to error_events with the real text)
+ * Every one is JSON with `error` as a plain sentence. Nothing here redirects: /api/stripe is a
+ * PUBLIC_PATH in the middleware, so a signed-out phone gets the 401 above, never the login page.
+ * `Cache-Control: no-store` on all of them — a token, or a refusal, is never something to keep.
+ */
+const NO_STORE = { "Cache-Control": "no-store" };
+
+function refuse(code: string, error: string, status: number) {
+  return NextResponse.json({ error, code }, { status, headers: NO_STORE });
+}
+
 export async function POST() {
   const ctx = await requireStaff();
   if ("error" in ctx) {
-    return NextResponse.json({ error: ctx.error }, { status: ctx.error === "Not signed in." ? 401 : 403 });
+    const why = ctx.error ?? "This action is staff-only.";
+    return why === "Not signed in." ? refuse("signed_out", why, 401) : refuse("not_staff", why, 403);
   }
   if (!ctx.orgId) {
-    return NextResponse.json({ error: "Your account isn't attached to a company yet." }, { status: 400 });
+    return refuse("no_org", "Your account isn't attached to a company yet.", 400);
   }
   // The SDK asks for a fresh token per connect and again on every reconnect; thirty a minute is
   // more than a reader ever needs and less than a loop would want.
   if (await rateLimited(`terminal-token:${ctx.userId}`, 30, 60)) {
-    return NextResponse.json({ error: "Too many Tap to Pay on iPhone sessions in a row — give it a minute." }, { status: 429 });
+    return refuse("rate_limited", "Too many Tap to Pay on iPhone sessions in a row — give it a minute.", 429);
   }
   if (!billingEnabled) {
-    return NextResponse.json({ error: "Card payments aren't set up on this server yet." }, { status: 503 });
+    return refuse("not_configured", "Card payments aren't set up on this server yet.", 503);
   }
 
   // Real columns only (the collectArtifacts lesson: a select naming a column that does not exist
@@ -52,19 +74,17 @@ export async function POST() {
     .eq("id", ctx.orgId)
     .maybeSingle();
   if (orgErr || !org) {
-    return NextResponse.json(
-      { error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." },
-      { status: 500 },
-    );
+    return refuse("read_failed", orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup.", 500);
   }
   const connect = connectStateFromOrg(org as never);
   // canAcceptPayments is the same gate the QR door and the public pay route use: an account exists
   // AND Stripe says it may charge. Terminal additionally needs the card_payments capability, which
   // is exactly what charges_enabled mirrors for an Express account.
   if (!canAcceptPayments(connect)) {
-    return NextResponse.json(
-      { error: "Card payments aren't switched on for this company yet. Finish Stripe setup in Settings → Payments first." },
-      { status: 400 },
+    return refuse(
+      "not_enabled",
+      "Card payments aren't switched on for this company yet. Finish Stripe setup in Settings → Payments first.",
+      400,
     );
   }
 
@@ -75,15 +95,12 @@ export async function POST() {
       // connection tokens by location for internet readers only; Tap to Pay ignores it.
       { stripeAccount: connect.accountId! },
     );
-    return NextResponse.json({ secret: token.secret }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ secret: token.secret }, { headers: NO_STORE });
   } catch (e) {
     // A Stripe-side refusal (key in the wrong mode, a capability that lapsed since account.updated
     // last spoke) goes to error_events with the real text; the phone gets a sentence it can show.
     reportError("stripe:terminal:token", e, { orgId: ctx.orgId });
     const said = e instanceof Error ? e.message : "";
-    return NextResponse.json(
-      { error: `Stripe wouldn't start a Tap to Pay on iPhone session${said ? ` — ${said}` : ""}.` },
-      { status: 502 },
-    );
+    return refuse("stripe_refused", `Stripe wouldn't start a Tap to Pay on iPhone session${said ? ` — ${said}` : ""}.`, 502);
   }
 }

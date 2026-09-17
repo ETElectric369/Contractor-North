@@ -71,6 +71,13 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
   function row(t: Task) {
     return (
       <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+        {/* 44px HIT AREAS, SAME COMPACT ROW (Erik, 2026-09-16, "Can't delete tasks" from the job's
+            Tasks tab on his iPhone). The checkbox, pencil and trash were bare 16px targets sitting
+            shoulder to shoulder: a thumb aimed at the trash landed on the pencil, the gap, or
+            nothing, and the row never said a word. Each is now a 44px square (the 60mph rule).
+            The negative margins let the squares overlap the row's own padding, so the row stays as
+            tight as it was and the icons sit exactly where they always did. */}
+        <label className="-mx-3.5 -my-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center">
         <input
           type="checkbox"
           checked={t.status === "done"}
@@ -95,6 +102,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           }}
           className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand"
         />
+        </label>
         <div className="min-w-0 flex-1">
           <div className={t.status === "done" ? "text-slate-400 line-through" : "font-medium text-slate-900"}>
             {t.priority > 0 && t.status !== "done" && (
@@ -107,28 +115,41 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
           )}
         </div>
         {t.category && <Badge tone="slate">{t.category}</Badge>}
-        <button
-          onClick={() => setEditTask(t)}
-          className="text-slate-400 hover:text-brand"
-          title="Edit"
-        >
-          <Pencil className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => {
-            if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-            start(async () => {
-              const res = await deleteTask(t.id, { jobId });
-              if (!res?.ok) { toast(res?.error ?? "Couldn't delete task — try again.", "error"); return; }
-              toast("Task deleted", "success");
-              router.refresh();
-            });
-          }}
-          className="text-slate-400 hover:text-red-600"
-          title="Delete"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <div className="-my-2 -mr-3.5 flex shrink-0 items-center">
+          <button
+            type="button"
+            onClick={() => setEditTask(t)}
+            disabled={pending}
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand disabled:opacity-50"
+            title="Edit"
+            aria-label={`Edit "${t.title}"`}
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              // confirm() stays: it is the door every other delete in the app uses (tasks-view,
+              // photos, documents), and the iOS shell renders it as a native alert, Cancel on the
+              // left and Ok on the right. The server now says what happened when the delete
+              // touches nothing (deleteTask's row check), so this can no longer toast a success
+              // over a task that is still there.
+              if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
+              start(async () => {
+                const res = await deleteTask(t.id, { jobId });
+                if (!res?.ok) { toast(res?.error ?? "Couldn't delete task. Try again.", "error"); return; }
+                toast("Task deleted", "success");
+                router.refresh();
+              });
+            }}
+            disabled={pending}
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            title="Delete"
+            aria-label={`Delete "${t.title}"`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </li>
     );
   }

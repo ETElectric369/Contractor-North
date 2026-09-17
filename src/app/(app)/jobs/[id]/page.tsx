@@ -1367,6 +1367,7 @@ export default async function JobDetailPage({
           moved to the Costs tab's header, one chip away). */}
       <JobActionDock
         job={j}
+        openTaskCount={(tasks ?? []).filter((t: any) => t.status !== "done").length}
         viewerIsStaff={viewerIsStaff}
         tz={tz}
         openEntry={openEntry}

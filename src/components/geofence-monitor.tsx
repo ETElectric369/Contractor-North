@@ -556,11 +556,14 @@ export function GeofenceMonitor({
 
   // Non-blocking sheet (NOT a Modal — nothing behind it is disabled): floats above the
   // bottom nav like a toast, below the toast channel itself.
+  // UNDER a sheet, never over it (2026-09-16): the Modal sits at z-[120]. At z-[130] this card
+  // landed on top of an open Add Cost sheet's Save and Cancel while the person was off-site at
+  // the supply house. It waits behind the sheet and is there the moment it closes.
   return (
     <div
       role="status"
       aria-live="polite"
-      className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[130] shell:inset-x-auto shell:bottom-6 shell:right-6 shell:w-96"
+      className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[110] shell:inset-x-auto shell:bottom-6 shell:right-6 shell:w-96"
     >
       <div className="rounded-2xl border border-amber-300 bg-white p-4 shadow-xl">
         {phase === "confirmed" ? (

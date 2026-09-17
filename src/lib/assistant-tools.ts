@@ -19,6 +19,9 @@ import { unbilledWorkForJob } from "@/lib/unbilled-work";
 import { reportError } from "@/lib/observe";
 import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
 import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
+import { isStaffRole } from "@/lib/actions/perms";
+import { resolveJobId } from "@/lib/actions/resolve-id";
+import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -382,10 +385,23 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_material_lists",
     description:
-      "List MATERIAL LISTS across jobs (name, item count, job). Use for 'what material lists are there', 'materials for the Miller job'. Pass job_id to filter.",
+      "List MATERIAL LISTS across jobs (name, item count, job). Use for 'what material lists are there', 'materials for the Miller job'. Pass job_id to filter. For the LINES on a list use list_material_items.",
     input_schema: {
       type: "object",
       properties: { job_id: { type: "string" }, limit: { type: "integer", description: "Max rows (default 20, max 40)." } },
+    },
+  },
+  {
+    name: "list_material_items",
+    description:
+      "The LINE ITEMS on a job's materials list (the job's one shopping/take-off list): each line's item_id, description, part number, quantity, unit, whether it's been purchased, and whether it's a tool. Use for 'what's on the Waldow materials list', 'what still needs to be bought for the Miller job', and to find the exact line BEFORE material.markPurchased / material.removeLine (pass the item_id it returns). Pass job_id (the job's id from list_jobs, or its name / number as spoken — 'Waldow', 'J-012') or list_id (from list_material_lists). Lines are unpurchased until someone ticks them, so unpurchased = still to buy.",
+    input_schema: {
+      type: "object",
+      properties: {
+        job_id: { type: "string", description: "The job's id, or its name / number as spoken. The job's newest list is the list." },
+        list_id: { type: "string", description: "A specific list's id (from list_material_lists) — use instead of job_id for a list that isn't a job's." },
+        to_buy_only: { type: "boolean", description: "true = only the lines not yet purchased." },
+      },
     },
   },
   {
@@ -1221,6 +1237,84 @@ export async function runDataTool(
             name: l.name,
             items: l.material_list_items?.length ?? 0,
             job: l.jobs ? `${l.jobs.job_number} ${l.jobs.name}` : null,
+          })),
+        });
+      }
+
+      case "list_material_items": {
+        // Erik to Nort, 2026-09-16, on the job's materials list: "I want you to be able to do
+        // everything that I can do on this app." list_material_lists only ever counted the lines;
+        // this reads them, so Nort can answer "what's on the Waldow list" and resolve a line before
+        // it ticks or removes one. RLS scopes the rows; the COLUMNS are role-shaped the way the job
+        // tab and /materials/[id] shape them (TECH_ITEM_COLUMNS: no est_cost, no vendor for the
+        // crew) — the tool itself is offered to techs, since the list is theirs to work.
+        const jobRef = String(input.job_id ?? "").trim();
+        const listRef = sanitize(input.list_id);
+        if (!jobRef && !listRef) return JSON.stringify({ error: "Pass job_id (the job's id, name, or number) or list_id." });
+
+        let listId = listRef || null;
+        let jobText: string | null = null;
+        if (!listId) {
+          const job = await resolveJobId(supabase, jobRef);
+          if ("error" in job) return JSON.stringify({ error: job.error });
+          if (!job.id) return JSON.stringify({ error: "Pass job_id (the job's id, name, or number) or list_id." });
+          const { data: jobRow, error: jobErr } = await supabase.from("jobs").select("id, job_number, name").eq("id", job.id).maybeSingle();
+          if (jobErr) throw jobErr;
+          if (!jobRow) return JSON.stringify({ error: "Job not found (or not one you can see)." });
+          jobText = `${jobRow.job_number ?? ""} ${jobRow.name ?? ""}`.trim();
+          // The job's ONE list is its newest, exactly as the job tab picks it.
+          const { data: list, error: listErr } = await supabase
+            .from("material_lists")
+            .select("id")
+            .eq("job_id", job.id)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (listErr) throw listErr;
+          if (!list) return JSON.stringify({ count: 0, job: jobText, list: null, items: [], note: "This job has no materials list yet — material.addLine starts one." });
+          listId = list.id as string;
+        }
+
+        const { data: list, error: lErr } = await supabase
+          .from("material_lists")
+          .select("id, name, job_id, jobs(job_number, name)")
+          .eq("id", listId)
+          .maybeSingle();
+        if (lErr) throw lErr;
+        if (!list) return JSON.stringify({ error: "No such materials list (or not one you can see)." });
+
+        // Money is the office's: the same role check the pages make, made here because this tool
+        // is offered to every role and the caller's client alone doesn't say who is asking.
+        const { data: auth } = await supabase.auth.getUser();
+        const userId: string | null = auth?.user?.id ?? null;
+        const { data: me } = userId ? await supabase.from("profiles").select("role").eq("id", userId).maybeSingle() : { data: null };
+        const staff = isStaffRole((me as { role?: string } | null)?.role);
+
+        let q = supabase
+          .from("material_list_items")
+          .select(staff ? "id, description, part_number, quantity, unit, vendor, est_cost, purchased, purchased_at, is_tool, sort_order" : TECH_ITEM_COLUMNS)
+          .eq("list_id", listId)
+          .order("sort_order");
+        if (input.to_buy_only === true) q = q.eq("purchased", false);
+        const { data, error } = await q;
+        if (error) throw error;
+        const items = (data ?? []) as any[];
+        return JSON.stringify({
+          count: items.length,
+          job: list.jobs ? `${list.jobs.job_number} ${list.jobs.name}` : jobText,
+          list: { id: list.id, name: list.name },
+          to_buy: items.filter((it) => !it.purchased).length,
+          purchased: items.filter((it) => !!it.purchased).length,
+          items: items.map((it) => ({
+            item_id: it.id, // pass to material.markPurchased / material.removeLine
+            description: it.description,
+            part_number: it.part_number,
+            quantity: Number(it.quantity ?? 1),
+            unit: it.unit ?? "ea",
+            purchased: !!it.purchased,
+            purchased_at: it.purchased_at ?? null,
+            is_tool: !!it.is_tool,
+            ...(staff ? { vendor: it.vendor ?? null, est_cost: it.est_cost == null ? null : money(it.est_cost) } : {}),
           })),
         });
       }

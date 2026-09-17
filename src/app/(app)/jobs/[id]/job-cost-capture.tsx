@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,14 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
   const fileRef = useRef<HTMLInputElement>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [busy, setBusy] = useState(false);
+  // THE CAMERA DOOR SPEAKS (the Add Cost sheet's rule, same day, same phone: Erik 2026-09-16,
+  // "Add cost can't take photo"). When the OS refuses the capture input nothing in JS throws, so
+  // Snap arms a short timer: no photo, no cancel, and the page never left the screen means the
+  // door never opened, and this line says so and names Upload. A real camera covers the page
+  // and the photo or the cancel clears it on return, so a slow camera is never a false alarm.
+  const [cameraHint, setCameraHint] = useState<string | null>(null);
+  const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snapListeners = useRef<(() => void) | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   // THE QUEUE. A drop while a read was in flight used to hit `if (busy) return` — the files
   // vanished without a word, the one silence these result lines exist to prevent (the Snap and
@@ -109,7 +117,19 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
     if (touched) router.refresh();
   }
 
+  function clearSnapWatch() {
+    if (snapTimer.current) {
+      clearTimeout(snapTimer.current);
+      snapTimer.current = null;
+    }
+    snapListeners.current?.();
+    snapListeners.current = null;
+    setCameraHint(null);
+  }
+  useEffect(() => () => clearSnapWatch(), []);
+
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    clearSnapWatch();
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     snapFiles(files);
@@ -117,8 +137,32 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
 
   // Phones get the real camera app (capture="environment"); desktop gets the in-browser modal.
   function snap() {
-    if (onPhone()) captureRef.current?.click();
-    else setShowCamera(true);
+    if (!onPhone()) return setShowCamera(true);
+    const input = captureRef.current;
+    if (!input) {
+      // Not mounted (it always is): the library door rather than a dead tap.
+      if (fileRef.current) return fileRef.current.click();
+      return setCameraHint("Couldn't open the camera on this device. Use Upload, or Add Cost to type it in.");
+    }
+    clearSnapWatch();
+    const onCancel = () => clearSnapWatch();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") clearSnapWatch();
+    };
+    input.addEventListener("cancel", onCancel);
+    document.addEventListener("visibilitychange", onVisible);
+    snapListeners.current = () => {
+      input.removeEventListener("cancel", onCancel);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    input.click();
+    snapTimer.current = setTimeout(() => {
+      snapTimer.current = null;
+      if (document.visibilityState !== "visible") return; // covered: the camera is most likely up
+      snapListeners.current?.();
+      snapListeners.current = null;
+      setCameraHint("Camera didn't open? Tap Upload to pick from your photos, or allow the camera for North in your phone's Settings.");
+    }, 2500);
   }
 
   return (
@@ -128,7 +172,11 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-5 py-3 text-sm">
         <span className="font-semibold text-slate-900">Costs · {formatCurrency(billsTotal)}</span>
         <div className="flex flex-wrap items-center gap-2">
-          <input ref={captureRef} type="file" accept="image/*" capture="environment" multiple className="hidden" onChange={onPick} />
+          {/* NO `multiple` ON THE CAMERA INPUT. iOS ignores `capture` the moment `multiple` is
+              present and opens the photo library instead, so with both set Snap the Bill never
+              reached the camera on an iPhone. One shot per Snap; the Upload input beside it keeps
+              `multiple` for the emailed-PDF and photo-library case, many at once. */}
+          <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPick} />
           <input ref={fileRef} type="file" accept="image/*,application/pdf,.pdf" multiple className="hidden" onChange={onPick} />
           <DropTarget onFiles={snapFiles} accept="image/*,application/pdf,.pdf" label="Drop the Bills">
             <Button type="button" onClick={snap} disabled={busy} className="px-3">
@@ -139,7 +187,10 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
             type="button"
             variant="outline"
             size="icon"
-            onClick={() => fileRef.current?.click()}
+            onClick={() => {
+              setCameraHint(null);
+              fileRef.current?.click();
+            }}
             disabled={busy}
             title="Upload Bills (Photos or PDFs)"
             aria-label="Upload Bills"
@@ -149,6 +200,8 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
           <QuickCostButton orgId={orgId} jobId={jobId} icon="dollar" label="Add Cost" className={OUTLINE_BTN} />
         </div>
       </div>
+
+      {cameraHint && <p className="border-t border-slate-100 px-5 py-2 text-sm text-amber-700">{cameraHint}</p>}
 
       {showCamera && (
         <CameraCapture

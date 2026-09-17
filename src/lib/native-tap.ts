@@ -116,8 +116,15 @@ export function tapToPayPluginPresent(): boolean {
 // `isInitialize`, and re-reads `isTest` on every initialize() — so initialize is cheap to repeat,
 // but the token LISTENER must be registered exactly once or every request gets answered twice.
 let tokenListenerArmed = false;
-/** Why the last connection-token fetch failed — the SDK's own message for that is generic. */
-let lastTokenError: string | null = null;
+/**
+ * Why the last connection-token fetch failed, and what the person can do about it. The SDK's own
+ * sentence for a failed token is generic ("Connecting to the reader failed because the app
+ * completed fetchConnectionToken with an error"), so the reason has to be kept here and folded
+ * into whatever fails next. `kind` picks the fix: a 401 is "sign in again", not "check the
+ * internet" (Erik's 2026-09-16 console: "Missing `token` is empty" with no word of why).
+ */
+type TokenFailure = { reason: string; advice: string; kind: "signed-out" | "network" | "busy" | "setup" };
+let lastTokenFailure: TokenFailure | null = null;
 let inFlight = false;
 let cancelRequested = false;
 /**
@@ -294,10 +301,49 @@ export function onTapProgress(cb: (p: TapProgress) => void): () => void {
 
 // ── the SDK's own signals: update progress + connection status ──────────────────────────────
 type ConnStatus = "CONNECTED" | "CONNECTING" | "NOT_CONNECTED" | "RECONNECTING" | "UNKNOWN";
-/** What the SDK last said about the reader link — reconnects happen without any JS turn. */
+/**
+ * What the SDK last said about the reader link — reconnects happen without any JS turn. This is
+ * an ECHO, not a read: the plugin exposes no connectionStatus getter, only the change event, so
+ * a fresh page (every app launch, every reload) starts blind at UNKNOWN while the native
+ * singleton may already be mid-reconnect. connectIfNeeded treats a collision as the missing
+ * word rather than as a failure for exactly that reason.
+ */
 let connStatus: ConnStatus = "UNKNOWN";
+/**
+ * The SDK's own reconnect is running (terminalReaderReconnectStarted, not yet Succeeded/Failed).
+ * Apple's reader is busy under it whatever getConnectedReader says — the SDK keeps the reader
+ * object while it reconnects — so a collect started now answers "reader busy" (code 20).
+ */
+let reconnectingAt = 0;
+/**
+ * A reconnect is believed for this long without a verdict. The flag is set by one event and
+ * cleared by another; a verdict this page never hears (a bridge without the event, a missed
+ * delivery) must cost one wait, not a wait before every tap for the life of the page.
+ */
+const RECONNECT_BELIEF_MS = 90_000;
 const statusWaiters = new Set<(s: ConnStatus) => void>();
 let sdkListenersArmed = false;
+
+/** The SDK's own reconnect is running, as far as this page knows. */
+function reconnecting(): boolean {
+  return reconnectingAt > 0 && Date.now() - reconnectingAt < RECONNECT_BELIEF_MS;
+}
+
+/** The SDK settled on `s`: remember it, wake every waiter, say it on the progress feed. */
+function settle(s: ConnStatus): void {
+  connStatus = s;
+  if (s === "CONNECTED" || s === "NOT_CONNECTED") reconnectingAt = 0;
+  for (const w of Array.from(statusWaiters)) w(s);
+  if (s === "CONNECTED") publish(STAGE.ready);
+  else if (s === "RECONNECTING") publish(STAGE.reconnecting);
+  else if (s === "CONNECTING") publish(STAGE.connecting);
+  else if (s === "NOT_CONNECTED") publish(STAGE.notReady);
+}
+
+/** The SDK, or Apple's reader under it, is mid-way through something this turn didn't start. */
+function sdkMidway(): boolean {
+  return reconnecting() || connStatus === "CONNECTING" || connStatus === "RECONNECTING";
+}
 
 function percentOf(d: unknown): number | null {
   const v = (d as { progress?: unknown } | null)?.progress;
@@ -326,14 +372,22 @@ async function armSdkListeners(p: TerminalPlugin): Promise<void> {
     const failed = typeof (d as { error?: unknown } | null)?.error === "string";
     if (!failed) publish(STAGE.configuring, 100);
   });
-  await p.addListener("terminalConnectionStatusChange", (d) => {
-    const s = statusOf(d);
-    connStatus = s;
-    for (const w of Array.from(statusWaiters)) w(s);
-    if (s === "CONNECTED") publish(STAGE.ready);
-    else if (s === "RECONNECTING") publish(STAGE.reconnecting);
-    else if (s === "CONNECTING") publish(STAGE.connecting);
-    else if (s === "NOT_CONNECTED") publish(STAGE.notReady);
+  await p.addListener("terminalConnectionStatusChange", (d) => settle(statusOf(d)));
+  // The reconnect trio (plugin 6.2+): the SDK's own foreground reconnect, start to verdict. The
+  // status stream says RECONNECTING too, but the verdict events are the ones that can't be
+  // missed — a reconnect that fails ends in NOT_CONNECTED, one that succeeds in CONNECTED, and
+  // either way the "busy under it" flag comes down. A build whose bridge lacks an event simply
+  // never fires it; the status stream still carries the turn.
+  await p.addListener("terminalReaderReconnectStarted", () => {
+    reconnectingAt = Date.now();
+    settle("RECONNECTING");
+  });
+  await p.addListener("terminalReaderReconnectSucceeded", () => settle("CONNECTED"));
+  await p.addListener("terminalReaderReconnectFailed", () => settle("NOT_CONNECTED"));
+  await p.addListener("terminalUnexpectedReaderDisconnect", () => {
+    // The SDK reconnects on its own (autoReconnectOnUnexpectedDisconnect); until it says so,
+    // the reader is not there for a tap.
+    if (!reconnecting()) settle("NOT_CONNECTED");
   });
 }
 
@@ -363,33 +417,97 @@ function nextSettledStatus(ms: number): Promise<ConnStatus> {
  * never pass requireStaff. This listener is registered BEFORE initialize(), as the plugin's
  * README insists, and kept for the life of the page.
  *
- * On failure the SDK is handed an EMPTY token on purpose: the native side turns that into an
- * error on its pending request, so the operation that needed the token fails now with a message,
- * instead of the SDK waiting forever for an answer that isn't coming. The real reason is kept in
- * lastTokenError and folded into the sentence the caller sees.
+ * THE PLUGIN'S ONLY ERROR CHANNEL IS AN EMPTY TOKEN. setConnectionToken({ token: "" }) is, in
+ * the plugin's Swift (APIClient.setConnectionToken), the one way to hand the SDK's pending
+ * request an ERROR: it calls the SDK's completion with an NSError ("Missing `token` is empty")
+ * and rejects our own call with the same words. So on failure that is exactly what happens, on
+ * purpose — the SDK then fails the command that needed the token at once (SCPError 9050,
+ * "…the app completed fetchConnectionToken with an error") instead of waiting 60 s for an
+ * answer that isn't coming (9052). The rejection of OUR call is swallowed below; in a Debug
+ * build Capacitor's bridge logger still prints every rejected plugin call to the console, which
+ * is where Erik's 2026-09-16 1:03 PM "Missing `token` is empty" came from: the token fetch
+ * failed, and this line is the SDK being told so. The real reason is kept in lastTokenFailure
+ * and folded into the sentence the caller sees (classify / failure).
+ *
+ * The request runs on a clock armed BEFORE it (a stalled LTE fetch has no natural end, and the
+ * SDK's own patience is 60 s), and a failure that can pass (no network, a 5xx, a non-JSON body)
+ * is tried once more; a 401/403/429/400 is an answer, not weather, and is not retried. Every
+ * request is answered EXACTLY ONCE: the plugin queues completions first-in-first-out and pops
+ * one per setConnectionToken, so a request left unanswered would shift every later answer onto
+ * the wrong request for the life of the process.
  */
-async function feedToken(p: TerminalPlugin): Promise<void> {
-  let secret = "";
+const TOKEN_FETCH_MS = 15_000;
+const TOKEN_RETRY_PAUSE_MS = 1_500;
+
+function pause(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+type TokenFetch = { secret: string } | { failure: TokenFailure; retryable: boolean };
+
+/** One POST to the token route, on a clock armed before the request. Never throws. */
+async function fetchToken(): Promise<TokenFetch> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), TOKEN_FETCH_MS);
   try {
     const r = await fetch("/api/stripe/terminal/token", {
       method: "POST",
       credentials: "same-origin",
       headers: { accept: "application/json" },
+      cache: "no-store",
+      signal: ctl.signal,
     });
     const body = (await r.json().catch(() => ({}))) as { secret?: unknown; error?: unknown };
-    if (r.ok && typeof body.secret === "string" && body.secret) {
-      secret = body.secret;
-      lastTokenError = null;
-    } else {
-      lastTokenError = typeof body.error === "string" && body.error ? body.error : `the server answered ${r.status}`;
+    if (r.ok && typeof body.secret === "string" && body.secret) return { secret: body.secret };
+    const reason = typeof body.error === "string" && body.error ? body.error.replace(/\.$/, "") : `the server answered ${r.status}`;
+    // The route's own refusals (src/app/api/stripe/terminal/token/route.ts), by status.
+    if (r.status === 401) {
+      return {
+        failure: { reason, advice: "Sign in to the North app again on this phone, then try the tap.", kind: "signed-out" },
+        retryable: false,
+      };
     }
+    if (r.status === 403) return { failure: { reason, advice: "Ask an owner or admin to take this payment.", kind: "setup" }, retryable: false };
+    if (r.status === 429) return { failure: { reason, advice: "Wait a minute, then try again.", kind: "busy" }, retryable: false };
+    if (r.status === 400 || r.status === 503) return { failure: { reason, advice: "", kind: "setup" }, retryable: false };
+    if (r.ok) {
+      // 200 without a secret: a page that isn't this route (a host error page, a redirect).
+      return { failure: { reason: "the server answered without a session", advice: "Try again in a moment.", kind: "network" }, retryable: true };
+    }
+    return { failure: { reason, advice: "Try again in a moment.", kind: "network" }, retryable: true };
   } catch (e) {
-    lastTokenError = e instanceof Error ? e.message : "no network";
+    const aborted = e instanceof Error && e.name === "AbortError";
+    const said = e instanceof Error && e.message && !aborted ? e.message : "";
+    return {
+      failure: {
+        reason: aborted ? "the server didn't answer in time" : `couldn't reach the server${said ? ` (${said})` : ""}`,
+        advice: "Check the internet connection and try again.",
+        kind: "network",
+      },
+      retryable: true,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function feedToken(p: TerminalPlugin): Promise<void> {
+  let got = await fetchToken();
+  if ("failure" in got && got.retryable) {
+    await pause(TOKEN_RETRY_PAUSE_MS);
+    got = await fetchToken();
+  }
+  let secret = "";
+  if ("secret" in got) {
+    secret = got.secret;
+    lastTokenFailure = null;
+  } else {
+    lastTokenFailure = got.failure;
   }
   try {
     await p.setConnectionToken({ token: secret });
   } catch {
-    /* an empty token rejects by design — the SDK has already been told no */
+    /* an empty token rejects by design (see above) — the SDK has already been told no */
   }
 }
 
@@ -463,7 +581,9 @@ export type TapFailKind =
   | "location"
   | "background"
   | "network"
-  | "busy";
+  | "busy"
+  | "signed-out"
+  | "setup";
 
 const OS_SENTENCE =
   "This iPhone's iOS is too old for Tap to Pay on iPhone — update it in Settings › General › Software Update, then try again. Until then, send the customer the pay link.";
@@ -481,6 +601,35 @@ const TERMS_UNKNOWN_SENTENCE =
 const NETWORK_SENTENCE = "Couldn't reach Stripe from this phone — check the internet connection and try again.";
 const BUSY_SENTENCE =
   "The Tap to Pay on iPhone reader on this phone is still busy with its last request — it's usually still warming up. Wait a few seconds, then try again; if it keeps saying that, fully close the North app and reopen it.";
+/** [1110] after connectIfNeeded already waited and tried once more: the earlier connection is still going. */
+const STILL_CONNECTING_SENTENCE =
+  "This iPhone is still finishing an earlier Tap to Pay on iPhone connection. Wait a moment, then press Tap to Pay again.";
+/** [9052] the SDK gave up waiting for this phone's session answer (60 s). */
+const TOKEN_LATE_SENTENCE =
+  "Stripe didn't get this phone's session in time. Check the internet connection and try again; if it keeps happening, fully close the North app and reopen it.";
+
+/** The sentence for a token fetch that failed: the reason, then the fix. */
+function tokenSentence(f: TokenFailure): string {
+  return `Couldn't start a Stripe session for this company (${f.reason}).${f.advice ? ` ${f.advice}` : ""}`;
+}
+
+/** Apple's reader (codes 20 readerBusy, 43 readerSessionBusy, 12 notReady) or the SDK ([3010]) is still on an earlier request. */
+function isBusy(e: unknown): boolean {
+  const m = said(e);
+  const rc = /SCPTapToPayReaderErrorDomain error (\d+)/i.exec(m);
+  if (rc) return rc[1] === "20" || rc[1] === "43" || rc[1] === "12";
+  return /^The reader is busy\.?$/i.test(m);
+}
+
+/**
+ * [1110] "Already connected to a reader. Disconnect from the reader, or power it off before
+ * trying again." The SDK raises it from discover/connect whenever its connectionStatus is not
+ * notConnected — CONNECTED, but also CONNECTING or RECONNECTING with connectedReader still nil —
+ * so it is the word for "mid-connection" as much as for "connected".
+ */
+function isAlreadyConnected(e: unknown): boolean {
+  return /Already connected to a reader/i.test(said(e));
+}
 
 /**
  * Apple's reader errors reach JS with NO words at all — Erik's 2026-09-11 console:
@@ -588,16 +737,24 @@ function classify(e: unknown): { kind: TapFailKind; sentence: string } | null {
   if (/went to background/i.test(m)) {
     return { kind: "background", sentence: "The app went to the background before the tap finished — keep the app on screen and try again." };
   }
-  // Our own empty-token answer (feedToken) surfacing as the SDK's connection-token failure, or a
-  // plain fetch failure: the real reason is in lastTokenError, if we have one.
-  if (/Missing `token`|connection token|network|offline|internet/i.test(m)) {
-    return {
-      kind: "network",
-      sentence: lastTokenError
-        ? `Couldn't get a Stripe session for this company (${lastTokenError}) — check the internet connection and try again.`
-        : NETWORK_SENTENCE,
-    };
+  // [1110] the SDK is mid-connection (see isAlreadyConnected). connectIfNeeded waits it out and
+  // tries once more before this sentence can be reached; by then it is the truth.
+  if (isAlreadyConnected(e)) return { kind: "busy", sentence: STILL_CONNECTING_SENTENCE };
+  // [3010] "The reader is busy." — the SDK's own busy, distinct from Apple's code 20 above.
+  if (/^The reader is busy\.?$/i.test(m)) return { kind: "busy", sentence: BUSY_SENTENCE };
+  // THE TOKEN PROVIDER, in the SDK 5.7.0 binary's words: [9050] "Connecting to the reader failed
+  // because the app completed fetchConnectionToken with an error." [1510] "…your app's
+  // ConnectionTokenProvider called the completion block with no token and no error…" [9052]
+  // "Your app's ConnectionTokenProvider did not call the provided completion block within 60
+  // seconds." — plus the plugin's own rejection of our empty answer. None of them says WHY; the
+  // reason is lastTokenFailure when this page fetched it, and its advice is the fix.
+  if (/fetchConnectionToken|ConnectionTokenProvider|connection token|Missing `token`/i.test(m)) {
+    const f = lastTokenFailure;
+    if (f) return { kind: f.kind, sentence: tokenSentence(f) };
+    if (/within 60 seconds/i.test(m)) return { kind: "network", sentence: TOKEN_LATE_SENTENCE };
+    return { kind: "network", sentence: NETWORK_SENTENCE };
   }
+  if (/network|offline|internet/i.test(m)) return { kind: "network", sentence: NETWORK_SENTENCE };
   return null;
 }
 
@@ -616,14 +773,17 @@ const STAGE_PREFIX: Record<string, string> = {
 function failure(stage: string, e: unknown): { error: string; kind: TapFailKind | null } {
   const known = classify(e);
   if (known) {
-    lastTokenError = null;
+    lastTokenFailure = null;
     return { error: known.sentence, kind: known.kind };
   }
   const prefix = STAGE_PREFIX[stage] ?? "Tap to Pay on iPhone didn't finish";
   const msg = said(e);
-  const token = lastTokenError ? ` (Stripe session: ${lastTokenError})` : "";
-  lastTokenError = null;
-  return { error: `${prefix}${msg ? ` — ${msg}` : ""}${token}.`, kind: null };
+  // A token that failed on the way here is the likelier cause than whatever the SDK said last;
+  // its reason and fix ride along whatever the wording.
+  const f = lastTokenFailure;
+  lastTokenFailure = null;
+  const token = f ? ` Stripe session: ${f.reason}.${f.advice ? ` ${f.advice}` : ""}` : "";
+  return { error: `${prefix}${msg ? ` — ${msg}` : ""}.${token}`, kind: f?.kind ?? null };
 }
 
 function describeFailure(stage: string, e: unknown): string {
@@ -657,14 +817,16 @@ type Ctx = { locationId: string; merchantDisplayName: string; livemode: boolean 
  * as". (That reading is Stripe's Connect guidance, not a line in the header; a connected reader
  * is taken as stronger evidence than a "false" from here — see tapToPayAccountLinked.)
  */
-async function readLinked(p: TerminalPlugin): Promise<boolean | null> {
+async function readLinked(p: TerminalPlugin): Promise<boolean | null | "busy"> {
   const ask = p.isTapToPayAccountLinked;
   if (typeof ask !== "function") return null;
   try {
     const { isLinked } = await raced(10_000, () => ask.call(p));
     return typeof isLinked === "boolean" ? isLinked : null;
-  } catch {
-    return null;
+  } catch (e) {
+    // Apple's reader was on something else (a reconnect finishing under this turn) — that is
+    // "ask again in a moment", not "Apple couldn't say", and the caller waits and re-asks.
+    return isBusy(e) || isAlreadyConnected(e) ? "busy" : null;
   }
 }
 
@@ -707,24 +869,33 @@ async function connectIfNeeded(p: TerminalPlugin, ctx: Ctx, setStage: (s: string
     publish(s);
   };
   go(STAGE.checking);
-  const { reader: already } = await raced(5_000, () => p.getConnectedReader());
-  if (already) {
+  // THE SDK'S OWN WORK COMES FIRST (Erik's 2026-09-16: four "reader busy" (code 20) and one
+  // "Already connected to a reader" in one afternoon, and no tap went through). The SDK reconnects
+  // on its own after every foreground (autoReconnectOnUnexpectedDisconnect), keeping the reader
+  // object while it does — so a getConnectedReader that answers "yes" can be a reader Apple is
+  // still preparing, and a collect on it answers code 20. A connect a timed-out turn abandoned is
+  // the same thing from the other side: still running natively, connectedReader nil, and a
+  // second discover/connect on top of it is "Already connected" (1110). Neither is a failure;
+  // both are "wait for the SDK's verdict, then look again".
+  await awaitSdkVerdict(go, 30_000);
+  if (await readerConnected(p)) {
     publish(STAGE.ready);
     return;
   }
-  // The SDK reconnects on its own after a foreground (autoReconnectOnUnexpectedDisconnect), and
-  // connectedReader is nil until that succeeds. A second connect on top of it is a collision, not
-  // a warm-up — wait for the SDK's verdict first; only a NOT_CONNECTED (or silence) means "ours".
-  if (connStatus === "RECONNECTING" || connStatus === "CONNECTING") {
-    go(STAGE.reconnecting);
-    const settled = await nextSettledStatus(30_000).catch((): ConnStatus => "UNKNOWN");
-    if (settled === "CONNECTED") {
-      publish(STAGE.ready);
-      return;
-    }
-  }
   if (opts.terms === "refuse") {
-    const linked = await readLinked(p);
+    let linked = await readLinked(p);
+    if (linked === "busy") {
+      // Apple's reader was on something else when asked — let it finish and ask once more; a
+      // reader that connected meanwhile is the answer itself.
+      go(STAGE.reconnecting);
+      await nextSettledStatus(15_000).catch(() => {});
+      if (await readerConnected(p)) {
+        publish(STAGE.ready);
+        return;
+      }
+      linked = await readLinked(p);
+      if (linked === "busy") linked = null;
+    }
     if (linked === false) throw new NotEnabledError("unlinked");
     // Apple couldn't answer (an older shell build, iOS < 16.4, a Stripe error, no answer in
     // time). A connect now would still raise Apple's sheet if the account is unlinked — in front
@@ -733,16 +904,63 @@ async function connectIfNeeded(p: TerminalPlugin, ctx: Ctx, setStage: (s: string
     // accepted (3.8.1); the warm-up simply skips this round and asks Apple again next foreground.
     if (linked === null && opts.canEnable !== true) throw new NotEnabledError("unknown");
   }
+  try {
+    await discoverAndConnect(p, ctx, go, opts);
+  } catch (e) {
+    if (!isBusy(e) && !isAlreadyConnected(e)) throw e;
+    // A collision after all: this page only HEARS the SDK's status change (there is no getter),
+    // so on a fresh page the first word can arrive after this turn began. The collision is that
+    // word. Let the SDK finish, take the reader if it is there; else clear what it left and try
+    // once more — the second answer is the answer (classify names it: STILL_CONNECTING_SENTENCE).
+    go(STAGE.reconnecting);
+    await nextSettledStatus(20_000).catch(() => {});
+    if (await readerConnected(p)) {
+      publish(STAGE.ready);
+      return;
+    }
+    if (isAlreadyConnected(e)) await raced(5_000, () => p.disconnectReader()).catch(() => {});
+    await discoverAndConnect(p, ctx, go, opts);
+  }
+  publish(STAGE.ready);
+}
+
+/** Wait, bounded, while the SDK is connecting or reconnecting on its own. Silence is not a verdict. */
+async function awaitSdkVerdict(go: (s: string) => void, ms: number): Promise<void> {
+  if (!sdkMidway()) return;
+  go(STAGE.reconnecting);
+  await nextSettledStatus(ms).catch(() => {});
+}
+
+/** Is a reader on the line, and not one the SDK is still reconnecting under. */
+async function readerConnected(p: TerminalPlugin): Promise<boolean> {
+  if (reconnecting()) return false;
+  const { reader } = await raced(5_000, () => p.getConnectedReader());
+  return !!reader;
+}
+
+/** Discover the (one) Tap to Pay reader and connect it. Rejects with the SDK's error or TIMED_OUT. */
+async function discoverAndConnect(p: TerminalPlugin, ctx: Ctx, go: (s: string) => void, opts: ConnectOpts): Promise<void> {
   go(STAGE.finding);
   // The SDK allows ONE discovery at a time — a probe (tapToPaySupported) that timed out on a slow
   // network may still have one running. Clear it first; the native side no-ops when there's none.
   await raced(3_000, () => p.cancelDiscoverReaders()).catch(() => {});
-  const { readers } = await raced(20_000, () => p.discoverReaders({ type: "tap-to-pay", locationId: ctx.locationId }));
+  let readers: Reader[] | undefined;
+  try {
+    ({ readers } = await raced(20_000, () => p.discoverReaders({ type: "tap-to-pay", locationId: ctx.locationId })));
+  } catch (e) {
+    // A discovery this turn gave up on keeps running natively; the next turn's discover would
+    // land on it. Tell it to stop on the way out.
+    if (e === TIMED_OUT) void p.cancelDiscoverReaders().catch(() => {});
+    throw e;
+  }
   const reader = readers?.[0];
   if (!reader) {
     throw new Error("this iPhone didn't offer one. Tap to Pay on iPhone needs an iPhone XS or newer on a current, non-beta iOS");
   }
   go(STAGE.connecting);
+  // A connect this turn gives up on (raced) keeps running natively — the plugin has no cancel for
+  // it. The status stream says CONNECTING until it settles, and the next turn's awaitSdkVerdict
+  // waits on exactly that instead of colliding.
   await raced(opts.connectMs, () =>
     p.connectReader({
       reader,
@@ -751,7 +969,6 @@ async function connectIfNeeded(p: TerminalPlugin, ctx: Ctx, setStage: (s: string
       autoReconnectOnUnexpectedDisconnect: true,
     }),
   );
-  publish(STAGE.ready);
 }
 
 /**
@@ -768,13 +985,23 @@ function probeDiscovery(p: TerminalPlugin, livemode: boolean, locationId: string
       await initialise(p, !livemode);
       // A reader already connected (a warm-up before this page load) is the strongest "yes"
       // there is — and a discovery on top of a live connection is a question the SDK need not
-      // be asked.
+      // be asked. A reader the SDK is mid-way through connecting is the same yes: this phone
+      // offered one, and a discovery now would only collide with it (1110).
+      if (sdkMidway()) return true;
       const { reader: connected } = await p.getConnectedReader();
       if (connected) return true;
       // The org's location when it already has one — the native side keeps the LAST location
       // it was handed, and a real discover always passes its own, but there is no reason to
       // leave nil behind. Never connects.
-      const { readers } = await p.discoverReaders({ type: "tap-to-pay", ...(locationId ? { locationId } : {}) });
+      let readers: Reader[] | undefined;
+      try {
+        ({ readers } = await p.discoverReaders({ type: "tap-to-pay", ...(locationId ? { locationId } : {}) }));
+      } catch (e) {
+        // "Already connected" from a discover: the SDK holds, or is finishing, a connection this
+        // page hadn't heard about yet. A reader on this phone, either way.
+        if (isAlreadyConnected(e)) return true;
+        throw e;
+      }
       const found = (readers?.length ?? 0) > 0;
       // Leave nothing running behind a probe — awaited, so a real discovery started after this
       // can never be the one this cancel lands on. Unless this turn already timed out and the
@@ -920,11 +1147,12 @@ export async function tapToPayAccountLinked(): Promise<boolean | null> {
       raced(20_000, async () => {
         await initialise(p, !livemode);
         const linked = await readLinked(p);
-        if (linked === false) {
-          const { reader } = await p.getConnectedReader();
-          if (reader) return true;
-        }
-        return linked;
+        if (linked === true) return true;
+        // A connected reader IS the acceptance (header) — and it also answers for a reader that
+        // was too busy to be asked.
+        const { reader } = await p.getConnectedReader();
+        if (reader) return true;
+        return linked === false ? false : null;
       }),
     );
   } catch {
@@ -1131,6 +1359,9 @@ export async function showHowToTap(): Promise<{ ok: true } | { ok: false; error:
 
 export type TapCollectResult = { ok: true } | { ok: false; error: string; cancelled?: boolean; notEnabled?: boolean };
 
+/** How long a busy reader gets to finish its last request before the one retry of a collect. */
+const BUSY_RETRY_PAUSE_MS = 2_000;
+
 /**
  * TAKE THE TAP. The PaymentIntent already exists (createTapPaymentIntent); this collects the card
  * against it and confirms. `{ ok: true }` means Stripe confirmed the charge — the invoice flips
@@ -1208,7 +1439,22 @@ export async function collectTapPayment(input: {
       // Apple takes the screen from here until the card is read (or the customer walks off).
       stage = STAGE.tapping;
       publish(stage);
-      await raced(120_000, () => p.collectPaymentMethod({ paymentIntent: input.clientSecret }));
+      // A read a timed-out turn left armed on Apple's reader would answer this one with "reader
+      // busy" (code 20); `inFlight` is this page's flag, not the reader's. Clearing it first
+      // costs nothing — the native side no-ops when there is nothing to cancel.
+      await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
+      const collect = () => raced(120_000, () => p.collectPaymentMethod({ paymentIntent: input.clientSecret }));
+      try {
+        await collect();
+      } catch (e) {
+        if (cancelRequested || !isBusy(e)) throw e;
+        // Apple's reader was still on its last request — a reconnect finishing under the tap, a
+        // read being torn down. Clear, give it a beat, once more; the second answer is the answer.
+        await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
+        await pause(BUSY_RETRY_PAUSE_MS);
+        if (cancelRequested) throw e;
+        await collect();
+      }
       // Stripe: authorize or cancel within 30 seconds of collection — confirm straight away.
       // The caller's "processing" screen (Apple 5.8) is this stage.
       stage = STAGE.confirming;

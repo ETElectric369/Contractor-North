@@ -117,6 +117,14 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // Confirm-gated: its payload becomes instruction authority in every future prompt (audit 8).
   "memory.standingOrders",
   "memory.forget", // confirm-gated: the delete path that makes "memory is full" actionable
+  // The job's ONE materials list (Erik to Nort, 2026-09-16: "add a single gang bell box to the
+  // materials list for Jason Waldo job" → "I don't have a tool for that" → "I want you to be able
+  // to do everything that I can do on this app"). addLine + markPurchased are reversible tier-1
+  // (a line can be removed / un-ticked; no money moves — a tech's line carries none at all, per
+  // 0254); removeLine is confirm:"destructive", so it proposes and waits for the yes.
+  "material.addLine",
+  "material.markPurchased",
+  "material.removeLine",
 ]);
 
 /** The READ actions offered alongside those writes. Normal reads live in DATA_TOOLS

@@ -18,6 +18,27 @@ function revalidateTaskViews(category?: string | null, jobId?: string | null) {
   if (jobId) revalidatePath(`/jobs/${jobId}`);
 }
 
+/**
+ * THE SILENT-WRITE LAW, applied to every task write. PostgREST answers a zero-row UPDATE or
+ * DELETE with a clean 204: no error, no rows. That is what RLS looks like when the row isn't
+ * yours to touch, and what a stale id looks like when the row is already gone, and until now
+ * every write below read it as success: the job's Tasks tab toasted "Task deleted" over a task
+ * that was still there (Erik, 2026-09-16, "Can't delete tasks"). So each write now ends in
+ * .select("id") and, on zero rows, this second read says which of the two it was: a row we can
+ * still see but couldn't write is a permission answer; a row we can't see is gone. (Under the
+ * tasks policies read and write are the same org test, so "can't see" is the honest reading.)
+ */
+async function zeroRowsReason(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  id: string,
+  verb: "change" | "delete",
+): Promise<string> {
+  const { data } = await supabase.from("tasks").select("id").eq("id", id).maybeSingle();
+  return data
+    ? `You don't have permission to ${verb} that task.`
+    : "Couldn't find that task. It may already be deleted. Refresh the page to see the current list.";
+}
+
 export type CreateTaskResult = Result & {
   /** The row now representing this task — the EXISTING one on a duplicate hit. */
   id?: string;
@@ -132,7 +153,7 @@ export async function toggleTask(
       .select("id")
       .eq("parent_id", id)
       .eq("status", "open");
-    if (kidsError) return { ok: false, error: kidsError.message };
+    if (kidsError) return { ok: false, error: dbError(kidsError) };
     const openChildren = openKids?.length ?? 0;
     if (openChildren > 0) {
       if (!opts?.cascade) {
@@ -143,22 +164,35 @@ export async function toggleTask(
           error: `This task has ${openChildren} open subtask${openChildren === 1 ? "" : "s"} — complete them too?`,
         };
       }
-      const { error: cascadeError } = await supabase
+      const kidIds = openKids!.map((k) => k.id as string);
+      const { data: cascaded, error: cascadeError } = await supabase
         .from("tasks")
         .update({ status: "done", completed_at: new Date().toISOString() })
-        .in("id", openKids!.map((k) => k.id as string));
-      if (cascadeError) return { ok: false, error: cascadeError.message };
+        .in("id", kidIds)
+        .select("id");
+      if (cascadeError) return { ok: false, error: dbError(cascadeError) };
+      if ((cascaded?.length ?? 0) < kidIds.length) {
+        // Some children flipped and some didn't: show what did land, then say so.
+        const missed = kidIds.length - (cascaded?.length ?? 0);
+        revalidateTaskViews(opts?.category, opts?.jobId);
+        return {
+          ok: false,
+          error: `Couldn't complete ${missed} of the ${kidIds.length} subtask${kidIds.length === 1 ? "" : "s"}. Refresh the page and try again.`,
+        };
+      }
     }
   }
 
-  const { error } = await supabase
+  const { data: flipped, error } = await supabase
     .from("tasks")
     .update({
       status: done ? "done" : "open",
       completed_at: done ? new Date().toISOString() : null,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!flipped?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "change") };
   revalidateTaskViews(opts?.category, opts?.jobId);
   return { ok: true };
 }
@@ -212,8 +246,9 @@ export async function updateTask(
     clean.tags = tags.length ? tags : null;
   }
 
-  const { error } = await supabase.from("tasks").update(clean).eq("id", id);
+  const { data: changed, error } = await supabase.from("tasks").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!changed?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "change") };
   revalidateTaskViews(opts?.category, opts?.jobId);
   // If the task was re-linked to a different job, refresh that job's page too.
   const newJobId = clean.job_id as string | null | undefined;
@@ -226,8 +261,11 @@ export async function deleteTask(
   opts?: { category?: string | null; jobId?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
-  const { error } = await supabase.from("tasks").delete().eq("id", id);
+  // A zero-row delete used to come back ok and the tab said "Task deleted" over a task that
+  // was still there; see zeroRowsReason. Children go with the parent (parent_id cascades).
+  const { data: gone, error } = await supabase.from("tasks").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
   revalidateTaskViews(opts?.category, opts?.jobId);
   return { ok: true };
 }

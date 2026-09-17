@@ -16,6 +16,7 @@ import { fileReceiptDocument } from "@/lib/receipt-capture";
 import { createBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { useToast } from "@/components/toast";
 
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
 // A PRE-prep sanity ceiling on the raw pick, not the reader's cap: the reader's 8 MB applies to
@@ -23,6 +24,14 @@ const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontracto
 // the raw pick at 8 would refuse photos the reader takes happily. The reader's own refusal, when
 // it comes, is said in its words by the save path below.
 const MAX_PHOTO = 15 * 1024 * 1024;
+// A Snap in flight, stamped in sessionStorage as "<instance>:<ms>" the moment the camera door is
+// tapped. A reload keeps sessionStorage; the photo, a cancel, a close or a client-side navigation
+// clears it. So a page that mounts with the stamp still there came back from a reload that
+// happened while the camera was open (see the notice effect in the component).
+const SNAP_KEY = "cn-quick-cost-snap";
+const SNAP_STALE_MS = 10 * 60 * 1000;
+// Once per page load, however many Add Cost doors the page mounts (My Day has two).
+let reloadAnnounced = false;
 
 /** Same test JobDocuments uses: a touch device gets a straight-to-camera door. */
 function onPhone() {
@@ -79,6 +88,20 @@ export function QuickCostButton({
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
+  // THE CAMERA DOOR SPEAKS (Erik, 2026-09-16, "Add cost can't take photo", filed from My Day). A
+  // hidden <input capture> clicked from a button is the same door JobPhotos and JobDocuments use,
+  // and when the OS refuses it (the shell's camera permission, a picker that never presents),
+  // nothing in JS throws: the tap just does nothing, and a button that does nothing is a dead end.
+  // So Snap arms a short timer. If neither a photo (change) nor a cancel comes back and the page
+  // never left the screen, the sheet says so under the buttons and names the other door. While a
+  // real camera is up it covers the sheet, and the photo or the cancel clears the line on return,
+  // so a slow camera can never read as a false alarm.
+  const [cameraHint, setCameraHint] = useState<string | null>(null);
+  const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The listeners a Snap arms, so clearing the watch can also unarm them.
+  const snapListeners = useRef<(() => void) | null>(null);
+  const snapId = useRef(Math.random().toString(36).slice(2));
   // Read on the client after mount (navigator is not on the server), so the camera door can't
   // cause a hydration mismatch on the mounts that server-render this button.
   const [phone, setPhone] = useState(false);
@@ -154,6 +177,94 @@ export function QuickCostButton({
     setReceipt(f);
   }
 
+  /** Forget a Snap in flight: the timer, its listeners, the hint, and this instance's reload stamp. */
+  function clearSnapWatch() {
+    if (snapTimer.current) {
+      clearTimeout(snapTimer.current);
+      snapTimer.current = null;
+    }
+    snapListeners.current?.();
+    snapListeners.current = null;
+    setCameraHint(null);
+    try {
+      if (sessionStorage.getItem(SNAP_KEY)?.startsWith(`${snapId.current}:`)) sessionStorage.removeItem(SNAP_KEY);
+    } catch {}
+  }
+
+  /** The camera door. Never a dead tap: no input to click means the library door, or a sentence. */
+  function snap() {
+    const input = captureRef.current;
+    if (!input) {
+      if (fileRef.current) return fileRef.current.click();
+      return setError("Couldn't open the camera or your photos on this device. Add the receipt later from the job's Receipts & Documents.");
+    }
+    clearSnapWatch();
+    try {
+      sessionStorage.setItem(SNAP_KEY, `${snapId.current}:${Date.now()}`);
+    } catch {}
+    // A cancel (iOS 16.4+ fires it on the input) or a return to the screen after the camera had
+    // it means the door DID open; drop the watch so the hint never shows over a working camera.
+    const onCancel = () => clearSnapWatch();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") clearSnapWatch();
+    };
+    input.addEventListener("cancel", onCancel);
+    document.addEventListener("visibilitychange", onVisible);
+    snapListeners.current = () => {
+      input.removeEventListener("cancel", onCancel);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    input.click();
+    snapTimer.current = setTimeout(() => {
+      snapTimer.current = null;
+      // The page is covered (the camera, most likely): nothing to say, keep listening for the return.
+      if (document.visibilityState !== "visible") return;
+      snapListeners.current?.();
+      snapListeners.current = null;
+      // Nothing opened and nothing covers us. No reload is coming from this tap either.
+      try {
+        if (sessionStorage.getItem(SNAP_KEY)?.startsWith(`${snapId.current}:`)) sessionStorage.removeItem(SNAP_KEY);
+      } catch {}
+      setCameraHint("Camera didn't open? Tap Photo or PDF to pick from your photos, or allow the camera for North in your phone's Settings.");
+    }, 2500);
+  }
+
+  /** The library door (Photo or PDF). Choosing it ends any camera hint. */
+  function pickFromLibrary() {
+    setCameraHint(null);
+    if (fileRef.current) return fileRef.current.click();
+    setError("Couldn't open your photos on this device. Add the receipt later from the job's Receipts & Documents.");
+  }
+
+  // THE RELOAD THAT EATS THE SHEET. In the iOS shell the camera can push the web view out of
+  // memory; the shell reloads the page (Capacitor's webViewWebContentProcessDidTerminate) and this
+  // sheet, its typed fields and the photo just taken are gone with no console line and no
+  // sentence. Snap stamps sessionStorage before the camera opens (a reload keeps it; the normal
+  // photo / cancel / close paths clear it), so the first Add Cost door to mount after such a
+  // reload says what happened. Unmounting (a client-side navigation, not a reload) drops this
+  // instance's stamp so a later page load can't misread it.
+  useEffect(() => {
+    let at = 0;
+    try {
+      const raw = sessionStorage.getItem(SNAP_KEY);
+      if (raw) {
+        at = Number(raw.split(":")[1] || 0);
+        sessionStorage.removeItem(SNAP_KEY);
+      }
+    } catch {}
+    if (at && Date.now() - at < SNAP_STALE_MS && !reloadAnnounced) {
+      reloadAnnounced = true;
+      toast("The app reloaded while the camera was open, so that receipt photo didn't land. Open Add Cost again and try Photo or PDF.", "error");
+    }
+    const id = snapId.current;
+    return () => {
+      if (snapTimer.current) clearTimeout(snapTimer.current);
+      try {
+        if (sessionStorage.getItem(SNAP_KEY)?.startsWith(`${id}:`)) sessionStorage.removeItem(SNAP_KEY);
+      } catch {}
+    };
+  }, [toast]);
+
   async function openModal() {
     reset();
     onOpen?.();
@@ -179,11 +290,13 @@ export function QuickCostButton({
   }
 
   function closeModal() {
+    clearSnapWatch();
     setOpen(false);
     onClose?.();
   }
 
   function finishOk() {
+    clearSnapWatch();
     setOpen(false);
     reset();
     onClose?.();
@@ -402,14 +515,20 @@ export function QuickCostButton({
               accept="image/*"
               capture="environment"
               className="hidden"
-              onChange={(e) => pick(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                clearSnapWatch();
+                pick(e.target.files?.[0] ?? null);
+              }}
             />
             <input
               ref={fileRef}
               type="file"
               accept="image/*,application/pdf,.pdf"
               className="hidden"
-              onChange={(e) => pick(e.target.files?.[0] ?? null)}
+              onChange={(e) => {
+                setCameraHint(null);
+                pick(e.target.files?.[0] ?? null);
+              }}
             />
             <DropTarget
               onFiles={(files) => pick(files[0] ?? null)}
@@ -420,7 +539,7 @@ export function QuickCostButton({
               {receipt ? (
                 <button
                   type="button"
-                  onClick={() => fileRef.current?.click()}
+                  onClick={pickFromLibrary}
                   className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
                 >
                   <Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt attached"}</span>
@@ -430,7 +549,7 @@ export function QuickCostButton({
                   {phone && (
                     <button
                       type="button"
-                      onClick={() => captureRef.current?.click()}
+                      onClick={snap}
                       className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
                     >
                       <Camera className="h-4 w-4" /> Snap the Receipt
@@ -438,7 +557,7 @@ export function QuickCostButton({
                   )}
                   <button
                     type="button"
-                    onClick={() => fileRef.current?.click()}
+                    onClick={pickFromLibrary}
                     className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
                   >
                     {phone ? (
@@ -450,6 +569,7 @@ export function QuickCostButton({
                 </div>
               )}
             </DropTarget>
+            {cameraHint && !receipt && <p className="mt-1 text-xs text-amber-600">{cameraHint}</p>}
             {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt with it.</p>}
             {/* The "Read the Receipt" affordance — a choice the person can see and flip, not a
                 rule buried in which fields happen to be blank. */}

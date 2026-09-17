@@ -24,6 +24,11 @@ export function RefreshOnVisible({
     last.current = Date.now(); // arm from mount — the page is already fresh
     const maybeRefresh = () => {
       if (document.visibilityState !== "visible") return;
+      // NOT WHILE A SHEET IS OPEN (2026-09-16). router.refresh() replaces the history entry without
+      // the Modal's own marker, so after any refresh a back gesture on an open sheet did nothing;
+      // and a refresh at the exact moment the camera hands a receipt back is a re-render nobody
+      // asked for. The sheet closing is the next chance; the poll picks up from there.
+      if (document.body.classList.contains("modal-open")) return;
       const now = Date.now();
       if (now - last.current < minIntervalMs) return;
       last.current = now;

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { REGISTRY, listActions } from "./registry";
 import { AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
 import { needsConsent } from "./risk";
+import { DATA_TOOLS } from "@/lib/assistant-tools";
 
 // Structural invariants over the WHOLE registry — so a malformed new entity (wrong
 // key, missing handler, bad auth) fails CI instead of at runtime on a real surface.
@@ -172,5 +173,84 @@ describe("action registry — invoice money loop (draft fill by voice)", () => {
     const tech = offered("tech");
     expect(tech).not.toContain("invoice__fromJob");
     expect(tech).not.toContain("payment__record");
+  });
+});
+
+// The job's ONE materials list, by voice (Erik to Nort, 2026-09-16: "add a single gang bell box
+// to the materials list for Jason Waldo job" → "I don't have a tool for that" → "I want you to
+// be able to do everything that I can do on this app"). Techs work the same list (auth "any"),
+// adding + ticking are reversible tier-1, removing a line is confirm-gated.
+describe("action registry — material entity (the job's one materials list)", () => {
+  const offered = (role: string) => agentWriteToolsForRole(role).tools.map((t) => t.name);
+
+  it("registers the three verbs as writes open to any role", () => {
+    const ids = listActions({ group: "material" }).map((a) => a.name).sort();
+    expect(ids).toEqual(["material.addLine", "material.markPurchased", "material.removeLine"]);
+    for (const v of ids) {
+      expect(REGISTRY[v].effect).toBe("write");
+      expect(REGISTRY[v].auth).toBe("any"); // a tech works the same list as the office
+      expect(AGENT_WRITE_ALLOWED.has(v)).toBe(true);
+    }
+  });
+
+  it("is offered to a tech AND the office as material__addLine / markPurchased / removeLine", () => {
+    for (const role of ["tech", "office", "owner"]) {
+      const names = offered(role);
+      expect(names).toContain("material__addLine");
+      expect(names).toContain("material__markPurchased");
+      expect(names).toContain("material__removeLine");
+    }
+  });
+
+  it("adding + ticking run straight through; removing a line trips the confirm gate", () => {
+    expect(needsConsent(REGISTRY["material.addLine"], "agent", false)).toBe(false);
+    expect(needsConsent(REGISTRY["material.markPurchased"], "agent", false)).toBe(false);
+    expect(REGISTRY["material.removeLine"].confirm).toBe("destructive");
+    expect(needsConsent(REGISTRY["material.removeLine"], "agent", false)).toBe(true);
+    expect(needsConsent(REGISTRY["material.removeLine"], "agent", true)).toBe(false);
+  });
+
+  it("addLine takes a job name where an id belongs, defaults quantity 1 / unit ea, and needs a description", () => {
+    const schema = REGISTRY["material.addLine"].input;
+    const ok = schema.safeParse({ job_id: "Waldow", description: "single-gang bell box" });
+    expect(ok.success).toBe(true);
+    if (ok.success) {
+      expect(ok.data.quantity).toBe(1);
+      expect(ok.data.unit).toBe("ea");
+    }
+    expect(schema.safeParse({ job_id: "Waldow" }).success).toBe(false);
+    expect(schema.safeParse({ job_id: "Waldow", description: "   " }).success).toBe(false);
+    expect(schema.safeParse({ job_id: "Waldow", description: "bit", quantity: 0 }).success).toBe(false);
+  });
+
+  it("the addLine read-back names the line and the job in the user's words, never a uuid", () => {
+    const parsed = REGISTRY["material.addLine"].input.parse({ job_id: "Waldow", description: "single-gang bell box" });
+    expect(REGISTRY["material.addLine"].describe?.(parsed)).toBe("Add 1 ea single-gang bell box to the Waldow materials list.");
+    const byId = REGISTRY["material.addLine"].input.parse({
+      job_id: "8f1c3b2a-4d5e-4f60-9a7b-1c2d3e4f5a6b",
+      description: "short extension bit",
+      quantity: 2,
+    });
+    expect(REGISTRY["material.addLine"].describe?.(byId)).toBe("Add 2 ea short extension bit to that job's materials list.");
+  });
+
+  it("markPurchased / removeLine need the job plus a description fragment or an item_id", () => {
+    for (const v of ["material.markPurchased", "material.removeLine"]) {
+      const schema = REGISTRY[v].input;
+      expect(schema.safeParse({ job_id: "Waldow", description: "bell box" }).success).toBe(true);
+      expect(schema.safeParse({ job_id: "Waldow", item_id: "8f1c3b2a-4d5e-4f60-9a7b-1c2d3e4f5a6b" }).success).toBe(true);
+      expect(schema.safeParse({ job_id: "Waldow" }).success).toBe(false); // which line?
+      expect(schema.safeParse({ description: "bell box" }).success).toBe(false); // which job?
+    }
+    const m = REGISTRY["material.markPurchased"].input.parse({ job_id: "Waldow", description: "bell box" });
+    expect(m.purchased).toBe(true); // ticking is the default; purchased:false un-ticks
+    expect(REGISTRY["material.removeLine"].describe?.(m)).toContain("say yes to confirm");
+  });
+
+  it("the read side exists: list_material_items is a data tool that takes job_id or list_id", () => {
+    const t = DATA_TOOLS.find((d) => d.name === "list_material_items");
+    expect(t).toBeDefined();
+    const props = (t?.input_schema as { properties?: Record<string, unknown> })?.properties ?? {};
+    expect(Object.keys(props)).toEqual(expect.arrayContaining(["job_id", "list_id", "to_buy_only"]));
   });
 });

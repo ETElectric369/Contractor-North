@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * AN ENDLESS STACK, ONE IMPLEMENTATION.
@@ -24,8 +24,24 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
  *     paint, and the restore must not itself be read as a gesture.
  *   · RESET ON A JUMP — pressing Today with forty weeks unrolled should land on today, not on
  *     today plus everything he had opened up.
+ *   · FILL TO THE FOLD (opt-in) — growth rides on scroll events, and a box whose content is
+ *     shorter than the box never fires one. Timecards on a phone: two light weeks under a 70dvh
+ *     lid could not scroll, so the stack could never grow backwards and every earlier week was
+ *     unreachable until something happened to add height. Erik 2026-09-16, iPhone,
+ *     /timecards?week=2: "Scroll doesn't work until I click around." With `fillToOverflow` the
+ *     hook prepends one step per animation frame — after mount, after a jump, after every growth,
+ *     after a rotation — until the box actually overflows or the back cap is hit. It is not a
+ *     gesture, so the 350 ms beat never throttles it; but each step takes the same latch and the
+ *     same hold-his-place restore, so the anchor week stays where he is looking and a gesture can
+ *     never double up on a step in flight. Off by default: the calendar behaves exactly as before.
  */
-export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
+export function useEndlessStack(
+  anchorKey: string,
+  maxBack = 26,
+  maxFwd = 52,
+  opts?: { fillToOverflow?: boolean },
+) {
+  const fillToOverflow = !!opts?.fillToOverflow;
   const [back, setBack] = useState(0);
   const [fwd, setFwd] = useState(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -33,6 +49,40 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
   const anchorRef = useRef(0);
   const lastTopRef = useRef(0);
   const lastGrowRef = useRef(0);
+  // Live copies for the fill step, which runs inside a rAF callback: a value closed over by the
+  // effect that scheduled it can be a render stale (the reset effect's `back` is the pre-jump count,
+  // and at the cap that stale count would refuse a fill the fresh stack is owed).
+  const backRef = useRef(back);
+  backRef.current = back;
+  const maxBackRef = useRef(maxBack);
+  maxBackRef.current = maxBack;
+  const fillRafRef = useRef(0);
+
+  /* ONE STEP PER FRAME, MEASURED LIVE. Scheduling cancels any step still queued, so a jump can't
+     land a step measured against the stack it just replaced. The check reads the DOM at the moment
+     it runs and bails the instant the box overflows — from there the gestures take over. */
+  const scheduleFill = useCallback(() => {
+    if (!fillToOverflow || typeof requestAnimationFrame === "undefined") return;
+    cancelAnimationFrame(fillRafRef.current);
+    fillRafRef.current = requestAnimationFrame(() => {
+      fillRafRef.current = 0;
+      const el = scrollRef.current;
+      if (!el || growingRef.current) return;
+      // Not laid out (nothing rendered yet, or hidden) — there is nothing to measure, and a fill
+      // against a 0px box would run straight to the cap.
+      if (el.clientHeight === 0) return;
+      if (el.scrollHeight > el.clientHeight) return;
+      if (backRef.current >= maxBackRef.current) return;
+      growingRef.current = true;
+      /* ARMS THE BEAT, NOT THROTTLED BY IT. The last step's restore lands at the very bottom of a
+         box that only just overflows, and that scrollTop write echoes a scroll event from there.
+         Inside the beat the echo is physics and ignored; outside it the forward branch would read
+         it as a downward gesture and open a week nobody asked for. Same beat a gesture growth arms. */
+      lastGrowRef.current = Date.now();
+      anchorRef.current = el.scrollHeight;
+      setBack((b) => b + 1);
+    });
+  }, [fillToOverflow]);
 
   useEffect(() => {
     setBack(0);
@@ -49,7 +99,10 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
          only: ours, because Safari has none and the restore must work everywhere. */
       scrollRef.current.style.overflowAnchor = "none";
     }
-  }, [anchorKey]);
+    // Mount and every jump start the fill from a clean slate. Scheduled AFTER the reset so the
+    // check runs against the re-anchored stack, and it replaces any step queued before the jump.
+    scheduleFill();
+  }, [anchorKey, scheduleFill]);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -70,7 +123,20 @@ export function useEndlessStack(anchorKey: string, maxBack = 26, maxFwd = 52) {
       lastTopRef.current = el.scrollTop;
     }
     growingRef.current = false;
-  }, [back, fwd]);
+    // After every growth, gesture or fill alike: is there still room under the lid?
+    scheduleFill();
+  }, [back, fwd, scheduleFill]);
+
+  // A rotation makes the box taller (portrait after landscape), so the fill re-checks; when the
+  // box already overflows the step is a no-op. Unmount drops any step still queued.
+  useEffect(() => {
+    if (!fillToOverflow || typeof window === "undefined") return;
+    window.addEventListener("resize", scheduleFill);
+    return () => {
+      window.removeEventListener("resize", scheduleFill);
+      cancelAnimationFrame(fillRafRef.current);
+    };
+  }, [fillToOverflow, scheduleFill]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;

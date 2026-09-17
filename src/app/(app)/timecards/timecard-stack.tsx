@@ -69,7 +69,13 @@ export function TimecardStack({
   paySchedule: PaySchedule;
   payAnchor: string;
 }) {
-  const stack = useEndlessStack(anchorWeek[0] ?? todayStr, 26, 8);
+  /* FILL TO THE FOLD. On a phone a week is a short list, not a grid, and two light weeks under
+     the 70dvh lid below did not overflow — so the box never scrolled, the hook (which grows only
+     from scroll events) never fired, and every earlier week was unreachable until something
+     happened to add height. Erik 2026-09-16, iPhone, /timecards?week=2: "Scroll doesn't work
+     until I click around." The hook now prepends until the box overflows; from there a normal
+     scroll takes over. */
+  const stack = useEndlessStack(anchorWeek[0] ?? todayStr, 26, 8, { fillToOverflow: true });
 
   /** The weeks on screen, oldest first. Pure day-string arithmetic at local noon so a DST change
    *  can't shunt a whole week by a day. */
