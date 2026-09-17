@@ -11,12 +11,12 @@ import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress } from "@/lib/utils";
+import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel, jobSiteLabel } from "@/lib/schedule-options";
-import { todayBoundsInTz, prettyDay, tzDayStartUtc } from "@/lib/tz";
+import { todayBoundsInTz, prettyDay, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { revalidatePath } from "next/cache";
 import { dbError } from "@/lib/db-error";
 import { YourList } from "./your-list";
@@ -28,6 +28,8 @@ import { AppointmentButton, type ApptValue } from "../appointments/appointment-b
 import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
 import { NewTaskBox } from "../tasks/tasks-view";
 import { QuickCostButton } from "@/components/quick-cost-button";
+import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
+import type { DailyReportSummary } from "../timeclock/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -203,6 +205,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
   // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
+  //
+  // The daily-report window: 14 ORG-local days back from today (lib/tz, never the
+  // UTC server's day — a Pacific evening debrief must not fall out of the window a
+  // day early).
+  const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
   const [curJobRes, whichJobsR, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
@@ -252,24 +259,33 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         .gte("completed_at", dayStart.toISOString())
         .lt("completed_at", dayEnd.toISOString()),
     ),
-    // TODAY's crew-lead daily reports (staff only) — the debriefs Nort filed at
-    // clock-out. Fails soft (empty) until migration 0128 lands.
+    // Crew-lead daily reports (staff only) — the clock-out debriefs Nort filed, and
+    // the surface the daily_report bell/push (url "/planner") lands on. Last 14
+    // ORG-LOCAL days, newest first: this card used to show TODAY only and sent the
+    // office to /timecards for the rest, but the review list moved here (cn-v958),
+    // so yesterday's report has to be reachable on this page or the link is a dead
+    // end. PROJECTION: gps_summary + status ride along because the card classifies
+    // on them (the day story, and the filed→reviewed check-off). Fails soft (empty)
+    // until migration 0128 lands.
     isStaff
       ? supabase
           .from("daily_reports")
-          .select("id, profile_id, did_today, materials_tomorrow, created_at, profiles:profile_id(full_name)")
-          .eq("report_date", todayStr)
+          .select("id, profile_id, report_date, did_today, materials_tomorrow, gps_summary, status, created_at, profiles:profile_id(full_name)")
+          .gte("report_date", reportsSince)
+          .order("report_date", { ascending: false })
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as any[] }),
   ]);
-  const dailyReports = (((dailyReportsR as any)?.data ?? []) as {
-    id: string;
-    profile_id: string;
-    did_today: string | null;
-    materials_tomorrow: string | null;
-    created_at: string;
-    profiles: { full_name: string | null } | null;
-  }[]);
+  const dailyReports = (((dailyReportsR as any)?.data ?? []) as any[]).map((r) => ({
+    id: r.id as string,
+    report_date: r.report_date as string,
+    did_today: (r.did_today ?? null) as string | null,
+    materials_tomorrow: (r.materials_tomorrow ?? null) as string | null,
+    gps: (r.gps_summary ?? null) as DailyReportSummary | null,
+    status: (r.status ?? "filed") as string,
+    name: (r.profiles?.full_name ?? "Crew member") as string,
+  }));
+  const reportsToReview = dailyReports.filter((r) => r.status !== "reviewed").length;
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   // Options for the job-less punch's picker, labelled the way /timeclock's picker labels them
   // (its optionLabel): codes on → the job name; codes off → customer · street address.
@@ -758,44 +774,107 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           crew presence + hours live together on /timecards now — the "on the
           clock" strip above its week grid. My Day keeps the clock + reports. */}
 
-      {/* Crew-lead daily reports (staff only) — the clock-out debriefs Nort filed today:
-          what got done + what materials they need tomorrow. Lightweight by design; the
-          full report (with the GPS day summary) is reviewed from the timecards side. */}
+      {/* CREW-LEAD DAILY REPORTS (staff only) — THE debrief surface, moved here whole from
+          /timecards (cn-v958). A debrief answers "what got done" and "WHAT MATERIALS DO WE NEED
+          TOMORROW", and tomorrow is a My Day question; on a payroll-review page it was the
+          biggest block standing between Erik and the money he opens that page for. It sits in
+          slot 2, straight under the clock: the debrief is the other end of the same shift, and
+          it has to be read BEFORE today's agenda, not after it — the materials line is what
+          changes the morning.
+          The footer link to /timecards is gone with the move: this IS the review list now, so
+          the 14-day window lives here and a daily_report bell/push (url "/planner") lands on
+          the report it is about.
+          KNOWN GAP, unchanged by the move (audit 2026-07-16): 0128's design says "filed for
+          office EDITING" and the update RLS grants staff that write, but no UI anywhere edits a
+          report's did_today/materials_tomorrow — this is read + check-off only. Build the edit
+          affordance here if the office ever needs to correct a filed report. */}
       {isStaff && dailyReports.length > 0 && (
         <Card className="mb-4 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2">
               <ClipboardList className="h-4 w-4 text-slate-400" />
               <span className="text-sm font-semibold text-slate-800">Daily reports</span>
             </div>
-            <span className="text-xs font-medium text-slate-500">{dailyReports.length} today</span>
+            {/* NOTHING SILENT: the right-hand line says what is left to do AND what window
+                this list covers, so "only three" is never mistaken for "only three exist". */}
+            <span className="shrink-0 text-xs font-medium text-slate-500">
+              {reportsToReview > 0 ? `${reportsToReview} to review · ` : ""}last 14 days
+            </span>
           </div>
-          <div className="divide-y divide-slate-50">
-            {dailyReports.map((r) => (
-              <div key={r.id} className="px-5 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-medium text-slate-800">
-                    {r.profiles?.full_name ?? "Crew member"}
-                  </span>
-                  {r.materials_tomorrow && <Badge tone="amber">materials</Badge>}
-                </div>
-                {r.did_today && (
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{r.did_today.split("\n")[0]}</p>
-                )}
-                {r.materials_tomorrow && (
-                  <p className="mt-0.5 truncate text-xs text-amber-700">
-                    Needs: {r.materials_tomorrow.split("\n")[0]}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-          <Link
-            href="/timecards"
-            className="block border-t border-slate-100 px-5 py-2 text-center text-xs font-medium text-brand hover:bg-slate-50"
-          >
-            Review in timecards
-          </Link>
+          <ul className="divide-y divide-slate-100">
+            {dailyReports.map((r) => {
+              const reviewed = r.status === "reviewed";
+              // The debrief itself — what got done, what to buy tomorrow, and the day story.
+              const body = (
+                <>
+                  {r.did_today && (
+                    <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{r.did_today}</p>
+                  )}
+                  {r.materials_tomorrow && (
+                    <p className="mt-1 whitespace-pre-line text-sm text-amber-700">
+                      <span className="font-medium">Materials for tomorrow:</span> {r.materials_tomorrow}
+                    </p>
+                  )}
+                  {r.gps && (
+                    <div className="mt-1.5 text-xs text-slate-500">
+                      <span className="font-medium text-slate-600">{formatDuration(Number(r.gps.total_hours) || 0)}</span>
+                      {Number(r.gps.miles) > 0 && <span> · {Number(r.gps.miles).toFixed(1)} mi</span>}
+                      {r.gps.first_in && <span> · first in {formatTime(r.gps.first_in, tz)}</span>}
+                      {r.gps.last_out && <span> · last out {formatTime(r.gps.last_out, tz)}</span>}
+                      {(r.gps.jobs ?? []).length > 0 && (
+                        <span>
+                          {" · "}
+                          {(r.gps.jobs ?? [])
+                            .map((jr) => `${jr.label} ${formatDuration(Number(jr.hours) || 0)}`)
+                            .join(" · ")}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+              // A REVIEWED REPORT HAS ALREADY DONE ITS JOB. Moving this card to the page Erik
+              // opens every morning only helps if it does not rebuild the wall it left: 14 days
+              // of debriefs rendered whole (did-today and materials are whitespace-pre-line and
+              // uncapped) is a dozen full-height blocks standing between the clock and today's
+              // agenda on a 375px phone, most of them already checked off. So an unreviewed
+              // report stays open — it is the thing that still needs him — and a reviewed one
+              // shrinks to its identity row.
+              // NOT A DEAD END, and nothing silent: the row is a <details> disclosure, so the
+              // debrief is one tap away in place (no page, no fetch, no client JS), the header
+              // still counts "N to review · last 14 days", and the 14-day reach is untouched.
+              if (reviewed) {
+                return (
+                  <li key={r.id}>
+                    <details className="group">
+                      {/* Whole row is the target (44px), not a control inside it. */}
+                      <summary className="flex min-h-[44px] cursor-pointer list-none items-center gap-2 px-5 py-3 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open:rotate-90" />
+                        <div className="min-w-0 flex-1 truncate text-sm">
+                          <span className="font-semibold text-slate-900">{r.name}</span>
+                          <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz)}</span>
+                        </div>
+                        <Badge tone="green" className="shrink-0">reviewed</Badge>
+                      </summary>
+                      <div className="px-5 pb-3">{body}</div>
+                    </details>
+                  </li>
+                );
+              }
+              return (
+                <li key={r.id} className="px-5 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 text-sm">
+                      <span className="font-semibold text-slate-900">{r.name}</span>
+                      <span className="ml-2 text-slate-500">{formatDate(r.report_date, tz)}</span>
+                    </div>
+                    <MarkReportReviewedButton id={r.id} />
+                  </div>
+                  {body}
+                </li>
+              );
+            })}
+          </ul>
         </Card>
       )}
 

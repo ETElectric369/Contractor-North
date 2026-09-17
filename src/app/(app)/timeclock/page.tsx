@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { payPeriodBounds, todayStrInTz, tzDayStartUtc } from "@/lib/tz";
@@ -7,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TimeclockPanel } from "./timeclock-panel";
+import { NextUp } from "./next-up";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -364,6 +366,30 @@ export default async function TimeclockPage() {
           crewLead={crewLead}
           jobCodesEnabled={jobCodesOn}
         />
+
+        {/* NEXT UP — the OTHER question a tech brings to this page (see next-up.tsx for the
+         *  precedence and why it never guesses past the schedule). It sits directly under the clock
+         *  button because that is where the question gets asked: thumb already there, phone already
+         *  out. Everyone gets their OWN two days, staff included.
+         *
+         *  STREAMED, not awaited (the audit-v921 lesson: the phone lag was a page body sitting on a
+         *  query before anything painted). The clock is the reason this page exists, so it paints
+         *  first and these two rows arrive a beat later under a placeholder that keeps its space —
+         *  no reflow under a thumb that is already moving. */}
+        {user && (
+          <Suspense
+            fallback={
+              <Card>
+                <CardContent className="py-4">
+                  <h3 className="mb-1 text-sm font-semibold text-slate-900">Next up</h3>
+                  <p className="py-2 text-sm text-slate-400">Checking the schedule…</p>
+                </CardContent>
+              </Card>
+            }
+          >
+            <NextUp userId={user.id} tz={orgSettings.timezone} />
+          </Suspense>
+        )}
 
         {/* WHERE THE CREW WEEK BOARD STOOD — three doors, staff only.
          *

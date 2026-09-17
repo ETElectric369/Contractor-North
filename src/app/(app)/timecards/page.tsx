@@ -28,8 +28,6 @@ import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { OpenEntryEditor } from "./open-entry-editor";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
-import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
-import type { DailyReportSummary } from "../timeclock/actions";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
@@ -154,27 +152,6 @@ export default async function TimecardsPage({
   const tz = orgSettings.timezone;
 
   const { start, end, days: weekDayStrs } = weekRange(offset, tz, orgSettings.week_start);
-
-  // Crew-lead daily reports — the office review surface the daily_report bell/push
-  // (url "/timecards") and the planner card's "Review in timecards" land on. Last 14
-  // org-local days, newest first; the planner card shows TODAY only, so this is where
-  // yesterday's report lives (with the GPS day story + the filed→reviewed check-off).
-  const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
-  const { data: reportRows } = await supabase
-    .from("daily_reports")
-    .select("id, profile_id, report_date, did_today, materials_tomorrow, gps_summary, status, created_at, profiles:profile_id(full_name)")
-    .gte("report_date", reportsSince)
-    .order("report_date", { ascending: false })
-    .order("created_at", { ascending: false });
-  const dailyReports = ((reportRows ?? []) as any[]).map((r) => ({
-    id: r.id as string,
-    report_date: r.report_date as string,
-    did_today: (r.did_today ?? null) as string | null,
-    materials_tomorrow: (r.materials_tomorrow ?? null) as string | null,
-    gps: (r.gps_summary ?? null) as DailyReportSummary | null,
-    status: (r.status ?? "filed") as string,
-    name: (r.profiles?.full_name ?? "Crew member") as string,
-  }));
 
   // rate_override MUST be selected here: the edit modal round-trips it on save, so
   // omitting the column made every unrelated week-list edit send undefined→null and
@@ -912,59 +889,14 @@ export default async function TimecardsPage({
         </p>
       )}
 
-      {/* Crew-lead daily reports — what got done + materials needed tomorrow, with the
-          GPS day story. This is the review surface the daily_report notification deep-links
-          to; "Mark reviewed" checks a report off (0128's filed → reviewed).
-          KNOWN GAP (audit 2026-07-16): 0128's design says "filed for office EDITING" and the
-          update RLS grants staff that write, but no UI anywhere edits a report's
-          did_today/materials_tomorrow — this list is read+review only. Build the edit
-          affordance here if the office ever needs to correct a filed report. */}
-      {dailyReports.length > 0 && (
-        <Card className="mb-4 overflow-hidden">
-          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <span className="text-sm font-semibold text-slate-800">Daily reports</span>
-            <span className="text-xs font-medium text-slate-500">last 14 days</span>
-          </div>
-          <ul className="divide-y divide-slate-100">
-            {dailyReports.map((r) => (
-              <li key={r.id} className="px-5 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0 text-sm">
-                    <span className="font-semibold text-slate-900">{r.name}</span>
-                    <span className="ml-2 text-slate-500">{formatDate(r.report_date)}</span>
-                    {r.status === "reviewed" && <Badge tone="green" className="ml-2">reviewed</Badge>}
-                  </div>
-                  {r.status !== "reviewed" && <MarkReportReviewedButton id={r.id} />}
-                </div>
-                {r.did_today && (
-                  <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{r.did_today}</p>
-                )}
-                {r.materials_tomorrow && (
-                  <p className="mt-1 whitespace-pre-line text-sm text-amber-700">
-                    <span className="font-medium">Materials for tomorrow:</span> {r.materials_tomorrow}
-                  </p>
-                )}
-                {r.gps && (
-                  <div className="mt-1.5 text-xs text-slate-500">
-                    <span className="font-medium text-slate-600">{formatDuration(Number(r.gps.total_hours) || 0)}</span>
-                    {Number(r.gps.miles) > 0 && <span> · {Number(r.gps.miles).toFixed(1)} mi</span>}
-                    {r.gps.first_in && <span> · first in {formatTime(r.gps.first_in, tz)}</span>}
-                    {r.gps.last_out && <span> · last out {formatTime(r.gps.last_out, tz)}</span>}
-                    {(r.gps.jobs ?? []).length > 0 && (
-                      <span>
-                        {" · "}
-                        {(r.gps.jobs ?? [])
-                          .map((jr) => `${jr.label} ${formatDuration(Number(jr.hours) || 0)}`)
-                          .join(" · ")}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+      {/* THE DAILY REPORTS CARD IS GONE FROM HERE — it lives on My Day now (cn-v958).
+          A crew lead's debrief says what got done and WHAT MATERIALS ARE NEEDED TOMORROW, and
+          tomorrow is a My Day question, not a payroll-review one. It was the single biggest
+          block competing for room with the money Erik opens this page for ("way too much in my
+          face i dont even know what it all is"). The whole card moved intact — the person, the
+          reviewed badge, did-today, materials-tomorrow, the GPS day story and Mark Reviewed —
+          and the bell/push deep link moved with it, so a daily_report notification still lands
+          on the page that holds the report. */}
 
       {/* THE THREE STAT TILES AND THE PER-PERSON CARDS ARE GONE (Erik: "way too much in my face i
           dont even know what it all is and it looks like duplicates").

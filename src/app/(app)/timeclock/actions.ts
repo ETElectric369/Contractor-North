@@ -80,12 +80,27 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
       if (dayJob) return dayJobId;
     }
 
+    /**
+     * THE PUNCH AND THE CARD READ THE SAME ROWS (0266, and the reason it exists).
+     *
+     * `scheduled_end` rides along because the two dates ARE the job's window whenever the segment
+     * rows are missing, and the PROJECTION law is that a missing field reads as an absence rather
+     * than an error. Leaving it out is what made this mirror answer only on a job's START day: on
+     * day two of a three-day job the Clock's Next Up card said "22 Pine" off the full window while
+     * this resolver, mirroring the start day alone, went somewhere else. A card and a punch that
+     * disagree about where a man is, is the exact thing the precedence law exists to stop.
+     *
+     * Until 0266 a tech could not READ job_schedule_segments at all (0040's only policy was
+     * staff-only for every verb, reads included), so both surfaces were running on mirrors and
+     * drifting apart in different directions. Now both read the real rows, and the mirror below is
+     * what it should always have been: the fallback for a job whose segments were never written.
+     */
     const { data: mine } = await supabase
       .from("jobs")
-      .select("id, scheduled_start")
+      .select("id, scheduled_start, scheduled_end")
       .contains("assigned_to", [uid])
       .in("status", ACTIVE_JOB_STATUSES);
-    const myJobs = (mine ?? []) as { id: string; scheduled_start: string | null }[];
+    const myJobs = (mine ?? []) as { id: string; scheduled_start: string | null; scheduled_end: string | null }[];
     if (myJobs.length) {
       // Scheduled today via the segments table (multi-range jobs) …
       const { data: segs } = await supabase
@@ -95,6 +110,15 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
         .lte("start_date", todayStr)
         .gte("end_date", todayStr);
       const segToday = new Set(((segs ?? []) as { job_id: string }[]).map((s) => s.job_id));
+      // … or, for a job with no segment rows at all, across its own scheduled window rather than
+      // on its first day only. `todayStr` is already the ORG's day, which is what the window is in.
+      for (const j of myJobs) {
+        if (segToday.has(j.id)) continue;
+        const start = j.scheduled_start ? String(j.scheduled_start).slice(0, 10) : null;
+        if (!start) continue;
+        const end = j.scheduled_end ? String(j.scheduled_end).slice(0, 10) : start;
+        if (start <= todayStr && todayStr <= end) segToday.add(j.id);
+      }
       // … or via the scheduled_start mirror (single-day jobs) — the SHARED tier-1 pick
       // (lib/job-status.pickJobScheduledToday), the same one the /timeclock crew board
       // points members with, so the punch and the board can't drift.
@@ -1761,9 +1785,18 @@ export async function fileDailyReport(input: {
   if (jobIds.length) {
     const { data: jobRows } = await supabase.from("jobs").select("id, job_number, name").in("id", jobIds);
     for (const j of (jobRows ?? []) as { id: string; job_number: string | null; name: string | null }[]) {
-      // Deliberately NOT schedule-options' jobLabel: this drops empty halves and falls
-      // back to the id (the shared shape would print "undefined · x" on a partial row).
-      labelMap.set(j.id, [j.job_number, j.name].filter(Boolean).join(" · ") || j.id);
+      // jobLabel IS the SSOT for this, and always was — the old hand-rolled
+      // `[job_number, name].join(" · ")` here was wrong twice over. It printed the
+      // jobLabelWithNumber shape ("J-017 · Smith panel"), which that file reserves for
+      // printed documents and exports somebody reconciles against, and Erik has said
+      // three times that a screen label is the job NAME, not J-xxx. The comment that
+      // used to sit here justified the fork by claiming jobLabel would render
+      // "undefined · x" on a half-filled row; it would not — jobLabel is
+      // `name || num || "Job"`, null-safe, and it never joins anything.
+      // This label is FROZEN into gps_summary at file time, so every report filed with
+      // the old code keeps the old shape until somebody backfills the JSON. Cheap
+      // today: daily_reports is still empty (no profile has crew_lead = true).
+      labelMap.set(j.id, jobLabel(j));
     }
   }
   const summary: DailyReportSummary = {
@@ -1795,34 +1828,45 @@ export async function fileDailyReport(input: {
   if (error) return { ok: false, error: dbError(error) };
 
   // Tell the office — bell (always works) + push, suppressing the filer.
+  // The deep link is "/planner": NO DEAD ENDS — the Daily Reports card (with the
+  // filed→reviewed check-off and the GPS day story) lives on My Day since cn-v958,
+  // so a tap on this bell has to land there and not on the payroll page it left.
   const staff = (await orgStaffIds(me.org_id)).filter((id) => id !== user.id);
   const name = me.full_name ?? "the crew";
   const payload = {
     title: `Daily report from ${name}`,
     body: (did || mats).split("\n")[0].slice(0, 140),
-    url: "/timecards",
+    url: "/planner",
   };
   await createNotifications(me.org_id, staff, { type: "daily_report", ...payload });
   await sendPushToProfiles(staff, "daily_report", payload);
 
-  revalidatePath("/planner"); // the boss's Daily reports card
-  revalidatePath("/timecards");
+  revalidatePath("/planner"); // THE Daily Reports card — the only page that renders a report
   return { ok: true, summary };
 }
 
 /**
  * Office review: flip a daily report filed → reviewed (the second half of 0128's
  * `status` design — "filed for office editing"). Staff-only; RLS (daily_reports_update:
- * own-or-staff, org-scoped) backstops the guard. Reviewed rows stay visible on the
- * /timecards review list, just checked off.
+ * own-or-staff, org-scoped) backstops the guard. Reviewed rows stay visible on My Day's
+ * Daily Reports card (the review list since cn-v958), just checked off — so the ONE path
+ * to revalidate is /planner. Revalidating it is not optional: a card that still shows
+ * "Mark Reviewed" after the tap is a silent write in the user's eyes.
  */
 export async function markDailyReportReviewed(id: string): Promise<ClockResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { error } = await ctx.supabase.from("daily_reports").update({ status: "reviewed" }).eq("id", id);
+  // Checked write (the silent-write law): RLS refusing this row is a zero-row UPDATE with a
+  // 200 and no error, and the button would toast "Report marked reviewed" over nothing.
+  const { data: hit, error } = await ctx.supabase
+    .from("daily_reports")
+    .update({ status: "reviewed" })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
-  revalidatePath("/timecards");
-  revalidatePath("/planner");
+  if (!hit) return { ok: false, error: "That report isn't there any more — My Day is catching up." };
+  revalidatePath("/planner"); // the Daily Reports card's reviewed badge + the "N to review" count
   return { ok: true };
 }
 
