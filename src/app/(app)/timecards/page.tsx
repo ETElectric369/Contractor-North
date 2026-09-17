@@ -1,12 +1,11 @@
-import { attachRates, payRateMap } from "@/lib/profile-columns";
+import { attachRates, payRateMap, payRateMapRead } from "@/lib/profile-columns";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { AlertTriangle, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
-import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import {
   formatCurrency,
@@ -17,9 +16,9 @@ import {
   initials,
 } from "@/lib/utils";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
-import { formatDateTimeTz, payPeriodBounds, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
+import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
 import { summarizeMileage } from "@/lib/mileage-math";
-import { aggregatePayrollEntries } from "@/lib/payroll-math";
+import { balanceForPerson, toPayPaymentRow, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimecardStack } from "./timecard-stack";
@@ -60,6 +59,44 @@ function weekRange(offset: number, tz: string, weekStart: "sunday" | "monday") {
     days.push(d.toISOString().slice(0, 10));
   }
   return { start, end, days };
+}
+
+/** ── THE OWED ROW'S READS ────────────────────────────────────────────────────────────────────
+ *
+ *  This page used to carry its own roster of every person with hours, gross and a paid badge — a
+ *  read-only mirror of /payroll sitting two inches under a grid of the same hours. Erik: "there is
+ *  way too much in my face i dont even know what it all is and it looks like duplicates." The Pay
+ *  page now owns "what do I owe" with real payments behind it, so the mirror collapses to ONE row
+ *  carrying its headline figure and a way in.
+ *
+ *  The figure is computed by balanceForPerson — the SAME pure function /payroll uses, so the two
+ *  screens cannot disagree about a man's money. Only the READ CONTRACT is copied here, and it is
+ *  copied rather than shared because it has to behave identically: PostgREST stops at its
+ *  db-max-rows cap with a 200 and no error, so a bare read is how a short list becomes a confident
+ *  wrong number. Page it, advance by the rows ACTUALLY returned, stop only on an empty page. If
+ *  either half of that contract is ever changed on /payroll, change it here in the same breath. */
+const BALANCE_MONTHS = 18;
+const PAGE_ROWS = 1000;
+const MAX_PAGES = 12;
+/** One projection, used by both entry reads, so a column can never go missing from one of them
+ *  (THE PROJECTION LAW: the failure is always a select list). */
+const BALANCE_ENTRY_COLS =
+  "id, profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)";
+
+type WholeRead<T> = { rows: T[]; problem: string | null };
+
+async function readAll<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+): Promise<WholeRead<T>> {
+  const out: T[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await page(from, from + PAGE_ROWS - 1);
+    if (error || !data) return { rows: [], problem: "read failed" };
+    if (!data.length) return { rows: out, problem: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], problem: "too many rows to read at once" };
 }
 
 export default async function TimecardsPage({
@@ -205,7 +242,12 @@ export default async function TimecardsPage({
         profileId: e.profile_id,
         workDate: todayStrInTz(tz, new Date(e.clock_in)),
         jobId: e.job_id ?? null,
-        hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out) - (Number(e.lunch_minutes) || 0) / 60 : 0,
+        // THE SAME ONE RULE. This hand-rolled `hoursBetween(...) - lunch/60` instead of handing
+        // hoursBetween the lunch it already knows how to deduct, which skipped the clamp — a
+        // short shift with a long lunch came out NEGATIVE here and zero everywhere else, and a
+        // negative day is read as "no hours", which is the difference between a no_show finding
+        // and an unplanned one. Two formulas that agree on ordinary days are still two formulas.
+        hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : 0,
       })),
     ),
   );
@@ -220,8 +262,6 @@ export default async function TimecardsPage({
   // Group by tech. (The hours-per-job-code tally that lived here is gone —
   // Erik: analytics territory, clutter on a payroll review page.)
   const byTech = new Map<string, { name: string; entries: any[]; hours: number; miles: number }>();
-  let crewTotal = 0;
-  let crewMiles = 0;
 
   for (const e of entries ?? []) {
     const name = (e as any).profiles?.full_name ?? "—";
@@ -229,11 +269,8 @@ export default async function TimecardsPage({
       byTech.get(e.profile_id) ?? { name, entries: [] as any[], hours: 0, miles: 0 };
     rec.entries.push(e);
     rec.miles += Number(e.miles ?? 0);
-    crewMiles += Number(e.miles ?? 0);
     if (e.status === "closed" && e.clock_out) {
-      const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-      rec.hours += h;
-      crewTotal += h;
+      rec.hours += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     }
     byTech.set(e.profile_id, rec);
   }
@@ -246,7 +283,6 @@ export default async function TimecardsPage({
       return { ...rec, baseline, mileage: summarizeMileage(rec.entries, baseline, tz) };
     })
     .sort((a, b) => b.hours - a.hours);
-  const crewBusinessMiles = Math.round(techs.reduce((s, t) => s + t.mileage.business, 0) * 10) / 10;
   const label = `${start.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })} – ${new Date(
     end.getTime() - 1,
   ).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
@@ -292,16 +328,27 @@ export default async function TimecardsPage({
   };
   const stackEntries = ((stackRows ?? []) as any[]).map((e) => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
-    // The paid hours, lunch already deducted by the same rule the rest of the app uses — a total
-    // on a pay-period line that disagreed with payroll would be worse than no total at all.
-    const gross = (new Date(e.clock_out ?? Date.now()).getTime() - new Date(e.clock_in).getTime()) / 3_600_000;
-    const lunch = Number(e.lunch_minutes ?? 0) / 60;
+    /* ONE WEEK, ONE NUMBER (Erik: "it looks like duplicates").
+     *
+     * This mapper used to run an open shift against `Date.now()` and hand the stack a LIVE,
+     * growing figure, while every other total on this page — and every total on /payroll — counts
+     * closed shifts only. So the moment anybody was on the clock the same week showed two numbers
+     * that disagreed, and neither said why. Two totals that differ by a shift in progress is not a
+     * detail; it is the whole reason the page read as duplicated.
+     *
+     * The rule is now the app's one rule: hoursBetween, lunch deducted (the SSOT in lib/utils).
+     * An open shift is worth ZERO hours — it has not been worked yet, and nothing gets paid on a
+     * guess. But it is real and it is happening, so it still DRAWS on the grid, and `open` carries
+     * the fact up to the stack, which says "still on the clock" where the number would be. Stated,
+     * not hidden: the old live number was the app quietly counting hours nobody had earned. */
+    const open = !e.clock_out;
     return {
       id: e.id as string,
       dayStr,
       startMin,
       endMin,
-      hours: Math.max(0, Math.round((gross - lunch) * 100) / 100),
+      hours: open ? 0 : hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
+      open,
       label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
       sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
       color: pillColorForPerson(e.profile_id).pill,
@@ -322,44 +369,180 @@ export default async function TimecardsPage({
     ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
     : "Owner";
 
-  // ── PAY-PERIOD BREAKDOWN (Erik 7/15 — replaces the all-time-hours and
-  // hours-per-job-code clutter): the pay period CONTAINING the viewed week,
-  // one row per employee — total hours, base pay, and the paid state. Pay
-  // mirrors /payroll EXACTLY (the same aggregatePayrollEntries: per-entry
-  // rate_override honored, lunch deducted, paid/unpaid split by the paid_at
-  // lock that /payroll's Mark-paid stamps). Mileage dollars are deliberately
-  // absent — mileage settles as a human-stated amount on /payroll, never an
-  // app-computed figure (payroll-two-buckets doctrine).
-  const period = payPeriodBounds(orgSettings.pay_schedule, orgSettings.pay_anchor, weekDayStrs[0]);
-  const { data: periodEntries } = await supabase
-    .from("time_entries")
-    .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)")
-    .eq("status", "closed")
-    .not("clock_out", "is", null)
-    .gte("clock_in", tzDayStartUtc(period.start, tz).toISOString())
-    .lt("clock_in", tzDayStartUtc(period.end, tz).toISOString());
-  // Rates merged from the staff-scoped profile_pay view (0215/0216 revoked them from the
-  // authenticated role, so the embed cannot carry them). Without this every rate reads 0.
-  attachRates((periodEntries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profile_id, holder: e }));
-  const periodRows = aggregatePayrollEntries((periodEntries ?? []) as any[], tz);
-  // The $48.50 lesson (mirrors /payroll's open-entries banner): still-open entries are
-  // EXCLUDED by the closed-only filter above — name the gap or the period card silently
-  // under-counts a whole shift. openNow (org-wide open set) is already fetched above.
-  const periodStartMs = tzDayStartUtc(period.start, tz).getTime();
-  const periodEndMs = tzDayStartUtc(period.end, tz).getTime();
-  const openInPeriod = (openNow ?? []).filter((e: any) => {
-    const t = new Date(e.clock_in).getTime();
-    return t >= periodStartMs && t < periodEndMs;
+  /* ── WHAT HE OWES, IN ONE ROW ──────────────────────────────────────────────────────────────
+   *
+   *  WHAT WAS HERE: the "Pay period" card — every person with hours, their gross, and a paid
+   *  badge. It answered a real question in July, when nothing else did. It is now a read-only
+   *  mirror of /payroll printed two inches under a grid of the same hours, which is exactly what
+   *  Erik is looking at when he says "way too much in my face i dont even know what it all is and
+   *  it looks like duplicates" and "mold as much together as possible". /payroll shipped last
+   *  night with real payments behind that question, so this becomes its headline and a door.
+   *
+   *  THE SAME ARITHMETIC, NOT A SECOND ONE: balanceForPerson (pure, unit-tested) over the same
+   *  reads /payroll makes, so the figure he taps and the figure he lands on cannot disagree.
+   *
+   *  AND THE SAME REFUSAL: a balance is subtraction, so a list that came back short or broken
+   *  does not read as an error, it reads as a confident wrong number. Any broken read and this
+   *  row shows NO figure at all — just the way in (MONEY: never invent a figure). */
+  const balanceWindowYmd = (() => {
+    const d = new Date(`${todayStr}T00:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - BALANCE_MONTHS);
+    return d.toISOString().slice(0, 10);
+  })();
+  const balanceWindowIso = tzDayStartUtc(balanceWindowYmd, tz).toISOString();
+  const [balClosed, balOpen, balPayments, balRuns, balRates] = await Promise.all([
+    readAll<any>((from, to) =>
+      supabase
+        .from("time_entries")
+        .select(BALANCE_ENTRY_COLS)
+        .eq("status", "closed")
+        .not("clock_out", "is", null)
+        .gte("clock_in", balanceWindowIso)
+        .order("id")
+        .range(from, to),
+    ),
+    // Open shifts ride along so balanceForPerson can SEE them; hoursBetween prices them at zero,
+    // so they can never inflate a balance — the same rule the grid above now obeys.
+    readAll<any>((from, to) =>
+      supabase
+        .from("time_entries")
+        .select(BALANCE_ENTRY_COLS)
+        .is("clock_out", null)
+        .gte("clock_in", balanceWindowIso)
+        .order("id")
+        .range(from, to),
+    ),
+    // EVERY payment, all time, never windowed: `paid` is an all-time sum by contract, and a
+    // payment dropped by a date filter reappears on screen as money he still owes.
+    readAll<any>((from, to) =>
+      supabase
+        .from("pay_payments")
+        .select("id, profile_id, amount, paid_on, method, reference, note, needs_check, voided_at, created_at")
+        .order("id")
+        .range(from, to),
+    ),
+    // The FROZEN half of earned. kind='base' ONLY — mileage dollars must never reach a wages
+    // balance (0095's two-lock rule).
+    readAll<any>((from, to) =>
+      supabase
+        .from("payroll_runs")
+        .select("profile_id, period_start, period_end, gross")
+        .eq("kind", "base")
+        .order("id")
+        .range(from, to),
+    ),
+    // The rate multiplies every unlocked dollar, so a dropped read prices every unpaid hour at
+    // zero and "You Owe $0" is a lie. It refuses with the other four.
+    payRateMapRead(supabase),
+  ]);
+  const owedUnreadable = [balClosed, balOpen, balPayments, balRuns, balRates].some((r) => !!r.problem);
+  let owedTotal = 0;
+  let owedPeople = 0;
+  if (!owedUnreadable) {
+    // Rates come from the staff-scoped profile_pay view, not the embed (0215/0216 revoked those
+    // columns from the authenticated role).
+    attachRates(balClosed.rows, balRates.rates, (e: any) => ({ id: e.profile_id, holder: e }));
+    attachRates(balOpen.rows, balRates.rates, (e: any) => ({ id: e.profile_id, holder: e }));
+    const push = <T,>(m: Map<string, T[]>, k: string, v: T) => {
+      const a = m.get(k);
+      if (a) a.push(v);
+      else m.set(k, [v]);
+    };
+    const entriesByPerson = new Map<string, any[]>();
+    for (const e of [...balClosed.rows, ...balOpen.rows]) {
+      const id = e.profile_id ? String(e.profile_id) : "";
+      if (id) push(entriesByPerson, id, e);
+    }
+    const lockedByPerson = new Map<string, { period_start: string; period_end: string; gross: number }[]>();
+    for (const r of balRuns.rows) {
+      const id = r.profile_id ? String(r.profile_id) : "";
+      if (id) {
+        push(lockedByPerson, id, {
+          period_start: String(r.period_start),
+          period_end: String(r.period_end),
+          gross: Number(r.gross ?? 0),
+        });
+      }
+    }
+    const paymentsByPerson = new Map<string, PayPaymentRow[]>();
+    for (const p of balPayments.rows.map(toPayPaymentRow)) push(paymentsByPerson, p.profileId, p);
+
+    const ids = new Set<string>([...entriesByPerson.keys(), ...lockedByPerson.keys(), ...paymentsByPerson.keys()]);
+    const balances: PersonBalance[] = [...ids].map((id) =>
+      balanceForPerson({
+        profileId: id,
+        name: nameById.get(id) ?? "—",
+        entries: entriesByPerson.get(id) ?? [],
+        lockedRuns: lockedByPerson.get(id) ?? [],
+        payments: paymentsByPerson.get(id) ?? [],
+        tz,
+        fallbackRate: Number(balRates.rates.get(id)?.hourly_rate ?? 0),
+      }),
+    );
+    // /payroll's rule, word for word: what he OWES, not a net position. A man who is ahead does
+    // not reduce what the next man is owed, so only positive balances are summed — and a zero or
+    // negative balance is not a person he owes, so it is not in the count either.
+    const owing = balances.filter((b) => b.owed > 0.005);
+    owedPeople = owing.length;
+    owedTotal = Math.round(owing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
+  }
+
+  /* ── FIX THESE ─────────────────────────────────────────────────────────────────────────────
+   *
+   *  TWO CARDS BECOME ONE. "Different from the plan" and "Needs attention" sat back to back with
+   *  near-identical amber chrome and no line between them, so they read as one long
+   *  undifferentiated warning list — Erik: "i dont even know what it all is and it looks like
+   *  duplicates". They ARE one list, so this stops pretending otherwise and puts them in the
+   *  order the money is in.
+   *
+   *  WORST MONEY FIRST. A broken shift is hours that are WRONG — a forgotten clock-out inflating
+   *  a week, or a 0193 ghost auto-closed at zero and worth nothing — and that is the next check.
+   *  A plan drift is hours that are probably RIGHT but filed against the wrong job, which costs
+   *  later, at invoicing. So broken rows first in normal weight, drift under a rule in lighter
+   *  type.
+   *
+   *  Both feeders are unchanged: `needsAttention` above, and comparePlanToActual / needsAttention
+   *  / explain from lib/plan-vs-actual. */
+  const entryIdByPersonDay = new Map<string, string>();
+  for (const e of (entries ?? []) as any[]) {
+    const k = `${e.profile_id}|${todayStrInTz(tz, new Date(e.clock_in))}`;
+    if (!entryIdByPersonDay.has(k)) entryIdByPersonDay.set(k, String(e.id));
+  }
+  const brokenRows = (needsAttention as any[]).map((e) => {
+    const day = todayStrInTz(tz, new Date(e.clock_in));
+    const openHrs = formatDuration(hoursBetween(e.clock_in, new Date(), 0));
+    return {
+      id: String(e.id),
+      name: e.profiles?.full_name ?? "—",
+      when: formatDateTimeTz(e.clock_in, tz),
+      job: e.job ? jobLabel(e.job) : null,
+      /* A zero-closed row is NOT open (audit 7: "Brian · open 98h" on a shift 0193 closed at zero
+         on Monday was a lie that grew by the hour). Say what the system actually did, with its
+         reason. Kept word for word from the card this replaces. */
+      badge: e.auto_closed_reason
+        ? `auto-closed — ${String(e.auto_closed_reason).replace(/_/g, " ")}`
+        : new Date(e.clock_in).getTime() < todayStartMs
+          ? `open ${openHrs} · past day`
+          : `open ${openHrs}`,
+      // The deep link names the ENTRY'S OWN WEEK, not the page's (same reason as the grid pills).
+      href: `/timecards?week=${weekOf(day)}&entry=${e.id}`,
+    };
   });
-  const openPeriodNames = [
-    ...new Set(openInPeriod.map((e: any) => e.profiles?.full_name).filter(Boolean)),
-  ] as string[];
-  // Inclusive last day as a date STRING so formatDate renders it literally
-  // (formatting the UTC-midnight instant in the business tz shifts a day back).
-  const periodEndIncl = new Date(new Date(`${period.end}T00:00:00Z`).getTime() - 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-  const periodLabel = `${formatDate(period.start)} – ${formatDate(periodEndIncl)}`;
+  const driftRows = drift.slice(0, 8).map((r) => {
+    const entryId = entryIdByPersonDay.get(`${r.profileId}|${r.workDate}`);
+    return {
+      key: `${r.profileId}|${r.workDate}`,
+      date: formatDate(r.workDate),
+      text: explain(r, (id) => jobLabelById.get(id) ?? "a job", nameById.get(r.profileId) ?? "Someone"),
+      /* ONE WAY IN, NOT TWO. A drift row with hours has an entry behind it, so it opens that
+         entry's editor through the ?entry= door OpenEntryEditor already answers — no second
+         mechanism invented here. A no_show has no entry to open BY DEFINITION (that is what
+         no_show means), and a row with nowhere to go is a dead end, so that one goes to its day
+         on the calendar, where the stale plan actually lives. */
+      href: entryId ? `/timecards?week=${weekOf(r.workDate)}&entry=${entryId}` : `/schedule?view=day&date=${r.workDate}`,
+    };
+  });
+  const fixCount = brokenRows.length + drift.length;
 
   // The ?entry= deep link (a grid pill tap) — find the entry and auto-open its editor below.
   // The stack scrolls 26 weeks, but `entries` holds ONE week — so a tap on any pill outside the
@@ -421,27 +604,33 @@ export default async function TimecardsPage({
       </PageHeader>
 
       {/* Live presence — the crew pulse that used to be My Day's CrewBoard: who's on
-          the clock RIGHT NOW, living next to the hours it becomes (Erik, cn-v503). */}
+          the clock RIGHT NOW, living next to the hours it becomes (Erik, cn-v503). The block
+          stays exactly where cn-v503 put it and reads the same getCrewStatus; only the SIZE
+          changed. It was text-xs pills wrapped into one line, and this is the thing he checks
+          from a ladder in the sun — 10px of grey inside a pill is not readable at arm's length.
+          One person per row, at reading size. */}
       {crew.length > 0 && (
         <Card className="mb-4">
           <CardContent className="py-3">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">On the clock</span>
-              {onClock.length === 0 && <span className="text-sm text-slate-400">Nobody right now</span>}
-              {onClock.map((c) => (
-                <span
-                  key={c.id}
-                  className="flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-900"
-                >
-                  <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden />
-                  {c.name}
-                  {c.jobLabel && <span className="font-normal text-emerald-700">· {c.jobLabel}</span>}
-                </span>
-              ))}
-              <span className="ml-auto text-xs text-slate-500">
+              <span className="text-xs text-slate-500">
                 {onClock.length} of {crew.length}
               </span>
             </div>
+            {onClock.length === 0 ? (
+              <p className="mt-1 text-base text-slate-400">Nobody right now</p>
+            ) : (
+              <ul className="mt-0.5">
+                {onClock.map((c) => (
+                  <li key={c.id} className="flex min-h-[44px] items-center gap-2.5 text-base">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" aria-hidden />
+                    <span className="shrink-0 font-medium text-slate-900">{c.name}</span>
+                    {c.jobLabel && <span className="min-w-0 truncate text-slate-500">{c.jobLabel}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
       )}
@@ -489,130 +678,119 @@ export default async function TimecardsPage({
         />
       )}
 
-      {/* PAY PERIOD — the money view of the period containing this week (the
-          heavier grid divider above marks where it starts). Same math as
-          /payroll; the badge is the paid_at state /payroll's Mark-paid stamps. */}
-      <Card className="mb-4">
-        <CardContent className="py-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Pay period
-            </span>
-            <span className="text-xs text-slate-500">
-              {periodLabel} ·{" "}
-              <Link href="/payroll" className="font-medium text-brand hover:underline">
-                Payroll →
-              </Link>
-            </span>
-          </div>
-          {openInPeriod.length > 0 && (
-            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800">
-              {openInPeriod.length} open {openInPeriod.length === 1 ? "entry" : "entries"} (
-              {openPeriodNames.join(", ")}) not counted — close {openInPeriod.length === 1 ? "it" : "them"}{" "}
-              below and these totals will update.
-            </p>
-          )}
-          {periodRows.length === 0 ? (
-            <p className="text-sm text-slate-400">No hours logged this pay period yet.</p>
+      {/* ONE ROW WHERE THE ROSTER WAS. The Pay page owns "what do I owe" now, with the payments
+          behind it; this is its headline and the door. The WHOLE ROW is the target (a link inside
+          a row is a smaller thing to hit than the row), 44px, and the figure is the same
+          balanceForPerson arithmetic that page runs — or no figure at all. */}
+      <Link
+        href="/payroll"
+        className="mb-4 flex min-h-[44px] w-full items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+      >
+        <span className="min-w-0 flex-1">
+          {owedUnreadable ? (
+            <>
+              <span className="block text-base font-semibold text-slate-900">Open Pay</span>
+              {/* NOTHING SILENT, and never a figure he could act on that might be wrong. */}
+              <span className="block text-sm text-slate-500">
+                No amount is shown here right now because the pay records could not be read whole. Your hours below are
+                fine.
+              </span>
+            </>
+          ) : owedPeople === 0 ? (
+            <>
+              <span className="block text-base font-semibold text-slate-900">Everyone is paid up</span>
+              <span className="block text-sm text-slate-500">Open Pay</span>
+            </>
           ) : (
-            <ul className="divide-y divide-slate-100">
-              {periodRows.map((r) => {
-                const hours = r.paidHours + r.unpaidHours;
-                const gross = Math.round((r.paidGross + r.unpaidGross) * 100) / 100;
-                return (
-                  <li key={r.profileId} className="flex items-center justify-between gap-2 py-1.5 text-sm">
-                    <span className="min-w-0 truncate text-slate-700">{r.name}</span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="tabular-nums text-slate-500">{formatDuration(hours)}</span>
-                      <span className="font-semibold tabular-nums text-slate-900">{formatCurrency(gross)}</span>
-                      {r.unpaidHours === 0 ? (
-                        <Badge tone="green">paid</Badge>
-                      ) : r.paidHours > 0 ? (
-                        <Badge tone="amber">partly paid</Badge>
-                      ) : (
-                        <Badge tone="slate">unpaid</Badge>
-                      )}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <span className="block text-base font-semibold text-slate-900">You Owe {formatCurrency(owedTotal)}</span>
+              <span className="block text-sm text-slate-500">
+                across {owedPeople} {owedPeople === 1 ? "person" : "people"} · Open Pay
+              </span>
+            </>
           )}
-        </CardContent>
-      </Card>
+        </span>
+        <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
+      </Link>
 
-      {/* Forgotten clock-outs inflate hours until someone closes them — surface
-          them HERE, where payroll reviews, instead of waiting to be stumbled on. */}
-      {/* PLAN vs ACTUAL — where the hours went against where the calendar said they would.
-          NOT a discipline tool: a mismatch is nearly always a stale plan, not somebody lying — a
-          crew gets pulled to a callback, a job finishes early. The value is that the office sees
-          it on Friday rather than at invoicing, when the hours are already on the wrong job and
-          the customer is already looking at the number. */}
-      {drift.length > 0 && (
-        <Card className="mb-4">
-          <CardContent className="py-4">
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-900">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> Different from the plan
-            </h3>
-            <ul className="space-y-1 text-sm text-slate-600">
-              {drift.slice(0, 8).map((r) => (
-                <li key={`${r.profileId}|${r.workDate}`} className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="text-xs tabular-nums text-slate-400">{formatDate(r.workDate)}</span>
-                  <span>
-                    {explain(r, (id) => jobLabelById.get(id) ?? "a job", nameById.get(r.profileId) ?? "Someone")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {drift.length > 8 && (
-              <p className="mt-1 text-xs text-slate-400">+{drift.length - 8} more this week.</p>
-            )}
-            <p className="mt-2 text-xs text-slate-400">
-              Usually the plan moved and nobody updated it. Worth a look before these hours go on an invoice.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+      {/* ── FIX THESE ─────────────────────────────────────────────────────────────────────────
+          One amber card where "Needs attention" and "Different from the plan" used to sit back to
+          back. Both are still here, both feeders untouched — broken hours first (money on the
+          next check), plan drift under the rule in lighter type (money at invoicing).
 
-      {needsAttention.length > 0 && (
+          KEPT FROM THE PLAN CARD, because it is the reason that list is allowed to exist: this is
+          NOT a discipline tool. A mismatch is nearly always a stale plan, not somebody lying — a
+          crew gets pulled to a callback, a job finishes early. The value is the office seeing it
+          on Friday rather than at invoicing, when the hours are already on the wrong job and the
+          customer is already looking at the number. */}
+      {fixCount > 0 ? (
         <Card className="mb-4 border-amber-200 bg-amber-50/60">
-          <CardContent className="py-4">
-            <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700">
-              <AlertTriangle className="h-3.5 w-3.5" /> Needs attention
-            </div>
-            <ul className="divide-y divide-amber-200/60">
-              {needsAttention.map((e: any) => {
-                const openHrs = hoursBetween(e.clock_in, new Date(), 0);
-                const pastDay = new Date(e.clock_in).getTime() < todayStartMs;
-                return (
-                  <li key={e.id} className="flex items-center justify-between gap-2 py-2 text-sm">
-                    <div className="min-w-0 text-slate-700">
-                      <span className="font-medium">{e.profiles?.full_name ?? "—"}</span>
-                      <span className="text-slate-500"> · in {formatDateTimeTz(e.clock_in, tz)}</span>
-                      {e.job && <span className="text-slate-500"> · {jobLabel(e.job)}</span>}
-                      <Badge tone="amber" className="ml-2">
-                        {/* A zero-closed row is NOT open (audit 7: "Brian · open 98h" on a shift
-                            0193 closed at zero on Monday was a lie that grew by the hour). Say
-                            what the system actually did, with its reason. */}
-                        {e.auto_closed_reason
-                          ? `auto-closed — ${String(e.auto_closed_reason).replace(/_/g, " ")}`
-                          : pastDay ? `open ${formatDuration(openHrs)} · past day` : `open ${formatDuration(openHrs)}`}
-                      </Badge>
-                    </div>
-                    <EditEntryButton
-                      entry={e}
-                      jobCodes={(jobCodes ?? []) as JobCode[]}
-                      jobs={jobs ?? []}
-                      members={members ?? []}
-                      isStaff
-                      jobCodesEnabled={orgSettings.timeclock_job_codes}
-                    />
+          <CardContent className="py-3">
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+              <AlertTriangle className="h-4 w-4 shrink-0" /> Fix These ({fixCount})
+            </h3>
+            {brokenRows.length > 0 && (
+              <ul className="divide-y divide-amber-200/60">
+                {brokenRows.map((r) => (
+                  <li key={r.id}>
+                    {/* The WHOLE ROW opens that entry's editor, through the ?entry= door that was
+                        already there and simply had a small button in front of it. */}
+                    <Link
+                      href={r.href}
+                      scroll={false}
+                      className="flex min-h-[44px] items-center gap-2 py-2 text-sm active:bg-amber-100/60"
+                    >
+                      <span className="min-w-0 flex-1 text-slate-800">
+                        <span className="font-medium">{r.name}</span>
+                        <span className="text-slate-500"> · in {r.when}</span>
+                        {r.job && <span className="text-slate-500"> · {r.job}</span>}
+                        <Badge tone="amber" className="ml-2">
+                          {r.badge}
+                        </Badge>
+                      </span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+                    </Link>
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            )}
+            {driftRows.length > 0 && (
+              <>
+                {brokenRows.length > 0 && <div className="my-1 border-t border-amber-200/80" />}
+                <ul>
+                  {driftRows.map((r) => (
+                    <li key={r.key}>
+                      <Link
+                        href={r.href}
+                        scroll={false}
+                        className="flex min-h-[44px] items-center gap-2 py-2 text-sm font-light text-slate-600 active:bg-amber-100/60"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="text-xs tabular-nums text-slate-400">{r.date}</span> {r.text}
+                        </span>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+                {drift.length > driftRows.length && (
+                  <p className="text-xs text-slate-400">+{drift.length - driftRows.length} more this week.</p>
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                  A plan line is usually the plan moving and nobody updating it. Worth a look before these hours go on
+                  an invoice.
+                </p>
+              </>
+            )}
           </CardContent>
         </Card>
+      ) : (
+        /* NOTHING SILENT: a missing warning has to be AFFIRMED. Without this line the page looks
+           exactly the same when everything is clean and when the check never ran, and "no news"
+           is not something you can trust a payroll week to. */
+        <p className="mb-4 flex min-h-[44px] items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-900">
+          <Check className="h-4 w-4 shrink-0" aria-hidden /> Nothing needs fixing this week.
+        </p>
       )}
 
       {/* Crew-lead daily reports — what got done + materials needed tomorrow, with the
@@ -669,26 +847,21 @@ export default async function TimecardsPage({
         </Card>
       )}
 
-      <FactsGrid cols={3} className="mb-4 sm:max-w-2xl">
-        <StatTile label={`Crew hours (${label})`} value={formatDuration(crewTotal)} />
-        <StatTile label="People with entries" value={techs.length} />
-        {/* Miles are DATA — no app-computed dollars here. Mileage pay is a
-            human-typed settlement on /payroll, never rate×miles. */}
-        <StatTile
-          label={
-            <>
-              Business miles
-              {crewMiles > crewBusinessMiles ? <span className="text-slate-400"> · {crewMiles.toFixed(1)} logged</span> : null}
-            </>
-          }
-          value={`${crewBusinessMiles.toFixed(1)} mi`}
-        />
-      </FactsGrid>
+      {/* THE THREE STAT TILES ARE GONE (Erik: "way too much in my face i dont even know what it
+          all is and it looks like duplicates"). All three predate the week stack — "Crew hours"
+          and "People with entries" came with the original page in June, "Business miles" with
+          cn-v138 — and the stack took over what two of them said without anyone retiring them:
 
-      {/* The "Hours by job code", "Hours this pay period" (hours-only) and
-          "Accumulated hours · all time" cards left this page (Erik 7/15 —
-          analytics territory / clutter). The Pay-period card under the week
-          grid is the one money summary now. */}
+            · "Crew hours" restated the week total the stack header prints two inches above it,
+              and DISAGREED with it whenever somebody was on the clock (that gap is the arithmetic
+              bug fixed in this wave). The stack header is now the one week number.
+            · "People with entries" was the length of the list immediately below it.
+            · "Business miles" survives per person, on each person's card below, where a mileage
+              settlement is actually made. Miles are DATA — no app-computed dollars, here or
+              there: mileage pay is a human-typed settlement on /payroll, never rate × miles.
+
+          Also long gone, and staying gone (Erik 7/15, analytics territory): "Hours by job code",
+          "Hours this pay period", "Accumulated hours · all time". */}
 
       {techs.length === 0 ? (
         <EmptyState

@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from "react";
 import Link from "next/link";
+import { ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { TimeGrid, type TimeGridEvent } from "@/components/time-grid";
 import { useEndlessStack } from "@/components/use-endless-stack";
@@ -17,6 +18,11 @@ type WeekData = {
   days: { dayStr: string; label: string; isToday: boolean; heavyStart: boolean }[];
   events: TimeGridEvent[];
   weekHours: number;
+  /** Shifts still running inside this week — worth ZERO hours, and said out loud beside the
+   *  total rather than quietly folded into it. See the `open` note on StackEntry. */
+  weekOpen: number;
+  /** The same count for the pay period this week opens, when it opens one. */
+  periodOpen: number;
   mark: ReturnType<typeof periodOpeningIn>;
 };
 
@@ -40,12 +46,34 @@ export type StackEntry = {
   startMin: number;
   /** null = still on the clock; TimeGrid runs it to the live now line. */
   endMin: number | null;
+  /** Hours by the app's ONE rule (lib/utils hoursBetween, lunch deducted), computed on the
+   *  server. ZERO on an open shift — see `open`. */
   hours: number;
+  /**
+   * STILL ON THE CLOCK.
+   *
+   * This stack used to be handed a live figure for a running shift — clock-in against the wall
+   * clock — while the totals everywhere else on the page, and on /payroll, counted closed shifts
+   * only. So the same week showed two numbers that disagreed the moment anybody punched in, and
+   * neither of them said why. That is the "looks like duplicates" complaint, underneath.
+   *
+   * An open shift is worth nothing until it is closed, so it adds 0 to every total here. It is
+   * still real and still happening, so it still DRAWS on the grid and still lists on the phone —
+   * it just reads "on the clock" where a number would be, and the week says how many are running.
+   * The fact is stated rather than hidden, which is the opposite of what the live number did.
+   */
+  open: boolean;
   label: string;
   sub: string;
   color: string;
   href: string;
 };
+
+/** "38.20 h" / "38.20 h · 1 still on the clock". One phrase, used at the week and at the pay
+ *  period, so the two can never say it differently. */
+function hoursLine(hours: number, open: number): string {
+  return `${hours.toFixed(2)} h${open > 0 ? ` · ${open} still on the clock` : ""}`;
+}
 
 export function TimecardStack({
   entries,
@@ -109,7 +137,7 @@ export function TimecardStack({
   }, [entries]);
 
   const hourRows = useMemo(
-    () => entries.map((e) => ({ dayStr: e.dayStr, hours: e.hours })),
+    () => entries.map((e) => ({ dayStr: e.dayStr, hours: e.hours, open: e.open })),
     [entries],
   );
 
@@ -135,10 +163,12 @@ export function TimecardStack({
       const mark = periodOpeningIn(days, paySchedule, payAnchor);
       const events: TimeGridEvent[] = [];
       let weekHours = 0;
+      let weekOpen = 0;
       for (const d of days) {
         for (const e of byDay.get(d) ?? []) {
           events.push(e);
-          weekHours += e.hours;
+          weekHours += e.hours; // 0 for an open shift — the rule lives on the server, once
+          if (e.open) weekOpen++;
         }
       }
       cache.set(days[0], {
@@ -150,11 +180,17 @@ export function TimecardStack({
         })),
         events,
         weekHours: Math.round(weekHours * 100) / 100,
+        weekOpen,
+        // The period line carries the number somebody is about to be PAID on, so a running shift
+        // it does not count has to be named there too, not only on the week.
+        periodOpen: mark ? hourRows.filter((r) => r.open && r.dayStr >= mark.start && r.dayStr < mark.end).length : 0,
         mark,
       });
     }
     return cache;
-  }, [weeks, byDay, paySchedule, payAnchor, todayStr]);
+    // hourRows is memoized on the same `entries` as byDay, so it can only change when byDay does —
+    // listing it adds no invalidation, it just keeps the dep list honest.
+  }, [weeks, byDay, hourRows, paySchedule, payAnchor, todayStr]);
 
   if (!weeks.length) return null;
 
@@ -171,7 +207,7 @@ export function TimecardStack({
     >
       {weeks.map((days) => {
         const wd = weekData.get(days[0])!;
-        const { mark, events, weekHours } = wd;
+        const { mark, events, weekHours, weekOpen, periodOpen } = wd;
         const hasToday = days.includes(todayStr);
 
         return (
@@ -190,7 +226,7 @@ export function TimecardStack({
                 </span>
                 <span className="text-sm font-semibold text-slate-800">{periodLabel(mark)}</span>
                 <span className="font-mono text-xs tabular-nums text-slate-500">
-                  {hoursInPeriod(hourRows, mark).toFixed(2)} h
+                  {hoursLine(hoursInPeriod(hourRows, mark), periodOpen)}
                 </span>
                 {mark.midWeek && (
                   // Semimonthly starts on the 16th, mid-week. Say so rather than letting the line
@@ -202,7 +238,10 @@ export function TimecardStack({
 
             <Card className="overflow-clip">
               <div
-                className={`sticky top-0 z-20 flex items-baseline gap-2 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
+                /* flex-wrap, because the hours line can now carry "· 1 still on the clock" and a
+                   375px header has no room to squash a date instead. It wraps; it never truncates
+                   the week it names. */
+                className={`sticky top-0 z-20 flex flex-wrap items-baseline gap-x-2 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
                   hasToday
                     ? "border-brand/30 bg-brand-light/70 text-brand"
                     : "border-slate-100 bg-white/90 text-slate-500"
@@ -212,8 +251,10 @@ export function TimecardStack({
                 {hasToday && (
                   <span className="text-[10px] font-bold uppercase tracking-wide">this week</span>
                 )}
+                {/* ONE WEEK, ONE NUMBER — and when it is short a running shift, it says so here
+                    instead of quietly counting hours nobody has earned yet. */}
                 <span className="ml-auto font-mono tabular-nums text-slate-500">
-                  {weekHours.toFixed(2)} h
+                  {hoursLine(weekHours, weekOpen)}
                 </span>
               </div>
               {/* THE GRID IS A DESKTOP INSTRUMENT. Erik: "timecard scroll on my phone froze up
@@ -227,7 +268,7 @@ export function TimecardStack({
                   .filter((ds) => (byDay.get(ds) ?? []).length > 0)
                   .map((ds) => (
                     <div key={ds} className="border-b border-slate-100 last:border-b-0">
-                      <div className={`flex items-baseline justify-between px-3 pt-2 text-xs font-semibold ${ds === todayStr ? "text-brand" : "text-slate-500"}`}>
+                      <div className={`flex flex-wrap items-baseline justify-between gap-x-2 px-3 pt-2 text-xs font-semibold ${ds === todayStr ? "text-brand" : "text-slate-500"}`}>
                         <span>
                           {labelFor(ds)}
                           {!!mark && mark.start === ds && (
@@ -235,7 +276,10 @@ export function TimecardStack({
                           )}
                         </span>
                         <span className="font-mono tabular-nums text-slate-400">
-                          {(Math.round((byDay.get(ds) ?? []).reduce((t, e) => t + e.hours, 0) * 100) / 100).toFixed(2)} h
+                          {hoursLine(
+                            Math.round((byDay.get(ds) ?? []).reduce((t, e) => t + e.hours, 0) * 100) / 100,
+                            (byDay.get(ds) ?? []).filter((e) => e.open).length,
+                          )}
                         </span>
                       </div>
                       <ul>
@@ -244,13 +288,26 @@ export function TimecardStack({
                             {/* Link, not <a>: a full reload threw the scroll position away and
                                 re-anchored the page, so tapping an old entry FELT like nothing
                                 opened. Client nav keeps the stack where he left it. */}
-                            <Link href={e.href} scroll={false} className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50">
+                            {/* THE CHEVRON. One tap has opened this entry's editor since cn-v855,
+                                but nothing on the row said so, so it got read as a printout and
+                                the way in was the long way round through the job. Showing the
+                                door that is already there LOWERS the real tap count. */}
+                            <Link
+                              href={e.href}
+                              scroll={false}
+                              className="flex min-h-[44px] items-center gap-2 px-3 py-1.5 text-sm hover:bg-slate-50 active:bg-slate-100"
+                            >
                               <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${e.color.split(" ")[0]}`} aria-hidden />
                               <span className="min-w-0 flex-1 truncate text-slate-800">{e.label}</span>
                               <span className="shrink-0 text-xs text-slate-500">{e.sub}</span>
-                              <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-slate-600">
-                                {e.hours.toFixed(2)}
-                              </span>
+                              {e.open ? (
+                                <span className="shrink-0 text-xs font-medium text-emerald-700">on the clock</span>
+                              ) : (
+                                <span className="w-12 shrink-0 text-right font-mono text-xs tabular-nums text-slate-600">
+                                  {e.hours.toFixed(2)}
+                                </span>
+                              )}
+                              <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" aria-hidden />
                             </Link>
                           </li>
                         ))}
