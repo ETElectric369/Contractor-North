@@ -1,27 +1,28 @@
 import { attachRates, payRateMap, payRateMapRead } from "@/lib/profile-columns";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Clock } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { PageHeader, EmptyState } from "@/components/page-header";
+import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SegmentedControl } from "@/components/ui/segmented";
 import {
   formatCurrency,
   formatDuration,
   formatDate,
+  formatDateShort,
   formatTime,
   hoursBetween,
-  initials,
 } from "@/lib/utils";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
-import { summarizeMileage } from "@/lib/mileage-math";
 import { balanceForPerson, toPayPaymentRow, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
-import { TimecardStack } from "./timecard-stack";
+import { TimecardStack, type Grouping, type StackEntry } from "./timecard-stack";
 import { hmToMin } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
@@ -102,10 +103,21 @@ async function readAll<T>(
 export default async function TimecardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string; entry?: string }>;
+  searchParams: Promise<{ week?: string; entry?: string; group?: string }>;
 }) {
-  const { week, entry: entryParam } = await searchParams;
+  const { week, entry: entryParam, group } = await searchParams;
   const offset = Math.max(0, parseInt(week ?? "0", 10) || 0);
+  /* ── HOW THE LEDGER IS STACKED ────────────────────────────────────────────────────────────
+   *  By Day or By Person, in the URL, because he is not choosing it once: he pages weeks with
+   *  the arrows, taps a shift, saves, and the page revalidates under him. A ?group= ride-along
+   *  survives every one of those AND a refresh, where component state would have quietly put him
+   *  back on By Day each time. It changes the GROUPING INSIDE each week and nothing else — never
+   *  the span, so the number in a week header is always summed from the rows under it. */
+  const grouping: Grouping = group === "person" ? "person" : "day";
+  /** Every link back to this page carries the grouping, or the toggle resets the moment he pages
+   *  a week or opens an entry (the paging arrows, the stack rows, the Fix These rows). */
+  const hrefFor = (weekOffset: number, extra?: string) =>
+    `/timecards?week=${weekOffset}${grouping === "person" ? "&group=person" : ""}${extra ? `&${extra}` : ""}`;
   const supabase = await createClient();
 
   const {
@@ -180,13 +192,15 @@ export default async function TimecardsPage({
   // embed: 0216 revoked those columns from the authenticated role. This grid read them through
   // an ALIASED embed — profiles:profile_id(...) — which two earlier sweeps' patterns missed,
   // so the whole page 42501'd until this merge landed.
-  {
-    const pay = await payRateMap(supabase);
-    for (const e of (entries ?? []) as any[]) {
-      if (!e?.profile_id || !e.profiles) continue;
-      e.profiles = { ...e.profiles, ...(pay.get(String(e.profile_id)) ?? {}) };
-    }
+  const payMap = await payRateMap(supabase);
+  for (const e of (entries ?? []) as any[]) {
+    if (!e?.profile_id || !e.profiles) continue;
+    e.profiles = { ...e.profiles, ...(payMap.get(String(e.profile_id)) ?? {}) };
   }
+  /** The commute baseline, per person, for the By Person mileage split (cn-v138). Off the
+   *  staff-scoped view, never off `profiles` (0216). */
+  const baselineById: Record<string, number> = {};
+  for (const [id, r] of payMap) baselineById[id] = Number(r.commute_baseline_miles ?? 0);
 
   // "Needs attention" pull — open entries that should have been closed: anything
   // still open from a PAST day (a forgotten clock-out) or open more than 12 hours
@@ -259,30 +273,16 @@ export default async function TimecardsPage({
   // three call sites were hand-rolling the label instead of asking it.
   const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, jobLabel(j)]));
 
-  // Group by tech. (The hours-per-job-code tally that lived here is gone —
-  // Erik: analytics territory, clutter on a payroll review page.)
-  const byTech = new Map<string, { name: string; entries: any[]; hours: number; miles: number }>();
-
-  for (const e of entries ?? []) {
-    const name = (e as any).profiles?.full_name ?? "—";
-    const rec =
-      byTech.get(e.profile_id) ?? { name, entries: [] as any[], hours: 0, miles: 0 };
-    rec.entries.push(e);
-    rec.miles += Number(e.miles ?? 0);
-    if (e.status === "closed" && e.clock_out) {
-      rec.hours += hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-    }
-    byTech.set(e.profile_id, rec);
+  /* WHO IS IN THIS WEEK — names for the grid legend, in the order their first shift lands.
+   *  (The per-person TALLY that used to be built here — hours, miles, a Card each — is gone: it
+   *  was a second rendering of the stack's own shifts, and it is now the stack's By Person
+   *  grouping, summing the same rows. The hours-per-job-code tally died before it, Erik:
+   *  analytics territory, clutter on a payroll review page.) */
+  const legendNames = new Map<string, string>();
+  for (const e of (entries ?? []) as any[]) {
+    const id = String(e.profile_id ?? "");
+    if (id && !legendNames.has(id)) legendNames.set(id, e.profiles?.full_name ?? "—");
   }
-
-  // Split each person's miles into the commute baseline vs reimbursable business
-  // miles (baseline subtracted once per day-driven).
-  const techs = [...byTech.values()]
-    .map((rec) => {
-      const baseline = Number(rec.entries[0]?.profiles?.commute_baseline_miles ?? 0);
-      return { ...rec, baseline, mileage: summarizeMileage(rec.entries, baseline, tz) };
-    })
-    .sort((a, b) => b.hours - a.hours);
   const label = `${start.toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })} – ${new Date(
     end.getTime() - 1,
   ).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" })}`;
@@ -306,7 +306,14 @@ export default async function TimecardsPage({
   const stackTo = new Date(end.getTime() + 8 * 7 * 86_400_000).toISOString();
   const { data: stackRows } = await supabase
     .from("time_entries")
-    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_id, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .select(
+      /* job_code / source / notes / miles ride along now that this list is THE list: they are
+         four flat columns, not the editor's projection, and two of them are disclosures (0168's
+         manual/offline provenance) that must not go quiet just because a row is three weeks old.
+         time_allocations is still NOT here — an embed across six months of rows is the thing this
+         read exists to avoid, so split lines stay on the anchored week's deep read below. */
+      "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, profiles:profile_id(full_name), job:job_id(job_number, name)",
+    )
     .gte("clock_in", stackFrom)
     .lt("clock_in", stackTo)
     /* DESCENDING, because LIMIT applies after ORDER. Ascending kept the OLDEST 4000 rows, so the
@@ -326,7 +333,47 @@ export default async function TimecardsPage({
     if (!Number.isFinite(ms) || !Number.isFinite(anchorStartMs)) return offset;
     return Math.max(0, offset - Math.floor((ms - anchorStartMs) / (7 * 86_400_000)));
   };
-  const stackEntries = ((stackRows ?? []) as any[]).map((e) => {
+  /* ── THE DETAIL THAT USED TO BE A SECOND LIST ─────────────────────────────────────────────
+   *
+   *  Under the stack sat one Card per person, re-listing that person's week: the job, the code
+   *  badge, manual/offline, lunch, the hours, the notes, the split lines, and a duplicate +
+   *  pencil pair. The SAME SHIFTS the stack was already drawing. Erik: "it looks like duplicates
+   *  … lets try and mold as much together as possible." So the detail moves ONTO the stack's row
+   *  and the cards go; By Person is now a grouping of this one ledger, not a second copy of it.
+   *
+   *  Split lines and the two controls need the editor's whole projection (allocations, the
+   *  payroll locks, rate_override), which is read for the ANCHORED WEEK only — which is exactly
+   *  the span those cards ever covered, so nothing that existed is lost. A row from an older week
+   *  still opens its editor with one tap (the ?entry= door below fetches the row it needs), so an
+   *  older row is never a dead end, just quieter. */
+  const detailById = new Map<
+    string,
+    { allocations: { jobCode: string | null; hours: number; description: string | null }[]; controls: ReactNode }
+  >();
+  for (const e of (entries ?? []) as any[]) {
+    detailById.set(String(e.id), {
+      allocations: ((e.time_allocations ?? []) as any[]).map((a) => ({
+        jobCode: a.job_code ?? null,
+        hours: Number(a.hours ?? 0),
+        description: a.description ?? null,
+      })),
+      controls: (
+        <>
+          {e.status === "closed" && <DuplicateEntryButton id={e.id} />}
+          <EditEntryButton
+            entry={e}
+            jobCodes={(jobCodes ?? []) as JobCode[]}
+            jobs={jobs ?? []}
+            members={members ?? []}
+            isStaff
+            jobCodesEnabled={orgSettings.timeclock_job_codes}
+          />
+        </>
+      ),
+    });
+  }
+
+  const toStackEntry = (e: any): StackEntry => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
     /* ONE WEEK, ONE NUMBER (Erik: "it looks like duplicates").
      *
@@ -342,23 +389,73 @@ export default async function TimecardsPage({
      * the fact up to the stack, which says "still on the clock" where the number would be. Stated,
      * not hidden: the old live number was the app quietly counting hours nobody had earned. */
     const open = !e.clock_out;
+    const detail = detailById.get(String(e.id));
+    const color = pillColorForPerson(e.profile_id);
     return {
-      id: e.id as string,
+      id: String(e.id),
+      personId: String(e.profile_id ?? ""),
+      personName: e.profiles?.full_name ?? "—",
+      person: firstNameOf(e.profiles?.full_name),
       dayStr,
+      clockIn: String(e.clock_in),
       startMin,
       endMin,
       hours: open ? 0 : hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes),
       open,
+      miles: Number(e.miles ?? 0),
       label: `${firstNameOf(e.profiles?.full_name)}${e.job ? ` · ${jobLabel(e.job)}` : ""}`,
-      sub: `${formatTime(e.clock_in, tz)}–${e.clock_out ? formatTime(e.clock_out, tz) : "now"}`,
-      color: pillColorForPerson(e.profile_id).pill,
-      href: `/timecards?week=${weekOf(dayStr)}&entry=${e.id}`,
+      /* THE DAY IT ENDED, WHEN THAT IS NOT THE DAY IT STARTED.
+       *
+       * A row is filed under its clock-IN day — the By Day group header, or the day that leads
+       * the row in By Person — and the span beside it is times only. So a shift punched 10:00 PM
+       * Monday and closed 6:30 AM Tuesday read "10:00 PM–6:30 AM" under Monday, with nothing on
+       * screen saying the clock-out was the next morning. timeEntryGridSpan clamps exactly this
+       * case at 1440, so the app knows these shifts happen; the per-person card this row replaced
+       * printed the DATE on both ends and never had the ambiguity.
+       *
+       * The hours were always right (hoursBetween is a duration), but this row is now the only
+       * rendering of the shift and Erik pays people off it. So the out-day is named whenever it
+       * differs, and stays out of the way on the ordinary shifts that end when they started. */
+      sub: (() => {
+        const from = formatTime(e.clock_in, tz);
+        if (!e.clock_out) return `${from}–now`;
+        const crossed = todayStrInTz(tz, new Date(e.clock_out)) !== dayStr;
+        return `${from}–${formatTime(e.clock_out, tz)}${crossed ? ` ${formatDateShort(e.clock_out, tz)}` : ""}`;
+      })(),
+      color: color.pill,
+      dot: color.dot,
+      href: hrefFor(weekOf(dayStr), `entry=${e.id}`),
+      // THE NAME, NOT THE NUMBER, and still a way into the job itself (jobLabel is the SSOT).
+      job: e.job_id && e.job ? { href: `/jobs/${e.job_id}`, label: jobLabel(e.job) } : null,
+      jobCode: e.job_code ?? null,
+      source: e.source === "manual" ? "manual" : e.source === "offline" ? "offline" : null,
+      lunchMin: Number(e.lunch_minutes ?? 0),
+      notes: e.notes ?? null,
+      allocations: detail?.allocations,
+      controls: detail?.controls,
     };
-  });
+  };
 
-  const gridLegend = [...byTech.entries()].map(([pid, rec]) => ({
+  /* ONE LIST, AND THE ANCHORED WEEK IS ALWAYS IN IT. The wide read is capped at 4000 rows, so on
+     a busy org a week deep in the scroll can fall off the far end — which mattered little when a
+     second list rendered it anyway, and matters now that this is the only one. Any anchored-week
+     entry the wide read missed is added from the deep read. Then sorted by day and start time, so
+     a day reads top to bottom in the order it was worked (the wide read comes back DESC, which is
+     a cap trick, not a reading order). */
+  const seenStackIds = new Set<string>();
+  const stackEntries: StackEntry[] = [];
+  for (const row of (stackRows ?? []) as any[]) {
+    seenStackIds.add(String(row.id));
+    stackEntries.push(toStackEntry(row));
+  }
+  for (const e of (entries ?? []) as any[]) {
+    if (!seenStackIds.has(String(e.id))) stackEntries.push(toStackEntry(e));
+  }
+  stackEntries.sort((a, b) => (a.dayStr < b.dayStr ? -1 : a.dayStr > b.dayStr ? 1 : a.startMin - b.startMin));
+
+  const gridLegend = [...legendNames.entries()].map(([pid, name]) => ({
     id: pid,
-    name: rec.name,
+    name,
     dot: pillColorForPerson(pid).dot,
   }));
   const gridNow = { dayStr: todayStr, min: tzMinutesOfDay(new Date(), tz) };
@@ -525,7 +622,7 @@ export default async function TimecardsPage({
           ? `open ${openHrs} · past day`
           : `open ${openHrs}`,
       // The deep link names the ENTRY'S OWN WEEK, not the page's (same reason as the grid pills).
-      href: `/timecards?week=${weekOf(day)}&entry=${e.id}`,
+      href: hrefFor(weekOf(day), `entry=${e.id}`),
     };
   });
   const driftRows = drift.slice(0, 8).map((r) => {
@@ -539,7 +636,7 @@ export default async function TimecardsPage({
          mechanism invented here. A no_show has no entry to open BY DEFINITION (that is what
          no_show means), and a row with nowhere to go is a dead end, so that one goes to its day
          on the calendar, where the stale plan actually lives. */
-      href: entryId ? `/timecards?week=${weekOf(r.workDate)}&entry=${entryId}` : `/schedule?view=day&date=${r.workDate}`,
+      href: entryId ? hrefFor(weekOf(r.workDate), `entry=${entryId}`) : `/schedule?view=day&date=${r.workDate}`,
     };
   });
   const fixCount = brokenRows.length + drift.length;
@@ -561,9 +658,8 @@ export default async function TimecardsPage({
       .eq("id", entryParam)
       .maybeSingle();
     if (one) {
-      const pay = await payRateMap(supabase);
       if ((one as any).profile_id && (one as any).profiles) {
-        (one as any).profiles = { ...(one as any).profiles, ...(pay.get(String((one as any).profile_id)) ?? {}) };
+        (one as any).profiles = { ...(one as any).profiles, ...(payMap.get(String((one as any).profile_id)) ?? {}) };
       }
       focusEntry = one as any;
     }
@@ -582,7 +678,7 @@ export default async function TimecardsPage({
             tz={tz}
           />
           <Link
-            href={`/timecards?week=${offset + 1}`}
+            href={hrefFor(offset + 1)}
             className="flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
             title="Previous week"
           >
@@ -592,7 +688,7 @@ export default async function TimecardsPage({
             {offset === 0 ? "This week" : label}
           </span>
           <Link
-            href={`/timecards?week=${Math.max(0, offset - 1)}`}
+            href={hrefFor(Math.max(0, offset - 1))}
             className={`rounded-lg border border-slate-300 bg-white p-2 text-slate-600 hover:bg-slate-50 ${
               offset === 0 ? "pointer-events-none opacity-40" : ""
             }`}
@@ -635,19 +731,40 @@ export default async function TimecardsPage({
         </Card>
       )}
 
-      {/* THE PRIMARY VIEW — the week as a Google-Calendar-style time grid: each
-          entry a pill in its time allotment, one color per person (legend above),
-          the heavier divider = a pay-period boundary day. The editable per-person
-          table stays below — this grid is display; edits keep their tools. */}
+      {/* ── THE LEDGER, ONCE ──────────────────────────────────────────────────────────────────
+          The week as pills in their time allotment on a desktop, as a list of shifts on a phone,
+          and under it — until now — the SAME shifts again, one Card per person. Erik: "it looks
+          like duplicates … lets try and mold as much together as possible."
+
+          They are one list now, stacked either way you need to read it: By Day to answer "what
+          happened Tuesday", By Person to answer "what do I owe Brian for this week". Same rows,
+          same arithmetic, same tap into the editor. The toggle regroups INSIDE each week and
+          never changes the span, so a header's number always belongs to the rows beneath it. */}
       <div className="mb-4">
-        <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="text-sm font-semibold text-slate-900">Hours</span>
-          {gridLegend.map((p) => (
-            <span key={p.id} className="flex items-center gap-1 text-xs text-slate-600">
-              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${p.dot}`} aria-hidden /> {p.name}
-            </span>
-          ))}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <span className="min-w-0 text-sm font-semibold text-slate-900">
+            Hours Worked
+            <span className="ml-2 text-xs font-normal text-slate-500">tap any shift to fix it</span>
+          </span>
+          <SegmentedControl
+            activeId={grouping}
+            items={[
+              { id: "day", label: "By Day", href: `/timecards?week=${offset}` },
+              { id: "person", label: "By Person", href: `/timecards?week=${offset}&group=person` },
+            ]}
+          />
         </div>
+        {/* The color key belongs to the grouping that needs decoding. By Person writes each
+            person's name across the top of their own shifts, so it needs no legend. */}
+        {grouping === "day" && gridLegend.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {gridLegend.map((p) => (
+              <span key={p.id} className="flex items-center gap-1 text-xs text-slate-600">
+                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${p.dot}`} aria-hidden /> {p.name}
+              </span>
+            ))}
+          </div>
+        )}
         {/* THE WEEKS RUN, AND THE PAY PERIODS ARE MARKED ACROSS THEM. The single week behind two
             arrows is gone: reading "what did we pay him last period" used to mean clicking back,
             reading, clicking back, reading, and holding both halves in your head — for the one
@@ -662,6 +779,8 @@ export default async function TimecardsPage({
           nowMin={gridNow.min}
           paySchedule={orgSettings.pay_schedule}
           payAnchor={orgSettings.pay_anchor}
+          group={grouping}
+          baselineById={baselineById}
         />
       </div>
 
@@ -847,130 +966,33 @@ export default async function TimecardsPage({
         </Card>
       )}
 
-      {/* THE THREE STAT TILES ARE GONE (Erik: "way too much in my face i dont even know what it
-          all is and it looks like duplicates"). All three predate the week stack — "Crew hours"
-          and "People with entries" came with the original page in June, "Business miles" with
-          cn-v138 — and the stack took over what two of them said without anyone retiring them:
+      {/* THE THREE STAT TILES AND THE PER-PERSON CARDS ARE GONE (Erik: "way too much in my face i
+          dont even know what it all is and it looks like duplicates").
+
+          The tiles predate the week stack — "Crew hours" and "People with entries" came with the
+          original page in June, "Business miles" with cn-v138 — and the stack took over what two
+          of them said without anyone retiring them:
 
             · "Crew hours" restated the week total the stack header prints two inches above it,
-              and DISAGREED with it whenever somebody was on the clock (that gap is the arithmetic
-              bug fixed in this wave). The stack header is now the one week number.
+              and DISAGREED with it whenever somebody was on the clock. The stack header is now
+              the one week number.
             · "People with entries" was the length of the list immediately below it.
-            · "Business miles" survives per person, on each person's card below, where a mileage
-              settlement is actually made. Miles are DATA — no app-computed dollars, here or
-              there: mileage pay is a human-typed settlement on /payroll, never rate × miles.
+            · "Business miles" survives per person, in the stack's By Person grouping, on the
+              person header where a mileage settlement is actually read. Miles stay DATA — no
+              app-computed dollars, here or there: mileage pay is a human-typed settlement on
+              /payroll, never rate × miles.
+
+          The per-person Cards that used to render here went the same way, and for the harder
+          reason: they were not a summary of the stack, they were a SECOND RENDERING of its
+          shifts, which is the duplicate Erik was actually looking at. Everything they carried —
+          the initials header, the week hours, the mileage split, and per shift the times, the job
+          link, the code badge, manual/offline, lunch, the hours, duplicate, pencil, the notes and
+          the split lines — now rides on the stack's one row, under [By Day | By Person] above.
+          The EmptyState that stood in for them went too: the stack says "No hours this week" in
+          each week it owns, so there is exactly one of those on screen instead of two.
 
           Also long gone, and staying gone (Erik 7/15, analytics territory): "Hours by job code",
           "Hours this pay period", "Accumulated hours · all time". */}
-
-      {techs.length === 0 ? (
-        <EmptyState
-          icon={Clock}
-          title="No time entries this week"
-          description="Clock-ins for the selected week will show up here."
-        />
-      ) : (
-        <div className="space-y-4">
-          {techs.map((rec) => (
-            <Card key={rec.name}>
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                    {initials(rec.name)}
-                  </div>
-                  <span className="text-sm font-semibold text-slate-900">{rec.name}</span>
-                </div>
-                <span className="text-sm font-bold text-slate-900">
-                  {formatDuration(rec.hours)}
-                  {rec.mileage.recorded > 0 && (
-                    <span className="ml-2 text-xs font-normal text-slate-400">
-                      {rec.baseline > 0
-                        ? `${rec.mileage.business.toFixed(1)} mi business · ${rec.mileage.recorded.toFixed(1)} logged`
-                        : `${rec.mileage.recorded.toFixed(1)} mi`}
-                    </span>
-                  )}
-                </span>
-              </div>
-              <ul className="divide-y divide-slate-100">
-                {rec.entries.map((e: any) => {
-                  const h =
-                    e.status === "closed" && e.clock_out
-                      ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)
-                      : null;
-                  return (
-                    <li key={e.id} className="px-5 py-3">
-                      <div className="flex items-center justify-between text-sm">
-                        <div className="text-slate-700">
-                          {formatDateTimeTz(e.clock_in, tz)}
-                          {" → "}
-                          {e.clock_out ? formatDateTimeTz(e.clock_out, tz) : (
-                            <Badge tone="green">open</Badge>
-                          )}
-                          {e.job && (
-                            <Link href={`/jobs/${e.job_id}`} className="ml-2 font-medium text-brand hover:underline">
-                              {jobLabel(e.job)}
-                            </Link>
-                          )}
-                          {e.job_code && (
-                            <Badge tone="slate" className="ml-2">
-                              {e.job_code}
-                            </Badge>
-                          )}
-                          {e.source === "manual" && (
-                            <Badge tone="amber" className="ml-1">manual</Badge>
-                          )}
-                          {/* DISCLOSURE IS THE GUARD (0168). An offline punch's start time came
-                              from the phone, not the server clock — nothing can prove it was made
-                              live rather than backdated, so the card says where it came from and
-                              lets the office judge. */}
-                          {e.source === "offline" && (
-                            <Badge tone="blue" className="ml-1" title="Punched with no signal — time came from the phone">
-                              offline
-                            </Badge>
-                          )}
-                          {e.lunch_minutes > 0 && (
-                            <span className="ml-2 text-xs text-slate-400">
-                              lunch {e.lunch_minutes}m
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-medium text-slate-800">
-                            {h != null ? formatDuration(h) : "—"}
-                          </span>
-                          {e.status === "closed" && <DuplicateEntryButton id={e.id} />}
-                          <EditEntryButton
-                            entry={e}
-                            jobCodes={(jobCodes ?? []) as JobCode[]}
-                            jobs={jobs ?? []}
-                            members={members ?? []}
-                            isStaff
-                            jobCodesEnabled={orgSettings.timeclock_job_codes}
-                          />
-                        </div>
-                      </div>
-                      {e.notes && (
-                        <p className="mt-1 text-xs text-slate-500">{e.notes}</p>
-                      )}
-                      {e.time_allocations && e.time_allocations.length > 0 && (
-                        <ul className="mt-1.5 space-y-1">
-                          {e.time_allocations.map((a: any, i: number) => (
-                            <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
-                              {a.job_code && <Badge tone="blue">{a.job_code}</Badge>}
-                              <span className="text-slate-500">{formatDuration(a.hours)}</span>
-                              {a.description && <span>· {a.description}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
