@@ -66,7 +66,7 @@ import { translator } from "@/lib/i18n";
 import { billingEnabled } from "@/lib/stripe";
 import { qboConfigured } from "@/lib/quickbooks";
 import { trialDaysLeft } from "@/lib/subscription";
-import { startCheckout, openPortal, connectPayments } from "./billing-actions";
+import { startCheckout, openPortal, connectPayments, refreshConnectStatus, refreshConnectStatusForm } from "./billing-actions";
 import { PayoutsLinkButton } from "./payouts-link-button";
 import { connectStateFromOrg, connectStatusLabel, canAcceptPayments } from "@/lib/stripe-connect";
 import { disconnectQuickbooks, getDocCounters } from "./actions";
@@ -102,9 +102,18 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; billing_error?: string; qbo?: string; qbo_error?: string; gcal?: string; tab?: string }>;
+  searchParams: Promise<{
+    billing?: string;
+    billing_error?: string;
+    connect?: string;
+    connect_error?: string;
+    qbo?: string;
+    qbo_error?: string;
+    gcal?: string;
+    tab?: string;
+  }>;
 }) {
-  const { billing, billing_error, qbo, qbo_error, gcal, tab } = await searchParams;
+  const { billing, billing_error, connect, connect_error, qbo, qbo_error, gcal, tab } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -127,6 +136,31 @@ export default async function SettingsPage({
     supabase.from("job_code_templates").select("id, name, codes").order("name"),
     supabase.from("job_codes").select("id, code, description, billable, active").order("code"),
   ]);
+
+  /**
+   * COMING BACK FROM STRIPE IS THE MOMENT THE STATUS CHANGED (audit finding 3).
+   *
+   * connectPayments sends the contractor to Stripe with return_url ...&connect=done. Until now
+   * nothing happened on the way back: the card was drawn from whatever the organizations row
+   * happened to say, and it only became true when the account.updated webhook arrived — which may
+   * be seconds, or may be never if the webhook is misconfigured. refreshConnectStatus was written
+   * for exactly this and had no caller anywhere in the app. Now it runs on the return trip, and the
+   * card is drawn from what Stripe just said.
+   *
+   * revalidate:false because this runs during the render of the very page it would revalidate, and
+   * /settings is force-dynamic so there is nothing cached to bust. If it fails, the card says so
+   * and offers Refresh Status — it never quietly shows stale state as if it were fresh.
+   */
+  const connectSync =
+    // `as any` for the Connect columns the way every other line on this page does — the shared
+    // Organization type predates them (src/lib/types.ts is another owner's file).
+    connect === "done" && isAdmin && billingEnabled && (org as any)?.stripe_account_id
+      ? await refreshConnectStatus({ revalidate: false })
+      : null;
+  // The fresh answer wins over the row we read a moment before it landed.
+  const connectOrg = connectSync?.ok
+    ? { ...(org as any), stripe_account_status: connectSync.status, stripe_charges_enabled: connectSync.chargesEnabled }
+    : (org as any);
 
   // THE PRICE-LIST PANE'S NUMBERS — counts, never rows. head:true sends no body, so this stays
   // three cheap COUNT queries whatever the size of somebody's book.
@@ -500,10 +534,36 @@ export default async function SettingsPage({
                 {/* CONNECT (0161): the contractor's OWN Stripe account. Their customers'
                     money goes to their bank — Contractor North never holds it. */}
                 {(() => {
-                  const st = connectStateFromOrg(org as any);
+                  const st = connectStateFromOrg(connectOrg);
                   const s = connectStatusLabel(st);
                   return (
                     <>
+                      {/* NOTHING SILENT on the way back from Stripe: every return trip says what
+                          happened. connect=refresh is Stripe telling us the onboarding link
+                          expired before they finished — that used to land here as a blank page. */}
+                      {connect === "refreshed" && (
+                        <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                          Status refreshed from Stripe.
+                        </div>
+                      )}
+                      {connect === "refresh" && (
+                        <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          Your Stripe setup link expired before you finished. Press Finish Setup to pick up where you
+                          left off.
+                        </div>
+                      )}
+                      {connect_error && (
+                        <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{connect_error}</div>
+                      )}
+                      {connectSync && !connectSync.ok && (
+                        <div className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                          We couldn&apos;t check your status with Stripe just now, so this shows what we had before.
+                          Press Refresh Status to try again.
+                          {connectSync.error && (
+                            <span className="mt-1 block text-xs text-amber-700">Stripe said: {connectSync.error}</span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex flex-wrap items-center gap-3">
                         <Badge tone={s.tone === "green" ? "green" : s.tone === "amber" ? "amber" : "slate"}>{s.label}</Badge>
                         <span className="text-sm text-slate-600">{s.detail}</span>
@@ -519,6 +579,15 @@ export default async function SettingsPage({
                           ) : (
                             <form action={connectPayments}>
                               <FormSubmit>{st.accountId ? "Finish Setup" : "Set Up Card Payments"}</FormSubmit>
+                            </form>
+                          )}
+                          {/* THE DOOR BACK TO THE TRUTH. Stripe can disable an account days later
+                              (a document expires, a capability is revoked) and the app would sit on
+                              a stale "Accepting payments" badge until a webhook happened to land.
+                              Owner/admin only — refreshConnectStatus refuses anyone else anyway. */}
+                          {isAdmin && st.accountId && (
+                            <form action={refreshConnectStatusForm}>
+                              <FormSubmit variant="outline">Refresh Status</FormSubmit>
                             </form>
                           )}
                         </div>
@@ -542,7 +611,7 @@ export default async function SettingsPage({
               <Section title="Tap to Pay on iPhone">
                 <TapToPaySettingsSection
                   isAdmin={isAdmin}
-                  canAccept={billingEnabled && canAcceptPayments(connectStateFromOrg(org as any))}
+                  canAccept={billingEnabled && canAcceptPayments(connectStateFromOrg(connectOrg))}
                 />
               </Section>
               <Section title="Plan & subscription">

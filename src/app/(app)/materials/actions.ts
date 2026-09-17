@@ -147,6 +147,38 @@ export async function createMaterialList(input: {
   return { ok: true, id: list.id };
 }
 
+/**
+ * THE ONE RULE FOR "WHICH LIST IS THE JOB'S LIST" — newest first, id as the tiebreak.
+ *
+ * Erik's law is one materials list per job, the same one the office and the crew both write.
+ * Nothing in the database enforces that yet, so every reader has to agree on the same pick or the
+ * crew and the office quietly end up on different rows. The pick is: the newest list on the job
+ * (which makes an accepted quote's take-off canonical when one exists), with the id breaking a
+ * created_at tie so two renders of the same data can never disagree — an ORDER BY with no
+ * tiebreak is allowed to come back in either order.
+ *
+ * Trusting the read matters as much as the rule: a failed lookup used to fall through to an
+ * insert, which is one of the ways a job grew a second list, so the error is carried out.
+ */
+async function canonicalListIdForJob(supabase: Db, jobId: string): Promise<{ id: string | null; error?: string }> {
+  const { data, error } = await supabase
+    .from("material_lists")
+    .select("id")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { id: null, error: dbError(error) };
+  return { id: (data as { id?: string } | null)?.id ?? null };
+}
+
+/** The same pick, for a page that has a job id and needs to know whether the list it is about to
+ *  render is the live one. Read-only: unlike ensureJobMaterialList it never creates anything. */
+export async function canonicalMaterialListId(jobId: string): Promise<{ id: string | null; error?: string }> {
+  return canonicalListIdForJob(await createClient(), jobId);
+}
+
 /** The job's ONE canonical materials list — Erik's rule: the job's Materials tab
  *  IS the list, never a list-of-lists. Returns the NEWEST list on the job (so the
  *  estimator's quote take-off, created on acceptance, is canonical when it exists);
@@ -154,11 +186,11 @@ export async function createMaterialList(input: {
  *  Called on the first add-item from the job tab — merely VIEWING a job never
  *  creates data. Job lookup rides RLS, so a foreign job id can't be seeded.
  *
- *  Idempotent for EVERY role, and the read has to be trusted for that to hold: a
- *  failed lookup used to fall through to the insert, which is exactly how a job
- *  grows a second list. Two lists can still exist (a quote take-off landing after
- *  a hand-made one) — the newest is the list, here and on the job tab alike, so
- *  the crew and the office are always reading the same rows. The create itself
+ *  Idempotent for EVERY role, including against itself under a race (see the
+ *  adopt-the-winner note below). Two lists can still exist by another road — a
+ *  quote take-off landing on a job that already had a hand-made list — and the
+ *  newest is the list, here and on the job tab alike, so the crew and the office
+ *  are always reading the same rows; the other one renders as superseded. The create itself
  *  rides 0254: a tech's first add on a list-less job is allowed to mint the one
  *  list, and RLS refuses with an error (never a 204) if it isn't. */
 export async function ensureJobMaterialList(jobId: string): Promise<Result> {
@@ -168,15 +200,9 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
-  const { data: existing, error: exErr } = await supabase
-    .from("material_lists")
-    .select("id")
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (exErr) return { ok: false, error: dbError(exErr) };
-  if (existing) return { ok: true, id: (existing as any).id };
+  const existing = await canonicalListIdForJob(supabase, jobId);
+  if (existing.error) return { ok: false, error: existing.error };
+  if (existing.id) return { ok: true, id: existing.id };
 
   const { data: job, error: jErr } = await supabase
     .from("jobs")
@@ -193,9 +219,27 @@ export async function ensureJobMaterialList(jobId: string): Promise<Result> {
     .single();
   if (error) return { ok: false, error: dbError(error) };
 
+  // TWO MEN, ONE JOB, THE SAME SECOND. Look-then-insert is a race: two techs pressing the first
+  // "Add" at the same moment both read "no list", both insert one, and the job now has two lists
+  // with one line each — the exact split this file exists to prevent, and reachable by the whole
+  // crew since 0254. There is no unique constraint to lean on yet, so the fix here is to ADOPT THE
+  // WINNER rather than trust our own insert: re-read the job's canonical list by the same rule
+  // every reader uses and return that id, so both racers end up writing the same rows.
+  //
+  // The loser's row is brand new and provably empty — nothing has been added to it, because the
+  // caller only ever learns an id from what we return — so we clear it away. Best effort on
+  // purpose: material_lists DELETE is staff-only at the policy, so a tech's cleanup is a no-op 204
+  // and the stray simply stays. That is not a silent loss either: a non-canonical job list now
+  // renders as superseded on /materials — badged, read-only, pointing at the live one.
+  const winner = await canonicalListIdForJob(supabase, jobId);
+  const canonicalId = winner.id ?? list.id;
+  if (canonicalId !== list.id) {
+    await supabase.from("material_lists").delete().eq("id", list.id).eq("created_by", user.id).select("id");
+  }
+
   revalidatePath("/materials");
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, id: list.id };
+  return { ok: true, id: canonicalId };
 }
 
 /** THE OFFICE HEARS ABOUT IT. Erik, on a tech adding a line: "so it passed right to me."

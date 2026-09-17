@@ -10,6 +10,7 @@ import {
 import { getOrgSettings } from "@/lib/org-settings";
 import { recordAiUsage, aiSpendExceeded, modelFor } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
+import { reportError } from "@/lib/observe";
 import { after } from "next/server";
 import { todayStrInTz } from "@/lib/tz";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
@@ -563,13 +564,17 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       let budget = 3000; // ~750 tokens of history is plenty for continuity without bloating the prompt
       const kept: string[] = [];
       for (const m of (hist ?? []) as { role: string; content: string; created_at: string }[]) {
-        if (!m.content?.trim() || live.has(key(m.role, m.content))) continue;
+        // A persisted turn can carry the confirm envelope (see the transcript write below): that
+        // is transport, not something Nort said. Strip it before the line is deduped or shown, so
+        // the history digest never reads back a marker + raw JSON at Nort.
+        const body = String(m.content ?? "").split(CONFIRM_MARKER)[0];
+        if (!body.trim() || live.has(key(m.role, body))) continue;
         // audit v921: bare toLocaleDateString reads the SERVER's day (UTC on Vercel), so a 5:30 PM
         // Pacific line came back labeled tomorrow while the RIGHT NOW block above says today is
         // today — "what did we talk about yesterday" recalled the wrong day. Label in the ORG's tz.
         const day = new Date(m.created_at).toLocaleDateString("en-US", { timeZone: orgS.timezone });
         const who = m.role === "user" ? "Them" : "You";
-        const text = String(m.content).replace(/\s+/g, " ").trim().slice(0, 300);
+        const text = body.replace(/\s+/g, " ").trim().slice(0, 300);
         const line = `[${day}] ${who}: ${text}`;
         if (budget - line.length < 0) break;
         budget -= line.length;
@@ -693,6 +698,17 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       // the turn to conversations/messages — giving Nort a real transcript (cross-session
       // memory) + a day's-end record to review. Marker-stripped, same as the client sees.
       let assistantReply = "";
+      // THE PROPOSAL THIS TURN MADE, kept where the transcript write below can see it. The
+      // confirm marker goes out as the LAST bytes of the stream, so a phone that drops in that
+      // half-second gets the lead sentence ("I'll record a $340 CED bill, sound right?") and no
+      // Yes/No card — and the recovery path reads the persisted reply, which is marker-stripped.
+      // Persisting the proposal WITH the turn is what lets recovery rebuild the card instead of
+      // leaving a money proposal on screen with no way to answer it. (The agent_audit_log row
+      // executeAction already writes cannot serve: input_summary carries key NAMES and a record
+      // id only, never the amount or the read-back prompt; its read policy is is_org_staff(), so
+      // the tech in the field could not read their own row; and the table is deliberately
+      // immutable, so a consumed proposal could never be retired.)
+      let confirmProposed: AgentConfirm | null = null;
       // Cache telemetry for the audit row — lets us verify hits from the DB (cache_read > 0).
       let cacheRead = 0;
       let outputTokens = 0;
@@ -941,6 +957,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           if (pendingConfirm) {
             // Append the proposal as the LAST thing in the stream; the client splits it off,
             // shows a confirm card (or speaks it), and runs it only on the user's yes.
+            confirmProposed = pendingConfirm;
             emit(CONFIRM_MARKER + JSON.stringify(pendingConfirm));
             break;
           }
@@ -982,7 +999,9 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         // one conversation per user per day so a day reads as one thread.
         try {
           const lastUser = [...messages].reverse().find((m) => m.role === "user");
-          if (lastUser?.content?.trim() && assistantReply.trim()) {
+          // A turn that ONLY proposed (Nort said nothing but the read-back) still has to be
+          // persisted, or the one turn most worth recovering is the one that is not there.
+          if (lastUser?.content?.trim() && (assistantReply.trim() || confirmProposed)) {
             const { data: recent } = await supabase
               .from("conversations")
               .select("id, created_at")
@@ -1005,10 +1024,36 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               convoId = created?.id;
             }
             if (convoId) {
-              await supabase.from("messages").insert([
-                { conversation_id: convoId, role: "user", content: lastUser.content.slice(0, 8000) },
-                { conversation_id: convoId, role: "assistant", content: assistantReply.trim().slice(0, 8000) },
-              ]);
+              // THE PROPOSAL RIDES WITH THE TURN. Same envelope the stream uses — one grammar,
+              // two transports — so the client parses it back with the code it already has.
+              // `at` is what makes a recovered proposal EXPIRE: a money read-back must not be
+              // answerable long after the moment it belonged to. A proposal too big to carry is
+              // dropped rather than truncated: half a JSON object is not a proposal, and the
+              // recovered turn then reads exactly as it does today (text, no card).
+              let confirmTail = confirmProposed
+                ? "\n" + CONFIRM_MARKER + JSON.stringify({ ...confirmProposed, at: new Date().toISOString() })
+                : "";
+              if (confirmTail.length > 4000) confirmTail = "";
+              const replyBody = assistantReply.trim().slice(0, Math.max(0, 8000 - confirmTail.length));
+              // THE SILENT-WRITE LAW, and it matters more now: a zero-row insert is a 204, and
+              // with a proposal riding along it would take the ONLY copy of a money read-back with
+              // it. The turn stays best-effort for the response, but a refusal is no longer
+              // invisible to us.
+              const { data: wrote, error: writeErr } = await supabase
+                .from("messages")
+                .insert([
+                  { conversation_id: convoId, role: "user", content: lastUser.content.slice(0, 8000) },
+                  { conversation_id: convoId, role: "assistant", content: replyBody + confirmTail },
+                ])
+                .select("id");
+              if (writeErr || !wrote?.length) {
+                reportError("chat.transcript", writeErr ?? new Error("transcript insert wrote no rows"), {
+                  userId: user.id,
+                  orgId,
+                  // The proposal's CONTENT never goes to the log — only the fact that one was lost.
+                  pendingConfirm: confirmProposed?.name ?? null,
+                });
+              }
             }
           }
         } catch {

@@ -3,6 +3,7 @@ import { ListChecks } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { isStaffRole } from "@/lib/actions/perms";
 import { NewListButton } from "./new-list-button";
@@ -22,10 +23,15 @@ export default async function MaterialsPage({
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
 
+  // created_at DESC then id DESC — the same pick canonicalMaterialListId makes, so "the first row
+  // for this job" below is the same list the job hub and the crew's editor resolve to. The id is
+  // the tiebreak: an ORDER BY with no tiebreak may come back in either order, and two renders
+  // disagreeing about which list is the job's is exactly the bug this page is here to surface.
   let listQuery = supabase
     .from("material_lists")
     .select("*, jobs(job_number, name, address, customers(name)), material_list_items(id)")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   if (jobFilter) listQuery = listQuery.eq("job_id", jobFilter);
   // A TECH'S INDEX IS THE JOBS' LISTS (Erik, 2026-09-11): the one list per job he can
   // read and write. A list with no job is a quote's take-off or a work order's sheet —
@@ -46,7 +52,23 @@ export default async function MaterialsPage({
       : Promise.resolve({ data: null }),
   ]);
 
-  const materialLists = lists ?? [];
+  // WHICH LIST IS THE JOB'S LIST, SAID OUT LOUD.
+  //
+  // A job can hold more than one list (a hand-typed one, then the accepted quote's take-off landing
+  // newer). Everything that reads a job resolves to the newest, so the others are dead rows that
+  // still looked live here — a card you could open and type into while nobody else saw a word of it.
+  // The rows arrive newest-first, so the FIRST row for a job is that job's canonical list and every
+  // later one is superseded.
+  const canonicalByJob = new Map<string, string>();
+  for (const l of (lists ?? []) as { id: string; job_id: string | null }[]) {
+    if (l.job_id && !canonicalByJob.has(l.job_id)) canonicalByJob.set(l.job_id, l.id);
+  }
+  const isSuperseded = (l: { id: string; job_id?: string | null }) =>
+    !!l.job_id && canonicalByJob.get(l.job_id) !== l.id;
+
+  // A TECH'S INDEX IS ONE LIST PER JOB (Erik's law), so a superseded one is not offered to him at
+  // all — for the office it stays visible and badged, because clearing the stray is office work.
+  const materialLists = ((lists ?? []) as any[]).filter((l) => isStaff || !isSuperseded(l));
 
   return (
     <div>
@@ -98,8 +120,12 @@ export default async function MaterialsPage({
                     {/* THE ADDRESS IS THE HEADLINE (cn-v829): customer · address, never the job number
                         (Erik, 09-01: "job number in the way, no address"). The list's own name is derived
                         from the number and says nothing a person recognizes. */}
-                    <div className="truncate font-medium text-slate-900">
-                      {l.jobs ? jobSiteLabel({ ...l.jobs, customer_name: l.jobs.customers?.name ?? null }) : l.name}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="min-w-0 truncate font-medium text-slate-900">
+                        {l.jobs ? jobSiteLabel({ ...l.jobs, customer_name: l.jobs.customers?.name ?? null }) : l.name}
+                      </div>
+                      {/* Plain word, not a status code: this list is not the one the job reads. */}
+                      {isSuperseded(l) && <Badge tone="amber" className="shrink-0">Replaced</Badge>}
                     </div>
                     <div className="mt-0.5 text-xs text-slate-400">
                       {l.material_list_items?.length ?? 0} items ·{" "}

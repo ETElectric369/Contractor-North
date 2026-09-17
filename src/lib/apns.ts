@@ -141,7 +141,38 @@ function post(host: string, token: string, payload: unknown): Promise<{ status: 
 }
 
 /** A token Apple says will never be valid again — the row should go. */
-const DEAD = new Set(["BadDeviceToken", "Unregistered", "DeviceTokenNotForTopic", "TopicDisallowed"]);
+const DEAD = new Set(["BadDeviceToken", "Unregistered"]);
+
+/**
+ * WHY "TopicDisallowed" AND "DeviceTokenNotForTopic" ARE NOT IN THE SET ABOVE (2026-09-16).
+ *
+ * Both name the TOPIC — our bundle id, our team, our signing key — not the phone. A rotated .p8,
+ * a wrong APNS_TEAM_ID, or an APNS_BUNDLE_ID that doesn't match the shipped app makes Apple answer
+ * one of these for EVERY device we send to. While they sat in DEAD, the first send pruned the
+ * first phone's row, the next send pruned the next one, and the config fault never reached
+ * reportError at all — the dead-token check short-circuits before the fault branch below. A single
+ * server misconfiguration unregistered the whole crew, one phone at a time, and the only symptom
+ * was that nobody got notifications any more.
+ *
+ * The asymmetry settles it: keeping a genuinely dead token costs one refused request per send;
+ * pruning a live one costs a phone somebody has to re-enable by hand. A token that is really gone
+ * says BadDeviceToken or Unregistered anyway.
+ */
+const TOPIC_FAULT = new Set(["TopicDisallowed", "DeviceTokenNotForTopic", "BadTopic"]);
+
+export type ApnsVerdict = "dead" | "retry" | "config";
+
+/** What one APNs refusal means: prune the row, try again later, or fix the server. Pure, so the
+ *  rule can be read in one place instead of inferred from the order of three ifs. */
+export function apnsVerdict(status: number, reason: string): ApnsVerdict {
+  if (DEAD.has(reason)) return "dead";
+  if (TOPIC_FAULT.has(reason)) return "config";
+  // No answer at all, or Apple's own 5xx — the token is fine, the moment wasn't.
+  if (status >= 500 || status === 0) return "retry";
+  // Everything else Apple refuses (400/403: bad key, wrong team, expired provider token) is OUR
+  // configuration and fails identically for every device.
+  return "config";
+}
 
 /**
  * Send one alert to one device.
@@ -172,10 +203,11 @@ export async function sendApns(
     // says BadDeviceToken on BOTH, which is why the loop ends with `gone` either way.
     if (r.reason !== "BadDeviceToken") break;
   }
-  if (DEAD.has(last.reason)) return { ok: false, gone: true, reason: last.reason };
-  if (last.status >= 500 || last.status === 0) return { ok: false, gone: false, reason: last.reason };
-  // 400/403 that isn't a dead token is a CONFIG fault (bad key, wrong team, wrong topic) and will
-  // fail for every device — surface it instead of letting the whole crew silently go quiet.
-  reportError("apns", new Error(`APNs ${last.status}: ${last.reason}`));
+  const verdict = apnsVerdict(last.status, last.reason);
+  if (verdict === "dead") return { ok: false, gone: true, reason: last.reason };
+  if (verdict === "retry") return { ok: false, gone: false, reason: last.reason };
+  // A CONFIG fault will fail for every device alike — surface it instead of letting the whole crew
+  // silently go quiet (and never prune a row over it).
+  reportError("apns", new Error(`APNs ${last.status}: ${last.reason}`), { status: last.status, reason: last.reason });
   return { ok: false, gone: false, reason: last.reason };
 }

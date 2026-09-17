@@ -46,6 +46,11 @@ import { ensureTerminalLocation, tapToPayContext, type TapToPayContext } from "@
  *  4.1  Apple's own how-to sheet (ProximityReaderDiscovery, iOS 18+) through CN's tiny native
  *       TapToPayEducation plugin — showHowToTap().
  *  Copy: in-app communications say "Tap to Pay on iPhone" in full; only a button may shorten it.
+ *
+ * ONE PAGE IS NOT ONE IDENTITY. Sign-out and sign-in are soft client transitions (server-action
+ * redirects), so every cache below — and the reader's own connection — outlives the person it
+ * was read for unless something says otherwise. noteTapIdentity is that something: every server
+ * answer carries who it belongs to, and a stamp that moved empties the page and drops the reader.
  */
 
 type Reader = { serialNumber: string; [k: string]: unknown };
@@ -130,15 +135,17 @@ let cancelRequested = false;
 /**
  * This phone CAN tap — a reader was offered or connected once on this page load. The model and
  * the iOS don't change under a page, so a "yes" is never re-asked; a "no" always is, because its
- * reasons (network, entitlement, setup) can.
+ * reasons (network, entitlement, setup) can. Dropped when the signed-in identity moves, with
+ * every other memo here (noteTapIdentity).
  */
 let supportedOnce = false;
 /**
  * The SERVER's word on whether this person may accept Apple's terms (tapToPayContext.canEnable:
- * owner/admin), kept for the page load like ctxCache — a role does not change under a page, and a
- * sign-out is a new page. null = nobody on this page has asked yet. The checkout needs it only in
- * the corner where Apple's own linked answer can't be read (connectIfNeeded), and must not owe the
- * server a round-trip at the moment of the tap (Apple 5.6) — so every read of the context memos it.
+ * owner/admin), kept for the page load like ctxCache. null = nobody on this page has asked yet.
+ * The checkout needs it only in the corner where Apple's own linked answer can't be read
+ * (connectIfNeeded), and must not owe the server a round-trip at the moment of the tap (Apple
+ * 5.6) — so every read of the context memos it, and the identity stamp on that same answer is
+ * what keeps it from outliving the person it was read for.
  */
 let canEnableCache: boolean | null = null;
 /** The warm-up in progress, if any — collect waits for it, a second prepare shares it. */
@@ -149,7 +156,8 @@ let enabling: Promise<TapEnableResult> | null = null;
  * The company's location/name/mode from the LAST successful ensureTerminalLocation, kept for the
  * page load so a foreground warm-up costs no server round-trip (Apple 1.5 wants one on every
  * foreground; driveway LTE does not want a cold function each time). Cleared on any failure of
- * the chain it feeds, so a location that stopped being right can't loop.
+ * the chain it feeds, so a location that stopped being right can't loop — and cleared the moment
+ * the signed-in identity moves, because THIS company's location is the tenant boundary.
  */
 let ctxCache: Ctx | null = null;
 /** Apple's model answer, once the education plugin has given it — splits "OS" from "model". */
@@ -163,6 +171,63 @@ let notEnabledAt = 0;
 let lastPrepareFailure: { at: number; result: TapPrepareResult } | null = null;
 const NOT_ENABLED_RECHECK_MS = 60_000;
 const FAILED_WARMUP_RECHECK_MS = 30_000;
+
+// ── whose page is this? ─────────────────────────────────────────────────────────────────────
+/**
+ * WHO EVERY CACHE ABOVE BELONGS TO — `${orgId}:${userId}`, stamped by the server on every answer
+ * that reaches this file (tapToPayContext, ensureTerminalLocation, createTapPaymentIntent).
+ *
+ * This file used to say "a sign-out is a new page". IT IS NOT. Sign-out and sign-in are Next
+ * server-action redirects — soft client transitions, no reload — so this module, its caches and
+ * the reader's own native connection all survive one. Signed out of one company and into
+ * another, a tap would otherwise run against the FIRST company's Terminal Location and the first
+ * person's role. A rule at one read path is a convention; this stamp is the one place every path
+ * passes through, and the moment it moves everything learned for the old identity is dropped and
+ * the reader is let go.
+ */
+let identity: string | null = null;
+/** When the server last confirmed that identity — the unattended warm-up's own clock. */
+let identityAt = 0;
+/**
+ * How long a cached location may go unconfirmed before the WARM-UP re-asks who is signed in.
+ * Nothing on the tap path waits for this (Apple 5.6): a press mints its PaymentIntent, and that
+ * answer carries the stamp — so the checkout is reconciled by a round-trip it already makes, and
+ * the background warm-up, which makes none, is reconciled on this clock.
+ */
+const IDENTITY_RECHECK_MS = 5 * 60_000;
+
+/**
+ * A server answer said who is signed in. Same person, same company: note when we heard it and go
+ * on. A DIFFERENT one: everything this page learned belongs to the identity that left — another
+ * company's Stripe location, another person's role, this phone's memos of their failures — and
+ * the reader is still connected for that company's account. Drop all of it and disconnect.
+ *
+ * The device facts (supportedOnce, modelSupported) go too. The hardware did not change; a reset
+ * with an exceptions list is the kind somebody eventually gets wrong, and re-learning them costs
+ * one probe when a sheet opens, never anything at the press.
+ */
+export function noteTapIdentity(stamp: string | null | undefined): void {
+  if (typeof stamp !== "string" || !stamp) return;
+  identityAt = Date.now();
+  if (identity === stamp) return;
+  const moved = identity !== null;
+  identity = stamp;
+  // The first stamp on a page has nothing to clear: every cache here is filled by a path that
+  // stamps on its way in, so an unstamped page is an empty one.
+  if (!moved) return;
+  ctxCache = null;
+  canEnableCache = null;
+  supportedOnce = false;
+  modelSupported = null;
+  notEnabledAt = 0;
+  lastPrepareFailure = null;
+  lastTokenFailure = null;
+  // Only an ECHO of the old session's reader; the SDK says where the new one stands.
+  connStatus = "UNKNOWN";
+  reconnectingAt = 0;
+  // Not awaited: it takes its SDK turn like any other caller, behind whoever holds one now.
+  void disconnectTapReader();
+}
 
 // ── one SDK, one caller at a time ───────────────────────────────────────────────────────────
 /**
@@ -1105,7 +1170,12 @@ export async function tapToPayDeviceStatus(): Promise<TapDeviceStatus> {
  */
 async function readContext(): Promise<TapToPayContext> {
   const c = await raced(10_000, () => tapToPayContext());
-  if (c.ok) canEnableCache = c.canEnable;
+  if (c.ok) {
+    // The stamp FIRST: if this is a different company or person than the page's caches were
+    // built for, noteTapIdentity empties them — and the role below is the one left standing.
+    noteTapIdentity(c.identity);
+    canEnableCache = c.canEnable;
+  }
   return c;
 }
 
@@ -1192,6 +1262,13 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
   preparing = (async (): Promise<TapPrepareResult> => {
     let stage: string = STAGE.location;
     try {
+      // NOBODY IS HOLDING THIS PHONE — the warm-up is the one path with no customer waiting on
+      // it, so it is the one that can afford to ask who is signed in. A cached location the
+      // server hasn't confirmed for this identity in five minutes is re-confirmed here: signing
+      // out of one company and into another is a soft transition, and warming the reader onto
+      // the company someone LEFT is a tenant boundary, not a nicety. A moved identity empties
+      // ctxCache under this line, and the location below is read again for the new one.
+      if (ctxCache && Date.now() - identityAt > IDENTITY_RECHECK_MS) await readContext().catch(() => {});
       let ctx: Ctx | null = ctxCache;
       if (!ctx) {
         publish(STAGE.location);
@@ -1200,6 +1277,7 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
           publish(STAGE.notReady);
           return { ok: false, error: r.error };
         }
+        noteTapIdentity(r.identity);
         ctx = r;
         ctxCache = r;
       }
@@ -1277,6 +1355,7 @@ export async function enableTapToPay(): Promise<TapEnableResult> {
         publish(STAGE.notReady);
         return { ok: false, error: ctx.error };
       }
+      noteTapIdentity(ctx.identity);
       ctxCache = ctx;
       await withSdk(async () => {
         stage = STAGE.starting;
@@ -1409,19 +1488,34 @@ export async function collectTapPayment(input: {
     // may fail without failing the payment: null is the safe side (an unknown terms status is
     // refused, never connected).
     const roleRead = canEnableCache === null ? readContext().catch(() => null) : null;
-    let ctx: Ctx | null = ctxCache;
-    if (!ctx) {
+    const takeCtx = async (): Promise<Ctx | { error: string }> => {
+      if (ctxCache) return ctxCache;
       publish(STAGE.location);
       const r = await raced(20_000, () => ensureTerminalLocation());
-      if (!r.ok) {
-        publish(STAGE.notReady);
-        return { ok: false, error: r.error };
-      }
-      ctx = r;
+      if (!r.ok) return { error: r.error };
+      noteTapIdentity(r.identity);
       ctxCache = r;
+      return r;
+    };
+    let got = await takeCtx();
+    if ("error" in got) {
+      publish(STAGE.notReady);
+      return { ok: false, error: got.error };
     }
-    if (roleRead) await roleRead;
-    const c: Ctx = ctx;
+    if (roleRead) {
+      await roleRead;
+      // That answer also said WHO is signed in. If it moved, the location above belonged to the
+      // company they left and the stamp has just emptied the cache — read the right one before
+      // any of this touches the reader.
+      if (!ctxCache) {
+        got = await takeCtx();
+        if ("error" in got) {
+          publish(STAGE.notReady);
+          return { ok: false, error: got.error };
+        }
+      }
+    }
+    const c: Ctx = got;
     // The server's word, read fresh on THIS page load — never a flag anyone could set here.
     const canEnable = canEnableCache === true;
     await withSdk(async () => {

@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice } from "@/app/(app)/billing/actions";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
 import {
   cancelTapPayment,
   collectTapPayment,
   enableTapToPay,
+  noteTapIdentity,
   onTapProgress,
   showHowToTap,
   tapToPayAccountLinked,
@@ -476,9 +478,11 @@ export function PayNowButton(props: Mode & {
   const probe = useRef<Promise<void> | null>(null);
   /** Apple 5.6 — the reader's UI within a second of the press. The reader is warm (warmup.tsx);
    *  the other second was ours: minting the PaymentIntent on the press. So on an invoice it is
-   *  minted the moment the phone says it can tap, and the press only has the SDK left to do. A
-   *  door nobody walked through is cancelled on close (cancelTapPaymentIntent) — the balance is
-   *  fixed at open, and a balance that changes under an open sheet ends in Paid, not a stale tap. */
+   *  minted the moment the phone says it can tap, and the press only has the SDK left to do.
+   *  A door nobody walked through is cancelled — on close, on unmount, and by the mint itself
+   *  when it lands after the sheet has gone. It is minted at the balance of THAT MOMENT, so the
+   *  press re-reads the live balance before re-using it: a payment, a credit or an edited line
+   *  landing under an open sheet must move the figure on the card, not just the one on screen. */
   const preMint = useRef<Promise<void> | null>(null);
   /** The invoice door in flight or already opened. The QR button and Tap to Pay both need the
    *  bill minted and SENT first; sharing one promise means pressing Tap to Pay while the QR is
@@ -583,10 +587,38 @@ export function PayNowButton(props: Mode & {
       await preMint.current;
       if (stale()) return;
       let pi = tapPi.current;
-      if (!pi || pi.invoiceId !== id) {
+      if (pi && pi.invoiceId !== id) {
+        // A door onto a different invoice: let it go rather than leave it open on the tenant's
+        // Stripe account.
+        void cancelTapPaymentIntent(pi.paymentIntentId).catch(() => {});
+        tapPi.current = null;
+        pi = null;
+      }
+      if (pi) {
+        // NEVER CHARGE A FIGURE THE INVOICE NO LONGER SAYS. The PaymentIntent minted when this
+        // sheet opened is fixed at the balance of that moment; a payment landing, a credit
+        // applied, a line edited while the sheet sat open would leave the card reading the old
+        // number. So the live balance is read at the PRESS and the two must agree to the cent.
+        // They don't — or the read didn't answer, which is the same as not knowing — and this
+        // door is cancelled and a fresh one minted, which re-reads the balance on the server.
+        // One row, no Stripe call: it is the only thing between the press and the reader (5.6).
+        const live = await invoiceCollectStatus(id).catch(() => null);
+        if (stale()) return;
+        const cents = live?.ok ? Math.round(invoiceBalance(live.total, live.amountPaid) * 100) : null;
+        if (cents !== pi.amount) {
+          void cancelTapPaymentIntent(pi.paymentIntentId).catch(() => {});
+          tapPi.current = null;
+          pi = null;
+        }
+      }
+      if (!pi) {
         const r = await createTapPaymentIntent(id);
         if (stale()) return;
         if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return; }
+        // Who this phone is signed in as, straight off the answer it just got. The bridge keys
+        // its page-long caches (the company's Stripe location, the role, the reader itself) to
+        // this; a sign-out into another company is a soft transition, so nothing else tells it.
+        noteTapIdentity(r.identity);
         pi = { invoiceId: id, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
         tapPi.current = pi;
         balanceRef.current = r.balance;
@@ -698,6 +730,28 @@ export function PayNowButton(props: Mode & {
     return () => { live = false; };
   }, [open, wantsReceipt, invoiceId, receipt, art]);
 
+  /** Mirrors `tap.kind === "busy"` for the unmount cleanup below, which is written once and can
+   *  never see the state through its own closure. */
+  const tapBusy = useRef(false);
+  useEffect(() => {
+    tapBusy.current = tap.kind === "busy";
+  }, [tap]);
+
+  // NAVIGATING AWAY IS CLOSING THE SHEET. The same three things close() does — a new generation,
+  // a reader told to stand down, a PaymentIntent nobody walked through let go — minus the
+  // refresh, because the page is already leaving. Without it a connect or a card read started
+  // here stays armed on the phone, and Apple's card sheet comes up minutes later on whatever
+  // screen the person moved to.
+  useEffect(() => {
+    return () => {
+      gen.current += 1;
+      if (tapBusy.current) void cancelTapPayment();
+      const unused = tapPi.current;
+      tapPi.current = null;
+      if (unused) void cancelTapPaymentIntent(unused.paymentIntentId).catch(() => {});
+    };
+  }, []);
+
   function close() {
     // The next open is a new generation: every step still awaiting from this one stops on return.
     gen.current += 1;
@@ -785,9 +839,21 @@ export function PayNowButton(props: Mode & {
                     // sends its bill on the explicit tap, never on open.
                     if (d.ok && d.supported && props.source === "invoice") {
                       const invId = props.invoiceId;
-                      preMint.current = createTapPaymentIntent(invId).then(
+                      // `send: false`: OPENING A SHEET IS NOT SENDING A BILL. Minting promotes a
+                      // draft invoice to sent — a door onto a wall is worse than none — so the
+                      // background mint takes the door only when the bill is already in front of
+                      // the customer, and the PRESS is what promotes a draft.
+                      preMint.current = createTapPaymentIntent(invId, { send: false }).then(
                         (r) => {
-                          if (gen.current !== g || !r.ok) return;
+                          if (!r.ok) return;
+                          // Minted after the person hit Done. close() couldn't cancel it — tapPi
+                          // was still empty when it ran — so this door cancels itself rather than
+                          // sit open on the tenant's Stripe account.
+                          if (gen.current !== g) {
+                            void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
+                            return;
+                          }
+                          noteTapIdentity(r.identity);
                           tapPi.current = { invoiceId: invId, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
                           balanceRef.current = r.balance;
                         },

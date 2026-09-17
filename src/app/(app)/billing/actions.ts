@@ -168,18 +168,75 @@ export async function applyCustomerCredit(
   }
 
   const origin = (credit.invoice_id as string | null) ?? null;
-  const { data: moved, error } = await supabase
+  // MOVE THE CREDIT FROM WHERE WE READ IT, NOT FROM WHEREVER IT IS NOW. status stays 'open'
+  // through a move, so the status filter alone could not see a lost race: two staff moving the
+  // same credit to two different invoices both reported success, and the loser's invoice went on
+  // showing a balance reduced by dollars that had gone somewhere else. Pinning the update to the
+  // invoice_id this call read makes the loser write nothing and say so.
+  const moveFrom = supabase
     .from("customer_credits")
     .update({ invoice_id: invoiceId })
     .eq("id", creditId)
-    .eq("status", "open")
-    .select("id");
+    .eq("status", "open");
+  const { data: moved, error } = await (origin ? moveFrom.eq("invoice_id", origin) : moveFrom.is("invoice_id", null)).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!moved?.length) return { ok: false, error: "That credit was just changed by someone else — reload and try again." };
 
   const landed = await recalcInvoice(supabase, invoiceId);
   // The invoice it came FROM loses it, so its balance has to be recomputed too.
   if (origin && origin !== invoiceId) await recalcInvoice(supabase, origin);
+
+  /**
+   * THE SECOND CREDIT FINDS NO ROOM.
+   *
+   * The room check above is a READ. Two credits applied to the same invoice in the same breath
+   * both saw the same balance, both passed, and both landed — and recalcTotals caps the pair at
+   * the shortfall (invoice-math, audit 8), so the later one sits on this invoice contributing
+   * $0: still open, no longer counted on the account tile, and reachable only by someone who
+   * thinks to look at this invoice for it. Read the invoice back and, if the open credits on it
+   * now exceed what it can take, put this one back where it came from and say why.
+   *
+   * A failed read is not proof of anything, so it logs and leaves the move alone.
+   */
+  const [totalRes, paysRes, creditsRes] = await Promise.all([
+    supabase.from("invoices").select("total").eq("id", invoiceId).maybeSingle(),
+    supabase.from("payments").select("amount").eq("invoice_id", invoiceId),
+    supabase.from("customer_credits").select("amount").eq("invoice_id", invoiceId).eq("disposition", "credit").eq("status", "open"),
+  ]);
+  const checkErr = totalRes.error || paysRes.error || creditsRes.error;
+  if (checkErr || !totalRes.data) {
+    reportError("applyCustomerCredit.verify", checkErr ?? new Error("invoice not found"), { creditId, invoiceId });
+  } else {
+    const sum = (rows: { amount: number | null }[] | null) => (rows ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const over = sum(paysRes.data as any) + sum(creditsRes.data as any) - (Number((totalRes.data as any).total) || 0);
+    if (over > 0.005) {
+      const putBack = supabase
+        .from("customer_credits")
+        .update({ invoice_id: origin })
+        .eq("id", creditId)
+        .eq("status", "open")
+        .eq("invoice_id", invoiceId);
+      const { data: returned, error: backErr } = await putBack.select("id");
+      await recalcInvoice(supabase, invoiceId);
+      if (origin && origin !== invoiceId) await recalcInvoice(supabase, origin);
+      revalidateMoney(invoiceId);
+      if (origin) revalidateMoney(origin);
+      revalidateMoney();
+      if (inv.customer_id) revalidatePath(`/crm/${inv.customer_id}`);
+      if (backErr || !returned?.length) {
+        reportError("applyCustomerCredit.putBack", backErr ?? new Error("credit not returned"), { creditId, invoiceId, origin });
+        return {
+          ok: false,
+          error: "Another credit reached this invoice first, so this one has nothing left to cover, and moving it back didn't go through. Open the customer's account and check where this credit sits.",
+        };
+      }
+      return {
+        ok: false,
+        error: "Another credit reached this invoice first, so there is nothing left for this one to cover. It is still on the account, ready for a different invoice.",
+      };
+    }
+  }
+
   revalidateMoney(invoiceId);
   if (origin) revalidateMoney(origin);
   revalidateMoney();
@@ -625,7 +682,31 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     if (itemsErr && isMissingColumn(itemsErr, "source_ids")) {
       itemsErr = (await supabase.from("invoice_items").insert(copies.map(({ source_ids: _claim, ...rest }) => rest))).error;
     }
-    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+    if (itemsErr) {
+      /**
+       * DON'T LEAVE A BURNED INVOICE BEHIND.
+       *
+       * The header row is inserted first, so a rejected item insert — now a real possibility,
+       * because the 0258 claim boundary refuses lines whose estimate rows another live invoice
+       * already bills ("work already billed on INV-061") — used to return the error and leave
+       * an EMPTY invoice holding a real invoice number. Worse, that empty row carries this
+       * quote_id, so the next tap of Create Invoice matched it at the top of this function and
+       * handed the office a blank document as if it were the bill.
+       *
+       * The lines land in one statement, so nothing of the invoice exists yet: take the header
+       * back out and hand up the database's own sentence, which already names the invoice to
+       * void or adjust.
+       */
+      const { data: gone, error: delErr } = await supabase.from("invoices").delete().eq("id", invoice.id).select("id");
+      if (delErr || !gone?.length) {
+        reportError("createInvoiceFromQuote.cleanup", delErr ?? new Error("empty invoice not removed"), { quoteId, invoiceId: invoice.id });
+        return {
+          ok: false,
+          error: `${dbError(itemsErr)} An empty invoice was left behind for this estimate; delete it on Billing before trying again.`,
+        };
+      }
+      return { ok: false, error: dbError(itemsErr) };
+    }
   }
 
   // DERIVE THE TOTAL FROM THE LINES THAT LANDED (audit v921 high). The header was copied from
@@ -2131,12 +2212,47 @@ export async function deletePayment(paymentId: string, invoiceId: string): Promi
   return { ok: true };
 }
 
-/** Delete an invoice — only while no payments are recorded against it
- *  (paid history must stay; void those instead). */
+/** Delete an invoice — only while it is still a DRAFT and no payments are
+ *  recorded against it (a sent bill is the customer's; void those instead). */
 export async function deleteInvoice(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+
+  /**
+   * DELETING A SENT INVOICE IS A SILENT RE-BILL.
+   *
+   * Every line-level mutation on this file goes through requireDraftInvoice; delete checked
+   * only for payments, and the Actions menu offers it at every status. So a sent, unpaid
+   * INV-061 could be deleted outright — and its lines carried the claims on the hours and
+   * materials it billed (0255/0258). The delete cascade took the claims with it, those rows
+   * read as unbilled again, and the next New Invoice on the job charged the customer for the
+   * same work a second time. The document the customer is holding left the books with nothing
+   * recorded. Void is the ending for a sent invoice: the number and the history stay, and the
+   * claims are released on purpose, where someone can see it happened.
+   */
+  const { data: inv, error: invErr } = await supabase
+    .from("invoices")
+    .select("status")
+    .eq("id", id)
+    .maybeSingle();
+  if (invErr) return { ok: false, error: dbError(invErr) };
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status === "void") {
+    // Already ended the right way. Say that plainly rather than pointing at Void again.
+    return {
+      ok: false,
+      error: "This invoice is void, which is the record that it was cancelled. It bills nothing and holds nothing, so it stays on the books.",
+    };
+  }
+  if (inv.status !== "draft") {
+    return {
+      ok: false,
+      error:
+        "This invoice has already been sent, so it can't be deleted. Mark it void instead: that keeps the record and releases the hours and materials it billed.",
+    };
+  }
+
   const { count, error: countErr } = await supabase
     .from("payments")
     .select("id", { count: "exact", head: true })
@@ -2154,8 +2270,27 @@ export async function deleteInvoice(id: string): Promise<Result> {
     .from("payment_milestones")
     .update({ status: "pending", billed_amount: null })
     .eq("invoice_id", id);
-  const { error } = await supabase.from("invoices").delete().eq("id", id);
+  // The silent-write law on the last act a document ever takes: a zero-row delete is a 204, and
+  // reporting ok on one sends the office back to a list that still has the invoice in it.
+  // AND THE DELETE CARRIES THE RULE IT WAS CHECKED AGAINST. Reading `status` and then deleting by
+  // id alone is the same check-then-write shape the claim trigger was just fixed for: between the
+  // read above and this line another tab can send the invoice, and the delete would take a SENT
+  // document and its claims with it — the very thing the draft gate exists to stop. `.eq("status",
+  // "draft")` makes the database do the checking, so a lost race deletes nothing and says so.
+  const { data: gone, error } = await supabase
+    .from("invoices")
+    .delete()
+    .eq("id", id)
+    .eq("status", "draft")
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length) {
+    return {
+      ok: false,
+      error:
+        "That invoice didn't delete — it was sent or voided while you were deleting it, or you don't have access. Reload the invoice to see where it stands.",
+    };
+  }
   revalidateMoney();
   return { ok: true };
 }

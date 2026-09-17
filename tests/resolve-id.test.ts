@@ -20,12 +20,20 @@ import {
  * handed and returns a preset row set (or error), matching the real PostgREST query shape.
  */
 
-/** Build a fake ResolverClient that always returns `rows` (or `error`) and captures the last
- *  `or()` filter string so a test can assert HOW the name was matched. */
+/** Build a fake ResolverClient that always returns `rows` (or `error`) and captures every query
+ *  so a test can assert HOW the name was matched. `.or()` calls are the sanitized filter passes;
+ *  `.ilike()` calls are the literal "as they said it" pass. */
 function fakeClient(
   result: { rows?: { id: string }[]; error?: { message: string } },
-): { client: ResolverClient; calls: { table: string; orFilter: string }[] } {
+): {
+  client: ResolverClient;
+  calls: { table: string; orFilter: string }[];
+  literal: { table: string; column: string; pattern: string }[];
+} {
   const calls: { table: string; orFilter: string }[] = [];
+  const literal: { table: string; column: string; pattern: string }[] = [];
+  const answer = () =>
+    Promise.resolve({ data: result.rows ?? null, error: result.error ?? null });
   const client: ResolverClient = {
     from(table: string) {
       return {
@@ -33,18 +41,49 @@ function fakeClient(
           return {
             or(orFilter: string) {
               calls.push({ table, orFilter });
-              return {
-                limit(_n: number) {
-                  return Promise.resolve({ data: result.rows ?? null, error: result.error ?? null });
-                },
-              };
+              return { limit: (_n: number) => answer() };
+            },
+            ilike(column: string, pattern: string) {
+              literal.push({ table, column, pattern });
+              return { limit: (_n: number) => answer() };
             },
           };
         },
       };
     },
   };
-  return { client, calls };
+  return { client, calls, literal };
+}
+
+/** A fake whose LITERAL (.ilike) pass returns `literalRows` and whose sanitized `.or()` passes
+ *  return nothing — the shape of the "Joe's Plumbing" bug: the punctuated name is findable only
+ *  when it is searched for as written. */
+function fakeLiteralOnly(literalRows: { id: string }[]): {
+  client: ResolverClient;
+  literal: { column: string; pattern: string }[];
+  orCalls: string[];
+} {
+  const literal: { column: string; pattern: string }[] = [];
+  const orCalls: string[] = [];
+  const client: ResolverClient = {
+    from(_table: string) {
+      return {
+        select(_cols: string) {
+          return {
+            or(orFilter: string) {
+              orCalls.push(orFilter);
+              return { limit: (_n: number) => Promise.resolve({ data: [], error: null }) };
+            },
+            ilike(column: string, pattern: string) {
+              literal.push({ column, pattern });
+              return { limit: (_n: number) => Promise.resolve({ data: literalRows, error: null }) };
+            },
+          };
+        },
+      };
+    },
+  };
+  return { client, literal, orCalls };
 }
 
 /** A fake whose EXACT pass returns nothing but whose CONTAINS pass (2nd call) returns rows —
@@ -64,6 +103,10 @@ function fakeExactThenContains(exactRows: { id: string }[], containsRows: { id: 
                   return Promise.resolve({ data: rows, error: null });
                 },
               };
+            },
+            // The literal pass only runs for a punctuated name; these fixtures use plain ones.
+            ilike(_column: string, _pattern: string) {
+              return { limit: (_n: number) => Promise.resolve({ data: [], error: null }) };
             },
           };
         },
@@ -148,10 +191,97 @@ describe("resolveEntityId — the four branches", () => {
   });
 
   it("asks rather than querying when the name is only .or()-breaking punctuation", async () => {
-    // "(),:" sanitizes to empty — never build an empty/injectable filter; ask instead.
-    const { client, calls } = fakeClient({ rows: [{ id: A_UUID }] });
+    // "(),:" sanitizes to empty — never build an empty/injectable filter; ask instead. Nothing is
+    // named "(),:" either, so the literal pass isn't worth a round trip.
+    const { client, calls, literal } = fakeClient({ rows: [{ id: A_UUID }] });
     const r = await resolveCustomerId(client, "(),:");
     expect("error" in r && r.error).toMatch(/No customer named/);
     expect(calls).toHaveLength(0);
+    expect(literal).toHaveLength(0);
+  });
+});
+
+describe("resolveEntityId — a punctuated name is matched AS IT WAS SAID (audit v947)", () => {
+  it("finds \"Joe's Plumbing\" that the sanitized filter could never equal", async () => {
+    // The bug: safeForOr turned the name into "Joe s Plumbing" BEFORE the equality check, so the
+    // exact pass compared a string that matches nothing and the contains pass searched for the
+    // same mangled text. Nort reported a real customer as not found.
+    const { client, literal, orCalls } = fakeLiteralOnly([{ id: A_UUID }]);
+    const r = await resolveCustomerId(client, "Joe's Plumbing");
+    expect(r).toEqual({ id: A_UUID });
+    // The apostrophe reaches the query intact, as a filter VALUE on a single column.
+    expect(literal[0]).toEqual({ column: "name", pattern: "Joe's Plumbing" });
+    // Decided before any or() filter was built.
+    expect(orCalls).toHaveLength(0);
+  });
+
+  it("carries commas and periods through too (\"Smith & Sons, Inc.\")", async () => {
+    const { client, literal } = fakeLiteralOnly([{ id: A_UUID }]);
+    const r = await resolveCustomerId(client, "Smith & Sons, Inc.");
+    expect(r).toEqual({ id: A_UUID });
+    expect(literal[0].pattern).toBe("Smith & Sons, Inc.");
+  });
+
+  it("keeps % and _ literal instead of wildcarding them", async () => {
+    const { client, literal } = fakeLiteralOnly([{ id: A_UUID }]);
+    await resolveCustomerId(client, "10% Off, LLC");
+    expect(literal[0].pattern).toBe("10\\% Off, LLC");
+  });
+
+  it("still refuses to pick when the literal name matches two rows", async () => {
+    const { client } = fakeLiteralOnly([{ id: A_UUID }, { id: "another-id" }]);
+    const r = await resolveCustomerId(client, "Joe's Plumbing");
+    expect("error" in r && r.error).toMatch(/Several customers match/);
+  });
+
+  it("counts a row matching on BOTH name columns as one match, not an ambiguity", async () => {
+    // name and company_name are queried separately; the same row coming back twice must not read
+    // as "several customers".
+    const { client } = fakeLiteralOnly([{ id: A_UUID }]);
+    const r = await resolveCustomerId(client, "Joe's Plumbing");
+    expect(r).toEqual({ id: A_UUID });
+  });
+
+  it("skips the extra round trip when the name has nothing to sanitize", async () => {
+    const { client, literal } = fakeClient({ rows: [{ id: A_UUID }] });
+    const r = await resolveJobId(client, "Miller deck");
+    expect(r).toEqual({ id: A_UUID });
+    expect(literal).toHaveLength(0);
+  });
+
+  it("surfaces a literal-pass lookup error instead of falling through to a miss", async () => {
+    const { client } = fakeClient({ error: { message: "boom" } });
+    const r = await resolveCustomerId(client, "Joe's Plumbing");
+    expect("error" in r && r.error).toMatch(/Couldn't look up that customer/);
+  });
+
+  it("finds a punctuated PARTIAL name as a last resort (\"Joe's\" → Joe's Plumbing)", async () => {
+    // The same blind spot one rung down: the sanitized contains pass searched "%Joe s%".
+    let call = 0;
+    const patterns: string[] = [];
+    const client: ResolverClient = {
+      from(_t: string) {
+        return {
+          select(_c: string) {
+            return {
+              or(_f: string) {
+                return { limit: (_n: number) => Promise.resolve({ data: [], error: null }) };
+              },
+              ilike(_col: string, pattern: string) {
+                patterns.push(pattern);
+                // Exact passes (calls 0–1) miss; the contains passes find the row.
+                const rows = pattern.startsWith("%") ? [{ id: A_UUID }] : [];
+                call += 1;
+                return { limit: (_n: number) => Promise.resolve({ data: rows, error: null }) };
+              },
+            };
+          },
+        };
+      },
+    };
+    const r = await resolveCustomerId(client, "Joe's");
+    expect(r).toEqual({ id: A_UUID });
+    expect(patterns).toContain("%Joe's%");
+    expect(call).toBeGreaterThan(0);
   });
 });

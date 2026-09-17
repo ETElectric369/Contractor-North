@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useToast } from "@/components/toast";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -88,12 +87,21 @@ export function EditEntryButton({
   onClosed?: () => void;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
   const [open, setOpen] = useState(initialOpen);
+  /**
+   * A SAVED EDIT THAT MOVED BILLED HOURS HAS TO BE READ, NOT GLIMPSED.
+   *
+   * This warning names an invoice and two figures the office has to act on (adjust the document
+   * by hand, or leave it), and it used to go out as an info toast — 2.8 seconds, on a page that
+   * refreshes underneath it, on a laptop in a truck. The edit IS saved; the note stays on screen
+   * until it is closed.
+   */
+  const [billedNote, setBilledNote] = useState<string | null>(null);
   const close = () => {
+    setBilledNote(null);
     setOpen(false);
     onClosed?.();
   };
@@ -167,6 +175,7 @@ export function EditEntryButton({
 
   function save() {
     setError(null);
+    setBilledNote(null);
     if (!span) return setError("Invalid date/time.");
     const { clockIn: ci, clockOut: co } = span;
     if (co <= ci) return setError("End must be after start.");
@@ -212,8 +221,13 @@ export function EditEntryButton({
         return setError("No connection — that didn't go through. Try again in a moment.");
       }
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      // A saved edit can still carry a warning (a billed shift whose hours changed) — said, not swallowed.
-      if (res.warning) toast(res.warning, "info");
+      // A saved edit can still carry a warning (a billed shift whose hours changed) — said, not
+      // swallowed, and not on a timer: the modal stays up holding it until the office closes it.
+      if (res.warning) {
+        setBilledNote(res.warning);
+        router.refresh();
+        return;
+      }
       close();
       router.refresh();
     });
@@ -275,6 +289,15 @@ export function EditEntryButton({
         <div className="space-y-4">
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+          )}
+          {billedNote && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div className="font-semibold">Saved. One thing about the invoice:</div>
+              <div className="mt-1">{billedNote}</div>
+              <Button variant="outline" size="sm" onClick={close} className="mt-2">
+                Got It
+              </Button>
+            </div>
           )}
           {(basePaid || mileageSettled) && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">

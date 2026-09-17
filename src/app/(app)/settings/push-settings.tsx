@@ -2,31 +2,58 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { savePushSubscription, removePushSubscription, savePushPrefs, saveDeviceToken, removeDeviceToken } from "./push-actions";
+import {
+  savePushSubscription,
+  removePushSubscription,
+  savePushPrefs,
+  saveDeviceToken,
+  removeDeviceToken,
+  myNotificationRole,
+} from "./push-actions";
 import { isNativeShell } from "@/lib/native-shell";
+import { isStaffRole } from "@/lib/actions/perms";
 import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
-const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean }[] = [
-  { key: "assigned", label: "Jobs & appointments assigned to me" },
-  { key: "inquiry", label: "New inquiries / leads" },
-  { key: "quote_accepted", label: "Quotes accepted by a customer" },
-  { key: "invoice_paid", label: "Invoices paid" },
+/**
+ * WHO CAN ACTUALLY RECEIVE THIS ALERT (2026-09-16).
+ *
+ * Every toggle here was shown to everybody, including the six whose senders only ever address
+ * office staff (orgStaffIds / the staff list in quotes, timeclock and billing). A tech could
+ * switch "Invoices paid" on and wait forever: the alert is never addressed to them, so the switch
+ * changed nothing. A control a role cannot use must not render — so each trigger now names its
+ * audience and the list is filtered by the viewer's role.
+ *
+ * "tech" is not an oversight either: notifyGeofenceExit refuses staff outright (Erik: "push at
+ * geofence for clock out only for techs"), so that switch is just as dead in an owner's hands.
+ *
+ * KEEP THIS HONEST — when a sender's audience changes, change the audience here in the same
+ * breath, or the switch starts lying again.
+ */
+type Audience = "all" | "staff" | "tech";
+
+const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; audience: Audience }[] = [
+  { key: "assigned", label: "Jobs & appointments assigned to me", audience: "all" },
+  { key: "inquiry", label: "New inquiries / leads", audience: "staff" },
+  { key: "quote_accepted", label: "Quotes accepted by a customer", audience: "staff" },
+  { key: "invoice_paid", label: "Invoices paid", audience: "staff" },
   // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
-  // was still marked "soon" after the backend shipped.
-  { key: "day_ahead", label: "My day ahead (morning summary)" },
+  // was still marked "soon" after the backend shipped. It digests to orgStaffIds.
+  { key: "day_ahead", label: "My day ahead (morning summary)", audience: "staff" },
   // clock_out's sender is LIVE too (notifyGeofenceExit — fires for techs who leave the
-  // job site while clocked in), so the toggle is real now.
-  { key: "clock_out", label: "Clock-out reminder (left the job site)" },
-  { key: "daily_report", label: "Daily reports from crew leads" },
+  // job site while clocked in), so the toggle is real now. Techs only, by construction.
+  { key: "clock_out", label: "Clock-out reminder (left the job site)", audience: "tech" },
+  { key: "daily_report", label: "Daily reports from crew leads", audience: "staff" },
   // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
   // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
-  // effect of muting an unrelated alert. The help line says what it actually covers.
+  // effect of muting an unrelated alert. The help line says what it actually covers. Staff-only
+  // because taking a payment is: createTapPaymentIntent runs behind requireStaff.
   {
     key: "tap_to_pay",
     label: "Tap to Pay on iPhone",
     help: "A card declined on Tap to Pay on iPhone (it buzzes even if you saw it on screen), and the one-time launch announcement.",
+    audience: "staff",
   },
 ];
 const DEFAULTS: Record<string, boolean> = {
@@ -49,7 +76,14 @@ function urlB64ToUint8(base64String: string) {
   return arr;
 }
 
-export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, boolean> }) {
+export function PushSettings({
+  initialPrefs,
+  role: initialRole,
+}: {
+  initialPrefs: Record<string, boolean>;
+  /** The viewer's role, when the server already has it. Left out, this asks for it once. */
+  role?: string | null;
+}) {
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,6 +102,24 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
   const [native, setNative] = useState(false);
   // The APNs token for THIS phone, held so Turn Off knows which row to delete.
   const [deviceToken, setDeviceToken] = useState<string | null>(null);
+  // The viewer's role decides which toggles are real for them (see TRIGGERS above).
+  const [role, setRole] = useState<string | null>(initialRole ?? null);
+  const [roleUnknown, setRoleUnknown] = useState(false);
+
+  useEffect(() => {
+    if (initialRole) return;
+    let live = true;
+    myNotificationRole().then((r) => {
+      if (!live) return;
+      if (r.ok && r.role) setRole(r.role);
+      // NOT A DEAD END: we fall back to the alerts everyone gets and say why the rest are missing,
+      // rather than guessing a role and rendering switches that do nothing.
+      else setRoleUnknown(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [initialRole]);
 
   useEffect(() => {
     const inShell = isNativeShell();
@@ -206,6 +258,13 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
       </p>
     );
 
+  // Until the role is known, only the alerts every role receives — never a switch that can't work.
+  const visibleTriggers = TRIGGERS.filter((t) => {
+    if (t.audience === "all") return true;
+    if (!role) return false;
+    return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
+  });
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -236,7 +295,7 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
       )}
 
       <div className="space-y-2">
-        {TRIGGERS.map((t) => (
+        {visibleTriggers.map((t) => (
           <label
             key={t.key}
             className={`flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm ${t.soon ? "opacity-60" : ""}`}
@@ -257,6 +316,12 @@ export function PushSettings({ initialPrefs }: { initialPrefs: Record<string, bo
             />
           </label>
         ))}
+        {!role && !roleUnknown && <p className="text-xs text-slate-400">Loading the rest of your alerts…</p>}
+        {roleUnknown && (
+          <p className="text-xs text-red-600">
+            We couldn&apos;t check your role, so only the alerts everyone gets are listed. Reload the page to see the rest.
+          </p>
+        )}
       </div>
     </div>
   );

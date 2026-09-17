@@ -6,7 +6,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
-import { intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
+import { intakeAnswerLines, intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
 import { coerceScopes, ownScopes, scopeLines, type ScopePick } from "@/lib/playbook/scopes";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
@@ -214,16 +214,78 @@ export default async function NewQuotePage({
   let openedForLead: { id: string; name: string; company_name: string | null } | null = null;
   const effInquiryId = inquiry ?? captureInquiryId;
   if (effInquiryId) {
-    const { data: leadRow } = await supabase
-      .from("inquiries")
-      .select("id, name, company_name, intake")
-      .eq("id", effInquiryId)
-      .maybeSingle();
-    const lr = leadRow as { id?: string; name?: string; company_name?: string | null; intake?: unknown } | null;
+    const [{ data: leadRow }, intakeForm] = await Promise.all([
+      supabase
+        .from("inquiries")
+        // `message` rides along (PROJECTION LAW): for a lead that came in by phone, by email or
+        // through the site chat there ARE no structured answers, and the message is the only
+        // thing the customer actually said. See the prefill below.
+        .select("id, name, company_name, message, intake")
+        .eq("id", effInquiryId)
+        .maybeSingle(),
+      // THE FORM THE CUSTOMER FILLED IN — the only place the LABELS for intake.intake_answers
+      // exist (the answers are a bag of keys, and `q_mst1drw8` is not a question). Read tolerantly
+      // and RLS-scoped, the same way the appointment page reads it; an org with no public door
+      // simply has none and the prefill falls back to the message.
+      tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
+        supabase.from("forms").select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
+      ),
+    ]);
+    const lr = leadRow as {
+      id?: string;
+      name?: string;
+      company_name?: string | null;
+      message?: string | null;
+      intake?: unknown;
+    } | null;
     if (lr?.id) openedForLead = { id: lr.id, name: lr.name ?? "Lead", company_name: lr.company_name ?? null };
     leadPlans = intakePaths(lr?.intake)
       .filter((p) => extOf(p) === "pdf")
       .map((p) => ({ path: p, name: uploadDisplayName(p) }));
+
+    /**
+     * QUOTING STRAIGHT FROM A LEAD ARRIVED BLANK (Erik, 2026-09-07, the Andy Kolar lead).
+     *
+     * The "Ready to quote" triage bucket's own button lands here with ?inquiry=<id> and no
+     * ?capture= — no walk-through has happened, and none needs to. Everything the customer typed
+     * into the web form was already on the row (intake.intake_answers) and, flattened, in
+     * `message`. This page read neither: the estimator opened with an empty scope box and the
+     * office retyped from the Leads board, or quoted without it.
+     *
+     * Same provenance split the walk-through path uses, and for the same reason — a stranger
+     * typed these into a web form, so they are CLAIMS TO CHECK, never "his words, take them as
+     * given" and never measurements. Labels come from the intake playbook (intakeAnswerLines,
+     * which also rescues answers under questions since deleted from the form); the flattened
+     * `message` is only printed for the lines it does not already cover, so a lead that came in
+     * by phone still carries its note and an intake lead is not shown the same ten lines twice.
+     *
+     * Never overwrites a walk-through prefill: this runs only when nothing above produced one.
+     */
+    if (!initialScope && lr?.id) {
+      const intakePb = intakeForm ? playbookForForm(intakeForm) : null;
+      const answered = intakePb
+        ? intakeAnswerLines(intakePb, (lr.intake as { intake_answers?: unknown } | null)?.intake_answers)
+        : [];
+      const said = answered.map((l) => `${l.label}: ${l.value}`).join("\n");
+      // The intake door writes `message` as exactly these "Label: answer" lines, so drop the ones
+      // already shown above and keep anything else the message carries (a phone lead's note, an
+      // office remark appended later).
+      const labels = answered.map((l) => `${l.label}:`.toLowerCase());
+      const leftover = String(lr.message ?? "")
+        .split("\n")
+        .filter((line) => line.trim() && !labels.some((lab) => line.trim().toLowerCase().startsWith(lab)))
+        .join("\n")
+        .trim();
+      const who = [lr.name, lr.company_name].filter(Boolean).join(" · ") || "this lead";
+      const parts = [
+        `From the lead: ${who}. Nobody has been on site yet, so nothing here is a measurement.`,
+        said
+          ? `WHAT THE CUSTOMER TOLD YOU (they typed these into your web form, so treat them as claims to check, not as given):\n${said}`
+          : "",
+        leftover ? `IN THEIR OWN WORDS:\n${leftover}` : "",
+      ].filter(Boolean);
+      if (parts.length > 1) initialScope = parts.join("\n\n");
+    }
   }
   const [{ data: customers }, { data: leadRows }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([

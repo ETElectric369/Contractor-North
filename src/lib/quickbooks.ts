@@ -156,6 +156,35 @@ export async function qboFetch(conn: QboConnection, path: string, init?: Request
   return res.json();
 }
 
+/** The last ten digits of a phone number, or "" — the only comparable part of a US number once
+ *  formatting, a country code and an extension are stripped out. */
+const phoneDigits = (v: unknown): string => String(v ?? "").replace(/\D/g, "").slice(-10);
+
+/** Does this QuickBooks customer carry a contact detail that PROVES it is our customer? Name is
+ *  not proof: a father and son, or two John Smiths, share one. A phone or an email does. */
+function sameQboContact(qbo: any, customer: any): boolean {
+  const ourPhone = phoneDigits(customer?.phone);
+  if (ourPhone.length === 10) {
+    for (const p of [qbo?.PrimaryPhone?.FreeFormNumber, qbo?.Mobile?.FreeFormNumber, qbo?.AlternatePhone?.FreeFormNumber]) {
+      if (phoneDigits(p) === ourPhone) return true;
+    }
+  }
+  const ourEmail = String(customer?.email ?? "").trim().toLowerCase();
+  const theirEmail = String(qbo?.PrimaryEmailAddr?.Address ?? "").trim().toLowerCase();
+  return Boolean(ourEmail) && ourEmail === theirEmail;
+}
+
+/** The contact block we put on a customer we create, so a LATER run can recognise our own work
+ *  by something other than the name (a lost mapping must not mint a third row). */
+function qboContactBody(customer: any): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const phone = String(customer?.phone ?? "").trim();
+  if (phone) body.PrimaryPhone = { FreeFormNumber: phone };
+  const email = String(customer?.email ?? "").trim();
+  if (email) body.PrimaryEmailAddr = { Address: email };
+  return body;
+}
+
 /** Ensure a QBO customer exists; returns its QBO Id, caching on the row. */
 async function ensureCustomer(conn: QboConnection, customer: any): Promise<string> {
   // A mapping is only valid inside the company file it was made in (audit 9, 0203).
@@ -168,19 +197,66 @@ async function ensureCustomer(conn: QboConnection, customer: any): Promise<strin
    * Intuit fault 6240 "Duplicate Name Exists", the mapping was never written, and every retry
    * failed identically with no way to link the two. Look first; create only a name the books
    * don't have. (Single quotes are doubled: that's the escape in Intuit's query language.)
+   *
+   * BUT A NAME IS NOT A PERSON (audit v947). Adopting on DisplayName alone collapsed two
+   * different CN customers who happen to share a name — a father and son, two John Smiths — onto
+   * ONE QuickBooks customer, and from then on one of them received the other's invoices. That is
+   * the money law twice over: the wrong person is billed, and the right person's books are wrong.
+   * The sibling invoice adoption a few lines below already refuses to adopt without a second
+   * signal for exactly this reason. Same rule here: a phone or an email must agree. On an
+   * unconfirmed collision we create a DISTINGUISHABLE name rather than merging two people —
+   * a near-duplicate in the books is a five-second merge in QuickBooks; a cross-billed invoice
+   * is a phone call from a customer.
    */
   const name = String(customer.name || "Customer").trim() || "Customer";
-  const found = await qboFetch(
-    conn,
-    `/query?minorversion=65&query=${encodeURIComponent(
-      `select Id from Customer where DisplayName = '${name.replace(/'/g, "''")}'`,
-    )}`,
-  );
-  let id: string | undefined = found?.QueryResponse?.Customer?.[0]?.Id;
-  if (!id) {
+  const lookup = async (display: string) => {
+    const res = await qboFetch(
+      conn,
+      `/query?minorversion=65&query=${encodeURIComponent(
+        `select Id, DisplayName, PrimaryPhone, Mobile, AlternatePhone, PrimaryEmailAddr from Customer where DisplayName = '${display.replace(/'/g, "''")}'`,
+      )}`,
+    );
+    return res?.QueryResponse?.Customer?.[0];
+  };
+
+  const found = await lookup(name);
+  let id: string | undefined;
+  if (found?.Id && sameQboContact(found, customer)) {
+    id = found.Id;
+  } else if (found?.Id) {
+    // A NAMESAKE, OR OUR OWN CUSTOMER WITH NOTHING TO PROVE IT BY. Either way we must not write
+    // this invoice onto that row. The tag is stable per CN customer (their phone, else their
+    // email, else their id) so a repeat push finds the same one instead of minting a third.
+    const tag =
+      phoneDigits(customer.phone).length === 10
+        ? phoneDigits(customer.phone)
+        : String(customer.email ?? "").trim() || String(customer.id ?? "").slice(0, 8);
+    // Truncate the NAME, never the tag: a half-cut tag would be a different DisplayName on the
+    // next push and would mint a third row instead of finding this one.
+    const suffix = ` (${tag})`;
+    const altName = `${name.slice(0, Math.max(1, 100 - suffix.length))}${suffix}`;
+    const mine = await lookup(altName);
+    if (mine?.Id) {
+      id = mine.Id;
+    } else {
+      const created = await qboFetch(conn, "/customer?minorversion=65", {
+        method: "POST",
+        body: JSON.stringify({ DisplayName: altName, ...qboContactBody(customer) }),
+      });
+      id = created?.Customer?.Id;
+      // NOTHING SILENT: the books now hold two similar names on purpose, and the office should be
+      // able to find out why without guessing. Not an error the sender needs to act on — the push
+      // itself is fine — so it goes to the ops log, not to their screen.
+      reportError(
+        "quickbooks:customer:namesake",
+        new Error(`"${name}" already exists in QuickBooks with different contact details — filed as "${altName}" instead of merging`),
+        { customerId: customer.id, existingQboId: found.Id, createdQboId: id, realmId: conn.realm_id },
+      );
+    }
+  } else {
     const created = await qboFetch(conn, "/customer?minorversion=65", {
       method: "POST",
-      body: JSON.stringify({ DisplayName: name }),
+      body: JSON.stringify({ DisplayName: name, ...qboContactBody(customer) }),
     });
     id = created?.Customer?.Id;
   }
@@ -227,7 +303,10 @@ export async function pushInvoiceToQbo(
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("*, customers(id, name, qbo_id, qbo_realm_id)")
+    // phone + email ride along (PROJECTION LAW): they are the second signal ensureCustomer needs
+    // before it adopts a QuickBooks customer that merely shares a name. Without them in the
+    // select, every namesake reads as unconfirmed and every push files a distinguished twin.
+    .select("*, customers(id, name, phone, email, qbo_id, qbo_realm_id)")
     .eq("id", invoiceId)
     .eq("org_id", orgId)
     .maybeSingle();
@@ -374,6 +453,12 @@ export async function pushInvoiceToQbo(
     }
     return { ok: true, qbo_id: qboId };
   } catch (e: any) {
+    // A THIRD PARTY'S REFUSAL BELONGS IN THE OPS LOG, NOT ONLY ON ONE PERSON'S SCREEN. Everything
+    // reaching this catch is a real Intuit API or payload failure — the token/reconnect case is
+    // handled above, outside the try — and until now the only trace was a toast the sender read
+    // once and closed. A raw `QuickBooks API 400: …` fault is exactly what the daily triage needs
+    // to see, so it lands in error_events too; the sender still gets the plain sentence.
+    reportError("quickbooks:invoice:push", e, { invoiceId, orgId });
     return { ok: false, error: e?.message?.slice(0, 300) ?? "QuickBooks error" };
   }
 }

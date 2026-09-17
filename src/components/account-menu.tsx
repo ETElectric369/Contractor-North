@@ -9,7 +9,13 @@ import { LanguageSwitcher } from "@/components/language-switcher";
 import { ShareQrButton } from "@/components/share-qr-button";
 import { initials } from "@/lib/utils";
 import { signOut } from "@/app/login/actions";
-import { removePushSubscription } from "@/app/(app)/settings/push-actions";
+import {
+  removePushSubscription,
+  releaseDeviceTokenOnSignOut,
+  reportPushRegistrationFailure,
+} from "@/app/(app)/settings/push-actions";
+import { isNativeShell } from "@/lib/native-shell";
+import { nativePushPermission, registerForNativePush } from "@/lib/native-push";
 import type { Profile } from "@/lib/types";
 
 /**
@@ -153,34 +159,74 @@ export function AccountMenu({
             <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
           </Link>
           <div className="relative z-10 my-1 border-t border-white/50" />
-          <form
-            action={signOut}
-            onSubmit={() => {
-              // UNBIND THIS DEVICE'S PUSH BEFORE LEAVING (audit v921 high). On a shared crew
-              // phone the push_subscriptions row is keyed by the browser endpoint and pointed at
-              // whoever last subscribed — so after A signs out, A's org notifications kept
-              // arriving on the device until B re-subscribed. Best-effort, fire-and-forget: the
-              // sign-out itself must never wait on or fail over the push teardown.
-              void (async () => {
-                try {
-                  const reg = await navigator.serviceWorker?.getRegistration();
-                  const sub = await reg?.pushManager.getSubscription();
-                  if (sub?.endpoint) {
-                    await removePushSubscription(sub.endpoint);
-                    await sub.unsubscribe();
-                  }
-                } catch {
-                  /* device push may be unavailable; sign-out proceeds regardless */
-                }
-              })();
-            }}
-          >
+          <form action={signOutAfterUnbindingPush}>
             <SignOutButton />
           </form>
         </div>
       )}
     </div>
   );
+}
+
+/** How long Sign Out will wait on the push teardown before leaving anyway. Long enough for the
+ *  usual case (the OS hands back a token it already holds in a few hundred ms), short enough that
+ *  a phone in airplane mode never feels like Sign Out is broken. */
+const PUSH_TEARDOWN_MS = 4000;
+
+/**
+ * UNBIND THIS DEVICE'S PUSH BEFORE LEAVING (audit v921 high; the native half, 2026-09-16).
+ *
+ * On a shared crew phone the push row is pointed at whoever last registered — so after A signs
+ * out, A's org notifications kept arriving on the device until B re-registered: job names,
+ * customer names, invoice amounts, on a phone A no longer has any right to.
+ *
+ * The web half did this already. Inside the NATIVE SHELL it did nothing at all: there is no
+ * service worker in a WKWebView, so `navigator.serviceWorker` has no registration, the whole
+ * teardown fell through, and the APNs row survived the sign-out untouched. The shell's
+ * counterpart to saveDeviceToken is the token, not an endpoint — so ask the OS for it and release
+ * that row instead.
+ *
+ * Registering again does NOT raise a system prompt here: we only do it when permission is already
+ * granted, and a granted permission means register() just hands back the token the OS is holding.
+ */
+async function unbindThisDevicesPush(): Promise<void> {
+  if (isNativeShell()) {
+    const perm = await nativePushPermission();
+    if (perm !== "granted") return; // nothing was ever registered from this phone
+    const r = await registerForNativePush();
+    if (r.ok) await releaseDeviceTokenOnSignOut(r.token);
+    // Nobody is watching this screen (we are on our way to /login), so the ops log is the sink.
+    else await reportPushRegistrationFailure("signOut.register", r.error);
+    return;
+  }
+  const reg = await navigator.serviceWorker?.getRegistration();
+  const sub = await reg?.pushManager.getSubscription();
+  if (sub?.endpoint) {
+    await removePushSubscription(sub.endpoint);
+    await sub.unsubscribe();
+  }
+}
+
+/**
+ * THE TEARDOWN IS NOW WAITED ON, WITH A CEILING (2026-09-16).
+ *
+ * It used to be fire-and-forget from onSubmit. That was survivable for web push, whose request is
+ * dispatched in the same tick — but the native path has to ask the OS for the token first, and
+ * `signOut` redirects to /login long before that answer comes back. An unbind that loses the race
+ * every time is not an unbind. So Sign Out waits for it, capped: whatever happens in
+ * PUSH_TEARDOWN_MS, the sign-out proceeds. It can never fail over the teardown, and can never
+ * hang on it either. (The button already says "Signing Out…" for the whole wait.)
+ */
+async function signOutAfterUnbindingPush(): Promise<void> {
+  try {
+    await Promise.race([
+      unbindThisDevicesPush(),
+      new Promise<void>((resolve) => setTimeout(resolve, PUSH_TEARDOWN_MS)),
+    ]);
+  } catch {
+    /* device push may be unavailable; signing out is not allowed to depend on it */
+  }
+  await signOut();
 }
 
 /** Sign Out goes quiet while the action runs: a second tap must never fire a second sign-out. */

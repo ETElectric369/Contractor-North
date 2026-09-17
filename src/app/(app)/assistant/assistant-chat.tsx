@@ -235,6 +235,55 @@ const RELOAD_OFFLINE_SENTENCE = "You're offline — couldn't check whether your 
 const RELOAD_PENDING_SENTENCE = "No answer to your last question yet — Nort may still be working on it. Reload in a moment to check, or ask it again.";
 /** The server's turn is over and there is nothing: the only honest door left is asking again. */
 const RELOAD_UNANSWERED_SENTENCE = "Your last question didn't get an answer before the app reloaded — ask it again.";
+/** HOW LONG A RECOVERED MONEY PROPOSAL MAY STILL BE ANSWERED. The confirm marker is the last
+ *  thing in the stream, so a drop in that half-second used to lose the Yes/No card for good: the
+ *  recovery path reads the persisted reply, and that text is marker-stripped. The route now
+ *  persists the proposal WITH the turn, stamped with the moment it was made — and this is the
+ *  window in which the card may come back. Ten minutes: long enough to cover a tunnel, a locked
+ *  phone or a cold reload, short enough that a $340 bill can never resurface after the user has
+ *  moved on and forgotten what they were approving. Deliberately inside the 15-minute pending-turn
+ *  marker above, so a proposal can never outlive the turn that carries it. Past the window the
+ *  proposal is NOT re-offered — the turn is shown and the user is told to ask again. */
+const RECOVERED_CONFIRM_MAX_AGE_MS = 10 * 60_000;
+const EXPIRED_CONFIRM_SENTENCE = "That one needed a yes or no while the connection was down, and it's too old to answer now. Ask again if you still want it.";
+
+/** A recovered turn arrives as the persisted reply, which may END with the confirm envelope the
+ *  dropped stream never delivered. Split it: the text the user reads, and the proposal to put back
+ *  on screen. Nothing here RUNS anything — the card's Yes still goes through confirmAgentAction,
+ *  which re-checks the allow-list, the role gate and the action's own schema server-side. An
+ *  envelope we cannot read counts as stale — a proposal nobody can answer, said out loud rather
+ *  than left as a question on screen with no buttons under it. */
+function splitRecovered(reply: string): { text: string; confirm: AgentConfirm | null; stale: boolean } {
+  const cut = reply.indexOf(CONFIRM_MARKER);
+  if (cut < 0) return { text: reply, confirm: null, stale: false };
+  const text = reply.slice(0, cut);
+  let parsed: (Partial<AgentConfirm> & { at?: string }) | null = null;
+  try { parsed = JSON.parse(reply.slice(cut + CONFIRM_MARKER.length)); } catch {}
+  const ok = !!parsed && typeof parsed.name === "string" && !!parsed.name
+    && typeof parsed.prompt === "string" && !!parsed.prompt
+    && !!parsed.input && typeof parsed.input === "object";
+  if (!ok) return { text, confirm: null, stale: true };
+  const at = Date.parse(parsed!.at ?? "");
+  // An envelope with no usable stamp is treated as stale: an unanswerable age is not a young age.
+  const stale = !Number.isFinite(at) || Date.now() - at > RECOVERED_CONFIRM_MAX_AGE_MS;
+  return {
+    text,
+    confirm: stale ? null : { name: parsed!.name!, input: parsed!.input as Record<string, unknown>, prompt: parsed!.prompt! },
+    stale,
+  };
+}
+
+/** The assistant line(s) a recovered turn becomes. A turn that only PROPOSED has no sentence of
+ *  its own, so the read-back is the line — exactly what the live path shows when the reply is the
+ *  proposal. An expired proposal says so on its own line: nothing silent. */
+function recoveredLines(r: { text: string; confirm: AgentConfirm | null; stale: boolean }): Msg[] {
+  const body = r.text.trim();
+  const head = body || r.confirm?.prompt || EXPIRED_CONFIRM_SENTENCE;
+  const lines: Msg[] = [{ role: "assistant", content: head }];
+  if (r.stale && head !== EXPIRED_CONFIRM_SENTENCE) lines.push({ role: "assistant", content: EXPIRED_CONFIRM_SENTENCE });
+  return lines;
+}
+
 /** Every residual line the recovery paths can leave. A restored transcript loses the `hint`
  *  (saveConversation keeps role + content only), so content is how a residual line is recognised
  *  again after a reload — it is REPLACED by the next attempt's line, never stacked under it. */
@@ -613,6 +662,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     if (reply) {
       clearPendingTurn(p.at);
       const q = p.content.trim();
+      // THE PROPOSAL THE TAIL BYTES NEVER DELIVERED. A confirm-gated turn ends with the marker,
+      // so a drop in that half-second left a money read-back on screen with no Yes and no No.
+      // The route persists the proposal with the turn, so it comes back here: the card is put
+      // back, still gated — nothing runs until the user says yes, and the yes still goes through
+      // the server-side gate.
+      const rec = splitRecovered(reply);
+      const lines = recoveredLines(rec);
       setMessages((cur) => {
         // While the marker stood, whatever the stored transcript holds after this question is at
         // best a half-streamed reply or a residual "didn't get an answer" line — never the answer
@@ -623,14 +679,25 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           if (cur[i].role === "user" && cur[i].content.trim() === q) { ui = i; break; }
         }
         if (ui >= 0 && cur.slice(ui + 1).every((x) => x.role === "assistant")) {
-          return [...cur.slice(0, ui + 1), { role: "assistant", content: reply }];
+          return [...cur.slice(0, ui + 1), ...lines];
         }
         // The question never reached the transcript (the reload came before the stream ended, or
         // the drawer opened fresh): the pair is appended — over any residual line a prior attempt left.
-        return [...dropResidualTail(cur), { role: "user", content: p.content }, { role: "assistant", content: reply }];
+        return [...dropResidualTail(cur), { role: "user", content: p.content }, ...lines];
       });
-      // Opened by the Talk button: the reply is read out, as it would have been.
-      if (autoStart) say(reply.replace(/\s*\[[^\]]*\]\s*$/, ""), () => { if (voiceModeRef.current) startMic(); });
+      // A recovered proposal is re-ARMED, never re-run: this only puts the card back on screen.
+      if (rec.confirm) {
+        confirmRef.current = rec.confirm;
+        setPendingConfirm(rec.confirm);
+      }
+      // Opened by the Talk button: the turn is read out, as it would have been. With a proposal
+      // waiting, what gets read is the read-back — and the mic re-opens for yes or no, the same
+      // explicit human answer the live path waits for.
+      if (autoStart) {
+        const spoken = lines.map((l) => l.content).join(" ").replace(/\s*\[[^\]]*\]\s*$/, "");
+        if (rec.confirm) say(rec.confirm.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+        else say(spoken, () => { if (voiceModeRef.current) startMic(); });
+      }
     } else {
       const offline = isOffline();
       // Online, and the server's turn is provably over with nothing there: the marker would only
@@ -957,11 +1024,28 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
           setStatus(null);
           if (reply) {
             turnSettled = true;
-            setAssistantTail(reply);
+            // A confirm-gated turn puts the proposal in the LAST bytes of the stream — exactly the
+            // bytes a drop eats. The route persists it with the turn, so it comes back with the
+            // reply and the Yes/No card goes back on screen instead of a money read-back nobody
+            // can answer. Re-armed, never re-run: the yes still runs the server-side gate.
+            const rec = splitRecovered(reply);
+            const lines = recoveredLines(rec);
+            const head = lines[0].content;
+            setAssistantTail(head);
+            if (lines.length > 1) setMessages((m) => [...m, ...lines.slice(1)]);
+            if (rec.confirm) {
+              confirmRef.current = rec.confirm;
+              setPendingConfirm(rec.confirm);
+            }
             if (viaVoice) {
-              const unspoken = stripTrailingTag(partial && reply.startsWith(partial) ? reply.slice(spokenLen) : reply).trim();
-              if (unspoken) say(unspoken, () => { if (voiceModeRef.current) startMic(); });
-              else if (voiceModeRef.current) startMic();
+              // With a proposal waiting, read the read-back and listen for yes or no — the same
+              // explicit human answer the live path waits for, never an automatic one.
+              if (rec.confirm) say(rec.confirm.prompt, () => { if (voiceModeRef.current) confirmListen(); });
+              else {
+                const unspoken = stripTrailingTag(partial && head.startsWith(partial) ? head.slice(spokenLen) : head).trim();
+                if (unspoken) say(unspoken, () => { if (voiceModeRef.current) startMic(); });
+                else if (voiceModeRef.current) startMic();
+              }
             }
           } else {
             // Nothing on the server (yet) — or no way to ask it. The residual sentence names the

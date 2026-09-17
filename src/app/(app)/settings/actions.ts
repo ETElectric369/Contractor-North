@@ -753,7 +753,7 @@ export async function updateMemberAuth(
  *  flip active back and they're in again. Owner/admin only; you can't deactivate
  *  yourself (mirrors the updateMember self-guard so the owner can't lock themselves out).
  *  Revalidates /planner too — the assignee pickers there filter on active. */
-export async function setMemberActive(id: string, active: boolean): Promise<Result> {
+export async function setMemberActive(id: string, active: boolean): Promise<Result & { warning?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -819,7 +819,12 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
   revalidatePath("/team");
   revalidatePath("/settings");
   revalidatePath("/planner"); // assignee pickers filter on active
-  return warning ? { ok: true, error: warning } : { ok: true };
+  // A CAVEAT IS NOT A SUCCESS, AND IT IS NOT AN ERROR EITHER (2026-09-16). This used to return the
+  // caveat in `error` alongside ok: true, and the /team menu reads `error` only when ok is false —
+  // so the ban failing (no service key, GoTrue refusing) showed the office a clean success while
+  // the fired tech's existing session went on working. Its own channel, so a caller has to decide
+  // what to do with it rather than accidentally not seeing it.
+  return warning ? { ok: true, warning } : { ok: true };
 }
 
 /** How much history a member carries — the remove-vs-deactivate signal. A member with

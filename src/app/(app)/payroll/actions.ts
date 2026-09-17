@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { reportError } from "@/lib/observe";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -124,6 +125,10 @@ export async function markPeriodPaid(input: {
     .select("id");
   if (upErr) return { ok: false, error: upErr.message };
   if (!stamped?.length) return { ok: false, error: "Those hours were just marked paid by someone else." };
+  // Compensate only what THIS call stamped. Clearing the whole read list would un-pay a row a
+  // concurrent overlapping period had already stamped and snapshotted, and its run row would
+  // stay standing — the doubled gross again, from the other side.
+  const stampedIds = (stamped as { id: string }[]).map((r) => r.id);
 
   // org_id is stamped by the set_org_id trigger. Base bucket only: no miles, no
   // mileage dollars — those live on kind='mileage' rows, human-stated.
@@ -141,11 +146,26 @@ export async function markPeriodPaid(input: {
     // Compensate: entries must not stay locked without the accountant snapshot.
     // Clear the just-stamped ids so the period is re-payable; if even that fails,
     // surface BOTH errors — never report ok on a half-write.
-    const { error: compErr } = await supabase.from("time_entries").update({ paid_at: null }).in("id", ids);
+    // Row-checked like its mileage sibling: a release that writes no rows leaves the hours locked
+    // as paid with no payroll run behind them, which nothing on screen can show.
+    const { data: freed, error: compErr } = await supabase
+      .from("time_entries")
+      .update({ paid_at: null })
+      .in("id", stampedIds)
+      .select("id");
+    const stillLocked = !!compErr || !freed?.length;
+    if (stillLocked) {
+      reportError("payroll:markPeriodPaid:compensate", compErr ?? new Error("hours release wrote no rows"), {
+        profileId: input.profileId,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        stampedIds,
+      });
+    }
     return {
       ok: false,
-      error: compErr
-        ? `Payroll record failed (${runErr.message}) and unlocking the entries also failed (${compErr.message}) — check this period on Timecards before retrying.`
+      error: stillLocked
+        ? `Payroll record failed (${runErr.message}) and unlocking the entries didn't go through${compErr ? ` (${compErr.message})` : ""} — those hours are still marked paid. Check this period on Timecards before retrying.`
         : `Payroll record failed — nothing was marked paid. ${runErr.message}`,
     };
   }
@@ -284,11 +304,52 @@ export async function settleMileage(input: {
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
   const ids = list.map((e) => e.id);
-  const { error: upErr } = await supabase
+  // CLAIM ONLY STILL-HELD ROWS (the race markPeriodPaid was fixed for, on the mileage side).
+  // This read the held list and then stamped `.in(ids)` with no condition and no row check, so
+  // two taps on a slow connection — or two people settling the same person's period — both
+  // stamped and both inserted a payroll_runs row, and the accountant's export reimbursed the
+  // same miles twice. Filtering the UPDATE on mileage_paid_at IS NULL and reading the rows back
+  // means the loser stamps nothing and bails before it can write a second settlement.
+  const { data: stamped, error: upErr } = await supabase
     .from("time_entries")
     .update({ mileage_paid_at: new Date().toISOString() })
-    .in("id", ids);
+    .in("id", ids)
+    .is("mileage_paid_at", null)
+    .select("id");
   if (upErr) return { ok: false, error: upErr.message };
+  if (!stamped?.length) return { ok: false, error: "Those miles were just settled by someone else." };
+  const stampedIds = (stamped as { id: string }[]).map((r) => r.id);
+  // A PARTIAL claim is not a settlement. `amount` is a figure a human typed for the miles that
+  // were on screen; filing it against a smaller set of rows (an overlapping period settled
+  // mid-flight) would record a number that covers miles it never covered. Put the stamps back
+  // and let the office look at the period again.
+  if (stampedIds.length !== ids.length) {
+    // A ROLLBACK THAT WRITES NOTHING IS A FAILED ROLLBACK. This read only `error`, so a refused or
+    // zero-row release (RLS, a row stamped again mid-flight) reported the clean sentence and left
+    // those entries locked as paid with no settlement record behind them — miles nobody can settle
+    // and nobody can see are stuck. Zero rows is treated exactly like an error, and either way it
+    // goes to the ops log with the ids, because a stuck lock is invisible from the screen.
+    const { data: released, error: rbErr } = await supabase
+      .from("time_entries")
+      .update({ mileage_paid_at: null })
+      .in("id", stampedIds)
+      .select("id");
+    const stuck = !!rbErr || !released?.length;
+    if (stuck) {
+      reportError("payroll:settleMileage:rollback", rbErr ?? new Error("mileage release wrote no rows"), {
+        profileId: input.profileId,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        stampedIds,
+      });
+    }
+    return {
+      ok: false,
+      error: stuck
+        ? `Some of these miles were just settled by someone else, and releasing the rest didn't go through${rbErr ? ` (${rbErr.message})` : ""}. Those entries are still marked settled — check this period on Timecards before retrying.`
+        : "Some of these miles were just settled by someone else. Reload this period and enter the amount again.",
+    };
+  }
 
   // org_id stamped by set_org_id. Mileage bucket only: gross/rate/hours are 0 by
   // the bucket-shape constraint — reimbursement dollars can never read as wages.
@@ -305,12 +366,26 @@ export async function settleMileage(input: {
     created_by: userId,
   });
   if (runErr) {
-    // Same compensation as markPeriodPaid: no lock without a record.
-    const { error: compErr } = await supabase.from("time_entries").update({ mileage_paid_at: null }).in("id", ids);
+    // Same compensation as markPeriodPaid: no lock without a record. Row-checked for the same
+    // reason as the rollback above — a release that writes nothing leaves the miles locked.
+    const { data: freed, error: compErr } = await supabase
+      .from("time_entries")
+      .update({ mileage_paid_at: null })
+      .in("id", stampedIds)
+      .select("id");
+    const stillLocked = !!compErr || !freed?.length;
+    if (stillLocked) {
+      reportError("payroll:settleMileage:compensate", compErr ?? new Error("mileage release wrote no rows"), {
+        profileId: input.profileId,
+        periodStart: input.periodStart,
+        periodEnd: input.periodEnd,
+        stampedIds,
+      });
+    }
     return {
       ok: false,
-      error: compErr
-        ? `Settlement record failed (${runErr.message}) and unlocking the miles also failed (${compErr.message}) — check this period before retrying.`
+      error: stillLocked
+        ? `Settlement record failed (${runErr.message}) and unlocking the miles didn't go through${compErr ? ` (${compErr.message})` : ""} — those entries are still marked settled. Check this period before retrying.`
         : `Settlement record failed — nothing was settled. ${runErr.message}`,
     };
   }

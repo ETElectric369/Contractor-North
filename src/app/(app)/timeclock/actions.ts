@@ -22,7 +22,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 import { clampCloseAtMs, tailAllocationHours } from "./close-math";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
-import { claimedMoveRefusal, entryClaimCarry, planAllocationEdit, type ClaimHolder, type ClaimIndex, type NextAllocation, type StoredAllocation } from "./allocation-claims";
+import { billedPartMoved, claimedMoveRefusal, entryClaimCarry, planAllocationEdit, type ClaimHolder, type ClaimIndex, type NextAllocation, type StoredAllocation } from "./allocation-claims";
 
 export type ClockResult = { ok: boolean; error?: string; warning?: string };
 
@@ -933,7 +933,10 @@ export async function completeAutoClockOut(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, clock_in, clock_out, job_id")
+    // lunch_minutes rides along so the debrief can tell whether the confirmed meal actually
+    // CHANGED the shift's hours — the entry-level claim warning below needs the before figure,
+    // and a missing field is always a select list.
+    .select("id, clock_in, clock_out, job_id, lunch_minutes")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .eq("status", "closed")
@@ -1054,7 +1057,18 @@ export async function completeAutoClockOut(input: {
   for (const jid of new Set([entry.job_id, ...next.map((r) => r.job_id)].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/timeclock");
   revalidatePath("/planner"); // auto clock-out changes who's on the clock on My Day
-  return { ok: true };
+  // The confirmed lunch can TRIM what an invoice already bills (the office invoices from the
+  // truck at the end of the day, before the tech debriefs) — a claimed allocation row through
+  // the plan, or, on an un-split shift billed gross, the entry's own hours. The trim is right
+  // and it stands, but the invoice keeps its old figure, so the answer says which invoice and
+  // both numbers rather than letting billed hours drift from the timecard in silence.
+  const entryHolder = claims.get(input.entry_id);
+  const hoursWere = closed ? hoursBetween(entry.clock_in, entry.clock_out as string, Number(entry.lunch_minutes) || 0) : null;
+  const warnings = [...plan.warnings];
+  if (entryHolder && hoursWere != null && workedNow != null && Math.abs(hoursWere - workedNow) >= 0.01) {
+    warnings.push(billedPartMoved(entryHolder, hoursWere, workedNow));
+  }
+  return warnings.length ? { ok: true, warning: warnings.join(" ") } : { ok: true };
 }
 
 /**
@@ -1307,6 +1321,7 @@ export async function updateTimeEntry(input: {
   let plan: ReturnType<typeof planAllocationEdit> | null = null;
   let carryEntryClaimToInserts = false;
   let touched = new Set<string>();
+  const rescaleWarnings: string[] = [];
   if (input.allocations !== undefined) {
     let allocs = input.allocations.filter((a) => (a.hours ?? 0) > 0 || a.job_id || a.job_code || a.description?.trim());
     // C7: clamp the split to the entry's worked hours server-side (the client guard in
@@ -1404,6 +1419,13 @@ export async function updateTimeEntry(input: {
     const before = storedAllocs.reduce((s, r) => s + (Number(r.hours) || 0), 0);
     if (before > workedHrs + 0.01) {
       const scaled = clampAllocationHours(storedAllocs.map((r) => ({ id: r.id, hours: Number(r.hours) || 0 })), workedHrs);
+      // A shortened shift trims the rows an invoice may be billing, with no split on screen to
+      // show it. Allowed (the times are the correction), but the office hears about it.
+      for (const r of scaled) {
+        const holder = claims.get(r.id);
+        const was = Number(storedAllocs.find((s) => s.id === r.id)?.hours) || 0;
+        if (holder && Math.abs(was - r.hours) >= 0.01) rescaleWarnings.push(billedPartMoved(holder, was, r.hours));
+      }
       for (const r of scaled) {
         const { data: upd, error: sErr } = await supabase.from("time_allocations").update({ hours: r.hours }).eq("id", r.id).select("id");
         if (sErr || !upd?.length) {
@@ -1415,14 +1437,21 @@ export async function updateTimeEntry(input: {
       revalidatePath("/jobs");
     }
   }
+  // EVERYTHING BILLED THAT MOVED, SAID IN ONE ANSWER. The entry-level warning below covered a
+  // shift billed GROSS; a shift billed through its SPLIT moved just as silently until the plan
+  // started reporting it (allocation-claims), and the rescale branch above trims claimed rows
+  // with no submitted split at all. All three ride out on the one `warning` the edit modal
+  // holds on screen until the office closes it.
+  const warnings: string[] = [];
   if (billedHoursMoved && billedBy) {
     const fmt = (h: number) => `${(Math.round(h * 100) / 100).toString()} h`;
-    return {
-      ok: true,
-      warning: `${billedBy.invoice_number ?? "An invoice"} billed this shift at ${fmt(hoursBefore ?? 0)} — it now reads ${fmt(hoursAfter)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`,
-    };
+    warnings.push(
+      `${billedBy.invoice_number ?? "An invoice"} billed this shift at ${fmt(hoursBefore ?? 0)} — it now reads ${fmt(hoursAfter)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`,
+    );
   }
-  return { ok: true };
+  if (plan?.ok) warnings.push(...plan.warnings);
+  warnings.push(...rescaleWarnings);
+  return warnings.length ? { ok: true, warning: warnings.join(" ") } : { ok: true };
 }
 
 /**

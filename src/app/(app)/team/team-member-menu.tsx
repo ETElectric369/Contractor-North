@@ -54,6 +54,10 @@ export function TeamMemberMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Its own state, not `err`: deactivating CAN half-succeed (the seat is locked out of the app,
+  // but their live sign-in couldn't be ended), and that has to look different from both a clean
+  // success and a failure.
+  const [warn, setWarn] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   // Viewport-aware vertical placement: the LAST roster row's menu used to drop
   // down under the mobile bottom nav, burying Remove (Chris's report). The shared
@@ -82,12 +86,21 @@ export function TeamMemberMenu({
 
   async function runToggleActive() {
     setErr(null);
+    setWarn(null);
     setBusy("active");
     try {
       const res = await setMemberActive(member.id, !member.active);
       if (res.ok) {
-        setOpen(false);
+        // The roster row did change, so refresh it either way. But when the sign-in ban didn't
+        // take, this menu closing is the only thing the office would see — and "it closed" reads
+        // as "they're locked out", which is exactly what hasn't happened yet. Stay open and say
+        // what is still true: their existing session is still working.
         router.refresh();
+        if (res.warning) {
+          setWarn(res.warning);
+          return;
+        }
+        setOpen(false);
         return;
       }
       setErr(res.error ?? "Could not update.");
@@ -98,6 +111,7 @@ export function TeamMemberMenu({
 
   async function runRemove() {
     setErr(null);
+    setWarn(null);
     setBusy("remove");
     try {
       // Footprint gate: a member with logged time keeps their history — steer to Deactivate.
@@ -189,6 +203,11 @@ export function TeamMemberMenu({
                 Remove
               </button>
             </>
+          )}
+          {warn && (
+            <div className="relative z-10 mx-2 my-1 rounded-lg border border-amber-300 bg-amber-50/90 px-3 py-2 text-xs font-medium text-amber-800">
+              {warn}
+            </div>
           )}
           {err && <div className="relative z-10 px-4 py-1.5 text-xs text-red-600">{err}</div>}
         </div>

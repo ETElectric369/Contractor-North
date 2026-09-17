@@ -253,14 +253,36 @@ export async function payoutsDashboardLink(): Promise<{ url?: string; error?: st
   }
 }
 
+/** Not exported: a "use server" module may only export async functions, and nothing outside this
+ *  file needs the name — the Settings page infers it. */
+type ConnectSync = {
+  ok: boolean;
+  chargesEnabled?: boolean;
+  status?: string;
+  error?: string;
+};
+
 /**
- * Pull the connected account's current state from Stripe and mirror it locally.
- * Called when the contractor returns from onboarding, so the UI is correct
- * immediately instead of waiting for the account.updated webhook to arrive.
+ * Pull the connected account's current state from Stripe and mirror it onto our columns.
+ *
+ * TWO THINGS WERE WRONG WITH THIS (audit finding 3).
+ *
+ * It swallowed everything. `catch {}` and a bare `{ ok: false }` meant a Stripe outage, a revoked
+ * key, a deleted account and a mirror write that matched no row were all the same silent shrug —
+ * the one Stripe call on this page that cn-v949 did not teach to say where it went. Every refusal
+ * now reaches reportError with the account it was asking about, and comes back carrying a sentence
+ * a contractor can act on instead of a bare false.
+ *
+ * And nothing called it. It exists precisely so the contractor coming back from Stripe onboarding
+ * sees the truth immediately instead of waiting on the account.updated webhook — but no caller
+ * existed anywhere in the app, so an account whose state changed in Stripe (documents accepted,
+ * payouts disabled, a capability revoked) never re-mirrored until a webhook happened to arrive.
+ * The Settings page now runs it on the return trip (connect=done) and offers a Refresh Status
+ * button beside the card.
  */
-export async function refreshConnectStatus(): Promise<{ ok: boolean; chargesEnabled?: boolean }> {
+export async function refreshConnectStatus(opts?: { revalidate?: boolean }): Promise<ConnectSync> {
   const { org } = await loadOwnerOrg();
-  if (!org.stripe_account_id) return { ok: false };
+  if (!org.stripe_account_id) return { ok: false, error: "Connect a Stripe account first." };
   try {
     const account = await getStripe().accounts.retrieve(org.stripe_account_id);
     const fields = accountUpdateFields(account);
@@ -273,10 +295,40 @@ export async function refreshConnectStatus(): Promise<{ ok: boolean; chargesEnab
       .update(fields)
       .eq("id", org.id)
       .select("id");
-    if (error || !mirrored?.length) return { ok: false };
-    revalidatePath("/settings");
-    return { ok: true, chargesEnabled: fields.stripe_charges_enabled };
-  } catch {
-    return { ok: false };
+    if (error || !mirrored?.length) {
+      // A zero-row update is a 204 (silent-write law). Stripe answered; our own row did not move,
+      // which is a bug on our side and belongs in the ops log, not in a boolean.
+      reportError("stripe:connect:status-mirror", error ?? new Error("the status update matched no organization row"), {
+        orgId: org.id,
+        accountId: org.stripe_account_id,
+      });
+      return {
+        ok: false,
+        error: "Stripe answered, but your payment status didn't save here. Try Refresh Status again in a minute.",
+      };
+    }
+    // Skipped when the Settings page calls this from its own render: the page is force-dynamic, so
+    // there is nothing cached to bust, and revalidating a route while rendering it is not allowed.
+    if (opts?.revalidate !== false) revalidatePath("/settings");
+    return { ok: true, chargesEnabled: fields.stripe_charges_enabled, status: fields.stripe_account_status };
+  } catch (e: any) {
+    reportError("stripe:connect:status-refresh", e, { orgId: org.id, accountId: org.stripe_account_id });
+    return { ok: false, error: e?.message ?? "Stripe error" };
   }
+}
+
+/**
+ * The Settings card's "Refresh Status" button. A form action, so it carries its answer back the way
+ * every other door on this page does — on the URL, where the card renders it. The result is never
+ * thrown away: ok or not, the contractor is told, and a failure already sits in the ops log.
+ */
+export async function refreshConnectStatusForm(): Promise<void> {
+  const res = await refreshConnectStatus();
+  redirect(
+    res.ok
+      ? "/settings?tab=getpaid&connect=refreshed"
+      : `/settings?tab=getpaid&connect_error=${encodeURIComponent(
+          res.error ?? "Could not check your status with Stripe.",
+        )}`,
+  );
 }

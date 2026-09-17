@@ -368,12 +368,45 @@ export async function syncOrgCalendars(service: any, conn: any): Promise<OrgSync
   // the window holds more than 200 rows the NEWEST items silently stop reaching Google — the exact
   // failure this retry logic exists to prevent. Retry from the older point, but never before where
   // we already were.
-  const prev = conn.last_synced_at ? Date.parse(conn.last_synced_at) : 0;
-  const retryFrom = oldestFailed && Date.parse(oldestFailed) > prev ? oldestFailed : null;
-  await service
+  // AND A CLEAN SWEEP MUST ACTUALLY ADVANCE IT (audit v947). The fallback read
+  // `conn.last_synced_at ?? startedAt`, which after the very first run is always the OLD value —
+  // so on every clean sweep the watermark rewrote itself unchanged. It froze at whatever it was
+  // set to once, `since` never moved again, and the sweep window grew without bound against the
+  // same .limit(200) queries: the identical starvation the paragraph above describes, reached
+  // from the SUCCESS side. Three outcomes now, and they are the only three:
+  //   · nothing failed                       → this sweep's own start. The watermark moves.
+  //   · something failed, newer than where
+  //     we were                              → that item's own time, so the next run re-reaches it.
+  //   · something failed at or before where
+  //     we were (an unpushed appointment
+  //     never stamps updated_at, so it
+  //     clamps to `since`)                   → HOLD at the previous watermark. Not startedAt:
+  //                                            that would sweep the failure past and it is the one
+  //                                            thing this retry logic exists to prevent. Not
+  //                                            `since` either — holding, not rewinding, is what
+  //                                            stops the window growing five minutes a run.
+  const prevIso: string | null = conn.last_synced_at ?? null;
+  const prev = prevIso ? Date.parse(prevIso) : 0;
+  const nextWatermark = oldestFailed
+    ? Date.parse(oldestFailed) > prev
+      ? oldestFailed
+      : (prevIso ?? startedAt)
+    : startedAt;
+  const { data: stamped, error: stampErr } = await service
     .from("calendar_connections")
-    .update({ sync_tokens: tokens, last_synced_at: retryFrom ?? conn.last_synced_at ?? startedAt })
-    .eq("id", conn.id);
+    .update({ sync_tokens: tokens, last_synced_at: nextWatermark })
+    .eq("id", conn.id)
+    .select("id");
+  // A zero-row update is a 204: if the watermark never landed, the next run re-reads the OLD one
+  // and re-pushes this whole window. Harmless to Google (the upsert is by event id) but it is the
+  // sync quietly standing still, so it goes in the ops log rather than passing as a clean sweep.
+  if (stampErr || !stamped?.length) {
+    reportError("gcal-sync-watermark", stampErr ?? new Error("no calendar_connections row updated"), {
+      orgId: conn.org_id,
+      connectionId: conn.id,
+    });
+    res.errors.push("The sync ran, but its place-marker didn't save. The next sync will repeat this window.");
+  }
 
   return res;
 }

@@ -1,6 +1,7 @@
 "use server";
 import { dbError } from "@/lib/db-error";
 
+import { reportError } from "@/lib/observe";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 
 /** Save (or refresh) the current user's push subscription for this device. */
@@ -62,7 +63,13 @@ export async function removePushSubscription(endpoint: string) {
  *
  * org_id rides along like the web row's does, so an org's rows are prunable together.
  */
-export async function saveDeviceToken(deviceToken: string, userAgent?: string) {
+export async function saveDeviceToken(
+  deviceToken: string,
+  userAgent?: string,
+  /** `background: true` = the app-launch re-registration nobody asked for, so the ops-log entry
+   *  says which failure this was: a person tapping Enable, or a silent refresh going wrong. */
+  opts?: { background?: boolean },
+) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -82,22 +89,78 @@ export async function saveDeviceToken(deviceToken: string, userAgent?: string) {
   // and the same reasoning, as the fan-out in lib/push.ts. The user is already authenticated
   // above; the only thing this widens is which ROW may be replaced, and only for a caller who
   // already holds the 64-hex token the OS issued to that install.
+  //
+  // RE-POINT, DON'T DELETE-THEN-INSERT (2026-09-16). This used to delete the token's row and then
+  // insert a fresh one. Two operations with no transaction around them: when the insert failed
+  // (an RLS change, a check constraint, a dropped connection) the phone was left with NO row at
+  // all — worse off than before it registered — and the background re-registration on app launch
+  // threw the result away, so nothing said so. The crew simply stopped getting alerts.
+  //
+  // An UPDATE keyed on the token does the whole job in one statement and never opens that window:
+  // the row for this install is handed to whoever is signed in now. Only a token we have never
+  // seen falls through to an INSERT, where there is no row to lose.
   const svc = createServiceClient();
-  await svc.from("push_subscriptions").delete().eq("device_token", token);
+  const claim = {
+    profile_id: user.id,
+    platform: "ios",
+    user_agent: userAgent ?? null,
+    // Null: the sender probes production, then sandbox, and writes back whichever answered.
+    apns_env: null,
+  };
+  const { data: moved, error: moveErr } = await svc
+    .from("push_subscriptions")
+    .update(claim)
+    .eq("device_token", token)
+    .select("id");
+  if (moveErr) {
+    reportError("saveDeviceToken.repoint", moveErr, { background: !!opts?.background });
+    return { ok: false, error: dbError(moveErr) };
+  }
+  if (moved?.length) return { ok: true };
+
   const { data: rows, error } = await svc
     .from("push_subscriptions")
-    .insert({
-      profile_id: user.id,
-      platform: "ios",
-      device_token: token,
-      user_agent: userAgent ?? null,
-      // Null: the sender probes production, then sandbox, and writes back whichever answered.
-      apns_env: null,
-    })
+    .insert({ ...claim, device_token: token })
     .select("id");
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // 23505: another launch of the same app inserted this token between our UPDATE and our
+    // INSERT (the shell re-registers on every launch, and Settings can register at the same
+    // time). The row exists and is simply not ours yet — re-point it rather than telling a
+    // person their phone couldn't be registered when it plainly was.
+    if (String((error as { code?: string }).code) === "23505") {
+      const { data: raced, error: raceErr } = await svc
+        .from("push_subscriptions")
+        .update(claim)
+        .eq("device_token", token)
+        .select("id");
+      if (!raceErr && raced?.length) return { ok: true };
+    }
+    reportError("saveDeviceToken.insert", error, { background: !!opts?.background });
+    return { ok: false, error: dbError(error) };
+  }
   // THE SILENT-WRITE LAW: a refused write is a 200 with no rows.
-  if (!rows?.length) return { ok: false, error: "Couldn't register this device for notifications." };
+  if (!rows?.length) {
+    reportError("saveDeviceToken.insert", new Error("insert returned no row"), { background: !!opts?.background });
+    return { ok: false, error: "Couldn't register this device for notifications." };
+  }
+  return { ok: true };
+}
+
+/**
+ * A push failure that happens on the PHONE, not on the server — iOS refusing to register, a token
+ * that never arrives — has no server call to fail and no screen to fail on when it happens in the
+ * background. This is its only way into the ops log. Signed-in callers only, and both strings are
+ * clamped: this writes an error_events row, so it must not become a place to dump text.
+ */
+export async function reportPushRegistrationFailure(stage: string, detail: string) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  reportError(`nativePush.${String(stage ?? "").slice(0, 40) || "unknown"}`, new Error(String(detail ?? "").slice(0, 300)), {
+    profileId: user.id,
+  });
   return { ok: true };
 }
 
@@ -121,6 +184,35 @@ export async function removeDeviceToken(deviceToken: string) {
     return { ok: false, error: "This device's notifications weren't registered to your account — nothing was turned off on the server." };
   }
   return { ok: true };
+}
+
+/**
+ * Unbind THIS phone on sign-out. Same delete as removeDeviceToken, but nobody is looking at the
+ * screen while it runs — the app is on its way to /login — so a failure has to land in the ops log
+ * instead of a toast that will never be painted. A phone that keeps its row keeps buzzing with the
+ * previous person's customer names and dollar figures, which is the whole reason this exists.
+ */
+export async function releaseDeviceTokenOnSignOut(deviceToken: string) {
+  const res = await removeDeviceToken(deviceToken);
+  if (!res.ok) reportError("signOut.releaseDeviceToken", new Error(res.error ?? "device token not released"));
+  return res;
+}
+
+/**
+ * WHICH ALERTS EVEN APPLY TO ME. Settings renders the per-trigger toggles in a client component,
+ * which has no role in hand, and a switch for an alert a role can never receive is a control that
+ * does nothing: a tech turning "Invoices paid" on waits for a buzz that is only ever sent to
+ * office staff. One read of the caller's OWN row, so it can't be used to ask about anyone else.
+ */
+export async function myNotificationRole(): Promise<{ ok: boolean; role?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false };
+  const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const role = (data as { role?: string | null } | null)?.role;
+  return role ? { ok: true, role } : { ok: false };
 }
 
 /** Save the current user's per-trigger notification toggles. */

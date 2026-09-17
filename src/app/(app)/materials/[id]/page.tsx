@@ -4,7 +4,7 @@ import { jobSiteLabel } from "@/lib/schedule-options";
 import { Briefcase, ListChecks } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
-import { formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { isStaffRole } from "@/lib/actions/perms";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { ItemEditor } from "./item-editor";
@@ -13,7 +13,7 @@ import { NeedMaterials } from "../need-materials";
 import { NewPoButton } from "../../purchasing/new-po-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { materialListSectionTree } from "@/lib/nav-tree";
-import { deleteMaterialList } from "../actions";
+import { canonicalMaterialListId, deleteMaterialList } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -43,11 +43,14 @@ export default async function MaterialListPage({
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
 
+  const jobId: string | null = l.jobs?.id ?? l.job_id ?? null;
+
   // material_list_items has no created_at column — ordering by it errored the
   // whole query, so items silently never loaded. Order by sort_order only.
   // Pull the org's jobs (RLS-scoped) so the edit control can re-link this list —
   // staff only; a tech has no relink control, so his page doesn't pay for the read.
-  const [{ data: items }, { data: jobs }] = await Promise.all([
+  // The canonical-list read rides the same wave rather than adding a fourth serial trip.
+  const [{ data: items }, { data: jobs }, canonical] = await Promise.all([
     supabase
       .from("material_list_items")
       .select(viewerIsStaff ? "*" : TECH_ITEM_COLUMNS)
@@ -60,14 +63,31 @@ export default async function MaterialListPage({
           .order("created_at", { ascending: false })
           .limit(100)
       : Promise.resolve({ data: null }),
+    jobId ? canonicalMaterialListId(jobId) : Promise.resolve({ id: null as string | null }),
   ]);
 
-  const jobId: string | null = l.jobs?.id ?? l.job_id ?? null;
   // A list with no job is a quote's take-off or a work order's sheet — office paper.
   // A tech can land here from a link, so it renders, but read-only with one sentence
   // saying whose it is rather than an editor whose every save would refuse.
   const techReadOnly = !viewerIsStaff && !jobId;
   const keeperNoun = l.quote_id ? "a quote" : l.work_order_id ? "a work order" : "no job";
+
+  // A SUPERSEDED LIST IS A TRAP, SO IT STOPS BEING AN EDITOR (for every role).
+  //
+  // A job can end up with two lists — somebody types one by hand, then the accepted quote's
+  // take-off is built and lands newer (createMaterialListFromQuote keys its own idempotence on the
+  // QUOTE, so it mints a second list rather than merging). Everything that reads the job — the job
+  // hub's Materials tab, ensureJobMaterialList, My Day's Materials button — resolves to the NEWEST
+  // list. This page did not: it happily drew the full editor on the old one, for techs too. A man
+  // adding six items to it at the supply house was writing to rows nobody else opens, and nothing
+  // on screen said so. That breaks the one-list-per-job law at the only door where it was still
+  // breakable, so the old list becomes read-only here and says where the live one is.
+  //
+  // Canonical is decided in ONE place (canonicalMaterialListId) so this page and the job hub can
+  // never disagree about which list is the job's.
+  const canonicalId: string | null = (canonical as { id: string | null }).id;
+  const supersededBy = jobId && canonicalId && canonicalId !== l.id ? canonicalId : null;
+  const readOnly = techReadOnly || !!supersededBy;
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -104,18 +124,26 @@ export default async function MaterialListPage({
             so none of it is drawn for him (nothing silent, no dead ends). */}
         {viewerIsStaff && (
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href={`/print/pdf-preview?doc=material-list&id=${l.id}&back=/materials/${l.id}`}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <ListChecks className="h-4 w-4 shrink-0" /> Pick List
-            </Link>
-            <NewPoButton
-              jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
-              lists={[{ id: l.id, name: l.name }]}
-              defaultJobId={l.jobs?.id}
-              defaultListId={l.id}
-            />
+            {/* A superseded list keeps only the office's clean-up doors. Printing a pick list from
+                it would send somebody to the supply house with the wrong sheet, and a PO seeded
+                from it would ORDER off rows the job no longer reads — so neither is offered.
+                Delete stays: removing the stray is the whole point of landing here. */}
+            {!supersededBy && (
+              <>
+                <Link
+                  href={`/print/pdf-preview?doc=material-list&id=${l.id}&back=/materials/${l.id}`}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <ListChecks className="h-4 w-4 shrink-0" /> Pick List
+                </Link>
+                <NewPoButton
+                  jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
+                  lists={[{ id: l.id, name: l.name }]}
+                  defaultJobId={l.jobs?.id}
+                  defaultListId={l.id}
+                />
+              </>
+            )}
             <SectionActionsMenu
               tree={materialListSectionTree(
                 l.name,
@@ -130,11 +158,28 @@ export default async function MaterialListPage({
         )}
       </div>
 
-      {techReadOnly ? (
+      {readOnly ? (
         <div className="space-y-3">
-          <p className="text-sm text-slate-500">
-            This list belongs to {keeperNoun} &mdash; the office keeps it.
-          </p>
+          {supersededBy ? (
+            /* NO DEAD ENDS: say what happened and where the live list is, in one breath. */
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-sm text-amber-900">
+                This list was replaced. The job&rsquo;s materials list is a newer one, and that is the
+                list everybody works from. Anything added here would not show up on the job. The
+                items below are kept so nothing is lost.
+              </p>
+              <Link
+                href={`/materials/${supersededBy}`}
+                className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100"
+              >
+                <ListChecks className="h-4 w-4 shrink-0" /> Open the Job&rsquo;s List
+              </Link>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">
+              This list belongs to {keeperNoun} &mdash; the office keeps it.
+            </p>
+          )}
           <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
             {((items ?? []) as any[]).map((it) => (
               <li key={it.id} className="flex items-center gap-2 px-4 py-3 text-sm">
@@ -142,6 +187,10 @@ export default async function MaterialListPage({
                 <span className="ml-auto shrink-0 text-xs text-slate-400">
                   {it.part_number ? `#${it.part_number} · ` : ""}
                   {it.quantity ?? ""} {it.unit ?? ""}
+                  {/* The office reads this view too now (a superseded list is read-only for
+                      everyone), and it may be reading it to decide what to carry across, so the
+                      cost stays visible to staff. A tech's projection never selects the column. */}
+                  {viewerIsStaff && it.est_cost != null && ` · ${formatCurrency(Number(it.est_cost))}`}
                 </span>
               </li>
             ))}

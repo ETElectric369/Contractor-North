@@ -11,6 +11,9 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/toast";
 import { useDraft } from "@/lib/use-draft";
+import { createClient } from "@/lib/supabase/client";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "@/lib/tz";
 import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 import {
   createAppointment,
@@ -58,14 +61,64 @@ export interface ApptValue {
   assigned_to: string | null;
 }
 
-function toLocal(iso: string | null): { date: string; time: string } {
+/**
+ * THE BUSINESS'S CLOCK, LOADED ONCE PER PAGE.
+ *
+ * A calendar day can mount forty of these buttons, so they share one in-flight promise and one
+ * query. A failed load is not cached: the next open tries again rather than leaving the page on
+ * the device's clock for good.
+ */
+let orgTzPromise: Promise<string | null> | null = null;
+function loadOrgTz(): Promise<string | null> {
+  if (orgTzPromise) return orgTzPromise;
+  const p = (async (): Promise<string | null> => {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+      if (error || !data) return null;
+      return getOrgSettings((data as { settings?: unknown }).settings).timezone;
+    } catch {
+      return null;
+    }
+  })();
+  orgTzPromise = p;
+  void p.then((tz) => {
+    if (tz == null && orgTzPromise === p) orgTzPromise = null;
+  });
+  return p;
+}
+
+/**
+ * An instant, shown on the clock the form is keeping. `tz` is the org's IANA zone once it has
+ * loaded; null means the fields are still on the DEVICE's clock, which is what this whole form
+ * used to do unconditionally — an office laptop set to New York read a 9 AM Pacific appointment
+ * back as 12 PM, and saving it put it wherever that hour landed.
+ */
+function toLocal(iso: string | null, tz: string | null): { date: string; time: string } {
   if (!iso) return { date: "", time: "" };
   const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return {
-    date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
-    time: `${p(d.getHours())}:${p(d.getMinutes())}`,
-  };
+  if (isNaN(d.getTime())) return { date: "", time: "" };
+  if (tz) {
+    const min = tzMinutesOfDay(d, tz);
+    return { date: todayStrInTz(tz, d), time: `${p2(Math.floor(min / 60))}:${p2(min % 60)}` };
+  }
+  return { date: ymd(d), time: `${p2(d.getHours())}:${p2(d.getMinutes())}` };
+}
+
+/**
+ * "YYYY-MM-DD" + "HH:MM" as an absolute instant, read on the clock the form is keeping.
+ *
+ * WITH a tz this is the org's wall clock through the same DST-correct primitive the server
+ * actions use (tzDateTimeUtc) — so 9 AM means 9 AM at the shop no matter where the laptop is.
+ * WITHOUT one, the device's clock, unchanged: if the timezone never loaded, the hours on screen
+ * were also read off the device, and a form that displays in one clock and saves in another is
+ * how you move an appointment three hours by opening it.
+ */
+function isoFor(date: string, hm: string, tz: string | null): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  if (tz) return tzDateTimeUtc(date, hm, tz);
+  const d = new Date(`${date}T${hm}:00`);
+  return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 // The whole form as ONE serializable object so useDraft can mirror it. All
@@ -147,8 +200,15 @@ export function AppointmentButton({
   const [slots, setSlots] = useState(defaultSlots);
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // WHICH CLOCK THE DATE/TIME FIELDS ARE CURRENTLY KEEPING. A ref, not state, because the read
+  // that matters is the one submit() makes at save time — display and save must never disagree
+  // about the zone, which is exactly how an out-of-zone laptop moved appointments.
+  const formTz = useRef<string | null>(null);
+  // Said out loud only when the business's zone differs from this device's — on the office
+  // machine there is nothing to explain.
+  const [zoneNote, setZoneNote] = useState<string | null>(null);
 
-  const emptyForm = (): ApptForm => {
+  const emptyForm = (tz: string | null = formTz.current): ApptForm => {
     // CREATE-with-logic (an entry that "could go anywhere" gets a starting point, never a blank):
     // when mounted from a job or customer, prefill the location + a title from that context, and
     // suggest a real day/time rather than a blind empty date or a blind 08:00. Editing an existing
@@ -162,9 +222,9 @@ export function AppointmentButton({
       : ctxCust
       ? `Appointment — ${ctxCust.label}`
       : "";
-    const date = appointment ? toLocal(appointment.starts_at).date : suggestedDate(defaultDate);
-    const st = appointment ? toLocal(appointment.starts_at) : { date, time: "08:00" };
-    const en = appointment ? toLocal(appointment.ends_at) : { date: "", time: "" };
+    const date = appointment ? toLocal(appointment.starts_at, tz).date : suggestedDate(defaultDate);
+    const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: "08:00" };
+    const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
     return {
       // Default TYPE: caller's explicit defaultType first (the Inspections tab passes
       // "inspection"), anywhere else → a plain appointment (NOT the old blind "quote"
@@ -207,6 +267,13 @@ export function AppointmentButton({
   const initialSnap = useRef<string | null>(null);
   if (initialSnap.current === null) initialSnap.current = JSON.stringify(draftState);
   const dirty = !linkToken && JSON.stringify(draftState) !== initialSnap.current;
+  // The LIVE form state, readable from a callback that was created on an earlier render — the
+  // timezone below arrives asynchronously, and a stale closure would read "nothing typed yet"
+  // about a form useDraft has since restored and re-seed straight over it.
+  const draftStateRef = useRef(draftState);
+  useEffect(() => {
+    draftStateRef.current = draftState;
+  }, [draftState]);
 
   // Open straight from the quick-add menu's "New appointment"
   // (/schedule?view=appointments&new=1), then strip the param so a refresh or
@@ -226,9 +293,61 @@ export function AppointmentButton({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [searchParams, pathname, router, editing]);
 
+  // Ask for the business's timezone as soon as this mounts, so an edit form is on the right clock
+  // before it is ever opened (and so the ?new=1 quick-add door, which opens the modal without
+  // going through openModal, is covered too). One cached query per page, forty buttons or one.
+  useEffect(() => {
+    let alive = true;
+    void loadOrgTz().then((tz) => {
+      if (alive) applyOrgTz(tz);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * MOVE THE FORM ONTO THE BUSINESS'S CLOCK once the org timezone lands.
+   *
+   * CREATE: the fields keep their text — somebody booking "9:00" means 9:00 at the shop — only
+   * the zone they're read in changes, which is the whole fix.
+   * EDIT, untouched: re-seed from the stored instant so the hours on screen are the business's.
+   * EDIT, already typed in: left alone, clock and all. Re-reading hours the user just typed
+   * against a different zone would move the appointment silently, and silently moving an
+   * appointment is the bug being fixed, not a smaller version of the fix.
+   */
+  function applyOrgTz(tz: string | null) {
+    if (!tz || tz === formTz.current) return;
+    const live = draftStateRef.current;
+    const touched = JSON.stringify(live) !== initialSnap.current;
+    if (editing && touched) return;
+    formTz.current = tz;
+    // The note goes up only once the fields really are on that clock, or it would be describing
+    // a zone the form isn't keeping.
+    try {
+      const deviceTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      setZoneNote(
+        tz === deviceTz ? null : `Times are ${tz.split("/").pop()?.replace(/_/g, " ") ?? tz} time, the business's clock.`,
+      );
+    } catch {
+      /* no Intl zone on this device — the note is a courtesy, never a gate */
+    }
+    if (!editing) return;
+    const next = emptyForm(tz);
+    setForm(next);
+    // Re-baseline against the LIVE mode/slots, so the re-seed itself never reads as an edit and
+    // the close guard doesn't start asking "discard your changes?" about a form nobody touched.
+    initialSnap.current = JSON.stringify({ form: next, mode: live.mode, slots: live.slots });
+    draftStateRef.current = { form: next, mode: live.mode, slots: live.slots };
+  }
+
   function openModal() {
     if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
     setOpen(true);
+    // Open FIRST, then correct: waiting on a query before the modal appears reads as a dropped
+    // tap. It is cached after the first open on the page, so in practice it is already here.
+    void loadOrgTz().then(applyOrgTz);
   }
 
   // Confirmed close (the Modal's two-tap guard has already asked when dirty) —
@@ -261,8 +380,8 @@ export function AppointmentButton({
       const clean = slots.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.date));
       if (!clean.length) return setError("Add at least one date option.");
       formData.set("slots_json", JSON.stringify(clean));
-      const first = new Date(`${clean[0].date}T${clean[0].time || "08:00"}:00`);
-      if (!isNaN(first.getTime())) formData.set("starts_at_iso", first.toISOString());
+      const first = isoFor(clean[0].date, clean[0].time || "08:00", formTz.current);
+      if (first) formData.set("starts_at_iso", first);
       start(async () => {
         const res = await createAppointmentProposal(formData);
         if (!res.ok || !res.token) return setError(res.error ?? "Could not create the link.");
@@ -273,17 +392,24 @@ export function AppointmentButton({
       return;
     }
 
-    // Resolve the picked date+time to ISO here in the browser, so the user's own
-    // timezone is honored (the server action runs in UTC).
+    // Resolve the picked date+time to an instant on the BUSINESS's clock, not this device's.
+    //
+    // It used to be `new Date("2026-09-20T09:00:00").toISOString()`, which parses in whatever zone
+    // the browser is set to — and appointments/actions.ts prefers a supplied starts_at_iso
+    // unconditionally, so this value won. An office laptop set to New York booked a Pacific org's
+    // 9 AM appointment at 6 AM, on a job the crew then showed up three hours late for. Exactly the
+    // bug already fixed for MOVE (shiftApptToDay's org-tz path), reached through the other door.
+    // With no org timezone loaded the device's clock still stands in — the fields on screen were
+    // read the same way, and a form that displays in one zone and saves in another is the bug.
     const date = String(formData.get("date") ?? "");
     if (date) {
       const st = String(formData.get("start_time") ?? "") || "08:00";
-      const startD = new Date(`${date}T${st}:00`);
-      if (!isNaN(startD.getTime())) formData.set("starts_at_iso", startD.toISOString());
+      const startIso = isoFor(date, st, formTz.current);
+      if (startIso) formData.set("starts_at_iso", startIso);
       const et = String(formData.get("end_time") ?? "");
       if (et) {
-        const endD = new Date(`${date}T${et}:00`);
-        if (!isNaN(endD.getTime())) formData.set("ends_at_iso", endD.toISOString());
+        const endIso = isoFor(date, et, formTz.current);
+        if (endIso) formData.set("ends_at_iso", endIso);
       }
     }
     start(async () => {
@@ -475,6 +601,9 @@ export function AppointmentButton({
                 <Label htmlFor="ap-end">End</Label>
                 <Input id="ap-end" name="end_time" type="time" value={form.end_time} onChange={(e) => patch({ end_time: e.target.value })} />
               </div>
+              {/* NOTHING SILENT: on a laptop set to another zone these hours are no longer the
+                  hours on that laptop's clock, and nobody should have to work that out. */}
+              {zoneNote && <p className="col-span-3 text-xs text-slate-500">{zoneNote}</p>}
             </div>
           ) : (
             <div className="space-y-2 rounded-lg border border-brand/30 bg-brand-light/20 p-3">
@@ -495,6 +624,7 @@ export function AppointmentButton({
                   />
                 </div>
               ))}
+              {zoneNote && <p className="text-xs text-slate-500">{zoneNote}</p>}
             </div>
           )}
 

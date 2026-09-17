@@ -16,7 +16,9 @@
  *   • a matched row keeps its id, so whatever invoice claims it keeps its claim;
  *   • a stored row nothing matches is removed — unless an invoice claims it, in which case the
  *     whole edit is refused, naming that invoice (the office voids or adjusts the invoice first);
- *   • a claimed row may not move to another job (its hours were billed to THIS job's customer).
+ *   • a claimed row may not move to another job (its hours were billed to THIS job's customer);
+ *   • a claimed row whose HOURS change saves, and the answer says so: the invoice keeps the
+ *     figure it went out with, so rebalancing a split behind a sent bill can never be silent.
  *
  * The entry itself is a claimable row too: an un-split shift is billed by its entry id. When
  * the office splits such a shift for the first time, billing switches from "the entry, gross"
@@ -65,11 +67,30 @@ export type AllocationPlan =
       insert: PlannedRow[];
       /** Stored rows nothing matched and no invoice claims. */
       remove: string[];
+      /**
+       * Things that ARE saved but the office has to be told about: a billed part of the shift
+       * whose hours changed (see billedPartMoved). Empty on an edit nothing bills.
+       */
+      warnings: string[];
     }
   | { ok: false; error: string };
 
 const invoiceLabel = (h: ClaimHolder | undefined): string => h?.invoice_number ?? "an invoice";
 const fmtHours = (h: number | null | undefined): string => `${(Math.round((Number(h) || 0) * 100) / 100).toFixed(2)} h`;
+
+/**
+ * BILLED HOURS MAY CHANGE, BUT NEVER SILENTLY.
+ *
+ * A claim says "these rows are billed", not "at this many hours", so rebalancing a split is
+ * allowed (a typo is a typo, and refusing would block every honest correction). What is not
+ * allowed is saying nothing: [Whitney 6 h, billed on INV-061] + [Job B 2 h] rebalanced to
+ * [Whitney 1 h] + [Job B 7 h] used to save clean, and INV-061 went on billing six hours the
+ * timecard no longer records, with nobody in a position to notice. Same sentence as the
+ * entry-level warning in updateTimeEntry, so every door says it the same way.
+ */
+export function billedPartMoved(holder: ClaimHolder | undefined, before: number, after: number): string {
+  return `${invoiceLabel(holder)} bills ${fmtHours(before)} of this shift and that part now reads ${fmtHours(after)}. The invoice keeps its figure; adjust it by hand if the customer should pay for the difference.`;
+}
 
 /**
  * Decide, row by row, how a submitted split lands on a stored one. Pure. The order of `next` is
@@ -115,14 +136,20 @@ export function planAllocationEdit(stored: StoredAllocation[], next: NextAllocat
   }
 
   // 3. Refusals, decided before a single write: a claimed row may neither leave its job nor go.
+  //    A claimed row whose HOURS change stays allowed and is reported instead (billedPartMoved).
+  const warnings: string[] = [];
   for (const p of pairs) {
     const holder = claims.get(p.stored.id);
-    if (holder && key(next[p.nextIdx].job_id) !== key(p.stored.job_id)) {
+    if (!holder) continue;
+    if (key(next[p.nextIdx].job_id) !== key(p.stored.job_id)) {
       return {
         ok: false,
         error: `${invoiceLabel(holder)} already bills the ${fmtHours(p.stored.hours)} part of this shift — void or adjust that invoice before moving those hours to another job. Nothing was changed.`,
       };
     }
+    const before = Number(p.stored.hours) || 0;
+    const after = Number(next[p.nextIdx].hours) || 0;
+    if (Math.abs(before - after) >= 0.01) warnings.push(billedPartMoved(holder, before, after));
   }
   const remove: string[] = [];
   for (const s of stored) {
@@ -152,6 +179,7 @@ export function planAllocationEdit(stored: StoredAllocation[], next: NextAllocat
     update: pairs.sort((a, b) => a.nextIdx - b.nextIdx).map((p) => ({ id: p.stored.id, row: toRow(p.nextIdx) })),
     insert: insert.map((i) => toRow(i.idx)),
     remove,
+    warnings,
   };
 }
 

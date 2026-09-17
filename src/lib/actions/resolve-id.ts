@@ -1,4 +1,5 @@
 import { dbError } from "@/lib/db-error";
+import { escapeLike } from "@/lib/utils";
 // Fragment-first name resolution — the SAFETY NET behind the "ids are uuids" prompt rule.
 //
 // Nort still occasionally passes a NAME ("John Chmura"), a fabricated slug ("c1a-first-rob"),
@@ -74,10 +75,11 @@ export type ResolveOpts = {
  *  · a name, TWO+ matches             → { error: 'Several <thing> match "…" — which one?' }
  *
  * The lookup runs through the passed RLS-scoped client, so it can only ever see (and match)
- * rows in the caller's own org. Name matching is case-insensitive: an EXACT match wins first
- * (so "Miller" resolves cleanly even when "Miller & Sons" also exists); only if there's no
- * exact match does it fall back to a "contains" search — and even then a single hit is
- * required. It NEVER returns an id when more than one row matches.
+ * rows in the caller's own org. Name matching is case-insensitive and runs in three passes,
+ * each stopping the moment it decides: the name EXACTLY as it was said ("Joe's Plumbing", with
+ * its punctuation), then the sanitized exact, then a "contains" search. An exact match wins
+ * first so "Miller" resolves cleanly even when "Miller & Sons" also exists, and even the
+ * contains pass requires a single hit. It NEVER returns an id when more than one row matches.
  */
 export async function resolveEntityId(
   supabase: ResolverClient,
@@ -107,8 +109,32 @@ export async function resolveEntityId(
   // NAME RESOLUTION against the RLS-scoped table. Try an exact (case-insensitive) match on
   // each name column first; only fall back to "contains" if nothing matched exactly.
   const escaped = safeForOr(raw);
+
+  // 0) THE NAME AS THE PERSON ACTUALLY SAID IT (audit v947).
+  //
+  // safeForOr strips [,()*:%\"'.] to spaces because those are STRUCTURAL in a PostgREST
+  // `.or(...)` list — but it does that BEFORE the equality check below, so "Joe's Plumbing"
+  // was compared as "Joe s Plumbing" and could never equal its own stored row. The contains
+  // pass then searched for the same mangled string and missed too, so Nort answered "No
+  // customer named Joe's Plumbing" about a customer sitting right there. This was patched at
+  // exactly one call site (saveQuoteFromDraft); every entity handler — job, quote, bill, petty
+  // cash, appointment, task, time, lien, permit, material — still took the broken path.
+  //
+  // A SINGLE `.ilike(col, value)` has no `or()` grammar to break out of, so the punctuation is
+  // safe to carry: one query per name column (two at most), %/_ escaped so they stay literal.
+  // Only worth the round trip when sanitizing actually changed the name — otherwise this pass
+  // and the one below are the same query.
+  const punctuated = escaped !== raw && escaped !== "";
+  if (punctuated) {
+    const literal = await runLiteralMatch(supabase, table, nameColumns, raw, "exact");
+    if ("error" in literal) return { error: `Couldn't look up that ${thing} — ${literal.error}` };
+    const literalDecision = decide(literal.rows, raw, thing);
+    if (literalDecision) return literalDecision;
+  }
+
   if (!escaped) {
-    // The name was ONLY structural/punctuation characters — nothing to match on.
+    // The name was ONLY structural/punctuation characters — nothing to match on, and nothing
+    // worth a literal lookup either (no record is named "(),:").
     return { error: `No ${thing} named "${raw}" — is it spelled right, or should I create it?` };
   }
 
@@ -127,6 +153,17 @@ export async function resolveEntityId(
   const containsDecision = decide(contains.rows, raw, thing);
   if (containsDecision) return containsDecision;
 
+  // 3) CONTAINS on the punctuated name AS WRITTEN — the same blind spot one rung down. Nort says
+  //    "Joe's"; the sanitized pass searched "%Joe s%" and missed "Joe's Plumbing" too. Last
+  //    resort, and only for a name sanitizing actually changed, so the ordinary lookup still
+  //    costs the two queries it always did.
+  if (punctuated) {
+    const loose = await runLiteralMatch(supabase, table, nameColumns, raw, "contains");
+    if ("error" in loose) return { error: `Couldn't look up that ${thing} — ${loose.error}` };
+    const looseDecision = decide(loose.rows, raw, thing);
+    if (looseDecision) return looseDecision;
+  }
+
   // Nothing matched either way.
   return {
     error: `No ${thing} named "${raw}" — is it spelled right, or should I create it?`,
@@ -138,13 +175,44 @@ export async function resolveEntityId(
  *  `or(...)` list (backslash-escaping them doesn't reliably protect them), so they're stripped
  *  to spaces; %, _, * are LIKE/pattern wildcards, likewise stripped so "Miller & Sons" or
  *  "Joe's Plumbing, Inc." matches by its plain words instead of breaking or over-matching the
- *  filter. Collapses whitespace and caps length. Returns "" when nothing usable is left. */
+ *  filter. Collapses whitespace and caps length. Returns "" when nothing usable is left.
+ *  NOT the first thing tried any more: runExactLiteral above matches the name as written, so a
+ *  punctuated name never has to be found by its mangled form. */
 function safeForOr(value: string): string {
   return value
     .replace(/[,()*:%\\"'.]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 100);
+}
+
+/** Match the name EXACTLY as it was said, one column at a time. A single `.ilike(col, value)` is
+ *  a filter VALUE, not an `or()` expression, so commas, parens, colons, quotes and periods travel
+ *  intact; escapeLike keeps % and _ literal instead of turning "Joe_s" into a wildcard. Ids are
+ *  de-duplicated across the columns so a row matching on both `name` and `company_name` still
+ *  reads as ONE match rather than an ambiguity. */
+async function runLiteralMatch(
+  supabase: ResolverClient,
+  table: string,
+  columns: string[],
+  raw: string,
+  mode: "exact" | "contains",
+): Promise<{ rows: { id: string }[] } | { error: string }> {
+  const pattern = mode === "contains" ? `%${escapeLike(raw)}%` : escapeLike(raw);
+  const seen = new Set<string>();
+  const rows: { id: string }[] = [];
+  for (const col of columns) {
+    const { data, error } = await supabase.from(table).select("id").ilike(col, pattern).limit(3);
+    if (error) return { error: dbError(error) ?? "lookup failed" };
+    for (const r of (data ?? []) as { id: string }[]) {
+      if (r?.id && !seen.has(r.id)) {
+        seen.add(r.id);
+        rows.push(r);
+      }
+    }
+    if (rows.length > 1) break; // already ambiguous — decide() only needs zero / one / many
+  }
+  return { rows };
 }
 
 /** Run one name-match query and return the matched rows (id only). Capped at 3 — we only need

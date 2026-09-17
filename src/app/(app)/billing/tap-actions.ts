@@ -105,6 +105,21 @@ function stripeLivemode(): boolean {
   return !!key && !/^(sk|rk)_test_/.test(key);
 }
 
+/**
+ * WHO THE PHONE IS SIGNED IN AS — the stamp the bridge keys its page-long caches to
+ * (src/lib/native-tap.ts: the Stripe location, the role, the connected reader).
+ *
+ * Signing out and back in as another company is a SOFT client transition (both doors are Next
+ * server-action redirects, not reloads), so the module state on the phone outlives the person it
+ * was read for. Every answer below carries this stamp; the bridge compares it to the one its
+ * caches were built under and, when it has moved, throws them away and lets go of the reader —
+ * so a tap in one company can never run against another company's Terminal Location. Org and
+ * user ids only: no secret, and both are already the caller's own facts.
+ */
+function identityStamp(orgId: string, userId: string): string {
+  return `${orgId}:${userId}`;
+}
+
 type OrgRow = {
   name: string | null;
   address_line1: string | null;
@@ -139,6 +154,8 @@ export type TapToPayContext =
        * only if the account is already linked, and say "ask an admin" (3.8.1) otherwise.
        */
       canEnable: boolean;
+      /** Who this answer belongs to (identityStamp) — the bridge drops its caches when it moves. */
+      identity: string;
     }
   | { ok: false; error: string };
 
@@ -165,6 +182,7 @@ export async function tapToPayContext(): Promise<TapToPayContext> {
     locationId: row.stripe_terminal_location_id ?? null,
     merchantDisplayName: (row.name ?? "").trim() || "Invoice payment",
     canEnable: ENABLE_ROLES.includes(role),
+    identity: identityStamp(ctx.orgId, ctx.userId),
   };
 }
 
@@ -350,7 +368,14 @@ function announcedOn(iso: string): string {
 }
 
 export type TerminalLocationResult =
-  | { ok: true; locationId: string; merchantDisplayName: string; livemode: boolean }
+  | {
+      ok: true;
+      locationId: string;
+      merchantDisplayName: string;
+      livemode: boolean;
+      /** Who this location was read for (identityStamp) — see the bridge's identity reset. */
+      identity: string;
+    }
   | { ok: false; error: string };
 
 /**
@@ -383,10 +408,11 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
   const row = org as unknown as OrgRow;
   const merchantDisplayName = (row.name ?? "").trim() || "Invoice payment";
   const livemode = stripeLivemode();
+  const identity = identityStamp(orgId, ctx.userId);
 
   // Already minted — the common case after the first tap.
   if (row.stripe_terminal_location_id) {
-    return { ok: true, locationId: row.stripe_terminal_location_id, merchantDisplayName, livemode };
+    return { ok: true, locationId: row.stripe_terminal_location_id, merchantDisplayName, livemode, identity };
   }
 
   if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
@@ -461,7 +487,7 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
       } catch {
         /* best effort */
       }
-      return { ok: true, locationId: theirs, merchantDisplayName, livemode };
+      return { ok: true, locationId: theirs, merchantDisplayName, livemode, identity };
     }
     // Not a race: the row simply wasn't ours to write (RLS said no, quietly). Say so; nothing
     // moved — and the Location we just made would be a stray per attempt, so it goes too.
@@ -479,7 +505,7 @@ export async function ensureTerminalLocation(): Promise<TerminalLocationResult> 
       error: "Stripe set up the location, but it couldn't be saved to your company — nothing was changed. Ask an owner or admin to try.",
     };
   }
-  return { ok: true, locationId, merchantDisplayName, livemode };
+  return { ok: true, locationId, merchantDisplayName, livemode, identity };
 }
 
 export type TapPaymentIntentResult =
@@ -495,8 +521,19 @@ export type TapPaymentIntentResult =
       balance: number;
       invoiceNumber: string | null;
       livemode: boolean;
+      /** Who minted it (identityStamp) — the bridge keys its caches to this. */
+      identity: string;
     }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      /**
+       * Refused ONLY because the invoice is still a draft and this caller asked not to send it
+       * (`send: false`). The pre-mint on the Pay Now sheet's open uses it: opening and closing a
+       * sheet must never send someone's bill. The press asks again with `send` on.
+       */
+      draft?: boolean;
+    };
 
 /**
  * MINT THE PAYMENTINTENT THE PHONE WILL COLLECT — on the tenant's account, for the full balance.
@@ -510,8 +547,16 @@ export type TapPaymentIntentResult =
  * Declined? Call the bridge again with the SAME clientSecret — Stripe says re-use the PI rather
  * than minting another, and a second PI per attempt would also be a second door onto the same
  * balance.
+ *
+ * `send: false` means "mint only if this bill is already in front of the customer" — the Pay Now
+ * sheet's pre-mint (Apple 5.6) passes it, because a sheet that was opened and closed must not
+ * have sent anybody's draft invoice. The press itself asks with `send` on, and THAT is what
+ * promotes the draft: an explicit tap, never a look.
  */
-export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaymentIntentResult> {
+export async function createTapPaymentIntent(
+  invoiceId: string,
+  opts?: { send?: boolean },
+): Promise<TapPaymentIntentResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   const orgId = ctx.orgId;
@@ -554,6 +599,16 @@ export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaym
   // and only now, after every refusal above has had its say, so a "nothing to collect" answer
   // never leaves the invoice's status changed behind it.
   if (status === "draft") {
+    // …and a LOOK is not a tap. The pre-mint that runs when the sheet opens passes `send: false`:
+    // it takes the door only if the bill is already sent, so opening and closing the sheet can't
+    // silently promote a draft. The press asks again, with `send` on.
+    if (opts?.send === false) {
+      return {
+        ok: false,
+        draft: true,
+        error: "This invoice is still a draft. Press Tap to Pay on iPhone and it sends the bill first, then takes the card.",
+      };
+    }
     const { data: sent, error: sendErr } = await supabase
       .from("invoices")
       .update({ status: "sent" })
@@ -604,6 +659,7 @@ export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaym
       balance,
       invoiceNumber,
       livemode: !!pi.livemode,
+      identity: identityStamp(orgId, ctx.userId),
     };
   } catch (e) {
     reportError("stripe:terminal:intent", e, { orgId, invoiceId });
