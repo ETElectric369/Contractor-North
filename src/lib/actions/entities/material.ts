@@ -216,17 +216,27 @@ export const materialActions: Record<string, ActionDef> = {
       const added = await addMaterialItem(list.id, draft);
       if (!added.ok) return { ok: false, error: added.error ?? "Couldn't add that line." };
 
-      // ANNOUNCE THE DEED: read the row back (newest line with this description on this list) so
-      // the spoken confirmation names what the database holds and hands the model the line's id
-      // for a follow-up ("actually, take that off").
-      const { data: row } = await supabase
-        .from("material_list_items")
-        .select("id, description, quantity, unit, purchased")
-        .eq("list_id", list.id)
-        .eq("description", i.description.trim())
-        .order("sort_order", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // ANNOUNCE THE DEED: read back THE ROW THIS CALL MADE — by its id, which addMaterialItem
+      // now hands back (audit, 2026-09-17). It used to re-find "its" line by description, newest
+      // first, which is a guess dressed as an identity: two adds of the same item on one list —
+      // two people at the supply house, or one man adding a second box on purpose — and the id
+      // Nort reads back names the OTHER row. A later "take that one off the list" then deletes
+      // the wrong line, and the confirm card, built from the same id, reads perfectly correct
+      // while it does. Falling back to the description match keeps an older row answering.
+      const { data: row } = added.id
+        ? await supabase
+            .from("material_list_items")
+            .select("id, description, quantity, unit, purchased")
+            .eq("id", added.id)
+            .maybeSingle()
+        : await supabase
+            .from("material_list_items")
+            .select("id, description, quantity, unit, purchased")
+            .eq("list_id", list.id)
+            .eq("description", i.description.trim())
+            .order("sort_order", { ascending: false })
+            .limit(1)
+            .maybeSingle();
       revalidatePath(`/jobs/${j.job.id}`);
       revalidatePath("/materials");
       const words = row ? lineWords(row as LineRow) : lineWords(draft);

@@ -10,6 +10,7 @@ import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
+import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
@@ -1105,8 +1106,37 @@ export async function deleteDocument(
   const supabase = await createClient();
   // Read the row FIRST (RLS scopes it to the caller's org) so we delete the file it actually
   // points at, not a client path that could name another org's object; row-check the delete.
-  const { data: row } = await supabase.from("documents").select("id, file_url").eq("id", id).maybeSingle();
+  const { data: row } = await supabase.from("documents").select("id, file_url, uploaded_by").eq("id", id).maybeSingle();
   if (!row) return { ok: false, error: "Document not found." };
+
+  /**
+   * STAFF, OR THE PERSON WHO PUT IT THERE (audit, 2026-09-17).
+   *
+   * This had no role gate at all, and the policy underneath it (documents_write, migration 0013)
+   * is `org_id = auth_org_id() AND is_member()` — any member, for every verb. Both the Documents
+   * and Photos tabs render Delete unconditionally, so a tech could delete ANY document on ANY
+   * job in the company: a signed contract, a permit, the office's own receipts.
+   *
+   * Not a plain requireStaff, though. The tech-job-access law is that a tech WORKS the job, and
+   * he is the one taking the photos and snapping the receipts — a man who shoots a blurry one
+   * must be able to throw it away. So: staff may delete anything, and anyone may delete what
+   * they themselves uploaded. An older row with no uploader recorded is staff-only, because
+   * nobody can claim it.
+   */
+  const { data: me } = await supabase.auth.getUser();
+  const uid = me?.user?.id ?? null;
+  const { data: prof } = uid
+    ? await supabase.from("profiles").select("role, active").eq("id", uid).maybeSingle()
+    : { data: null as { role?: string; active?: boolean } | null };
+  const isStaff = !!prof && prof.active !== false && isStaffRole(prof.role);
+  const mine = !!uid && (row as { uploaded_by?: string | null }).uploaded_by === uid;
+  if (!isStaff && !mine) {
+    return {
+      ok: false,
+      error: "Only the office can delete this one. You can delete photos and receipts you added yourself.",
+    };
+  }
+
   const storedPath = (row as { file_url?: string | null }).file_url ?? null;
   const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };

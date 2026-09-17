@@ -109,13 +109,22 @@ export function PushSettings({
   useEffect(() => {
     if (initialRole) return;
     let live = true;
-    myNotificationRole().then((r) => {
-      if (!live) return;
-      if (r.ok && r.role) setRole(r.role);
-      // NOT A DEAD END: we fall back to the alerts everyone gets and say why the rest are missing,
-      // rather than guessing a role and rendering switches that do nothing.
-      else setRoleUnknown(true);
-    });
+    myNotificationRole().then(
+      (r) => {
+        if (!live) return;
+        if (r.ok && r.role) setRole(r.role);
+        // NOT A DEAD END: we fall back to the alerts everyone gets and say why the rest are missing,
+        // rather than guessing a role and rendering switches that do nothing.
+        else setRoleUnknown(true);
+      },
+      // AND A REJECTION IS NOT A THIRD STATE (audit, 2026-09-17). Without this the .then never
+      // ran on a dropped connection, so neither setRole nor setRoleUnknown fired: role stayed
+      // null, roleUnknown stayed false, and the role-gated toggles simply were not there, with
+      // no sentence saying why. On a jobsite that is the common case, not the rare one.
+      () => {
+        if (live) setRoleUnknown(true);
+      },
+    );
     return () => {
       live = false;
     };

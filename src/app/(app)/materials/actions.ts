@@ -345,6 +345,11 @@ export async function addMaterialItem(
   if (error) return { ok: false, error: dbError(error) };
   if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
+  // THE ID OF THE ROW THIS CALL MADE (audit, 2026-09-17). It was selected and thrown away, so
+  // Nort's material.addLine had to go back and re-find "its" line by description, newest first —
+  // a guess, not an identity. Two people adding the same item to one list in the same minute, or
+  // one person adding a duplicate on purpose, and the id Nort reads back names the other row;
+  // a later "take that off the list" then deletes the wrong one. Hand back the real id.
   // The office adds to its own list all day; only a crew addition is news to anyone. And the
   // news travels AFTER the answer: the bell chain is five round trips plus a push, and awaiting
   // it here made a man adding eight faceplates one at a time wait for it eight times. after()
@@ -355,7 +360,7 @@ export async function addMaterialItem(
     const added = { ...item, description };
     after(() => tellOfficeAboutAddition(supabase, actor, listId, added));
   }
-  return { ok: true };
+  return { ok: true, id: (inserted as { id: string }).id };
 }
 
 export async function updateMaterialItem(

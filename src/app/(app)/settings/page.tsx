@@ -354,7 +354,12 @@ export default async function SettingsPage({
           </div>
         </Section>
         <Section title="Push notifications">
-          <PushSettings initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>} />
+          <PushSettings
+            initialPrefs={((profile as any)?.push_prefs ?? {}) as Record<string, boolean>}
+            /* The server already read this row; passing it skips the client round trip that
+               silently lost the role-gated toggles whenever the network hiccuped. */
+            role={(profile as any)?.role ?? null}
+          />
         </Section>
       </div>
     ),
