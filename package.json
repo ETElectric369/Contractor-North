@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:push": "node scripts/run-migrations.mjs --verify"
+    "db:push": "node scripts/run-migrations.mjs --verify",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
@@ -54,6 +55,7 @@
     "@types/web-push": "^3.6.4",
     "eslint": "^9.18.0",
     "eslint-config-next": "^15.1.6",
+    "patch-package": "^8.0.1",
     "pg": "^8.21.0",
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.0",
