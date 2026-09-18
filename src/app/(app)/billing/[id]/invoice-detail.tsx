@@ -749,6 +749,17 @@ export function InvoiceDetail({
                     <LineItemText description={it.description} className="block font-medium text-slate-800" />
                     <div className="text-xs text-slate-400">
                       {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+                      {/* WHERE THAT RATE CAME FROM, FOR THE OFFICE ONLY. Erik once stared at an
+                          import saying "still importing at 150" with nothing to tell him the
+                          number was his tech's own bill rate. That answer used to be appended to
+                          the line's DESCRIPTION, which is the text the customer receives, so it
+                          was repeating a man's full name on their invoice to explain something
+                          only the office needed (2026-09-18: "the rest is repetitive and
+                          unnecessary"). It belongs here, on the editor row, which no customer
+                          ever sees. Imported labor only, and only when the office is looking. */}
+                      {it.import_source === "labor" && (
+                        <span className="ml-1 text-slate-300">· their bill rate</span>
+                      )}
                     </div>
                   </button>
                   <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>

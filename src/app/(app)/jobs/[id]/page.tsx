@@ -95,6 +95,9 @@ const JOB_TAB_ORDER = [
 const JOB_PINNED_STAFF = new Set(["job", "time", "materials", "costs", "invoices"]);
 const JOB_PINNED_TECH = new Set(["job", "time", "materials", "photos"]);
 const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
+// Tabs whose chip is NOT drawn on the strip or in More, because a better door to them already
+// exists on the page. Only Tasks so far: the action dock carries it.
+const JOB_OFF_STRIP = new Set(["tasks"]);
 
 // Cluster header + icon per tab. The LucideIcon COMPONENT reference is the chip's own
 // 18px glyph on the strip AND the chamfered glass chip in the More panel. The whole
@@ -131,6 +134,11 @@ function arrangeJobTabs(tabs: TabDef[], viewerIsStaff: boolean): TabDef[] {
       ...(JOB_TAB_META[t.id] ?? {}),
       pinned: pinned.has(t.id),
       staffOnly: JOB_STAFF_ONLY.has(t.id),
+      // TASKS HAS ITS OWN DOOR. It is a slot in the action dock above (cn-v951, at Erik's ask),
+      // so a chip for it inside More was the same door listed twice — "Remove tasks from the
+      // dropdown menu" (2026-09-18). The TAB itself stays: the dock links to ?tab=tasks and the
+      // content still renders when it is active.
+      offStrip: JOB_OFF_STRIP.has(t.id),
     }));
 }
 

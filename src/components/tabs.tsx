@@ -31,6 +31,12 @@ export interface TabBarItem {
    *  that stay put and the little arrow drop down for more"). Unpinned tabs live behind the
    *  More chip. Ignored by the underline look, which keeps measuring. */
   pinned?: boolean;
+  /** Tiles look only: this tab's CONTENT still renders when it is the active tab, but its chip is
+   *  not drawn on the strip or inside More. For a tab that already has a better door somewhere
+   *  else on the page — a job's Tasks, which sits in the action dock — a second chip in the
+   *  dropdown is the same door listed twice (Erik, 2026-09-18: "Remove tasks from the dropdown
+   *  menu"). Never use it to hide a tab that has no other way in. */
+  offStrip?: boolean;
 }
 
 /** Two skins, one contract. "underline" is the measured strip every tabbed page mounts;
@@ -90,7 +96,7 @@ export function Tabs({
   activeId?: string;
   onChange?: (id: string) => void;
 }) {
-  const shown = tabs.filter((t) => !t.staffOnly || viewerIsStaff);
+  const shown = tabs.filter((t) => (!t.staffOnly || viewerIsStaff) && !t.offStrip);
   if (activeId !== undefined) {
     return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} look={look} />;
   }
@@ -185,7 +191,7 @@ export function TabBar({
   maxVisible?: number;
   look?: TabLook;
 }) {
-  const shown = items.filter((t) => !t.staffOnly || viewerIsStaff);
+  const shown = items.filter((t) => (!t.staffOnly || viewerIsStaff) && !t.offStrip);
   return look === "tiles" ? (
     <TileBar items={shown} activeId={activeId} onSelect={onSelect} />
   ) : (

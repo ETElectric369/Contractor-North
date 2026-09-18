@@ -1171,11 +1171,23 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
     // line whose hours grow. Re-importing refreshes it — unless the office negotiated
     // the number, in which case `edited` protects it and a NEW person still appends.
     import_key: `labor:${l.personId}`,
-    // THE RATE'S PROVENANCE, ON THE LINE. Erik, staring at an import: "still importing at 150"
-    // — the number was his tech's own bill_rate doing exactly its job, and nothing said so, so
-    // it read as a bug. A line that names its source explains itself; one that doesn't becomes
-    // a report.
-    description: `Labor — ${l.name}${levelRate && levelRate > 0 ? " (customer rate)" : l.rate !== defaultRate ? ` (${l.name}'s bill rate)` : ""}`,
+    /**
+     * THE LINE THE CUSTOMER READS SAYS WHO, AND THE NUMBERS SAY THE REST.
+     *
+     * This used to append the rate's provenance — "(Jimmy Santoliva's bill rate)" — because Erik
+     * once stared at an import saying "still importing at 150" and nothing told him the number
+     * was his tech's own bill_rate doing its job. That was a real confusion and the note answered
+     * it, but it answered it IN THE WRONG PLACE: `description` is the line text on the invoice the
+     * CUSTOMER receives, so an internal explanation was being mailed out, with the man's full name
+     * repeated inside its own line. Erik, reading one: "Labor - Jimmy (the rest is repetitive and
+     * unnecessary) Labor - Erik (nothing more needed)."
+     *
+     * The provenance is not lost, it is just not on the customer's paper: every line already shows
+     * its own rate beside the hours ("25.5 hr · $50.00"), and the invoice editor now names where
+     * that rate came from for the office only (invoice-detail.tsx). A hyphen, not an em-dash — this
+     * string is user-facing copy and it prints.
+     */
+    description: `Labor - ${l.name}`,
     quantity: l.quantity,
     unit: "hr",
     unit_price: l.rate,
