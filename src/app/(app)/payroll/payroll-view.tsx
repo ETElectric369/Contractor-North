@@ -44,10 +44,17 @@ const METHODS: { value: PayMethod; label: string }[] = [
  *  Recent means recent — the full history is the accountant's export, not this list. */
 const RECENT_LIMIT = 12;
 
+/** "Brian", "Brian and Jimmy", "Brian, Jimmy and Erik" — a list a man reads aloud, not "1, 2, 3". */
+const joinNames = (names: string[]): string =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
 export function PayrollView({
   balances,
   payments,
   nameById,
+  ownerIds,
+  viewerId,
+  rolesKnown,
   owedPeriods,
   openShifts,
   today,
@@ -65,6 +72,15 @@ export function PayrollView({
   /** Every payment, newest first, voided ones included (a void stays visible). */
   payments: PayPaymentRow[];
   nameById: Record<string, string>;
+  /** Profile ids whose role is `owner`. Their balances are DRAWS against the business, not wages
+   *  owed to a crew member, so the headline leaves them out and names them on their own line. */
+  ownerIds: string[];
+  /** The signed-in person, so an owner reading his own draw is told "your own" and an office
+   *  manager reading the same page is told whose it is. */
+  viewerId: string | null;
+  /** False when the role read broke: the headline then counts EVERYONE, and says so. Required, not
+   *  defaulted — a missing one must be a type error, never a silent slide back to the old total. */
+  rolesKnown: boolean;
   /** What the owed figure is made of, per person: the UNLOCKED pay periods and their gross. */
   owedPeriods: Record<string, { start: string; end: string; gross: number }[]>;
   /** People with a shift still running, and the entry to go fix. */
@@ -115,9 +131,26 @@ export function PayrollView({
   const label = `${fmtYmd(period.start)} – ${fmtYmd(endInclusive)}`;
 
   const owing = balances.filter((b) => b.owed > 0.005);
+  // THE HEADLINE COUNTS THE CREW (2026-09-18). Erik's own $40,498 at his $125 owner rate is a DRAW,
+  // not a wage he owes an employee, and summing it in made "You Owe" read as a debt to Brian and
+  // Jimmy when nearly all of it was himself — the worst kind of wrong number, because it is the one
+  // figure he acts on. Split by role: the crew makes the headline, the owner keeps a line of his
+  // own below the board so the figure is neither lost nor misread. Rows are untouched either way.
+  const ownerSet = new Set(ownerIds);
+  const crewOwing = owing.filter((b) => !ownerSet.has(b.profileId));
+  const ownerOwing = owing.filter((b) => ownerSet.has(b.profileId));
   // WHAT HE OWES, not a net position: a man who is ahead does not reduce what the next man is
   // owed, so only the positive balances are summed. The ahead rows say so on their own line.
-  const totalOwed = r2(owing.reduce((s, b) => s + b.owed, 0));
+  const totalOwed = r2(crewOwing.reduce((s, b) => s + b.owed, 0));
+  const ownerDraw = r2(ownerOwing.reduce((s, b) => s + b.owed, 0));
+  // Said once, in the register of whoever is reading it: Erik sees "your own", an office manager
+  // sees the name. Both sentences end by pointing at the row, so the draw is never a dead end.
+  const ownerIsViewer = ownerOwing.length === 1 && ownerOwing[0].profileId === viewerId;
+  const ownerDrawLine = ownerIsViewer
+    ? `Your own ${sayMoney(ownerDraw)} is an owner draw, not wages you owe the crew, so it is not in the total above. Tap your row to record what you have drawn.`
+    : ownerOwing.length === 1
+      ? `${joinNames(ownerOwing.map((b) => firstName(b.name)))} is an owner, so that ${sayMoney(ownerDraw)} is a draw, not wages owed to the crew, and it is not in the total above. Tap the row to record it.`
+      : `${joinNames(ownerOwing.map((b) => firstName(b.name)))} are owners, so their ${sayMoney(ownerDraw)} is a draw, not wages owed to the crew, and it is not in the total above. Tap a row to record it.`;
   const needsCheck = payments.filter((p) => p.needsCheck && !p.voided);
   const newest = payments.slice(0, RECENT_LIMIT);
   // A payment still waiting to be checked never falls off the end of this list. The amber line at
@@ -295,10 +328,22 @@ export function PayrollView({
 
       <div>
         <div className="text-4xl font-bold tabular-nums tracking-tight text-slate-900">You Owe {formatCurrency(totalOwed)}</div>
+        {/* WHO the total is across, and — only when an owner draw is being held out of it — that it
+            is the crew. An org with no owner balance reads exactly the sentence it always did; a
+            label that only appears when it has work to do is a label, not another thing to ignore. */}
         <div className="mt-1 text-sm text-slate-600">
-          {owing.length === 0 ? "Everyone is paid up." : `across ${owing.length} ${owing.length === 1 ? "person" : "people"}`}
+          {crewOwing.length === 0
+            ? ownerOwing.length > 0
+              ? "Your crew is paid up."
+              : "Everyone is paid up."
+            : `across ${crewOwing.length} ${crewOwing.length === 1 ? "person" : "people"}${ownerOwing.length > 0 ? " on your crew" : ""}`}
         </div>
         <div className="mt-0.5 text-xs text-slate-400">Base pay only. Mileage settles separately below.</div>
+        {!rolesKnown && (
+          <div className="mt-1 text-xs text-amber-700">
+            The app could not tell who is an owner just now, so this counts every person below, your own balance included.
+          </div>
+        )}
       </div>
 
       {openShifts.length > 0 && (
@@ -393,6 +438,14 @@ export function PayrollView({
           })}
         </div>
       )}
+
+      {/* THE OWNER'S OWN MONEY, at the end of the board where his row is. Without this line the
+          headline and the rows above it simply fail to add up, and a figure that does not add up is
+          the kind of thing a man stops trusting entirely. It is not a warning and it does not fire
+          on an ordinary day: no owner balance, no line. */}
+      {/* Pulled up a notch out of the page's space-y-4 so it reads as the board's own footnote
+          rather than a loose sentence floating between two sections. */}
+      {ownerOwing.length > 0 && <p className="-mt-1 px-1 text-xs leading-relaxed text-slate-500">{ownerDrawLine}</p>}
 
       {recent.length > 0 && (
         <div>

@@ -42,6 +42,7 @@ export function AddEntryButton({
   jobs,
   tz = "America/Los_Angeles",
   jobCodesEnabled = true,
+  viewerId,
 }: {
   isStaff: boolean;
   members: Member[];
@@ -53,6 +54,9 @@ export function AddEntryButton({
   /** org setting timeclock_job_codes — false drops the code question and labels
    *  jobs customer · address. Default true = today's form. */
   jobCodesEnabled?: boolean;
+  /** The signed-in person's profile id. Given it, the picker opens on THEIR OWN NAME instead of
+   *  offering a separate anonymous "Me" — see the note on the Crew member select below. */
+  viewerId?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -61,7 +65,27 @@ export function AddEntryButton({
   const [pending, start] = useTransition();
 
   const today = todayStrInTz(tz);
-  const [member, setMember] = useState("");
+  /**
+   * ONE PERSON, ONE NAME (Erik, 2026-09-18: "there is two of me in the system, one labeled Me and
+   * one labelled Erik Taylor… im wondering if we can resolve that one somehow").
+   *
+   * There were never two of him. This select offered a "Me" option whose value was the empty
+   * string, AND listed every member by name — and the owner is a member, so he read his own name
+   * twice in one list and assumed the app held two records of him. It does not:
+   * createManualEntry resolves `input.profile_id || ctx.userId`, so both choices always landed on
+   * the same profile.
+   *
+   * The sentinel was not just confusing, it was worse than picking yourself. The rate guardrail
+   * below anchors on the SELECTED person\u2019s real base rate to catch a bill rate typed into the pay
+   * slot, and with "Me" there is nobody to anchor to, so the guard was silently off for the one
+   * person most likely to be entering his own time.
+   *
+   * So: no sentinel. The picker opens on the viewer, by name, as one entry in one list. A picker\u2019s
+   * default should be a real value, never a placeholder that means "whoever is asking" — a
+   * sentinel always surfaces in the interface eventually as a second thing, which is exactly what
+   * happened here.
+   */
+  const [member, setMember] = useState(viewerId ?? "");
   const [date, setDate] = useState(today);
   const [startT, setStartT] = useState("08:00");
   const [endT, setEndT] = useState("16:00");
@@ -95,7 +119,7 @@ export function AddEntryButton({
   // Pay-rate guardrails: anchor the free Rate input to the selected person's REAL
   // base rate, and trip a non-blocking amber warning when the typed value is their
   // BILL rate — the $75-in-the-pay-slot mistake can never happen silently again.
-  // ("Me" has no anchor — the viewer isn't identified client-side.)
+  // (The viewer is now selected BY NAME, so his own entry is anchored like anyone else's.)
   const person = members.find((m) => m.id === member);
   const baseRate = Number(person?.hourly_rate ?? 0);
   const billRate = Number(person?.bill_rate ?? 0);
@@ -185,7 +209,12 @@ export function AddEntryButton({
             <div>
               <Label htmlFor="member">Crew member</Label>
               <Select id="member" value={member} onChange={(e) => setMember(e.target.value)}>
-                <option value="">Me</option>
+                {/* No "Me". When the viewer is not in the list (a staff account with no member
+                    row), the server still falls back to the caller, so the option stays for that
+                    case only and says what it means. */}
+                {!(viewerId && members.some((m) => m.id === viewerId)) && (
+                  <option value="">Myself</option>
+                )}
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.full_name ?? "Unnamed"}

@@ -339,6 +339,8 @@ export default async function TimeclockPage() {
       <PageHeader title={t("tc_title")} description={t("tc_desc")}>
         <AddEntryButton
           isStaff={isStaff}
+          /* Opens on the viewer BY NAME — no separate "Me" entry beside his own row. */
+          viewerId={user?.id}
           members={members ?? []}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
           jobs={jobOptions}

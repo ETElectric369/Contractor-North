@@ -263,10 +263,33 @@ export function EditEntryButton({
         </button>
       )}
 
+      {/* ── PORTAL, BECAUSE THE PENCIL NOW LIVES INSIDE THE WEEK STACK ────────────────────────
+          Erik, 2026-09-18, iPhone, /timecards?week=0: "Alignment and visibility" — the edit form
+          drawn INSIDE the week list, wedged between a pay-period break line and the next week's
+          card, Job code and Miles squeezed into a sliver, and Delete / Cancel / Save Changes cut
+          off past the bottom edge. He could not reach Save.
+
+          Modal renders IN PLACE by default, and until wave 3 that was harmless here: the pencil
+          sat in a per-person card BELOW the stack, in ordinary page flow. Wave 3 moved it onto the
+          row, which put the overlay inside `<Card className="overflow-clip">` (a ROUNDED, clipping
+          box) inside the stack's own `max-h-[70dvh] overflow-y-auto` scroller. That pair is what
+          catches the overlay on his phone. Nothing else in the chain explains it — there is no
+          transform / filter / backdrop-filter ancestor between the row and <body>, so the classic
+          containing-block trap is NOT what is happening, and on desktop Chromium a fixed overlay
+          escapes both an `overflow: clip` box and a scroller (hit-tested), which is exactly why
+          five waves went by without anyone seeing this.
+
+          Portaling ends the argument instead of tuning it: the overlay renders into <body>, out of
+          the scroller, out of the clipping Card, and out of the row's `pointer-events-none`
+          wrapper as well. Safe here by the documented rule — NO <form> wraps this Modal, so
+          nothing depends on DOM nesting to submit (ModalActions saves through onSave). The same
+          mount on the job hub gets the fix for free.
+          See Modal's `portal` prop and [[modal-in-glass-menu-portal]]. */}
       <Modal
         open={open}
         onClose={close}
         title="Edit time entry"
+        portal
         footer={
           <ModalActions
             onCancel={close}

@@ -131,7 +131,7 @@ export default async function PayrollPage({
 
   // THE SIX READS EVERY FIGURE ON THIS PAGE IS MADE OF. Each is paged to the end and each reports
   // its own failure (see readAll above); nothing below does arithmetic until they are all whole.
-  const [closedRead, openRead, autoClosedRead, paymentsRead, baseRunsRead, mileageRead, { data: people }, ratesRead] =
+  const [closedRead, openRead, autoClosedRead, paymentsRead, baseRunsRead, mileageRead, { data: people }, ratesRead, rolesRes] =
     await Promise.all([
       readAll<any>("hours", (from, to) =>
         supabase
@@ -194,6 +194,13 @@ export default async function PayrollPage({
       // read prices every unlocked hour at zero and a man owed thousands reads "Paid Up" — the exact
       // confident wrong number the rule below exists to prevent. It refuses with the other six.
       payRateMapRead(supabase),
+      // WHO IS THE CREW AND WHO IS THE HOUSE (2026-09-18). Erik's own balance is an owner DRAW, not
+      // a wage he owes an employee, and summing it into "You Owe" made the headline read as a debt
+      // to Brian and Jimmy when most of it was himself. The ROLE is the only thing that separates
+      // the two, and it is not on profile_pay — 0215's view carries the PAY columns, not role — so
+      // it comes off `profiles`, where every other staff page reads its roles from. Not a money
+      // read: it changes how the total is COMPOSED, never what any one person is owed.
+      supabase.from("profiles").select("id, role"),
     ]);
 
   // NOTHING SILENT. One rule, because a simple rule is the only kind that holds: if ANY of those
@@ -254,6 +261,20 @@ export default async function PayrollPage({
     const id = e.profile_id ? String(e.profile_id) : "";
     if (id && !nameById[id] && e.profiles?.full_name) nameById[id] = e.profiles.full_name;
   }
+
+  // OWNERS. Their balances are draws against the business, not wages owed to a crew member, so the
+  // headline leaves them out of "You Owe" and names them on their own line. Their ROWS are
+  // untouched: an owner is still tappable and still recordable, because Erik may well want to
+  // record what he has drawn.
+  const ownerIds: string[] = [];
+  for (const p of (rolesRes?.data ?? []) as { id?: string | null; role?: string | null }[]) {
+    if (p?.id && p.role === "owner") ownerIds.push(String(p.id));
+  }
+  // NOTHING SILENT, but NOT a refusal. If that read broke we cannot tell an owner from a tech —
+  // every person's own balance is still exactly right, only the way the total is composed is
+  // unknown. So the headline keeps counting everyone (the old behaviour, which is never LOW) and
+  // the view says why, out loud, instead of quietly shrinking a figure Erik pays people off.
+  const rolesKnown = !rolesRes?.error && Array.isArray(rolesRes?.data);
 
   // One mapper, shared with the actions (toPayPaymentRow), so a database row can never mean one
   // thing on the page and another thing in the write path.
@@ -388,6 +409,9 @@ export default async function PayrollPage({
         balances={balances}
         payments={payments}
         nameById={nameById}
+        ownerIds={ownerIds}
+        viewerId={user?.id ?? null}
+        rolesKnown={rolesKnown}
         owedPeriods={owedPeriods}
         openShifts={openShifts}
         today={today}

@@ -429,6 +429,22 @@ export function TimecardStack({
         const { mark, events, weekHours, weekOpen, periodOpen, people } = wd;
         const hasToday = days.includes(todayStr);
 
+        /* ── A WEEK NOBODY HAS REACHED YET SAYS NOTHING ────────────────────────────────────
+           Erik, 2026-09-18, iPhone: his screenshot has two "No hours this week. Clock-ins show
+           up here." cards stacked under the current week. The stack runs eight weeks FORWARD,
+           and every one of them was announcing an empty state for days that have not happened.
+
+           That is not news. It is the worst kind of notice — one that fires on every ordinary
+           day, until a man stops reading notices. So a week that has not STARTED yet and holds
+           nothing is not drawn at all: no card, no header, no sentence, no pay-period line for a
+           period nobody has worked.
+
+           A future week that DOES hold something still draws in full — an entry typed ahead, a
+           shift that runs past midnight into it — so nothing is ever hidden, only unsaid. And a
+           week that HAS started keeps its empty line below: "nobody worked this week" is a real
+           answer to a real question about a week that happened. */
+        if (!hasStarted(days[0], todayStr) && events.length === 0) return null;
+
         return (
           <div key={days[0]}>
             {/* ── THE BREAK LINE ─────────────────────────────────────────────────────────────
@@ -569,7 +585,8 @@ export function TimecardStack({
                     ))}
                 {/* THE one empty state for a week with no hours — the page's second one (an
                     EmptyState under the per-person cards, saying the same thing in other words)
-                    went with the cards. */}
+                    went with the cards. Only weeks that have already STARTED ever get this far
+                    (see the guard above), so it is always about a week that actually happened. */}
                 {events.length === 0 && (
                   <p className="px-3 py-4 text-center text-xs text-slate-400">
                     No hours this week. Clock-ins show up here.
@@ -596,6 +613,10 @@ const weekSpan = (days: string[]): string => {
   const z = parseLocal(days[6]);
   return a && z ? spanLabel(a, z, { month: "long" }) : days[0];
 };
+
+/** Has this week begun? Day-strings are ORG-local and zero-padded (lib/tz builds them), so the
+ *  string compare IS the date compare — no Date object, and no timezone left to get wrong. */
+const hasStarted = (weekStart: string, todayStr: string): boolean => weekStart <= todayStr;
 
 const labelFor = (ds: string): string => {
   const d = parseLocal(ds);

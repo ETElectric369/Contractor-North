@@ -1588,9 +1588,40 @@ export async function deleteTimeEntry(id: string): Promise<ClockResult> {
   return { ok: true };
 }
 
-/** Copy a finished entry to a new one (same person/job/code/times) so a repeat
- *  day can be logged in one tap, then tweaked. Open entries can't be duplicated. */
-export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
+/** "Thursday Sep 17, 11:00 AM to 9:00 PM" in the ORG's day (days are org-local, never the
+ *  UTC server's), for the sentence a copy answers with. */
+function shiftWhen(clockIn: string, clockOut: string, tz: string): string {
+  const a = new Date(clockIn);
+  const b = new Date(clockOut);
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return "";
+  // ICU puts a narrow no-break space before AM/PM; normalize it so the sentence reads,
+  // copies and compares as plain text.
+  const at = (d: Date) =>
+    d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  const weekday = a.toLocaleDateString("en-US", { timeZone: tz, weekday: "long" });
+  const monthDay = a.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
+  return `${weekday} ${monthDay}, ${at(a)} to ${at(b)}`;
+}
+
+/**
+ * THE COPY IS FOR SOMEBODY (Erik, 2026-09-18): "I'm supposed to be able to copy this time card
+ * for jimmy who worked with me."
+ *
+ * This copied a finished entry onto THE SAME PERSON, which is the one write the sanity trigger
+ * (0217) can never accept: a byte-identical second shift for one profile. So the control refused
+ * every time it was tapped, correctly, and could not succeed at anything. Two men on one job for
+ * the same hours is the most ordinary day in this trade, so the copy now takes a TARGET and the
+ * shift lands on whoever worked it too.
+ *
+ * `targetProfileId` is optional and defaults to the same person, so the old one-argument shape
+ * still means what it meant. The identical-times rule still protects whoever the copy lands ON.
+ * It just no longer refuses because the SOURCE person has those hours, which was the false
+ * refusal. Open entries still can't be copied.
+ */
+export async function duplicateTimeEntry(
+  id: string,
+  targetProfileId?: string | null,
+): Promise<ClockResult & { message?: string }> {
   // STAFF ONLY. This is the one tech-reachable path that INSERTS a closed entry — and it
   // copies rate_override — so an unguarded version let a member clone their own paid shift
   // (or a supervisor-rate one) as many times as they liked. It's an office convenience
@@ -1608,27 +1639,121 @@ export async function duplicateTimeEntry(id: string): Promise<ClockResult> {
   if (e.status !== "closed" || !e.clock_out) {
     return { ok: false, error: "Clock out the entry before duplicating it." };
   }
+  const clockIn = String(e.clock_in);
+  const clockOut = String(e.clock_out);
+  const startMs = new Date(clockIn).getTime();
+  const endMs = new Date(clockOut).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return { ok: false, error: "That entry's times can't be read, so there's nothing to copy." };
+  }
 
-  const { error } = await supabase.from("time_entries").insert({
-    profile_id: e.profile_id,
-    clock_in: e.clock_in,
-    clock_out: e.clock_out,
-    lunch_minutes: e.lunch_minutes,
-    miles: e.miles,
-    job_id: e.job_id,
-    job_code: e.job_code,
-    notes: e.notes,
-    // A duplicated supervisor-rate shift must PAY like the original — dropping the
-    // override silently paid base rate (the cn-v291 wage-bug family).
-    rate_override: e.rate_override ?? null,
-    status: "closed",
-    source: "manual",
-  });
+  // Whoever was named, else the same person.
+  const sourceId = String(e.profile_id);
+  const targetId = (targetProfileId ?? "").trim() || sourceId;
+  const samePerson = targetId === sourceId;
+
+  // The target has to be someone the caller can actually see — RLS scopes this read to the
+  // org, so an id from another tenant reads as "not on this crew" — and has to be NAMED,
+  // because every sentence below says who the copy went to.
+  const { data: targetRow } = await supabase
+    .from("profiles")
+    .select("id, full_name, active")
+    .eq("id", targetId)
+    .maybeSingle();
+  const target = targetRow as { id: string; full_name: string | null; active: boolean | null } | null;
+  if (!target) return { ok: false, error: "That person isn't on this crew." };
+  const name = target.full_name ?? "That person";
+  if (target.active === false) {
+    return { ok: false, error: `${name} isn't active anymore, so hours can't be added for them.` };
+  }
+
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  const when = shiftWhen(clockIn, clockOut, tz);
+
+  // THE GUARD FOLLOWS THE PERSON THE COPY LANDS ON. 0217 refuses a byte-identical second shift
+  // per profile, which is right — and is exactly why a same-person copy could never succeed.
+  // Read the TARGET's own shifts around this span once, and answer in plain words instead of
+  // letting a database exception reach the screen:
+  //   · the same exact times already on that person → there is nothing to add
+  //   · any overlap → those hours would be paid twice
+  const { data: near, error: nearErr } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, clock_out")
+    .eq("profile_id", targetId)
+    // 0217 caps a shift at 18 hours, so a day back catches every entry that could still be
+    // running into this one.
+    .gte("clock_in", new Date(startMs - 24 * 3_600_000).toISOString())
+    .lte("clock_in", clockOut)
+    .limit(100);
+  if (nearErr) return { ok: false, error: dbError(nearErr) };
+  const rows = ((near ?? []) as { id: string; clock_in: string; clock_out: string | null }[]).filter((r) =>
+    Number.isFinite(new Date(r.clock_in).getTime()),
+  );
+  const endOf = (r: { clock_out: string | null }) => (r.clock_out ? new Date(r.clock_out).getTime() : Date.now());
+  const exact = rows.find((r) => new Date(r.clock_in).getTime() === startMs && r.clock_out != null && endOf(r) === endMs);
+  if (exact) {
+    // On a same-person copy the row it finds IS the original, which is the honest reason the
+    // old one-tap duplicate could never work. Point at the picker instead of at a wall.
+    return {
+      ok: false,
+      error: samePerson
+        ? `${name} already has ${when}. Pick the person who worked it with them, or edit that entry.`
+        : `${name} already has ${when} on another entry. Open that one to change it.`,
+    };
+  }
+  const clash = rows.find((r) => new Date(r.clock_in).getTime() < endMs && endOf(r) > startMs);
+  if (clash) {
+    // An OPEN entry has no end to name, so it gets its start instead of a made-up finish.
+    const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
+    return {
+      ok: false,
+      error: clash.clock_out
+        ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
+        : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Close that shift first.`,
+    };
+  }
+
+  const { data: made, error } = await supabase
+    .from("time_entries")
+    .insert({
+      profile_id: targetId,
+      clock_in: clockIn,
+      clock_out: clockOut,
+      lunch_minutes: e.lunch_minutes,
+      // Miles and the pay-rate override belong to the person who earned them. Another man's
+      // mileage was never driven by this one (0095 keeps mileage human-stated), and a
+      // supervisor rate is not his pay. A copy onto the SAME person still carries both —
+      // dropping the override there silently paid base rate (the cn-v291 wage-bug family).
+      miles: samePerson ? e.miles : 0,
+      job_id: e.job_id,
+      job_code: e.job_code,
+      notes: e.notes,
+      rate_override: samePerson ? (e.rate_override ?? null) : null,
+      status: "closed",
+      source: "manual",
+    })
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // The silent-write law: an insert that comes back with no row wrote nothing.
+  if (!made?.length) return { ok: false, error: "That copy didn't save. Reload and try again." };
+
   revalidatePath("/timecards");
   revalidatePath("/timeclock");
-  revalidatePath("/planner"); // a duplicated entry changes My Day's hours + crew board
-  return { ok: true };
+  revalidatePath("/planner"); // a copied entry changes My Day's hours + crew board
+  // The copy is billable labor on that job — refresh its Time tab and unbilled total.
+  if (e.job_id) revalidatePath(`/jobs/${e.job_id}`);
+
+  // What stayed behind is said out loud, once, and only when there was something to leave.
+  const dropped = samePerson
+    ? []
+    : [e.rate_override != null ? "rate override" : null, Number(e.miles) > 0 ? "miles" : null].filter(
+        (x): x is string => !!x,
+      );
+  const warning = dropped.length
+    ? `The ${dropped.join(" and ")} stayed on the original. Add ${dropped.length > 1 ? "them" : "it"} to ${name}'s entry if ${dropped.length > 1 ? "they apply" : "it applies"}.`
+    : undefined;
+  return { ok: true, message: `Copied to ${name}, ${when}.`, ...(warning ? { warning } : {}) };
 }
 
 /** Save the "what did you do today?" note (and optional translation) mid-shift. */

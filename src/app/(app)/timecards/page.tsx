@@ -31,7 +31,11 @@ import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
-import { comparePlanToActual, needsAttention as needsAttentionRows, explain } from "@/lib/plan-vs-actual";
+import { comparePlanToActual, needsAttention as needsAttentionRows, explain, type PlannedDay } from "@/lib/plan-vs-actual";
+// The schedule's own answer for one person on one day. The SAME pure pick /schedule's crew board
+// and /timeclock's "Next up" use, so the three surfaces cannot name different jobs for the same
+// Wednesday (crew-plan.ts).
+import { pickScheduledJobForDay } from "../timeclock/crew-plan";
 
 export const dynamic = "force-dynamic";
 
@@ -206,42 +210,144 @@ export default async function TimecardsPage({
   });
 
   /**
-   * PLAN vs ACTUAL for the week on screen. What the crew calendar said, against where the hours
-   * actually landed. This is only meaningful now that the calendar holds real rows instead of a
-   * suggestion that vanished on refresh — you cannot be wrong about a guess.
+   * PLAN vs ACTUAL for the week on screen. What the plan said, against where the hours landed.
    *
-   * Read tolerantly: the 0170 `kind` column is young, and a payroll review page must not go blank
-   * because one column isn't there yet.
+   * WHY THIS FEEDER GREW A SECOND READ (2026-09-18). It used to hand comparePlanToActual the
+   * crew_day_assignments rows and nothing else, so any day with hours and no assignment row came
+   * back "unplanned". ET Electric has written 24 of those rows in the app's whole life and none
+   * since 2026-08-07 — the /timeclock week grid that wrote them lost both of its population
+   * mechanisms in cn-v590 and the grid itself went in cn-v951 — so EVERY day anybody worked
+   * produced a finding. Erik got five in one card, all of them about the job he and Jimmy had
+   * genuinely been on all week: "we worked on the job that was in the schedule and the time cards
+   * say Jason Waldow. Is this box accurate in any way that can help us?"
+   *
+   * It was not. So the plan now comes from where he actually keeps it — the JOB SCHEDULE — and
+   * crew_day_assignments goes back to being what it is, a per-day OVERRIDE (0139/0170) that wins
+   * when it exists and is silent when it does not. Three things are read:
+   *
+   *   1. THE OVERRIDE, as before, tolerantly (the 0170 `kind` column is young and a payroll review
+   *      page must not go blank because one column isn't there yet).
+   *   2. THE JOBS whose scheduled window touches this week, with their roster (assigned_to).
+   *   3. THEIR SEGMENTS — every segment of those jobs, not just the week's, because SEGMENTS-FIRST
+   *      only works if you can tell "this job has segments and none cover Wednesday" from "this
+   *      job has no segments at all". 0266 gives every org member the read; this page is staff.
+   *
+   * No status filter on the jobs: a job finished on Friday was still scheduled Monday, and
+   * dropping it would resurrect exactly the false findings this is here to stop.
    */
-  const planRows = await tolerateMissingColumns<{ profile_id: string; work_date: string; job_id: string | null; kind: string }[]>(
-    () =>
+  const weekFirst = weekDayStrs[0];
+  const weekLast = weekDayStrs[6];
+  type WeekJob = {
+    id: string;
+    job_number: string | null;
+    name: string | null;
+    assigned_to: string[] | null;
+    scheduled_start: string | null;
+    scheduled_end: string | null;
+  };
+  const [planRows, { data: weekJobRows }] = await Promise.all([
+    tolerateMissingColumns<{ profile_id: string; work_date: string; job_id: string | null; kind: string }[]>(() =>
       supabase
         .from("crew_day_assignments")
         .select("profile_id, work_date, job_id, kind")
-        .gte("work_date", weekDayStrs[0])
-        .lte("work_date", weekDayStrs[6]),
-  );
-  const drift = needsAttentionRows(
-    comparePlanToActual(
-      (planRows ?? []).map((r) => ({
-        profileId: r.profile_id,
-        workDate: r.work_date,
-        jobId: r.job_id,
-        kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
-      })),
-      (entries ?? []).map((e: any) => ({
-        profileId: e.profile_id,
-        workDate: todayStrInTz(tz, new Date(e.clock_in)),
-        jobId: e.job_id ?? null,
-        // THE SAME ONE RULE. This hand-rolled `hoursBetween(...) - lunch/60` instead of handing
-        // hoursBetween the lunch it already knows how to deduct, which skipped the clamp — a
-        // short shift with a long lunch came out NEGATIVE here and zero everywhere else, and a
-        // negative day is read as "no hours", which is the difference between a no_show finding
-        // and an unplanned one. Two formulas that agree on ordinary days are still two formulas.
-        hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : 0,
-      })),
+        .gte("work_date", weekFirst)
+        .lte("work_date", weekLast),
     ),
-  );
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, assigned_to, scheduled_start, scheduled_end")
+      .lte("scheduled_start", end.toISOString())
+      .or(`scheduled_end.gte.${start.toISOString()},and(scheduled_end.is.null,scheduled_start.gte.${start.toISOString()})`),
+  ]);
+  const weekJobs = (weekJobRows ?? []) as unknown as WeekJob[];
+  let weekSegs: { job_id: string; start_date: string; end_date: string }[] = [];
+  if (weekJobs.length) {
+    const { data: segRows } = await supabase
+      .from("job_schedule_segments")
+      .select("job_id, start_date, end_date")
+      .in(
+        "job_id",
+        weekJobs.map((j) => j.id),
+      );
+    weekSegs = (segRows ?? []) as typeof weekSegs;
+  }
+  /* WHICH DAYS EACH JOB RUNS — segments-first, with the scheduled_start→scheduled_end MIRROR
+   * behind it. Copied in shape from timeclock/next-up.tsx and schedule/crew-board-panel.tsx,
+   * which is the point: the card that tells a man where he is going and the card that tells the
+   * office where he went must read the calendar the same way, or they disagree about the same
+   * Wednesday. A segmented job runs only on its segment days (its base range is stretched
+   * min-start→max-end, so a Mon+Fri job would otherwise claim Wednesday); a job with no segments
+   * runs across its own window. The org-local days are resolved HERE because tz is a server
+   * concern and crew-plan.ts stays pure. */
+  const segsByJob = new Map<string, { start: string; end: string }[]>();
+  for (const s of weekSegs) {
+    if (!s.job_id) continue;
+    const list = segsByJob.get(s.job_id) ?? [];
+    list.push({ start: s.start_date, end: s.end_date });
+    segsByJob.set(s.job_id, list);
+  }
+  const rangesByJob = new Map<string, { start: string; end: string }[]>();
+  for (const j of weekJobs) {
+    const segs = segsByJob.get(j.id);
+    if (segs?.length) {
+      rangesByJob.set(j.id, segs);
+      continue;
+    }
+    if (!j.scheduled_start) continue; // unscheduled: it says nothing about any day, and that stands
+    const s = todayStrInTz(tz, new Date(j.scheduled_start));
+    const e = j.scheduled_end ? todayStrInTz(tz, new Date(j.scheduled_end)) : s;
+    rangesByJob.set(j.id, [{ start: s, end: e < s ? s : e }]);
+  }
+  /** Every job that was RUNNING on each day of the week, whoever the roster names. This is the
+   *  half of Erik's sentence the per-person pick cannot answer: jobs.assigned_to is a coarse list
+   *  nobody grooms, so hours landing on a job the calendar had open that day are not a warning,
+   *  even when the roster never named that person. */
+  const calendarJobsByDay = new Map<string, Set<string>>();
+  for (const d of weekDayStrs) {
+    const running = new Set<string>();
+    for (const [jobId, ranges] of rangesByJob) {
+      if (ranges.some((r) => r.start <= d && d <= r.end)) running.add(jobId);
+    }
+    calendarJobsByDay.set(d, running);
+  }
+  const jobsByPerson = new Map<string, WeekJob[]>();
+  for (const j of weekJobs) {
+    for (const pid of j.assigned_to ?? []) {
+      if (!pid) continue;
+      const list = jobsByPerson.get(String(pid)) ?? [];
+      list.push(j);
+      jobsByPerson.set(String(pid), list);
+    }
+  }
+  const actualDays = (entries ?? []).map((e: any) => ({
+    profileId: String(e.profile_id ?? ""),
+    workDate: todayStrInTz(tz, new Date(e.clock_in)),
+    jobId: e.job_id ?? null,
+    // THE SAME ONE RULE. This hand-rolled `hoursBetween(...) - lunch/60` instead of handing
+    // hoursBetween the lunch it already knows how to deduct, which skipped the clamp — a
+    // short shift with a long lunch came out NEGATIVE here and zero everywhere else, and a
+    // negative day is read as "no hours", which is the difference between a no_show finding
+    // and an unplanned one. Two formulas that agree on ordinary days are still two formulas.
+    hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : 0,
+  }));
+  /* THE PLAN, BOTH LAYERS. Assignments for the whole week (a no-hours one is still a no_show), and
+   * a schedule-derived day only where hours actually landed — a scheduled day nobody worked is
+   * silence by design, so manufacturing rows for it would only make work for comparePlanToActual
+   * to throw away. Precedence is settled INSIDE that function, not by the order of this array. */
+  const NO_SINGLE_DAYS: ReadonlyMap<string, string | null> = new Map();
+  const plannedDays: PlannedDay[] = (planRows ?? []).map((r) => ({
+    profileId: r.profile_id,
+    workDate: r.work_date,
+    jobId: r.job_id,
+    kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
+    source: "assignment" as const,
+  }));
+  for (const k of new Set(actualDays.filter((d) => d.profileId).map((d) => `${d.profileId}|${d.workDate}`))) {
+    const [profileId, workDate] = k.split("|");
+    const sched = pickScheduledJobForDay(jobsByPerson.get(profileId) ?? [], workDate, rangesByJob, NO_SINGLE_DAYS);
+    if (sched) plannedDays.push({ profileId, workDate, jobId: sched.id, kind: "job", source: "schedule" });
+  }
+  const drift = needsAttentionRows(comparePlanToActual(plannedDays, actualDays, calendarJobsByDay));
   const nameById = new Map<string, string>(((members ?? []) as any[]).map((m) => [m.id, m.full_name ?? "Crew member"]));
   // THE NAME, NOT THE NUMBER. Erik, three separate bug reports: "timecards and all jobs need to be
   // displayed as job name not job number everywhere" / "need to see job name not job number" /
@@ -249,6 +355,14 @@ export default async function TimecardsPage({
   // recognises their own week from J-022. jobLabel is the SSOT and already prefers the name — these
   // three call sites were hand-rolling the label instead of asking it.
   const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, jobLabel(j)]));
+  // ...AND EVERY JOB A FINDING CAN NAME. That list above is the 50 newest jobs — a picker, not a
+  // dictionary — so a drift line about anything older read "a job", which is no help at all on the
+  // one card that exists to say where the hours went. The week's scheduled jobs and the week's own
+  // entries both carry job_number/name already, so they fill the gaps for free.
+  for (const j of weekJobs) jobLabelById.set(j.id, jobLabel(j));
+  for (const e of (entries ?? []) as any[]) {
+    if (e.job_id && e.job) jobLabelById.set(String(e.job_id), jobLabel(e.job));
+  }
 
   /* WHO IS IN THIS WEEK — names for the grid legend, in the order their first shift lands.
    *  (The per-person TALLY that used to be built here — hours, miles, a Card each — is gone: it
@@ -336,7 +450,14 @@ export default async function TimecardsPage({
       })),
       controls: (
         <>
-          {e.status === "closed" && <DuplicateEntryButton id={e.id} />}
+          {e.status === "closed" && (
+            <DuplicateEntryButton
+              id={e.id}
+              profileId={e.profile_id}
+              personName={e.profiles?.full_name}
+              members={members ?? []}
+            />
+          )}
           <EditEntryButton
             entry={e}
             jobCodes={(jobCodes ?? []) as JobCode[]}
@@ -464,7 +585,7 @@ export default async function TimecardsPage({
     return d.toISOString().slice(0, 10);
   })();
   const balanceWindowIso = tzDayStartUtc(balanceWindowYmd, tz).toISOString();
-  const [balClosed, balOpen, balPayments, balRuns, balRates] = await Promise.all([
+  const [balClosed, balOpen, balPayments, balRuns, balRates, rolesRes] = await Promise.all([
     readAll<any>((from, to) =>
       supabase
         .from("time_entries")
@@ -508,10 +629,33 @@ export default async function TimecardsPage({
     // The rate multiplies every unlocked dollar, so a dropped read prices every unpaid hour at
     // zero and "You Owe $0" is a lie. It refuses with the other four.
     payRateMapRead(supabase),
+    /* WHO IS THE CREW AND WHO IS THE HOUSE (2026-09-18). Erik, on this row reading "You Owe
+     * $47,855.95 across 3 people": $40,498 of it is HIS OWN time at his own $125 rate, which is a
+     * draw against the business, not a wage he owes an employee. So the headline was a debt to
+     * Brian and Jimmy nearly six times bigger than the one he actually has, and that headline is
+     * the figure he acts on. The ROLE is the only thing that separates the two and it is not on
+     * profile_pay (0215 carries the PAY columns, not role), so it comes off `profiles` — the same
+     * read, for the same reason, that /payroll made tonight, so the two screens compose the total
+     * the same way. Not a money read: it changes how the total is COMPOSED, never what any one
+     * person is owed. */
+    supabase.from("profiles").select("id, role"),
   ]);
   const owedUnreadable = [balClosed, balOpen, balPayments, balRuns, balRates].some((r) => !!r.problem);
+  /* NOTHING SILENT, BUT NOT A REFUSAL. If the roles read broke, every person's balance is still
+   * exactly right and only the split is unknown — so the headline keeps counting everyone (the old
+   * behaviour, which is never LOW) and the line underneath says why, out loud. Shrinking a figure
+   * he pays people off, quietly, on a read we are not sure of, is the one move not available. */
+  const rolesKnown = !rolesRes.error && Array.isArray(rolesRes.data);
+  const ownerIds = new Set<string>(
+    ((rolesRes.data ?? []) as { id?: string | null; role?: string | null }[])
+      .filter((p) => p?.id && p.role === "owner")
+      .map((p) => String(p!.id)),
+  );
   let owedTotal = 0;
   let owedPeople = 0;
+  let ownerDraw = 0;
+  let ownerDrawNames: string[] = [];
+  let ownerDrawIsViewer = false;
   if (!owedUnreadable) {
     // Rates come from the staff-scoped profile_pay view, not the embed (0215/0216 revoked those
     // columns from the authenticated role).
@@ -557,9 +701,26 @@ export default async function TimecardsPage({
     // not reduce what the next man is owed, so only positive balances are summed — and a zero or
     // negative balance is not a person he owes, so it is not in the count either.
     const owing = balances.filter((b) => b.owed > 0.005);
-    owedPeople = owing.length;
-    owedTotal = Math.round(owing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
+    // THE HEADLINE COUNTS THE CREW. An owner's balance keeps a line of its own below, so the
+    // figure is neither lost nor misread — the same split /payroll's board makes, said shorter.
+    const crewOwing = rolesKnown ? owing.filter((b) => !ownerIds.has(b.profileId)) : owing;
+    const ownerOwing = rolesKnown ? owing.filter((b) => ownerIds.has(b.profileId)) : [];
+    owedPeople = crewOwing.length;
+    owedTotal = Math.round(crewOwing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
+    ownerDraw = Math.round(ownerOwing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
+    ownerDrawNames = ownerOwing.map((b) => firstNameOf(b.name));
+    ownerDrawIsViewer = ownerOwing.length === 1 && ownerOwing[0].profileId === (user?.id ?? "");
   }
+  /* Said once, in the register of whoever is reading it: Erik sees "your own", an office manager
+   * sees the name. Either way it names the money, says what kind of money it is, and the whole row
+   * is already the way in to Pay, where it can be recorded (NO DEAD ENDS). */
+  const ownerDrawLine = !rolesKnown
+    ? "Everyone with a balance is counted here. The roles could not be read just now, so an owner draw cannot be told apart from wages."
+    : ownerDraw > 0.005
+      ? ownerDrawIsViewer
+        ? `Your own ${formatCurrency(ownerDraw)} is a draw, not wages, so it is not in that figure.`
+        : `${ownerDrawNames.join(" and ")} ${ownerDrawNames.length > 1 ? "are owners" : "is an owner"}, so ${formatCurrency(ownerDraw)} of draw is not in that figure.`
+      : null;
 
   /* ── FIX THESE ─────────────────────────────────────────────────────────────────────────────
    *
@@ -575,8 +736,11 @@ export default async function TimecardsPage({
    *  later, at invoicing. So broken rows first in normal weight, drift under a rule in lighter
    *  type.
    *
-   *  Both feeders are unchanged: `needsAttention` above, and comparePlanToActual / needsAttention
-   *  / explain from lib/plan-vs-actual. */
+   *  THE TWO FEEDERS: `needsAttention` above (broken shifts, untouched), and the plan comparison
+   *  from lib/plan-vs-actual. That second one was rebuilt on 2026-09-18 — it took the plan from
+   *  crew_day_assignments alone, a table nobody has written to since August, so every worked day
+   *  came back "nothing planned" and the drift half of this card had never once been right. It
+   *  reads the JOB SCHEDULE now (see the feeder above); the rendering here did not change. */
   const entryIdByPersonDay = new Map<string, string>();
   for (const e of (entries ?? []) as any[]) {
     const k = `${e.profile_id}|${todayStrInTz(tz, new Date(e.clock_in))}`;
@@ -648,6 +812,9 @@ export default async function TimecardsPage({
         <div className="flex flex-wrap items-center gap-2">
           <AddEntryButton
             isStaff
+            /* Opens on the viewer BY NAME. Erik read his own name twice in this picker — once as
+               "Me" and once as himself — and took it for two records of one man. */
+            viewerId={user?.id}
             jobCodesEnabled={orgSettings.timeclock_job_codes}
             members={members ?? []}
             jobCodes={(jobCodes ?? []) as JobCode[]}
@@ -794,7 +961,11 @@ export default async function TimecardsPage({
             </>
           ) : owedPeople === 0 ? (
             <>
-              <span className="block text-base font-semibold text-slate-900">Everyone is paid up</span>
+              {/* "The crew" when he is carrying a draw of his own, because "everyone" with a figure
+                  sitting right under it contradicts itself. */}
+              <span className="block text-base font-semibold text-slate-900">
+                {ownerDraw > 0.005 ? "The crew is paid up" : "Everyone is paid up"}
+              </span>
               <span className="block text-sm text-slate-500">Open Pay</span>
             </>
           ) : (
@@ -804,6 +975,11 @@ export default async function TimecardsPage({
                 across {owedPeople} {owedPeople === 1 ? "person" : "people"} · Open Pay
               </span>
             </>
+          )}
+          {/* THE OWNER'S OWN MONEY, QUIETER AND STILL SAID. It is not wages, so it is not in the
+              headline; it is real, so it does not disappear. */}
+          {!owedUnreadable && ownerDrawLine && (owedPeople > 0 || ownerDraw > 0.005) && (
+            <span className="mt-0.5 block text-xs text-slate-500">{ownerDrawLine}</span>
           )}
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
