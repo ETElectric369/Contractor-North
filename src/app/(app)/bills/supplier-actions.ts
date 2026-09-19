@@ -1180,3 +1180,69 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
     message: `Voided the ${sayMoney(amount)} payment to ${name}. It stays on the list and goes back onto what you owe.`,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// THE SUPPLIER'S OWN INVOICES - putting one on a job
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * WHICH JOB A SUPPLIER INVOICE BELONGS TO, ANSWERED BY THE PERSON WHO WAS THERE.
+ *
+ * CED prints a JOB NAME on every invoice and it is very nearly his own: 13631 NORTHWOODS, 85
+ * WHITNEY PLACE, 13683 HILLSIDE. Very nearly is not the same as exactly, and the gap is where a
+ * machine would put money on the wrong job. The same road comes back as "5659 RHODESIA", "561
+ * RHODESIA", "5661 RHODESIA" and "5659 RODESSIA", and he has FIVE separate jobs on it. "235 TIMBER
+ * CREEK" matches two. "STOCK" matches none and never should - he has been telling his supplier
+ * what is shop stock for months, and it is not a job at all.
+ *
+ * So the app ranks and the man decides, and this is the write that records his answer.
+ *
+ * IT WAS THE MISSING HALF OF THE WHOLE FEATURE (review, 2026-09-19). The card that asks the
+ * question was built, the ranking that orders the choices was built and tested, and the page gated
+ * all of it behind `!!actions.setInvoiceJob` - which nothing implemented and nothing passed, so
+ * every one of those screens was unreachable in every state of the data. Two waves running have
+ * now shipped a feature that compiled and was never called.
+ */
+export async function setSupplierInvoiceJob(input: {
+  invoiceId: string;
+  jobId: string;
+}): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const invoiceId = String(input?.invoiceId ?? "");
+  const jobId = String(input?.jobId ?? "");
+  if (!invoiceId) return { ok: false, error: "Couldn't tell which invoice you meant." };
+  if (!jobId) return { ok: false, error: "Pick a job first." };
+
+  // The job has to be HIS. A job id is a uuid a client hands us, and the one thing worse than an
+  // invoice on no job is an invoice on another company's job (the tenant-isolation law: a rule at
+  // one read path is a convention, a check here is a boundary).
+  const { data: job } = await ctx.supabase
+    .from("jobs")
+    .select("id, name, job_number")
+    .eq("id", jobId)
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (!job) return { ok: false, error: "That job isn't here anymore. Reload the page." };
+
+  const { data, error } = await ctx.supabase
+    .from("supplier_invoices")
+    .update({ job_id: jobId })
+    .eq("id", invoiceId)
+    .eq("org_id", org.orgId)
+    .select("id, invoice_number");
+  if (error) return { ok: false, error: `That didn't save, so the invoice still has no job. ${dbError(error)}` };
+  // Silent-write law: a zero-row update is a 204, and an invoice silently left unassigned is money
+  // sitting on no job while the screen says it landed.
+  if (!data?.length) return { ok: false, error: "That invoice isn't here anymore. Reload the page." };
+
+  const number = (data[0] as { invoice_number?: string }).invoice_number ?? "That invoice";
+  const label = (job as { job_number?: string | null; name?: string | null }).name
+    ?? (job as { job_number?: string | null }).job_number
+    ?? "that job";
+  revalidatePath("/bills");
+  return { ok: true, message: `${number} is on ${label} now. Its cost counts there.` };
+}

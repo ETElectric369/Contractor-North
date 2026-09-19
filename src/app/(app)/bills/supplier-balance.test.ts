@@ -3,11 +3,15 @@ import {
   copyPlace,
   daysBetweenYmd,
   isOnAccountBill,
+  openBalanceOf,
   proposalTotals,
   sayAge,
   supplierBalance,
+  supplierNetIfPaidBy,
+  supplierSaysBalance,
   type SupplierAccountRow,
   type SupplierBillRow,
+  type SupplierInvoiceRow,
   type SupplierPaymentRow,
 } from "./supplier-balance";
 
@@ -233,5 +237,353 @@ describe("naming the two jobs a duplicated ticket sits on", () => {
     expect(copyPlace({ billId: "b", jobId: null, jobName: null, billDate: "2026-08-28", supplier: "CED" })).toBe(
       "Overhead (no job)",
     );
+  });
+});
+
+// ── THE NIGHT THE SUPPLIER SPOKE (2026-09-19, migration 0273) ───────────────────────────────────
+//
+// Erik got into his CED payment portal and downloaded every document. What is below is his real
+// book on that night, to the cent: 20 open documents holding $3,845.14, CED's own headline of
+// $3,819.66 for a cheque dated the 10th of October, $25.48 of discount still claimable today,
+// $25.99 already lost, and $6,000 of payments that must never be subtracted from any of it.
+
+const invoice = (over: Partial<SupplierInvoiceRow> = {}): SupplierInvoiceRow => ({
+  id: Math.random().toString(36).slice(2),
+  invoiceNumber: "8802-0000000",
+  kind: "invoice",
+  invoiceDate: "2026-09-02",
+  dueDate: "2026-10-10",
+  jobNameRaw: null,
+  jobId: null,
+  total: 100,
+  openBalance: 100,
+  closed: false,
+  discountAmount: null,
+  discountBy: null,
+  sourceFile: null,
+  ...over,
+});
+
+/** One open document: number, what is open on it, and the discount riding on it. */
+const open = (
+  number: string,
+  openBalance: number,
+  over: Partial<SupplierInvoiceRow> = {},
+): SupplierInvoiceRow =>
+  invoice({ invoiceNumber: `8802-${number}`, total: openBalance, openBalance, closed: false, ...over });
+
+/**
+ * HIS TWENTY OPEN CED DOCUMENTS, COPIED OUT OF THE DATABASE (2026-09-19).
+ *
+ * Every invoice number, date, open balance and discount below is the real row as loaded from the
+ * 47 PDFs he downloaded from the CED portal. The fixture this replaced was invented - made-up
+ * numbers like "1106310" chosen so the total came to $3,845.14 - which proves the arithmetic can
+ * hit a target, not that it agrees with his supplier. A review caught it, and it mattered: the
+ * fabricated rows spread the discount dates across four months, while in reality all seven live
+ * discounts fall on the same day, 10 October.
+ *
+ * The one to look at is 8802-1107230: $225.47 with a $4.14 discount, reversed to the cent by open
+ * credit memo 8802-1107337. CED does not offer a discount on money it has taken back, and the
+ * $4.14 is exactly the gap between what this app used to say a cheque would be and what the portal
+ * says. Gross $3,845.14, less $25.48 of live discount, is their own headline: $3,819.66.
+ */
+const CED_OPEN: SupplierInvoiceRow[] = [
+  open("1103832", 10.29, { invoiceDate: "2026-07-22", jobNameRaw: "13631 NORTHWOODS", discountAmount: 11.87, discountBy: "2026-08-10" }),
+  invoice({ invoiceNumber: "9019682437", kind: "service_charge", total: 31.26, openBalance: 31.26, closed: false, invoiceDate: "2026-07-25" }),
+  open("1104147", 101.96, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", discountAmount: 0.93, discountBy: "2026-08-10" }),
+  open("1104268", 859.99, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", discountAmount: 6.25, discountBy: "2026-08-10" }),
+  open("1104644", 95.27, { invoiceDate: "2026-07-29", jobNameRaw: "85 WHITNEY PLACE", discountAmount: 1.48, discountBy: "2026-08-10" }),
+  open("1104646", 36.54, { invoiceDate: "2026-07-29", jobNameRaw: "13631 NORTHWOODS", discountAmount: 0.34, discountBy: "2026-08-10" }),
+  open("1104645", -31.86, { invoiceDate: "2026-08-06", jobNameRaw: "13631 NORTHWOODS", kind: "credit_memo" }),
+  open("1105963", 84.37, { invoiceDate: "2026-08-19", jobNameRaw: "85 WHITNEY PL", discountAmount: 0.26, discountBy: "2026-09-10" }),
+  open("1105997", 2.30, { invoiceDate: "2026-08-19", jobNameRaw: "10429 BADGER", discountAmount: 0.04, discountBy: "2026-09-10" }),
+  open("1106188", 199.48, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HARRINGBONE", discountAmount: 3.67, discountBy: "2026-09-10" }),
+  open("1106249", 150.27, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HERRING BONE", discountAmount: 1.15, discountBy: "2026-09-10" }),
+  invoice({ invoiceNumber: "9019994306", kind: "service_charge", total: 15.16, openBalance: 15.16, closed: false, invoiceDate: "2026-08-25" }),
+  open("1107088", 456.02, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", discountAmount: 4.70, discountBy: "2026-10-10" }),
+  open("1107139", 59.17, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", discountAmount: 0.90, discountBy: "2026-10-10" }),
+  // Billed, then reversed to the cent by the credit memo below it, then rebilled as 1107338.
+  open("1107230", 225.47, { invoiceDate: "2026-09-03", jobNameRaw: "TTP 106", discountAmount: 4.14, discountBy: "2026-10-10" }),
+  open("1107337", -225.47, { invoiceDate: "2026-09-03", jobNameRaw: "TTP 106", kind: "credit_memo" }),
+  open("1107338", 223.29, { invoiceDate: "2026-09-03", jobNameRaw: "TTP106", discountAmount: 4.10, discountBy: "2026-10-10" }),
+  open("1106969", 301.81, { invoiceDate: "2026-09-04", jobNameRaw: "13897 HERRINGBONE", discountAmount: 5.54, discountBy: "2026-10-10" }),
+  open("1107695", 1062.18, { invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", discountAmount: 8.47, discountBy: "2026-10-10" }),
+  open("1107820", 187.64, { invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", discountAmount: 1.77, discountBy: "2026-10-10" }),
+];
+
+/**
+ * The shapes his own book does not happen to contain tonight, kept apart from it on purpose. A
+ * fixture that mixes real rows with invented ones to reach a total is how the last one stopped
+ * meaning anything.
+ */
+const EDGE_CASES: SupplierInvoiceRow[] = [
+  // A discount printed with no day to claim it by: neither claimable nor lost, and said so.
+  open("9900001", 97.6, { discountAmount: 1.95, discountBy: null }),
+  // Open, and no open balance printed on it. Falls back to its own total rather than to zero.
+  invoice({ invoiceNumber: "8802-9900002", total: 41.09, openBalance: null, closed: false }),
+];
+
+/** Documents CED has already settled. They are the other 27 of the 47, in miniature. */
+const CED_CLOSED: SupplierInvoiceRow[] = [
+  invoice({ invoiceNumber: "8802-1105868", total: 2950.17, openBalance: 0, closed: true }),
+  invoice({ invoiceNumber: "8802-1103059", total: 47.92, openBalance: 0, closed: true, jobNameRaw: "5659 RHODESIA" }),
+  invoice({ invoiceNumber: "8802-1103061", total: 114.4, openBalance: 0, closed: true, jobNameRaw: "STOCK" }),
+  // A settled document with a discount date still in the future. It is DONE, and a closed
+  // document must never put money into "still claimable" - that would be offering him a saving
+  // on a bill he has already paid, which is a number with nothing behind it.
+  invoice({
+    invoiceNumber: "8802-1104200",
+    total: 1200,
+    openBalance: 0,
+    closed: true,
+    discountAmount: 12,
+    discountBy: "2026-12-10",
+  }),
+];
+
+const CED = [...CED_OPEN, ...CED_CLOSED];
+
+/** His account exactly as it stood after the nine already-settled bills were flipped paid. */
+const cedAccount = (over: Partial<SupplierAccountRow> = {}): SupplierAccountRow =>
+  account({
+    bills: [
+      bill({ amount: 3034.54, isStatement: true, billDate: "2026-07-16" }),
+      bill({ amount: 1513.71, billDate: "2026-08-20" }),
+      bill({ amount: 162.32, isStatement: true, billDate: "2026-06-30" }),
+      bill({ amount: 2650.36, billDate: "2026-09-02" }),
+    ],
+    payments: [
+      payment({ id: "pay-aug", amount: 4000, paidOn: "2026-08-05" }),
+      payment({ id: "pay-sep-1", amount: 1500, paidOn: "2026-09-02" }),
+      payment({ id: "pay-sep-2", amount: 500, paidOn: "2026-09-12" }),
+    ],
+    supplierInvoices: CED,
+    ...over,
+  });
+
+const TODAY = "2026-09-19";
+
+/** Every number the balance hands back, flattened, so a forbidden figure cannot hide in a nested
+ *  field the assertions did not happen to name. */
+const everyNumberIn = (value: unknown): number[] => {
+  if (typeof value === "number") return [value];
+  if (Array.isArray(value)) return value.flatMap(everyNumberIn);
+  if (value && typeof value === "object") return Object.values(value).flatMap(everyNumberIn);
+  return [];
+};
+
+describe("when the supplier has spoken, the balance is the supplier's", () => {
+  it("reads CED's $3,845.14 and says which model said so", () => {
+    const b = supplierBalance(cedAccount(), TODAY);
+    expect(b.model).toBe("supplier-invoices");
+    expect(b.owed).toBe(3845.14);
+    expect(b.supplierSays?.gross).toBe(3845.14);
+    expect(b.supplierSays?.openDocuments).toBe(20);
+  });
+
+  // THE BUG THIS WAVE EXISTS TO KILL. His $6,000 is already inside what CED closed. Subtracting it
+  // from their open balances counts the same money twice, in the other direction, and produced
+  // $1,360.93 against a portal reading $3,845.14 - a cheque $2,484.21 short.
+  it("never produces $1,360.93", () => {
+    const b = supplierBalance(cedAccount(), TODAY);
+    expect(b.charged).toBe(7360.93);
+    expect(b.paid).toBe(6000);
+    expect(b.owed).not.toBe(1360.93);
+    expect(everyNumberIn(b)).not.toContain(1360.93);
+  });
+
+  // "you have sent them $6,000.00 since 5 August" beside "CED says you owe $3,845.14". Two true
+  // facts. The ledger is what he ticks off against his bank statement; it is not an input any more.
+  it("keeps the payment ledger whole and out of the arithmetic", () => {
+    const b = supplierBalance(cedAccount(), TODAY);
+    expect(b.paid).toBe(6000);
+    expect(b.livePayments).toBe(3);
+    expect(b.firstPayment?.paidOn).toBe("2026-08-05");
+    expect(b.lastPayment?.paidOn).toBe("2026-09-12");
+    expect(b.owed).toBe(3845.14);
+  });
+
+  it("does not let a voided payment change a supplier balance either way", () => {
+    const withVoid = cedAccount();
+    withVoid.payments = [...withVoid.payments, payment({ amount: 750, paidOn: "2026-09-15", voided: true })];
+    const b = supplierBalance(withVoid, TODAY);
+    expect(b.paid).toBe(6000);
+    expect(b.owed).toBe(3845.14);
+  });
+
+  it("ages the oldest open document against the org's today", () => {
+    const b = supplierBalance(cedAccount(), TODAY);
+    expect(b.supplierSays?.oldestOpen).toBe("2026-07-22");
+    // 22 July to 19 September. Two months past due on an account charging 1.5% a month, which is
+    // where his $60.42 of service charges came from.
+    expect(b.supplierSays?.oldestOpenDays).toBe(59);
+  });
+});
+
+describe("gross is not a cheque", () => {
+  // The portal prints both and they are $25.48 apart. A man writing a cheque has to know which
+  // number he is writing, so both are named rather than one of them being picked for him.
+  it("reproduces CED's own headline for a cheque dated 10 October", () => {
+    const figure = supplierNetIfPaidBy(CED, "2026-10-10", TODAY);
+    expect(figure.gross).toBe(3845.14);
+    expect(figure.discount).toBe(25.48);
+    expect(figure.net).toBe(3819.66);
+  });
+
+  it("costs him nothing to wait until the 10th, because every live discount falls on it", () => {
+    // His real book has all seven live discounts dated 2026-10-10. The invented fixture this
+    // replaced spread them over four months, which made "what waiting costs" look like a routine
+    // number instead of the zero it actually is tonight. The machinery still works - the next test
+    // writes a cheque past the last deadline and forfeits the lot.
+    const figure = supplierNetIfPaidBy(CED, "2026-10-10", TODAY);
+    expect(figure.forfeited).toBe(0);
+    expect(figure.forfeitedInvoices).toEqual([]);
+  });
+
+  it("is a bigger saving if he writes it this week", () => {
+    // Same $25.48 today as on the 10th: nothing expires in between. Writing it now and writing it
+    // on the deadline cost him exactly the same, which is a fact worth being able to state.
+    const figure = supplierNetIfPaidBy(CED, TODAY, TODAY);
+    expect(figure.discount).toBe(25.48);
+    expect(figure.net).toBe(3819.66);
+    expect(figure.forfeited).toBe(0);
+    expect(supplierBalance(cedAccount(), TODAY).supplierSays?.netIfPaidToday).toBe(3819.66);
+  });
+
+  it("gives up every discount on a cheque written after the last deadline", () => {
+    const figure = supplierNetIfPaidBy(CED, "2026-12-01", TODAY);
+    expect(figure.discount).toBe(0);
+    expect(figure.net).toBe(3845.14);
+    expect(figure.forfeited).toBe(25.48);
+  });
+
+  it("never invents a discount on a date it cannot read", () => {
+    const figure = supplierNetIfPaidBy(CED, "sometime", TODAY);
+    expect(figure.gross).toBe(3845.14);
+    expect(figure.discount).toBe(0);
+    expect(figure.net).toBe(3845.14);
+  });
+});
+
+describe("the discount he is still owed, and the discount he has already lost", () => {
+  it("splits it into claimable, expired and undated", () => {
+    const says = supplierSaysBalance(CED, TODAY);
+    // $25.48, not the $29.62 the raw column sums to: the $4.14 on 8802-1107230 is not claimable
+    // because credit memo 8802-1107337 reversed that invoice to the cent, and CED does not
+    // discount money it has taken back. This is the figure their own portal prints.
+    expect(says?.discountStillClaimable).toBe(25.48);
+    // Gone while $60.42 of late interest was being charged at 1.5% a month.
+    expect(says?.discountExpiredUnclaimed).toBe(25.99);
+    // His real book has no undated discount. The shape is covered by EDGE_CASES below.
+    expect(says?.discountUndated).toBe(0);
+    expect(supplierSaysBalance([...CED, ...EDGE_CASES], TODAY)?.discountUndated).toBe(1.95);
+  });
+
+  it("names the soonest deadline still ahead and what is riding on it", () => {
+    const says = supplierSaysBalance(CED, TODAY);
+    expect(says?.nextDiscountBy).toBe("2026-10-10");
+    // Every live discount shares that day, so the soonest deadline carries all of it - and the
+    // reversed $4.14 is not in the sum.
+    expect(says?.nextDiscountAmount).toBe(25.48);
+  });
+
+  it("adds up two deadlines that fall on the same day instead of naming half of one", () => {
+    const says = supplierSaysBalance(CED, "2026-09-26");
+    expect(says?.nextDiscountBy).toBe("2026-10-10");
+    // Six invoices share 10 October and they are summed, never half-named.
+    expect(says?.nextDiscountAmount).toBe(25.48);
+    expect(says?.discountStillClaimable).toBe(25.48);
+  });
+
+  it("takes no discount off a document the supplier has already settled", () => {
+    // 8802-1104200 is closed and carries $12.00 claimable until December. Counting it would be
+    // offering him a saving on a bill he has already paid.
+    const says = supplierSaysBalance(CED, TODAY);
+    expect(says?.discountStillClaimable).toBe(25.48);
+    expect(supplierNetIfPaidBy(CED, "2026-12-10", TODAY).discount).toBe(0);
+  });
+});
+
+describe("what one open document holds", () => {
+  it("uses the supplier's open balance when they printed one", () => {
+    expect(openBalanceOf(invoice({ total: 523.47, openBalance: 84.37 }))).toBe(84.37);
+  });
+
+  // The lean matches isOnAccountBill: a missing figure shows up as money he may still owe and gets
+  // argued with on screen, rather than quietly making the number he is trusting too small.
+  it("falls back to the total when they did not", () => {
+    expect(openBalanceOf(invoice({ total: 41.09, openBalance: null }))).toBe(41.09);
+    // CED printed an open balance on every one of his twenty, so his own book assumes nothing.
+    expect(supplierSaysBalance(CED, TODAY)?.assumedFromTotal).toBe(0);
+    // The shape still has to work, so it is proven on the edge-case row instead of on a real one.
+    expect(supplierSaysBalance([...CED, ...EDGE_CASES], TODAY)?.assumedFromTotal).toBe(1);
+  });
+
+  it("keeps a credit memo's negative sign, because it is money they owe him", () => {
+    expect(openBalanceOf(invoice({ kind: "credit_memo", total: -42.18, openBalance: -42.18 }))).toBe(-42.18);
+    expect(supplierSaysBalance(CED, TODAY)?.creditMemos).toBe(2);
+  });
+
+  it("never lets a negative discount amount ADD to a cheque", () => {
+    const odd = [open("1106999", 100, { discountAmount: -5, discountBy: "2026-10-10" })];
+    expect(supplierNetIfPaidBy(odd, "2026-10-10", TODAY).net).toBe(100);
+    expect(supplierSaysBalance(odd, TODAY)?.discountStillClaimable).toBe(0);
+  });
+});
+
+describe("the two models are never mixed", () => {
+  // Every account in his book except CED. Nothing about this shape has changed.
+  it("leaves an account with no supplier documents exactly where it was", () => {
+    const b = supplierBalance(
+      account({ bills: [bill({ amount: 5570.56 }), bill({ amount: 456.02 })], payments: [payment({ amount: 2000 })] }),
+      TODAY,
+    );
+    expect(b.model).toBe("bills-minus-payments");
+    expect(b.supplierSays).toBeNull();
+    expect(b.owed).toBe(4026.58);
+  });
+
+  it("treats an empty supplier list as no supplier data at all", () => {
+    const b = supplierBalance(account({ bills: [bill({ amount: 500 })], payments: [payment({ amount: 100 })], supplierInvoices: [] }), TODAY);
+    expect(b.model).toBe("bills-minus-payments");
+    expect(b.owed).toBe(400);
+  });
+
+  // Not the same sentence as "no data". The supplier has answered, and the answer is nothing owed.
+  it("says paid up when every document the supplier issued is closed", () => {
+    const b = supplierBalance(
+      account({ bills: [bill({ amount: 500 })], payments: [payment({ amount: 100 })], supplierInvoices: CED_CLOSED }),
+      TODAY,
+    );
+    expect(b.model).toBe("supplier-invoices");
+    expect(b.owed).toBe(0);
+    expect(b.supplierSays?.openDocuments).toBe(0);
+    expect(b.supplierSays?.discountStillClaimable).toBe(0);
+    // Model A would have said $400 here, and the supplier says otherwise.
+    expect(b.charged).toBe(500);
+    expect(b.paid).toBe(100);
+  });
+
+  it("shows a register account the supplier's own figure and says the contradiction out loud", () => {
+    // on_account = false means no RUNNING balance of ours. A document the supplier issued and
+    // still calls open is not us pretending - it is a fact with a file behind it - so it is shown,
+    // and the flag goes up beside it rather than the number being swallowed.
+    const b = supplierBalance(account({ onAccount: false, supplierInvoices: [open("1106500", 212.5)] }), TODAY);
+    expect(b.owed).toBe(212.5);
+    expect(b.openDocumentsOnRegisterAccount).toBe(true);
+    // The OLD flag counts unpaid bills and the card quotes a bill count and `charged` off it.
+    // There are no unpaid bills here, so it stays down and that sentence never gets to say
+    // "0 bills ... holding $0.00".
+    expect(b.unpaidOnRegisterAccount).toBe(false);
+    expect(b.chargedBills).toBe(0);
+    // Still no invented balance for a register account nobody has said anything about.
+    expect(supplierBalance(account({ onAccount: false }), TODAY).owed).toBeNull();
+    expect(supplierBalance(account({ onAccount: false }), TODAY).openDocumentsOnRegisterAccount).toBe(false);
+  });
+
+  it("still raises the old bills flag on a register account carrying unpaid bills", () => {
+    const b = supplierBalance(account({ onAccount: false, bills: [bill({ amount: 40 })] }), TODAY);
+    expect(b.unpaidOnRegisterAccount).toBe(true);
+    expect(b.openDocumentsOnRegisterAccount).toBe(false);
   });
 });

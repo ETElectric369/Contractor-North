@@ -10,8 +10,16 @@ import {
   suggestSupplierGroups,
   type BillFingerprint,
 } from "@/lib/supplier-identity";
+import { Card } from "@/components/ui/card";
+import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { ReceiptBillingCard, type ReceiptForBilling } from "./receipt-billing-card";
+import type {
+  ReconcileJob,
+  SupplierInvoiceKind,
+  SupplierInvoiceRow as SupplierDocumentRow,
+} from "./supplier-reconcile";
+import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import {
   candidateMoving,
   isOnAccountBill,
@@ -33,6 +41,7 @@ import {
   setSupplierOnAccount,
   unresolveDuplicateBill,
   voidSupplierPayment,
+  setSupplierInvoiceJob,
 } from "./supplier-actions";
 
 export const dynamic = "force-dynamic";
@@ -92,7 +101,23 @@ async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   return attempt;
 }
 
-export default async function BillsPage() {
+/** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
+ *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
+const SUPPLIER_INVOICE_KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
+
+export default async function BillsPage({
+  searchParams,
+}: {
+  /**
+   * WHAT THE IMPORT JUST DID, carried back the way settings/page.tsx already carries a Stripe or
+   * QuickBooks result: the server action redirects with its own sentence and the banner below
+   * renders it. This page is a server component and the supplier card is another file, so a
+   * plain form and a redirect is what lets an import say out loud what landed and what refused
+   * without a scrap of JavaScript between him and the answer.
+   */
+  searchParams?: Promise<{ import?: string; importOk?: string }>;
+}) {
+  const { import: importSaid, importOk } = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -119,6 +144,8 @@ export default async function BillsPage() {
     { data: aliasRows },
     { data: paymentRows },
     { data: orgRow },
+    { data: invoiceRows, error: invoicesErr },
+    { data: billLinkRows },
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -130,7 +157,16 @@ export default async function BillsPage() {
       .select("id, name, category, file_url, size_bytes, created_at, job_id, jobs(name)")
       .in("category", ["Receipt", "Bill"])
       .order("created_at", { ascending: false }),
-    supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
+    // status and address ride along for the supplier-invoice job picker (0273): CED's job name is
+    // "5659 RHODESIA", "561 RHODESIA", "5661 RHODESIA" and "5659 RODESSIA" for ONE road he has
+    // five jobs on, and a picker with nothing but a name on it cannot tell them apart. The limit
+    // went from 100 to 500 for the same reason - a job missing from the list is a document he
+    // cannot file, which is a dead end wearing a dropdown.
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, status, address")
+      .order("created_at", { ascending: false })
+      .limit(500),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
     supabase
       .from("supplier_accounts")
@@ -153,6 +189,22 @@ export default async function BillsPage() {
     // THE ORG'S TODAY, never the browser's day. It dates a payment and it ages a bill, and a
     // check written at 5pm in Truckee is not tomorrow's check.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // ── THE SUPPLIER'S OWN DOCUMENTS (migration 0273) ────────────────────────────────────────
+    // They join this breath rather than hanging off it. A serial hop added to a page read is the
+    // phone-lag class all over again (audit v921: the shell was awaiting a ~31-query badge before
+    // every page), and these depend on nothing above them. A database without 0273 answers both
+    // with an error and a null, which reads here as "no supplier documents" - model A, exactly the
+    // page he had yesterday.
+    supabase
+      .from("supplier_invoices")
+      .select(
+        "id, supplier_account_id, invoice_number, kind, invoice_date, due_date, job_name_raw, job_id, total, open_balance, closed, discount_amount, discount_by, source_file, jobs(name)",
+      )
+      .order("invoice_date", { ascending: false })
+      .limit(2000),
+    // Which scanned bills cover which supplier invoices. A document with no link is a purchase
+    // the app has no record of at all, which is $1,765.72 of his tonight.
+    supabase.from("bill_supplier_invoices").select("supplier_invoice_id").limit(5000),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
@@ -344,8 +396,68 @@ export default async function BillsPage() {
     billsOf.set(key, [...(billsOf.get(key) ?? []), toBillRow(b)]);
   }
 
+  // ── WHAT THE SUPPLIER ITSELF SAYS (migration 0273) ──────────────────────────────────────────
+  //
+  // THE BUG THIS EXISTS TO END, in his own figures. The balance shipped as
+  //
+  //     Owed = unpaid bills - live payments
+  //
+  // which is right while nobody knows which invoices a cheque settled, and WRONG the moment the
+  // supplier tells you. After nine of his bills were marked paid off CED's own documents, that
+  // arithmetic read $7,360.93 - $6,000 = $1,360.93 against CED's $3,845.14: his $6,000 of payments
+  // is ALREADY inside what CED calls closed, so subtracting it again counts the same money twice,
+  // in the other direction. Two models, and they must never be mixed:
+  //
+  //     A. no supplier data   ->  unpaid bills minus live payments   (still right, still the default)
+  //     B. supplier invoices  ->  the sum of what the supplier calls open  (exact, and what CED says)
+  //
+  // NONE OF THAT ARITHMETIC HAPPENS HERE. supplierBalance() picks the model off the rows this page
+  // hands over, and it is pure with a test around it. This file's whole job is to hand over rows,
+  // spelled and totalled once: a second copy of a money rule on a page is how two screens end up
+  // disagreeing about one dollar (the 24%-vs-82% budget bug, audit v800).
+  const billCounts = new Map<string, number>();
+  for (const l of (billLinkRows ?? []) as any[]) {
+    const key = String(l.supplier_invoice_id ?? "");
+    if (key) billCounts.set(key, (billCounts.get(key) ?? 0) + 1);
+  }
+
+  const documentsOf = new Map<string, SupplierDocumentRow[]>();
+  const supplierDocuments: SupplierDocumentRow[] = ((invoiceRows ?? []) as any[]).map((r) => {
+    const id = String(r.id);
+    const kind = String(r.kind ?? "invoice") as SupplierInvoiceKind;
+    const row: SupplierDocumentRow = {
+      id,
+      invoiceNumber: String(r.invoice_number ?? ""),
+      kind: SUPPLIER_INVOICE_KINDS.includes(kind) ? kind : "invoice",
+      invoiceDate: r.invoice_date ?? null,
+      dueDate: r.due_date ?? null,
+      // RAW, AND RESOLVED BY A PERSON. See 0273's header: one road, four spellings, five jobs.
+      jobNameRaw: r.job_name_raw ?? null,
+      jobId: r.job_id ?? null,
+      total: Number(r.total) || 0,
+      // Nullable in the schema. openBalanceOf() falls back to the total, and says out loud how
+      // many documents it had to do that for - never a silent zero, which would read as settled.
+      openBalance: r.open_balance == null ? null : Number(r.open_balance),
+      closed: r.closed === true,
+      discountAmount: r.discount_amount == null ? null : Number(r.discount_amount),
+      discountBy: r.discount_by ?? null,
+      sourceFile: r.source_file ?? null,
+      jobName: r.jobs?.name ?? null,
+      // Zero linked bills means the app has no record of the purchase at all: $1,765.72 of his.
+      billCount: billCounts.get(id) ?? 0,
+    };
+    const accountId = String(r.supplier_account_id ?? "");
+    if (accountId) documentsOf.set(accountId, [...(documentsOf.get(accountId) ?? []), row]);
+    return row;
+  });
+
+  // ONE ARRAY, TWO READERS. The same row objects go to the balance upstairs and to the reconcile
+  // card downstairs, so the two can never be looking at different documents - which is the fault
+  // that put a $3,034.54 STATEMENT on his books as a single bill standing for two invoices with
+  // two different fates.
   const supplierAccounts: SupplierAccountRow[] = ((accountRows ?? []) as any[]).map((a) => {
     const id = String(a.id);
+    const documents = documentsOf.get(id) ?? [];
     return {
       id,
       name: String(a.name ?? ""),
@@ -356,8 +468,40 @@ export default async function BillsPage() {
       aliases: aliasesOf.get(id) ?? [],
       bills: billsOf.get(id) ?? [],
       payments: supplierPayments.filter((p) => p.accountId === id),
+      // ABSENT, NOT EMPTY, when we hold none. Every account in this app except CED has no supplier
+      // documents, and the presence of even one row is what switches that account to model B.
+      ...(documents.length ? { supplierInvoices: documents } : {}),
     };
   });
+
+  // His jobs, with enough on each to tell five Rhodesias apart.
+  const reconcileJobs: ReconcileJob[] = ((jobs ?? []) as any[]).map((j) => ({
+    id: String(j.id),
+    jobNumber: j.job_number ?? null,
+    name: String(j.name ?? ""),
+    status: j.status ?? null,
+    address: j.address ?? null,
+  }));
+
+  // THE DAY THIS APP'S RECORDS BEGIN: its earliest scanned bill. Purchases the supplier made before
+  // it are counted and named, never nagged about - nothing here could have recorded them.
+  const recordsSince =
+    liveBills
+      .map((b: any) => String(b.bill_date ?? ""))
+      .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+      .sort()[0] ?? null;
+
+  // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
+  // rather than tidiness: every section of the reconcile card is built around documents CED
+  // issued, so with none of them the card could only say "nothing here" four times over.
+  const reconcile =
+    invoicesErr || !supplierDocuments.length
+      ? null
+      : {
+          byAccount: Object.fromEntries(documentsOf) as Record<string, SupplierDocumentRow[]>,
+          jobs: reconcileJobs,
+          recordsSince,
+        };
 
   // ── THE SPELLINGS NOBODY HAS FILED YET ──────────────────────────────────────────────────────
   //
@@ -635,6 +779,7 @@ export default async function BillsPage() {
           questions={questions}
           loose={loose}
           duplicates={duplicates}
+          reconcile={reconcile}
           actions={{
             acceptMerge: acceptSupplierMerge,
             dismissMerge: dismissSupplierMerge,
@@ -644,9 +789,73 @@ export default async function BillsPage() {
             recordPayment: recordSupplierPayment,
             voidPayment: voidSupplierPayment,
             setOnAccount: setSupplierOnAccount,
+            // WITHOUT THIS LINE THE WHOLE RECONCILE CARD IS UNREACHABLE (review, 2026-09-19).
+            // suppliers-card gates it on `!!actions.setInvoiceJob`, so an absent action does not
+            // degrade the feature - it deletes it, silently, in every state of the data.
+            setInvoiceJob: setSupplierInvoiceJob,
           }}
         />
       )}
+
+      {/* ── THE DOOR THE SUPPLIER'S OWN INVOICES COME IN THROUGH ────────────────────────────
+          Tonight I read forty-seven of his CED documents by hand. This is so next month is a
+          paste rather than a night: he opens the portal, opens a document, selects the text and
+          drops it in here.
+
+          IT IS A <details>, CLOSED, sitting under the money rather than on top of it. The
+          question this screen opens on is what he owes; importing is the thing he does once a
+          month, and a permanently open box of instructions above the balance would be in the way
+          eleven times out of twelve. It opens itself when there is a result to read.
+
+          IT SAYS WHAT IT READS AND WHAT IT DOES NOT. There is no server-side PDF text extractor
+          wired up in this app, so this takes TEXT, and the copy says so plainly instead of
+          offering a file picker that would refuse every PDF he owns. No button here promises
+          anything that is not behind it. */}
+      <Card className="mb-6 p-5" id="ced-import">
+        {importSaid && (
+          <div
+            className={`mb-4 rounded-lg px-3 py-2 text-sm ${
+              importOk === "1" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
+            }`}
+            role={importOk === "1" ? "status" : "alert"}
+          >
+            {importSaid}
+          </div>
+        )}
+        <details open={!!importSaid}>
+          <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-semibold text-slate-900">
+            Import Supplier Invoices
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-sm text-slate-600">
+              Open a document in the CED payment portal, select all of its text, and paste it below. One paste can
+              hold every invoice in the file. Each one is checked against its own arithmetic before it is saved: the
+              line extensions have to add up to merchandise, and merchandise plus tax plus shipping has to equal the
+              total. Anything that does not is named and left out rather than half read.
+            </p>
+            <p className="text-sm text-slate-600">
+              Pasting the same download twice changes nothing. A document already here keeps what it has, and the job
+              you filed it on is never touched.
+            </p>
+            <form action={importCedInvoicesFromForm} className="space-y-3">
+              <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
+                Invoice text
+              </label>
+              <textarea
+                id="ced-import-text"
+                name="text"
+                rows={8}
+                placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
+                className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              />
+              <FormSubmit>Import Documents</FormSubmit>
+            </form>
+            <p className="text-xs text-slate-500">
+              This reads text, not PDF files. Selecting the text inside the PDF and pasting it is the way in for now.
+            </p>
+          </div>
+        </details>
+      </Card>
 
       <ReceiptBillingCard receipts={receiptsForBilling} />
 

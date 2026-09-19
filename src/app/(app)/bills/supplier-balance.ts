@@ -23,6 +23,44 @@
  * Every function here is pure and every number is rounded to the cent at the point it is summed,
  * because the card, the payment sheet's preview and the inline sentence after a write all have to
  * agree to the penny or the screen is arguing with itself.
+ *
+ * ── AND THEN THE SUPPLIER SPOKE (Erik, 2026-09-19; migration 0273) ─────────────────────────────
+ *
+ * He got into his CED payment portal and downloaded every document. Forty-seven of them parsed and
+ * reconciled to the cent, and they said the app was wrong:
+ *
+ *     CED says he owes $3,845.14 gross across 20 open documents.   This app said $6,476.93.
+ *
+ * Earned-minus-Paid was not a bug. It is the RIGHT shape when nobody can tell you which invoices a
+ * cheque settled, which was true of every supplier in this app until that download. It becomes
+ * WRONG the instant the supplier tells you, and it does so in the most dangerous way available -
+ * quietly, and in his favour. Nine of his bills turned out to be already settled at CED, so they
+ * were flipped paid; the app then read $7,360.93 of unpaid bills minus $6,000 of live payments =
+ * $1,360.93. But that $6,000 is the very money CED used to CLOSE those nine. Subtracting it again
+ * counts the same dollars twice, in the other direction, and hands him a number $2,484.21 too
+ * small to write a cheque against. $1,360.93 is the figure this module exists to never produce
+ * again, and there is a test named after it below.
+ *
+ * SO THERE ARE TWO MODELS AND THEY MUST NEVER BE MIXED:
+ *
+ *   A. no supplier data   ->  Owed = unpaid bills MINUS live payments.   Still right. Still the
+ *                             shape for every account except CED today.
+ *   B. supplier invoices  ->  Owed = the sum of open_balance where closed = false, and PAYMENTS
+ *                             ARE NOT SUBTRACTED. They are already inside what the supplier
+ *                             closed. Exact, and it is what CED itself says.
+ *
+ * The balance says WHICH model it used (`model`), because a card showing a number he can check
+ * against a portal has to be able to explain where the number came from. Under model B the payment
+ * ledger does not disappear - it stops being an input to the balance and becomes what he actually
+ * SENT, for matching against his bank statement. Two true facts side by side. Never subtracted
+ * from each other.
+ *
+ * AND A GROSS FIGURE IS NOT A CHEQUE. CED's own headline is $3,819.66, which is the $3,845.14 of
+ * open balances minus $25.48 of prompt-pay discount that survives to the 10th of October. Both
+ * numbers are true, they are different numbers, and the portal proves they are both printed. He
+ * paid $60.42 of late interest at 1.5% a month while $25.99 of discount expired unclaimed on
+ * documents he was holding, so this module names the discount out loud, names what is still
+ * claimable, names what waiting costs, and names what is already gone.
  */
 
 /** The methods migration 0270 lets `supplier_payments.method` be. */
@@ -60,6 +98,41 @@ export interface SupplierBillRow {
   isStatement: boolean;
 }
 
+/**
+ * ONE DOCUMENT THE SUPPLIER ITSELF ISSUED (`supplier_invoices`, migration 0273) - as opposed to a
+ * `bills` row, which is a piece of paper this app scanned. Only the supplier can say whether one
+ * of these is settled, which is the entire reason the table, and model B, exist.
+ */
+export interface SupplierInvoiceRow {
+  id: string;
+  /** Their number, branch and all: "8802-1103832". What he reads off the portal. */
+  invoiceNumber: string;
+  /** invoice | credit_memo | service_charge | statement. A string, not a union, because a kind
+   *  some later migration adds must not crash a balance - see `openBalanceOf` below. */
+  kind: string;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  /** CED's own JOB NAME, verbatim: "5659 RHODESIA", "5661 RHODESIA", "5659 RODESSIA". Kept raw
+   *  and never matched to a job by machine - he has five jobs on that one road. */
+  jobNameRaw: string | null;
+  /** Where a PERSON said it belongs. Null until one does. */
+  jobId: string | null;
+  total: number;
+  /**
+   * What the supplier says is STILL OWED on this document. Nullable in the schema, so a document
+   * that is open and prints no open balance falls back to its total - see `openBalanceOf`.
+   */
+  openBalance: number | null;
+  /** The supplier's verdict. The only authority on this question there has ever been. */
+  closed: boolean;
+  /** "CASH DISCOUNT 11.87 OFF TOTAL DUE IF PAID BY THE 10TH OF THE MONTH FOLLOWING PURCHASE." */
+  discountAmount: number | null;
+  /** The day that discount stops being available. Both halves matter or neither does. */
+  discountBy: string | null;
+  /** The file it was read out of, so a figure on screen can be traced back to a document. */
+  sourceFile?: string | null;
+}
+
 export interface SupplierAccountRow {
   id: string;
   /** What he calls them: "CED Truckee". */
@@ -75,6 +148,84 @@ export interface SupplierAccountRow {
   bills: SupplierBillRow[];
   /** Newest first, voided ones included. */
   payments: SupplierPaymentRow[];
+  /**
+   * THE SUPPLIER'S OWN DOCUMENTS, when they have been loaded. Optional, and absent is the normal
+   * case: every account in this app except CED has none, and an account with none keeps model A
+   * exactly as it was. The presence of even one row here is what switches the balance to model B,
+   * because one row means somebody has told us which documents are settled.
+   */
+  supplierInvoices?: SupplierInvoiceRow[];
+}
+
+/**
+ * WHICH ARITHMETIC PRODUCED `owed`. The card has to be able to say this out loud: one of these
+ * numbers can be checked line by line against a portal and the other cannot, and a man deciding
+ * how much to trust a figure is entitled to know which one he is looking at.
+ */
+export type SupplierBalanceModel =
+  /** A. Unpaid bills minus live payments. Right when nobody knows which invoices a cheque settled. */
+  | "bills-minus-payments"
+  /** B. The sum of what the supplier still calls open. Payments are NOT subtracted - they are
+   *  already inside what the supplier closed, and taking them off again is the $1,360.93 bug. */
+  | "supplier-invoices";
+
+/**
+ * WHAT THE SUPPLIER SAYS, with the discount broken out, because a gross figure and a cheque are
+ * different numbers and his portal prints both.
+ */
+export interface SupplierSaysBalance {
+  /** Sum of open_balance where closed = false. CED: $3,845.14. THE GROSS. */
+  gross: number;
+  /** How many documents that is. CED: 20. */
+  openDocuments: number;
+  /**
+   * Open documents that printed no open balance, so their full total was used instead. Surfaced
+   * rather than buried: it is the one place this figure is an assumption, and the lean is toward
+   * money he may still owe rather than a number that is quietly too small.
+   */
+  assumedFromTotal: number;
+  /** Credit memos among the open documents - money the supplier owes HIM, which is why the gross
+   *  can be smaller than the invoices in it. Counted, never skipped. */
+  creditMemos: number;
+  /** Prompt-pay discount still claimable as of `today`: discount_by >= today, not closed. */
+  discountStillClaimable: number;
+  /**
+   * Discount on documents he is still holding whose day has already gone. CED: $25.99 - lost
+   * while $60.42 of late interest was being charged at 1.5% a month. This number is the reason
+   * the rest of this interface exists.
+   */
+  discountExpiredUnclaimed: number;
+  /** Discount printed with no date to claim it by. Neither claimable nor expired - unknown, and
+   *  said so rather than folded into whichever bucket flatters the screen. */
+  discountUndated: number;
+  /** gross minus discountStillClaimable: the cheque if he writes it TODAY. */
+  netIfPaidToday: number;
+  /** The soonest discount deadline still ahead, so the card can name a date. */
+  nextDiscountBy: string | null;
+  /** What is riding on that date - what he loses by letting it pass. */
+  nextDiscountAmount: number;
+  /** Oldest open document, and its age against the ORG's today. */
+  oldestOpen: string | null;
+  oldestOpenDays: number | null;
+}
+
+/**
+ * A CHEQUE DATED A PARTICULAR DAY. `supplierNetIfPaidBy(invoices, "2026-10-10", today)` is how
+ * CED's own headline is reproduced: $3,845.14 gross, $25.48 of discount alive on the 10th,
+ * $3,819.66 net. Waiting that long forfeits $4.14 that is claimable today, and `forfeited` is
+ * that number, named, so nothing about the decision is hidden behind a date picker.
+ */
+export interface SupplierPayByFigure {
+  /** Unchanged whatever day he pays. */
+  gross: number;
+  /** Prompt-pay discount still alive on `payBy`. */
+  discount: number;
+  /** gross minus discount. THE AMOUNT ON THE CHEQUE. */
+  net: number;
+  /** Discount alive today that would be gone by `payBy`. What waiting costs. */
+  forfeited: number;
+  /** The documents that would forfeit it, by invoice number, so the card can name them. */
+  forfeitedInvoices: string[];
 }
 
 export interface SupplierBalance {
@@ -88,23 +239,54 @@ export interface SupplierBalance {
   paid: number;
   livePayments: number;
   /**
-   * Charged minus paid - or NULL for a pay-at-the-register supplier, which has no running
+   * THE NUMBER. Under model A it is charged minus paid. Under model B it is `supplierSays.gross`
+   * and the payments are NOT in it - see the header, and the $1,360.93 test.
+   *
+   * NULL for a pay-at-the-register supplier with no supplier documents, which has no running
    * balance and must not be given one. A zero would read as "paid up", which is a different
-   * sentence and not a true one.
+   * sentence and not a true one. If the supplier itself has issued open documents against that
+   * account, the figure is theirs and it is shown - that is not pretending, that is a fact with a
+   * document behind it - and `unpaidOnRegisterAccount` goes up beside it so the contradiction is
+   * on screen rather than in the arithmetic.
    */
   owed: number | null;
+  /** Which arithmetic produced `owed`. The card explains the number with this. */
+  model: SupplierBalanceModel;
+  /** Model B's working, or NULL under model A. Never zeros: an account with no supplier documents
+   *  has no gross, no discount and no deadline, and inventing a $0.00 discount for it would be a
+   *  figure nobody wrote. */
+  supplierSays: SupplierSaysBalance | null;
   oldestUnpaid: string | null;
   /** How old that oldest unpaid bill is, in days, against the ORG's today (never the browser's). */
   oldestUnpaidDays: number | null;
   lastPayment: SupplierPaymentRow | null;
+  /**
+   * The EARLIEST live payment, so the ledger can say "you have sent them $6,000.00 since 5 August"
+   * beside "CED says you owe $3,845.14". Two true facts. Under model B they are never subtracted
+   * from each other; the sentence exists so he can tick the chunks off against his bank statement,
+   * which is the job the ledger actually does once the supplier is the authority on the balance.
+   */
+  firstPayment: SupplierPaymentRow | null;
   /** True when one of the open bills is a STATEMENT covering several of their invoices. A payment
    *  sheet that offers to match an invoice number needs to know it cannot here. */
   hasStatements: boolean;
   /**
    * A register account that somehow carries unpaid bills. Not a crash and not a number to bury:
    * the card says it out loud and points at the door that fixes it.
+   *
+   * THIS STAYS EXACTLY WHAT IT WAS - unpaid BILLS, nothing else. The card writes a sentence off
+   * it that counts bills and quotes `charged` ("2 bills are still marked unpaid ... holding
+   * $456.02"), so widening it to cover supplier documents would have made that sentence read
+   * "0 bills ... holding $0.00" on the one account it fired for. A second flag below carries the
+   * new case instead, with its own number to say.
    */
   unpaidOnRegisterAccount: boolean;
+  /**
+   * A register account against which the SUPPLIER still has open documents. The same contradiction
+   * wearing the 0273 clothes, and it needs its own sentence because it has its own figure:
+   * `supplierSays.gross`, not `charged`.
+   */
+  openDocumentsOnRegisterAccount: boolean;
 }
 
 /** On account, i.e. still carrying a balance. Anything not explicitly 'paid' counts as owed.
@@ -136,9 +318,196 @@ export function sayAge(days: number | null): string {
   return `${days} days old`;
 }
 
+// ── WHAT THE SUPPLIER SAYS ──────────────────────────────────────────────────────────────────────
+
+/**
+ * A real wall-calendar day. Every date comparison below is a plain string compare, which is exact
+ * for "YYYY-MM-DD" and wrong for anything else - and "" >= "2026-09-19" is FALSE, which would have
+ * quietly filed every undated discount under "expired unclaimed" and shown him money he never lost.
+ * So a date has to look like a date before it is allowed to answer a question about time.
+ */
+const isYmd = (d: unknown): d is string => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?? ""));
+
+/**
+ * WHAT ONE OPEN DOCUMENT STILL HOLDS.
+ *
+ * `open_balance` is nullable, so a document the supplier calls open that printed no open balance
+ * falls back to its own total. The lean matches `isOnAccountBill` above and for the same reason:
+ * a missing figure must show up as money he may still owe and be argued with on screen, never
+ * leave the balance and make the number he is trusting too small.
+ *
+ * A CREDIT MEMO IS NOT SKIPPED. Its open balance is negative, it reduces what he owes, and both
+ * of his are among the twenty open documents. Dropping it because the sign looked wrong is how a
+ * man gets billed for a return he already made.
+ */
+export function openBalanceOf(invoice: SupplierInvoiceRow): number {
+  const stated = invoice?.openBalance;
+  if (stated !== null && stated !== undefined && Number.isFinite(Number(stated))) return r2(Number(stated));
+  return r2(Number(invoice?.total) || 0);
+}
+
+/** The open documents - the supplier's verdict, and nothing else's. */
+const openInvoices = (invoices: SupplierInvoiceRow[] | null | undefined): SupplierInvoiceRow[] =>
+  (invoices ?? []).filter((i) => !i?.closed);
+
+/** The discount on one document, or 0 - never a negative, which would ADD to a cheque. */
+const discountOf = (invoice: SupplierInvoiceRow): number => {
+  const d = r2(Number(invoice?.discountAmount) || 0);
+  return d > 0 ? d : 0;
+};
+
+/**
+ * A DISCOUNT ON AN INVOICE A CREDIT MEMO HAS ALREADY REVERSED IS NOT A DISCOUNT (review, 2026-09-19).
+ *
+ * This is worth exactly $4.14 and it is the whole gap between what this app said a cheque would be
+ * and what CED's own portal said. On his TTP 106 order they billed $225.47 (invoice 8802-1107230,
+ * prompt-pay discount $4.14), reversed it to the cent with credit memo 8802-1107337 (-$225.47),
+ * and rebilled $223.29 on 8802-1107338. Both halves of the reversal are still OPEN documents, so
+ * they cancel in the gross - correctly - but the discount was still being counted against a line
+ * that nobody is going to pay. CED does not offer a discount on money it has taken back, and the
+ * headline proves it: $3,845.14 gross less $25.48 is their $3,819.66, not our $3,815.52.
+ *
+ * The rule is deliberately narrow: an OPEN invoice whose open balance is matched to the cent by an
+ * OPEN credit memo, each memo spending itself only once, so a single credit cannot silently cancel
+ * the discount on two different invoices. Anything less exact than to-the-cent is a judgement call
+ * about his money and is left alone.
+ */
+export function reversedInvoiceIds(invoices: SupplierInvoiceRow[]): Set<string> {
+  const open = invoices.filter((i) => !i?.closed);
+  const credits = open.filter((i) => openBalanceOf(i) < 0).map((i) => ({ i, spent: false }));
+  const out = new Set<string>();
+  for (const inv of open) {
+    const bal = openBalanceOf(inv);
+    if (!(bal > 0)) continue;
+    const hit = credits.find((c) => !c.spent && Math.round(openBalanceOf(c.i) * 100) === -Math.round(bal * 100));
+    if (hit) {
+      hit.spent = true;
+      const id = String((inv as { id?: unknown })?.id ?? "");
+      if (id) out.add(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * MODEL B, WORKED OUT. Pure, cents-safe at every summation the way lib/invoice-math.ts is, and
+ * exported on its own so a screen that wants only the supplier's side (the reconciliation view,
+ * a payment sheet's preview) does not have to build a whole account row to get it.
+ *
+ * Returns null when there are no supplier documents at all, which is the signal `supplierBalance`
+ * uses to stay on model A. An account with documents that are ALL closed is a different thing and
+ * gets a real answer: gross $0.00, and "the supplier says you are paid up" is a sentence worth
+ * being able to say.
+ */
+export function supplierSaysBalance(
+  invoices: SupplierInvoiceRow[] | null | undefined,
+  today: string,
+): SupplierSaysBalance | null {
+  if (!invoices?.length) return null;
+
+  let gross = 0;
+  let openDocuments = 0;
+  let assumedFromTotal = 0;
+  let creditMemos = 0;
+  let discountStillClaimable = 0;
+  let discountExpiredUnclaimed = 0;
+  let discountUndated = 0;
+  let nextDiscountBy: string | null = null;
+  let nextDiscountAmount = 0;
+  let oldestOpen: string | null = null;
+
+  for (const invoice of openInvoices(invoices)) {
+  // Discounts on invoices a credit memo has already reversed do not count - see reversedInvoiceIds.
+  const reversed = reversedInvoiceIds(invoices ?? []);
+    openDocuments += 1;
+    const open = openBalanceOf(invoice);
+    gross = r2(gross + open);
+    if (invoice.openBalance === null || invoice.openBalance === undefined) assumedFromTotal += 1;
+    if (String(invoice.kind ?? "") === "credit_memo") creditMemos += 1;
+    if (isYmd(invoice.invoiceDate) && (!oldestOpen || invoice.invoiceDate < oldestOpen)) oldestOpen = invoice.invoiceDate;
+
+    const discount = reversed.has(String((invoice as { id?: unknown })?.id ?? "")) ? 0 : discountOf(invoice);
+    if (discount <= 0) continue;
+    if (!isYmd(invoice.discountBy)) {
+      discountUndated = r2(discountUndated + discount);
+    } else if (invoice.discountBy >= today) {
+      discountStillClaimable = r2(discountStillClaimable + discount);
+      // The soonest deadline still ahead. Ties add up: two invoices due the same day are one
+      // decision, and naming half of it would be naming the wrong number.
+      if (!nextDiscountBy || invoice.discountBy < nextDiscountBy) {
+        nextDiscountBy = invoice.discountBy;
+        nextDiscountAmount = discount;
+      } else if (invoice.discountBy === nextDiscountBy) {
+        nextDiscountAmount = r2(nextDiscountAmount + discount);
+      }
+    } else {
+      discountExpiredUnclaimed = r2(discountExpiredUnclaimed + discount);
+    }
+  }
+
+  return {
+    gross,
+    openDocuments,
+    assumedFromTotal,
+    creditMemos,
+    discountStillClaimable,
+    discountExpiredUnclaimed,
+    discountUndated,
+    netIfPaidToday: r2(gross - discountStillClaimable),
+    nextDiscountBy,
+    nextDiscountAmount,
+    oldestOpen,
+    oldestOpenDays: daysBetweenYmd(oldestOpen, today),
+  };
+}
+
+/**
+ * THE CHEQUE, DATED. CED's portal headline is $3,819.66 and its open balances are $3,845.14; the
+ * gap is $25.48 of discount that survives to the 10th of October. Both figures are printed on the
+ * same page, and a man writing a cheque has to know which one he is writing - so both are named
+ * here rather than one of them being chosen for him.
+ *
+ * `forfeited` is the other half of that: $4.14 of his discount expires before the 10th, so paying
+ * on the 10th rather than this week costs him that. The app SUGGESTS the arithmetic; the date is
+ * entirely his.
+ */
+export function supplierNetIfPaidBy(
+  invoices: SupplierInvoiceRow[] | null | undefined,
+  payBy: string,
+  today: string,
+): SupplierPayByFigure {
+  let gross = 0;
+  let discount = 0;
+  let forfeited = 0;
+  const forfeitedInvoices: string[] = [];
+
+  for (const invoice of openInvoices(invoices)) {
+  // Discounts on invoices a credit memo has already reversed do not count - see reversedInvoiceIds.
+  const reversed = reversedInvoiceIds(invoices ?? []);
+    gross = r2(gross + openBalanceOf(invoice));
+    const amount = reversed.has(String((invoice as { id?: unknown })?.id ?? "")) ? 0 : discountOf(invoice);
+    if (amount <= 0 || !isYmd(invoice.discountBy)) continue;
+    if (isYmd(payBy) && invoice.discountBy >= payBy) {
+      discount = r2(discount + amount);
+    } else if (isYmd(today) && invoice.discountBy >= today) {
+      // Alive today, dead by the day he is thinking of paying. This is the money the late-interest
+      // story is made of, and it is worth nothing unless the screen names it before the day passes.
+      forfeited = r2(forfeited + amount);
+      forfeitedInvoices.push(String(invoice.invoiceNumber ?? ""));
+    }
+  }
+
+  return { gross, discount, net: r2(gross - discount), forfeited, forfeitedInvoices };
+}
+
 /**
  * THE BALANCE. One function, so the card, the sheet's preview and the sentence after a write can
  * never disagree - the payroll board's rule, arrived at the same way.
+ *
+ * IT PICKS A MODEL AND SAYS SO. Supplier documents present -> model B, the supplier's own open
+ * balances, payments left out of it. None present -> model A, unchanged, which is every account in
+ * his book except CED. The two are never averaged, blended or added; mixing them is exactly the
+ * double-count that produced $1,360.93.
  */
 export function supplierBalance(account: SupplierAccountRow, today: string): SupplierBalance {
   let charged = 0;
@@ -163,9 +532,15 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
     }
   }
 
+  // THE LEDGER IS COMPUTED UNDER BOTH MODELS, ALWAYS. Under model A it is an input to the
+  // balance; under model B it stops being one and becomes what he actually SENT them, for ticking
+  // off against his bank statement. It never stops being computed, because a payment ledger that
+  // vanished the day the supplier's documents arrived would be the app hiding his own money from
+  // him - and the whole reason model B exists is that a screen has to be checkable.
   let paid = 0;
   let livePayments = 0;
   let lastPayment: SupplierPaymentRow | null = null;
+  let firstPayment: SupplierPaymentRow | null = null;
   for (const payment of account.payments ?? []) {
     if (payment.voided) continue;
     paid = r2(paid + (Number(payment.amount) || 0));
@@ -173,7 +548,10 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
     // Newest by the day it was paid, not by the order the rows came back - he records Friday's
     // cheque on Monday, and the list must still name the latest payment.
     if (!lastPayment || String(payment.paidOn) > String(lastPayment.paidOn)) lastPayment = payment;
+    if (!firstPayment || String(payment.paidOn) < String(firstPayment.paidOn)) firstPayment = payment;
   }
+
+  const supplierSays = supplierSaysBalance(account.supplierInvoices, today);
 
   return {
     charged,
@@ -182,12 +560,22 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
     settledBills,
     paid,
     livePayments,
-    owed: account.onAccount ? r2(charged - paid) : null,
+    // MODEL B DOES NOT SUBTRACT THE PAYMENTS. His $6,000 is already inside what CED closed, and
+    // taking it off the open balances counts the same money twice in the other direction: the
+    // night this shipped that read $1,360.93 against CED's $3,845.14.
+    owed: supplierSays ? supplierSays.gross : account.onAccount ? r2(charged - paid) : null,
+    model: supplierSays ? "supplier-invoices" : "bills-minus-payments",
+    supplierSays,
     oldestUnpaid,
     oldestUnpaidDays: daysBetweenYmd(oldestUnpaid, today),
     lastPayment,
+    firstPayment,
     hasStatements,
     unpaidOnRegisterAccount: !account.onAccount && chargedBills > 0,
+    // A register account holding open supplier documents is the same contradiction as one holding
+    // unpaid bills, and it gets the same treatment: the figure is shown, and the card says out
+    // loud that this account is not supposed to carry one.
+    openDocumentsOnRegisterAccount: !account.onAccount && (supplierSays?.openDocuments ?? 0) > 0,
   };
 }
 
@@ -301,7 +689,14 @@ export function candidateMoving(question: SupplierCandidateQuestion): SupplierCa
 /**
  * WHAT THE JOINED ACCOUNT WOULD OWE: each side's own balance plus the unpaid bills that would be
  * filed onto it. On his book this is the sentence that lets him check the app against what he
- * knows - CED reads $6,476.93 today, and joining the Sunnyvale ticket makes it $6,944.80.
+ * knows - joining the Sunnyvale ticket adds its $467.87 to whatever CED's card is reading.
+ *
+ * IT ADDS TO WHICHEVER MODEL THE SIDE IS ON, and that is correct under both. `side.owed` comes
+ * straight from `supplierBalance`, so for CED it is now the supplier's own $3,845.14 rather than
+ * bills-minus-payments; a loose spelling has no supplier documents by definition, so its unpaid
+ * bills are the only thing it can contribute. (The comment here used to quote $6,476.93 as CED's
+ * balance. That was the figure the portal proved wrong on 2026-09-19 - it is written down in the
+ * module header now, as the mistake, and no longer stands in a comment as a fact.)
  *
  * Null when one side is a register supplier: that account has no running balance, so there is no
  * number to add to and inventing one would be a figure he never wrote.
