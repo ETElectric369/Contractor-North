@@ -214,6 +214,11 @@ export default async function JobDetailPage({
       .from("bills")
       .select("id, supplier, bill_number, amount, status, bill_date, po_id")
       .eq("job_id", id)
+      // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
+      // this the hub counted the $95.27 duplicate on 13631 Northwoods in cost, in profit and in
+      // work-to-date, while /analytics and the job's own financials dropped it - the same job
+      // reading $1,990.57 on one screen and $1,895.30 on another.
+      .is("superseded_by_bill_id", null)
       .order("created_at", { ascending: false }),
     supabase
       .from("tasks")

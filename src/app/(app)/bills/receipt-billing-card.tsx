@@ -27,6 +27,10 @@ export interface ReceiptBillingLine {
   description: string;
   quantity: number;
   amount: number;
+  /** What the line cost when its extension is $0.00 - a back-ordered part carries a real price
+   *  beside an empty total, and the invoice reads it even when this column is blank. Carried so
+   *  this card and the invoice cannot disagree about one line (the projection law, 2026-09-19). */
+  unitPrice: number | null;
   category: string | null;
   billable: boolean;
   /**

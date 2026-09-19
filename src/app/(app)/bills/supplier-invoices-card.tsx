@@ -124,6 +124,8 @@ export function SupplierInvoicesCard({
   /** What he has picked in an open row's picker, before he presses. Nothing is preselected, ever. */
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
+  /** The action key of the last refusal, so the row that caused it can say so itself. */
+  const [failedAt, setFailedAt] = useState<string | null>(null);
 
   // Held steady across renders so the reads below are not redone on every keystroke in a picker -
   // `feed` is a fresh object every time the page re-renders, and forty invoices ranked against
@@ -148,6 +150,7 @@ export function SupplierInvoicesCard({
 
   function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string) {
     setError(null);
+    setFailedAt(null);
     setBusy(key);
     start(async () => {
       const res = await fn();
@@ -155,6 +158,12 @@ export function SupplierInvoicesCard({
       if (!res.ok) {
         setDone(null);
         setError(res.error ?? "Nothing was saved. Try again.");
+        // AND WHERE HE WAS LOOKING WHEN IT HAPPENED (review, 2026-09-19). This card is long; a
+        // refusal rendered only at the top is a thousand pixels above the thumb that caused it,
+        // so a button un-disables, the row does not change, and the reason is off screen. The
+        // banner above stays - it is what a screen reader reaches first - and the same sentence
+        // is repeated under the row that asked.
+        setFailedAt(key);
         return;
       }
       setDone(res.message ?? fallback);
@@ -395,8 +404,16 @@ export function SupplierInvoicesCard({
             ) : (
               ""
             )}
+            {/* COPY MUST NOT PROMISE A BUTTON THAT ISN'T THERE, and must not promise it on rows
+                it cannot appear on. The first draft said "say which job up in Invoices With No Job
+                and Record It As A Bill appears on the row down here" - but that list and this one
+                are different sets, so he could file six jobs up there and come back to no new
+                buttons at all, and a purchase CED booked to STOCK can never be given a job in the
+                first place. It now says only what is true of the rows he is looking at. */}
             {needBill.rows.some((r) => !r.jobId)
-              ? " Most of these are on no job here either. Say which job up in Invoices With No Job and the cost can follow it there."
+              ? actions.recordAsBill
+                ? ` ${needBill.rows.filter((r) => !r.jobId).length} of them have no job on them here, and a purchase needs a job before its cost can go anywhere. Each one is up in Invoices With No Job as well: answer it on THAT row, and this row gets its button.`
+                : " Most of these are on no job here either. Say which job up in Invoices With No Job and the cost can follow it there."
               : ""}
           </p>
 
@@ -458,6 +475,11 @@ export function SupplierInvoicesCard({
                     {busy === `bill:${invoice.id}` ? "Recording It…" : "Record It As A Bill"}
                   </Button>
                 )}
+                {failedAt === `bill:${invoice.id}` && error && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">
+                    {error}
+                  </p>
+                )}
               </li>
             ))}
           </ul>
@@ -480,6 +502,21 @@ export function SupplierInvoicesCard({
             </p>
           )}
         </section>
+      )}
+
+      {/* WHAT THE LIST ABOVE LEAVES OUT, AND WHY - OUTSIDE THE LIST, SO IT OUTLIVES IT (review,
+          2026-09-19). Nested inside `needBill.rows.length > 0` these vanished the moment he
+          finished the list, and the green "nothing here needs you" banner then said every CED
+          document was in his books while $225.47 of returned merchandise sat unaccounted for. The
+          sentence that explains an absence has to outlast the thing it was explaining. */}
+      {needBill.reversedRows > 0 && (
+        <p className="mb-3 text-xs leading-relaxed text-slate-400">
+          {needBill.reversedRows === 1
+            ? `One purchase, ${formatCurrency(needBill.reversedTotal)}, went straight back to ${accountName} on a credit memo`
+            : `${needBill.reversedRows} purchases, ${formatCurrency(needBill.reversedTotal)} between them, went straight back to ${accountName} on credit memos`}
+          . You kept nothing and you owe nothing, so there is no bill to record and they are not on
+          the list above.
+        </p>
       )}
 
       {/* ── 3. THE DISCOUNT STILL ON THE TABLE ──────────────────────────────────────────────────

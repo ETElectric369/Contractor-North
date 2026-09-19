@@ -91,17 +91,31 @@ export type BillForItemisation = {
 };
 
 /**
- * What a line actually cost, as the importer has always read it: the stored `amount` when the
- * receipt reader captured one, otherwise unit × qty (with a bare unit price counting as one).
+ * What a line actually cost: the stored `amount` — the supplier's own extension — and only when
+ * there is no extension at all, unit × qty (a bare unit price counting as one).
  *
- * Exported because the SAME reading has to serve both sides of the new subtraction. If the sum
- * that comes off the target were computed any differently from the sell price the line would have
+ * Exported because the SAME reading has to serve both sides of the subtraction. If the sum that
+ * comes off the target were computed any differently from the sell price the line would have
  * carried, the remainder row would silently absorb the difference — which is precisely the leak
  * 0268 exists to close, rebuilt one layer down.
+ *
+ * $0.00 IS AN ANSWER, NOT A BLANK (review, 2026-09-19). This used to read an explicit zero the
+ * same as a missing one and fall through to unit × qty, and a supply house prints exactly that
+ * shape: a BACK-ORDERED line carries the price of the part beside an extension of $0.00, because
+ * nothing shipped. On his 85 Whitney receipt that is a $38.98 luminaire; on the next CED invoice
+ * with a back-ordered plate it is "50.00" per HUNDRED × 5, and this function returned $250.00 of
+ * cost for merchandise that never left the counter. Itemised, that put a $312.50 row on a
+ * customer's invoice and drove the supplies-and-tax row NEGATIVE to keep the total honest; switched
+ * off as "not the customer's", it took $250 off a receipt that never held it and billed the job's
+ * real $202.35 of chargers at nothing at all.
+ *
+ * `amount` is not null in the database, so the fallback now only answers a row that reaches here
+ * from somewhere other than a stored bill line. That is the right shape either way: an extension
+ * of zero means the line cost zero, and every other reading of it was a guess.
  */
 export function billLineCost(l: BillLine): number {
   const qty = Number(l.quantity) || 0;
-  return l.amount != null && Number(l.amount) !== 0 && !isNaN(Number(l.amount))
+  return l.amount != null && !isNaN(Number(l.amount))
     ? Number(l.amount)
     : (Number(l.unit_price) || 0) * (qty || 1);
 }
@@ -315,18 +329,39 @@ export function billItemisation(
   // labelled "Materials" for the residue — the same silent charge under a new name, in the code
   // written to end it. If something on this receipt was still billable, an empty itemisation
   // really does mean unreadable, and the lump is right.
+  const lump = (): BillItemRow[] => [{
+    import_key: `bill:${bill.id}`,
+    description: `Materials — ${bill.supplier}${bill.bill_number ? ` (bill #${bill.bill_number})` : ""}`,
+    quantity: 1,
+    unit: "lot",
+    unit_price: target,
+  }];
+
   if (!billRows.length) {
     if (purchased.length > 0 && !purchased.some(stillBills)) return [];
-    return [{
-      import_key: `bill:${bill.id}`,
-      description: `Materials — ${bill.supplier}${bill.bill_number ? ` (bill #${bill.bill_number})` : ""}`,
-      quantity: 1,
-      unit: "lot",
-      unit_price: target,
-    }];
+    return lump();
   }
   const remainder = Math.round((target - emitted) * 100) / 100;
-  if (Math.abs(remainder) >= 0.01) {
+
+  /**
+   * LINES THAT ADD UP TO MORE THAN THE RECEIPT ARE NOT AN ITEMISATION (review, 2026-09-19).
+   *
+   * A negative remainder means the rows above already bill more than the whole piece of paper, and
+   * the row below was keeping the TOTAL honest by putting a credit on a customer's invoice:
+   * "Supplies & tax — Consolidated Electrical Distributors, Inc. (CED)   1 ea × -$40.28". The
+   * total was right and the page was unreadable, and the first question it invites is one Erik
+   * cannot answer from the screen.
+   *
+   * It happens when a scan reads two documents as one. His Tao Zhu receipt carries twenty-one
+   * lines, $1,676.16 of them, against the $1,513.71 of a single CED invoice - the other $162.45 is
+   * invoice 8802-1101363, in the same PDF, read into the same bill. The lines are not wrong about
+   * what was bought; they are wrong about which paper they belong to, and no arithmetic here can
+   * tell which. So it falls back to the answer this function already has for "we could not itemise
+   * this": one row, the whole billable amount, the same total the customer would have paid anyway.
+   */
+  if (remainder <= -0.01) return lump();
+
+  if (remainder >= 0.01) {
     billRows.push({ import_key: `bill:${bill.id}:remainder`, description: `Supplies & tax — ${bill.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
   }
   return billRows;

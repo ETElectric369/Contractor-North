@@ -42,6 +42,7 @@ import {
   unresolveDuplicateBill,
   voidSupplierPayment,
   setSupplierInvoiceJob,
+  recordSupplierInvoiceAsBill,
 } from "./supplier-actions";
 
 export const dynamic = "force-dynamic";
@@ -304,6 +305,11 @@ export default async function BillsPage({
       description: String(l.description ?? ""),
       quantity: Number(l.quantity) || 0,
       amount: Number(l.amount) || 0,
+      // THE SELECT ALREADY FETCHES IT AND THIS MAP WAS DROPPING IT (review, 2026-09-19). A line
+      // with a $0.00 extension and a real price beside it costs the invoice $38.98 and cost this
+      // card $0.00, and because the card's tax share is proportional that skewed every exclusion
+      // on the same receipt. The failure is always a select list - or the map right after it.
+      unitPrice: l.unit_price == null ? null : Number(l.unit_price),
       category: l.category ?? null,
       // A row written before 0268 ran comes back without the column at all. Reading a missing
       // flag as "not billed" would take money off invoices nobody asked to change, so the
@@ -415,10 +421,43 @@ export default async function BillsPage({
   // hands over, and it is pure with a test around it. This file's whole job is to hand over rows,
   // spelled and totalled once: a second copy of a money rule on a page is how two screens end up
   // disagreeing about one dollar (the 24%-vs-82% budget bug, audit v800).
-  const billCounts = new Map<string, number>();
-  for (const l of (billLinkRows ?? []) as any[]) {
-    const key = String(l.supplier_invoice_id ?? "");
-    if (key) billCounts.set(key, (billCounts.get(key) ?? 0) + 1);
+  /**
+   * WHICH BILLS ALREADY COVER THIS INVOICE — and a link is only one of the two ways they can.
+   *
+   * `bill_supplier_invoices` is written by exactly one action, the Record button. Every bill in
+   * his books before that was a SCAN, and a scan of a STATEMENT covers several invoices at once:
+   * his $3,034.54 is 8802-1105868 plus 8802-1105963, and his $162.32 is 8802-1103059 plus
+   * 8802-1103061. Counting links alone said neither of those four was in his books, so the list
+   * offered to record all four - and taking that offer would put the money on the job twice, once
+   * inside the statement and once beside it (review, 2026-09-19).
+   *
+   * readBillInvoice already reads every invoice number out of a bill's own lines and filename for
+   * the duplicate finder below; here the same reading answers "is this purchase already in here?".
+   * Held as a SET of bill ids per invoice, so a bill that is both linked and named counts once.
+   */
+  const coveringBills = new Map<string, Set<string>>();
+  const cover = (invoiceKey: string, billId: string) => {
+    if (!invoiceKey || !billId) return;
+    const set = coveringBills.get(invoiceKey) ?? new Set<string>();
+    set.add(billId);
+    coveringBills.set(invoiceKey, set);
+  };
+  for (const l of (billLinkRows ?? []) as any[]) cover(String(l.supplier_invoice_id ?? ""), String(l.bill_id ?? ""));
+
+  const billsNamingNumber = new Map<string, Set<string>>();
+  for (const b of liveBills) {
+    const reading = readBillInvoice({
+      notes: (b as any).notes ?? null,
+      lineDescriptions: ((b as any).line_items ?? []).map((l: any) => l.description),
+    });
+    const stored = (b as any).supplier_invoice_number ?? null;
+    for (const n of [...reading.numbers, ...(stored ? [String(stored)] : [])]) {
+      const key = String(n ?? "").trim();
+      if (!key) continue;
+      const set = billsNamingNumber.get(key) ?? new Set<string>();
+      set.add(String((b as any).id));
+      billsNamingNumber.set(key, set);
+    }
   }
 
   const documentsOf = new Map<string, SupplierDocumentRow[]>();
@@ -443,8 +482,14 @@ export default async function BillsPage({
       discountBy: r.discount_by ?? null,
       sourceFile: r.source_file ?? null,
       jobName: r.jobs?.name ?? null,
-      // Zero linked bills means the app has no record of the purchase at all: $1,765.72 of his.
-      billCount: billCounts.get(id) ?? 0,
+      // Zero covering bills means the app has no record of the purchase at all: $1,765.72 of his.
+      // A bill covers it by being LINKED to it, or by naming its number on its own lines - which
+      // is how a scanned statement covers the invoices inside it.
+      billCount: (() => {
+        const bills = new Set(coveringBills.get(id) ?? []);
+        for (const b of billsNamingNumber.get(String(r.invoice_number ?? "").trim()) ?? []) bills.add(b);
+        return bills.size;
+      })(),
     };
     const accountId = String(r.supplier_account_id ?? "");
     if (accountId) documentsOf.set(accountId, [...(documentsOf.get(accountId) ?? []), row]);
@@ -793,6 +838,11 @@ export default async function BillsPage({
             // suppliers-card gates it on `!!actions.setInvoiceJob`, so an absent action does not
             // degrade the feature - it deletes it, silently, in every state of the data.
             setInvoiceJob: setSupplierInvoiceJob,
+            // AND THE SAME LINE AGAIN, FOR THE SAME CARD. "Record It As A Bill" was written,
+            // styled and gated on `actions.recordAsBill` - which nothing implemented and nothing
+            // passed, so Erik had to ask me to write his $223.29 CED invoice into his books by
+            // hand. Eleven more are sitting in that list behind this one line.
+            recordAsBill: recordSupplierInvoiceAsBill,
           }}
         />
       )}

@@ -340,7 +340,16 @@ const isYmd = (d: unknown): d is string => /^\d{4}-\d{2}-\d{2}$/.test(String(d ?
  * of his are among the twenty open documents. Dropping it because the sign looked wrong is how a
  * man gets billed for a return he already made.
  */
-export function openBalanceOf(invoice: SupplierInvoiceRow): number {
+/**
+ * THE FOUR FIELDS THESE TWO FUNCTIONS ACTUALLY READ, named so a caller holding raw database rows
+ * cannot slip past the type by casting (2026-09-19). `open_balance` is snake_case out of PostgREST
+ * and `openBalance` is what this file reads; a cast to SupplierInvoiceRow compiles either way and
+ * the balance silently falls back to the total, so a part-paid invoice reads as fully owed and the
+ * reversal rule stops firing. Asking for exactly these four makes the caller do the mapping.
+ */
+export type InvoiceBalanceShape = Pick<SupplierInvoiceRow, "id" | "total" | "openBalance" | "closed">;
+
+export function openBalanceOf(invoice: InvoiceBalanceShape): number {
   const stated = invoice?.openBalance;
   if (stated !== null && stated !== undefined && Number.isFinite(Number(stated))) return r2(Number(stated));
   return r2(Number(invoice?.total) || 0);
@@ -372,15 +381,59 @@ const discountOf = (invoice: SupplierInvoiceRow): number => {
  * the discount on two different invoices. Anything less exact than to-the-cent is a judgement call
  * about his money and is left alone.
  */
-export function reversedInvoiceIds(invoices: SupplierInvoiceRow[]): Set<string> {
+export function reversedInvoiceIds(invoices: InvoiceBalanceShape[]): Set<string> {
   const open = invoices.filter((i) => !i?.closed);
   const credits = open.filter((i) => openBalanceOf(i) < 0).map((i) => ({ i, spent: false }));
   const out = new Set<string>();
   for (const inv of open) {
     const bal = openBalanceOf(inv);
     if (!(bal > 0)) continue;
+    /**
+     * UNTOUCHED, NOT MERELY UNPAID (review, 2026-09-19). The match was against the OPEN balance
+     * alone, so a $10.29 credit memo for a small return landed on a $998.77 invoice that had been
+     * paid down to $10.29 and called the whole $998.77 reversed - a screen telling him a thousand
+     * dollars of merchandise came back when a tube of sealant did. An invoice a credit memo
+     * cancels has had nothing paid against it, so its open balance IS its total, and requiring
+     * that is what keeps this rule as narrow as its own header promises.
+     */
+    if (Math.round(bal * 100) !== Math.round((Number((inv as { total?: unknown })?.total) || 0) * 100)) continue;
     const hit = credits.find((c) => !c.spent && Math.round(openBalanceOf(c.i) * 100) === -Math.round(bal * 100));
     if (hit) {
+      hit.spent = true;
+      const id = String((inv as { id?: unknown })?.id ?? "");
+      if (id) out.add(id);
+    }
+  }
+  return out;
+}
+
+/**
+ * A PURCHASE A CREDIT MEMO CANCELLED — EVER, NOT JUST WHILE IT IS STILL OPEN.
+ *
+ * `reversedInvoiceIds` above answers a question about money still owed, so it only looks at OPEN
+ * documents: once CED closes a pair, there is no balance left to reverse and no discount left to
+ * lose. "Did he keep what was on this invoice?" is a different question and the answer never
+ * expires. It came up the day the Record button was wired (review, 2026-09-19): the moment Erik
+ * pays the September statement and CED marks 8802-1107230 and its credit memo closed, the pairing
+ * above stops matching and the five light almond receptacles he SENT BACK reappear on "Purchases
+ * Not In Your Books" with a job already on them and a live button offering to put $225.47 of
+ * merchandise he does not have onto his customer's job.
+ *
+ * So this pairs on the TOTAL, which does not move, and within the closed and open sets separately
+ * so a live credit can never be spent against a settled purchase or the other way round. Same
+ * narrowness: to the cent, each memo spending itself once.
+ */
+export function reversedPurchaseIds(invoices: InvoiceBalanceShape[]): Set<string> {
+  const out = new Set<string>();
+  const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
+  for (const settled of [false, true]) {
+    const side = (invoices ?? []).filter((i) => !!i?.closed === settled);
+    const credits = side.filter((i) => cents((i as { total?: unknown })?.total) < 0).map((i) => ({ i, spent: false }));
+    for (const inv of side) {
+      const total = cents((inv as { total?: unknown })?.total);
+      if (!(total > 0)) continue;
+      const hit = credits.find((c) => !c.spent && cents((c.i as { total?: unknown })?.total) === -total);
+      if (!hit) continue;
       hit.spent = true;
       const id = String((inv as { id?: unknown })?.id ?? "");
       if (id) out.add(id);
@@ -416,9 +469,14 @@ export function supplierSaysBalance(
   let nextDiscountAmount = 0;
   let oldestOpen: string | null = null;
 
-  for (const invoice of openInvoices(invoices)) {
   // Discounts on invoices a credit memo has already reversed do not count - see reversedInvoiceIds.
+  // Hoisted out of the loop: it was being paired afresh on every iteration (twenty times over his
+  // twenty open documents, on every render), and the indentation read as if it were outside
+  // already - which is how a future edit would have added per-invoice state to a set that silently
+  // resets each time round.
   const reversed = reversedInvoiceIds(invoices ?? []);
+
+  for (const invoice of openInvoices(invoices)) {
     openDocuments += 1;
     const open = openBalanceOf(invoice);
     gross = r2(gross + open);
@@ -481,9 +539,11 @@ export function supplierNetIfPaidBy(
   let forfeited = 0;
   const forfeitedInvoices: string[] = [];
 
-  for (const invoice of openInvoices(invoices)) {
   // Discounts on invoices a credit memo has already reversed do not count - see reversedInvoiceIds.
+  // Paired once, outside the loop, for the reason given in supplierSaysBalance above.
   const reversed = reversedInvoiceIds(invoices ?? []);
+
+  for (const invoice of openInvoices(invoices)) {
     gross = r2(gross + openBalanceOf(invoice));
     const amount = reversed.has(String((invoice as { id?: unknown })?.id ?? "")) ? 0 : discountOf(invoice);
     if (amount <= 0 || !isYmd(invoice.discountBy)) continue;

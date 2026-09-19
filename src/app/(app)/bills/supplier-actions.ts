@@ -6,11 +6,22 @@ import { reportError } from "@/lib/observe";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
-import { SUPPLIER_PAY_METHODS, type SupplierActionResult, type SupplierPayMethod } from "./supplier-balance";
+import {
+  reversedPurchaseIds,
+  SUPPLIER_PAY_METHODS,
+  type InvoiceBalanceShape,
+  type SupplierActionResult,
+  type SupplierPayMethod,
+} from "./supplier-balance";
 // sayMoney lives in payroll-math because payroll needed it first. It is pure string formatting
 // with no payroll in it ("$400", not "$400.00"), and a second copy here would drift the moment one
 // of them learned something about cents. One function, two ledgers.
 import { sayMoney } from "@/lib/payroll-math";
+// The arithmetic that turns a supplier's invoice lines into receipt lines lives on its own,
+// pure and tested: it is what decides the price a customer is charged for a part, and it must be
+// checkable without a database. It routes category/billable through decideReceiptLine, the one
+// door every other receipt path already passes through.
+import { supplierBillLines } from "./supplier-bill-lines";
 
 /**
  * PAYING A SUPPLIER, AND SAYING WHO THE SUPPLIER IS (migration 0270).
@@ -68,7 +79,10 @@ const spellingKey = (raw: unknown): string => String(raw ?? "").trim().toLowerCa
 const isPayMethod = (v: unknown): v is SupplierPayMethod =>
   typeof v === "string" && (SUPPLIER_PAY_METHODS as readonly string[]).includes(v);
 
+/** A unique index refused the write. The CODE is the reliable half - the message is English and
+ *  the app is the thing standing between a race and a double-charged job, so it checks both. */
 const isDuplicateKey = (err: unknown): boolean =>
+  String((err as { code?: string } | null)?.code ?? "") === "23505" ||
   /duplicate key value/i.test(String((err as { message?: string } | null)?.message ?? ""));
 
 /**
@@ -1243,6 +1257,344 @@ export async function setSupplierInvoiceJob(input: {
   const label = (job as { job_number?: string | null; name?: string | null }).name
     ?? (job as { job_number?: string | null }).job_number
     ?? "that job";
+
+  /**
+   * "ITS COST COUNTS THERE" WAS NOT TRUE (review, 2026-09-19). Filing a supplier invoice to a job
+   * writes one column on `supplier_invoices`, and nothing anywhere adds that table into a job's
+   * cost, its margin or its unbilled work - only `bills` do. He would file $301.81 onto a job,
+   * read a sentence saying the cost had landed, open the job and find every figure unchanged.
+   *
+   * What makes the cost land is the bill, so the sentence now says which step is next - and only
+   * when there IS a next step, because a document that already has a bill against it shows no
+   * button and copy must never point at a control that is not on the screen.
+   */
+  const { data: hasBill } = await ctx.supabase
+    .from("bill_supplier_invoices")
+    .select("bill_id")
+    .eq("org_id", org.orgId)
+    .eq("supplier_invoice_id", invoiceId)
+    .limit(1);
+
   revalidatePath("/bills");
-  return { ok: true, message: `${number} is on ${label} now. Its cost counts there.` };
+  return {
+    ok: true,
+    message: hasBill?.length
+      ? `${number} is on ${label} now, and its bill is already in your books.`
+      : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
+  };
+}
+
+/**
+ * THE SUPPLIER'S OWN INVOICE, WRITTEN INTO HIS BOOKS AS A BILL (2026-09-19).
+ *
+ * He asked me to do this by hand:
+ *
+ *   "since you have all the files could you please upload that final bill for 223.29"
+ *
+ * He had to ask because `recordAsBill` was typed on the card, rendered if it was passed, and
+ * nothing anywhere implemented it or passed it - the same failure as `setInvoiceJob` one wave
+ * earlier, on the same card. Eleven more CED invoices are sitting in that list, including the
+ * $523.47 on TTP56 he is about to bill, and every one of them was a message to me.
+ *
+ * A BILL FROM A SUPPLIER INVOICE IS NOT A SCAN. Everything else in `bills` arrived as a photograph
+ * read by a language model. This arrives from the supplier's own file: their number, their date,
+ * their line prices, their totals. So `pricing_provisional` is false on purpose - these ARE the
+ * prices his account pays, and they are the antidote to the Sunnyvale counter preview that 0271
+ * had to fence off.
+ *
+ * THE EXTENSION IS THE PRICE (0274, found doing his TTP 106 bill by hand two hours ago). CED
+ * prints a one-gang decora plate as "50.00" with a C beside it - fifty dollars per HUNDRED - and
+ * 93 of the 227 lines on his invoices are priced per hundred or per thousand. `bill_line_items`
+ * has nowhere to put that letter and every money path in the app reads the EXTENSION, so the
+ * conversion happens here, once: a line's unit price is what its own extension divided by its own
+ * quantity says it is. No divisor is chosen, no letter is trusted, nothing is inferred.
+ *
+ * WHAT IT REFUSES, AND WHY EACH REFUSAL IS ITS OWN SENTENCE. A statement stands for the invoices
+ * inside it and billing it charges the job for them twice (his $3,034.54 was exactly this). A
+ * credit memo is money coming back. A service charge is interest on the account, not a job cost.
+ * The card only ever offers this on a plain invoice, but a refusal that says which of those it hit
+ * is how he learns the shape of his own paperwork instead of pressing a dead button.
+ */
+export async function recordSupplierInvoiceAsBill(input: {
+  invoiceId: string;
+}): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const invoiceId = String(input?.invoiceId ?? "");
+  if (!invoiceId) return { ok: false, error: "Couldn't tell which invoice you meant." };
+
+  const { data: inv, error: readErr } = await ctx.supabase
+    .from("supplier_invoices")
+    .select(
+      "id, invoice_number, kind, invoice_date, job_id, supplier_account_id, tax, shipping, total, open_balance, closed, supplier_accounts(name), jobs(name, job_number)",
+    )
+    .eq("id", invoiceId)
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: `Couldn't read that invoice just now, so nothing was written. ${dbError(readErr)}` };
+  if (!inv) return { ok: false, error: "That invoice isn't here anymore. Reload the page." };
+
+  const row = inv as {
+    invoice_number?: string | null;
+    kind?: string | null;
+    invoice_date?: string | null;
+    job_id?: string | null;
+    supplier_account_id?: string | null;
+    tax?: unknown;
+    shipping?: unknown;
+    total?: unknown;
+    open_balance?: unknown;
+    closed?: boolean | null;
+    supplier_accounts?: { name?: string | null } | null;
+    jobs?: { name?: string | null; job_number?: string | null } | null;
+  };
+  const number = text(row.invoice_number) ?? "That invoice";
+
+  const kind = String(row.kind ?? "invoice");
+  if (kind !== "invoice") {
+    const why: Record<string, string> = {
+      statement: `${number} is a statement. It stands for the invoices inside it, so billing it would charge the job for those purchases a second time. Record them one at a time instead.`,
+      credit_memo: `${number} is a credit memo. It takes money back off the account rather than putting a cost on a job, so there is nothing here to bill.`,
+      service_charge: `${number} is a late-payment charge from the supplier, not something you bought for a job. It belongs to the account, not to a job's costs.`,
+    };
+    return { ok: false, error: why[kind] ?? `${number} isn't an invoice, so it can't become a bill.` };
+  }
+
+  const jobId = text(row.job_id);
+  if (!jobId) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
+
+  const accountId = text(row.supplier_account_id);
+  const accountName = text(row.supplier_accounts?.name);
+  // A bill has to say who it is from: `bills.supplier` is what the account groups on, what the
+  // price book records as the last supplier, and what the customer reads on the "Supplies & tax"
+  // line of their invoice. A bill named "Supplier" is worse than no bill.
+  if (!accountId || !accountName) {
+    return { ok: false, error: `${number} isn't filed under a supplier account yet, so a bill from it would have no supplier name on it.` };
+  }
+
+  const total = money(row.total);
+  if (!(total > 0)) return { ok: false, error: `There is no amount on ${number}, so there is nothing to record.` };
+
+  const openBalance = row.open_balance == null ? total : money(row.open_balance);
+  const partlyPaid = !row.closed && openBalance > 0 && Math.round(openBalance * 100) !== Math.round(total * 100);
+
+  const jobLabel = text(row.jobs?.name) ?? text(row.jobs?.job_number) ?? "its job";
+
+  // ALREADY IN THE BOOKS, TWO WAYS. A link is the certain one. A bill carrying this invoice number
+  // without a link is the same purchase filed by hand or by an earlier scan - and the answer to
+  // that is the link it is missing, not a second bill for the same money.
+  const { data: linked } = await ctx.supabase
+    .from("bill_supplier_invoices")
+    .select("bill_id, bills(job_id, jobs(name))")
+    .eq("org_id", org.orgId)
+    .eq("supplier_invoice_id", invoiceId)
+    .limit(1);
+  if (linked?.length) {
+    // THE BILL'S JOB, NOT THE INVOICE'S. They are usually the same and the case where they differ
+    // is exactly the one he needs told: the cost is sitting on a job he is not looking at.
+    const on = text((linked[0] as any)?.bills?.jobs?.name);
+    return {
+      ok: false,
+      error: on
+        ? `${number} is already recorded as a bill, on ${on}.`
+        : `${number} is already recorded as a bill.`,
+    };
+  }
+
+  /**
+   * AND THE RETURN HE SENT BACK (2026-09-19). The list this button sits on now hides an invoice a
+   * credit memo has reversed, but a list is a screen and this is a write: 8802-1107230 is five
+   * light almond receptacles that went back to the counter, and recording it would put $225.47 of
+   * merchandise he does not have onto a customer's job. The rule is read from the account's own
+   * documents with the same function the balance and the discount use, so all three agree.
+   */
+  const { data: siblings } = await ctx.supabase
+    .from("supplier_invoices")
+    .select("id, total, open_balance, closed")
+    .eq("org_id", org.orgId)
+    .eq("supplier_account_id", accountId);
+  // Mapped, not cast: PostgREST says `open_balance` and the rule reads `openBalance`, and a cast
+  // would compile while quietly reading every part-paid invoice as fully owed.
+  const siblingBalances: InvoiceBalanceShape[] = ((siblings ?? []) as any[]).map((r) => ({
+    id: String(r?.id ?? ""),
+    total: Number(r?.total) || 0,
+    openBalance: r?.open_balance == null ? null : Number(r.open_balance),
+    closed: !!r?.closed,
+  }));
+  if (reversedPurchaseIds(siblingBalances).has(invoiceId)) {
+    return {
+      ok: false,
+      error: `${number} was taken straight back off the account by a credit memo for the same amount, so there is nothing on it you kept. Recording it would charge ${jobLabel} for merchandise you returned.`,
+    };
+  }
+
+  // A SET-ASIDE COPY IS NOT WHERE THIS BELONGS (review, 2026-09-19). 0271's duplicate resolver
+  // leaves the losing copy in the table with a pointer on it, and tying the supplier's invoice to
+  // that one would hang it off a bill every cost reader in the app deliberately ignores: the
+  // reconcile list would fall quiet and the job would carry none of the money.
+  const { data: sameNumber } = await ctx.supabase
+    .from("bills")
+    .select("id, job_id, jobs(name)")
+    .eq("org_id", org.orgId)
+    .eq("supplier_invoice_number", number)
+    .is("superseded_by_bill_id", null)
+    .limit(1);
+  if (sameNumber?.length) {
+    const existing = sameNumber[0] as { id: string; job_id?: string | null; jobs?: { name?: string | null } | null };
+    const { data: joined, error: joinErr } = await ctx.supabase
+      .from("bill_supplier_invoices")
+      .insert({ org_id: org.orgId, bill_id: existing.id, supplier_invoice_id: invoiceId })
+      .select("id");
+    // 0277 is unique on the supplier invoice, so a collision here means the tie this branch is
+    // trying to create already exists - which is the end state it wants, not a failure.
+    if (joinErr && !isDuplicateKey(joinErr)) {
+      return { ok: false, error: `A bill already carries ${number}, and tying the two together didn't save. ${dbError(joinErr)}` };
+    }
+    if (!joinErr && !joined?.length) {
+      reportError("bills:recordAsBill.join", new Error("bill_supplier_invoices insert wrote no rows"), { invoiceId });
+      return { ok: false, error: `A bill already carries ${number}, but tying the two together didn't save. Try it again.` };
+    }
+    revalidatePath("/bills");
+    if (existing.job_id) revalidatePath(`/jobs/${existing.job_id}`);
+    const where = text(existing.jobs?.name) ?? "a job";
+    return {
+      ok: true,
+      message: `${number} was already in your books on ${where}. Nothing was charged twice - the two are tied together now, so it stops asking.`,
+    };
+  }
+
+  // ── THE LINES ───────────────────────────────────────────────────────────────────────────────
+  const { data: lineRows, error: lineErr } = await ctx.supabase
+    .from("supplier_invoice_lines")
+    .select("description, part_number, quantity, unit_price, extension, sort_order")
+    .eq("org_id", org.orgId)
+    .eq("supplier_invoice_id", invoiceId)
+    .order("sort_order");
+  if (lineErr) {
+    // A FAILED READ IS NOT AN EMPTY INVOICE. Writing the bill anyway would file it as an opaque
+    // lump and quietly lose the line prices the supplier's own file is holding right here.
+    return { ok: false, error: `Couldn't read that invoice's lines just now, so nothing was written. ${dbError(lineErr)}` };
+  }
+
+  // THE LINES HAVE TO BE THE BILL, OR SAY SO. `bills.amount` is the supplier's own total and is
+  // never adjusted to match a sum - it is the figure they will chase him for. When the lines come
+  // to LESS, the invoice importer already carries the difference in its supplies-and-tax row, and
+  // the sentence below names it rather than letting it show up as an unexplained few dollars. When
+  // they come to MORE, something was read wrong and itemising would overcharge his customer, so
+  // the bill goes in the way a hand-entered one always has: as one honest amount.
+  const { lines, lineSum, overshoot, shortfall } = supplierBillLines((lineRows ?? []) as any[], {
+    invoiceNumber: number,
+    tax: row.tax,
+    shipping: row.shipping,
+    total,
+  });
+
+  const { data: billRows, error: billErr } = await ctx.supabase
+    .from("bills")
+    .insert({
+      org_id: org.orgId,
+      job_id: jobId,
+      supplier: accountName,
+      supplier_account_id: accountId,
+      supplier_invoice_number: number,
+      bill_number: number,
+      amount: total,
+      // ONLY THE SUPPLIER CAN SAY WHETHER IT IS PAID, which is the whole reason supplier_invoices
+      // exists (0273). `closed` is their answer, read out of their own portal.
+      status: row.closed ? "paid" : "unpaid",
+      bill_date: text(row.invoice_date),
+      category: "Invoice",
+      // WHAT THE SUPPLIER SAYS IS STILL OWED, when it is not simply all of it. `bills.status` has
+      // two states and a part-paid invoice is neither: recorded as unpaid it shows at full value
+      // on his Unpaid filter while the card directly above says the supplier is owed ten dollars
+      // on that same document (review, 2026-09-19). The status stays the supplier's own verdict;
+      // the figure that contradicts it is written down rather than left off the screen.
+      notes: partlyPaid
+        ? `Recorded from ${accountName} invoice ${number}, the supplier's own document. They show ${sayMoney(openBalance)} of it still open.`
+        : `Recorded from ${accountName} invoice ${number}, the supplier's own document.`,
+      created_by: ctx.userId,
+      // Their file, their contract prices. Not a counter preview (0271).
+      pricing_provisional: false,
+      is_statement: false,
+    })
+    .select("id");
+  if (billErr) {
+    // 0276's unique index is what actually stops two taps making two bills; the read above is only
+    // the fast path. When the index fires, the answer is not a database error - it is that the
+    // thing he asked for has already happened.
+    if (isDuplicateKey(billErr)) {
+      revalidatePath("/bills");
+      return { ok: false, error: `${number} is already recorded as a bill. Reload the page and you'll see it.` };
+    }
+    return { ok: false, error: `That didn't save, so ${number} is still not in your books. ${dbError(billErr)}` };
+  }
+  if (!billRows?.length) {
+    reportError("bills:recordAsBill", new Error("bill insert wrote no rows"), { invoiceId, number });
+    return { ok: false, error: `That didn't save, so ${number} is still not in your books. Try it again.` };
+  }
+  const billId = String(billRows[0].id);
+
+  /**
+   * THE CLAIM GOES DOWN BEFORE THE LINES DO (review, 2026-09-19). 0277 makes this row unique on
+   * the supplier invoice, so it is the statement "this purchase is covered" and only one caller
+   * can make it. Writing it FIRST means the tap that loses a race owns a bill with nothing hanging
+   * off it, which can be taken straight back out; writing it last would leave orphaned line items
+   * behind on every loss.
+   */
+  let lineNote = "";
+  const { data: joined, error: joinErr } = await ctx.supabase
+    .from("bill_supplier_invoices")
+    .insert({ org_id: org.orgId, bill_id: billId, supplier_invoice_id: invoiceId })
+    .select("id");
+  if (joinErr && isDuplicateKey(joinErr)) {
+    // Somebody else got there between the read and the write. The bill just written is the
+    // duplicate, it holds no lines yet, and a second bill is a cost the job never incurred - so it
+    // goes back out and he reads the sentence the check above would have given him.
+    await ctx.supabase.from("bills").delete().eq("org_id", org.orgId).eq("id", billId).select("id");
+    revalidatePath("/bills");
+    return { ok: false, error: `${number} is already recorded as a bill. Reload the page and you'll see it.` };
+  }
+  // The bill is real and the cost is on the job whether or not the tie-line landed. Without it the
+  // reconcile card will go on asking for this invoice, which is a nuisance and a wrong number on a
+  // screen, so it gets its own sentence rather than a shrug.
+  if (joinErr || !joined?.length) {
+    reportError("bills:recordAsBill.link", joinErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, invoiceId });
+    lineNote += " The bill is on the job, but it didn't get tied to the supplier's invoice, so this list may still ask for it.";
+  }
+
+  if (overshoot) {
+    lineNote = ` Its lines came to ${sayMoney(lineSum)}, more than the ${sayMoney(total)} the supplier is charging, so it went in as one amount rather than itemised.${lineNote}`;
+  } else if (lines.length) {
+    const { data: wrote, error: writeErr } = await ctx.supabase
+      .from("bill_line_items")
+      .insert(lines.map((l, i) => ({ org_id: org.orgId, bill_id: billId, ...l, sort_order: i })))
+      .select("id");
+    // THE COST IS RIGHT EITHER WAY, so a line failure never throws the bill away - it is said out
+    // loud instead, because a bill that silently lost its itemisation bills the customer one lump
+    // labelled "Materials" and nobody would know why. The sentence stops at what is true: there
+    // is no control anywhere in the app for adding a line to a bill, and telling him to open it
+    // and add them would be a door that does not exist.
+    if (writeErr || !wrote?.length) {
+      reportError("bills:recordAsBill.lines", writeErr ?? new Error("bill line insert wrote no rows"), { billId, lines: lines.length });
+      lineNote = ` Its lines didn't save, so the ${sayMoney(total)} is in as one amount. The cost is right; the invoice will bill it as a single line.${lineNote}`;
+    } else if (shortfall >= 0.01) {
+      // THIS ARM WAS UNREACHABLE IN THE CASE IT WAS WRITTEN FOR (review). It hung off the end of an
+      // if/else chain whose first arm ran whenever there were any lines at all, so a receipt with
+      // a line the reader missed - the only way a shortfall happens - said nothing, and the money
+      // rode into the invoice's supplies row with no warning at all.
+      lineNote = ` ${sayMoney(shortfall)} of it isn't on a line, so it rides in the supplies and tax row when you invoice.${lineNote}`;
+    }
+  } else if (shortfall >= 0.01) {
+    lineNote = ` None of it is on a line, so the whole ${sayMoney(total)} bills as one amount.${lineNote}`;
+  }
+
+  revalidatePath("/bills");
+  revalidatePath(`/jobs/${jobId}`);
+  return {
+    ok: true,
+    message: `${number} is a bill on ${jobLabel} now: ${sayMoney(total)}${row.closed ? ", which the supplier already shows as paid" : ""}.${lineNote}`,
+  };
 }

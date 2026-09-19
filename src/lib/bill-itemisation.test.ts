@@ -324,3 +324,36 @@ describe("billedPortion / billLineBilledCost — one reading, both sides of the 
     expect(billLineBilledCost({ id: "a", amount: 108.36 })).toBe(108.36);
   });
 });
+
+describe("lines that add up to more than the receipt", () => {
+  /**
+   * HIS TAO ZHU SCAN, CONDENSED BUT NOT INVENTED. One PDF held two CED invoices and the reader put
+   * both sets of lines on one bill: twenty-one rows, $1,547.19 of purchased lines and $128.97 of
+   * tax (two tax rows, one per invoice - 8802-1101363 and 8802-1101419), against a bill amount of
+   * $1,513.71, which is the second invoice alone. The four rows below carry those exact four
+   * figures; the individual parts are not the point and the arithmetic is identical.
+   */
+  const bill = { id: "tao", supplier: "Consolidated Electrical Distributors, Inc. (CED)", bill_number: null, amount: 1513.71 };
+  const lines = [
+    { id: "a", description: "NMB 10/3 W/GND (250 ft Coil)", quantity: 250, unit_price: 1.65, amount: 411.68, category: "Electrical", billable: true, billed_amount: null },
+    { id: "b", description: "Everything else on the two tickets", quantity: 1, unit_price: 1135.51, amount: 1135.51, category: "Electrical", billable: true, billed_amount: null },
+    { id: "c", description: "Sales Tax 9.00000 (Invoice 8802-1101363)", quantity: 1, unit_price: 13.41, amount: 13.41, category: "Tax", billable: true, billed_amount: null },
+    { id: "d", description: "Sales Tax 8.26500 (Invoice 8802-1101419)", quantity: 1, unit_price: 115.56, amount: 115.56, category: "Tax", billable: true, billed_amount: null },
+  ];
+
+  it("bills the receipt as one amount rather than printing a credit on a customer's invoice", () => {
+    const rows = billItemisation(bill, lines, 25);
+    const total = rows.reduce((s, r) => Math.round((s + r.quantity * r.unit_price) * 100) / 100, 0);
+    expect(total).toBe(1892.14); // 1513.71 x 1.25 - the same money either way
+    expect(rows).toHaveLength(1);
+    expect(rows[0].unit).toBe("lot");
+    expect(rows.every((r) => r.unit_price > 0)).toBe(true);
+  });
+
+  it("still itemises, with a supplies row, when the lines fit inside the receipt", () => {
+    const rows = billItemisation({ ...bill, amount: 1800 }, lines, 25);
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[rows.length - 1].description).toContain("Supplies & tax");
+    expect(rows[rows.length - 1].unit_price).toBeGreaterThan(0);
+  });
+});

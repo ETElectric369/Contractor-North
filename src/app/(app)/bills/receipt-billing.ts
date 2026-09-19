@@ -28,7 +28,7 @@
  * "not billed" are two different ideas and this column is only the second one.
  */
 
-import { billedPortion, excludedReceiptCost } from "@/lib/bill-itemisation";
+import { billedPortion, billLineCost, excludedReceiptCost } from "@/lib/bill-itemisation";
 import { formatCurrency } from "@/lib/utils";
 
 /** The per-line category the receipt reader must choose from. `Food & Drink` is the new one. */
@@ -401,6 +401,19 @@ export function round2(n: number): number {
 
 export interface BillingSplitLine {
   amount: number | null;
+  /**
+   * WITHOUT THESE TWO THE CARD AND THE INVOICE READ THE SAME LINE DIFFERENTLY (review, 2026-09-19),
+   * and it is the projection law wearing the same hat as the tax gap below.
+   *
+   * `billLineCost` is `amount ?? unit_price * (qty || 1)`: a line whose stored extension is $0.00
+   * with a real price beside it - CED's standard back-order print, and there is one on his 85
+   * Whitney receipt right now - costs $38.98 to the importer and $0.00 to this card. Because the
+   * tax share here is PROPORTIONAL, a short denominator then skews every other exclusion on the
+   * same receipt too. A type too narrow to ask the right question is how two screens end up
+   * disagreeing about one dollar, which is the exact sentence the tax note below was written for.
+   */
+  unitPrice?: number | null;
+  quantity?: number | null;
   billable?: boolean | null;
   /** Dollars of this line THIS job took, when only part of the container was the customer's
    *  (0272). Null means the whole line, which is what every row written before 0272 means. */
@@ -459,7 +472,11 @@ export function splitReceiptBilling(
       notBilledCount += 1;
       continue;
     }
-    if (billedPortion(Number(l?.amount) || 0, l?.billedAmount) != null) partBilledCount += 1;
+    // billLineCost, not `amount`: a split on a line whose extension is $0.00 with a real price
+    // beside it used to count as no split at all, so the card said nothing while the invoice took
+    // the money off. That is the silent direction, and worse than a wrong figure.
+    if (billedPortion(billLineCost({ id: 0, amount: l?.amount, quantity: l?.quantity, unit_price: l?.unitPrice }), l?.billedAmount) != null)
+      partBilledCount += 1;
   }
   /**
    * THE SAME READING THE INVOICE USES, NOT A SECOND ONE (review of cn-v964).
@@ -478,6 +495,9 @@ export function splitReceiptBilling(
       // so an index keeps the shapes compatible without inventing a database id here.
       id: i,
       amount: l?.amount,
+      // The two the importer's own projection carries, so billLineCost reads one line one way.
+      quantity: l?.quantity,
+      unit_price: l?.unitPrice,
       category: l?.category ?? null,
       billable: l?.billable,
       billed_amount: l?.billedAmount,

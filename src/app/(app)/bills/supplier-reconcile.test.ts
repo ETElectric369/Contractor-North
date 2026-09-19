@@ -388,6 +388,32 @@ describe("invoices with no bill", () => {
     const slice = invoicesNeedingBill(hisBook(), { since: RECORDS_START });
     expect(slice.rows.map((r) => r.invoiceNumber)).not.toContain("8802-1104268");
   });
+
+  /**
+   * THE WRONG COLOUR RETURN. 8802-1107230 is five light almond USB receptacles Erik sent straight
+   * back; 8802-1107337 is CED taking the $225.47 off again, and its own PDF names its parent
+   * ("ORIGINAL INVOICE(S): 1107230"). Both are open, both name TTP 106, and no bill covers the
+   * invoice - so before this rule the list offered "Record It As A Bill" on merchandise he does
+   * not have, one tap from a customer's job. The ivory replacement beside it, 8802-1107338, is a
+   * real purchase and must stay.
+   */
+  it("never offers a purchase a credit memo already took back off the account", () => {
+    const slice = invoicesNeedingBill(hisBook(), { since: RECORDS_START });
+    const numbers = slice.rows.map((r) => r.invoiceNumber);
+    expect(numbers).not.toContain("8802-1107230");
+    expect(numbers).toContain("8802-1107338");
+    expect(slice.reversedRows).toBe(1);
+    expect(slice.reversedTotal).toBe(225.47);
+  });
+
+  it("does not quietly lose the returned money out of its own totals", () => {
+    // What it left out is counted, not dropped: rows + older + reversed is every purchase there is.
+    const slice = invoicesNeedingBill(hisBook(), { since: RECORDS_START });
+    expect(slice.total).toBe(Number((slice.settledTotal + slice.openTotal).toFixed(2)));
+    const purchases = hisBook().filter((r) => r.kind === "invoice" && !(Number(r.billCount) || 0));
+    const every = purchases.reduce((s, r) => Number((s + Number(r.total)).toFixed(2)), 0);
+    expect(Number((slice.total + slice.olderTotal + slice.reversedTotal).toFixed(2))).toBe(every);
+  });
 });
 
 describe("the prompt-pay discount, and the interest he paid instead", () => {

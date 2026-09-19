@@ -38,6 +38,7 @@ import {
   openBalanceOf,
   type SupplierInvoiceRow as SupplierDocument,
   reversedInvoiceIds,
+  reversedPurchaseIds,
 } from "./supplier-balance";
 
 // ── WHAT WE HOLD ────────────────────────────────────────────────────────────────────────────────
@@ -639,6 +640,12 @@ export interface NeedsBillSlice {
   /** Documents older than the day his records start, left off the list on purpose. */
   olderRows: number;
   olderTotal: number;
+  /** Purchases a credit memo has already taken straight back off the account: the wrong-colour
+   *  return. They are NOT missing from his books, they are cancelled, and a bill for one would put
+   *  merchandise he sent back onto a customer's job. Counted so the money does not vanish off the
+   *  screen unexplained. */
+  reversedRows: number;
+  reversedTotal: number;
   /** The day his records start, echoed back so the card can say what it left out. */
   since: string | null;
 }
@@ -668,11 +675,36 @@ export function invoicesNeedingBill(
   let openRows = 0;
   let olderRows = 0;
   let olderTotal = 0;
+  let reversedRows = 0;
+  let reversedTotal = 0;
+
+  /**
+   * A RETURN IS NOT A MISSING BILL (2026-09-19, wiring "Record It As A Bill").
+   *
+   * Erik ordered five light almond USB receptacles on 8802-1107230, sent them back, and CED wrote
+   * 8802-1107337 to take the $225.47 straight off again: "skip the returns for the wrong color".
+   * Both documents are open, both name TTP 106, and the invoice had no bill against it - so the
+   * moment the Record button was wired, this list offered to put $225.47 of merchandise he does
+   * not have onto his customer's job, one tap, with a credit memo sitting beside it saying so.
+   *
+   * It pairs on the TOTAL rather than the open balance (reversedPurchaseIds, exported from
+   * supplier-balance so there is ONE rule and not three copies of it), because "did he keep what
+   * was on this invoice?" is not a question that expires. The balance's own rule only looks at
+   * OPEN documents - correctly, since a settled pair owes nothing - and the day Erik pays the
+   * September statement CED closes both of these, that rule stops matching, and the return would
+   * walk back onto this list with a live button on it.
+   */
+  const reversed = reversedPurchaseIds(invoices ?? []);
 
   for (const inv of invoices ?? []) {
     if (!IS_A_PURCHASE.includes(inv.kind)) continue;
     if ((Number(inv.billCount) || 0) > 0) continue;
     const amount = r2(Number(inv.total) || 0);
+    if (reversed.has(String(inv.id))) {
+      reversedRows += 1;
+      reversedTotal = r2(reversedTotal + amount);
+      continue;
+    }
     // No date on it cannot be ruled out of a date window - it is kept, because "we do not know
     // when" is not a reason to stop counting money.
     if (since && inv.invoiceDate && inv.invoiceDate < since) {
@@ -698,7 +730,7 @@ export function invoicesNeedingBill(
       Number(b.closed) - Number(a.closed) ||
       (Number(b.total) || 0) - (Number(a.total) || 0),
   );
-  return { rows, total, settledTotal, settledRows, openTotal, openRows, olderRows, olderTotal, since };
+  return { rows, total, settledTotal, settledRows, openTotal, openRows, olderRows, olderTotal, reversedRows, reversedTotal, since };
 }
 
 // ── WHAT THE ACCOUNT CARD SAYS, AND WHICH MODEL IT CAME FROM ────────────────────────────────────

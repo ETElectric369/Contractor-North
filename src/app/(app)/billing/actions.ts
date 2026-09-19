@@ -1503,7 +1503,18 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   // already billed on INV-061"), which made a second invoice impossible once the first went out.
   const [{ data: pos }, { data: bills }] = await Promise.all([
     supabase.from("purchase_orders").select("id, po_number, vendor, total, status").eq("job_id", inv.job_id),
-    supabase.from("bills").select("id, supplier, bill_number, amount, po_id").eq("job_id", inv.job_id),
+    // A SET-ASIDE DUPLICATE IS NOT A COST, AND THIS WAS THE ONE READ THAT STILL BILLED IT
+    // (two independent reviewers, 2026-09-19). 0271's `superseded_by_bill_id` is filtered by
+    // /analytics, job-financials, unbilled-work and job-profitability - and was missed here, on
+    // the read that decides what a CUSTOMER pays. Erik taps the duplicate picker before the job
+    // is invoiced (sort the shoebox, then bill), so no 0255 claim exists to stop it, and the copy
+    // he just set aside is itemised onto the invoice beside the one he kept. $95.27 of CED is in
+    // exactly that state on 13631 Northwoods today.
+    supabase
+      .from("bills")
+      .select("id, supplier, bill_number, amount, po_id")
+      .eq("job_id", inv.job_id)
+      .is("superseded_by_bill_id", null),
   ]);
   const billIds = ((bills ?? []) as any[]).map((b) => String(b.id));
   // Claims AFTER the rows, never beside them: the read looks every bill and order up BY ID as well
