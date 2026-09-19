@@ -21,6 +21,11 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
+/* THE ONE DEFINITION OF "THEY'RE HOLDING AN OLDER BILL" (0269). The same function the server's
+   revision stamp is written against, asked here so the sentence on the page and the rule in the
+   database can never drift apart. It is server-only, which is why the ANSWER crosses to the
+   client component and the rule does not. */
+import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
@@ -34,6 +39,12 @@ export default async function InvoicePage({
   const { id } = await params;
   const supabase = await createClient();
 
+  /* THE PROJECTION IS WHERE THIS PAGE'S TRUTH COMES FROM (the projection law). `*` means the two
+     delivery stamps ride along without being named: 0267's `sent_at` (a real send, never a pay
+     door's promotion to 'sent') and 0269's `revised_at` (money moved after that send). The detail
+     component's notice reads both, so if this ever narrows to a field list, those two names have
+     to be on it or the card goes quiet about the customer holding an older bill — the exact
+     silence cn-v962 traded the edit lock for. */
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
     .select("*, customers(id, name, pricing_levels(markup_pct)), quotes(id, quote_number)")
@@ -230,6 +241,13 @@ export default async function InvoicePage({
         defaultMarkupPct={orgSettings.default_markup_pct}
         customers={(customers ?? []) as any}
         jobs={(jobs ?? []) as any}
+        /* Who holds this bill — the same name the Send Invoice confirm spells out, so the notice
+           about their copy being older says "Dave Gove", not "the customer". */
+        customerName={inv.customers?.name ?? null}
+        customerHoldsOlderCopy={customerHoldsOlderCopy(
+          (inv as { sent_at?: string | null }).sent_at,
+          (inv as { revised_at?: string | null }).revised_at,
+        )}
       />
     </div>
   );

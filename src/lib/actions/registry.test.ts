@@ -155,9 +155,25 @@ describe("action registry — invoice money loop (draft fill by voice)", () => {
     }
   });
 
-  it("draft-invoice edits run straight through, but recording a payment trips the confirm gate", () => {
-    expect(needsConsent(REGISTRY["invoice.fromJob"], "agent", false)).toBe(false); // tier-1 draft
-    expect(needsConsent(REGISTRY["invoice.addItem"], "agent", false)).toBe(false);
+  it("drafting an invoice runs straight through; changing a LINE or taking money trips the gate", () => {
+    /**
+     * THE LINE EDITS MOVED UP A TIER IN cn-v962, AND THIS ASSERTION MOVED WITH THEM.
+     *
+     * They were tier-1 on one argument: the server action underneath refused anything but a
+     * draft, so the worst a misheard sentence could do was rearrange a bill nobody had seen.
+     * Erik overruled that lock - "even if i did sent it ill always need to be able to go back and
+     * make changes as per a client's request or my own review catches errors" - so the same
+     * sentence spoken at a jobsite now reaches a SENT, PARTIAL, PAID or OVERDUE invoice and
+     * changes what a customer owes. A confirm is the only thing left between a misheard line and
+     * a re-priced bill somebody has already paid. The UI stays exempt (the person is looking at
+     * the line), so this costs a typed edit nothing and gates voice and agent callers, which is
+     * exactly where the risk is.
+     */
+    expect(needsConsent(REGISTRY["invoice.fromJob"], "agent", false)).toBe(false); // drafting a new bill asks nobody for money
+    expect(needsConsent(REGISTRY["invoice.addItem"], "agent", false)).toBe(true);
+    expect(needsConsent(REGISTRY["invoice.updateItem"], "agent", false)).toBe(true);
+    expect(needsConsent(REGISTRY["invoice.deleteItem"], "agent", false)).toBe(true);
+    expect(needsConsent(REGISTRY["invoice.addItem"], "agent", true)).toBe(false); // explicit yes passes
     expect(needsConsent(REGISTRY["payment.record"], "agent", false)).toBe(true); // money in → confirm
     expect(needsConsent(REGISTRY["payment.record"], "agent", true)).toBe(false); // explicit yes passes
   });

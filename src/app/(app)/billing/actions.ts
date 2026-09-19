@@ -12,7 +12,8 @@ import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
-import { markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
 import { billItemisation } from "@/lib/bill-itemisation";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
@@ -348,14 +349,38 @@ export async function invoiceShareText(
   // same deed textInvoice and emailInvoice stamp on the way out. But NOTHING SILENT still holds —
   // the flip happens only on the caller's explicit yes (needsSend → the button asks in plain
   // words), never as a side effect nobody chose.
-  if (String((invoice as { status?: string | null }).status ?? "") === "draft") {
+  /**
+   * A REVISED BILL SHARED AGAIN SETTLES ITS OWN RECORD (0269).
+   *
+   * Editing a delivered invoice leaves `revised_at > sent_at` standing — the page says the
+   * customer is holding an older copy, and only a real re-delivery makes that false. The share
+   * sheet is a delivery this app cannot watch (the OS takes over, and a cancelled sheet leaves no
+   * trace), so it does the one thing it can: it ASKS, through the same needsSend door the draft
+   * branch has used since cn-v700, and stamps only on the yes. A tap that was really "copy the
+   * link for my own notes" then costs one "no" instead of quietly telling the office a corrected
+   * bill went out that never did.
+   */
+  const isDraft = String((invoice as { status?: string | null }).status ?? "") === "draft";
+  const resendNeeded = !isDraft && (await hasUnsentRevision(ctx.supabase, id));
+  if (isDraft || resendNeeded) {
     if (!opts?.sendIt) {
       return {
         ok: false,
         needsSend: true,
-        error: `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`,
+        error: isDraft
+          ? `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`
+          : `${invoice.invoice_number ?? "This invoice"} has changed since it went out, so the customer is holding an older copy. Sharing the link again records it as re-sent.`,
       };
     }
+    // A re-send moves the DATE and nothing else — never the status, or sharing a paid invoice
+    // would walk it back onto the AR list (see textInvoice).
+    if (!isDraft) {
+      const resent = await markInvoiceResent(ctx.supabase, id);
+      if (!resent.ok) return { ok: false, error: resent.error ?? "Couldn't record this invoice as re-sent." };
+      revalidateMoney(id);
+    }
+  }
+  if (isDraft && opts?.sendIt) {
     // The stamp rides with the status because this IS the deed: the caller said yes to handing
     // the customer their link. 0267: `sent` alone can be manufactured by a pay door, `sent_at`
     // cannot. And the write is checked — a zero-row UPDATE is a 204, and handing out a link to a
@@ -403,18 +428,38 @@ export async function textInvoice(
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
   if (!sent)
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
-  if (invoice.status === "draft") {
-    // The text is already in the customer's hand, so the deed happened whatever the row does next
-    // — which is why this is stamped (0267) and why a failure here is reported as "it went out but
-    // the status didn't stick" rather than as a failed send. Silent is the one thing it can't be:
-    // the office would be looking at a Draft badge on a bill the customer is reading.
-    const stamped = await markInvoiceSent(supabase, id);
-    if (!stamped.ok) {
-      return { ok: false, error: `The text went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${stamped.error ?? "try again"})` };
-    }
-    // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
-    await recalcInvoice(supabase, id);
+  // The text is already in the customer's hand, so the deed happened whatever the row does next
+  // — which is why this is stamped (0267) and why a failure here is reported as "it went out but
+  // the status didn't stick" rather than as a failed send. Silent is the one thing it can't be:
+  // the office would be looking at a Draft badge on a bill the customer is reading.
+  //
+  // AND A SECOND TEXT IS A SECOND DELIVERY (0269). This used to stamp only inside the draft
+  // branch, which was complete right up until a delivered invoice could be revised: fix a line on
+  // a sent bill, text the customer the corrected one, and `revised_at > sent_at` would have
+  // stayed true forever — the page nagging "they're holding an older copy" about the copy that
+  // had just gone out, with no way at all to make it stop. The status half of the stamp is the
+  // part that must not repeat: markInvoiceResent moves the DATE and leaves 'paid' alone, because
+  // texting someone a copy of a bill they have paid must never put them back on the AR list.
+  // A VOID invoice is texted without a stamp: it is not a bill, and its link does not open
+  // (public_invoice is narrowed to sent/partial/paid/overdue), so recording a delivery on it
+  // would put a date on a thing that was cancelled.
+  const first = invoice.status === "draft";
+  const label = invoice.invoice_number ?? "this invoice";
+  const stamped = first ? await markInvoiceSent(supabase, id) : invoice.status === "void" ? { ok: true } : await markInvoiceResent(supabase, id);
+  if (!stamped.ok) {
+    // Two different failures, so two different sentences. A draft that missed its flip needs its
+    // status set; a re-send that missed only lost the DATE, and telling the office to set a paid
+    // invoice's status to Sent would walk it back onto the AR list to fix a cosmetic stamp.
+    return {
+      ok: false,
+      error: first
+        ? `The text went out, but ${label} didn't get marked as sent - reload and set its status to Sent. (${stamped.error ?? "try again"})`
+        : `The text went out, but ${label} still reads as changed since it was last sent - send it again in a moment to clear that. (${stamped.error ?? "try again"})`,
+    };
   }
+  // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
+  if (first) await recalcInvoice(supabase, id);
+  revalidateMoney(id);
   // Warm the stored PDF (0198) post-response so the customer's Download button works from
   // the first minute — after() never slows the send; the render carries the sender's cookies.
   const h = await headers();
@@ -478,6 +523,22 @@ export type ImportStats = {
 };
 type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
 type RpcStats = { inserted: number; updated: number; kept_edited: number; removed: number };
+
+/**
+ * DID THIS IMPORT CHANGE THE BILL? — the question the revision stamp (0269) asks of an importer.
+ *
+ * An import is idempotent by design: tapping "Import Labor" again on an invoice whose lines are
+ * all `kept_edited` writes nothing at all. Stamping `revised_at` for that would tell the office
+ * their customer is holding an older copy of a bill that did not move — and a nag that cries wolf
+ * is one nobody reads by the third time, which is how NOTHING SILENT quietly stops working.
+ *
+ * An ABSENT stats object is treated as a change. The RPC returning nothing means we do not know,
+ * and on a bill the customer is holding, "we don't know" has to resolve towards saying so.
+ */
+function importMovedMoney(stats?: RpcStats): boolean {
+  if (!stats) return true;
+  return Number(stats.inserted ?? 0) + Number(stats.updated ?? 0) + Number(stats.removed ?? 0) > 0;
+}
 
 /** Migration 0255 hasn't landed yet (a push deploys before its migration runs): claims are
  *  unknowable, so for those few minutes the old rule has to hold — never bill a second invoice's
@@ -818,8 +879,14 @@ export async function parkInvoice(invoiceId: string, until: string | null, reaso
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  // Parking is a DRAFTING decision — a sent invoice is the customer's, and it owes money.
-  const block = await requireDraftInvoice(supabase, invoiceId);
+  // Parking is a DRAFTING decision — a sent invoice is the customer's, and it owes money. The
+  // line lock came off in 0269; this did not, because setting a bill aside before it goes out is
+  // not the same act as fixing a line on one that already has.
+  const block = await requireDraftInvoice(
+    supabase,
+    invoiceId,
+    "Parking is for a bill that hasn't gone out yet, so it only works on a draft. This one is already with the customer - if it isn't going to be paid, void it, or use Credit / Refund in the Actions menu.",
+  );
   if (block) return block;
   if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) return { ok: false, error: "Pick a date." };
 
@@ -839,7 +906,7 @@ export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const block = await requireDraftInvoice(supabase, invoiceId);
+  const block = await requireLiveInvoice(supabase, invoiceId);
   if (block) return block;
 
   const { data: mine } = await supabase.from("invoice_items").select("id").eq("invoice_id", invoiceId);
@@ -862,6 +929,18 @@ export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[
     // Silent-write law: an RLS-refused reorder must not report success.
     if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
   }
+  // Ordering touches no amount, but it does change the DOCUMENT, and 0269 names reordering among
+  // the revisions worth recording: a customer comparing their copy to this one would see a
+  // different bill. On the record, like every other change to a delivered invoice.
+  await stampInvoiceRevised(supabase, invoiceId, "reorderInvoiceItems");
+  // AND THE STORED COPY HAS TO GO WITH IT (all three reviewers of cn-v962). Every other line
+  // mutation ends in recalcInvoice, which busts the stored PDF on its way out (invoice-recalc.ts).
+  // This one moves no money, so it never called recalc - harmless while reordering was draft-only,
+  // and a lie the moment this wave allowed it on a bill the customer already has: Download PDF
+  // would keep serving the old line order under a document that says it was revised. revalidateMoney
+  // clears Next's cache and does not touch the PDF store at all. Best effort by design, so it
+  // cannot cost the reorder that already landed.
+  await bustDocPdf("invoice", invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
 }
@@ -881,7 +960,11 @@ export async function addInvoiceItem(
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
-  if (inv.status !== "draft") return NOT_DRAFT_LOCKED; // M1: only draft invoices accept line edits
+  // This door carried its own inline copy of the line lock rather than calling the helper, which
+  // is exactly how a rule drifts: when the lock came off in 0269 there were two places to change
+  // it, and one of them looked like an ordinary status check. Same decision, one source.
+  const notEditable = invoiceLineEditRefusal(inv.status);
+  if (notEditable) return { ok: false, error: notEditable };
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: can't add billable lines to a standard invoice on a draw job
@@ -913,6 +996,7 @@ export async function addInvoiceItem(
     sort_order: nextSort,
   });
   if (error) return { ok: false, error: dbError(error) };
+  await stampInvoiceRevised(supabase, invoiceId, "addInvoiceItem");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1002,8 +1086,8 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
-  if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block; // 0269: void only. Re-billing is still impossible — the claims see to it
   if (inv.job_id) {
     const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
     if (conflict) return conflict; // H4: don't re-bill quoted scope onto a standard invoice on a draw job
@@ -1051,6 +1135,7 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   const before = await landedSourceIds(supabase, invoiceId, "quote", rows);
   const rep = await upsertImportedItems(supabase, invoiceId, "quote", rows);
   if (rep.error) return { ok: false, error: rep.error };
+  if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importQuoteItemsIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   // Report what actually happened — counted from the lines that LANDED, not the offer. "3 added,
@@ -1157,6 +1242,31 @@ export async function reimportFromScratch(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  /**
+   * THE ONE DOOR 0269 COULD NOT OPEN FROM HERE, SAID IN PLAIN WORDS.
+   *
+   * reset_import_source is a SECURITY DEFINER function with its own draft gate baked in
+   * (migrations 0204 / 0212 / 0223: `if v_status <> 'draft' then raise exception 'This invoice
+   * has been sent — only a draft can be re-imported.'`). That is a DB ceiling, and a ceiling is
+   * the right kind of thing to have — but it now disagrees with the app above it, and the way it
+   * disagrees is the worst kind: a raised Postgres exception arriving at the office as a
+   * refusal in a voice nothing else in the app uses, about a rule the rest of the page no longer
+   * has. Relaxing it needs a migration, which belongs to whoever owns migrations.
+   *
+   * Until then this says so itself, and names the way through that DOES work now: the lines are
+   * editable, so removing the ones that are wrong and importing again reaches the same place.
+   */
+  const { data: statusRow } = await supabase.from("invoices").select("status").eq("id", invoiceId).maybeSingle();
+  const st = String((statusRow as { status?: string } | null)?.status ?? "");
+  if (statusRow && st !== "draft") {
+    return {
+      ok: false,
+      error:
+        st === "void"
+          ? invoiceLineEditRefusal("void")!
+          : "Starting an import over is still only possible on a draft. On a bill that's gone out, delete the lines you want rebuilt and import that source again - it pulls back in whatever nobody has billed.",
+    };
+  }
   const { error } = await supabase.rpc("reset_import_source", { p_invoice_id: invoiceId, p_source: source });
   if (error) return { ok: false, error: dbError(error) };
   const run =
@@ -1182,13 +1292,17 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
-  // M1: imports BUILD a draft invoice — refuse to re-inflate a sent/paid one. Every other line
-  // mutation (add/update/delete) is draft-locked; the importers were the outliers, which let
-  // labor+materials get piled onto Tao J-002's already-partial deposit invoice AFTER a progress
-  // draw had billed the same actuals — the double-charge. A draw imports into its own FRESH draft,
-  // so this never blocks legitimate progress billing.
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
-  if (draftBlock) return draftBlock;
+  // THE DOUBLE-CHARGE THIS USED TO GUARD IS GUARDED SOMEWHERE BETTER NOW (0269 reading 0255).
+  //
+  // The draft lock here was cn-v479's answer to Tao J-002: labor and materials piled onto an
+  // already-partial deposit invoice AFTER a progress draw had billed the same actuals. But a
+  // status was only ever a proxy for the real question — is this hour already on a bill? — and
+  // since 0255/0258/0260 the LINE answers it: every imported line carries the source ids it
+  // bills, one non-void invoice in the org may hold a given id, and the DB trigger enforces it
+  // under concurrency. Importing onto a sent invoice now pulls in exactly the work nobody has
+  // billed, which is the same arithmetic it does on a draft. Void is the only status refused.
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block;
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the billed lines
   // reconcile to the penny with the "work to date" every panel shows) — MINUS every entry and
@@ -1251,6 +1365,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   const before = await landedSourceIds(supabase, invoiceId, "labor", rows);
   const rep = await upsertImportedItems(supabase, invoiceId, "labor", rows);
   if (rep.error) return { ok: false, error: rep.error };
+  if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importLaborIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   // Report what actually happened, in time entries, counted from the lines that LANDED (an edited
@@ -1299,8 +1414,8 @@ export async function importChangeOrdersIntoInvoice(invoiceId: string): Promise<
   if (!inv?.job_id) return { ok: false, error: "This invoice isn't linked to a job." };
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
-  if (draftBlock) return draftBlock;
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block; // 0269: void only. The claim on each change order is what stops a double
 
   const { data: cos, error: readErr } = await supabase
     .from("change_orders")
@@ -1334,6 +1449,7 @@ export async function importChangeOrdersIntoInvoice(invoiceId: string): Promise<
   const before = await landedSourceIds(supabase, invoiceId, "change_orders", offer);
   const rep = await upsertImportedItems(supabase, invoiceId, "change_orders", offer);
   if (rep.error) return { ok: false, error: rep.error };
+  if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importChangeOrdersIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   revalidatePath("/change-orders");
@@ -1372,8 +1488,8 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   }
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
-  if (draftBlock) return draftBlock; // M1: never re-inflate a sent/paid invoice (see importLaborIntoInvoice)
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block; // 0269: void only (see importLaborIntoInvoice — the claims are the guard)
 
   // Bills and orders another non-void invoice on this job already claims stay there (0255): the
   // loops below skip them and the stats say so. This replaces cn-v479's refusal ("materials are
@@ -1488,6 +1604,7 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   const before = await landedSourceIds(supabase, invoiceId, "costs", rows);
   const rep = await upsertImportedItems(supabase, invoiceId, "costs", rows);
   if (rep.error) return { ok: false, error: rep.error };
+  if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importCostsIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   // Report what actually happened, in bills, counted from the lines that LANDED: "2 bills pulled
@@ -1864,8 +1981,11 @@ export async function updateInvoiceItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const block = await requireDraftInvoice(supabase, invoiceId);
-  if (block) return block; // M1: draft-only edits
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block; // 0269: any live bill may be corrected; void is the ending
+  // Unchanged by 0269, and checked directly after: the draw's auto credit and its milestone line
+  // stay locked whatever the invoice's status is. Editing either desyncs the prior-billings
+  // offset or payment_milestones, which is a different failure from "fix a typo on a bill".
   if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
   // PATCH semantics (mirrors updateBill): write ONLY the keys the caller sent — an
   // omitted field never touches its column (it used to reset qty to 1 / price to $0).
@@ -1889,6 +2009,7 @@ export async function updateInvoiceItem(
     .select("id"); // audit v800: a zero-row write is a failure, not a quiet success
   if (error) return { ok: false, error: dbError(error) };
   if (!touched?.length) return { ok: false, error: "That line isn't on this invoice." };
+  await stampInvoiceRevised(supabase, invoiceId, "updateInvoiceItem");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1901,9 +2022,9 @@ export async function deleteInvoiceItem(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const block = await requireDraftInvoice(supabase, invoiceId);
-  if (block) return block; // M1: draft-only edits
-  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block; // 0269: any live bill may be corrected; void is the ending
+  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED; // unchanged by 0269
   const { data: gone, error } = await supabase
     .from("invoice_items")
     .delete()
@@ -1912,6 +2033,10 @@ export async function deleteInvoiceItem(
     .select("id"); // audit v800: a zero-row delete is a failure, not a quiet success
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: "That line isn't on this invoice." };
+  // A DELETED LINE RELEASES ITS CLAIM (0255: the claim dies with the line), which is the point —
+  // Erik's Smartwater comes off this bill and its receipt line is billable again. The stamp is
+  // what stops that being silent on an invoice the customer is already holding.
+  await stampInvoiceRevised(supabase, invoiceId, "deleteInvoiceItem");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -1933,26 +2058,47 @@ async function isProtectedCreditLine(supabase: any, itemId: string): Promise<boo
   return data?.import_source === "draw_credit" || data?.import_source === "milestone";
 }
 
-// Line edits are for DRAFTS only — once an invoice is sent/paid/void, its lines are locked so
-// a voice/agent (or a stray UI tap) can't silently re-bill a customer or un-pay a paid invoice
-// via recalc. (M1 — the "reversible draft only" guarantee the voice money-loop rests on.)
-//
-// AND IT MUST NAME A DOOR THAT EXISTS (Erik, INV-069, 2026-09-18). This sentence used to end
-// "record an adjustment / new invoice instead". There is no adjustment in this app — no table,
-// no action, no migration, no button, nothing that string could have meant — so a person who
-// took the advice went looking for a feature that has never existed, on a page that had just
-// refused him. A refusal that sends you nowhere real is a dead end wearing a helpful voice. The
-// two ways out named here are both one tap from where the refusal appears: Credit / Refund in
-// the ⋯ Actions menu (credit-button.tsx), and New Invoice.
-const NOT_DRAFT_LOCKED: Result = {
-  ok: false,
-  error:
-    "This invoice isn't a draft any more, so its lines are locked - changing them now would change a bill the customer already has. To put money back, use Credit / Refund in the Actions menu; to charge something new, start a new invoice.",
-};
-async function requireDraftInvoice(supabase: any, invoiceId: string): Promise<Result | null> {
+/**
+ * THE LOCK COMES OFF THE LINES (Erik, 2026-09-18, migration 0269).
+ *
+ * This used to be `requireDraftInvoice` for every line-level write: add, edit, delete, reorder,
+ * the tax rate and all four importers refused outright once an invoice left draft. The stated
+ * reason was that changing them "would change a bill the customer already has" — true, and not a
+ * reason to forbid it:
+ *
+ *   "even if i did sent it ill always need to be able to go back and make changes as per a
+ *    client's request or my own review catches errors"
+ *
+ * One night gave two of them. A client emailed asking that a PAID invoice be reissued in the
+ * property owner's name instead of the agent's. And INV-069 itself had Erik's own Smartwater
+ * billed to the customer, caught on his own review. What the refusal was really guarding is
+ * narrower than what it forbade — a bill changing without the customer ever learning it changed —
+ * and that is a RECORD, not a lock. lib/invoice-revision.ts holds both halves: the one status
+ * that is still refused, and the stamp that goes on every money change to a delivered bill.
+ *
+ * Void is the one ending: its lines released their claims on the job's hours and materials
+ * (0255), so editing them could move work another live invoice now bills.
+ */
+async function requireLiveInvoice(supabase: any, invoiceId: string): Promise<Result | null> {
   const { data: inv } = await supabase.from("invoices").select("status").eq("id", invoiceId).maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
-  if (inv.status !== "draft") return NOT_DRAFT_LOCKED;
+  const refusal = invoiceLineEditRefusal(inv.status);
+  return refusal ? { ok: false, error: refusal } : null;
+}
+
+/**
+ * STILL DRAFT-ONLY, AND ON PURPOSE — the two doors that are not line edits.
+ *
+ * Parking (0206) is a decision about a bill that has not gone out, and re-pointing an invoice at
+ * a different customer or job moves recorded payments and job costs between people. Neither is
+ * "fix a line on the bill", so neither rode along when the line lock came off. Each names its own
+ * way forward, because one shared sentence about locked lines is how the old refusal ended up
+ * pointing at a feature that does not exist.
+ */
+async function requireDraftInvoice(supabase: any, invoiceId: string, refusal: string): Promise<Result | null> {
+  const { data: inv } = await supabase.from("invoices").select("status").eq("id", invoiceId).maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if (inv.status !== "draft") return { ok: false, error: refusal };
   return null;
 }
 
@@ -2107,12 +2253,19 @@ export async function setInvoiceStatus(
   }
   // "Sent - I sent it myself" is a PERSON DECLARING THE DEED: they put the bill in the customer's
   // hands by some door this app doesn't own (printed it, handed it over, sent it from their own
-  // mail). That is a delivery and it stamps, exactly as email/text/share do — while an existing
-  // stamp is left alone, because the date the bill really went is the date it really went, and
-  // re-picking Sent later is not a second delivery. Every other status writes nothing here; a
-  // pay door writes nothing here ever (0267).
+  // mail). That is a delivery and it stamps, exactly as email/text/share do. Every other status
+  // writes nothing here; a pay door writes nothing here ever (0267).
+  //
+  // AN EXISTING STAMP IS LEFT ALONE — UNLESS THE BILL HAS CHANGED SINCE (0269). "The date the
+  // bill really went is the date it really went, and re-picking Sent later is not a second
+  // delivery" was the whole rule until a delivered invoice could be revised. Now there is a case
+  // where re-picking Sent IS a second delivery and the only one this app can be told about: the
+  // office corrected a line, printed the corrected bill and handed it over again. Refusing to
+  // move the date there would leave `revised_at > sent_at` true forever, and a banner that cannot
+  // be cleared by doing the thing it asks for is worse than no banner.
+  const redelivered = status === "sent" && sentAtKnown && !!cur.sent_at && (await hasUnsentRevision(supabase, id));
   const patch: { status: string; sent_at?: string } =
-    status === "sent" && sentAtKnown && !cur.sent_at
+    status === "sent" && sentAtKnown && (!cur.sent_at || redelivered)
       ? { status, sent_at: new Date().toISOString() }
       : { status };
   const { data: wroteS, error } = await supabase.from("invoices").update(patch).eq("id", id).select("id");
@@ -2319,8 +2472,11 @@ export async function deleteInvoice(id: string): Promise<Result> {
   /**
    * DELETING A SENT INVOICE IS A SILENT RE-BILL.
    *
-   * Every line-level mutation on this file goes through requireDraftInvoice; delete checked
-   * only for payments, and the Actions menu offers it at every status. So a sent, unpaid
+   * Every line-level mutation on this file goes through a status gate (requireLiveInvoice since
+   * 0269); delete checked only for payments, and the Actions menu offers it at every status. And
+   * delete is the one act 0269 changes nothing about — a bill the customer holds may be CORRECTED
+   * now, but it may still never vanish, because a document in someone's hands with no row behind
+   * it is exactly what the record is for. So a sent, unpaid
    * INV-061 could be deleted outright — and its lines carried the claims on the hours and
    * materials it billed (0255/0258). The delete cascade took the claims with it, those rows
    * read as unbilled again, and the next New Invoice on the job charged the customer for the
@@ -2400,15 +2556,22 @@ export async function setInvoiceTaxRate(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  // THE ONE MONEY MUTATION THAT HAD NO DRAFT LOCK (audit 8): every item edit and importer
-  // refuses a sent invoice, but the tax dropdown stayed live — so a mis-tap on a PAID invoice
-  // silently re-totalled it, flipped it back to partial, and put a different number on the
-  // document the customer already holds.
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
-  if (draftBlock) return draftBlock;
+  // THE ONE MONEY MUTATION THAT HAD NO LOCK AT ALL (audit 8): every item edit and importer had
+  // one, but the tax dropdown stayed live — so a mis-tap on a PAID invoice silently re-totalled
+  // it, flipped it back to partial, and put a different number on the document the customer
+  // already holds. SILENTLY is the word that mattered, and 0269 is what fixes it: the rate may
+  // move on a live bill (a job billed at the wrong county rate is an ordinary correction), and
+  // the change goes on the record where the office and the page can both see it.
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block;
   const rate = Number.isFinite(ratePercent) ? ratePercent / 100 : 0;
-  const { error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId);
+  const { data: wrote, error } = await supabase.from("invoices").update({ tax_rate: rate }).eq("id", invoiceId).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // Silent-write law: a zero-row UPDATE is a 204. This one never checked, so an RLS refusal here
+  // reported a new tax rate the row never took — and the recalc below then said the old total
+  // was correct, which reads as the app arguing with itself.
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
+  await stampInvoiceRevised(supabase, invoiceId, "setInvoiceTaxRate");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
   return { ok: true };
@@ -2490,8 +2653,15 @@ export async function setInvoiceCustomerJob(
   if (link.customer_id === undefined && link.job_id === undefined)
     return { ok: false, error: "Nothing to update." };
 
-  // Header edits to the billing relationship are only safe while it's a draft.
-  const draftBlock = await requireDraftInvoice(supabase, invoiceId);
+  // Header edits to the billing relationship are only safe while it's a draft — and unlike the
+  // LINES (0269), this one stayed shut. Re-pointing a delivered invoice moves its recorded
+  // payments and its job costs onto a different customer or job, which is a different act from
+  // correcting what the bill says.
+  const draftBlock = await requireDraftInvoice(
+    supabase,
+    invoiceId,
+    "This invoice has already gone out, so it can't be moved to a different customer or job - its payments and job costs are recorded against the ones it has. Its lines and totals can still be edited; to bill someone else, start a new invoice.",
+  );
   if (draftBlock) return draftBlock;
 
   // H4: don't re-point a draft onto a job already on the draw path.

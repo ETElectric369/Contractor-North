@@ -5,7 +5,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -71,18 +71,42 @@ export async function deliverInvoiceEmail(
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   if (!res.ok) return res;
-  if (invoice.status === "draft") {
-    // THE EMAIL IS THE DEED, SO THIS IS WHERE THE STAMP BELONGS (0267, INV-069). `status = 'sent'`
-    // alone could be manufactured by a pay door that never showed anyone a bill; sent_at cannot,
-    // and the demotion guard in billing/actions.ts now reads delivery off exactly this write.
-    //
-    // The mail is already gone by the time we get here, so a failure is NOT a failed send and
-    // must not be reported as one — but it cannot be swallowed either, or the office sits on a
-    // Draft badge over a bill the customer is reading, which is the whole shape of this incident.
-    const stamped = await markInvoiceSent(supabase, id);
-    if (!stamped.ok) {
-      return { ok: false, error: `The email went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${stamped.error ?? "try again"})` };
-    }
+  // THE EMAIL IS THE DEED, SO THIS IS WHERE THE STAMP BELONGS (0267, INV-069). `status = 'sent'`
+  // alone could be manufactured by a pay door that never showed anyone a bill; sent_at cannot,
+  // and the demotion guard in billing/actions.ts now reads delivery off exactly this write.
+  //
+  // EVERY SEND STAMPS, NOT ONLY THE FIRST (0269, caught by all three reviewers of cn-v962). This
+  // used to run only for a draft, which was right while a sent invoice could not be edited. Now
+  // that it can, the page tells Erik when the customer is holding an older bill than his and
+  // offers Send Invoice as the fix - and that button lands HERE. Stamping only on the first send
+  // meant the one door the notice points at could never clear the notice: he would email the
+  // corrected bill, watch it go, and be told again that they have the old one. A banner you
+  // cannot clear by doing what it asks is worse than no banner at all.
+  //
+  // The two halves are deliberately different functions. markInvoiceSent writes the STATUS as
+  // well, which is what a first send needs; markInvoiceResent writes only the date, because
+  // emailing someone a copy of a bill they have already paid must never demote 'paid' back to
+  // 'sent' and chase them for money they handed over. A VOID invoice stamps nothing: it is not a
+  // bill, and its link does not open (public_invoice is narrowed to sent/partial/paid/overdue).
+  //
+  // The mail is already gone by the time we get here, so a failure is NOT a failed send and must
+  // not be reported as one - but it cannot be swallowed either, or the office sits on a Draft
+  // badge over a bill the customer is reading, which is the whole shape of this incident.
+  const first = invoice.status === "draft";
+  const stamped = first
+    ? await markInvoiceSent(supabase, id)
+    : invoice.status === "void"
+      ? { ok: true as const }
+      : await markInvoiceResent(supabase, id);
+  if (!stamped.ok) {
+    return {
+      ok: false,
+      error: first
+        ? `The email went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${(stamped as { error?: string }).error ?? "try again"})`
+        : `The email went out, but ${invoice.invoice_number ?? "this invoice"} still shows the customer holding an older copy - reload and send it again. (${(stamped as { error?: string }).error ?? "try again"})`,
+    };
+  }
+  if (first) {
     // Mirror textInvoice (audit 7): the recalc advances a PREPAID draft to paid/partial instead
     // of stranding it on 'sent', and its bustDocPdf drops the draft-era stored copy so the
     // send-time warm stores a fresh one the customer door will serve.

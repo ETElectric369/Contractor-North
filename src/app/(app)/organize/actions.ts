@@ -18,8 +18,8 @@ import { OVERHEAD_CATEGORIES } from "./constants";
 // "identical" that stays true. The rule sentence beneath each schema is shared for the same reason.
 import {
   FOOD_AND_DRINK_PROMPT_RULE,
-  RECEIPT_LINE_CATEGORY_CHOICES,
-  normalizeBillable,
+  RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
+  decideReceiptLine,
 } from "@/app/(app)/bills/receipt-billing";
 
 export type Result = { ok: boolean; error?: string };
@@ -69,24 +69,27 @@ function cleanLines(raw: any): BillLine[] {
       const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
       const amount =
         l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
-      const category = l?.category ? String(l.category).slice(0, 60) : null;
-      return {
-        description: String(l?.description ?? "").slice(0, 300).trim(),
-        quantity,
-        unit_price,
-        amount,
-        category,
-        // WHOSE LINE IS IT (0268). Erik's INV-069 billed a homeowner for a Smartwater, a
-        // BodyArmor and a ten cent bottle deposit, and his answer was to stop scanning receipts
-        // at all — "i have another receipt that i didnt scan specifically because it was mostly
-        // snacks and a $3 part" — which cost him the $3 job cost too. Food and drink now arrives
-        // switched OFF the customer's bill and everything else arrives on it, tools included,
-        // because he was asked and that is exactly what he chose. This is also the one place a
-        // decision he already made survives: a tray item's lines are stored as jsonb and re-read
-        // verbatim when it is filed (or moved to another job) later, so an explicit flag in the
-        // stored row wins over the default and re-filing never re-bills the snacks.
-        billable: normalizeBillable(l?.billable, category),
-      };
+      const description = String(l?.description ?? "").slice(0, 300).trim();
+      const stated = l?.category ? String(l.category).slice(0, 60) : null;
+      // WHOSE LINE IS IT (0268). Erik's INV-069 billed a homeowner for a Smartwater, a
+      // BodyArmor and a ten cent bottle deposit, and his answer was to stop scanning receipts
+      // at all — "i have another receipt that i didnt scan specifically because it was mostly
+      // snacks and a $3 part" — which cost him the $3 job cost too. Food and drink now arrives
+      // switched OFF the customer's bill and everything else arrives on it, tools included,
+      // because he was asked and that is exactly what he chose. This is also the one place a
+      // decision he already made survives: a tray item's lines are stored as jsonb and re-read
+      // verbatim when it is filed (or moved to another job) later, so an explicit flag in the
+      // stored row wins over the default and re-filing never re-bills the snacks.
+      //
+      // AND THE NET UNDER IT. Twelve minutes after that shipped, with the Food & Drink rule in
+      // front of it, the reader filed two bags of kettle chips and an ice cream bar as "Other" —
+      // billable — on the Waldow job. A prompt is a request, not a mechanism. decideReceiptLine
+      // fills in a shrug ("Other", blank) when the words are plainly food, never touches a
+      // category the model actually chose, and never overrules a flag a person already set.
+      // This is the only door all three receipt paths pass through — the Organize My classifier,
+      // the job-receipt reader, and re-filing a tray item — so it is the only place it belongs.
+      const { category, billable } = decideReceiptLine(description, stated, l?.billable);
+      return { description, quantity, unit_price, amount, category, billable };
     })
     .filter((l: BillLine) => l.description.length > 0)
     .slice(0, 100);
@@ -226,7 +229,7 @@ Respond with ONLY a JSON object (no prose):
   "kind": "receipt" | "note" | "job_document",
   "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
   "summary": receipt → brief list of what was bought; note → full clean transcription of the handwriting; job_document → what the document is,
-  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of ${RECEIPT_LINE_CATEGORY_CHOICES}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
+  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
   "vendor": store/supplier name or null,
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
@@ -489,7 +492,7 @@ Respond with ONLY a JSON object (no prose):
   "vendor": store/supplier name or null,
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
-  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of ${RECEIPT_LINE_CATEGORY_CHOICES}}],${scopeSchemaLine}
+  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}],${scopeSchemaLine}
   "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
   "confidence": "low" | "medium" | "high"
 }

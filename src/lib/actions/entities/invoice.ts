@@ -80,7 +80,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Add an invoice line",
     description:
-      "Add ONE line item to a draft invoice. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. After adjusting, read the invoice back with get_invoice so the user can confirm before they send.",
+      "Add ONE line item to any invoice that is not void - a draft, or a bill the customer already has. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. On an invoice that has already gone out this changes what the customer owes, so the app asks the user to confirm first and the invoice is recorded as revised. After adjusting, read the invoice back with get_invoice.",
     input: z.object({
       invoice_id: z.string(),
       description: z.string().min(1),
@@ -90,6 +90,16 @@ export const invoiceActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
+    // TIER 2 BECAUSE THE DRAFT LOCK CAME OFF (cn-v962, all three reviewers). These three were
+    // tier-1 on one argument: the server action underneath refused anything but a draft, so the
+    // worst a voice command could do was rearrange a bill nobody had seen. That refusal is gone -
+    // Erik needs to fix a delivered invoice when a client asks - and the same sentence spoken at a
+    // jobsite now reaches a SENT, PARTIAL, PAID or OVERDUE bill and changes what a customer owes.
+    // A confirm is the only thing standing between a misheard line and a re-priced invoice someone
+    // has already paid. The UI is exempt from consent (the person is looking at the line), so this
+    // costs a typed edit nothing and gates voice and agent callers, which is exactly the boundary.
+    confirm: "financial",
+    describe: (i) => `Add "${i.description}" at $${i.unit_price ?? 0} to this invoice - say yes to confirm.`,
     handler: async (i) => {
       const r = await addInvoiceItem(i.invoice_id, {
         description: i.description,
@@ -106,7 +116,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Edit an invoice line",
     description:
-      "Change an existing invoice line — 'bump the panel line to $1,800'. You need BOTH the line's item_id AND its invoice_id — get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price); anything you omit stays as it is.",
+      "Change an existing invoice line - 'bump the panel line to $1,800'. Works on any invoice that is not void, a delivered one included. You need BOTH the line's item_id AND its invoice_id - get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price); anything you omit stays as it is. On a bill that has already gone out this changes what the customer owes, so the app asks the user to confirm first.",
     // A true PATCH: an omitted field must never touch the column (the old defaults
     // silently reset quantity to 1 / price to $0 on a "just fix the description" call).
     input: z.object({
@@ -118,6 +128,16 @@ export const invoiceActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
+    // TIER 2 BECAUSE THE DRAFT LOCK CAME OFF (cn-v962, all three reviewers). These three were
+    // tier-1 on one argument: the server action underneath refused anything but a draft, so the
+    // worst a voice command could do was rearrange a bill nobody had seen. That refusal is gone -
+    // Erik needs to fix a delivered invoice when a client asks - and the same sentence spoken at a
+    // jobsite now reaches a SENT, PARTIAL, PAID or OVERDUE bill and changes what a customer owes.
+    // A confirm is the only thing standing between a misheard line and a re-priced invoice someone
+    // has already paid. The UI is exempt from consent (the person is looking at the line), so this
+    // costs a typed edit nothing and gates voice and agent callers, which is exactly the boundary.
+    confirm: "financial",
+    describe: (i) => `Change this invoice line${i.description ? ` to "${i.description}"` : ""}${i.unit_price != null ? ` at $${i.unit_price}` : ""} - say yes to confirm.`,
     handler: async ({ item_id, invoice_id, ...patch }) => {
       const r = await updateInvoiceItem(item_id, invoice_id, patch);
       if (!r.ok) return { ok: false, error: r.error };
@@ -129,19 +149,32 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Remove an invoice line",
     description:
-      "Remove a line from a draft invoice. You need both the line's item_id and its invoice_id (from get_invoice). Reversible — you can add it back with invoice.addItem.",
+      "Remove a line from any invoice that is not void, including one the customer already has. You need both the line's item_id and its invoice_id (from get_invoice). Reversible - you can add it back with invoice.addItem. On a delivered bill this changes what the customer owes, so the app asks the user to confirm first.",
     input: z.object({ item_id: z.string(), invoice_id: z.string() }),
     auth: "staff",
     effect: "write",
+    // TIER 2 BECAUSE THE DRAFT LOCK CAME OFF (cn-v962, all three reviewers). These three were
+    // tier-1 on one argument: the server action underneath refused anything but a draft, so the
+    // worst a voice command could do was rearrange a bill nobody had seen. That refusal is gone -
+    // Erik needs to fix a delivered invoice when a client asks - and the same sentence spoken at a
+    // jobsite now reaches a SENT, PARTIAL, PAID or OVERDUE bill and changes what a customer owes.
+    // A confirm is the only thing standing between a misheard line and a re-priced invoice someone
+    // has already paid. The UI is exempt from consent (the person is looking at the line), so this
+    // costs a typed edit nothing and gates voice and agent callers, which is exactly the boundary.
+    confirm: "financial",
+    describe: () => "Remove this line from the invoice - say yes to confirm.",
     handler: async (i) => {
       const r = await deleteInvoiceItem(i.item_id, i.invoice_id);
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: "Line removed." };
     },
   },
-  // Header / field edits on a DRAFT invoice — reversible, nothing sent, no money moved,
-  // so tier-1 (auth:"staff", no confirm). Each WRAPS the existing billing server action,
-  // which carries the requireStaff + RLS + draft-only + recalc/revalidate logic.
+  // Header / field edits — reversible, no money moved, so tier-1 (auth:"staff", no confirm). Each
+  // WRAPS the existing billing server action, which carries the requireStaff + RLS +
+  // recalc/revalidate logic. NOTE what changed in cn-v962: "draft-only" is no longer what those
+  // wrapped actions carry for LINE edits (see the three above, now confirm-gated for exactly that
+  // reason). It is still true for invoice.setCustomerJob, which stays draft-only on the server
+  // because re-pointing a delivered bill moves its recorded payments onto a different customer.
   "invoice.setDueDate": {
     name: "invoice.setDueDate",
     group: "invoice",

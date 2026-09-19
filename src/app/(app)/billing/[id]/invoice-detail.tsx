@@ -11,7 +11,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
+import { invoiceBalance, invoiceOverpayment, isDrawKind } from "@/lib/invoice-math";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -39,6 +39,10 @@ import {
 } from "../actions";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { AddLineItems } from "@/components/add-line-items";
+/* The same Send Invoice the verb row at the top of the page uses — one send door, not a second
+   one written here. It rides inside the "they are holding an older bill" notice so the fix is
+   where the problem is said, and nobody has to scroll back up hunting for it. */
+import { EmailButton } from "@/components/email-button";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
@@ -96,6 +100,8 @@ export function InvoiceDetail({
   defaultMarkupPct = 0,
   customers = [],
   jobs = [],
+  customerName = null,
+  customerHoldsOlderCopy = false,
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -110,6 +116,11 @@ export function InvoiceDetail({
   defaultMarkupPct?: number;
   customers?: CustomerLite[];
   jobs?: JobLite[];
+  /** Who holds this bill, for the sentences about their copy of it (page.tsx owns the lookup). */
+  customerName?: string | null;
+  /** 0269: revised_at is later than sent_at — the bill in their hands is not this one. Decided by
+   *  lib/invoice-revision.ts on the server, never re-derived here. */
+  customerHoldsOlderCopy?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -152,18 +163,46 @@ export function InvoiceDetail({
    * page closes the editor instead of stranding what was typed in it. Adding a fifth control to
    * that row inherits the gate; it cannot be forgotten, because there is nothing to remember.
    *
-   * `isDraft` keeps the status-shaped blocks elsewhere on the page (park, customer/job link, the
-   * import row, the tax picker). `linesLocked` is the line-items card's own vocabulary, and it is
-   * deliberately the same word the server's refusal uses.
+   * WHAT THE WORD MEANS CHANGED THE VERY NEXT NIGHT (cn-v962, migration 0269). The gate stayed.
+   * Its rule did not. It read `!isDraft`, and Erik overruled that outright: "even if i did sent it
+   * ill always need to be able to go back and make changes as per a client's request or my own
+   * review catches errors." The same night proved him right twice — a client emailed asking that a
+   * PAID invoice carry the property owner's name instead of the agent's (he is only the agent),
+   * and the invoice that started INV-069 had Erik's own Smartwater on it, caught on review.
+   * Contractors revise bills; an app that forbids it isn't protecting anyone, it just gets fought.
+   *
+   * What the old refusal actually guarded is narrower than it was written: a bill changing without
+   * the customer ever learning it changed. So the lock comes off and the RECORD goes on. VOID is
+   * the one state still locked, because nothing bills off a voided document. Everything else is
+   * open, the server stamps `revised_at` (0269) when money moves on a delivered invoice, and the
+   * card says out loud that the copy in their inbox is older than this one — with Send Invoice
+   * right there. Nothing silent, which is the whole trade.
+   *
+   * `isDraft` keeps only the blocks that are still genuinely draft-only, each for a reason the
+   * server holds: park (an unsent bill waiting on an approval), the customer/job link (re-pointing
+   * a delivered invoice moves its payments and job costs onto someone else, which is a different
+   * act from correcting what the bill says) and the import row (an import BUILDS a bill; it is a
+   * delete-and-rebuild of a whole line group, not an edit). The tax rate is NOT one of them any
+   * more — it is a line-level money edit, it follows `linesLocked`, and the totals card says so.
    */
-  const linesLocked = !isDraft;
+  const linesLocked = invoice.status === "void";
   /* 0267's sent_at: stamped ONLY where a bill really reached the customer. INV-069 carries NULL
    * here because no card was ever tapped, and that difference is the whole point — an invoice
    * that merely left Draft must not be told it went out, and it must not be trapped out of Draft
    * by the owner's own $200 deposit. Mirrors the server rule: Draft is refused only when money is
    * on it AND it actually went to the customer. */
-  const wasDelivered = !!(invoice as { sent_at?: string | null }).sent_at;
+  const sentAt = (invoice as { sent_at?: string | null }).sent_at ?? null;
+  const wasDelivered = !!sentAt;
   const canReturnToDraft = !(Number(invoice.amount_paid ?? 0) > 0 && wasDelivered);
+  /* 0269's revised_at, for the DATES this card prints. The DECISION it prints them under is not
+   * made here: `customerHoldsOlderCopy` arrives as a prop, decided by the one function that also
+   * governs the server's stamp (lib/invoice-revision.ts, which is server-only and cannot be
+   * imported into a client component). Re-deriving `revised_at > sent_at` here would be a second
+   * copy of the rule living three feet from the first — the exact shape of the draft gate this
+   * wave just spent a day untangling, where one of the nine copies was wrong for months. */
+  const revisedAt = (invoice as { revised_at?: string | null }).revised_at ?? null;
+  /** The customer, by name, in the sentences about what they are holding. */
+  const who = customerName?.trim() || "The customer";
 
   // inline-editable title (the short header label)
   const [titleEditing, setTitleEditing] = useState(false);
@@ -604,9 +643,22 @@ export function InvoiceDetail({
             {(isDraft || canReturnToDraft) && <option value="draft">Draft</option>}
             {/* Escape hatch: you sent the PDF yourself (texted/AirDropped/emailed it OUTSIDE
                 the app), so record that it went out — the invoice leaves Draft and the job
-                reads as invoiced without forcing you back through the Send button. Draft-only,
-                so it can't be used to fake send-state on a live invoice. */}
-            {invoice.status === "draft" && <option value="sent">Sent — I sent it myself</option>}
+                reads as invoiced without forcing you back through the Send button.
+
+                IT HAS A SECOND JOB NOW, AND THE SERVER ALREADY DOES IT (cn-v962, caught by two
+                reviewers). setInvoiceStatus computes `redelivered` so that re-declaring Sent on a
+                revised bill moves the delivery stamp forward and clears the "they're holding an
+                older copy" notice. That branch was unreachable: this option only rendered on a
+                draft, and a revised bill is never a draft. So a person who fixed a line and then
+                handed the customer the new copy by hand had no way to tell the app, and the
+                notice would have nagged forever — a banner you cannot clear by doing what it
+                asks. It now appears in exactly the two cases the server accepts, with the words
+                that match what each one does. */}
+            {(invoice.status === "draft" || customerHoldsOlderCopy) && (
+              <option value="sent">
+                {invoice.status === "draft" ? "Sent - I sent it myself" : "Sent Again - I re-sent it myself"}
+              </option>
+            )}
             {/* Keep the current status visible even though it isn't a manual choice. */}
             {!["draft", "void"].includes(invoice.status) && (
               <option value={invoice.status} disabled>
@@ -616,11 +668,13 @@ export function InvoiceDetail({
             <option value="void">Void</option>
           </Select>
           {/* Taking the choice away silently is the same dead end wearing a different coat, so
-              when Draft is gone, say why it is gone and where the money verb lives instead. */}
+              when Draft is gone, say why it is gone — and since cn-v962, say the thing that makes
+              it not matter. The old sentence sent him to Credit / Refund as if the missing Draft
+              meant the bill was finished; it never did, and now the lines below are simply open. */}
           {!isDraft && !canReturnToDraft && (
             <span className="text-xs text-slate-400">
-              This one is with the customer and has money on it, so it can&rsquo;t go back to Draft. To change
-              what they owe, use Credit / Refund in the Actions menu at the top.
+              This one is with the customer and has money on it, so it can&rsquo;t go back to Draft. You
+              don&rsquo;t need Draft to fix it: change the lines below, then send it again.
             </span>
           )}
           {/* PARK IT (0206) — the ending that destroys nothing. A draft waiting on a change
@@ -655,9 +709,9 @@ export function InvoiceDetail({
             couldn't see) and capped at 6 rows where the composer shows 200 — and it never offered
             kits at all. That divergence is exactly what "different options for new invoice vs edit
             invoice" meant, and it is why a browse-on-empty fix reached one surface and not this one. */}
-        {/* Every line it adds goes through addInvoiceItem, which is draft-only — so on a locked
-            invoice this whole picker was a catalog you could browse, price, tick and submit, and
-            the only possible ending was a red toast. The card below says what to do instead. */}
+        {/* Open at every live status since cn-v962. It is hidden only on a VOID invoice, where
+            addInvoiceItem can still only refuse — a catalog you can browse, price, tick and submit
+            whose one possible ending is a red toast is the dead end, not the lock. */}
         {!linesLocked && (
         <AddLineItems
           priceItems={priceItems}
@@ -707,7 +761,14 @@ export function InvoiceDetail({
           </div>
         </div>
 
-        {isDraft &&
+        {/* THE IMPORT ROW FOLLOWS THE SERVER, NOT THE OLD DRAFT HABIT (cn-v962 review). All four
+            importers moved from requireDraftInvoice to requireLiveInvoice in this wave, on the
+            argument that the 0255 claims - not the status - are what stop an hour or a bill being
+            charged twice. This row stayed on `isDraft`, so none of that was reachable and the two
+            halves disagreed in silence. It is also the tool Erik actually needs on a delivered
+            bill: labor he forgot, a change order signed after the invoice went out. Same word as
+            the rest of the card. */}
+        {!linesLocked &&
           (invoice.job_id || (invoice as any).quote_id) &&
           !isDrawKind((invoice as any).invoice_kind) && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
@@ -739,7 +800,19 @@ export function InvoiceDetail({
               </>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
-            {stuckSource && (
+            {/* START IT OVER IS STILL DRAFT-ONLY, AND THAT ONE IS NOT OURS TO OPEN. Its refusal
+                lives inside the SECURITY DEFINER function reset_import_source (migrations
+                0204/0212/0223), which still raises on a non-draft invoice in a Postgres voice no
+                screen here can soften. Offering the button on a sent bill would be the dead end
+                this wave exists to delete, so on a delivered invoice the sentence says what to do
+                instead - the ordinary controls, which now work. */}
+            {stuckSource && !isDraft && (
+              <span className="text-xs text-amber-700">
+                Lines you edited or removed are protected, so nothing came in. On a bill that has
+                already gone out, change the lines directly instead.
+              </span>
+            )}
+            {stuckSource && isDraft && (
               <span className="flex items-center gap-1.5 text-xs text-amber-700">
                 Lines you edited or removed are protected, so nothing came in.
                 <button
@@ -770,6 +843,39 @@ export function InvoiceDetail({
         )}
 
         <div className="rounded-xl border border-slate-200 bg-white">
+          {/* WHAT THE CUSTOMER IS HOLDING, SAID WHERE THE EDITING HAPPENS (cn-v962, 0269).
+              The lock is off these lines, so this notice is what stands in its place: a revision is
+              allowed, and it is never silent. It reads off sent_at, NEVER status — a pay door can
+              promote a row to 'sent' without a customer ever seeing it (0267), and telling Erik
+              that the draft he is still building is "with the customer" would be the INV-069 lie in
+              a new costume. Nobody has it, so it says nothing at all. */}
+          {!linesLocked && wasDelivered && (
+            customerHoldsOlderCopy ? (
+              <div className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-amber-900">
+                    {who} is holding an older bill than this one. Send it again so they have what you see.
+                  </p>
+                  {/* The two stamps, because "older" is a claim and these are the facts behind it. */}
+                  <p className="mt-0.5 text-xs text-amber-700">
+                    Sent {formatDateTime(sentAt)} · changed {formatDateTime(revisedAt)}
+                  </p>
+                </div>
+                {/* The fix, in reach of the problem. */}
+                <EmailButton
+                  id={invoice.id}
+                  kind="invoice"
+                  customerName={customerName}
+                  amount={Number(invoice.total)}
+                />
+              </div>
+            ) : (
+              <p className="border-b border-slate-100 bg-slate-50/60 p-3 text-sm text-slate-500">
+                {who} has this bill already. Change anything here and their copy is older than yours, so send
+                it again when you&rsquo;re done.
+              </p>
+            )
+          )}
           <ul className="divide-y divide-slate-100">
             {items.map((it) =>
               editingId === it.id ? (
@@ -826,11 +932,12 @@ export function InvoiceDetail({
                 </li>
               ) : (
                 <li key={it.id} className="group flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-slate-50">
-                  {/* THE ROW'S TEXT IS A FORK, NOT A GATE. On a locked invoice the same words sit
+                  {/* THE ROW'S TEXT IS A FORK, NOT A GATE. On a VOID invoice the same words sit
                       in a plain <div>: it reads identically, it just isn't a promise. A button
                       titled "Edit line item" whose only possible ending is a refusal is the
                       dead end Erik walked into, and the whole-row target made it the easiest
-                      thing on the page to hit by accident. */}
+                      thing on the page to hit by accident. Since cn-v962 void is the only status
+                      that takes this branch; a sent or paid bill gets the real button back. */}
                   {linesLocked ? (
                     <div className="min-w-0 flex-1">
                       <LineRowText item={it} />
@@ -848,10 +955,11 @@ export function InvoiceDetail({
                   )}
                   <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
                   {/* ONE GATE FOR THE WHOLE CLUSTER. These three controls call reorderInvoiceItems,
-                      updateInvoiceItem and deleteInvoiceItem — all draft-only, all refusals on a
-                      locked bill. They used to be gated one at a time, and only the chevrons ever
-                      got the gate; the trash Erik pressed never did. A fourth control added here
-                      is locked by construction. */}
+                      updateInvoiceItem and deleteInvoiceItem. They used to be gated one at a time,
+                      and only the chevrons ever got the gate; the trash Erik pressed never did. A
+                      fourth control added here is gated by construction — which is the point, and
+                      it is why moving the rule from "draft" to "void" was a one-line change here
+                      instead of four blocks to remember. */}
                   {!linesLocked && (
                     <>
                       {items.length > 1 && (
@@ -905,7 +1013,10 @@ export function InvoiceDetail({
               <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
             )}
           </ul>
-          {isDraft && items.length > 1 && (
+          {/* Reordering is a line control like the chevrons beside it, so it follows the same
+              word. Leaving this one on `isDraft` after the unlock would have meant the arrows
+              worked on a sent bill and the tidy button silently didn't exist. */}
+          {!linesLocked && items.length > 1 && (
             <div className="flex items-center justify-end border-t border-slate-100 px-3 py-2">
               <button
                 type="button"
@@ -924,33 +1035,22 @@ export function InvoiceDetail({
               <option key={u} value={u} />
             ))}
           </datalist>
-          {/* WHERE THE ADD FORM WAS, SAY WHAT THIS IS AND WHERE TO GO (INV-069).
-              Gating the controls without this is the same dead end in a quieter coat: Erik would
-              have been left with a card that simply stopped responding and no sentence anywhere
-              telling him why or what to do about it. Same shape as the tax picker further down,
-              which has substituted readable text for a draft-only control since audit 8.
-              Two sentences: what happened to this bill, then the door that is actually open. */}
+          {/* THE ADD FORM IS BACK ON EVERY LIVE INVOICE (cn-v962). For one day this spot held a
+              sentence telling Erik his sent bill was finished and to set the status back to Draft
+              if he wanted to touch it. Both halves died with the lock: a delivered bill is not
+              finished, and Draft is not the road back — the lines above are simply open, and the
+              notice at the top of this card says what that costs the customer's copy.
+              Void keeps its refusal, and the refusal names a door that exists (a new invoice) —
+              the rule the old "record an adjustment" sentence broke by sending people after a
+              feature this app has never had. */}
           {linesLocked ? (
-            <div className="space-y-1 border-t border-slate-100 bg-slate-50/60 p-4 text-sm text-slate-500">
-              {invoice.status === "void" ? (
-                <p>
-                  This invoice is void, so its lines are set. If this work still needs billing, put it on a
-                  new invoice.
-                </p>
-              ) : (
-                <>
-                  <p>
-                    {wasDelivered
-                      ? "This bill is with the customer now, so its lines are set."
-                      : "This invoice has left Draft, so its lines are set. It hasn't gone to the customer yet."}
-                  </p>
-                  <p>
-                    {canReturnToDraft
-                      ? "To keep working on it, set the Status back to Draft at the top of the page. The lines open up again."
-                      : "To change what they owe, use Credit / Refund in the Actions menu at the top of the page, or bill the difference on a new invoice."}
-                  </p>
-                </>
-              )}
+            <div className="border-t border-slate-100 bg-slate-50/60 p-4 text-sm text-slate-500">
+              {/* The same two doors the server's own refusal names (invoiceLineEditRefusal), in the
+                  same order, so reading the page and tripping the guard never tell two stories. */}
+              <p>
+                This invoice is void, so its lines are set. If you voided it by mistake, set the status back
+                at the top of the page. To bill this work, start a new invoice.
+              </p>
             </div>
           ) : (
           <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
@@ -994,9 +1094,15 @@ export function InvoiceDetail({
               <span>{formatCurrency(invoice.subtotal)}</span>
             </div>
             <div className="flex items-center justify-between gap-2 text-slate-600">
-              {/* The picker is a DRAFT control (audit 8) — a sent invoice shows its rate as text,
-                  matching every other line-item edit on this page. */}
-              {taxRates.length > 0 && isDraft ? (
+              {/* THE TAX RATE IS A LINE-LEVEL EDIT AND IT FOLLOWS THE SAME WORD (cn-v962).
+                  Audit 8 made this picker draft-only because a mis-tap on a PAID invoice silently
+                  re-totalled it. SILENTLY was the load-bearing half: setInvoiceTaxRate now takes any
+                  live invoice and stamps the revision (0269), so a job billed at the wrong county
+                  rate is an ordinary correction again. Leaving it on `isDraft` after that would be
+                  the other kind of dead end — a control the server would happily accept, hidden
+                  with no way forward offered, on a page whose whole left column just unlocked.
+                  Void still shows the rate as plain text, which refuses nothing. */}
+              {taxRates.length > 0 && !linesLocked ? (
                 <Select
                   className="h-8 w-44 text-xs"
                   // Match with a tolerance a stored fraction can actually hit (0243 widened the column to
@@ -1035,6 +1141,20 @@ export function InvoiceDetail({
               <span>Balance due</span>
               <span>{formatCurrency(balance)}</span>
             </div>
+            {/* TAKING A LINE OFF A PAID BILL LEAVES THEM OVERPAID, AND NOTHING SAID SO (cn-v962
+                review). This is Erik's own case, one step on: delete the Smartwater lines from an
+                invoice the customer already settled and the total drops below what they handed
+                over. paidStatus keeps the status 'paid' (paid >= total) and invoiceBalance floors
+                at zero, so the card read Total $495 / Paid $500 / Balance due $0.00 and the five
+                dollars he now owes back appeared nowhere at all. That is the silence this whole
+                wave traded the edit lock for, so it has to be said out loud, with the door that
+                settles it. Credit / Refund is the literal label in the Actions menu. */}
+            {invoiceOverpayment(invoice.total, invoice.amount_paid) > 0.005 && (
+              <div className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                They have paid {formatCurrency(invoiceOverpayment(invoice.total, invoice.amount_paid))} more than this
+                bill now asks for. Settle it with Credit / Refund in the Actions menu at the top.
+              </div>
+            )}
           </CardContent>
         </Card>
 

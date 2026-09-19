@@ -39,6 +39,41 @@ export async function markInvoiceSent(
   return { ok: true };
 }
 
+/**
+ * THE SAME BILL, SENT AGAIN — and this time the status must NOT move (0269, 2026-09-18).
+ *
+ * Once a delivered invoice could be revised, every delivery door grew a second job: a bill that
+ * was edited after it went out leaves `revised_at > sent_at` standing, which the invoice page
+ * says out loud as "the customer is holding an older copy". Only a real re-delivery settles that,
+ * by moving `sent_at` forward — which is why 0269 does not clear `revised_at`: the fact that a
+ * revision happened is worth keeping, and the comparison is what answers the question.
+ *
+ * It cannot go through markInvoiceSent, and the reason is a money bug that would have been very
+ * quiet. That function writes `status = 'sent'`, which is exactly right for the draft it was
+ * written for and exactly WRONG here: texting a customer a copy of an invoice they have already
+ * paid would demote 'paid' to 'sent', putting a settled bill back on the AR list and chasing
+ * someone for money they have already handed over. A re-send is a delivery, not a status change.
+ * So this writes the one column that records the deed and touches nothing else.
+ *
+ * Checked, like its twin: a zero-row UPDATE is a 204, and an office told "re-sent" over a row
+ * that still says the customer holds an older copy is the shape of every incident in this file.
+ */
+export async function markInvoiceResent(
+  supabase: { from: (t: string) => any },
+  id: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await supabase
+    .from("invoices")
+    .update({ sent_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  // Mid-deploy there is no column to stamp, so there is nothing to fail: the bill still went out,
+  // and a send reported as broken because of a missing column would be a lie about the deed.
+  if (res.error) return isMissingSentAt(res.error) ? { ok: true } : { ok: false, error: dbError(res.error) };
+  if (!res.data?.length) return { ok: false, error: "Invoice not found." };
+  return { ok: true };
+}
+
 /** Postgres 42703 and PostgREST's schema-cache miss — the one error shape a not-yet-applied
  *  0267 produces, and nothing else, so a real failure still surfaces as itself. */
 function isMissingSentAt(err: unknown): boolean {
