@@ -19,7 +19,14 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
       // id + status + po_id feed the shared live-PO rule (a draft/cancelled order isn't a
       // cost, and a PO already paid by a bill is superseded by it — see livePurchaseOrders).
       supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
-      supabase.from("bills").select("amount, po_id").eq("job_id", jobId),
+      // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
+      // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
+      // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+      // counting against that job" - a sentence that was false everywhere, because every cost reader summed
+      // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
+      // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
+      // counted one purchase twice on the same job.
+      supabase.from("bills").select("amount, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
       supabase.from("organizations").select("settings").maybeSingle(),
     ]);
 

@@ -350,7 +350,14 @@ export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string
     customerLaborRateForJob(supabase, jobId),
     // id + status + po_id feed the shared live-PO rule (see livePurchaseOrders) — and id is the claim key.
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
-    supabase.from("bills").select("id, amount, po_id").eq("job_id", jobId),
+    // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
+    // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
+    // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+    // counting against that job" - a sentence that was false everywhere, because every cost reader summed
+    // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
+    // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
+    // counted one purchase twice on the same job.
+    supabase.from("bills").select("id, amount, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
   ]);
   const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   // Claims AFTER the rows, never beside them: the read wants every candidate id so a row billed on

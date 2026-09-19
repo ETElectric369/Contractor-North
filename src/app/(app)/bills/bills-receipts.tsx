@@ -321,11 +321,24 @@ export function BillsReceipts({
                         start(async () => {
                           const res = await setBillStatus(b.id, next, b.job_id ?? "");
                           if (!res?.ok) { toast(res?.error ?? "Couldn't update the bill — try again.", "error"); return; }
-                          toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
+                          toast(
+                            next === "paid"
+                              ? "Marked settled - it comes out of the supplier balance"
+                              : "Marked on account - it goes back into the supplier balance",
+                            "success",
+                          );
                           router.refresh();
                         });
                       }}
-                      title="Toggle paid/unpaid"
+                      /* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19).
+                         Owed = bills not marked paid, minus payments recorded against the account.
+                         So ticking a $456.02 CED bill here takes it out of `charged`, and recording
+                         the cheque that covered it puts the same $456.02 into `paid` - the balance
+                         falls by $912.04 for one payment. The control stays, because a counter
+                         receipt settled at the till is exactly what it is for. What changes is that
+                         it stops calling itself "paid/unpaid", which read like a second payment
+                         ledger, and says what it actually means: how this bill was bought. */
+                      title="Settled at the counter, or on account? This is how the bill was bought - the supplier balance reads it."
                     >
                       <Badge tone={statusTone(b.status)}>{b.status}</Badge>
                     </button>

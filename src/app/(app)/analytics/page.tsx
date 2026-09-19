@@ -68,7 +68,14 @@ export default async function AnalyticsPage() {
       // id + status + po_id feed computeJobProfitRows' shared live-PO rule: a draft/cancelled
       // order isn't a cost, and a PO paid by a bill is superseded by it (no double-charge).
       supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000),
-      supabase.from("bills").select("job_id, amount, category, po_id").limit(50000),
+      // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
+      // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
+      // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+      // counting against that job" - a sentence that was false everywhere, because every cost reader summed
+      // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
+      // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
+      // counted one purchase twice on the same job.
+      supabase.from("bills").select("job_id, amount, category, po_id").is("superseded_by_bill_id", null).limit(50000),
       // Cap BOTH sides of the trend (audit 9): bounding the payments that ADD money while leaving
       // the refunds that SUBTRACT it unbounded would overstate collected at exactly the volume
       // where the cap starts to bite.

@@ -8,6 +8,7 @@ import {
   defaultBillable,
   isUnclassifiedCategory,
   looksLikeFoodAndDrink,
+  looksProvisionallyPriced,
   normalizeBillable,
   resolveReceiptLineCategory,
   splitReceiptBilling,
@@ -408,4 +409,28 @@ describe("the OSH receipt that failed the first real test", () => {
       expect(looksLikeFoodAndDrink(r.description)).toBe(r.food);
     });
   }
+});
+
+describe("a masked price is not a masked card number (cn-v963 review)", () => {
+  /**
+   * The reader is told to transcribe every line and to read "****1234" as evidence of tender, so
+   * the first version of this check pulled ordinary card-paid receipts out of the price book.
+   */
+  it("reads asterisks standing where a price was removed", () => {
+    expect(looksProvisionallyPriced("IDEAL 30641 Twister 341-Tan    *****")).toBe(true);
+    expect(looksProvisionallyPriced("Extended  *****  pricing pending Truckee")).toBe(true);
+  });
+  it("ignores a masked card number, spaced or not", () => {
+    expect(looksProvisionallyPriced("VISA ****1234")).toBe(false);
+    expect(looksProvisionallyPriced("PAID  **** 4242  THANK YOU")).toBe(false);
+    expect(looksProvisionallyPriced("MASTERCARD ************9012")).toBe(false);
+  });
+  it("ignores a lone star or a footnote marker", () => {
+    expect(looksProvisionallyPriced("Item * see reverse")).toBe(false);
+    expect(looksProvisionallyPriced("Sale ** while supplies last")).toBe(false);
+  });
+  it("is quiet on nothing at all", () => {
+    expect(looksProvisionallyPriced(null)).toBe(false);
+    expect(looksProvisionallyPriced("")).toBe(false);
+  });
 });

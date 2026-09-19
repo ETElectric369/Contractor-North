@@ -444,3 +444,50 @@ export function splitReceiptBilling(
   // always add up to the figure on the receipt, even when the clamp above bit.
   return { cost, billed, notBilled: round2(cost - billed), notBilledCount };
 }
+
+/**
+ * WHEN THE PAPER IS NOT PRICED FOR HIM YET (Erik, 2026-09-18).
+ *
+ * He bought at the CED branch near Sunnyvale on his Truckee account. What came back was not a bill:
+ *
+ *   "my account gets priced by truckee thats why the final lines are blank so that is just a
+ *    preview of sunnyvale retail counter price not my prices which havent come back yet"
+ *   "thats why the invoice has all the *****"
+ *
+ * CED masks the contract price with asterisks and prints the branch's retail counter price beside
+ * it. The reader took the retail column and stored it as his cost, so eight electrical lines - a
+ * 125A load centre, Square D breakers - went into the price book at a rate he is never charged
+ * (learned_prices reads bill_line_items live). The real Truckee-priced invoice arrives later, by
+ * the same email import that already brought his statements in, which is how the SAME purchase
+ * gets counted twice on one job.
+ *
+ * The asterisks are the tell, and they are the one part of this a machine can see. This says so;
+ * `bills.pricing_provisional` (0271) is what it sets, and the price book skips those rows.
+ */
+export const MASKED_PRICE_PROMPT_RULE =
+  'Set "pricing_provisional": true when the document does NOT show this account\'s own prices - a price column masked with asterisks (*****), left blank, or shown as "N/A", a quote or counter preview, or a header saying the pricing is pending. Supply houses print asterisks where a contract price will go and show the branch retail price beside it, and that retail figure is NOT what this contractor pays. Still transcribe the numbers you can read, and still set the total, but say the pricing is provisional so nothing downstream treats it as settled cost.';
+
+/**
+ * The asterisk run a supply house prints where a contract price belongs. Three or more, so a
+ * footnote marker or a single emphasis star is never mistaken for a masked price.
+ *
+ * AND NOT A MASKED CARD NUMBER (review, 2026-09-19). The vision prompt asks the reader to
+ * transcribe every readable line AND to treat "a card number/••••" as evidence the receipt was
+ * paid at the register - so a Home Depot receipt ending "VISA ****1234" would have been read as a
+ * counter preview, quietly pulling a perfectly ordinary purchase out of the price book. A masked
+ * PRICE stands where a number was removed; a masked CARD is followed by the last four. Requiring
+ * no digits after the run tells them apart without guessing at either.
+ */
+// `(?!\*)` before the digit test is load-bearing, not decoration: without it the engine simply
+// backtracks to a SHORTER run and matches "***" out of "************9012", with the twelfth
+// asterisk satisfying "not a digit". Forcing the match to consume the whole run first is what makes
+// the digit test apply to the run's real end. A test asserts the twelve-star case.
+const MASKED_PRICE = /\*{3,}(?!\*)(?!\s*\d)/;
+
+/** True when transcribed text carries the mask itself - a second chance at the same fact for a
+ *  document whose reader did not answer the question, and the reason it is a plain function rather
+ *  than only a prompt instruction. Never guesses from a missing number alone: plenty of honest
+ *  lines have no extended price. */
+export function looksProvisionallyPriced(text: string | null | undefined): boolean {
+  return MASKED_PRICE.test(String(text ?? ""));
+}

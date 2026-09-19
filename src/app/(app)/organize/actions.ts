@@ -1,4 +1,5 @@
 "use server";
+import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
@@ -18,6 +19,8 @@ import { OVERHEAD_CATEGORIES } from "./constants";
 // "identical" that stays true. The rule sentence beneath each schema is shared for the same reason.
 import {
   FOOD_AND_DRINK_PROMPT_RULE,
+  MASKED_PRICE_PROMPT_RULE,
+  looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
   decideReceiptLine,
 } from "@/app/(app)/bills/receipt-billing";
@@ -125,12 +128,30 @@ async function insertItemizedBill(
     scope_category?: string | null; // the JOB SCOPE (Framing, Decking…) for budget-vs-actual
     notes: string;
     created_by: string;
+    /** 0271: the prices on this paper are a counter preview, not this account's own. */
+    pricing_provisional?: boolean;
   },
   lines: BillLine[],
   status: "paid" | "unpaid" = "unpaid",
 ): Promise<string | null> {
   const { data, error } = await supabase.from("bills").insert({ ...bill, status }).select("id").single();
-  if (error || !data) return null;
+  if (error || !data) {
+    // A RECEIPT THAT DID NOT BECOME A BILL USED TO SAY NOTHING AT ALL (review, 2026-09-19).
+    //
+    // This returned a bare null, so the caller filed the document, told Erik it was filed, and the
+    // cost simply never existed - the silent-write law broken at the one place a whole receipt can
+    // vanish. It is also the exact shape a deploy-before-migration takes here: PostgREST rejects
+    // the WHOLE insert for one unknown column, so a push that lands before its migration would
+    // have quietly stopped recording every scanned receipt until somebody noticed the money was
+    // missing. It cannot be a thrown error (the document IS filed by this point and that is worth
+    // keeping), so it goes to the ops log, where the daily sweep reads it.
+    reportError("organize:insertItemizedBill", error ?? new Error("bill insert returned no row"), {
+      supplier: bill.supplier,
+      jobId: bill.job_id,
+      amount: bill.amount,
+    });
+    return null;
+  }
   if (lines.length) {
     await supabase.from("bill_line_items").insert(
       lines.map((l, i) => ({
@@ -234,6 +255,7 @@ Respond with ONLY a JSON object (no prose):
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
+  "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
   "payment": "paid_at_purchase" | "on_account" | "unknown" — receipts only. "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases); "unknown" when you cannot tell,
   "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (fuel/gas station, shop supplies, small tools, office, vehicle, insurance); "unsure" otherwise,
   "overhead_category": "Fuel" | "Shop supplies" | "Tools" | "Office" | "Insurance" | "Vehicle" | "Other" or null — only when destination is "overhead",
@@ -244,6 +266,8 @@ Respond with ONLY a JSON object (no prose):
 Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
+
+${MASKED_PRICE_PROMPT_RULE}
 
 Jobs you may match against (id — label):
 ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
@@ -323,20 +347,39 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     documentId = doc?.id ?? null;
   }
 
+  /**
+   * IS THIS PAPER PRICED FOR HIM, OR JUST PRICED? (Erik, 2026-09-18; 0271.)
+   *
+   * His CED account is priced by Truckee. Buy at another branch and the ticket shows that branch's
+   * retail counter price with asterisks where his contract price will go - "thats why the invoice
+   * has all the *****" - and the real one follows by email days later. Left unmarked, the retail
+   * figure becomes a learned price he is never charged, and the priced invoice lands as a SECOND
+   * bill for the same purchase.
+   *
+   * Two chances at the same fact, because one of them is a language model: what the reader
+   * answered, OR the mask still visible in the text it transcribed. Either is enough - under-
+   * flagging teaches the price book a wrong number, while over-flagging only means a card asks
+   * him to confirm a cost he was going to look at anyway.
+   */
+  const provisional =
+    parsed?.pricing_provisional === true ||
+    looksProvisionallyPriced(String(parsed?.summary ?? "")) ||
+    (lines ?? []).some((l: { description?: string | null }) => looksProvisionallyPriced(l?.description));
+
   // A receipt becomes a billable cost: an itemized bill on the job (job receipt)
   // or a company expense bill (overhead). Notes/job-documents make no bill.
   let billId: string | null = null;
   if (kind === "receipt" && amount != null && destination === "job" && jobId) {
     billId = await insertItemizedBill(
       supabase,
-      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: ctx.userId },
+      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: ctx.userId, pricing_provisional: provisional },
       lines,
       billStatus,
     );
   } else if (destination === "overhead") {
     billId = await insertItemizedBill(
       supabase,
-      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: ctx.userId },
+      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: ctx.userId, pricing_provisional: provisional },
       lines,
       billStatus,
     );
@@ -493,13 +536,16 @@ Respond with ONLY a JSON object (no prose):
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
   "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}],${scopeSchemaLine}
+  "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
   "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
   "confidence": "low" | "medium" | "high"
 }
 Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.
 In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
-${FOOD_AND_DRINK_PROMPT_RULE}`,
+${FOOD_AND_DRINK_PROMPT_RULE}
+
+${MASKED_PRICE_PROMPT_RULE}`,
       messages: [
         {
           role: "user",

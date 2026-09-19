@@ -115,8 +115,15 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
     ? supabase.from("purchase_orders").select("id, job_id, total, status").eq("job_id", jobId)
     : supabase.from("purchase_orders").select("id, job_id, total, status").limit(50000);
   const billsQ = jobId
-    ? supabase.from("bills").select("job_id, amount, po_id").eq("job_id", jobId)
-    : supabase.from("bills").select("job_id, amount, po_id").limit(50000);
+  // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
+  // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
+  // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+  // counting against that job" - a sentence that was false everywhere, because every cost reader summed
+  // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
+  // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
+  // counted one purchase twice on the same job.
+    ? supabase.from("bills").select("job_id, amount, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null)
+    : supabase.from("bills").select("job_id, amount, po_id").is("superseded_by_bill_id", null).limit(50000);
   // Job-linked only: petty cash with no job is overhead, not a job's cost.
   const pettyQ = jobId
     ? supabase.from("petty_cash").select("job_id, amount, kind").eq("job_id", jobId)
@@ -276,7 +283,7 @@ export type ActualCategory = { category: string; actual: number };
  *  match the estimate's (quote_line_items.category), so this joins to getJobBudgetByCategory. */
 export async function getJobActualByCategory(supabase: any, jobId: string): Promise<ActualCategory[]> {
   const [{ data: bills }, { data: pos }, { data: entries }, { data: petty }] = await Promise.all([
-    supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId),
+    supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
     // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same split-aware, pay-rate
     // helper computeJobProfitRows uses.
