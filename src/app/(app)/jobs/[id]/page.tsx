@@ -547,6 +547,13 @@ export default async function JobDetailPage({
   // (non-void, non-draft — a draft draw isn't a real bill): progress.invoiced.
   const billedToDate = progress.invoiced;
   const collected = progress.collected;
+  // HOISTED so two cards can ask the same question and get the same answer. The action dock has
+  // always computed this; the payment-schedule card needs it too, because "Set Up Schedule" was
+  // being offered on a job whose draws have already gone out, where the server can only refuse
+  // (2026-09-18 dead-end sweep). Computed once, so the two surfaces cannot drift apart.
+  const isDrawBilled = (invoices ?? []).some(
+    (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
+  );
   // Open invoices (non-void, balance still owed) — targets for "record a payment".
   const openInvoices = (invoices ?? [])
     .filter((i: any) => i.status !== "void" && invoiceBalance(i.total, i.amount_paid) > 0.005)
@@ -1228,6 +1235,10 @@ export default async function JobDetailPage({
             contractTotal={contractTotal}
             depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
             milestones={(paymentMilestones as any) ?? []}
+            // Without this the gate inside the card is dead code: it defaults to false meaning
+            // "no draws", so Set Up Schedule kept being offered on a job whose draws have already
+            // been billed, where the server can only refuse.
+            drawsBilled={isDrawBilled}
           />
           <ContractCard jobId={j.id} contract={((contractRows as any) ?? [])[0] ?? null} />
           <LienInsuranceCard
@@ -1386,9 +1397,7 @@ export default async function JobDetailPage({
         pendingProposal={(pendingProposal as any) ?? null}
         hasQuote={(quotes ?? []).length > 0}
         defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
-        isDrawBilled={(invoices ?? []).some(
-          (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
-        )}
+        isDrawBilled={isDrawBilled}
         /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */
         customers={viewerIsStaff ? allCustomers ?? [] : []}
         templates={(codeTemplates ?? []) as { id: string; name: string }[]}

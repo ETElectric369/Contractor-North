@@ -20,6 +20,11 @@ import { STAFF_ROLES } from "@/lib/actions/perms";
  * The webhook is the one writer for card money; a second writer keyed on a different id is the
  * double-record class recordInvoicePayment was built to close.
  *
+ * NOR DOES ANYTHING HERE WRITE AN INVOICE (INV-069, 2026-09-18). Minting the PaymentIntent used to
+ * promote a draft to 'sent', and the mint happens when the Pay Now sheet OPENS, so a look sent
+ * somebody's half-built bill. The invoice moves at the deed now — in the webhook, where the money
+ * is — and every door in this file is a read plus a Stripe call, nothing more.
+ *
  * THE MONEY LAW (0161) applies to every Stripe object below: the Terminal Location, and the
  * PaymentIntent, are created ON THE TENANT'S OWN CONNECTED ACCOUNT ({ stripeAccount }) so the
  * tenant is merchant of record, pays Stripe's in-person rate, and Contractor North never holds a
@@ -524,16 +529,7 @@ export type TapPaymentIntentResult =
       /** Who minted it (identityStamp) — the bridge keys its caches to this. */
       identity: string;
     }
-  | {
-      ok: false;
-      error: string;
-      /**
-       * Refused ONLY because the invoice is still a draft and this caller asked not to send it
-       * (`send: false`). The pre-mint on the Pay Now sheet's open uses it: opening and closing a
-       * sheet must never send someone's bill. The press asks again with `send` on.
-       */
-      draft?: boolean;
-    };
+  | { ok: false; error: string };
 
 /**
  * MINT THE PAYMENTINTENT THE PHONE WILL COLLECT — on the tenant's account, for the full balance.
@@ -548,15 +544,29 @@ export type TapPaymentIntentResult =
  * than minting another, and a second PI per attempt would also be a second door onto the same
  * balance.
  *
- * `send: false` means "mint only if this bill is already in front of the customer" — the Pay Now
- * sheet's pre-mint (Apple 5.6) passes it, because a sheet that was opened and closed must not
- * have sent anybody's draft invoice. The press itself asks with `send` on, and THAT is what
- * promotes the draft: an explicit tap, never a look.
+ * ── THIS FUNCTION DOES NOT TOUCH THE INVOICE (INV-069, 2026-09-18) ──────────────────────────
+ *
+ * It used to. A draft was promoted to 'sent' right here, the moment the PaymentIntent was minted —
+ * and because Apple 5.6 wants the reader's UI within a second of the press, the mint happens when
+ * the Pay Now sheet OPENS. So opening a sheet sent a bill. Erik pressed Pay Now on INV-069, a
+ * $6,412.64 invoice he was still building; no card was ever presented, and the invoice was
+ * promoted for good:
+ *
+ *     "its not sent its in draft mode thats partially why this is confusing"
+ *
+ * The write called neither recalcInvoice nor a revalidate, so the row landed on a status
+ * paidStatus() calls 'partial' while his open page went on showing a Draft badge and live draft
+ * controls — and his own $200 deposit then barred the way back to Draft.
+ *
+ * A TAP NEEDS NO BILL IN THE CUSTOMER'S HAND. This is a `card_present` PaymentIntent on the
+ * tenant's connected account: no public link, no email, no text, nothing that could reach the
+ * customer's phone — the public_token this file never reads is the QR door's business, and only
+ * the QR door (collectArtifacts) hands a bill over and promotes on the spot. So a draft is a
+ * perfectly payable thing over the counter, minting the door is not an event on the invoice, and
+ * the status moves where the money does: the webhook's payment_intent.succeeded branch promotes
+ * the draft before the recalc (the rule is draftPromotionOnPayment in src/lib/tap-settlement.ts).
  */
-export async function createTapPaymentIntent(
-  invoiceId: string,
-  opts?: { send?: boolean },
-): Promise<TapPaymentIntentResult> {
+export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaymentIntentResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   const orgId = ctx.orgId;
@@ -593,32 +603,6 @@ export async function createTapPaymentIntent(
   }
   const connect = connectStateFromOrg(org as never);
   if (!canAcceptPayments(connect)) return { ok: false, error: NOT_SET_UP };
-
-  // A PAY DOOR ON A DRAFT IS A DOOR ONTO A WALL (collectArtifacts, INV-064) — a tap is a door as
-  // much as a QR is. Putting a bill in front of a customer IS sending it: promote here, checked —
-  // and only now, after every refusal above has had its say, so a "nothing to collect" answer
-  // never leaves the invoice's status changed behind it.
-  if (status === "draft") {
-    // …and a LOOK is not a tap. The pre-mint that runs when the sheet opens passes `send: false`:
-    // it takes the door only if the bill is already sent, so opening and closing the sheet can't
-    // silently promote a draft. The press asks again, with `send` on.
-    if (opts?.send === false) {
-      return {
-        ok: false,
-        draft: true,
-        error: "This invoice is still a draft. Press Tap to Pay on iPhone and it sends the bill first, then takes the card.",
-      };
-    }
-    const { data: sent, error: sendErr } = await supabase
-      .from("invoices")
-      .update({ status: "sent" })
-      .eq("id", invoiceId)
-      .eq("status", "draft")
-      .select("id");
-    if (sendErr || !sent?.length) {
-      return { ok: false, error: "Couldn't send this invoice, so there's nothing for them to pay yet." };
-    }
-  }
 
   const invoiceNumber = ((inv as { invoice_number?: string | null }).invoice_number ?? null) || null;
   try {

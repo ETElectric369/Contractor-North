@@ -12,6 +12,8 @@ import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
+import { markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { billItemisation } from "@/lib/bill-itemisation";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
@@ -354,7 +356,13 @@ export async function invoiceShareText(
         error: `Sharing marks ${invoice.invoice_number} as sent — the customer link only works on a sent invoice.`,
       };
     }
-    await ctx.supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // The stamp rides with the status because this IS the deed: the caller said yes to handing
+    // the customer their link. 0267: `sent` alone can be manufactured by a pay door, `sent_at`
+    // cannot. And the write is checked — a zero-row UPDATE is a 204, and handing out a link to a
+    // page that still 404s because the flip never landed is the failure this branch exists to
+    // prevent, not one to shrug at.
+    const stamped = await markInvoiceSent(ctx.supabase, id);
+    if (!stamped.ok) return { ok: false, error: stamped.error ?? "Couldn't mark this invoice as sent, so its customer link won't open yet." };
     // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
     await recalcInvoice(ctx.supabase, id);
     revalidateMoney(id);
@@ -396,7 +404,14 @@ export async function textInvoice(
   if (!sent)
     return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
   if (invoice.status === "draft") {
-    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // The text is already in the customer's hand, so the deed happened whatever the row does next
+    // — which is why this is stamped (0267) and why a failure here is reported as "it went out but
+    // the status didn't stick" rather than as a failed send. Silent is the one thing it can't be:
+    // the office would be looking at a Draft badge on a bill the customer is reading.
+    const stamped = await markInvoiceSent(supabase, id);
+    if (!stamped.ok) {
+      return { ok: false, error: `The text went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${stamped.error ?? "try again"})` };
+    }
     // Same reason as setInvoiceStatus: a prepaid draft must land on paid/partial, not 'sent'.
     await recalcInvoice(supabase, id);
   }
@@ -913,6 +928,41 @@ export async function addInvoiceItem(
 type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number; source_ids?: string[] };
 
 /**
+ * A BILL'S LINES, WITH THE ONE COLUMN THAT DECIDES WHO PAYS FOR THEM.
+ *
+ * `billable` (0268) has to be in the projection or the importer cannot tell Erik's Smartwater from
+ * his wire — and the projection law says it every time: the failure is always a select list. The
+ * retry is the cn-v576 deploy-window shape (a push lands before its migration runs, and a select
+ * naming a column that isn't there yet fails the WHOLE read, which would take the materials
+ * importer down for those minutes). Falling back leaves `billable` undefined on every row, which
+ * the arithmetic reads as billable — exactly the behaviour of the minute before 0268.
+ */
+async function billLinesForBills(
+  supabase: { from: (t: string) => any },
+  billIds: string[],
+): Promise<{ lines: any[]; error?: string }> {
+  if (!billIds.length) return { lines: [] };
+  const read = (withBillable: boolean) =>
+    supabase
+      .from("bill_line_items")
+      .select(`id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable" : ""}`)
+      .in("bill_id", billIds)
+      .order("sort_order");
+  let res = await read(true);
+  if (res.error && isMissingColumn(res.error, "billable")) res = await read(false);
+  if (res.error) {
+    // A FAILED READ IS NOT AN EMPTY RECEIPT (audit 8), AND SINCE 0268 IT IS A MONEY QUESTION.
+    // This used to shrug: no rows meant every bill billed as its opaque lump, which was merely
+    // coarse. Now a lost read would silently re-charge the customer for the lines Erik switched
+    // off — the exact leak 0268 closed — so the import refuses instead. Nothing is written, the
+    // retry costs a tap, and an invented figure costs his word to a customer.
+    reportError("materialsImport.billLines", res.error, { bills: billIds.length });
+    return { lines: [], error: "Couldn't read this job's receipts just now, so nothing was imported - try again in a moment." };
+  }
+  return { lines: (res.data ?? []) as any[] };
+}
+
+/**
  * ADDITIVE import (migration 0175). Matches incoming rows against what is already on the
  * invoice BY KEY, so one call can refresh, append and leave-alone independently:
  *
@@ -1339,16 +1389,11 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   // lines goes onto the invoice item-by-item — real descriptions, quantities, per-item prices —
   // instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill without lines (hand-entered)
   // still imports as its lump.
-  const [claims, { data: blis }] = await Promise.all([
+  const [claims, blis] = await Promise.all([
     claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [...((pos ?? []) as any[]).map((p) => String(p.id)), ...billIds]),
-    billIds.length
-      ? supabase
-          .from("bill_line_items")
-          .select("id, bill_id, description, quantity, unit_price, amount, category, sort_order")
-          .in("bill_id", billIds)
-          .order("sort_order")
-      : Promise.resolve({ data: [] as any[] }),
+    billLinesForBills(supabase, billIds),
   ]);
+  if (blis.error) return { ok: false, error: blis.error };
   // THE DEPLOY WINDOW (0255 not applied): a claim written by id — every labor line, and every cost
   // line since 0255 — is unreadable, so a bill another invoice holds could be billed again here.
   // The same refusal labor gives, for the same few minutes; keys alone are not a boundary.
@@ -1356,8 +1401,10 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   const skippedIds: string[] = [];
   /** Bills whose PO is already billed elsewhere: the delivery was charged through the order. */
   const poCovered: { billId: string; poId: string }[] = [];
+  /** Bills whose every line is marked not billable (0268): a real receipt, nothing on it to bill. */
+  const nothingBillable: string[] = [];
   const linesByBill = new Map<string, any[]>();
-  for (const l of (blis ?? []) as any[]) {
+  for (const l of blis.lines) {
     if (!linesByBill.has(l.bill_id)) linesByBill.set(l.bill_id, []);
     linesByBill.get(l.bill_id)!.push(l);
   }
@@ -1409,50 +1456,31 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
       poCovered.push({ billId: String(b.id), poId: b.po_id });
       continue;
     }
-    const target = mark(Number(b.amount));
-    const lines = (linesByBill.get(b.id) ?? []).filter((l) => !/tax/i.test(String(l.category ?? "")));
-    const billRows: typeof rows = [];
-    let emitted = 0;
-    for (const l of lines) {
-      const qty = Number(l.quantity) || 0;
-      const rawAmt =
-        l.amount != null && Number(l.amount) !== 0 && !isNaN(Number(l.amount))
-          ? Number(l.amount)
-          : (Number(l.unit_price) || 0) * (qty || 1);
-      if (!rawAmt) continue; // unpriced line → its cost stays in the remainder row
-      const sell = Math.round(rawAmt * (1 + (Number(markup) || 0) / 100) * 100) / 100;
-      if (!sell) continue;
-      const desc = String(l.description || "Materials").slice(0, 300);
-      const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;
-      // What qty × rounded-unit actually bills — within pennies of the sell it's the honest
-      // presentation and the remainder row eats the difference; past the cap (huge counts of
-      // sub-cent parts) the qty still folds into the description to protect the total.
-      const split = Math.round(unitExact * qty * 100) / 100;
-      if (qty > 0 && Number.isInteger(qty) && unitExact !== 0 && Math.abs(split - sell) <= 0.5) {
-        billRows.push({ import_key: `bli:${l.id}`, description: desc, quantity: qty, unit: "ea", unit_price: unitExact });
-        emitted = Math.round((emitted + split) * 100) / 100;
-      } else {
-        billRows.push({ import_key: `bli:${l.id}`, description: qty > 1 ? `${desc} (${qty} ea)` : desc, quantity: 1, unit: "ea", unit_price: sell });
-        emitted = Math.round((emitted + sell) * 100) / 100;
-      }
-    }
-    const remainder = Math.round((target - emitted) * 100) / 100;
-    // Every row of a bill claims the BILL (0255): a bill is billed as a unit (its rows sum to
-    // mark(bill.amount) — the anchor invariant), so the claim is at bill level, not per line.
+    const billRows = billItemisation(b, linesByBill.get(b.id) ?? [], markup);
+    // NOTHING LEFT TO CHARGE. Every line on this receipt was the company's own (0268) — Erik's
+    // "mostly snacks and a $3 part" with the part flipped off too. Counted, and said below,
+    // because "no purchase orders or bills on this job yet" would be a lie about a receipt he
+    // can see on the job, and a screen that disagrees with the database is the bug we came from.
     if (!billRows.length) {
-      rows.push({ import_key: `bill:${b.id}`, description: `Materials — ${b.supplier}${b.bill_number ? ` (bill #${b.bill_number})` : ""}`, quantity: 1, unit: "lot", unit_price: target, source_ids: [String(b.id)] });
+      nothingBillable.push(String(b.id));
       continue;
     }
-    if (Math.abs(remainder) >= 0.01) {
-      billRows.push({ import_key: `bill:${b.id}:remainder`, description: `Supplies & tax — ${b.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
-    }
+    // Every row of a bill claims the BILL (0255): a bill is billed as a unit (its rows sum to the
+    // marked-up BILLABLE total — the anchor invariant), so the claim is at bill level, not per line.
     rows.push(...billRows.map((r) => ({ ...r, source_ids: [String(b.id)] })));
   }
   if (!rows.length) {
     const held = [...skippedIds, ...poCovered.map((c) => c.poId)];
-    return held.length
-      ? { ok: false, empty: true, error: `Every bill and order on this job is already on ${joinNumbers(claimantNumbers(claims, held))} — nothing new to bill.` }
-      : { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
+    if (held.length) return { ok: false, empty: true, error: `Every bill and order on this job is already on ${joinNumbers(claimantNumbers(claims, held))} — nothing new to bill.` };
+    // A DEAD END IS A SCREEN THAT BLAMES THE WRONG THING. There IS a receipt here; every line on
+    // it is switched off. Say that, and say where the switch is, instead of "no bills yet".
+    if (nothingBillable.length)
+      return {
+        ok: false,
+        empty: true,
+        error: `Nothing here to bill: on ${nothingBillable.length === 1 ? "that receipt" : "those receipts"}, every line is marked as your own cost rather than the customer's. Open the bill to change what the customer pays for.`,
+      };
+    return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
   }
 
   // What the invoice's materials lines claim BEFORE the RPC, so the toast counts only the bills
@@ -1908,10 +1936,18 @@ async function isProtectedCreditLine(supabase: any, itemId: string): Promise<boo
 // Line edits are for DRAFTS only — once an invoice is sent/paid/void, its lines are locked so
 // a voice/agent (or a stray UI tap) can't silently re-bill a customer or un-pay a paid invoice
 // via recalc. (M1 — the "reversible draft only" guarantee the voice money-loop rests on.)
+//
+// AND IT MUST NAME A DOOR THAT EXISTS (Erik, INV-069, 2026-09-18). This sentence used to end
+// "record an adjustment / new invoice instead". There is no adjustment in this app — no table,
+// no action, no migration, no button, nothing that string could have meant — so a person who
+// took the advice went looking for a feature that has never existed, on a page that had just
+// refused him. A refusal that sends you nowhere real is a dead end wearing a helpful voice. The
+// two ways out named here are both one tap from where the refusal appears: Credit / Refund in
+// the ⋯ Actions menu (credit-button.tsx), and New Invoice.
 const NOT_DRAFT_LOCKED: Result = {
   ok: false,
   error:
-    "This invoice has already been sent, so its lines are locked. Edit it while it's still a draft, or record an adjustment / new invoice instead.",
+    "This invoice isn't a draft any more, so its lines are locked - changing them now would change a bill the customer already has. To put money back, use Credit / Refund in the Actions menu; to charge something new, start a new invoice.",
 };
 async function requireDraftInvoice(supabase: any, invoiceId: string): Promise<Result | null> {
   const { data: inv } = await supabase.from("invoices").select("status").eq("id", invoiceId).maybeSingle();
@@ -1929,21 +1965,35 @@ type StatusRow = {
   job_id: string | null;
   invoice_number: string | null;
   amount_paid: number | null;
+  /** 0267. NULL means this bill never left the desk, whatever `status` says. */
+  sent_at?: string | null;
   invoice_items: { import_source?: string | null; import_key?: string | null; source_ids?: string[] | null }[] | null;
 };
 
-/** One read, tolerant of the 0255 deploy window (a select naming a missing column fails whole). */
-async function invoiceForStatusChange(supabase: Awaited<ReturnType<typeof createClient>>, id: string): Promise<{ row: StatusRow | null; error?: string }> {
-  const read = (withClaims: boolean) =>
+/** One read, tolerant of BOTH deploy windows (a select naming a missing column fails whole): 0255's
+ *  `source_ids` and 0267's `sent_at`. `sentAtKnown` says whether the answer for delivery is real or
+ *  simply absent — the demotion guard below must not read a column it never got as "not sent",
+ *  which would hand it the loosest possible answer at the one moment it is least sure. */
+async function invoiceForStatusChange(supabase: Awaited<ReturnType<typeof createClient>>, id: string): Promise<{ row: StatusRow | null; error?: string; sentAtKnown: boolean }> {
+  const read = (withClaims: boolean, withSentAt: boolean) =>
     supabase
       .from("invoices")
-      .select(`id, status, job_id, invoice_number, amount_paid, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
+      .select(`id, status, job_id, invoice_number, amount_paid${withSentAt ? ", sent_at" : ""}, invoice_items(import_source, import_key${withClaims ? ", source_ids" : ""})`)
       .eq("id", id)
       .maybeSingle();
-  let res: { data: unknown; error: unknown | null } = await read(true);
-  if (res.error && isMissingColumn(res.error, "source_ids")) res = await read(false);
-  if (res.error) return { row: null, error: dbError(res.error) };
-  return { row: (res.data ?? null) as StatusRow | null };
+  let withClaims = true;
+  let sentAtKnown = true;
+  let res: { data: unknown; error: unknown | null } = await read(withClaims, sentAtKnown);
+  if (res.error && isMissingColumn(res.error, "sent_at")) {
+    sentAtKnown = false;
+    res = await read(withClaims, sentAtKnown);
+  }
+  if (res.error && isMissingColumn(res.error, "source_ids")) {
+    withClaims = false;
+    res = await read(withClaims, sentAtKnown);
+  }
+  if (res.error) return { row: null, error: dbError(res.error), sentAtKnown };
+  return { row: (res.data ?? null) as StatusRow | null, sentAtKnown };
 }
 
 
@@ -2015,22 +2065,57 @@ export async function setInvoiceStatus(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  // A whitelisted status only, and NEVER back to Draft once money is on it (audit v921): a draft
-  // is line-editable and off the AR list, so demoting a paid/partial invoice hides real revenue
-  // and lets its lines change under recorded payments.
+  // A whitelisted status only, and never back to Draft once a bill the customer HOLDS has money
+  // on it (audit v921): a draft is line-editable and off the AR list, so demoting a delivered
+  // paid/partial invoice hides real revenue and lets its lines change under recorded payments.
   if (!INVOICE_STATUSES.includes(status)) return { ok: false, error: "That isn't a valid invoice status." };
-  const { row: cur, error: readErr } = await invoiceForStatusChange(supabase, id);
+  const { row: cur, error: readErr, sentAtKnown } = await invoiceForStatusChange(supabase, id);
   if (readErr) return { ok: false, error: readErr };
   if (!cur) return { ok: false, error: "Invoice not found." };
+  /*
+   * THE DEPOSIT WAS NOT SUPPOSED TO BE THE LOCK (Erik, INV-069, 2026-09-18).
+   *
+   * This guard used to read `amount_paid > 0` and nothing else. That is exactly right for an
+   * invoice the customer is holding: its lines must not move under money they have already paid
+   * against a document in their hands. It is exactly wrong for a draft with a deposit on it —
+   * which is a workflow this app deliberately invites, since a DRAFT never auto-advances on
+   * payment (invoice-math.ts paidStatus; billing/page.tsx "Payments record on DRAFTS too"). So
+   * when Pay Now promoted his still-being-built $6,412 draft to 'sent' without a card ever being
+   * tapped, his own $200 cash deposit became the thing that stopped him getting back to it:
+   *
+   *   "its not sent its in draft mode thats partially why this is confusing"
+   *
+   * 0267 gave the row a way to tell the two apart. Money bars the way back only when the bill
+   * ACTUALLY reached the customer — sent_at, which no pay door may ever stamp.
+   */
   if (status === "draft" && Number(cur.amount_paid ?? 0) > 0) {
-    return { ok: false, error: "This invoice has payments — it can't go back to Draft. Void it instead." };
+    const label = cur.invoice_number ?? "This invoice";
+    // Mid-deploy, before 0267 runs, there is no evidence either way. Hold the OLD, stricter line
+    // rather than guessing "never delivered" on a money boundary, and say it is temporary.
+    if (!sentAtKnown)
+      return { ok: false, error: `Billing is mid-update for a few minutes - ${label} can't go back to Draft until it's certain the customer isn't already holding it. Try again shortly.` };
+    if (cur.sent_at != null)
+      return {
+        ok: false,
+        error: `${label} went out to the customer and has money on it, so it can't go back to Draft - its lines would change under a bill they already have. Void it, or use Credit / Refund in the Actions menu.`,
+      };
   }
   // Leaving "void" resurrects this invoice's claims — refused while another invoice holds any.
   if (cur.status === "void" && status !== "void") {
     const back = await unvoidConflict(supabase, cur);
     if (back) return back;
   }
-  const { data: wroteS, error } = await supabase.from("invoices").update({ status }).eq("id", id).select("id");
+  // "Sent - I sent it myself" is a PERSON DECLARING THE DEED: they put the bill in the customer's
+  // hands by some door this app doesn't own (printed it, handed it over, sent it from their own
+  // mail). That is a delivery and it stamps, exactly as email/text/share do — while an existing
+  // stamp is left alone, because the date the bill really went is the date it really went, and
+  // re-picking Sent later is not a second delivery. Every other status writes nothing here; a
+  // pay door writes nothing here ever (0267).
+  const patch: { status: string; sent_at?: string } =
+    status === "sent" && sentAtKnown && !cur.sent_at
+      ? { status, sent_at: new Date().toISOString() }
+      : { status };
+  const { data: wroteS, error } = await supabase.from("invoices").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteS?.length) return { ok: false, error: "Invoice not found." };
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
@@ -2672,7 +2757,20 @@ export async function settleUp(input: {
   // an unsent bill's lines) — but this bill has left draft in the real world: delivered, settled,
   // on the doorstep. Without this step the payment below would record and the invoice would sit
   // "draft" forever, never reading as paid anywhere.
-  await supabase.from("invoices").update({ status: "sent" }).eq("id", inv.id);
+  //
+  // AND IT STAMPS (0267), which is a judgement call worth writing down. 0267 lists the delivery
+  // doors as email, text, share and the manual "I sent it myself"; settle-up is not on that list
+  // because it was not in front of anyone when the list was written. It belongs there: a person
+  // stood at the customer's door, handed over the bill and took the money. Leaving it unstamped
+  // would say this invoice "never left the desk", which is false — and would let the new demotion
+  // guard walk a fully-paid settle-up back to Draft and edit its lines under recorded cash, a
+  // door that has never been open. It would also make every future settle-up disagree with every
+  // past one, since 0267's backfill stamped every invoice that ever reached paid/partial.
+  //
+  // Not fatal if it misses: the money below is the point, and the office can see the badge. But
+  // it is on the record rather than silent.
+  const settleSent = await markInvoiceSent(supabase, inv.id);
+  if (!settleSent.ok) reportError("settleUp.markSent", new Error(settleSent.error ?? "status write did not land"), { invoiceId: inv.id });
 
   // The one payment path — balance cap, org check, recalc-to-paid, cash-in push all inherited.
   // "later" leaves the balance open on purpose: Venmo/Stripe settles it in the customer's hands.
@@ -2776,16 +2874,24 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
   // the read-only view, and the customer scanned their way to a page with no Pay button. Putting
   // a bill in front of a customer IS sending it: promote here, checked (a zero-row update would
   // mean the door is still shut, and saying so beats a QR that fails on someone else's phone).
+  //
+  // AND IT IS A REAL DELIVERY, SO IT STAMPS (INV-069, 2026-09-18). This one goes through
+  // markInvoiceSent rather than writing the status by hand, for two reasons the review of this
+  // wave caught the hard way. First, sent_at: the demotion guard below now refuses a return to
+  // Draft only for a bill that actually reached the customer, so a QR promotion that skipped the
+  // stamp would have left a card-paid invoice walking back to Draft — a money boundary this wave
+  // would have OPENED while closing another. A QR held up to someone's phone is the same deed as
+  // texting them the link; it stamps. Second, the recalc and the revalidate underneath: without
+  // them this door reproduced INV-069 exactly — a draft carrying a deposit flipped to 'sent'
+  // (where paidStatus says 'partial') while the open page kept its draft props and went on
+  // offering controls the server had just locked.
   if ((inv as { status?: string }).status === "draft") {
-    const { data: sent, error: sendErr } = await supabase
-      .from("invoices")
-      .update({ status: "sent" })
-      .eq("id", invoiceId)
-      .eq("status", "draft")
-      .select("id");
-    if (sendErr || !sent?.length) {
+    const sent = await markInvoiceSent(supabase, invoiceId);
+    if (!sent.ok) {
       return { ok: false, error: "Couldn't send this invoice, so there's nothing for them to pay yet." };
     }
+    await recalcInvoice(supabase, invoiceId);
+    revalidateMoney(invoiceId);
   }
 
   const balance = invoiceBalance(inv.total, inv.amount_paid);

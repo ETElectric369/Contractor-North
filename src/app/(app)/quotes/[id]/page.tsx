@@ -17,7 +17,7 @@ import { ShareIconButton } from "@/components/share-icon-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { QuoteTypeToggle } from "./quote-type-toggle";
 import type { NavTree } from "@/lib/nav-tree";
-import { createJobFromQuote, deleteQuote, quoteShareText } from "../actions";
+import { createJobFromQuote, deleteQuote, quoteEditLock, quoteShareText } from "../actions";
 import { createMaterialListFromQuote } from "../../materials/actions";
 import { createWorkOrderFromQuote } from "../../work-orders/actions";
 import { createInvoiceFromQuote } from "../../billing/actions";
@@ -140,7 +140,10 @@ export default async function QuoteDetailPage({
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
               <h1 className="min-w-0 text-2xl font-bold text-slate-900">{q.quote_number}</h1>
               <Badge tone={statusTone(q.status)}>{q.status}</Badge>
-              <QuoteTypeToggle id={q.id} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
+              {/* The status is what makes this gate work at all: unpassed, the toggle keeps
+                  rendering at every status and keeps flipping its visible selection before the
+                  server refuses, which is the UI telling a lie and then taking it back. */}
+              <QuoteTypeToggle id={q.id} status={q.status} value={(((q as any).doc_type ?? "quote") as "estimate" | "quote")} />
             </div>
             {/* The estimate page had NO share at all — only Email and Text, both of which need a
                 number or an address on file. Same tiny box-with-arrow as the invoice, same corner
@@ -192,6 +195,10 @@ export default async function QuoteDetailPage({
 
       <QuoteItemsEditor
         quote={q}
+        // Asked of the server rule itself, never guessed from the status: acceptance alone locks
+        // nothing, so a status-only gate would have hidden controls that still work. null = every
+        // control stays live.
+        lock={await quoteEditLock(q.id)}
         items={lineItems}
         priceItems={(priceItems ?? []) as never}
         kits={(kits ?? []) as never}

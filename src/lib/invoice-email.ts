@@ -5,6 +5,7 @@ import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+import { markInvoiceSent } from "@/lib/invoice-sent-stamp";
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -71,7 +72,17 @@ export async function deliverInvoiceEmail(
   });
   if (!res.ok) return res;
   if (invoice.status === "draft") {
-    await supabase.from("invoices").update({ status: "sent" }).eq("id", id);
+    // THE EMAIL IS THE DEED, SO THIS IS WHERE THE STAMP BELONGS (0267, INV-069). `status = 'sent'`
+    // alone could be manufactured by a pay door that never showed anyone a bill; sent_at cannot,
+    // and the demotion guard in billing/actions.ts now reads delivery off exactly this write.
+    //
+    // The mail is already gone by the time we get here, so a failure is NOT a failed send and
+    // must not be reported as one — but it cannot be swallowed either, or the office sits on a
+    // Draft badge over a bill the customer is reading, which is the whole shape of this incident.
+    const stamped = await markInvoiceSent(supabase, id);
+    if (!stamped.ok) {
+      return { ok: false, error: `The email went out, but ${invoice.invoice_number ?? "this invoice"} didn't get marked as sent - reload and set its status to Sent. (${stamped.error ?? "try again"})` };
+    }
     // Mirror textInvoice (audit 7): the recalc advances a PREPAID draft to paid/partial instead
     // of stranding it on 'sent', and its bustDocPdf drops the draft-era stored copy so the
     // send-time warm stores a fresh one the customer door will serve.

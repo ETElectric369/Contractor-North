@@ -17,19 +17,43 @@ type Row = { label: string; percent: number };
 /** The "payment structure" for a job (the deal-to-cash spine, Phase 1). Fixed-Bid
  *  jobs get a milestone schedule (% of contract) and a one-click "Request next
  *  payment" that drafts the next draw; T&M jobs request the next payment off the
- *  work logged to date. */
+ *  work logged to date.
+ *
+ *  "SET UP SCHEDULE" ASKED ONE QUESTION AND THE SERVER ASKS TWO (2026-09-18 sweep, INV-069 wave).
+ *
+ *  This card decided what to offer from the milestone rows alone: no rows, so here is the button.
+ *  setPaymentSchedule refuses on two conditions, quoted exactly:
+ *    const { data: draw } = await supabase.from("invoices").select("invoice_number")
+ *      .eq("job_id", jobId).neq("status", "void").in("invoice_kind", [...DRAW_KINDS]).limit(1)…
+ *    if (draw) return { ok: false, error: "This job already has draws — a payment schedule can
+ *                        only be set before any billing starts." };
+ *    if ((existing ?? []).some((m: any) => m.invoice_id))
+ *      return { ok: false, error: "Billing has already started on this schedule…" };
+ *  The second one this card could see (that is `billingStarted`). The first one it could not,
+ *  because a draw can exist on a job with no milestone rows at all — someone billed a deposit
+ *  from the Invoices tab before anyone thought about a schedule. On that job the button was
+ *  unmissable, sat in an empty-state box that read "No payment schedule yet", and could only
+ *  ever come back refused after a person had filled in three rows of percentages.
+ *
+ *  `drawsBilled` is the first condition, computed by the page from the invoices it already
+ *  reads. It is optional, and false means "no draws" rather than "unknown", so a caller that
+ *  hasn't been wired up yet behaves exactly as before and the server still answers. */
 export function PaymentScheduleCard({
   jobId,
   billingType = "fixed",
   contractTotal = 0,
   depositPercent = 0,
   milestones = [],
+  drawsBilled = false,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
   contractTotal?: number;
   depositPercent?: number;
   milestones?: Milestone[];
+  /** True when a non-void deposit/progress/final invoice already exists on this job — the exact
+   *  read setPaymentSchedule does before it will attach or replace a schedule. */
+  drawsBilled?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -69,6 +93,9 @@ export function PaymentScheduleCard({
   }
 
   const hasSchedule = status.rows.length > 0;
+  // Both of setPaymentSchedule's refusals in one place, so the Edit link and the Set Up button
+  // are gated by the same sentence the action is.
+  const scheduleEditable = !billingStarted && !drawsBilled;
   return (
     <Card>
       <CardContent className="py-4">
@@ -76,16 +103,30 @@ export function PaymentScheduleCard({
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
             <CalendarClock className="h-4 w-4" /> Payment schedule
           </div>
-          {hasSchedule && !billingStarted && (
+          {hasSchedule && scheduleEditable && (
             <button onClick={() => setEditing(true)} className="text-xs font-medium text-brand hover:underline">Edit</button>
           )}
         </div>
 
         {!hasSchedule ? (
           <div className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-center">
-            <div className="text-sm text-slate-600">No payment schedule yet.</div>
-            <div className="mt-0.5 text-xs text-slate-400">Set deposit / progress / final draws as a % of the contract.</div>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => setEditing(true)}>Set Up Schedule</Button>
+            {drawsBilled ? (
+              // NOT A BLANK BOX WHERE THE BUTTON WAS. The job is already being billed a draw at
+              // a time, which is a way of working, not a fault — so the box says that, and
+              // points at the control on this same tab that keeps doing it.
+              <>
+                <div className="text-sm text-slate-600">No payment schedule on this job.</div>
+                <div className="mt-0.5 text-xs text-slate-500">
+                  Draws have already been billed here, so a schedule can&apos;t be set up now. Keep billing with Progress Payment above.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm text-slate-600">No payment schedule yet.</div>
+                <div className="mt-0.5 text-xs text-slate-400">Set deposit / progress / final draws as a % of the contract.</div>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => setEditing(true)}>Set Up Schedule</Button>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -125,7 +166,12 @@ export function PaymentScheduleCard({
             </div>
             {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
             <div className="mt-3 flex items-center justify-end gap-3">
-              {billingStarted && <span className="text-xs text-slate-400">Schedule locked — billing started</span>}
+              {/* Where the Edit link was. Two reasons, one line, no em-dash (Erik's copy law). */}
+              {!scheduleEditable && (
+                <span className="text-xs text-slate-400">
+                  {billingStarted ? "Schedule locked - billing started" : "Schedule locked - this job already has draws"}
+                </span>
+              )}
               {status.next ? (
                 <Button onClick={requestNext} disabled={pending}>
                   Request Next Payment <ArrowRight className="h-4 w-4" />

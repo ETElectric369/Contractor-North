@@ -175,13 +175,24 @@ export default async function InvoicePage({
               { jobId: (inv as any).job_id ?? null },
               {
                 run: deleteInvoice.bind(null, inv.id),
+                // The confirm copy now lives in invoiceSectionTree, beside the gate built from the
+                // same rule, so the dialog and the rule cannot drift apart again. This string is
+                // the fallback for callers that pass no invoice.
                 confirm: `Delete ${inv.invoice_number}? Only allowed while no payments are recorded.`,
               },
+              // WITHOUT THIS THE GATE IS DEAD CODE. invoiceSectionTree treats a missing invoice as
+              // "unknown", and unknown is deliberately not "refused" — so an unpassed status left
+              // Delete Invoice offered on every void, sent and paid bill exactly as before, while
+              // the code above it read as though it had been fixed.
+              { status: inv.status, hasPayments: Number(inv.amount_paid ?? 0) > 0 || (payments ?? []).length > 0 },
             )}
           >
             <CreditButton
               menuItem
               invoiceId={inv.id}
+              // Void is the one state where this whole window can only refuse. Unpassed, the gate
+              // inside it never fires and Credit / Refund keeps opening onto a wall.
+              invoiceStatus={inv.status}
               // Deliberately the INVERSE of invoiceBalance: paid − total = the OVERPAYMENT
               // (the refund default). invoiceBalance floors at 0, so it can't express this —
               // not a bypass of the balance SSOT.

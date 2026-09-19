@@ -15,7 +15,33 @@ import { LineItemText } from "@/components/line-item-text";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 import { addQuoteItem, updateQuoteItem, deleteQuoteItem, updateQuoteMeta } from "../actions";
 
-/** Editable line items + totals + header details for a saved quote. */
+/** Editable line items + totals + header details for a saved quote.
+ *
+ *  THE LOCKED ESTIMATE SHOWED EVERY EDITING CONTROL IT HAD (2026-09-18 sweep, the INV-069 wave).
+ *
+ *  The pencil, the trash, the price-list picker and the type-one row rendered at every status.
+ *  On a locked estimate every one of them called an action that could only refuse — and the
+ *  refusal arrived as a red line under the card AFTER the click, which is the same conversation
+ *  Erik had with INV-069: press the control the screen is offering, get told the row was never
+ *  yours to change. Worst of all on a kit: the loop added lines one at a time, so the first
+ *  refusal came after nothing had landed, on a screen still covered in live-looking controls.
+ *
+ *  requireEditableQuote (quotes/actions.ts) is the rule, quoted exactly:
+ *    if ((quote as any).status !== "accepted") return { ok: true };
+ *    const jobId = (quote as any).job_id as string | null;
+ *    if (!jobId) return { ok: true };                 // accepted but no job yet
+ *    …signed contract on the job  -> refused
+ *    …a milestone linked to a non-void invoice -> refused
+ *  Note how narrow that is. "Accepted" alone is NOT the lock — Erik's own comment on the guard
+ *  says a scope change after acceptance is a legitimate business event, and an accepted estimate
+ *  with no signed contract and no drawn milestone stays fully editable. So this component will
+ *  not guess from `quote.status`: gating on accepted-alone would hide controls that work, which
+ *  is the same bug pointed the other way. The page does the two reads the guard does and hands
+ *  the answer down as `lock`; absent it, nothing changes and the server still answers.
+ *
+ *  What stays editable when locked is exactly what the server still accepts: updateQuoteMeta
+ *  only consults the guard `if (meta.tax_rate !== undefined)`, so the title, the scope
+ *  paragraph and the notes keep their live controls, and only the tax rate becomes text. */
 export function QuoteItemsEditor({
   quote,
   items,
@@ -23,6 +49,7 @@ export function QuoteItemsEditor({
   kits = [],
   defaultMarkupPct = 0,
   levelMarkupPct = null,
+  lock = null,
 }: {
   quote: Quote;
   items: QuoteLineItem[];
@@ -32,6 +59,10 @@ export function QuoteItemsEditor({
   /** The customer's pricing-level markup. null = the customer has no level — NEVER 0, which would
    *  price them at net cost, because effectiveMarkupPct returns on ANY finite level including 0. */
   levelMarkupPct?: number | null;
+  /** Non-null when requireEditableQuote would refuse a line change on this estimate. `reason` is
+   *  the plain sentence shown where the editing controls were — it must say what the user CAN do
+   *  (duplicate it as a revision), because a control that simply vanishes is its own dead end. */
+  lock?: { reason: string } | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -117,11 +148,17 @@ export function QuoteItemsEditor({
   function saveDetails() {
     setError(null);
     start(async () => {
+      // THE WHOLE MODAL WAS HOSTAGE TO ONE FIELD. updateQuoteMeta runs the accepted-quote guard
+      // only `if (meta.tax_rate !== undefined)`, and this call always sent the tax rate — so on a
+      // locked estimate a person fixing a TYPO in the title was refused, and the words they had
+      // just typed sat in a modal that would refuse them again. When the lines are locked the
+      // rate is shown as text and left out of the write, which is exactly the set of keys the
+      // server still accepts.
       const res = await updateQuoteMeta(quote.id, {
         title,
         description,
         notes,
-        tax_rate: (taxPct || 0) / 100,
+        ...(lock ? {} : { tax_rate: (taxPct || 0) / 100 }),
         valid_until: validUntil || null,
       });
       if (!res.ok) {
@@ -193,6 +230,19 @@ export function QuoteItemsEditor({
                   </button>
                 </div>
               </li>
+            ) : lock ? (
+              // A LOCKED LINE IS A READING, NOT A FORM. No click-to-edit on the description
+              // either: it was a full-width invisible button, which is the most convincing
+              // offer on the row and the one most likely to be pressed by accident.
+              <li key={it.id} className="flex items-center gap-3 px-5 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <LineItemText description={it.description} className="block font-medium text-slate-800" />
+                  <div className="text-xs text-slate-400">
+                    {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+                  </div>
+                </div>
+                <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+              </li>
             ) : (
               <li key={it.id} className="group flex items-center gap-3 px-5 py-3 text-sm transition-colors hover:bg-slate-50">
                 <button
@@ -232,6 +282,16 @@ export function QuoteItemsEditor({
           {items.length === 0 && <li className="px-5 py-6 text-center text-sm text-slate-400">No line items yet.</li>}
         </ul>
 
+        {lock ? (
+          // WHERE THE PICKER AND THE TYPE-ONE ROW WERE. The sentence comes from the page, which
+          // read the same two tables requireEditableQuote reads, so it names the actual reason
+          // (a signed contract, or a draw already billed) and the way forward. A bare missing
+          // form would leave someone clicking around the card looking for the Add button.
+          <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-4">
+            <div className="text-sm font-medium text-slate-800">These line items are locked</div>
+            <p className="mt-0.5 text-sm text-slate-600">{lock.reason}</p>
+          </div>
+        ) : (
         <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
           {/* THE SAME PICKER THE COMPOSER HAS. Adding a line to a SAVED estimate used to mean
               typing it, price and all, from memory — on the surface where you're most likely to be
@@ -291,6 +351,7 @@ export function QuoteItemsEditor({
             </Button>
           </div>
         </div>
+        )}
 
         <div className="border-t border-slate-100 px-5 py-4">
           <div className="ml-auto max-w-xs space-y-1.5 text-sm">
@@ -349,7 +410,21 @@ export function QuoteItemsEditor({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="qd-tax">Tax rate (%)</Label>
-              <NumberInput id="qd-tax" value={taxPct} onValueChange={setTaxPct} />
+              {/* The same substitution the invoice page makes on a sent bill
+                  (billing/[id]/invoice-detail.tsx): the rate as text, not an input that can
+                  only be refused. The number is the one already on the estimate, not a new one. */}
+              {lock ? (
+                <>
+                  <div id="qd-tax" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    {taxPct.toFixed(2)}%
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Changing the rate would change the total. {lock.reason}
+                  </p>
+                </>
+              ) : (
+                <NumberInput id="qd-tax" value={taxPct} onValueChange={setTaxPct} />
+              )}
             </div>
             <div>
               <Label htmlFor="qd-valid">Valid until</Label>

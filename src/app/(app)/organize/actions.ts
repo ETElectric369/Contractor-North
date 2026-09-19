@@ -11,6 +11,16 @@ import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
 import { OVERHEAD_CATEGORIES } from "./constants";
+// TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the Organize
+// My classifier (any upload) and the job-receipt reader (a receipt already filed to a job). They
+// were two hand-maintained copies of one list, which is how "Food & Drink" would have shipped to
+// one door and not the other. One exported string, interpolated into both, is the only version of
+// "identical" that stays true. The rule sentence beneath each schema is shared for the same reason.
+import {
+  FOOD_AND_DRINK_PROMPT_RULE,
+  RECEIPT_LINE_CATEGORY_CHOICES,
+  normalizeBillable,
+} from "@/app/(app)/bills/receipt-billing";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -46,6 +56,8 @@ export interface BillLine {
   unit_price: number;
   amount: number;
   category: string | null;
+  /** false = the company eats this line; it never reaches the customer's invoice (0268). */
+  billable: boolean;
 }
 
 /** Normalize the AI's line_items into clean BillLine rows. */
@@ -57,12 +69,23 @@ function cleanLines(raw: any): BillLine[] {
       const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
       const amount =
         l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
+      const category = l?.category ? String(l.category).slice(0, 60) : null;
       return {
         description: String(l?.description ?? "").slice(0, 300).trim(),
         quantity,
         unit_price,
         amount,
-        category: l?.category ? String(l.category).slice(0, 60) : null,
+        category,
+        // WHOSE LINE IS IT (0268). Erik's INV-069 billed a homeowner for a Smartwater, a
+        // BodyArmor and a ten cent bottle deposit, and his answer was to stop scanning receipts
+        // at all — "i have another receipt that i didnt scan specifically because it was mostly
+        // snacks and a $3 part" — which cost him the $3 job cost too. Food and drink now arrives
+        // switched OFF the customer's bill and everything else arrives on it, tools included,
+        // because he was asked and that is exactly what he chose. This is also the one place a
+        // decision he already made survives: a tray item's lines are stored as jsonb and re-read
+        // verbatim when it is filed (or moved to another job) later, so an explicit flag in the
+        // stored row wins over the default and re-filing never re-bills the snacks.
+        billable: normalizeBillable(l?.billable, category),
       };
     })
     .filter((l: BillLine) => l.description.length > 0)
@@ -114,6 +137,7 @@ async function insertItemizedBill(
         unit_price: l.unit_price,
         amount: l.amount,
         category: l.category,
+        billable: l.billable,
         sort_order: i,
       })),
     );
@@ -202,7 +226,7 @@ Respond with ONLY a JSON object (no prose):
   "kind": "receipt" | "note" | "job_document",
   "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
   "summary": receipt → brief list of what was bought; note → full clean transcription of the handwriting; job_document → what the document is,
-  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
+  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of ${RECEIPT_LINE_CATEGORY_CHOICES}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
   "vendor": store/supplier name or null,
   "amount": total in dollars as a number, or null,
   "date": "YYYY-MM-DD" date printed on it, or null,
@@ -215,6 +239,8 @@ Respond with ONLY a JSON object (no prose):
 }
 
 Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+
+${FOOD_AND_DRINK_PROMPT_RULE}
 
 Jobs you may match against (id — label):
 ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
@@ -463,12 +489,14 @@ Respond with ONLY a JSON object (no prose):
   "vendor": store/supplier name or null,
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
-  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of "Materials" | "Electrical" | "Tools" | "Fasteners" | "Lumber" | "Plumbing" | "Paint" | "Rental" | "Tax" | "Other"}],${scopeSchemaLine}
+  "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": one of ${RECEIPT_LINE_CATEGORY_CHOICES}}],${scopeSchemaLine}
   "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
   "confidence": "low" | "medium" | "high"
 }
 Transcribe EVERY readable line, including tax as its own line. Use [] for line_items only if nothing is legible.
-In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.`,
+In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+
+${FOOD_AND_DRINK_PROMPT_RULE}`,
       messages: [
         {
           role: "user",

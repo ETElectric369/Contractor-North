@@ -354,6 +354,29 @@ async function requireEditableQuote(
   };
 }
 
+/**
+ * THE SAME REFUSAL, ASKED IN ADVANCE, SO THE PAGE CAN STOP OFFERING WHAT THE SERVER WILL REJECT.
+ *
+ * The quote editor's pencil, trash and price-list picker rendered at every status, so on a locked
+ * estimate every one of them was a control that could only ever produce a red toast — the INV-069
+ * shape, on another page (2026-09-18).
+ *
+ * The obvious fix is the wrong one: gating on `status === "accepted"` in the component would hide
+ * controls that still WORK, because acceptance alone does not lock anything. What locks an
+ * estimate is an accepted quote whose job carries a signed contract or a billed draw, and that
+ * takes two more queries to know. A gate that disagrees with the server rule is the same bug
+ * moved, so this asks the rule itself rather than approximating it, and hands back the very
+ * sentence the server would have refused with — including the way out it already names
+ * ("Duplicate it as a revision"). One extra read on a page that already makes several, in exchange
+ * for a gate that cannot drift.
+ */
+export async function quoteEditLock(quoteId: string): Promise<{ reason: string } | null> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return null; // not this function's refusal to make; the actions still guard
+  const editable = await requireEditableQuote(ctx.supabase, quoteId);
+  return editable.ok ? null : { reason: editable.error };
+}
+
 /** Recompute subtotal/tax/total from the quote's line items. */
 async function recalcQuote(supabase: any, quoteId: string) {
   // A FAILED READ IS NOT AN EMPTY QUOTE (audit v800 — the audit-8 guard that already protects

@@ -54,6 +54,35 @@ const toDateInput = (iso?: string | null) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+/**
+ * THE WORDS ON A LINE ROW, ONCE, SO BOTH VERSIONS OF THE ROW SAY THE SAME THING.
+ *
+ * A draft row wraps these in a button that opens the editor; a locked row wraps them in a plain
+ * div. That fork exists because of INV-069: a whole-row button titled "Edit line item" on an
+ * invoice whose lines the server will not let you touch is a promise the page cannot keep, and
+ * being the biggest target in the row it was the easiest thing on the page to hit by accident.
+ * Pulling the text out means the locked row can never drift from the editable one — the customer
+ * sees the same line either way, and the only difference is whether it does anything.
+ */
+function LineRowText({ item: it }: { item: InvoiceItem }) {
+  return (
+    <>
+      <LineItemText description={it.description} className="block font-medium text-slate-800" />
+      <div className="text-xs text-slate-400">
+        {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
+        {/* WHERE THAT RATE CAME FROM, FOR THE OFFICE ONLY. Erik once stared at an import saying
+            "still importing at 150" with nothing to tell him the number was his tech's own bill
+            rate. That answer used to be appended to the line's DESCRIPTION, which is the text the
+            customer receives, so it was repeating a man's full name on their invoice to explain
+            something only the office needed (2026-09-18: "the rest is repetitive and
+            unnecessary"). It belongs here, on the editor row, which no customer ever sees.
+            Imported labor only, and only when the office is looking. */}
+        {it.import_source === "labor" && <span className="ml-1 text-slate-300">· their bill rate</span>}
+      </div>
+    </>
+  );
+}
+
 export function InvoiceDetail({
   invoice,
   items,
@@ -104,6 +133,37 @@ export function InvoiceDetail({
   }
 
   const isDraft = invoice.status === "draft";
+  /* ONE NAME FOR THE WHOLE CARD, NOT FOUR MEMORIES (INV-069, 2026-09-18).
+   *
+   * Erik pressed Pay Now on a $6,412.64 draft he was still building. The card door promoted the
+   * row to 'sent' the instant it opened, and told his page nothing — so he sat looking at a Draft
+   * badge and live draft controls on an invoice the database had already locked. He tapped the
+   * trash on a "Beverage Bottle Dep 0.10" line and got back "This invoice has already been sent,
+   * so its lines are locked." His answer: "its not sent its in draft mode thats partially why
+   * this is confusing."
+   *
+   * The server's refusal was right. The dead end was ours. `isDraft` was hand-applied per JSX
+   * block, which meant the line row below gated its up/down chevrons and forgot the three
+   * controls sitting beside them — the description button, the pencil, the trash. Four siblings,
+   * one remembered. That is not a bug you fix four times; it is a bug you stop being able to
+   * write. So the line-items card now speaks ONE word, `linesLocked`: the row's entire control
+   * cluster lives inside a single gate, the add form and the picker read the same flag, and
+   * `editingId` is DERIVED from it rather than trusted, so a status that changes under an open
+   * page closes the editor instead of stranding what was typed in it. Adding a fifth control to
+   * that row inherits the gate; it cannot be forgotten, because there is nothing to remember.
+   *
+   * `isDraft` keeps the status-shaped blocks elsewhere on the page (park, customer/job link, the
+   * import row, the tax picker). `linesLocked` is the line-items card's own vocabulary, and it is
+   * deliberately the same word the server's refusal uses.
+   */
+  const linesLocked = !isDraft;
+  /* 0267's sent_at: stamped ONLY where a bill really reached the customer. INV-069 carries NULL
+   * here because no card was ever tapped, and that difference is the whole point — an invoice
+   * that merely left Draft must not be told it went out, and it must not be trapped out of Draft
+   * by the owner's own $200 deposit. Mirrors the server rule: Draft is refused only when money is
+   * on it AND it actually went to the customer. */
+  const wasDelivered = !!(invoice as { sent_at?: string | null }).sent_at;
+  const canReturnToDraft = !(Number(invoice.amount_paid ?? 0) > 0 && wasDelivered);
 
   // inline-editable title (the short header label)
   const [titleEditing, setTitleEditing] = useState(false);
@@ -298,6 +358,13 @@ export function InvoiceDetail({
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
+  /** WHICH ROW IS ACTUALLY IN EDIT MODE — derived, never the raw state. If the invoice stops being
+   *  a draft while this page is open (INV-069: Pay Now promoted it mid-edit), an open editor would
+   *  otherwise keep offering a Save that updateInvoiceItem can only refuse — and saveEdit clears
+   *  editId only on res.ok, so that refusal left everything he had typed stranded on screen with
+   *  no way back out of the form. Deriving it means the form closes with the lock, and the Save,
+   *  Move to Top and Move to Bottom buttons inside it are gated by the same single decision. */
+  const editingId = linesLocked ? null : editId;
   const [editDesc, setEditDesc] = useState("");
   const [editQty, setEditQty] = useState(1);
   const [editPrice, setEditPrice] = useState(0);
@@ -527,7 +594,14 @@ export function InvoiceDetail({
               });
             }}
           >
-            <option value="draft">Draft</option>
+            {/* BACK TO DRAFT, ONLY WHEN IT IS REALLY ON OFFER (INV-069). This option used to
+                render unconditionally and the server refused it whenever a payment existed, so
+                Erik's own $200 deposit had become the lock on his own half-built invoice: the
+                one control that would have fixed everything was right there, and it could only
+                ever say no. It now matches the server rule exactly — refused only when money is
+                on the invoice AND it actually went to the customer (sent_at). `isDraft ||` keeps
+                the option present when it is the selected value. */}
+            {(isDraft || canReturnToDraft) && <option value="draft">Draft</option>}
             {/* Escape hatch: you sent the PDF yourself (texted/AirDropped/emailed it OUTSIDE
                 the app), so record that it went out — the invoice leaves Draft and the job
                 reads as invoiced without forcing you back through the Send button. Draft-only,
@@ -541,6 +615,14 @@ export function InvoiceDetail({
             )}
             <option value="void">Void</option>
           </Select>
+          {/* Taking the choice away silently is the same dead end wearing a different coat, so
+              when Draft is gone, say why it is gone and where the money verb lives instead. */}
+          {!isDraft && !canReturnToDraft && (
+            <span className="text-xs text-slate-400">
+              This one is with the customer and has money on it, so it can&rsquo;t go back to Draft. To change
+              what they owe, use Credit / Refund in the Actions menu at the top.
+            </span>
+          )}
           {/* PARK IT (0206) — the ending that destroys nothing. A draft waiting on a change
               order or an approval had only Void (which unlinks the payment milestones) or
               Delete (which throws away the line items); both record something false about a
@@ -573,6 +655,10 @@ export function InvoiceDetail({
             couldn't see) and capped at 6 rows where the composer shows 200 — and it never offered
             kits at all. That divergence is exactly what "different options for new invoice vs edit
             invoice" meant, and it is why a browse-on-empty fix reached one surface and not this one. */}
+        {/* Every line it adds goes through addInvoiceItem, which is draft-only — so on a locked
+            invoice this whole picker was a catalog you could browse, price, tick and submit, and
+            the only possible ending was a red toast. The card below says what to do instead. */}
+        {!linesLocked && (
         <AddLineItems
           priceItems={priceItems}
           kits={kits as never}
@@ -597,6 +683,7 @@ export function InvoiceDetail({
             })
           }
         />
+        )}
 
         {/* Re-import is hidden on deposit/progress/final DRAWS: a draw is itemized
             at creation with a frozen "Less previous billings" credit, so a manual
@@ -685,7 +772,7 @@ export function InvoiceDetail({
         <div className="rounded-xl border border-slate-200 bg-white">
           <ul className="divide-y divide-slate-100">
             {items.map((it) =>
-              editId === it.id ? (
+              editingId === it.id ? (
                 <li key={it.id} className="space-y-2 bg-slate-50/80 px-4 py-3 text-sm">
                   <Input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Description" />
                   <div className="flex items-center gap-2">
@@ -739,72 +826,78 @@ export function InvoiceDetail({
                 </li>
               ) : (
                 <li key={it.id} className="group flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-slate-50">
-                  <button
-                    type="button"
-                    onClick={() => startEdit(it)}
-                    disabled={pending}
-                    className="min-w-0 flex-1 cursor-pointer text-left"
-                    title="Edit line item"
-                  >
-                    <LineItemText description={it.description} className="block font-medium text-slate-800" />
-                    <div className="text-xs text-slate-400">
-                      {it.quantity} {it.unit} × {formatCurrency(it.unit_price)}
-                      {/* WHERE THAT RATE CAME FROM, FOR THE OFFICE ONLY. Erik once stared at an
-                          import saying "still importing at 150" with nothing to tell him the
-                          number was his tech's own bill rate. That answer used to be appended to
-                          the line's DESCRIPTION, which is the text the customer receives, so it
-                          was repeating a man's full name on their invoice to explain something
-                          only the office needed (2026-09-18: "the rest is repetitive and
-                          unnecessary"). It belongs here, on the editor row, which no customer
-                          ever sees. Imported labor only, and only when the office is looking. */}
-                      {it.import_source === "labor" && (
-                        <span className="ml-1 text-slate-300">· their bill rate</span>
-                      )}
+                  {/* THE ROW'S TEXT IS A FORK, NOT A GATE. On a locked invoice the same words sit
+                      in a plain <div>: it reads identically, it just isn't a promise. A button
+                      titled "Edit line item" whose only possible ending is a refusal is the
+                      dead end Erik walked into, and the whole-row target made it the easiest
+                      thing on the page to hit by accident. */}
+                  {linesLocked ? (
+                    <div className="min-w-0 flex-1">
+                      <LineRowText item={it} />
                     </div>
-                  </button>
-                  <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
-                  {isDraft && items.length > 1 && (
-                    <div className="flex shrink-0 flex-col">
-                      <button
-                        type="button"
-                        onClick={() => moveItem(it.id, -1)}
-                        disabled={pending || items[0]?.id === it.id}
-                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
-                        aria-label="Move up"
-                        title="Move up"
-                      >
-                        <ChevronUp className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveItem(it.id, 1)}
-                        disabled={pending || items[items.length - 1]?.id === it.id}
-                        className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
-                        aria-label="Move down"
-                        title="Move down"
-                      >
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(it)}
+                      disabled={pending}
+                      className="min-w-0 flex-1 cursor-pointer text-left"
+                      title="Edit line item"
+                    >
+                      <LineRowText item={it} />
+                    </button>
                   )}
-                  <button
-                    onClick={() => startEdit(it)}
-                    disabled={pending}
-                    className="shrink-0 text-slate-500 hover:text-brand"
-                    aria-label="Edit"
-                    title="Edit"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
-                    disabled={pending}
-                    className="shrink-0 text-slate-500 hover:text-red-600"
-                    aria-label="Remove"
-                    title="Remove"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>
+                  {/* ONE GATE FOR THE WHOLE CLUSTER. These three controls call reorderInvoiceItems,
+                      updateInvoiceItem and deleteInvoiceItem — all draft-only, all refusals on a
+                      locked bill. They used to be gated one at a time, and only the chevrons ever
+                      got the gate; the trash Erik pressed never did. A fourth control added here
+                      is locked by construction. */}
+                  {!linesLocked && (
+                    <>
+                      {items.length > 1 && (
+                        <div className="flex shrink-0 flex-col">
+                          <button
+                            type="button"
+                            onClick={() => moveItem(it.id, -1)}
+                            disabled={pending || items[0]?.id === it.id}
+                            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
+                            aria-label="Move up"
+                            title="Move up"
+                          >
+                            <ChevronUp className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveItem(it.id, 1)}
+                            disabled={pending || items[items.length - 1]?.id === it.id}
+                            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
+                            aria-label="Move down"
+                            title="Move down"
+                          >
+                            <ChevronDown className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        onClick={() => startEdit(it)}
+                        disabled={pending}
+                        className="shrink-0 text-slate-500 hover:text-brand"
+                        aria-label="Edit"
+                        title="Edit"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
+                        disabled={pending}
+                        className="shrink-0 text-slate-500 hover:text-red-600"
+                        aria-label="Remove"
+                        title="Remove"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </>
+                  )}
                 </li>
               ),
             )}
@@ -831,7 +924,35 @@ export function InvoiceDetail({
               <option key={u} value={u} />
             ))}
           </datalist>
-          {/* Add line item */}
+          {/* WHERE THE ADD FORM WAS, SAY WHAT THIS IS AND WHERE TO GO (INV-069).
+              Gating the controls without this is the same dead end in a quieter coat: Erik would
+              have been left with a card that simply stopped responding and no sentence anywhere
+              telling him why or what to do about it. Same shape as the tax picker further down,
+              which has substituted readable text for a draft-only control since audit 8.
+              Two sentences: what happened to this bill, then the door that is actually open. */}
+          {linesLocked ? (
+            <div className="space-y-1 border-t border-slate-100 bg-slate-50/60 p-4 text-sm text-slate-500">
+              {invoice.status === "void" ? (
+                <p>
+                  This invoice is void, so its lines are set. If this work still needs billing, put it on a
+                  new invoice.
+                </p>
+              ) : (
+                <>
+                  <p>
+                    {wasDelivered
+                      ? "This bill is with the customer now, so its lines are set."
+                      : "This invoice has left Draft, so its lines are set. It hasn't gone to the customer yet."}
+                  </p>
+                  <p>
+                    {canReturnToDraft
+                      ? "To keep working on it, set the Status back to Draft at the top of the page. The lines open up again."
+                      : "To change what they owe, use Credit / Refund in the Actions menu at the top of the page, or bill the difference on a new invoice."}
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
           <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
             <Input
               placeholder="Add a line item…"
@@ -860,6 +981,7 @@ export function InvoiceDetail({
               </Button>
             </div>
           </div>
+          )}
         </div>
       </div>
 

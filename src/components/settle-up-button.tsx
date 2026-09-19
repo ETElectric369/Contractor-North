@@ -562,9 +562,11 @@ export function PayNowButton(props: Mode & {
     return { error: bridgeSentence, outcome: "not-enabled" };
   }
 
-  /** The phone as the reader. Same door-building as the QR for a visit/job (the bill must exist
-   *  and be SENT before a card can pay it), then Stripe's PaymentIntent on the tenant's account,
-   *  then the bridge: Apple takes the screen while the customer holds their card to the phone. */
+  /** The phone as the reader. Same door-building as the QR for a visit/job (settleUp mints the
+   *  bill and sends it, because collecting on a visit means there has to BE a bill), then Stripe's
+   *  PaymentIntent on the tenant's account, then the bridge: Apple takes the screen while the
+   *  customer holds their card to the phone. On an invoice the door is the invoice itself and its
+   *  status is left exactly as it is — a draft is payable across a counter (INV-069). */
   async function tapToPay() {
     const g = gen.current;
     /** Has the sheet this tap belongs to closed (or reopened)? `armed` = the await we just came
@@ -701,14 +703,37 @@ export function PayNowButton(props: Mode & {
 
   // THE RECEIPT LINK (Apple 5.10), fetched once per open the moment there is an outcome to send —
   // paid, or a tap that was declined or timed out. Two reads: the public token (off the QR's
-  // pay URL when the QR was built, else one collectArtifacts — the draft→sent promotion has
-  // already happened by then) and the business's name for the text (tapToPayContext's
-  // merchantDisplayName; its "Invoice payment" fallback is not a name and is left out).
+  // pay URL when the QR was built, else one collectArtifacts) and the business's name for the
+  // text (tapToPayContext's merchantDisplayName; its "Invoice payment" fallback is not a name and
+  // is left out).
   const wantsReceipt = paid != null || (tap.kind === "error" && tap.outcome === "declined");
   useEffect(() => {
     if (!open || !wantsReceipt || !invoiceId || receipt) return;
     let live = true;
     void (async () => {
+      /**
+       * A DECLINED TAP MUST NOT SEND THE BILL (INV-069, 2026-09-18).
+       *
+       * The fallback below asks collectArtifacts for the public pay link, and BUILDING that link
+       * is handing the bill over — it promotes a draft on the spot, by design, because a QR in a
+       * customer's hand is a delivery. On a paid invoice that promotion has already happened (the
+       * webhook moved the row when the money landed), so the call changes nothing. A declined tap
+       * charged nothing, and on a draft this would quietly send an invoice the owner is still
+       * building — the exact move that cost Erik INV-069, one screen further along. So the draft
+       * is read first, and what it gets is a sentence instead of a link: what happened, and what
+       * is still his to do.
+       */
+      if (paid == null && !art?.payUrl) {
+        const s = await invoiceCollectStatus(invoiceId).catch(() => null);
+        if (!live) return;
+        if (s?.ok && s.status === "draft") {
+          setReceipt({
+            error:
+              "Nothing was charged, and this invoice is still a draft, so there's no link to send yet. Finish it and send it when you're ready.",
+          });
+          return;
+        }
+      }
       type Door = { payUrl?: string; invoiceNumber: string | null };
       const [got, business] = await Promise.all<[Promise<Door | null>, Promise<string>]>([
         art?.payUrl
@@ -728,7 +753,7 @@ export function PayNowButton(props: Mode & {
       );
     })();
     return () => { live = false; };
-  }, [open, wantsReceipt, invoiceId, receipt, art]);
+  }, [open, wantsReceipt, invoiceId, receipt, art, paid]);
 
   /** Mirrors `tap.kind === "busy"` for the unmount cleanup below, which is written once and can
    *  never see the state through its own closure. */
@@ -839,11 +864,15 @@ export function PayNowButton(props: Mode & {
                     // sends its bill on the explicit tap, never on open.
                     if (d.ok && d.supported && props.source === "invoice") {
                       const invId = props.invoiceId;
-                      // `send: false`: OPENING A SHEET IS NOT SENDING A BILL. Minting promotes a
-                      // draft invoice to sent — a door onto a wall is worse than none — so the
-                      // background mint takes the door only when the bill is already in front of
-                      // the customer, and the PRESS is what promotes a draft.
-                      preMint.current = createTapPaymentIntent(invId, { send: false }).then(
+                      // OPENING A SHEET CHANGES NOTHING ON THE INVOICE (INV-069, 2026-09-18).
+                      // This mint used to promote a draft to sent, which is how a $6,412 invoice
+                      // Erik was still building became a sent bill he could not take back — from
+                      // a sheet he opened and closed. `send: false` was the opt-out, and it only
+                      // moved the promotion to the press: still a door being opened, still not a
+                      // payment. The mint is a Stripe call and nothing else now; a draft is
+                      // payable across the counter, and the webhook moves the row when the card
+                      // actually lands.
+                      preMint.current = createTapPaymentIntent(invId).then(
                         (r) => {
                           if (!r.ok) return;
                           // Minted after the person hit Done. close() couldn't cancel it — tapPi
