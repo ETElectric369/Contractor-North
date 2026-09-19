@@ -26,6 +26,33 @@
  * cannot re-bill it. "Not itemised" and "not billed" are different ideas and this column is only
  * the second one — TAX IS UNTOUCHED and still passes through in the remainder, because sales tax
  * paid on the customer's own materials is a real cost of their job.
+ *
+ * ── THE THIRD STATE: A CONTAINER BOUGHT WHOLE AND USED IN PIECES (Erik, 2026-09-19; 0272) ─────
+ * Reading his own invoice he stopped on a line:
+ *
+ *   "the Twister box i was confused about and i remebered that is a whole ccontainer of wire nuts
+ *    that we uses some of but is certainly stock and shouldnt be charged to the customer in full
+ *    however necessary for the job"
+ *
+ * IDEAL 30641, 500 Twister wire nuts, $108.36 — 21.7 cents each. The customer was billed $135.00
+ * for the whole box. The same receipt carries an eight ounce jar of anti-oxidant at $20.65, used a
+ * dab at a time. Neither line is a snack and neither belongs to one job, so the boolean had no
+ * answer for them: billed meant the whole box, not billed meant he ate a cost his customer really
+ * did incur. He worked around it by hand — sixty nuts at twenty-seven cents typed onto the invoice,
+ * the jar line deleted — which is rewriting his own books to get past the app.
+ *
+ * `billed_amount` is the same idea as the boolean with a number instead: bill X, and take
+ * (cost − X) off the target, PROPORTIONAL TAX AND ALL. That last clause is the whole trick. The
+ * boolean's own tax leak was found one layer down once already (the all-snacks receipt that still
+ * billed 48 cents of sales tax under a row saying "Materials"), and a partial line rebuilds it
+ * exactly if the tax rides on the full line while only part of the line is billed. So there is one
+ * reading of "what this line bills" — billLineBilledCost — and both the itemisation and the
+ * subtraction are written in terms of it. They cannot drift apart because there is nothing to
+ * drift.
+ *
+ * `is_stock` is deliberately NOT read here. It is the classification (this went on the shelf); the
+ * money is `billed_amount` and nothing else. Two columns that both mean money is precisely how two
+ * screens end up disagreeing about the same dollar, which is the bug this whole wave came from.
  */
 
 /** A row this file hands back for the invoice. (Structurally the importer's ImportRow, minus the
@@ -48,6 +75,11 @@ export type BillLine = {
   amount?: unknown;
   category?: string | null;
   billable?: boolean | null;
+  /** Dollars of this line THIS job takes, when only part of it was the customer's (0272). Null —
+   *  and every row written before 0272 — means the whole line, unchanged. */
+  billed_amount?: unknown;
+  /** Shop stock: the container went on the shelf. A label, never money — see the file header. */
+  is_stock?: boolean | null;
 };
 
 /** The bill itself — its amount is the anchor everything else trues up to. */
@@ -75,9 +107,65 @@ export function billLineCost(l: BillLine): number {
 }
 
 /**
- * ── THE ANCHOR INVARIANT (adversarial-review fix, 7/24; amended for 0268) ─────────────────────
+ * HOW MUCH OF A LINE THE CUSTOMER PAYS FOR, when only part of it was theirs.
+ *
+ * Returns null for "the whole line" — the answer for every row written before 0272 and for every
+ * row nobody has split since, so the default is exactly the behaviour of the minute before this
+ * shipped. A number is Erik saying "this job used this much of it".
+ *
+ * THREE REFUSALS, EACH ONE A FIGURE THIS APP WILL NOT INVENT:
+ *  • a negative or unreadable stored value reads as "the whole line", never as zero. Zero is a
+ *    real decision (the container went on the shelf and this job used none of it); junk is not a
+ *    decision at all, and reading it as one would quietly stop billing a line nobody touched.
+ *  • it is clamped to the line's own cost. Migration 0272 has a CHECK that says the same thing,
+ *    and it is said twice on purpose: a constraint protects the table, this protects the customer
+ *    from a row that got in before the constraint did.
+ *  • a zero or negative line cost (a return, a discount, an unpriced line) ignores the split
+ *    entirely. Splitting a credit is not a thing anyone has asked for, and "half of minus nine
+ *    dollars" is an invented number wearing arithmetic's clothes.
+ */
+export function billedPortion(lineCost: number, rawBilledAmount: unknown): number | null {
+  if (rawBilledAmount == null || !(lineCost > 0)) return null;
+  // An empty string is PostgREST handing back a blank, not a person typing zero. Number("") is 0,
+  // which would read a blank as the decision "this job used none of it" and stop billing a line
+  // nobody touched — the silent direction, so it is spelled out rather than left to coercion.
+  if (typeof rawBilledAmount === "string" && rawBilledAmount.trim() === "") return null;
+  const n = Number(rawBilledAmount);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(Math.round(n * 100) / 100, Math.round(lineCost * 100) / 100);
+}
+
+/**
+ * THE ONE READING OF "WHAT THIS LINE BILLS", in dollars of cost. Both halves of the subtraction
+ * are written in terms of this — what goes onto the invoice, and what comes off the target the
+ * remainder row trues up to — for the same reason billLineCost is shared: two readings of one
+ * figure is how the remainder row silently absorbs a difference, which is the leak 0268 closed
+ * and the one a partial line would have reopened.
+ */
+export function billLineBilledCost(l: BillLine): number {
+  if (l.billable === false) return 0;
+  const cost = billLineCost(l);
+  const part = billedPortion(cost, l.billed_amount);
+  return part == null ? cost : part;
+}
+
+/**
+ * Does this line still put ANY money in front of the customer? A person switched it off, or a
+ * person said this job used none of the container — either way it is the company's own.
+ *
+ * An unpriced line (cost 0) is not "off": nobody decided anything about it, its money is simply
+ * unreadable, and the remainder row is where unreadable money has always lived. That distinction
+ * is what keeps a hand-entered bill billing its lump instead of vanishing.
+ */
+function stillBills(l: BillLine): boolean {
+  return l.billable !== false && billedPortion(billLineCost(l), l.billed_amount) !== 0;
+}
+
+/**
+ * ── THE ANCHOR INVARIANT (adversarial-review fix, 7/24; amended for 0268 and 0272) ────────────
  * A bill's rows sum to EXACTLY the marked-up BILLABLE total — mark(bill.amount) before 0268, and
- * mark(bill.amount − the cost of every line marked not billable) now. That is the same figure the
+ * mark(bill.amount − everything this receipt does not bill) now, where "does not bill" is a line
+ * switched off, the shelf's share of a container split by 0272, and the proportional tax on both. That is the same figure the
  * lump path bills and the same one livePurchaseOrders' PO-supersede math subtracts. Itemisation
  * changes PRESENTATION, never the total. Mechanically:
  *  • line sell = round(signed line AMOUNT × (1+m)) — never per-unit rounding × qty (a 1000-count
@@ -95,11 +183,47 @@ export function billLineCost(l: BillLine): number {
  *    are junk still bills its full amount (never $0), and a corrected bill.amount always wins
  *    over stale lines.
  *  • lines marked NOT BILLABLE are subtracted from the target before any of that, so there is no
- *    lump left for them to hide in.
+ *    lump left for them to hide in. A line billed IN PART (0272) is the same subtraction with a
+ *    number instead of a boolean: bill X, take (cost − X) and its share of the tax off the target,
+ *    and emit one row for the part the job used rather than a count nobody typed.
  *
  * Returns the rows for ONE bill, in order. An empty array means this bill has nothing to charge
  * the customer for — every line on it was the company's own cost.
  */
+const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
+const sumBy = (ls: BillLine[], f: (l: BillLine) => number) =>
+  ls.reduce((sum, l) => Math.round((sum + f(l)) * 100) / 100, 0);
+/** What a line does NOT bill: the whole thing when it is switched off, the shelf's share of a
+ *  container when only part of it was this job's. One expression, both states. */
+const notBilledCost = (l: BillLine) => Math.round((billLineCost(l) - billLineBilledCost(l)) * 100) / 100;
+
+/**
+ * HOW MUCH OF A RECEIPT THE CUSTOMER DOES NOT PAY FOR — ONE READING, TWO SCREENS.
+ *
+ * Exported because the Bills card and the invoice importer were computing it differently and
+ * disagreeing by exactly the tax share (review of cn-v964). On the wave's own fixture - a $139.65
+ * receipt with the Twister box split to $13.00 - the card said $44.29 was coming off and the
+ * invoice took $36.43. A $7.86 gap between what a screen promises and what the money does is the
+ * INV-069 shape again: he is told he is wrong about his own receipt.
+ *
+ * The tax clause is the part that has to be shared, not the subtraction. Tax on the customer's
+ * materials passes through; tax on the company's snacks does not; and four fifths of a box left on
+ * the shelf takes four fifths of the tax charged on that box with it. A receipt never says which
+ * cents of tax belong to which item, so the honest reading is proportional - and it has now been
+ * got wrong once per layer, which is why there is exactly one copy of it.
+ */
+export function excludedReceiptCost(allLines: BillLine[]): number {
+  const purchased = allLines.filter((l) => !isTaxLine(l));
+  const purchasedCost = sumBy(purchased, billLineCost);
+  const excludedPurchasedCost = sumBy(purchased, notBilledCost);
+  const taxLines = allLines.filter(isTaxLine);
+  const excludedTaxDirect = sumBy(taxLines, notBilledCost);
+  const sharedTax = sumBy(taxLines, billLineBilledCost);
+  const excludedShare = purchasedCost > 0 ? excludedPurchasedCost / purchasedCost : 0;
+  const excludedTaxShare = Math.round(sharedTax * excludedShare * 100) / 100;
+  return Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
+}
+
 export function billItemisation(
   bill: BillForItemisation,
   allLines: BillLine[],
@@ -111,12 +235,7 @@ export function billItemisation(
   // Snacks, a tool bought for the truck, anything on the receipt that is not the customer's. The
   // sum comes off the BILL before markup so there is one rounding, not two, and the rows below
   // still land on the cent.
-  const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
-  const sumCost = (ls: BillLine[]) => ls.reduce((sum, l) => Math.round((sum + billLineCost(l)) * 100) / 100, 0);
   const purchased = allLines.filter((l) => !isTaxLine(l));
-  const excludedPurchased = purchased.filter((l) => l.billable === false);
-  const purchasedCost = sumCost(purchased);
-  const excludedPurchasedCost = sumCost(excludedPurchased);
 
   /**
    * TAX RIDES WITH WHAT IT TAXES (review of this wave, 2026-09-18).
@@ -129,18 +248,15 @@ export function billItemisation(
    *
    * A receipt never says which cents of tax belong to which item, so the honest reading is the
    * proportional one: the share of the purchase that was the company's own takes the same share
-   * of the tax with it. An all-snacks receipt therefore takes ALL of its tax off and bills
+   * of the tax with it. A PARTIAL line is the same sentence with a number in it (0272): four
+   * fifths of a box of wire nuts stayed on the shelf, so four fifths of the tax charged on that
+   * box did too. Leaving the tax whole while billing a fifth of the line would rebuild the leak
+   * one layer down for the third time. An all-snacks receipt therefore takes ALL of its tax off and bills
    * nothing; a Home Depot run with one BodyArmor on it takes a few cents off and bills the rest,
    * unchanged to the customer. A tax line somebody switched off by hand is simply gone in full —
    * they said what they meant.
    */
-  const taxLines = allLines.filter(isTaxLine);
-  const excludedTaxDirect = sumCost(taxLines.filter((l) => l.billable === false));
-  const sharedTax = sumCost(taxLines.filter((l) => l.billable !== false));
-  const excludedShare = purchasedCost > 0 ? excludedPurchasedCost / purchasedCost : 0;
-  const excludedTaxShare = Math.round(sharedTax * excludedShare * 100) / 100;
-
-  const excludedCost = Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
+  const excludedCost = excludedReceiptCost(allLines);
   const target = mark(Number(bill.amount) - excludedCost);
   // The whole receipt was the company's own (Erik's "mostly snacks and a $3 part", with the part
   // flipped off too). There is nothing to put in front of the customer, and a $0 or negative
@@ -148,16 +264,34 @@ export function billItemisation(
   // a job cost — that reads bills.amount and never comes through here.
   if (excludedCost > 0 && !(target > 0)) return [];
 
-  const lines = allLines.filter((l) => l.billable !== false && !/tax/i.test(String(l.category ?? "")));
+  const lines = allLines.filter((l) => stillBills(l) && !isTaxLine(l));
   const billRows: BillItemRow[] = [];
   let emitted = 0;
   for (const l of lines) {
     const qty = Number(l.quantity) || 0;
-    const rawAmt = billLineCost(l);
+    const fullCost = billLineCost(l);
+    const part = billedPortion(fullCost, l.billed_amount);
+    const rawAmt = part == null ? fullCost : part;
     if (!rawAmt) continue; // unpriced line → its cost stays in the remainder row
     const sell = Math.round(rawAmt * rate * 100) / 100;
     if (!sell) continue;
     const desc = String(l.description || "Materials").slice(0, 300);
+    /**
+     * A PARTIAL LINE BILLS ONE ROW, NOT A COUNT — and this is a refusal, not a shortcut.
+     *
+     * The qty × unit presentation below is the one Erik asked for by name ("no per item price
+     * which is exactly what i need"), and the obvious move is to render "60 ea × $0.27" here.
+     * The app does not know the 60. What 0272 stores is DOLLARS; the container count lives with
+     * the stock item, and reconstructing a count by dividing the dollars by a per-unit price
+     * would put a number on a customer's invoice that nobody typed — $13.00 ÷ 21.672 cents is
+     * 59.99, and rounding that to "60 nuts" is exactly the kind of invented figure this app does
+     * not print. So the row says what is true: this is the part of that container the job used.
+     */
+    if (part != null) {
+      billRows.push({ import_key: `bli:${l.id}`, description: `${desc} (what this job used)`, quantity: 1, unit: "ea", unit_price: sell });
+      emitted = Math.round((emitted + sell) * 100) / 100;
+      continue;
+    }
     const unitExact = qty > 0 ? Math.round((sell / qty) * 100) / 100 : sell;
     // What qty × rounded-unit actually bills — within pennies of the sell it's the honest
     // presentation and the remainder row eats the difference; past the cap (huge counts of
@@ -182,7 +316,7 @@ export function billItemisation(
   // written to end it. If something on this receipt was still billable, an empty itemisation
   // really does mean unreadable, and the lump is right.
   if (!billRows.length) {
-    if (purchased.length > 0 && !purchased.some((l) => l.billable !== false)) return [];
+    if (purchased.length > 0 && !purchased.some(stillBills)) return [];
     return [{
       import_key: `bill:${bill.id}`,
       description: `Materials — ${bill.supplier}${bill.bill_number ? ` (bill #${bill.bill_number})` : ""}`,

@@ -28,6 +28,9 @@
  * "not billed" are two different ideas and this column is only the second one.
  */
 
+import { billedPortion, excludedReceiptCost } from "@/lib/bill-itemisation";
+import { formatCurrency } from "@/lib/utils";
+
 /** The per-line category the receipt reader must choose from. `Food & Drink` is the new one. */
 export const RECEIPT_LINE_CATEGORIES = [
   "Materials",
@@ -399,6 +402,19 @@ export function round2(n: number): number {
 export interface BillingSplitLine {
   amount: number | null;
   billable?: boolean | null;
+  /** Dollars of this line THIS job took, when only part of the container was the customer's
+   *  (0272). Null means the whole line, which is what every row written before 0272 means. */
+  billedAmount?: number | null;
+  /**
+   * WITHOUT THIS THE CARD COULD NOT SEE TAX, AND THAT WAS THE WHOLE BUG (review of cn-v964).
+   *
+   * The invoice takes the excluded share of sales tax off along with the lines it excludes, and
+   * this type had no way to know which line was the tax - so the card's figure and the invoice's
+   * figure were guaranteed to differ by exactly that share, $7.86 on the wave's own fixture. A
+   * type too narrow to ask the right question is how two screens end up disagreeing about one
+   * dollar.
+   */
+  category?: string | null;
 }
 
 export interface ReceiptBillingSplit {
@@ -410,6 +426,11 @@ export interface ReceiptBillingSplit {
   notBilled: number;
   /** How many lines are switched off — what the collapsed row needs to say without opening. */
   notBilledCount: number;
+  /** How many lines bill only part of themselves: a container that went on the shelf and gave
+   *  this job a handful. Counted separately from the switched-off lines because they are a
+   *  different sentence — "not billed" and "billed in part" are not the same fact, and a card
+   *  that blurred them would be the screen disagreeing with the invoice all over again. */
+  partBilledCount: number;
 }
 
 /**
@@ -431,18 +452,41 @@ export function splitReceiptBilling(
   lines: BillingSplitLine[] | null | undefined,
 ): ReceiptBillingSplit {
   const cost = round2(Number(billAmount) || 0);
-  let eaten = 0;
   let notBilledCount = 0;
+  let partBilledCount = 0;
   for (const l of lines ?? []) {
     if (l?.billable === false) {
-      eaten += Number(l.amount) || 0;
       notBilledCount += 1;
+      continue;
     }
+    if (billedPortion(Number(l?.amount) || 0, l?.billedAmount) != null) partBilledCount += 1;
   }
+  /**
+   * THE SAME READING THE INVOICE USES, NOT A SECOND ONE (review of cn-v964).
+   *
+   * This loop used to do its own subtraction - line cost minus the billed portion - and it was
+   * right about the lines and silent about the tax. The invoice takes the excluded share of sales
+   * tax off as well, because four fifths of a box left on the shelf takes four fifths of the tax
+   * charged on that box with it. So on a $139.65 receipt with the Twister box split to $13.00 the
+   * card promised $44.29 was coming off and the importer took $36.43: a $7.86 gap between a
+   * sentence on a screen and what the money actually did, which is the INV-069 shape wearing a new
+   * hat. excludedReceiptCost is now the only place that arithmetic exists.
+   */
+  const eaten = excludedReceiptCost(
+    (lines ?? []).map((l, i) => ({
+      // The shared reading keys nothing off the id; it is required by the importer's own row type,
+      // so an index keeps the shapes compatible without inventing a database id here.
+      id: i,
+      amount: l?.amount,
+      category: l?.category ?? null,
+      billable: l?.billable,
+      billed_amount: l?.billedAmount,
+    })),
+  );
   const billed = Math.max(0, round2(cost - round2(eaten)));
   // notBilled is DERIVED from billed rather than from `eaten` so the two figures on the card
   // always add up to the figure on the receipt, even when the clamp above bit.
-  return { cost, billed, notBilled: round2(cost - billed), notBilledCount };
+  return { cost, billed, notBilled: round2(cost - billed), notBilledCount, partBilledCount };
 }
 
 /**
@@ -490,4 +534,175 @@ const MASKED_PRICE = /\*{3,}(?!\*)(?!\s*\d)/;
  *  lines have no extended price. */
 export function looksProvisionallyPriced(text: string | null | undefined): boolean {
   return MASKED_PRICE.test(String(text ?? ""));
+}
+
+/**
+ * ── WHAT A CONTAINER LOOKS LIKE ON A RECEIPT (Erik, 2026-09-19; migration 0272) ───────────────
+ *
+ *   "the Twister box i was confused about and i remebered that is a whole ccontainer of wire nuts
+ *    that we uses some of but is certainly stock and shouldnt be charged to the customer in full
+ *    however necessary for the job"
+ *
+ * A 500 count box of wire nuts at $108.36 is 21.7 cents each, and his customer was billed $135.00
+ * for the box. The arithmetic was never the hard part - he did it in his head in one sentence. The
+ * hard part is NOTICING, halfway down a twelve line receipt, that one of those lines is a box
+ * rather than a part. That is all this section does: it points at a row and says "this looks like
+ * a container".
+ *
+ * ── AND IT IS A NUDGE, NOT A DEFAULT, FOREVER ────────────────────────────────────────────────
+ * Nothing here ever sets `is_stock` or `billed_amount`. The app suggests, a person decides, and a
+ * number on a customer's invoice is the last place to start guessing - a container count guessed
+ * wrong changes what somebody is charged, silently, in a direction nobody asked for.
+ *
+ * THE QUANTITY COLUMN IS NOT THE CONTAINER COUNT, and the line that started this proves it. That
+ * Twister row reads `quantity 500` because the scanner read 500 out of the PRODUCT NAME, not
+ * because anyone bought five hundred boxes. On the next receipt the same column will read 1 for a
+ * box of a thousand. So a big quantity is only ever a reason to LOOK at a row; the count that
+ * divides the money comes from a person typing it, and from nowhere else. The next person to reach
+ * for `quantity` as the divisor - it is right there, it is a number, it is tempting - is reaching
+ * for a figure the receipt does not contain.
+ */
+
+/** The words a supply house prints when it is selling you a container of something. "roll", "spool"
+ *  and "reel" are here because 250 feet of THHN is the same story as 500 wire nuts: bought whole,
+ *  used by the piece, and never one job's to own. */
+const CONTAINER_WORDS =
+  /\b(?:bx|box|boxes|pk|pkg|pack|packs|ct|cnt|count|case|carton|spool|spl|roll|reel|coil|jar|tub|pail|bucket|drum|bag)\b/i;
+
+/** A count written next to a container word: "500/BX", "100 PK", "250CT". */
+const COUNTED_CONTAINER = /(\d[\d,]*)\s*(?:\/|-|\s)?\s*(?:bx|box|boxes|pk|pkg|pack|packs|ct|cnt|count)\b/i;
+
+/**
+ * THREE HEURISTICS CAME OUT OF THIS FUNCTION, AND THE REASON IS THE WHOLE POINT OF THE FEATURE
+ * (review of cn-v964).
+ *
+ * `STANDALONE_NUMBER` looked for a round number anywhere in the description and called it a
+ * container count. Run against real supply-house text it reads "SQD QO 100 AMP MAIN BREAKER" as a
+ * box of 100, "50 AMP RECEPTACLE" as a box of 50, and "ROMEX 14-2 W/G 250" as 250 pieces. Those
+ * are an amperage, an amperage and a footage. `PER_HUNDRED` (/C) and `PER_THOUSAND` (/M) are real
+ * trade shorthand and also match "18/C" - eighteen CONDUCTOR cable - and any part number with an
+ * M after a slash.
+ *
+ * The count was then stated as fact beside a one-press "Use N" button, which makes a wrong guess
+ * one tap from a wrong invoice. And it is the same mistake in the same feature twice: Erik reached
+ * for a quantity heuristic himself ("qtys of 100s might give it away") and the very line that
+ * prompted all of this disproves it - the Twister row reads quantity 500 because the scanner took
+ * "500/5000" out of the PRODUCT NAME.
+ *
+ * So only COUNTED_CONTAINER survives: a number sitting beside an actual container word. That still
+ * catches "500/BX", "100 PK" and "250 CT", which is every way a supply house actually prints a
+ * pack size, and it costs nothing when it is silent - the sheet asks him for the number, which is
+ * where that answer was always going to come from.
+ */
+
+/**
+ * The container count the DESCRIPTION states, when it states one plainly. Null is the common and
+ * correct answer: a receipt line usually does not say, and saying so is what makes the person type
+ * it. Never reads `quantity` - see the section header for the row that disproves it.
+ */
+export function containerCountInDescription(description: string | null | undefined): number | null {
+  const d = String(description ?? "");
+  if (!d) return null;
+  const counted = d.match(COUNTED_CONTAINER);
+  if (counted) {
+    const n = Number(String(counted[1]).replace(/,/g, ""));
+    if (Number.isFinite(n) && n >= 2 && n <= 100000) return n;
+  }
+  // Nothing else guesses. A count this function cannot read off a container word is a count the
+  // person types, and "we do not know" is the honest and common answer here.
+  return null;
+}
+
+export interface ContainerHint {
+  /** Worth a second look. Never worth a write. */
+  looksLikeContainer: boolean;
+  /** The count the description states, or null when it does not state one. */
+  count: number | null;
+  /** One plain sentence saying WHY the row is flagged, so the suggestion can be argued with. */
+  why: string;
+}
+
+/**
+ * Does this line look like a container bought whole? Three signals, in the order they are trusted:
+ * a count printed beside a container word, a container word on its own, and a quantity over fifty.
+ *
+ * The third is the weakest and it is still here, because it is the one that catches the row that
+ * started this: a description that says nothing about a box, sitting on a line that says 500.
+ */
+export function containerHint(
+  description: string | null | undefined,
+  quantity: number | null | undefined,
+): ContainerHint {
+  const d = String(description ?? "");
+  const count = containerCountInDescription(d);
+  const qty = Number(quantity) || 0;
+  if (count != null) {
+    return { looksLikeContainer: true, count, why: `This line says ${count} of them.` };
+  }
+  if (CONTAINER_WORDS.test(d)) {
+    return { looksLikeContainer: true, count: null, why: "This line reads like a box or a spool." };
+  }
+  if (qty > 50) {
+    return {
+      looksLikeContainer: true,
+      count: null,
+      // The count is deliberately NOT offered here. See the section header: this number came off
+      // the product name once already.
+      why: `The receipt read ${qty} on this line, which is usually a container.`,
+    };
+  }
+  return { looksLikeContainer: false, count: null, why: "" };
+}
+
+/**
+ * What one of them cost, given the count a PERSON confirmed the container holds. Null when there
+ * is nothing to divide by - an unasked question has no answer, and a zero would render "$0.00
+ * each" beside a figure he is about to bill somebody.
+ */
+export function perUnitCost(lineCost: number | null | undefined, containerCount: number | null | undefined): number | null {
+  const cost = Number(lineCost) || 0;
+  const count = Number(containerCount) || 0;
+  if (!(cost > 0) || !(count > 0)) return null;
+  return cost / count;
+}
+
+/**
+ * The per-unit price in the words Erik used for it: "21.7 cents each". Tenths of a cent, because
+ * $108.36 over 500 is 21.672 cents and rounding that to "22 cents" loses the very arithmetic that
+ * made the box obvious to him in the first place. A dollar or more reads as dollars, where a tenth
+ * of a cent is noise.
+ */
+export function perUnitLabel(unitCost: number | null | undefined): string {
+  const n = Number(unitCost);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n >= 1) return `${formatCurrency(round2(n))} each`;
+  const cents = Math.round(n * 1000) / 10;
+  return `${cents % 1 === 0 ? cents.toFixed(0) : cents.toFixed(1)} cents each`;
+}
+
+/**
+ * How many did you use, times what one costs. THE money figure, computed the way he says it out
+ * loud, and rounded once - `billed_amount` stores dollars, so this is the only conversion and it
+ * happens where he can see the result before he saves it.
+ */
+export function usedCost(usedCount: number | null | undefined, unitCost: number | null | undefined): number {
+  const count = Number(usedCount) || 0;
+  const unit = Number(unitCost) || 0;
+  if (!(count > 0) || !(unit > 0)) return 0;
+  return round2(count * unit);
+}
+
+/**
+ * The other direction, for the person who thinks in dollars: roughly how many that is.
+ *
+ * DISPLAY ONLY, AND HEDGED WHERE IT IS SHOWN. $13.00 divided by 21.672 cents is 59.98, and the
+ * app does not put "60" anywhere a customer will read it - the invoice row says what this job used
+ * in dollars, which is the number a person actually typed. This is here so the count he can picture
+ * appears beside the dollars he typed, and so the stock draw has a quantity to take off the shelf.
+ */
+export function usedCountFromCost(cost: number | null | undefined, unitCost: number | null | undefined): number | null {
+  const c = Number(cost) || 0;
+  const unit = Number(unitCost) || 0;
+  if (!(c > 0) || !(unit > 0)) return null;
+  return Math.round((c / unit) * 100) / 100;
 }

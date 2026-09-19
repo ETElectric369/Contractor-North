@@ -66,6 +66,15 @@ export function QtyControl({
 
   return (
     <>
+      {/* A REFUSED BUMP SAID NOTHING AT ALL (review of cn-v964). The only place this error rendered
+          was inside the recount Modal, and a closed Modal returns null - so the sentence was
+          written into state nobody could see, and a +/- that the server turned down looked exactly
+          like one that worked. On a screen whose whole promise is that the number on it is the
+          number in the van, a silent refusal is the one failure that makes it useless. It renders
+          where the buttons are. */}
+      {error && (
+        <div className="mb-1 rounded-lg bg-red-50 px-3 py-2 text-right text-xs text-red-700">{error}</div>
+      )}
       <div className="flex items-center justify-end gap-2">
         <button
           onClick={() => bump(-1)}

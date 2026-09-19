@@ -495,6 +495,65 @@ export async function linkBillsBySupplierText(input: {
 }
 
 /**
+ * ONE SPELLING, ON AN ACCOUNT OF ITS OWN - the door a lone name never had (review of cn-v963).
+ *
+ * Sixteen supplier spellings came off his receipts and the merge review only ever showed the ones
+ * that looked like something else. Five of them looked like nothing at all - Home Depot, Goodwin's,
+ * Tahoe City Lumber, the counters he pays at the till - so they were dropped on the floor: counted
+ * in the amber line at the top of the card, named nowhere, with no way to file them. Money outside
+ * every balance on the page and no button in sight is the dead end this wave keeps finding.
+ *
+ * It is the two existing doors in this file wired together, deliberately: `createSupplierAccount`
+ * and `linkBillsBySupplierText` were both exported and called by NOBODY, and a third copy of
+ * "make an account, then move its bills" is how two screens start disagreeing about one dollar.
+ *
+ * ON_ACCOUNT DEFAULTS TO FALSE, and the card says so before the press. A name with no relative
+ * anywhere in his book is, on his own receipts, a till counter - and a running balance on a
+ * supplier he settles as he walks out would put a figure on the card that he does not owe anyone.
+ * If those bills are still marked unpaid, the account's own card says that out loud and offers to
+ * turn a running balance on, which is where "unless he says otherwise" actually lives.
+ *
+ * IT REPORTS THE HALF THAT LANDED. The account is made first and the bills move second, so a
+ * failure in between leaves a real account holding nothing. Saying "nothing happened" over that
+ * would send him looking for work the app had already done.
+ */
+export async function fileSpellingAsItsOwnAccount(input: {
+  supplier: string;
+  /** Leave it off for the till counter this nearly always is. */
+  onAccount?: boolean;
+}): Promise<SupplierActionResult & { accountId?: string; linked?: number }> {
+  const spelling = text(input?.supplier);
+  if (!spelling) return { ok: false, error: "Couldn't tell which supplier name you meant. Reload the page." };
+  const onAccount = input?.onAccount === true;
+
+  const made = await createSupplierAccount({ name: spelling, onAccount });
+  if (!made.ok || !made.accountId) {
+    return { ok: false, error: made.error ?? "That supplier didn't save, so nothing was added." };
+  }
+
+  const kind = onAccount
+    ? "with a running balance you can pay down"
+    : "paid at the register, so it carries no running balance";
+
+  const filed = await linkBillsBySupplierText({ supplier: spelling, accountId: made.accountId });
+  if (!filed.ok) {
+    return {
+      ok: false,
+      accountId: made.accountId,
+      error: `${spelling} was added as a supplier ${kind}, but its bills did not move onto it, so nothing adds up there yet. ${filed.error ?? "Try filing them again."}`,
+    };
+  }
+
+  revalidatePath("/bills");
+  return {
+    ok: true,
+    accountId: made.accountId,
+    linked: filed.linked,
+    message: `${spelling} is a supplier of its own now, ${kind}. ${filed.message ?? ""}`.trim(),
+  };
+}
+
+/**
  * Every bill in this shop, once, for the spelling work below. Read rather than filtered in the
  * query because `ilike` would read a `%` or a `_` inside a scanned supplier name as a wildcard and
  * sweep up bills he never picked.

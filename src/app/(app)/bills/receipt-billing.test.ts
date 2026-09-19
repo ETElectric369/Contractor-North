@@ -12,6 +12,12 @@ import {
   normalizeBillable,
   resolveReceiptLineCategory,
   splitReceiptBilling,
+  containerCountInDescription,
+  containerHint,
+  perUnitCost,
+  perUnitLabel,
+  usedCost,
+  usedCountFromCost,
 } from "./receipt-billing";
 
 describe("what the receipt reader bills by default", () => {
@@ -79,7 +85,7 @@ describe("what the customer gets billed for a receipt", () => {
       { amount: 100, billable: true },
       { amount: 20.5, billable: true },
     ]);
-    expect(split).toEqual({ cost: 120.5, billed: 120.5, notBilled: 0, notBilledCount: 0 });
+    expect(split).toEqual({ cost: 120.5, billed: 120.5, notBilled: 0, notBilledCount: 0, partBilledCount: 0 });
   });
 
   it("subtracts only the lines that are switched off", () => {
@@ -129,8 +135,8 @@ describe("what the customer gets billed for a receipt", () => {
   });
 
   it("survives a bill with no lines at all", () => {
-    expect(splitReceiptBilling(75, [])).toEqual({ cost: 75, billed: 75, notBilled: 0, notBilledCount: 0 });
-    expect(splitReceiptBilling(null, null)).toEqual({ cost: 0, billed: 0, notBilled: 0, notBilledCount: 0 });
+    expect(splitReceiptBilling(75, [])).toEqual({ cost: 75, billed: 75, notBilled: 0, notBilledCount: 0, partBilledCount: 0 });
+    expect(splitReceiptBilling(null, null)).toEqual({ cost: 0, billed: 0, notBilled: 0, notBilledCount: 0, partBilledCount: 0 });
   });
 
   // A returned snack is a credit the company keeps, so the customer's half can legitimately come
@@ -432,5 +438,175 @@ describe("a masked price is not a masked card number (cn-v963 review)", () => {
   it("is quiet on nothing at all", () => {
     expect(looksProvisionallyPriced(null)).toBe(false);
     expect(looksProvisionallyPriced("")).toBe(false);
+  });
+});
+
+describe("spotting a container on a receipt line (0272)", () => {
+  /**
+   * A count is offered ONLY when it sits beside a container word. "500/BX" and "100PK" are how a
+   * supply house actually prints a pack size; a bare round number anywhere in the text is not.
+   */
+  it("offers the count a description states plainly", () => {
+    expect(containerCountInDescription("Wire Nut Red 100PK")).toBe(100);
+    expect(containerCountInDescription("Staples 500/BX")).toBe(500);
+    expect(containerCountInDescription("1/2 in Connector 250 CT")).toBe(250);
+  });
+
+  it("will not read an amperage, a footage or a conductor count as a pack size", () => {
+    /**
+     * THE HEURISTICS THAT CAME OUT (review of cn-v964), each one run against real supply-house
+     * text. A bare round number matched "SQD QO 100 AMP MAIN BREAKER" as a box of 100 and
+     * "ROMEX 14-2 W/G 250" as 250 pieces; the /C and /M trade shorthand matched "18/C", which is
+     * eighteen CONDUCTOR cable. Every one of those was then stated as fact beside a one-press
+     * "Use N" button, putting a wrong guess one tap from a wrong invoice.
+     */
+    expect(containerCountInDescription("SQD QO 100 AMP MAIN BREAKER")).toBeNull();
+    expect(containerCountInDescription("50 AMP RECEPTACLE")).toBeNull();
+    expect(containerCountInDescription("ROMEX 14-2 W/G 250")).toBeNull();
+    expect(containerCountInDescription("18/C 18AWG SHIELDED")).toBeNull();
+    expect(containerCountInDescription("Wire Nut Tan /C")).toBeNull();
+  });
+
+  it("does not guess Erik's own Twister line, and says nothing instead", () => {
+    // "IDEAL 30641 500/5000 Twister 341-Tan" is the row that started the whole feature. 30641 is a
+    // part number and "500/5000" is a catalogue spec, not a pack size beside a container word - so
+    // the app asks him for the count rather than offering one it read out of a product name. That
+    // is the same mistake the quantity column already made on this exact line.
+    expect(containerCountInDescription("IDEAL 30641 500/5000 Twister 341-Tan")).toBeNull();
+  });
+
+  it("does not read a catalogue number or a colour code as a count", () => {
+    // "30641" is IDEAL's part number and "341-Tan" is the colour. Offering either as "how many
+    // are in the box" would divide his money by a number that means nothing.
+    expect(containerCountInDescription("IDEAL 30641 Twister 341-Tan")).toBeNull();
+    expect(containerCountInDescription("Square D QO120 Breaker")).toBeNull();
+    expect(containerCountInDescription("12 AWG THHN Black")).toBeNull();
+    expect(containerCountInDescription("Panel 125A Main Lug")).toBeNull();
+    expect(containerCountInDescription("")).toBeNull();
+    expect(containerCountInDescription(null)).toBeNull();
+  });
+
+  it("flags a likely container and says why", () => {
+    const box = containerHint("Wire Nut Red 100PK", 100);
+    expect(box.looksLikeContainer).toBe(true);
+    expect(box.count).toBe(100);
+    expect(box.why).toContain("100");
+
+    const spool = containerHint("THHN 12 AWG Black Spool", 1);
+    expect(spool.looksLikeContainer).toBe(true);
+    expect(spool.count).toBeNull();
+  });
+
+  it("flags a big quantity WITHOUT offering it as the count", () => {
+    /**
+     * The whole reason this rule is written down. Erik reached for the quantity heuristic himself
+     * and his own line disproves it: that Twister row reads 500 because the scanner took it from
+     * the product name, not because five hundred boxes were bought. A big quantity is a reason to
+     * look at a row. It is never the number the money is divided by.
+     */
+    const hint = containerHint("Bulk Fastener Assorted", 240);
+    expect(hint.looksLikeContainer).toBe(true);
+    expect(hint.count).toBeNull();
+  });
+
+  it("leaves an ordinary part alone", () => {
+    expect(containerHint("Square D QO120 Breaker", 6).looksLikeContainer).toBe(false);
+    expect(containerHint("125A Main Lug Load Center", 1).looksLikeContainer).toBe(false);
+    expect(containerHint(null, null).looksLikeContainer).toBe(false);
+  });
+
+  it("never decides anything - the hint carries no billing state at all", () => {
+    // A suggestion that could write would be a default, and a default here changes what a
+    // customer is charged without anybody saying so.
+    const hint = containerHint("IDEAL 30641 Twister 341-Tan 500", 500);
+    expect(Object.keys(hint).sort()).toEqual(["count", "looksLikeContainer", "why"]);
+  });
+});
+
+describe("the arithmetic Erik did in his head", () => {
+  it("says 21.7 cents each for the box that started this", () => {
+    const unit = perUnitCost(108.36, 500);
+    expect(unit).toBeCloseTo(0.21672, 5);
+    expect(perUnitLabel(unit)).toBe("21.7 cents each");
+  });
+
+  it("bills sixty of them at $13.00", () => {
+    // $16.25 with his 25% markup, which is the $16.20 he typed onto the invoice by hand.
+    expect(usedCost(60, perUnitCost(108.36, 500))).toBe(13);
+  });
+
+  it("splits the eight ounce jar by the ounce", () => {
+    expect(perUnitLabel(perUnitCost(20.65, 8))).toBe("$2.58 each");
+    expect(usedCost(1, perUnitCost(20.65, 8))).toBe(2.58);
+  });
+
+  it("turns a dollar figure back into a rough count, for the shelf and never for the invoice", () => {
+    // 59.99, not 60. The invoice row says dollars for exactly this reason: nobody typed a 60,
+    // and rounding this one up would print a count on a customer's bill that no person chose.
+    expect(usedCountFromCost(13, perUnitCost(108.36, 500))).toBeCloseTo(59.99, 2);
+  });
+
+  it("stays quiet rather than dividing by nothing", () => {
+    expect(perUnitCost(108.36, 0)).toBeNull();
+    expect(perUnitCost(108.36, null)).toBeNull();
+    expect(perUnitCost(0, 500)).toBeNull();
+    expect(perUnitLabel(null)).toBe("");
+    expect(perUnitLabel(0)).toBe("");
+    expect(usedCost(60, null)).toBe(0);
+    expect(usedCountFromCost(13, 0)).toBeNull();
+  });
+
+  it("drops the tenth of a cent when there is not one", () => {
+    expect(perUnitLabel(0.25)).toBe("25 cents each");
+    expect(perUnitLabel(1)).toBe("$1.00 each");
+  });
+});
+
+describe("a receipt with a container split across the shelf and the job", () => {
+  it("counts the shelf's share against the customer's half", () => {
+    // The real ticket: the box of Twisters, the jar of Noalox, and sixty nuts on this job.
+    const split = splitReceiptBilling(139.65, [
+      { amount: 108.36, billable: true, billedAmount: 13 },
+      { amount: 20.65, billable: true },
+      { amount: 10.64, billable: true },
+    ]);
+    expect(split.billed).toBe(44.29);
+    expect(split.notBilled).toBe(95.36);
+    expect(split.partBilledCount).toBe(1);
+    expect(split.notBilledCount).toBe(0);
+  });
+
+  it("keeps the two facts apart: switched off is not the same as billed in part", () => {
+    const split = splitReceiptBilling(139.65, [
+      { amount: 108.36, billable: true, billedAmount: 13 },
+      { amount: 20.65, billable: false },
+      { amount: 10.64, billable: true },
+    ]);
+    expect(split.notBilledCount).toBe(1);
+    expect(split.partBilledCount).toBe(1);
+    expect(split.billed).toBe(23.64);
+  });
+
+  it("treats a missing split as the whole line, exactly as before 0272", () => {
+    const split = splitReceiptBilling(120.5, [
+      { amount: 100, billable: true },
+      { amount: 20.5, billable: true, billedAmount: null },
+    ]);
+    expect(split).toEqual({ cost: 120.5, billed: 120.5, notBilled: 0, notBilledCount: 0, partBilledCount: 0 });
+  });
+
+  it("still adds back up to what the receipt cost", () => {
+    const split = splitReceiptBilling(139.65, [
+      { amount: 108.36, billable: true, billedAmount: 13 },
+      { amount: 20.65, billable: true, billedAmount: 2.58 },
+      { amount: 10.64, billable: true },
+    ]);
+    expect(round(split.billed + split.notBilled)).toBe(split.cost);
+  });
+
+  it("does not let a split bill more of a line than the line cost", () => {
+    const split = splitReceiptBilling(108.36, [{ amount: 108.36, billable: true, billedAmount: 999 }]);
+    expect(split.billed).toBe(108.36);
+    expect(split.partBilledCount).toBe(1);
   });
 });

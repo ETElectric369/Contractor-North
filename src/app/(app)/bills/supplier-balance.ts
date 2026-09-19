@@ -239,6 +239,187 @@ export function proposalTotals(proposal: SupplierMergeProposal): { bills: number
   return { bills, total, unpaid };
 }
 
+// ── THE QUESTION THE MATCHER WILL NOT ANSWER ────────────────────────────────────────────────────
+//
+// suggestSupplierGroups hands back `{ groups, candidates }` and the page read only the groups, so
+// every candidate it worked out was thrown away (review of cn-v963). On Erik's book that discarded
+// exactly one question, and it is the only genuine judgement call in this whole feature:
+// "Contractors Electrical Distributors" ($467.87) against his four "Consolidated Electrical ..."
+// spellings. Both reduce to the initials CED, they share two of their three words, the first word
+// differs. It turns out to be one account used at two separately owned branches - "its the local
+// distributor near sunnyvale for the job so i used my truckee account number, thats how they roll"
+// - which is precisely the fact no amount of string cleverness gets out of a string. It came from
+// him, and so must the answer.
+//
+// A CANDIDATE IS NOT A PROPOSAL. A proposal says "these are the same, press Accept". This says "I
+// cannot tell", and it carries both doors: join them onto one account, or keep them apart. Neither
+// is preselected and neither happens on its own.
+
+export interface SupplierCandidateSide {
+  /** What it is called on screen: the account's name when it already is one, else the spelling
+   *  exactly as the scanner wrote it. */
+  label: string;
+  /** The spelling the matcher compared. It is what a press would move, so it is what gets quoted -
+   *  never a tidied-up version of it. */
+  spelling: string;
+  /** Set when this side is an account he has already made. Those sides are never moved by either
+   *  button: "keep them separate" gives every spelling it is handed an account of its own, and
+   *  handing it a spelling that is currently an alias of CED Truckee would tear that spelling off
+   *  the account he just built. */
+  accountId: string | null;
+  /** Bills scanned under this spelling that are on no account yet, and what they hold. Zero on a
+   *  side that is already an account: that money is in its balance below, and counting it twice on
+   *  one row is how a money screen starts arguing with itself. */
+  bills: number;
+  total: number;
+  unpaid: number;
+  /** What the account already owes, for a side that is one. Null for a loose spelling, and null
+   *  for a register supplier, which has no running balance and must not be given one. */
+  owed: number | null;
+}
+
+export interface SupplierCandidateQuestion {
+  /** The spellings BOTH doors would move, as JSON, in the same id shape the merge actions parse. */
+  id: string;
+  sides: [SupplierCandidateSide, SupplierCandidateSide];
+  /** Why the matcher stopped short of proposing anything, in its own words. */
+  because: string;
+  /** The account a join would file onto, when one of the two already is one. Null when a join
+   *  would make a new account out of both spellings. */
+  existingAccountId: string | null;
+  existingAccountName: string | null;
+  /** A starting point for the name box when a join would make a NEW account. His to change. */
+  suggestedName: string;
+}
+
+/** The sides a press actually moves: the ones not already on an account of their own. A question
+ *  with none of these has nothing left to ask and must not be shown. */
+export function candidateMoving(question: SupplierCandidateQuestion): SupplierCandidateSide[] {
+  return (question?.sides ?? []).filter((s) => !s.accountId);
+}
+
+/**
+ * WHAT THE JOINED ACCOUNT WOULD OWE: each side's own balance plus the unpaid bills that would be
+ * filed onto it. On his book this is the sentence that lets him check the app against what he
+ * knows - CED reads $6,476.93 today, and joining the Sunnyvale ticket makes it $6,944.80.
+ *
+ * Null when one side is a register supplier: that account has no running balance, so there is no
+ * number to add to and inventing one would be a figure he never wrote.
+ */
+export function candidateJoinedOwed(question: SupplierCandidateQuestion): number | null {
+  let owed = 0;
+  for (const side of question?.sides ?? []) {
+    if (side.accountId) {
+      if (side.owed === null) return null;
+      owed = r2(owed + side.owed);
+    } else {
+      owed = r2(owed + (Number(side.unpaid) || 0));
+    }
+  }
+  return owed;
+}
+
+/** What the book knows about one spelling, for the question builder below. */
+export interface SupplierBookEntry {
+  id: string;
+  name: string;
+  /** Null for a register supplier, which has no running balance. */
+  owed: number | null;
+}
+
+/**
+ * The exact string, trimmed and lowercased - `aliasKey` in supplier-identity, which is what
+ * `supplier_aliases` is unique on and what actually moves bills. A local copy rather than an
+ * import so the fuzzy matcher does not get dragged into the client bundle for three lines; the
+ * rule itself must never diverge, because the row he reads and the rows a press moves would then
+ * be two different sets.
+ */
+const sameSpelling = (raw: unknown): string => String(raw ?? "").trim().toLowerCase();
+
+/**
+ * THE PAIRS THE MATCHER WILL NOT DECIDE, TURNED INTO SOMETHING WITH DOORS ON IT.
+ *
+ * Fed `suggestSupplierGroups().candidates` plus what the book already knows, it works out for each
+ * pair which side is loose (a spelling on no account at all) and which is an account he has
+ * already made.
+ *
+ * TWO RULES, AND BOTH ARE LOAD-BEARING:
+ *
+ *  · A QUESTION WITH NO LOOSE SIDE IS NOT ASKED. Nothing on that row could move without tearing a
+ *    spelling off an account he built, so both doors could only refuse.
+ *
+ *  · THAT SAME RULE IS WHAT MAKES "KEEP THEM SEPARATE" STICK. Nothing anywhere records "he said
+ *    no": the dismissal works by becoming TRUE - the loose bills land on an account of their own,
+ *    the spelling leaves the unfiled pile, and the pair stops qualifying. The matcher still sees
+ *    both names next time, because it reads account names too, so without this rule the question
+ *    he just answered would be waiting for him on the next page load.
+ */
+export function supplierCandidateQuestions(
+  candidates: { a: string; b: string; reasons?: string[] }[] | null | undefined,
+  book: {
+    /** Money on a spelling that is on no account yet, keyed by the spelling lowercased. */
+    unfiled: Map<string, SupplierSpelling>;
+    /** The account a spelling is already filed under, keyed the same way. */
+    accounts: Map<string, SupplierBookEntry>;
+  },
+): SupplierCandidateQuestion[] {
+  const sideOf = (name: string): SupplierCandidateSide | null => {
+    const key = sameSpelling(name);
+    const account = book?.accounts?.get(key);
+    if (account) {
+      // Its money is its balance. The spelling may ALSO have unfiled bills of its own (a receipt
+      // scanned after the account was made); those are left at zero here because they have their
+      // own one-press row in the proposals, and one dollar shown twice on one screen is the
+      // 24%-vs-82% budget bug wearing a new hat.
+      return {
+        label: account.name,
+        spelling: name,
+        accountId: account.id,
+        bills: 0,
+        total: 0,
+        unpaid: 0,
+        owed: account.owed,
+      };
+    }
+    const g = book?.unfiled?.get(key);
+    if (!g) return null;
+    return {
+      label: g.alias,
+      spelling: g.alias,
+      accountId: null,
+      bills: Number(g.bills) || 0,
+      total: r2(Number(g.total) || 0),
+      unpaid: r2(Number(g.unpaid) || 0),
+      owed: null,
+    };
+  };
+
+  const questions: SupplierCandidateQuestion[] = [];
+  for (const candidate of candidates ?? []) {
+    const a = sideOf(String(candidate?.a ?? ""));
+    const b = sideOf(String(candidate?.b ?? ""));
+    if (!a || !b) continue;
+    const moving = [a, b].filter((s) => !s.accountId);
+    if (!moving.length) continue;
+    const home = a.accountId ? a : b.accountId ? b : null;
+    questions.push({
+      // THE ID CARRIES ONLY THE SPELLINGS A PRESS MAY MOVE, as JSON, in the shape the merge
+      // actions already parse. The account side is never in it, because "keep them separate"
+      // gives every spelling it is handed an account of its own.
+      id: `merge:${JSON.stringify(moving.map((s) => s.spelling))}`,
+      sides: [a, b],
+      because: candidate?.reasons?.[0] ?? "",
+      existingAccountId: home?.accountId ?? null,
+      existingAccountName: home?.label ?? null,
+      // Only a starting point for the name box, and only when a join would make a new account:
+      // the longer spelling is usually the fuller one. It is his to retype either way.
+      suggestedName:
+        home?.label ?? [...moving].sort((x, y) => y.spelling.length - x.spelling.length)[0]?.spelling ?? "",
+    });
+  }
+  return questions;
+}
+
 // ── THE SAME TICKET, FILED TWICE ────────────────────────────────────────────────────────────────
 // An identical CED ticket ($95.27, 8 lines, line for line to the penny) sits on BOTH "13631
 // Northwoods" (07-29) and "85 Whitney Place" (08-28). One of those jobs is carrying a cost that is

@@ -13,7 +13,10 @@ import {
 import { BillsReceipts } from "./bills-receipts";
 import { ReceiptBillingCard, type ReceiptForBilling } from "./receipt-billing-card";
 import {
+  candidateMoving,
   isOnAccountBill,
+  supplierBalance,
+  supplierCandidateQuestions,
   type DuplicateBillGroup,
   type SupplierAccountRow,
   type SupplierBillRow,
@@ -24,6 +27,7 @@ import { SuppliersCard } from "./suppliers-card";
 import {
   acceptSupplierMerge,
   dismissSupplierMerge,
+  fileSpellingAsItsOwnAccount,
   recordSupplierPayment,
   resolveDuplicateBill,
   setSupplierOnAccount,
@@ -68,7 +72,7 @@ function isMissingColumn(err: unknown): boolean {
 
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, job_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   const read = (o: BillColumns) =>
     supabase.from("bills").select(columns(o)).order("created_at", { ascending: false });
 
@@ -253,6 +257,12 @@ export default async function BillsPage() {
       // flag as "not billed" would take money off invoices nobody asked to change, so the
       // absence means billed — the same direction the column's own default takes.
       billable: l.billable !== false,
+      // THE THIRD STATE (0272). A container bought whole and used in pieces: a 500ct box of wire
+      // nuts at $108.36, of which this job used sixty. `billedAmount` is what THIS job takes, in
+      // dollars of cost; null means the whole line, which is what every row written before 0272
+      // means and keeps meaning.
+      billedAmount: l.billed_amount == null ? null : Number(l.billed_amount),
+      isStock: l.is_stock === true,
     })),
   }));
 
@@ -395,12 +405,16 @@ export default async function BillsPage() {
   // something. The names of the accounts he already has go into the same read, so a CED receipt
   // scanned next Tuesday is offered to the CED account instead of proposing a second one.
   //
-  // A LONE SPELLING WITH NO RELATIVE IS NOT PROPOSED. On that card, Accept would make it an account
-  // of its own - and so would "Not The Same", which sets it aside as a supplier of its own. Two
-  // buttons doing the same thing is worse than no button: he would press one and learn nothing
-  // about what the app thinks. Those bills keep behaving exactly as they do today, their money is
-  // named in the unassigned line above, and a door to file one spelling by hand is the handoff
-  // this wave leaves open.
+  // A LONE SPELLING WITH NO RELATIVE IS NOT PROPOSED, and that part was always right: on a proposal
+  // card, Accept would make it an account of its own and so would "Not The Same", which sets it
+  // aside as a supplier of its own. Two buttons doing one thing is worse than no button.
+  //
+  // WHAT WAS WRONG WAS THE CONCLUSION (review of cn-v963). Those spellings were then dropped
+  // entirely - five of his sixteen, their money counted in the amber line at the top of the card
+  // and named nowhere, with nothing to press. A suggestion that cannot be made is not a reason to
+  // say nothing; it is a reason to stop suggesting and just offer the door. So they fall through
+  // to `loose` further down, which gives each one a row of its own and one button that makes it a
+  // supplier in its own right.
   const accountKeyToId = new Map<string, string>();
   for (const a of supplierAccounts) {
     accountKeyToId.set(spellingKey(a.name), a.id);
@@ -470,6 +484,70 @@ export default async function BillsPage() {
       because: `"${g.alias}" is already saved as a name for ${account.name}. These bills were scanned after that and never landed on it.`,
     });
   }
+
+  // ── THE ONE QUESTION ONLY HE CAN ANSWER ─────────────────────────────────────────────────────
+  //
+  // `suggestSupplierGroups` returns `{ groups, candidates }`. This page bound the whole thing to
+  // `identity` and then iterated `identity.groups` and nothing else, so every candidate it worked
+  // out was computed and thrown away (review of cn-v963). On his book that discarded exactly one
+  // question, and it is the single judgement call in this entire feature: "Contractors Electrical
+  // Distributors" ($467.87) against his four "Consolidated Electrical ..." spellings. Both come out
+  // as the initials CED, they share two of their three words, and the first word differs. The
+  // matcher already words it correctly. It just had nowhere to say it.
+  //
+  // IT IS NOT RENDERED AS A PROPOSAL. A proposal says "these are the same, press Accept"; this says
+  // "I cannot tell", and carries both doors.
+  //
+  // BOTH DOORS ONLY EVER TOUCH THE LOOSE SIDES - the spellings still sitting on no account at all.
+  // "Keep them separate" is dismissSupplierMerge, which gives every spelling it is handed an
+  // account of its own; hand it a spelling that is currently an alias of CED Truckee and it would
+  // tear that spelling straight off the account he built tonight. A side that IS an account gets
+  // named and has its balance shown, and is not moved by anything on that row.
+  //
+  // AND THAT IS ALSO WHY THE DISMISSAL STICKS. Nothing anywhere stores "he said no": what makes a
+  // dismissal stick is that it becomes TRUE - the bills land on an account of their own, so the
+  // spelling leaves the unfiled pile. The matcher still sees both names next time, because it is
+  // fed account names too, and the question would come straight back were it not for the rule
+  // above: no loose side, no question. The same rule the proposals use, for the same reason.
+  //
+  // THE RULE ITSELF IS PURE AND LIVES IN supplier-balance.ts WITH A TEST AROUND IT, because the
+  // part that matters is not the loop, it is which side a press is allowed to touch - and a money
+  // rule with a second copy on a page is how two screens end up disagreeing about one dollar.
+  const questions = supplierCandidateQuestions(identity.candidates, {
+    unfiled,
+    accounts: new Map(
+      [...accountKeyToId].flatMap(([key, id]) => {
+        const account = supplierAccounts.find((a) => a.id === id);
+        if (!account) return [];
+        return [[key, { id: account.id, name: account.name, owed: supplierBalance(account, today).owed }] as const];
+      }),
+    ),
+  });
+
+  // ── EVERY OTHER SPELLING, WITH THE DOOR IT NEVER HAD ────────────────────────────────────────
+  //
+  // Whatever is left: a name off a receipt that is in no proposal and no question, which on his
+  // book is Home Depot, Goodwin's, Tahoe City Lumber and the rest of the counters he pays at the
+  // till. Until tonight those were counted in the amber line at the top of the card and offered
+  // nothing at all.
+  //
+  // A SPELLING THAT ALREADY HAS A DOOR DOES NOT GET A SECOND ONE. If it sits in a proposal or is
+  // the loose side of a question, it gets no row here: "Keep Them Separate" up there and "Give It
+  // Its Own Account" down here are the same write wearing two sentences, and two buttons doing one
+  // thing is the very trap the proposals avoid by not offering "Not The Same" on a group of one.
+  // (A spelling can be in a proposal AND in a question - "are these four one account?" and "is
+  // that fifth one theirs too?" are two different questions - and that is fine, because those two
+  // rows offer genuinely different outcomes.)
+  const spokenFor = new Set([
+    ...proposals.flatMap((p) => p.spellings.map((s) => spellingKey(s.alias))),
+    ...questions.flatMap((q) => candidateMoving(q).map((s) => spellingKey(s.spelling))),
+  ]);
+  const loose: SupplierSpelling[] = [...unfiled.values()]
+    .filter((g) => !spokenFor.has(spellingKey(g.alias)))
+    .map((g) => ({ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }))
+    // Biggest money first: what he still owes, then what it cost him, then by name so the list
+    // does not shuffle itself between loads.
+    .sort((x, y) => y.unpaid - x.unpaid || y.total - x.total || x.alias.localeCompare(y.alias));
 
   // ── THE SAME TICKET, FILED TO TWO JOBS ──────────────────────────────────────────────────────
   //
@@ -554,10 +632,13 @@ export default async function BillsPage() {
           today={today}
           unassigned={unassigned}
           proposals={proposals}
+          questions={questions}
+          loose={loose}
           duplicates={duplicates}
           actions={{
             acceptMerge: acceptSupplierMerge,
             dismissMerge: dismissSupplierMerge,
+            fileAsItsOwnAccount: fileSpellingAsItsOwnAccount,
             resolveDuplicate: resolveDuplicateBill,
             unresolveDuplicate: unresolveDuplicateBill,
             recordPayment: recordSupplierPayment,

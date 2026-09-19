@@ -18,13 +18,24 @@ import {
   type DuplicateBillGroup,
   type SupplierAccountRow,
   type SupplierActionResult,
+  type SupplierCandidateQuestion,
   type SupplierMergeProposal,
   type SupplierPayMethod,
+  type SupplierSpelling,
 } from "./supplier-balance";
 import { SupplierDuplicates, type SupplierDuplicateActions } from "./supplier-duplicates";
-import { SupplierMergeReview, type SupplierMergeActions } from "./supplier-merge-review";
+import {
+  SupplierCandidateReview,
+  SupplierMergeReview,
+  SupplierUnfiledSpellings,
+  type SupplierMergeActions,
+  type SupplierSpellingActions,
+} from "./supplier-merge-review";
 
-export interface SuppliersCardActions extends SupplierMergeActions, SupplierDuplicateActions {
+export interface SuppliersCardActions
+  extends SupplierMergeActions,
+    SupplierDuplicateActions,
+    SupplierSpellingActions {
   /**
    * A CHUNK OF MONEY SENT TO A SUPPLIER. Not a ticket, not a tick, and never a figure this app
    * worked out for him: "i pay them in chunks that never match the ticckets".
@@ -89,6 +100,8 @@ export function SuppliersCard({
   today,
   unassigned = null,
   proposals = [],
+  questions = [],
+  loose = [],
   duplicates = [],
   actions,
 }: {
@@ -98,6 +111,10 @@ export function SuppliersCard({
   /** Bills on no account yet. Shown so every dollar on this page is accounted for somewhere. */
   unassigned?: { bills: number; total: number } | null;
   proposals?: SupplierMergeProposal[];
+  /** The pairs the matcher will not decide. A question, never a proposal. */
+  questions?: SupplierCandidateQuestion[];
+  /** Spellings that look like nothing else in the book, each with a door of its own. */
+  loose?: SupplierSpelling[];
   duplicates?: DuplicateBillGroup[];
   actions: SuppliersCardActions;
 }) {
@@ -149,6 +166,11 @@ export function SuppliersCard({
   const unfiled = r2(unassigned?.total ?? 0);
   const totalOwed = r2(onAccountOwed + registerUnpaid + unfiled);
   const openDuplicates = duplicates.filter((g) => !g.resolution);
+  // HOW MANY DOORS THERE ACTUALLY ARE BELOW THIS LINE for a spelling that is on no account yet:
+  // a suggestion, a question, or a row of its own. The amber line reads off this instead of off
+  // the proposals alone, which is how it came to say "the suggestions below are how they get
+  // there" over five spellings that had nothing below at all.
+  const spellingDoors = proposals.length + questions.length + loose.length;
 
   const payBalance = payFor ? supplierBalance(payFor, today) : null;
   const payDirty = amount !== null || reference.trim() !== "" || note.trim() !== "" || paidOn !== today;
@@ -261,17 +283,16 @@ export function SuppliersCard({
           <div className="mb-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
             {unassigned.bills} {unassigned.bills === 1 ? "bill is" : "bills are"} not on a supplier account yet, and{" "}
             {formatCurrency(unassigned.total)} of what you owe is on them.
-            {/* THE SENTENCE HAS TO MATCH THE BUTTONS THAT EXIST (review, 2026-09-19). The second
-                half used to read "Put those bills on an account and they turn into a balance you
-                can pay down" - an instruction with no control anywhere on the page, which is the
-                exact dead end this whole run of work has been removing. A spelling only reaches
-                this state when nothing in the book looks like it, and on Erik's own receipts that
-                is the one-off counters: Home Depot, Goodwin's, Tahoe City Lumber. Those are paid
-                at the register and have no balance to pay down, so the honest line says what is
-                true and asks for the one case it cannot tell apart. */}
-            {proposals.length > 0
-              ? " The suggestions below are how they get there."
-              : " Nothing in your book looks like them, so they are counted here but not grouped. That is the right answer for a counter you pay at the till. If one of them is really an account you settle later, say so and it gets a balance."}
+            {/* THE SENTENCE HAS TO MATCH THE BUTTONS THAT EXIST (review, 2026-09-19). It once read
+                "Put those bills on an account and they turn into a balance you can pay down" - an
+                instruction with no control anywhere on the page. Then it read that nothing in the
+                book looked like them, which was true and still offered nothing: five of his sixteen
+                spellings had no door at all. Now every one of them is listed below - in a
+                suggestion, in a question, or in a list of its own - so the line can point down the
+                page again and mean it. */}
+            {spellingDoors > 0
+              ? " Every one of them is listed below with a way to file it."
+              : " Nothing else on this page can place them, so they are counted here and left alone."}
           </div>
         )}
 
@@ -575,6 +596,13 @@ export function SuppliersCard({
       </Card>
 
       <SupplierMergeReview proposals={proposals} actions={actions} />
+
+      {/* THE QUESTION COMES AFTER THE SUGGESTIONS AND BEFORE THE LEFTOVERS, because that is the
+          order of how sure the app is: here is what I think, here is what I cannot tell, here is
+          what I have no opinion about at all. */}
+      <SupplierCandidateReview questions={questions} actions={actions} />
+
+      <SupplierUnfiledSpellings spellings={loose} canSetOnAccount={!!actions.setOnAccount} actions={actions} />
 
       <SupplierDuplicates groups={duplicates} actions={actions} />
 

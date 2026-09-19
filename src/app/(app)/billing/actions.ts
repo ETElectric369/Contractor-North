@@ -1029,7 +1029,14 @@ async function billLinesForBills(
   const read = (withBillable: boolean) =>
     supabase
       .from("bill_line_items")
-      .select(`id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable" : ""}`)
+      // THE PROJECTION LAW, ON THE ONE READ THAT DECIDES WHAT A CUSTOMER PAYS (all three reviewers
+      // of cn-v964). This is the ONLY feeder of billItemisation in production. `billed_amount`
+      // (0272) was missing from it, so every split Erik made was invisible here: the Bills card
+      // would say "$13.00 of it billed to this job" and the invoice would import $135.00 for the
+      // whole box - the screen disagreeing with the database, which is the exact bug the last three
+      // nights of work exist to end. It rides on the same rung as `billable` because both are the
+      // receipt line's states and a database missing one is already in the fallback case.
+      .select(`id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable, billed_amount" : ""}`)
       .in("bill_id", billIds)
       .order("sort_order");
   let res = await read(true);
