@@ -183,6 +183,101 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.claimedOn).toEqual([]);
   });
 
+  /**
+   * HIS OSH RUN FOR JASON WALDOW (bills 905c9f3d on J-046, live row): $16.28 of receipt, two bags
+   * of Kettle Chips and an ice cream bar switched off, ten bulk fasteners and $1.01 of tax on.
+   * Nothing claims it. The card used to say $20.35 of unbilled material and the button beside it
+   * wrote $8.13 - $12.22 of his own snacks with 25% on top, presented as money a customer owed.
+   */
+  const osh = {
+    id: "bill-osh",
+    amount: 16.28,
+    po_id: null,
+    bill_line_items: [
+      { id: "o1", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+      { id: "o2", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+      { id: "o3", quantity: 1, unit_price: 4.99, amount: 4.99, category: "Other", billable: false },
+      { id: "o4", quantity: 10, unit_price: 0.61, amount: 6.1, category: "Fasteners", billable: true },
+      { id: "o5", quantity: 1, unit_price: 1.01, amount: 1.01, category: "Tax", billable: true },
+    ],
+  };
+
+  it("a receipt counts for what it BILLS, not what the box cost — the J-046 snacks", () => {
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [osh] });
+    expect(w.billsCount).toBe(1);
+    expect(w.billsAmount).toBe(6.5); // 16.28 − 9.17 of snacks − their 0.61 share of the tax
+    expect(w.excluded).toBe(9.78); // what he took off, so the card can say it rather than look wrong
+    expect(w.billsBilled).toBe(8.13); // exactly what importCostsIntoInvoice writes
+    expect(w.total).toBe(8.13);
+  });
+
+  it("a receipt that was ENTIRELY the company's own is not unbilled work at all", () => {
+    const allOff = { ...osh, bill_line_items: osh.bill_line_items.map((l) => (l.category === "Tax" ? l : { ...l, billable: false })) };
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [allOff] });
+    expect(w.billsCount).toBe(0); // the importer emits no rows for it — "1 bill · $0.00" would be a lie
+    expect(w.billsBilled).toBe(0);
+    expect(w.excluded).toBe(16.28);
+    expect(w.total).toBe(0);
+  });
+
+  it("a receipt with no lines read off it still bills its whole amount (hand-entered, unchanged)", () => {
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [{ id: "b-hand", amount: 200, po_id: null }] });
+    expect(w.billsAmount).toBe(200);
+    expect(w.excluded).toBe(0);
+    expect(w.billsBilled).toBe(250);
+  });
+
+  it("the PO a receipt supersedes is netted at the SUPPLIER'S charge, not at what the customer pays", () => {
+    // A PO is an estimate of what the delivery COST; its bill supersedes it at cost. Netting only
+    // the billable part would leave the snacks behind as an un-billed PO remainder.
+    const w = computeUnbilledWork({
+      ...base,
+      claims: foldClaims([], true),
+      jobEntries: [],
+      pos: [{ id: "po-osh", total: 16.28, status: "sent" }],
+      bills: [{ ...osh, po_id: "po-osh" }],
+    });
+    expect(w.billsCount).toBe(1); // the PO is fully superseded and gone; only the receipt is left
+    expect(w.billsAmount).toBe(6.5);
+  });
+
+  it("laborRowIds asks about a standalone allocation's PARENT shift too", () => {
+    // 90 of the 98 live labor claims are entry ids. Without the parent in the candidate list, a
+    // shift billed on another job and re-split onto this one is never looked up at all.
+    expect(laborRowIds({ jobEntries: [], jobAllocs: [{ id: "a-new", time_entries: { id: "e-brian" } }] })).toEqual(["a-new", "e-brian"]);
+  });
+
+  it("re-splitting a shift INV-061 already bills adds nothing to bill, and says whose it is", () => {
+    // INV-061 is dated 2026-08-29; this allocation was made three weeks later, by a door that
+    // checks no claim. Brian's 2 h on J-028 are already billed and already paid.
+    const w = computeUnbilledWork({
+      ...base,
+      claims: claimsHolding(["e-brian"]),
+      jobEntries: [],
+      jobAllocs: [{ id: "a-new", hours: 2, created_at: "2026-09-19T22:10:00Z", time_entries: { id: "e-brian", profiles: brian } }],
+      bills: [],
+    });
+    expect(w.hours).toBe(0);
+    expect(w.laborAmount).toBe(0);
+    expect(w.total).toBe(0);
+    expect(w.claimedOn).toEqual(["INV-061"]);
+  });
+
+  it("a split that predates the invoice is still billable — the live J-016 / J-013 pair", () => {
+    // INV-00032 holds Brian's entry id but the shift was split before it was written and it billed
+    // one hour of it; the other 2.5 h are Sue Waltz's, on J-013, unbilled to this day.
+    const w = computeUnbilledWork({
+      ...base,
+      claims: claimsHolding(["e-brian"], { id: "i32", invoice_number: "INV-00032", status: "paid", created_at: "2026-06-28T10:22:59.067Z" }),
+      jobEntries: [],
+      jobAllocs: [{ id: "a-j013", hours: 2.5, created_at: "2026-06-28T10:19:04.188Z", time_entries: { id: "e-brian", profiles: brian } }],
+      bills: [],
+    });
+    expect(w.hours).toBe(2.5);
+    expect(w.laborAmount).toBe(187.5);
+    expect(w.claimedOn).toEqual([]);
+  });
+
   it("a live PO already billed elsewhere is skipped; its later supplier bill is left off and counted (never a double charge)", () => {
     const w = computeUnbilledWork({
       ...base,

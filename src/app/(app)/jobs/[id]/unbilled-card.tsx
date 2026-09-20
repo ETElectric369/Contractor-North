@@ -182,6 +182,16 @@ export function UnbilledCard({
                   <dt className="w-12 shrink-0 text-slate-400">Bills</dt>
                   <dd className="text-slate-800">
                     {w.billsCount} · {formatCurrency(w.billsAmount)}
+                    {/* WHAT CAME OFF, NAMED (review of the audit fix wave, 2026-09-20). The bills
+                        figure is now NET of the lines he switched off - his own snacks, the part
+                        of a container that went on the shelf - and a receipt reading $6.50 when
+                        the paper says $16.28 looks like a typo unless the screen says why. The
+                        field was computed for exactly this sentence and nothing was drawing it. */}
+                    {w.excluded > 0.005 && (
+                      <span className="text-slate-500">
+                        {" "}({formatCurrency(w.excluded)} of it your own cost)
+                      </span>
+                    )}
                     {/* The markup is stated, not hidden in the total: the customer is billed the
                         marked-up figure and the office should see both numbers. */}
                     {w.billsCount > 0 && w.markupPct > 0 && (

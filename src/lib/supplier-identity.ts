@@ -503,13 +503,6 @@ export function suggestSupplierGroups(
   return { groups, candidates };
 }
 
-/** The user-facing word for a confidence. Plain words: nobody needs to read "0.78". */
-export function confidenceLabel(c: SupplierConfidence): string {
-  if (c === "strong") return "Almost certainly the same";
-  if (c === "likely") return "Probably the same";
-  return "Worth a look";
-}
-
 /**
  * THE KEY THE DATABASE ITSELF USES, and deliberately nothing cleverer.
  *

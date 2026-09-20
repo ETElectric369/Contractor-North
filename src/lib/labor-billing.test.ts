@@ -397,4 +397,61 @@ describe("labor lines claim their hours (0255)", () => {
     expect(free.jobEntries).toEqual(entries);
     expect(free.skippedIds).toEqual([]);
   });
+
+  /**
+   * SPLITTING A SHIFT THAT IS ALREADY BILLED CANNOT MINT FREE HOURS (review of cn-v966).
+   *
+   * Brian Taylor's real row: time_entries 3acf00cd, 2.0 h on J-028 (2026-08-17 17:00-19:00), no
+   * allocations at all, billed whole on INV-061 by its ENTRY id - INV-061 is paid. Anyone holding
+   * his token can call replace_time_allocations on his own shift; the RPC deletes nothing (there
+   * are no rows), inserts a fresh 2 h allocation with a brand-new id, and checks no claim. Those
+   * two hours would then read as unbilled on whatever job he filed them to and bill the customer a
+   * second time. 25 live shifts sit in that state today.
+   */
+  it("withoutClaimedLabor: a shift billed WHOLE by its entry id stays billed after it is re-split", () => {
+    // INV-061 was written on 2026-08-29 against a shift with NO allocations. The row below was made
+    // three weeks later, by a door that checks no claim — those are the same two hours again.
+    const heldBy = new Map([["e-brian", { created_at: "2026-08-29T05:03:05Z" }]]);
+    const allocs = [{ id: "a-new", hours: 2, created_at: "2026-09-19T22:10:00Z", time_entries: { id: "e-brian", profiles: brianP } }];
+    const free = withoutClaimedLabor([], allocs, new Set(["e-brian"]), heldBy);
+    expect(free.jobAllocs).toEqual([]);
+    expect(free.skippedIds).toEqual(["e-brian"]); // the INVOICE'S id, so the card can name INV-061
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).total).toBe(0); // NOT 2h × $75
+  });
+
+  it("withoutClaimedLabor: a split that ALREADY existed when the invoice was written still bills", () => {
+    // His live J-016/J-013 pair: INV-00032 (10:22) holds Brian's entry id, but the shift was split
+    // at 10:19 and that invoice billed one hour of it. The other 2.5 h sit on J-013 for Sue Waltz,
+    // unbilled. Refusing them would name an invoice that never billed those hours.
+    const heldBy = new Map([["e-brian", { created_at: "2026-06-28T10:22:59.067Z" }]]);
+    const allocs = [{ id: "a-j013", hours: 2.5, created_at: "2026-06-28T10:19:04.188Z", time_entries: { id: "e-brian", profiles: brianP } }];
+    const free = withoutClaimedLabor([], allocs, new Set(["e-brian"]), heldBy);
+    expect(free.jobAllocs.map((a) => a.id)).toEqual(["a-j013"]);
+    expect(free.skippedIds).toEqual([]);
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).total).toBe(187.5); // 2.5h × $75
+  });
+
+  it("withoutClaimedLabor: with no date on either side, a claimed parent reads as billed", () => {
+    // Unknown is not "free". Between billing an hour twice and asking him to void an invoice, only
+    // one of them takes money from a customer who already paid.
+    const allocs = [{ id: "a-new", hours: 2, time_entries: { id: "e-brian", profiles: brianP } }];
+    expect(withoutClaimedLabor([], allocs, new Set(["e-brian"])).jobAllocs).toEqual([]);
+  });
+
+  it("withoutClaimedLabor: an allocation whose parent shift is NOT billed passes through (the everyday split)", () => {
+    // updateTimeEntry carries the claim onto the new rows in the same request, so the ordinary
+    // split is dropped by its OWN id. Only a shift whose entry id is still held is judged here.
+    const allocs = [{ id: "a1", hours: 3, time_entries: { id: "e-free", profiles: brianP } }];
+    const free = withoutClaimedLabor([], allocs, new Set(["e-someone-else"]));
+    expect(free.jobAllocs.map((a) => a.id)).toEqual(["a1"]);
+    expect(free.skippedIds).toEqual([]);
+    expect(computeJobLaborBilling(free.jobEntries, free.jobAllocs, 0).total).toBe(225); // 3h × $75
+  });
+
+  it("withoutClaimedLabor: an allocation carrying no parent row is judged on its own id alone", () => {
+    // A caller with an older projection must not lose hours because the parent is absent - an
+    // unknown parent is not a claimed one.
+    const allocs = [{ id: "a1", hours: 4, time_entries: { profiles: brianP } }];
+    expect(withoutClaimedLabor([], allocs, new Set(["e-brian"])).jobAllocs.map((a) => a.id)).toEqual(["a1"]);
+  });
 });

@@ -116,17 +116,6 @@ export async function markPeriodPaid(input: {
   const list = (entries ?? []) as any[];
   if (!list.length) return { ok: false, error: "No unpaid hours in this period." };
 
-  // Freeze the snapshot's hours+gross via the EXACT function the approval screen renders
-  // (aggregatePayrollEntries) — one code path, so the number the accountant exports can't
-  // drift from what the owner approved. Every fetched entry is unpaid (query filter) and
-  // one profile, so they roll into a single row's UNPAID bucket; pass the base rate as the
-  // fallback because this query doesn't join profiles. Miles aren't selected here, so the
-  // aggregator's mileage side reads 0 — exactly right, this is the base bucket only.
-  const [agg] = aggregatePayrollEntries(list, tz, rate);
-  const hours = agg?.unpaidHours ?? 0;
-  const gross = agg?.unpaidGross ?? 0;
-  const r2 = (n: number) => Math.round(n * 100) / 100;
-
   const ids = list.map((e) => e.id);
   // CLAIM ONLY STILL-UNPAID ROWS (audit v921): two staff (or two taps) both read the unpaid list
   // before either wrote, so both stamped and both inserted a payroll_runs row -> doubled gross in
@@ -144,6 +133,37 @@ export async function markPeriodPaid(input: {
   // concurrent overlapping period had already stamped and snapshotted, and its run row would
   // stay standing — the doubled gross again, from the other side.
   const stampedIds = (stamped as { id: string }[]).map((r) => r.id);
+
+  // Freeze the snapshot's hours+gross via the EXACT function the approval screen renders
+  // (aggregatePayrollEntries) — one code path, so the number the accountant exports can't
+  // drift from what the owner approved. One profile and nothing carries paid_at (the query
+  // filtered on it and doesn't even select it), so these roll into a single row's UNPAID
+  // bucket; pass the base rate as the fallback because this query doesn't join profiles.
+  // Miles aren't selected here, so the aggregator's mileage side reads 0 — exactly right,
+  // this is the base bucket only.
+  //
+  // PRICE WHAT WAS CLAIMED, NOT WHAT WAS READ. This used to run ABOVE the claim, on the whole
+  // read list, and a PARTIAL claim then froze a gross covering hours somebody else's lock had
+  // already stamped AND already snapshotted. Two surfaces stamp paid_at now, not one — the
+  // Payroll button and applyLocks on every recordPayment — and the pay anchor moving in
+  // Settings is all it takes for their two windows to overlap. balanceForPerson sums EVERY
+  // kind='base' run into `earned` forever and nothing ever reconciles a frozen run back to the
+  // entries, so that overlap is a permanent overstatement of what Erik owes Brian.
+  //
+  // Re-pricing beats settleMileage's refuse-and-roll-back sibling here because this gross is
+  // COMPUTED, not a figure a human typed at a smaller set of miles: a smaller claimed set is
+  // simply a smaller TRUE gross, still covered in full by the credit, and applyLocks re-reads
+  // the locked total after every lock (lockedGrossCents below) so the walking credit stays
+  // honest for the next period. Refusing here would dead-end a payment that did nothing wrong.
+  const claimed = new Set(stampedIds);
+  const [agg] = aggregatePayrollEntries(
+    list.filter((e) => claimed.has(e.id)),
+    tz,
+    rate,
+  );
+  const hours = agg?.unpaidHours ?? 0;
+  const gross = agg?.unpaidGross ?? 0;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
 
   // org_id is stamped by the set_org_id trigger. Base bucket only: no miles, no
   // mileage dollars — those live on kind='mileage' rows, human-stated.
@@ -1107,15 +1127,32 @@ export async function confirmImportedPayment(id: string): Promise<PayResult> {
   const paymentId = String(id ?? "");
   const { data: row } = await supabase
     .from("pay_payments")
-    .select("id, profile_id, amount, paid_on, needs_check, voided_at")
+    .select("id, profile_id, amount, paid_on, note, needs_check, voided_at")
     .eq("id", paymentId)
     .maybeSingle();
   if (!row) return { ok: false, error: "That payment isn't here anymore. Reload the page." };
   if (!(row as any).needs_check) return { ok: false, error: "That payment is already checked off." };
 
+  /**
+   * THE INSTRUCTION MUST NOT OUTLIVE THE DEED (audit finding, 2026-09-20). 0265 wrote the note
+   * "Recorded from the old Mark Paid button, and still needs checking. It covers ..." beside the
+   * flag, and this action cleared the flag and left the sentence. The note is the only part of the
+   * row still on screen once the needs-check banner is gone, which makes it the part that has to
+   * stay true - and it is durable ledger text, reachable by SQL and by any export, so it has to
+   * stop EXISTING rather than stop being drawn. The row keeps where the figure came from and
+   * loses the order attached to it, in the same statement that drops the flag. 0279 did the same
+   * to the two rows that were already checked off before this shipped.
+   */
+  const storedNote = String((row as any).note ?? "");
+  const checkedNote =
+    storedNote
+      .replace(", and still needs checking.", ".")
+      .replace(" - check this.", ".")
+      .replace(" — check this.", ".") || null;
+
   const { data: cleared, error } = await supabase
     .from("pay_payments")
-    .update({ needs_check: false })
+    .update({ needs_check: false, ...(checkedNote !== storedNote ? { note: checkedNote } : {}) })
     .eq("id", paymentId)
     .eq("needs_check", true)
     .select("id");

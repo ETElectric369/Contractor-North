@@ -267,8 +267,12 @@ export function BillsReceipts({
               <div>
                 <Label htmlFor="b-status">Status</Label>
                 <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                  <option value="unpaid">Unpaid</option>
-                  <option value="paid">Paid</option>
+                  {/* HOW THE BILL WAS BOUGHT, not whether a payment exists. A cheque to a
+                      supplier is recorded on the Suppliers card above; picking "Settled At The
+                      Counter" here takes this bill out of that balance, which is a different
+                      fact and the only one this field has ever meant. */}
+                  <option value="unpaid">On Account</option>
+                  <option value="paid">Settled At The Counter</option>
                 </Select>
               </div>
             </div>
@@ -340,7 +344,14 @@ export function BillsReceipts({
                          ledger, and says what it actually means: how this bill was bought. */
                       title="Settled at the counter, or on account? This is how the bill was bought - the supplier balance reads it."
                     >
-                      <Badge tone={statusTone(b.status)}>{b.status}</Badge>
+                      {/* AND THE FACE OF IT HAS TO SAY SO TOO (review of cn-v966). cn-v966 rewrote
+                          the toast and the tooltip and left the badge printing the raw column,
+                          "paid" / "unpaid" - and "paid" is the one word on this screen that
+                          invites him to tick a bill a cheque already covered. The tooltip does
+                          not exist on a 375px phone and the toast arrives after the tap, so the
+                          badge was the whole invitation. It is also a clickable, so a lowercase
+                          database word was a Title Case violation sitting inside a button. */}
+                      <Badge tone={statusTone(b.status)}>{b.status === "paid" ? "Settled" : "On Account"}</Badge>
                     </button>
                     <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
                       <Pencil className="h-4 w-4" />
@@ -471,6 +482,8 @@ function BillEditModal({
   const [billJob, setBillJob] = useState(bill.job_id ?? "__overhead");
   const [billCategory, setBillCategory] = useState(bill.category ?? "Shop supplies");
   const [error, setError] = useState<string | null>(null);
+  /** What updateBill said about an invoice that bills this receipt. Holds the modal open. */
+  const [billedNote, setBilledNote] = useState<string | null>(null);
 
   const isOverhead = billJob === "__overhead";
 
@@ -489,6 +502,16 @@ function BillEditModal({
         category: isOverhead ? billCategory : null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      // THE SAME SENTENCE THE JOB PAGE HOLDS OPEN (review of the fix wave, 2026-09-20). A re-price
+      // on a receipt a live invoice is billing leaves the invoice on its old figure on purpose -
+      // the customer was told a number - so the two now describe one purchase at two prices, and
+      // that has to be said. This is the main door for editing a receipt, and it was closing clean
+      // on exactly that save. `warning` comes back through executeAction verbatim.
+      if (res.warning) {
+        setBilledNote(res.warning);
+        router.refresh();
+        return;
+      }
       onClose();
       router.refresh();
     });
@@ -502,6 +525,15 @@ function BillEditModal({
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save Changes" />}
     >
       <div className="space-y-3">
+        {billedNote && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
+            <div className="font-semibold">Saved. One thing about the invoice:</div>
+            <div className="mt-1">{billedNote}</div>
+            <Button variant="outline" size="sm" onClick={onClose} className="mt-2 h-11">
+              Got It
+            </Button>
+          </div>
+        )}
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
@@ -542,8 +574,10 @@ function BillEditModal({
           <div>
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
+              {/* The same two words as the add form and the badge: one vocabulary for one
+                  column, or the screen teaches him two different meanings for one tick. */}
+              <option value="unpaid">On Account</option>
+              <option value="paid">Settled At The Counter</option>
             </Select>
           </div>
         </div>

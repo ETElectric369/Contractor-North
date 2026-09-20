@@ -43,6 +43,7 @@ import {
   voidSupplierPayment,
   setSupplierInvoiceJob,
   recordSupplierInvoiceAsBill,
+  updateSupplierAccount,
 } from "./supplier-actions";
 
 export const dynamic = "force-dynamic";
@@ -205,7 +206,16 @@ export default async function BillsPage({
       .limit(2000),
     // Which scanned bills cover which supplier invoices. A document with no link is a purchase
     // the app has no record of at all, which is $1,765.72 of his tonight.
-    supabase.from("bill_supplier_invoices").select("supplier_invoice_id").limit(5000),
+    //
+    // BOTH COLUMNS, AND THE BILL ID IS THE ONE THAT WAS MISSING (review of cn-v966). The read
+    // further down does `String(l.bill_id ?? "")` on every one of these 21 rows, and a column
+    // left out of a select list does not come back null - it is not there at all, so the `?? ""`
+    // never fired and every link collapsed to the nine-letter string "undefined". The set that
+    // is meant to hold WHICH BILLS cover an invoice held one sentinel instead, so a bill that is
+    // both linked to an invoice and names it on its own lines counted as two, and no filter over
+    // those ids (superseded, on a job, on this account) could ever have been written. The failure
+    // is always a select list - and `?? ""` cannot defend a column that was never asked for.
+    supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").limit(5000),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
@@ -495,6 +505,60 @@ export default async function BillsPage({
     if (accountId) documentsOf.set(accountId, [...(documentsOf.get(accountId) ?? []), row]);
     return row;
   });
+
+  // ── THE BILLS THE SUPPLIER HAS NO DOCUMENT FOR (review of cn-v966) ──────────────────────────
+  //
+  // Model B says "owed is what the supplier still calls open", and that is right for every
+  // purchase the supplier issued paper for. It is not right for one they never issued paper for
+  // and never will: bill c0535cdb, the $467.87 Sunnyvale counter ticket he bought on his Truckee
+  // account. CED Truckee will not be sending a document that covers a Sunnyvale branch ticket,
+  // so that money sits in no balance on this page - while the card explained the whole unpaid
+  // pile away as "your paperwork rather than theirs", which is true of the other eleven bills on
+  // that account and flatly false of this one.
+  //
+  // THE BALANCE DOES NOT MOVE. Folding it into `owed` would invite a cheque for money CED has
+  // not billed him, and the app SUGGESTS while a person DECIDES. All this does is name the slice
+  // so it has a home on the screen instead of falling between two figures.
+  //
+  // A document covers a bill by being LINKED to it, or by having its number read off the bill's
+  // own lines - the same two routes `billCount` above counts - and only when the bill is filed
+  // on THAT document's account, so a number belonging to another supplier can never mark a bill
+  // covered.
+  const billAccount = new Map<string, string>();
+  for (const b of liveBills) billAccount.set(String(b.id), String(b.supplier_account_id ?? ""));
+
+  const coveredBillIds = new Set<string>();
+  const coverBill = (billId: string, documentAccountId: string) => {
+    if (!billId || !documentAccountId) return;
+    if (billAccount.get(billId) !== documentAccountId) return;
+    coveredBillIds.add(billId);
+  };
+  for (const r of (invoiceRows ?? []) as any[]) {
+    const accountId = String(r.supplier_account_id ?? "");
+    for (const id of coveringBills.get(String(r.id)) ?? []) coverBill(id, accountId);
+    for (const id of billsNamingNumber.get(String(r.invoice_number ?? "").trim()) ?? []) coverBill(id, accountId);
+  }
+
+  // ONLY WHERE THE QUESTION EXISTS - an account whose supplier documents we actually hold. Under
+  // model A every unpaid bill is already inside the balance, so there is no uncovered slice to
+  // name and this map stays empty for every account but CED.
+  //
+  // A $0.00 ROW IS NOT A SLICE OF MONEY. He has one, and counting it would make the sentence say
+  // "2 bills" over a single dollar figure that only one of them is carrying.
+  const noSupplierDocument = new Map<string, { total: number; bills: number; ids: string[] }>();
+  for (const b of liveBills) {
+    const accountId = String(b.supplier_account_id ?? "");
+    if (!accountId || !documentsOf.has(accountId)) continue;
+    if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    if (coveredBillIds.has(String(b.id))) continue;
+    const amount = Number(b.amount) || 0;
+    if (amount <= 0.005) continue;
+    const g = noSupplierDocument.get(accountId) ?? { total: 0, bills: 0, ids: [] };
+    g.total = Math.round((g.total + amount) * 100) / 100;
+    g.bills += 1;
+    g.ids.push(String(b.id));
+    noSupplierDocument.set(accountId, g);
+  }
 
   // ONE ARRAY, TWO READERS. The same row objects go to the balance upstairs and to the reconcile
   // card downstairs, so the two can never be looking at different documents - which is the fault
@@ -825,6 +889,10 @@ export default async function BillsPage({
           loose={loose}
           duplicates={duplicates}
           reconcile={reconcile}
+          // The slice of an account's unpaid bills that the supplier's own documents do not cover.
+          // Never folded into a balance - named, so $467.87 he does owe is not explained away as
+          // paperwork by a sentence written for the eleven bills beside it.
+          noSupplierDocument={Object.fromEntries(noSupplierDocument)}
           actions={{
             acceptMerge: acceptSupplierMerge,
             dismissMerge: dismissSupplierMerge,
@@ -838,6 +906,8 @@ export default async function BillsPage({
             // suppliers-card gates it on `!!actions.setInvoiceJob`, so an absent action does not
             // degrade the feature - it deletes it, silently, in every state of the data.
             setInvoiceJob: setSupplierInvoiceJob,
+            // The account's own details, which had no door until the audit counted one.
+            updateAccount: updateSupplierAccount,
             // AND THE SAME LINE AGAIN, FOR THE SAME CARD. "Record It As A Bill" was written,
             // styled and gated on `actions.recordAsBill` - which nothing implemented and nothing
             // passed, so Erik had to ask me to write his $223.29 CED invoice into his books by

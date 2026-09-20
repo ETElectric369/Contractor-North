@@ -7,6 +7,11 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
 import { invoiceBalance } from "@/lib/invoice-math";
+/* THE rule, imported, never re-derived. `revised_at > sent_at` is one sentence and it already has
+   one home (lib/invoice-revision.ts) — the same function the server stamps by and the invoice page
+   banners by. A second copy of it on this board is exactly the shape of the draft gate this wave
+   spent a day untangling, where one of nine copies had been wrong for months. */
+import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { getCollected } from "@/lib/analytics/money-metrics";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
@@ -19,7 +24,7 @@ const money = (n: number) => formatCurrency(n);
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }] =
+  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }, { data: revisedInv }] =
     await Promise.all([
       getMoneyPipeline(supabase),
       supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
@@ -33,13 +38,36 @@ export default async function BillingPage() {
       // list quietly stops showing older rows with nothing on screen saying so. An explicit high
       // limit fails visibly at a known number instead of invisibly at the server's.
       supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, customers(name)").order("created_at", { ascending: false }).limit(2000),
+      // THE QUESTION 0269 BUILT AN INDEX FOR, AND NOBODY EVER ASKED (audit v966).
+      //
+      // 0269 says it in its own words: the "needs re-sending" question "is asked per org on the
+      // billing board", and it shipped invoices_revised_at_idx on (org_id, revised_at) where
+      // revised_at is not null to answer it cheaply. It was never wired up. The whole workflow
+      // 0269 exists to allow — fix a line on a bill the customer already has, then get on with
+      // the day — showed up on no list, no count and no badge anywhere in the app. The only way
+      // to learn that INV-071 needed re-sending was to already be looking at INV-071.
+      // This board's own tagline is "nothing slips through". That was the case that slipped.
+      //
+      // Asked as its own narrow read rather than by widening the list above, because that is what
+      // the partial index covers and it is the only projection on this page that needs the two
+      // stamps. VOID is excluded: a voided document is not a bill any more, so there is nothing
+      // to re-send. `revised_at is not null` alone is not the answer — a re-send moves sent_at
+      // forward and leaves revised_at standing (that fact is worth keeping), so the rule below
+      // decides, not this filter.
+      supabase.from("invoices").select("id, invoice_number, total, status, sent_at, revised_at, customers(name)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
     ]);
 
   const list = (allInv ?? []) as any[];
   const collected = collectedTotals.allTime;
 
   const { doneNotInvoiced, drafts, unpaid } = pipeline;
-  const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0;
+  // Built from EVERY revised invoice, not from `unpaid`. A revision that lowers a paid invoice's
+  // total leaves its status 'paid' and its balance at zero — and that is the exact case Erik's
+  // client wrote in about (a settled bill reissued in the property owner's name). Filtering this
+  // lane by money owed would miss the one it was built for.
+  const needsResend = ((revisedInv ?? []) as any[]).filter((i) => customerHoldsOlderCopy(i.sent_at, i.revised_at));
+  // "All caught up" may not be printed over a customer holding the wrong bill.
+  const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0 && needsResend.length === 0;
 
   return (
     <div>
@@ -72,7 +100,7 @@ export default async function BillingPage() {
       {caughtUp && (
         <Card className="mb-4 border-emerald-200 bg-emerald-50/50">
           <CardContent className="flex items-center gap-2 py-4 text-sm font-medium text-emerald-800">
-            <CheckCircle2 className="h-5 w-5" /> All caught up — every finished job is invoiced and every invoice is paid.
+            <CheckCircle2 className="h-5 w-5" /> All caught up. Every finished job is invoiced, every invoice is paid, and nobody is holding an older copy of one.
           </CardContent>
         </Card>
       )}
@@ -112,6 +140,40 @@ export default async function BillingPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <span className="text-sm font-medium text-slate-900">{money(inv.total)}</span>
+                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </Stage>
+      )}
+
+      {/* STAGE 2B — sent, then changed: the copy in their inbox is not this one.
+          THE ONE LANE THAT DELIBERATELY OVERLAPS ANOTHER. Every other stage on this board is
+          exclusive, because a thing that needs one money action should be in one place. This one
+          asks for a different verb than "record payment" — the bill is wrong in the customer's
+          hands, which is true whether they owe money or paid months ago — so an invoice can sit
+          here and in "Sent — awaiting payment" at the same time. It carries no total of its own
+          and is folded into none of the three tiles above, so nothing is double counted.
+          Amber on purpose: the same colour as the banner on the invoice's own page, so the board
+          and the page can never look like they are talking about two different problems. */}
+      {needsResend.length > 0 && (
+        <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Revised - Send Again" count={needsResend.length} sub="You changed these after they went out, so the customer is holding an older bill. Open one to send the corrected copy.">
+          {needsResend.map((inv: any) => (
+            <li key={inv.id}>
+              {/* A DOOR TO SOMETHING THAT EXISTS. This row does not send anything — it opens the
+                  invoice, where the amber notice and the one Send Invoice button already live. A
+                  second send path written here is how two doors drift apart. */}
+              <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
+                  <div className="truncate text-xs text-slate-500">{inv.invoice_number} · changed {formatDate(inv.revised_at)}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  {/* The bill's own total, which is what the corrected copy will say. Not a
+                      balance: this lane is about which piece of paper they are holding, and a
+                      revised PAID invoice belongs here reading its real figure, not $0.00. */}
+                  <span className="text-sm font-medium text-slate-900">{money(Number(inv.total) || 0)}</span>
                   <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
                 </div>
               </Link>

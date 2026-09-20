@@ -2,6 +2,7 @@
  *  estimate / invoiced / collected / work-to-date computation is unit-testable
  *  without a DB. The server fn does the fetching, then calls this. */
 
+import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 
 export type JobProgressFinancials = {
@@ -9,7 +10,9 @@ export type JobProgressFinancials = {
    *  reference on Time & Material). */
   estimate: number;
   /** Billable work to date: labor at charge rate + materials with markup. Computed
-   *  the SAME way importLabor/importCosts bill, so it reconciles to the penny. */
+   *  the SAME way importLabor/importCosts bill, so it reconciles to the penny - which
+   *  since 0268/0272 means a receipt counts for what it BILLS, not what it cost (a line
+   *  switched off, or the shelf's share of a split container, never reaches a customer). */
   workToDate: number;
   /** Invoices actually sent to the customer (non-void, non-draft). */
   invoiced: number;
@@ -39,7 +42,11 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 const NON_COST_PO_STATUSES = new Set(["cancelled"]);
 
 export type MaterialPo = { id?: string | null; total: number | null; status?: string | null };
-export type MaterialBill = { amount: number | null; po_id?: string | null };
+/** A supplier bill as the money readers see it. `bill_line_items` is what the receipt was read
+ *  into: it decides how much of `amount` reaches the customer (0268/0272), and a row that carries
+ *  none - a hand-entered bill, or a caller whose select list has not been widened - bills its
+ *  whole amount exactly as it always did. */
+export type MaterialBill = { amount: number | null; po_id?: string | null; bill_line_items?: BillLine[] | null };
 
 /**
  * THE material-cost rule, shared by every summer (progress financials, profitability,
@@ -117,7 +124,21 @@ export function computeJobProgress(input: {
     livePurchaseOrders(input.pos, input.bills).reduce(
       (s, p) => (num(p.total) > 0 ? s + mk(num(p.total)) : s),
       0,
-    ) + (input.bills ?? []).reduce((s, b) => (num(b.amount) > 0 ? s + mk(num(b.amount)) : s), 0);
+    ) +
+    // WORK TO DATE IS WHAT THE CUSTOMER WILL BE BILLED, NOT WHAT THE BOX COST (review of cn-v966).
+    // The whole promise of this function is that the panel reconciles to the penny with the lines
+    // importCostsIntoInvoice writes, and since 0268/0272 those lines are the receipt MINUS the
+    // snacks and minus the share of a container that went on the shelf. Summing bills.amount here
+    // put Erik's ice cream bar, marked up, into the reference figure a progress draw is measured
+    // against. billableBillCost is the importer's own reading, shared, so the two cannot drift.
+    //
+    // livePurchaseOrders above still gets the FULL amounts: a PO is an estimate of what the
+    // delivery COST and its bill supersedes it at cost, not at price. Netting the excluded lines
+    // out of that subtraction would leave the snacks behind as an un-billed PO remainder.
+    (input.bills ?? []).reduce((s, b) => {
+      const billable = billableBillCost(b.amount, b.bill_line_items);
+      return billable > 0 ? s + mk(billable) : s;
+    }, 0);
 
   const workToDate = cents(num(input.billableLabor) + billableMaterials);
   return { estimate, workToDate, invoiced, collected, billingType };

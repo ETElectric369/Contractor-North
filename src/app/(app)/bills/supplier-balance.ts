@@ -423,16 +423,51 @@ export function reversedInvoiceIds(invoices: InvoiceBalanceShape[]): Set<string>
  * so a live credit can never be spent against a settled purchase or the other way round. Same
  * narrowness: to the cent, each memo spending itself once.
  */
-export function reversedPurchaseIds(invoices: InvoiceBalanceShape[]): Set<string> {
+/**
+ * The four fields the reversal rule reads, plus the KIND when the caller happens to know it. It is
+ * optional because `InvoiceBalanceShape` never carried it and the balance callers do not need it;
+ * a caller that passes it gets the narrower, safer answer below.
+ */
+export type PurchaseReversalShape = InvoiceBalanceShape & Partial<Pick<SupplierInvoiceRow, "kind">>;
+
+export function reversedPurchaseIds(invoices: PurchaseReversalShape[]): Set<string> {
   const out = new Set<string>();
   const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
+  /**
+   * ONLY AN INVOICE IS A PURCHASE AND ONLY A CREDIT MEMO TAKES ONE BACK - supplier-reconcile's own
+   * IS_A_PURCHASE, said here so the rule cannot be walked around by the sign of a total. A
+   * statement carries the same money as the invoices inside it, so letting one spend a credit memo
+   * would burn the memo on a wrapper and leave the real return reading as merchandise he kept. A
+   * row with no `kind` on it is judged on its amount alone, exactly as this did before.
+   */
+  const isKind = (i: PurchaseReversalShape, want: string) => {
+    const k = String((i as { kind?: unknown })?.kind ?? "");
+    return !k || k === want;
+  };
   for (const settled of [false, true]) {
     const side = (invoices ?? []).filter((i) => !!i?.closed === settled);
-    const credits = side.filter((i) => cents((i as { total?: unknown })?.total) < 0).map((i) => ({ i, spent: false }));
-    for (const inv of side) {
-      const total = cents((inv as { total?: unknown })?.total);
-      if (!(total > 0)) continue;
-      const hit = credits.find((c) => !c.spent && cents((c.i as { total?: unknown })?.total) === -total);
+    const credits = side
+      .filter((i) => cents(i?.total) < 0 && isKind(i, "credit_memo"))
+      .map((i) => ({ i, spent: false }));
+    const purchases = side.filter((i) => cents(i?.total) > 0 && isKind(i, "invoice"));
+    for (const inv of purchases) {
+      const total = cents(inv?.total);
+      /**
+       * AMBIGUOUS IS NOT ANSWERED (review, 2026-09-20). This used to take the FIRST unspent memo
+       * at the matching cent, so with two $150.00 invoices and one $150.00 credit memo the answer
+       * was whichever row the caller's ORDER BY happened to hand over first - and the two callers
+       * do not sort the same way. Getting it wrong is silent and expensive in both directions: the
+       * purchase he really kept becomes unbillable ("you returned this"), and the merchandise he
+       * really sent back stays on the Record button, one tap from a customer's job.
+       *
+       * Nothing in these rows says which one came back, so neither is called reversed and both
+       * stay on the list for a person to settle. The app suggests, he decides. When every tied
+       * purchase has its own memo there is no guess left to make, and the guard fires as before.
+       */
+      const twins = purchases.filter((i) => cents(i?.total) === total).length;
+      const memos = credits.filter((c) => cents(c.i?.total) === -total).length;
+      if (twins > memos) continue;
+      const hit = credits.find((c) => !c.spent && cents(c.i?.total) === -total);
       if (!hit) continue;
       hit.spent = true;
       const id = String((inv as { id?: unknown })?.id ?? "");

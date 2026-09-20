@@ -153,18 +153,33 @@ async function insertItemizedBill(
     return null;
   }
   if (lines.length) {
-    await supabase.from("bill_line_items").insert(
-      lines.map((l, i) => ({
-        bill_id: data.id,
-        description: l.description,
-        quantity: l.quantity,
-        unit_price: l.unit_price,
-        amount: l.amount,
-        category: l.category,
-        billable: l.billable,
-        sort_order: i,
-      })),
-    );
+    const { error: lineErr } = await supabase
+      .from("bill_line_items")
+      .insert(
+        lines.map((l, i) => ({
+          bill_id: data.id,
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          amount: l.amount,
+          category: l.category,
+          billable: l.billable,
+          sort_order: i,
+        })),
+      )
+      .select("id");
+    // A BILL WITH NO LINES IS STILL A NUMBER (silent-write law, same pass as 0278). The bill row
+    // is already in and carries the total, so throwing it away would lose the whole cost - but
+    // the itemisation is what 0268 bills off and what the Receipt Line editor shows, so a receipt
+    // that lands as a bare total must not do it quietly. Same reason it is the ops log and not a
+    // thrown error: the cost IS recorded, and that is worth keeping.
+    if (lineErr) {
+      reportError("organize:insertItemizedBill.lines", lineErr, {
+        billId: data.id,
+        supplier: bill.supplier,
+        lineCount: lines.length,
+      });
+    }
   }
   return data.id;
 }
@@ -615,7 +630,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
   if (!billId) return { ok: false, error: "Could not create the bill." };
 
   // Link record so the receipt is known to be billed (drives idempotency above).
-  await supabase.from("organized_items").insert({
+  const { data: link, error: linkErr } = await supabase.from("organized_items").insert({
     kind: "receipt",
     title: vendor,
     summary: null,
@@ -632,12 +647,70 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     line_items: lines.length ? lines : null,
     file_url: doc.file_url,
     created_by: ctx.userId,
-  });
+  }).select("id");
+
+  // THE LINK ROW IS THE IDEMPOTENCY (same pass as 0278, same class as the teardown above).
+  //
+  // The "have we already billed this document?" check at the top of this function reads THIS row
+  // and nothing else. Written and thrown away, a failure here was invisible and the receipt stayed
+  // forever un-billed in the app's eyes: the next tap on Record as Cost reads the same paper again
+  // and writes a SECOND bill on the job, double job cost and double marked-up material on the
+  // customer's invoice. Exactly the duplicate the teardown checks exist to stop, arriving from the
+  // other direction.
+  //
+  // The bill IS in, so this cannot refuse - throwing an error here would lose a real cost over a
+  // bookkeeping row. It rides out on `warning`, which every caller already prints (see
+  // receipt-capture's readReceiptDocument), alongside the ops-log line the daily sweep reads.
+  const linkMissing = linkErr || !link?.length;
+  if (linkMissing) {
+    reportError("organize:billJobReceipt.link", linkErr ?? new Error("link insert returned no row"), {
+      documentId,
+      billId,
+      jobId: doc.job_id,
+    });
+  }
+  const linkWarning = linkMissing
+    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record as Cost on it again would write a second bill, so check the job's costs first."
+    : null;
 
   revalidatePath("/bills");
   revalidatePath("/analytics");
   revalidatePath(`/jobs/${doc.job_id}`);
-  return { ok: true, amount, vendor, lineCount: lines.length, warning: check.mismatch ? check.note : undefined };
+  return {
+    ok: true,
+    amount,
+    vendor,
+    lineCount: lines.length,
+    // Both facts or neither: a receipt that did not add up AND did not get linked has two things
+    // wrong with it, and hiding one behind the other is how the second one gets found in a month.
+    warning: [check.mismatch ? check.note : null, linkWarning].filter(Boolean).join(" ") || undefined,
+  };
+}
+
+/**
+ * THE DATABASE'S REFUSAL, SAID FOR THE DOOR IT CAME THROUGH (0278).
+ *
+ * guard_billed_bill raises ONE sentence for every door that deletes a bill, and it ends "then
+ * delete this receipt" - right under the trash icon, wrong here, where Erik tapped a job name and
+ * expected the receipt to MOVE. A refusal that names an action he did not take reads as a second,
+ * different bug, and he stops trusting the first sentence too.
+ *
+ * So the invoice number stays the DATABASE'S (never ours to guess or re-look-up - it is the one
+ * fact this app must not invent), and only the tail is this door's. Matching on the guard's own
+ * words is deliberate: anything the guard did NOT say falls through to dbError with its text
+ * intact, because an unrecognised error keeps its exact wording - that is how bug reports work
+ * here.
+ *
+ * The leading \S matters. invoice_holding_claim coalesces a missing number to "another invoice",
+ * so a cross-org claimant opens the sentence in lower case and, if that fallback ever became an
+ * empty string, would open it with a space. Require a real first character, then upper-case it,
+ * and the toast reads like a sentence either way.
+ */
+function billClaimRefusal(err: unknown, tail: string): string | null {
+  const msg = String((err as { message?: unknown } | null)?.message ?? "");
+  const held = msg.match(/^(\S.*? already bills this receipt\.)/);
+  if (!held) return null;
+  return `${held[1][0].toUpperCase()}${held[1].slice(1)} ${tail}`;
 }
 
 export type FileDestination =
@@ -659,12 +732,51 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
-  // Tear down the previous filing. The petty-cash row is torn down HERE too (audit 9, 0202):
-  // without a back-link, re-filing a receipt left the first petty_cash row standing and the
-  // same disbursement was counted twice in the drawer.
-  if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
-  if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
-  if (item.petty_cash_id) await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id);
+  // THE BILL COMES DOWN FIRST, AND ONLY IF THE DATABASE LETS IT (0278; audit of cn-v951..v966).
+  //
+  // Re-filing tears the old filing down and builds a new one, and this line tore down a bill a
+  // LIVE INVOICE was already billing. invoice_items has no foreign key to bills - a claim is a
+  // uuid inside an array - so the invoice lines survived the delete intact and went on charging
+  // the customer for a receipt that no longer existed, while the job's cost dropped by the same
+  // amount and its margin jumped. Re-filing is the worse half: the replacement bill comes back
+  // with a NEW id that no claim covers, so importCostsIntoInvoice will bill the same purchase to
+  // a second customer. Bill c0535cdb, $467.87 of CED on J-046, is claimed by eight lines of
+  // INV-069 that Jason has already part paid; 26 of the 30 receipts in the Organize archive are
+  // in that state today.
+  //
+  // Throwing the result away is what made it silent: with the guard in place the teardown now
+  // FAILS, and the old code walked straight past that into inserting the second bill.
+  //
+  // FIRST, ahead of the document and petty-cash rows, so a refusal leaves the item exactly as it
+  // was and "Nothing was moved" is a fact rather than a hope. No zero-row refusal here, unlike
+  // the trash door: bills_write and the organized_items read are the same org+staff gate, so
+  // zero rows means the bill is simply already gone (bill_id is ON DELETE SET NULL, and a retry
+  // after a half-finished move lands here), and re-filing has to keep working.
+  if (item.bill_id) {
+    const { error: billErr } = await supabase.from("bills").delete().eq("id", item.bill_id).select("id");
+    if (billErr)
+      return {
+        ok: false,
+        error:
+          billClaimRefusal(
+            billErr,
+            "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
+          ) ?? dbError(billErr),
+      };
+  }
+  // Then the rest of the previous filing. The petty-cash row is torn down HERE too (audit 9,
+  // 0202): without a back-link, re-filing a receipt left the first petty_cash row standing and
+  // the same disbursement was counted twice in the drawer. Both are checked for the bill's own
+  // reason - a teardown that fails and says nothing becomes a SECOND row a moment later.
+  if (item.document_id) {
+    const { error: docErr } = await supabase.from("documents").delete().eq("id", item.document_id).select("id");
+    if (docErr) return { ok: false, error: `${dbError(docErr)} The old copy is still on the job, so this was not re-filed.` };
+  }
+  if (item.petty_cash_id) {
+    const { error: pcErr } = await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id).select("id");
+    if (pcErr)
+      return { ok: false, error: `${dbError(pcErr)} The old petty cash entry is still in the drawer, so this was not re-filed.` };
+  }
   const prevJob = item.job_id;
   const lines = cleanLines(item.line_items);
 
@@ -750,14 +862,50 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
 
-  if (item.document_id) await supabase.from("documents").delete().eq("id", item.document_id);
-  if (item.bill_id) await supabase.from("bills").delete().eq("id", item.bill_id);
+  // SAME CEILING, SAME ORDER (0278). A receipt a live invoice is already billing cannot be thrown
+  // away, so the bill goes first and a refusal costs nothing: the photo, the copy on the job and
+  // the item itself are all still standing when this returns. Before the guard, this discarded
+  // the result and carried on, which deleted the picture and the row and left INV-069 charging
+  // for a receipt nobody could open. The escape hatch is the invoice's, not ours: void it, or
+  // take its materials lines off, and the same tap goes through.
+  if (item.bill_id) {
+    const { error: billErr } = await supabase.from("bills").delete().eq("id", item.bill_id).select("id");
+    if (billErr)
+      return {
+        ok: false,
+        error:
+          billClaimRefusal(
+            billErr,
+            "Void that invoice, or take its materials lines off, then delete this receipt. Nothing was deleted.",
+          ) ?? dbError(billErr),
+      };
+  }
+  if (item.document_id) {
+    const { error: docErr } = await supabase.from("documents").delete().eq("id", item.document_id).select("id");
+    if (docErr) return { ok: false, error: `${dbError(docErr)} The copy on the job is still there, so nothing else was deleted.` };
+  }
   // The petty-cash disbursement this filing created goes with it (audit 9, 0202) — deleting the
   // item used to orphan real spend in the drawer with nothing behind it.
-  if (item.petty_cash_id) await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id);
-  if (item.file_url) await supabase.storage.from("documents").remove([item.file_url]);
-  const { error } = await supabase.from("organized_items").delete().eq("id", id);
+  if (item.petty_cash_id) {
+    const { error: pcErr } = await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id).select("id");
+    if (pcErr)
+      return { ok: false, error: `${dbError(pcErr)} The petty cash entry is still in the drawer, so nothing else was deleted.` };
+  }
+
+  // THE ROW BEFORE THE PHOTO, and the silent-write law on the row itself: a delete that matches
+  // nothing is a 204 that reads exactly like success. Removing the file first meant a refused row
+  // delete left an item sitting in the tray pointing at a picture that was already gone.
+  const { data: gone, error } = await supabase.from("organized_items").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!gone?.length)
+    return { ok: false, error: "Nothing deleted. That item isn't here any more, or this login can't delete it." };
+  if (item.file_url) {
+    const { error: rmErr } = await supabase.storage.from("documents").remove([item.file_url]);
+    // The item IS gone, which is what was asked for. A left-behind photo costs storage, not
+    // money, so it goes to the ops log the daily sweep reads rather than a red box over a deed
+    // that already succeeded.
+    if (rmErr) reportError("organize:deleteOrganizedItem.storage", rmErr, { id, path: item.file_url });
+  }
 
   revalidatePath("/organize");
   revalidatePath("/bills");

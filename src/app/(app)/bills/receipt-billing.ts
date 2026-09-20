@@ -583,14 +583,51 @@ export function looksProvisionallyPriced(text: string | null | undefined): boole
  * for a figure the receipt does not contain.
  */
 
-/** The words a supply house prints when it is selling you a container of something. "roll", "spool"
- *  and "reel" are here because 250 feet of THHN is the same story as 500 wire nuts: bought whole,
- *  used by the piece, and never one job's to own. */
-const CONTAINER_WORDS =
-  /\b(?:bx|box|boxes|pk|pkg|pack|packs|ct|cnt|count|case|carton|spool|spl|roll|reel|coil|jar|tub|pail|bucket|drum|bag)\b/i;
+/**
+ * The words that mean a container ON THEIR OWN. "roll", "spool" and "reel" are here because 250
+ * feet of THHN is the same story as 500 wire nuts: bought whole, used by the piece, and never one
+ * job's to own.
+ *
+ * "box", "bx", "pk", "ct" AND FRIENDS ARE NOT HERE, and taking them out is the whole point (audit
+ * of cn-v966). A device box is a piece of hardware, and on a supply-house receipt "box" is the
+ * most common part noun there is: run against every line in his bill_line_items, this test matched
+ * 31 rows and SEVENTEEN of them were single outlet boxes and covers - "Box Cover Square Blank
+ * 4 in" at $1.99, "1G WP Box w/3 1/2 Hubs RACO", "RACO 292 3-1/2 in round 1/2D NMC box". "bx" is
+ * worse still: BX is armoured cable. Each of those got "This line reads like a box or a spool"
+ * beside a split-the-container sheet it has no business being offered, and the nine real hits (his
+ * NMB coils and the 1000 ft reel) were drowned in them. A suggestion that fires on most of a
+ * receipt is a suggestion that gets tapped through, which is exactly how the Smartwater reached
+ * INV-069.
+ *
+ * Those words earn a flag only with a count beside them, which is COUNTED_CONTAINER's job below.
+ * This costs him no reachable behaviour: "Bill Only What This Job Used" renders on EVERY billable
+ * line whether or not it is flagged, so a box this no longer notices is still one tap from the
+ * same sheet.
+ */
+const CONTAINER_WORDS = /\b(?:case|carton|spool|spl|roll|reel|coil|jar|tub|pail|bucket|drum|bag)\b/i;
 
-/** A count written next to a container word: "500/BX", "100 PK", "250CT". */
-const COUNTED_CONTAINER = /(\d[\d,]*)\s*(?:\/|-|\s)?\s*(?:bx|box|boxes|pk|pkg|pack|packs|ct|cnt|count)\b/i;
+/**
+ * A count written next to a container word: "500/BX", "100 PK", "250CT".
+ *
+ * THE LEADING BOUNDARY IS LOAD-BEARING, AND IT IS THERE FOR CED'S LOAD CENTRES (audit of
+ * cn-v966). Square D and CED name a panel "<circuits>/<spaces>CT <amps> ...", so "12/24CT 125A N3R
+ * Load Center" ($203.89) and "40/60CT 200A LD-CTR" ($343.59) are SINGLE PHYSICAL PANELS on his
+ * receipts right now. Without this class the run starts at the "24" and the app states, as fact,
+ * "This line says 24 of them" beside a one-press "Use 24" button - and one tap later a $203.89
+ * panel bills the customer $8.50 and twenty-three phantom panels land on the shelf. CT on a load
+ * centre is the CIRCUIT count, never a pack size.
+ *
+ * The class must reject a DIGIT as well as the separator: a bare "not a slash" lets the engine
+ * backtrack to the "4" of "12/24CT" and answer 4. A real pack size carries its separator AFTER the
+ * count ("500/BX", "200-Pack"), never before it.
+ *
+ * Written as a consumed alternation rather than the lookbehind that says the same thing, because
+ * this file is parsed in his phone's browser and a lookbehind in a regex LITERAL is a syntax error
+ * on Safari before 16.4 - not a wrong answer, the whole chunk failing to parse. Nothing else in
+ * src/ uses one. `(?:...)` is non-capturing, so the count is still group 1.
+ */
+const COUNTED_CONTAINER =
+  /(?:^|[^\d,.\/-])(\d[\d,]*)\s*(?:\/|-|\s)?\s*(?:bx|box|boxes|pk|pkg|pack|packs|ct|cnt|count)\b/i;
 
 /**
  * THREE HEURISTICS CAME OUT OF THIS FUNCTION, AND THE REASON IS THE WHOLE POINT OF THE FEATURE
@@ -675,13 +712,27 @@ export function containerHint(
 }
 
 /**
- * What one of them cost, given the count a PERSON confirmed the container holds. Null when there
- * is nothing to divide by - an unasked question has no answer, and a zero would render "$0.00
- * each" beside a figure he is about to bill somebody.
+ * What one of them cost: the line's whole extension over HOW MANY PIECES THAT LINE BOUGHT.
+ *
+ * THE DIVISOR IS NOT THE CONTAINER COUNT, and reading it as one was a $224.59 bug (audit of
+ * cn-v966). The second argument used to be the answer to "how many are in the container?" on its
+ * own, which quietly asserted that every line bought exactly one full container. His CED ticket of
+ * 2026-07-22 has "NMB 6/3 W/GND (1000 ft REEL)", quantity 55, $4.32 a foot, $237.66 - fifty-five
+ * feet CUT OFF a reel he does not own. "reel" flags the row, the sheet asks how many are in the
+ * container with "1000 ft REEL" printed above it, and $237.66 / 1000 billed the customer $13.07
+ * for $237.66 of wire while telling him the other $224.59 went in his stock, along with 945 feet
+ * of cable that never existed.
+ *
+ * So the caller multiplies: pieces = (units this line bought) x (pieces per unit). One box of 500
+ * is 1 x 500, unchanged. Two boxes of 500 is 2 x 500 = 1000, which is now exact instead of half
+ * price. Fifty-five feet is 55 x 1, which is $4.32 and no phantom reel.
+ *
+ * Null when there is nothing to divide by - an unasked question has no answer, and a zero would
+ * render "$0.00 each" beside a figure he is about to bill somebody.
  */
-export function perUnitCost(lineCost: number | null | undefined, containerCount: number | null | undefined): number | null {
+export function perUnitCost(lineCost: number | null | undefined, pieces: number | null | undefined): number | null {
   const cost = Number(lineCost) || 0;
-  const count = Number(containerCount) || 0;
+  const count = Number(pieces) || 0;
   if (!(cost > 0) || !(count > 0)) return null;
   return cost / count;
 }
@@ -725,4 +776,113 @@ export function usedCountFromCost(cost: number | null | undefined, unitCost: num
   const unit = Number(unitCost) || 0;
   if (!(c > 0) || !(unit > 0)) return null;
   return Math.round((c / unit) * 100) / 100;
+}
+
+/**
+ * ── THE RECEIPT'S OWN PRICE IS THE CHECK THE SPLIT NEVER HAD (audit of cn-v966) ───────────────
+ *
+ * Every figure below already sits on the row. `unit_price` and `quantity` are printed on the paper
+ * and stored beside the extension, and NOTHING in the split feature ever looked at them: `canSave`
+ * refused only when the billed amount came out ABOVE the line cost, and the reel failure goes the
+ * other way, so it sailed through. A line that states what one of something cost is a line that
+ * can contradict the app out loud, and it is the only thing in the world that can - nobody else
+ * knows whether "1000 ft REEL" is what he bought or what he cut it off.
+ */
+
+/**
+ * Two figures are the same money: within a cent, or within one percent of each other. Both slacks
+ * are needed and they are the SAME pair everywhere below, so anything that reconciles also passes.
+ * A supply house prices wire per hundred or per thousand feet and rounds the extension, so his own
+ * coils miss by eight cents on $187.68 and by 82 cents on $411.68 - real lines, both honest.
+ */
+function sameMoney(a: number | null | undefined, b: number | null | undefined): boolean {
+  const x = Number(a);
+  const y = Number(b);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  const d = Math.abs(x - y);
+  return d <= 0.01 + 1e-9 || d <= Math.abs(y) * 0.01 + 1e-9;
+}
+
+/**
+ * What ONE PURCHASED UNIT cost, when the receipt states it plainly, and null when it does not.
+ *
+ * "States it plainly" means the row's own arithmetic closes: quantity x unit_price reconciles with
+ * the extension. That is the receipt saying "this line bought `quantity` of these at `unit_price`
+ * each", and it is a fact, not a guess.
+ *
+ * Null is a perfectly ordinary answer and it is the answer on the line that started this whole
+ * feature. "IDEAL 30641 500/5000 Twister 341-Tan" carries quantity 500 and unit_price 108.36
+ * against an extension of 108.36, because the scanner read the 500 out of the PRODUCT NAME - so
+ * 500 x 108.36 is nowhere near 108.36, the row states nothing, and everything below stands down
+ * and leaves that split exactly as it behaves today. The row tells the app when its one-container
+ * assumption is false, which is the only reason any of this is safe.
+ */
+export function statedUnitPrice(
+  quantity: number | null | undefined,
+  unitPrice: number | null | undefined,
+  lineCost: number | null | undefined,
+): number | null {
+  const qty = Number(quantity) || 0;
+  const unit = Number(unitPrice) || 0;
+  const cost = Number(lineCost) || 0;
+  if (!(qty > 0) || !(unit > 0) || !(cost > 0)) return null;
+  return sameMoney(round2(qty * unit), round2(cost)) ? unit : null;
+}
+
+/** A count in the words a person wrote it in: 55, not 55.00, and 2.5 when it really is. */
+function countWords(n: number): string {
+  return String(round2(n));
+}
+
+export interface SplitAgainstReceipt {
+  /** The line's whole extension, `billLineCost`. */
+  cost: number | null | undefined;
+  /** The receipt's own two columns. */
+  quantity: number | null | undefined;
+  unitPrice: number | null | undefined;
+  /** How many purchased units this line bought, as the person answered it. */
+  boughtQuantity: number | null | undefined;
+  /** bought x container count: how many PIECES the money is being divided into. */
+  pieces: number | null | undefined;
+}
+
+/**
+ * The refusal, in plain words, when a split contradicts what the receipt itself says one costs.
+ * Null when there is nothing to object to, which is the common answer.
+ *
+ * THE COMPARISON IS PER PURCHASED UNIT, NOT PER PIECE, and that distinction is the whole function.
+ * A container split is SUPPOSED to make a piece cheaper than a purchased unit: one 200-Pack strap
+ * at $22.65 really is 11.3 cents a strap, and refusing that would delete the feature. What must
+ * hold is one step further back - the line's extension over how many units it bought has to land
+ * on the price the receipt prints. Bought 1 at $22.65 out of $22.65: true. Bought 1 at $4.32 out
+ * of $237.66: false by a factor of fifty-five, which is the reel, and it is caught before a dollar
+ * moves whatever container count he types.
+ *
+ * Said in ONE place because it is said in TWO: the card greys Save with it and the server refuses
+ * with it, and a rule at one read path is a convention rather than a boundary (0173). The sentence
+ * is returned rather than a boolean so both doors say the same words.
+ *
+ * NO DEAD END. The way out is named and it is a field on the same sheet, because on his coils the
+ * right answer is a real split: 250 feet bought at 75 cents, 180 on this job, 70 back on the van.
+ */
+export function splitContradictsReceipt(input: SplitAgainstReceipt): string | null {
+  const stated = statedUnitPrice(input.quantity, input.unitPrice, input.cost);
+  if (stated == null) return null;
+  // Nothing was divided, so there is no derived figure to contradict anything. A dollar amount he
+  // typed straight in is his own number and this has no business second-guessing it.
+  const pieces = Number(input.pieces) || 0;
+  if (!(pieces > 0)) return null;
+  const cost = Number(input.cost) || 0;
+  const bought = Number(input.boughtQuantity) || 1;
+  if (!(bought > 0)) return null;
+  if (sameMoney(cost / bought, stated)) return null;
+  const qty = countWords(Number(input.quantity) || 0);
+  // Three short facts and the way out. The middle one names the figure that actually contradicts
+  // the paper - what ONE purchased unit comes to under his answer - rather than the piece price,
+  // because on a 250 ft coil the piece price is perfectly sensible and only the "bought 1" is not.
+  return (
+    `This receipt charged ${formatCurrency(stated)} each for ${qty} of these. ` +
+    `Saying this line bought ${countWords(bought)} would make them ${perUnitLabel(cost / bought)}. ` +
+    `Say this line bought ${qty}, or keep billing the whole line.`
+  );
 }

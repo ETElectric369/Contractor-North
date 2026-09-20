@@ -16,9 +16,12 @@ import {
   perUnitCost,
   perUnitLabel,
   round2,
+  splitContradictsReceipt,
   splitReceiptBilling,
+  statedUnitPrice,
   usedCost,
   usedCountFromCost,
+  type ContainerHint,
 } from "./receipt-billing";
 import { setReceiptLineBillable, setReceiptLineUsage } from "./receipt-billing-actions";
 
@@ -101,7 +104,16 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   const toast = useToast();
   const [, start] = useTransition();
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [editing, setEditing] = useState<{ receipt: ReceiptForBilling; line: ReceiptBillingLine } | null>(null);
+  // The nudge travels WITH the line into the sheet instead of being computed a second time inside
+  // it. The row already worked out whether the suggestion had any business showing - not locked,
+  // still billable, not already split, not already on the shelf - and the sheet used to throw all
+  // of that away and re-ask containerHint, so a "Use 24" button turned up on rows where the card
+  // had deliberately stood the hint down. One reading, carried, not two readings that can differ.
+  const [editing, setEditing] = useState<{
+    receipt: ReceiptForBilling;
+    line: ReceiptBillingLine;
+    hint: ContainerHint | null;
+  } | null>(null);
 
   // Optimistic flips, so the totals move under his thumb instead of after a round trip. The
   // signature is every line's SERVER value: when the refresh lands and the server agrees, the
@@ -153,7 +165,12 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
    */
   function saveUsage(
     line: ReceiptBillingLine,
-    next: { billedAmount: number | null; containerCount: number | null; usedQuantity: number | null },
+    next: {
+      billedAmount: number | null;
+      containerCount: number | null;
+      boughtQuantity: number | null;
+      usedQuantity: number | null;
+    },
   ) {
     setOverrides((o) => ({
       ...o,
@@ -355,7 +372,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                               <div className="flex flex-wrap items-center gap-x-2">
                                 <button
                                   type="button"
-                                  onClick={() => setEditing({ receipt: r, line: l })}
+                                  onClick={() => setEditing({ receipt: r, line: l, hint: showHint ? hint : null })}
                                   className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
                                 >
                                   {part == null ? "Bill Only What This Job Used" : "Change What This Job Used"}
@@ -391,6 +408,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
       {editing && (
         <UsedOnThisJob
           line={editing.line}
+          hint={editing.hint}
           jobName={editing.receipt.job_name}
           onClose={() => setEditing(null)}
           onSave={(next) => saveUsage(editing.line, next)}
@@ -416,30 +434,67 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
  */
 function UsedOnThisJob({
   line,
+  hint,
   jobName,
   onClose,
   onSave,
 }: {
   line: ReceiptBillingLine;
+  /** The nudge the ROW computed, or null when the row stood it down. Never recomputed here. */
+  hint: ContainerHint | null;
   jobName: string | null;
   onClose: () => void;
-  onSave: (next: { billedAmount: number | null; containerCount: number | null; usedQuantity: number | null }) => void;
+  onSave: (next: {
+    billedAmount: number | null;
+    containerCount: number | null;
+    boughtQuantity: number | null;
+    usedQuantity: number | null;
+  }) => void;
 }) {
-  const hint = containerHint(line.description, line.quantity);
+  /**
+   * THE FACTOR THAT WAS MISSING, AND WHAT IT COST (audit of cn-v966).
+   *
+   * One question used to divide the money - how many are in the container - and the answer was
+   * divided into the line's WHOLE extension. That is only right when the line bought exactly one
+   * full container, which nothing on the sheet ever said out loud and nothing ever checked. On his
+   * CED ticket of 2026-07-22, "NMB 6/3 W/GND (1000 ft REEL)" is fifty-five feet at $4.32; typing
+   * 1000 into the old sheet billed the customer $13.07 for $237.66 of wire and put 945 feet of
+   * cable that does not exist on his shelf.
+   *
+   * So there are two factors now and their product is what divides: how many units the line bought
+   * (1 by default, which is exactly today's arithmetic and leaves the Twister box untouched) times
+   * how many pieces are in one. Two boxes of 500 is $216.72 / 1000, exact instead of half price.
+   */
+  const [bought, setBought] = useState(1);
   const [count, setCount] = useState(0);
   const [mode, setMode] = useState<"count" | "dollars">("count");
   const [used, setUsed] = useState(0);
   const [dollars, setDollars] = useState(line.billedAmount ?? 0);
 
   const cost = round2(line.amount);
-  const unit = perUnitCost(cost, count);
+  const pieces = round2(bought * count);
+  const unit = perUnitCost(cost, pieces);
   const unitWords = perUnitLabel(unit);
   const amount = mode === "count" ? usedCost(used, unit) : round2(dollars);
   const roughCount = mode === "dollars" ? usedCountFromCost(amount, unit) : null;
   const overCost = amount > cost;
-  // By count, the container count is what the money is divided by, so it is required. By dollars
-  // it only powers the per-unit line, and a figure he types straight in needs no divisor at all.
-  const canSave = !overCost && (mode === "count" ? count > 0 : amount >= 0);
+  /** What the receipt itself says one purchased unit cost, when its own arithmetic closes. Null on
+   *  the Twister row, where quantity came out of the product name, so nothing below fires there. */
+  const stated = statedUnitPrice(line.quantity, line.unitPrice, cost);
+  /** The refusal the split never had. Same sentence the server refuses with, from one function. */
+  const objection = splitContradictsReceipt({
+    cost,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    boughtQuantity: bought,
+    pieces,
+  });
+  // By count, the piece count is what the money is divided by, so it is required. By dollars it
+  // only powers the per-unit line, and a figure he types straight in needs no divisor at all.
+  const canSave = !overCost && !objection && (mode === "count" ? pieces > 0 : amount >= 0);
+  // "$216.72 ÷ (2 × 500)" when both factors are real, and plain "$108.36 ÷ 500" when one is 1, so
+  // the one-box case reads exactly as it always has.
+  const divisorWords = bought > 1 && count > 1 ? `(${round2(bought)} × ${round2(count)})` : String(pieces);
 
   return (
     <Modal
@@ -450,14 +505,18 @@ function UsedOnThisJob({
       // Dirty means HE typed something, not that the field has a value in it: the dollars box
       // opens holding the split already stored, and treating that as unsaved work would make a
       // backdrop tap ask him to confirm discarding a number he never touched.
-      dirty={count > 0 || used > 0 || dollars !== (line.billedAmount ?? 0)}
+      dirty={bought !== 1 || count > 0 || used > 0 || dollars !== (line.billedAmount ?? 0)}
       footer={
         <ModalActions
           onCancel={onClose}
           onSave={() =>
             onSave({
               billedAmount: amount,
-              containerCount: count > 0 ? count : null,
+              // PIECES, not the container count. The shelf gets `quantity_on_hand` and
+              // `unit_cost` straight off this figure, so passing one box's count for a two box
+              // line was the same halving landing in inventory as on the invoice.
+              containerCount: pieces > 0 ? pieces : null,
+              boughtQuantity: bought > 0 ? bought : null,
               usedQuantity: mode === "count" && used > 0 ? used : null,
             })
           }
@@ -470,7 +529,9 @@ function UsedOnThisJob({
                  line back on the customer's bill, in one press, from the place he split it. */
               <button
                 type="button"
-                onClick={() => onSave({ billedAmount: null, containerCount: null, usedQuantity: null })}
+                onClick={() =>
+                  onSave({ billedAmount: null, containerCount: null, boughtQuantity: null, usedQuantity: null })
+                }
                 className="flex min-h-11 items-center rounded-lg px-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
               >
                 Bill The Whole Line
@@ -489,12 +550,54 @@ function UsedOnThisJob({
           </p>
         </div>
 
+        {/* THE QUESTION THE SHEET NEVER ASKED. Answered 1 by default, which is what the old
+            arithmetic silently assumed on every line it ever divided. When the receipt's own
+            columns close it says so and offers its figure, because on a cut length of wire the
+            receipt knows this and he should not have to work it out from the extension. */}
         <div>
-          <label htmlFor="container-count" className="block text-sm font-medium text-slate-700">
-            How many are in the container?
+          <label htmlFor="bought-count" className="block text-sm font-medium text-slate-700">
+            How many of them did this line buy?
           </label>
           <p className="mt-0.5 text-xs text-slate-500">
+            One box, one reel, one jar is 1.
+            {stated != null
+              ? ` This receipt charged ${formatCurrency(stated)} each for ${round2(line.quantity)} of them.`
+              : " The receipt does not say plainly, so this starts at one."}
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <NumberInput
+              id="bought-count"
+              value={bought}
+              onValueChange={setBought}
+              placeholder="1"
+              className="h-11 w-32"
+            />
+            {stated != null && line.quantity > 0 && bought !== round2(line.quantity) && (
+              <button
+                type="button"
+                onClick={() => setBought(round2(line.quantity))}
+                className="flex min-h-11 items-center rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Use {round2(line.quantity)}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="container-count" className="block text-sm font-medium text-slate-700">
+            How many are in one of them?
+          </label>
+          {/* THE COMPOUND MISTAKE THIS SENTENCE HEADS OFF. On "NMB 12/2 W/GND (250 ft Coil)" the
+              receipt already answers the question above with 250, and the instinct is to type 250
+              here as well, which divides one coil into sixty-two thousand pieces. Nothing in the
+              app can know how many pieces are in a foot, so it says what the receipt DID price and
+              leaves the reading to him. */}
+          <p className="mt-0.5 text-xs text-slate-500">
             Nobody but you knows this. The receipt says what the box cost, not what is in it.
+            {stated != null
+              ? ` It priced one of them at ${formatCurrency(stated)}, so if that is already the piece you use, this is 1.`
+              : ""}
           </p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <NumberInput
@@ -504,7 +607,9 @@ function UsedOnThisJob({
               placeholder="500"
               className="h-11 w-32"
             />
-            {hint.count != null && count !== hint.count && (
+            {/* Gated on the hint the ROW decided to show. Recomputing it here put a "Use 24" on
+                lines the card had already stood the suggestion down on. */}
+            {hint?.count != null && count !== hint.count && (
               <button
                 type="button"
                 onClick={() => setCount(hint.count as number)}
@@ -516,7 +621,7 @@ function UsedOnThisJob({
           </div>
           {unitWords && (
             <p className="mt-1.5 text-xs font-medium text-slate-600">
-              {formatCurrency(cost)} ÷ {count} is {unitWords}.
+              {formatCurrency(cost)} ÷ {divisorWords} is {unitWords}.
             </p>
           )}
         </div>
@@ -568,7 +673,14 @@ function UsedOnThisJob({
           )}
         </div>
 
-        {overCost ? (
+        {objection ? (
+          /* THE REFUSAL THAT GOES THE OTHER WAY. The only check this sheet ever had was "more
+             than the line cost", and the reel failure comes in UNDER it: $13.07 billed against
+             $237.66 passes that gate with room to spare while $224.59 walks off the invoice. This
+             one compares against the price the receipt itself prints, which is the only figure in
+             the building that can tell the app its one-container assumption is wrong. */
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{objection}</p>
+        ) : overCost ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
             That is more than the line cost, {formatCurrency(cost)}. Lower it, or keep billing the whole line.
           </p>
@@ -581,7 +693,9 @@ function UsedOnThisJob({
                 put on it and this sentence must not say otherwise. It says what happens instead,
                 and how to get the other thing, which is the difference between a limit and a dead
                 end. */}
-            {count > 0 ? "goes in your stock." : "stays on you. Say how many are in the container and it goes in your stock instead."}
+            {pieces > 0
+              ? "goes in your stock."
+              : "stays on you. Say how many are in one of them and it goes in your stock instead."}
           </p>
         )}
 

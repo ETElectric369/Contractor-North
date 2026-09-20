@@ -63,6 +63,20 @@ export interface SuppliersCardActions
    */
   setOnAccount?: (input: { accountId: string; onAccount: boolean }) => Promise<SupplierActionResult>;
   /**
+   * CORRECTING WHAT THE ACCOUNT ACTUALLY IS. The account number is the one field here that is
+   * genuinely load-bearing - it is how a payment he sent gets matched when CED asks about it - and
+   * it arrives typed off a phone photo. The write has existed since 0270 and had no door at all
+   * until the audit counted it (2026-09-20), which is the dead-door class the other way round:
+   * not a control that does nothing, but a capability nothing can reach.
+   */
+  updateAccount?: (input: {
+    accountId: string;
+    name?: string;
+    accountNumber?: string | null;
+    branchCode?: string | null;
+    note?: string | null;
+  }) => Promise<SupplierActionResult>;
+  /**
    * A PERSON says which job a supplier invoice belongs to (migration 0273). Optional, and its
    * absence is what switches the whole reconcile card off: every section of that card is built
    * around this one verb, so without it the card could only refuse, and a control that can only
@@ -85,6 +99,38 @@ const METHOD_LABELS: Record<SupplierPayMethod, string> = {
 
 /** How many bills or payments one account shows before it says how many more there are. */
 const LIST_LIMIT = 8;
+
+/**
+ * THE DISCOUNT SENTENCE, AND THE ONE DATE IT IS ALLOWED TO NAME (review of cn-v966).
+ *
+ * CED's rule is "cash discount if paid by the 10th of the month FOLLOWING purchase", so every
+ * month of invoices carries a later deadline than the month before it. `total` is every discount
+ * still live across all of them; `by` is only the SOONEST of those dates; `dueOnNext` is the
+ * slice that actually rides on that date. Today all six of his live discounts happen to fall on
+ * Oct 10, which makes total and dueOnNext accidentally equal - and a sentence that is only
+ * accidentally true is one that goes confidently wrong the first time a September discount is
+ * still open when an October invoice lands. It would then read "$34.48 comes off if they are
+ * paid by Oct 10" over $9 that is not at risk until Nov 10: money hurried for no reason, which
+ * is the same sin as money forgotten.
+ *
+ * THREE PLACES WERE BUILDING THIS SENTENCE and only two of them guarded it. One function now, so
+ * a fourth copy cannot get it wrong. No full stop on the end: the amber pointer joins its
+ * clauses with commas and closes the sentence itself.
+ */
+export function discountDeadlineSentence(claim: { total: number; dueOnNext: number; by: string | null }): {
+  sentence: string;
+  /** True when the whole claimable figure really does ride on that one date. */
+  allOnOneDate: boolean;
+} {
+  if (!(claim.total > 0.005) || !claim.by) return { sentence: "", allOnOneDate: false };
+  const allOnOneDate = claim.dueOnNext >= claim.total - 0.005;
+  return {
+    allOnOneDate,
+    sentence: allOnOneDate
+      ? `${formatCurrency(claim.total)} comes off if they are paid by ${formatDate(claim.by)}`
+      : `${formatCurrency(claim.dueOnNext)} of ${formatCurrency(claim.total)} in discount goes if they are not paid by ${formatDate(claim.by)}`,
+  };
+}
 
 /**
  * WHAT HE OWES HIS SUPPLIERS, AND THE FIRST PLACE HE CAN PAY ONE (Erik, 2026-09-18; 0270).
@@ -122,6 +168,7 @@ export function SuppliersCard({
   loose = [],
   duplicates = [],
   reconcile = null,
+  noSupplierDocument = {},
   actions,
 }: {
   accounts: SupplierAccountRow[];
@@ -151,6 +198,16 @@ export function SuppliersCard({
      *  counted and named, never nagged about: nothing here could have recorded them. */
     recordsSince: string | null;
   } | null;
+  /**
+   * PER ACCOUNT, THE SLICE OF ITS UNPAID BILLS THE SUPPLIER'S OWN DOCUMENTS DO NOT COVER.
+   *
+   * Only ever set for an account on model B, and it is NOT a second balance: `owed` stays the
+   * supplier's own figure. It exists because one sentence on this card explained every unpaid
+   * bill on a modelled account away as "your paperwork rather than theirs", which is true of a
+   * bill CED has closed and false of the $467.87 Sunnyvale counter ticket CED Truckee never
+   * issued a document for at all. That money is real and had nowhere on the screen to be.
+   */
+  noSupplierDocument?: Record<string, { total: number; bills: number; ids: string[] }>;
   actions: SuppliersCardActions;
 }) {
   const router = useRouter();
@@ -166,6 +223,11 @@ export function SuppliersCard({
   // be the app inventing a figure for his books, and the balance is the LAST thing to seed it with
   // when the whole point is that his chunks never match it.
   const [payFor, setPayFor] = useState<SupplierAccountRow | null>(null);
+  const [editFor, setEditFor] = useState<SupplierAccountRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editNumber, setEditNumber] = useState("");
+  const [editBranch, setEditBranch] = useState("");
+  const [editNote, setEditNote] = useState("");
   const [amount, setAmount] = useState<number | null>(null);
   const [paidOn, setPaidOn] = useState(today);
   const [method, setMethod] = useState<SupplierPayMethod>("check");
@@ -208,7 +270,11 @@ export function SuppliersCard({
   const owing = balances.filter((b) => (b.balance.owed ?? 0) > 0.005);
   const onAccountOwed = r2(owing.reduce((s, b) => s + (b.balance.owed ?? 0), 0));
   const ahead = balances.filter((b) => (b.balance.owed ?? 0) < -0.005);
-  // Money marked unpaid on a supplier he settles at the register. It has no balance to sit in, but
+  // ONE VOCABULARY, CARD AND LIST. The bills list below this card stopped printing the raw column
+  // ("paid" / "unpaid") and now says On Account / Settled, which is what that tick has always
+  // meant - so every sentence up here that tells him to go and change one says the same two
+  // words. Copy that names a word no longer on the screen is a dead end with extra steps.
+  // Money marked On Account on a supplier he settles at the register. It has no balance to sit in, but
   // it is still money the Unpaid tab is counting, so it is counted here and named on its own row.
   // UNDER MODEL B THOSE BILLS ARE NOT A SECOND PILE OF MONEY. A register account holding supplier
   // documents already has a positive `owed` - the supplier's own gross - which is in `owing`
@@ -227,6 +293,21 @@ export function SuppliersCard({
   // numbers sit on it without a word between them would be the worst version of this card.
   const supplierModelled = balances.filter((b) => b.balance.model === "supplier-invoices");
   const modelledBillsUnpaid = r2(supplierModelled.reduce((s, b) => s + b.balance.charged, 0));
+  // THE PART OF THAT PILE THE SUPPLIER HAS NO DOCUMENT FOR (review of cn-v966). "Your paperwork
+  // rather than theirs" is the right sentence about a bill CED has closed. It is the wrong
+  // sentence about one CED never issued paper for - their figure cannot cover what they have not
+  // billed him for, and saying it does buries $467.87 he genuinely owes inside a reassurance.
+  const noDocumentAccounts = supplierModelled
+    .map(({ account }) => ({ account, slice: noSupplierDocument[account.id] ?? null }))
+    .filter(
+      (x): x is { account: SupplierAccountRow; slice: { total: number; bills: number; ids: string[] } } =>
+        !!x.slice && x.slice.total > 0.005,
+    );
+  const modelledNoDocument = r2(noDocumentAccounts.reduce((s, x) => s + x.slice.total, 0));
+  // What is left is what the sentence was always about: his paperwork for purchases the supplier
+  // has already accounted for. Never below zero, and never invented - it is one subtraction of
+  // two figures that are both on this screen.
+  const modelledExplained = r2(Math.max(0, modelledBillsUnpaid - modelledNoDocument));
 
   // WHAT IS WAITING ON HIM IN A SUPPLIER'S OWN DOCUMENTS, counted here so the pointer at the top
   // of this card can say it before he has opened anything. Same pure module the card below
@@ -246,9 +327,9 @@ export function SuppliersCard({
             waiting.needsBill.rows > 0
               ? `${formatCurrency(waiting.needsBill.total)} was bought and never got into your bills`
               : "",
-            waiting.claimable.total > 0.005 && waiting.claimable.by
-              ? `${formatCurrency(waiting.claimable.total)} comes off if they are paid by ${formatDate(waiting.claimable.by)}`
-              : "",
+            // THE SOONEST DATE DOES NOT CARRY THE WHOLE DISCOUNT. The two sentences below this
+            // one already guarded that; this one, the first thing he reads on the card, did not.
+            discountDeadlineSentence(waiting.claimable).sentence,
           ].filter(Boolean);
           return { account, sentence: `${account.name}: ${parts.join(", ")}.` };
         })
@@ -280,6 +361,40 @@ export function SuppliersCard({
       setDone({ text: res.message ?? fallback, paymentId: undoPaymentId ?? null });
       router.refresh();
     });
+  }
+
+  function openEdit(account: SupplierAccountRow) {
+    setSheetError(null);
+    setEditFor(account);
+    setEditName(account.name ?? "");
+    setEditNumber(account.accountNumber ?? "");
+    setEditBranch(account.branchCode ?? "");
+    setEditNote(account.note ?? "");
+  }
+
+  function saveEdit() {
+    if (!editFor || !actions.updateAccount) return;
+    const account = editFor;
+    const name = editName.trim();
+    if (!name) {
+      setSheetError("An account needs a name. It is what every receipt gets filed under.");
+      return;
+    }
+    run(
+      () =>
+        actions.updateAccount!({
+          accountId: account.id,
+          name,
+          // An emptied field means "there isn't one", which is a different answer from "unchanged"
+          // - null says it, and the action's own patch builder only writes the keys it is given.
+          accountNumber: editNumber.trim() || null,
+          branchCode: editBranch.trim() || null,
+          note: editNote.trim() || null,
+        }),
+      `editacct:${account.id}`,
+      `Saved ${name}.`,
+    );
+    setEditFor(null);
   }
 
   function openPay(account: SupplierAccountRow) {
@@ -355,7 +470,7 @@ export function SuppliersCard({
                       ? `${formatCurrency(onAccountOwed)} on ${owing.length} ${owing.length === 1 ? "account" : "accounts"} you can pay down below.`
                       : "",
                     registerUnpaid > 0.005
-                      ? `${formatCurrency(registerUnpaid)} is on suppliers you pay at the register and is still marked unpaid.`
+                      ? `${formatCurrency(registerUnpaid)} is on suppliers you pay at the register and is still marked On Account.`
                       : "",
                   ]
                     .filter(Boolean)
@@ -380,13 +495,27 @@ export function SuppliersCard({
                 {supplierModelled.length === 1 ? "its own" : "their own"} open documents, not from
                 your bills. Your payments are not taken off that figure: the supplier has already
                 taken them off.
-                {modelledBillsUnpaid > 0.005
-                  ? ` The bills list further down still shows ${formatCurrency(modelledBillsUnpaid)} unpaid there, which is your paperwork rather than theirs.`
+                {modelledExplained > 0.005
+                  ? ` The bills list further down still shows ${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.`
                   : ""}
               </div>
             )}
           </div>
         )}
+
+        {/* THE SLICE THE SUPPLIER'S OWN FIGURE CANNOT COVER (review of cn-v966). One line per
+            account, up here beside the total, because the sentence above it is the one that
+            would otherwise have explained this money away. The balance is NOT changed: folding
+            it in would invite a cheque for money CED has not billed him. It is named, and he
+            decides. */}
+        {noDocumentAccounts.map(({ account, slice }) => (
+          <div key={account.id} className="mb-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+            {formatCurrency(slice.total)} on {slice.bills} {slice.bills === 1 ? "bill has" : "bills have"} no
+            document from {account.name} behind {slice.bills === 1 ? "it" : "them"}, so their figure does not
+            cover {slice.bills === 1 ? "it" : "them"} and {slice.bills === 1 ? "it is" : "they are"} not in the
+            balance above. Open that account below to see which.
+          </div>
+        ))}
 
         {/* NOTHING HIDES. Until a spelling is on an account, its money belongs to no balance on
             this card - and the Unpaid tab further down the page is still counting it. Saying that
@@ -484,6 +613,30 @@ export function SuppliersCard({
               // module the card downstairs renders from, so the number on this row and the
               // number on that card are one number.
               const waiting = feed ? reconcileSummary(feed.invoices, feed.jobs, today, { since: feed.recordsSince }) : null;
+              // ONE SENTENCE, ONE BUILDER (discountDeadlineSentence, above). `nextDiscountAmount`
+              // is the slice that rides on the soonest date; the whole claimable figure only
+              // comes off by it when every live discount falls on the same day.
+              const discountLine = balance.supplierSays
+                ? discountDeadlineSentence({
+                    total: balance.supplierSays.discountStillClaimable,
+                    dueOnNext: balance.supplierSays.nextDiscountAmount,
+                    by: balance.supplierSays.nextDiscountBy,
+                  })
+                : null;
+              // THE BILLS THIS ACCOUNT'S SUPPLIER HAS NO DOCUMENT FOR, listed in full rather than
+              // left to the eight-row window further down. A bill past the eighth would never
+              // appear, and the amber line at the top of this card tells him to open the account
+              // to find it - a pointer to a row that is not on the screen is a dead end.
+              const noDocIds = new Set(noSupplierDocument[account.id]?.ids ?? []);
+              const noDocBills = account.bills.filter((b) => noDocIds.has(b.id));
+              const noDocTotal = r2(noDocBills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0));
+              // MODEL A ONLY. Under model B the payments are not subtracted at all, so a ticked
+              // bill and a cheque cannot take the same dollar off the balance twice.
+              const settledBesidePayments =
+                balance.model === "bills-minus-payments" &&
+                account.onAccount &&
+                balance.settledAtRegister > 0.005 &&
+                balance.paid > 0.005;
               const unpaidBills = account.bills.filter((b) => String(b.status ?? "").toLowerCase() !== "paid");
               const oldestFirst = [...unpaidBills].sort((a, b) =>
                 String(a.billDate ?? "").localeCompare(String(b.billDate ?? "")),
@@ -598,28 +751,16 @@ export function SuppliersCard({
                           </p>
                           {/* A DATE AND A NUMBER, up here where the balance is, because that is
                               where a man decides what cheque to write. */}
-                          {balance.supplierSays.discountStillClaimable > 0.005 && balance.supplierSays.nextDiscountBy && (
+                          {discountLine?.sentence && (
                             <p className="mt-1 text-xs font-medium leading-relaxed text-green-800">
-                              {/* `nextDiscountAmount` is what rides on that ONE date; the whole
-                                  claimable figure only comes off by it when every live discount
-                                  falls on the same day. Tonight all seven of his do - and a
-                                  sentence that is only accidentally true is one that will be
-                                  confidently wrong the first time they do not. */}
-                              {balance.supplierSays.nextDiscountAmount >=
-                              balance.supplierSays.discountStillClaimable - 0.005 ? (
-                                <>
-                                  {formatCurrency(balance.supplierSays.discountStillClaimable)} comes off if they
-                                  are paid by {formatDate(balance.supplierSays.nextDiscountBy)}, which would make
-                                  it {formatCurrency(balance.supplierSays.netIfPaidToday)}.
-                                </>
-                              ) : (
-                                <>
-                                  {formatCurrency(balance.supplierSays.discountStillClaimable)} of discount is
-                                  still live, and {formatCurrency(balance.supplierSays.nextDiscountAmount)} of it
-                                  goes if they are not paid by{" "}
-                                  {formatDate(balance.supplierSays.nextDiscountBy)}.
-                                </>
-                              )}
+                              {/* THE NET-IF-PAID-TODAY FIGURE RIDES ON ONE BRANCH ONLY: the one
+                                  where the whole live discount really does come off by that one
+                                  date. Printing it beside a staggered deadline would name a
+                                  total he cannot reach with the cheque he is about to write. */}
+                              {discountLine.sentence}
+                              {discountLine.allOnOneDate
+                                ? `, which would make it ${formatCurrency(balance.supplierSays.netIfPaidToday)}.`
+                                : "."}
                             </p>
                           )}
                         </>
@@ -662,12 +803,79 @@ export function SuppliersCard({
                         </div>
                       )}
 
+                      {/* WHAT THEIR FIGURE DOES NOT COVER, named one bill at a time. Their
+                          number cannot account for a purchase they never billed him for: the
+                          $467.87 was bought at a Sunnyvale counter on his Truckee account, and
+                          Truckee will not be issuing paper for it. It is not added to the
+                          balance, because a balance he can pay should only ever be money the
+                          supplier has actually asked him for. */}
+                      {fromSupplier && noDocBills.length > 0 && (
+                        <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                          {formatCurrency(noDocTotal)} on {noDocBills.length}{" "}
+                          {noDocBills.length === 1 ? "bill has" : "bills have"} no document from {account.name}{" "}
+                          behind {noDocBills.length === 1 ? "it" : "them"}, so{" "}
+                          {noDocBills.length === 1 ? "it is" : "they are"} not in the balance above.{" "}
+                          {noDocBills.length === 1 ? "It is" : "They are"} still money you owe.
+                          <ul className="mt-1.5 space-y-1">
+                            {noDocBills.slice(0, LIST_LIMIT).map((b) => (
+                              <li key={b.id}>
+                                <span className="font-medium tabular-nums">{formatCurrency(b.amount)}</span>
+                                {b.billDate ? ` · ${formatDate(b.billDate)}` : ""}
+                                {b.supplier ? ` · scanned as ${b.supplier}` : ""}
+                                {b.jobId && b.jobName ? (
+                                  <>
+                                    {" · "}
+                                    <Link href={`/jobs/${b.jobId}`} className="underline">
+                                      {b.jobName}
+                                    </Link>
+                                  </>
+                                ) : (
+                                  " · overhead (no job)"
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                          {/* The same eight-row window the lists below use. Naming a ninth row he
+                              cannot see would be the dead end this block was written to close. */}
+                          {noDocBills.length > LIST_LIMIT && (
+                            <span className="mt-1 block">
+                              And {noDocBills.length - LIST_LIMIT} more like {noDocBills.length - LIST_LIMIT === 1 ? "it" : "them"}, in the bills list further down this page.
+                            </span>
+                          )}
+                          <span className="mt-1.5 block">
+                            When you pay {noDocBills.length === 1 ? "it" : "them"}, mark{" "}
+                            {noDocBills.length === 1 ? "it" : "them"} Settled in the bills list further down this
+                            page.
+                          </span>
+                        </div>
+                      )}
+
                       {balance.settledAtRegister > 0.005 && (
                         <p className="mt-2 text-xs text-slate-500">
                           Another {formatCurrency(balance.settledAtRegister)} on {balance.settledBills}{" "}
-                          {balance.settledBills === 1 ? "receipt was" : "receipts were"} paid at the register, so it
-                          is not part of this balance.
+                          {balance.settledBills === 1 ? "receipt is" : "receipts are"} marked Settled At The
+                          Counter, so it is not part of this balance.
                         </p>
+                      )}
+
+                      {/* THE TICK AND THE CHEQUE CAN BE THE SAME DOLLAR (review of cn-v966).
+                          Under model A the balance is charged minus paid, so marking a $456.02
+                          bill settled takes it out of `charged` while recording the cheque that
+                          covered it puts the same $456.02 into `paid`: the balance falls by
+                          $912.04 for one payment. NEITHER CONTROL IS BLOCKED, and neither should
+                          be - a counter receipt charged to an on-account supplier is a real
+                          thing, and so is a cheque. The app cannot know which bills a cheque
+                          covered; that is the premise of the whole ledger. What it can do is say
+                          the two can collide, and let him decide which one happened. Fires on no
+                          account today, and on the first one that goes wrong. */}
+                      {settledBesidePayments && (
+                        <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                          {formatCurrency(balance.settledAtRegister)} of bills here are marked settled at the
+                          counter, and {formatCurrency(balance.paid)} in payments is recorded against the account.
+                          If a cheque covered any of those bills, this balance is that much too low. Mark those
+                          bills On Account in the bills list further down this page, or undo that payment here,
+                          whichever actually happened.
+                        </div>
                       )}
 
                       {/* NO DEAD END. A register supplier with unpaid bills on it is a real
@@ -676,12 +884,12 @@ export function SuppliersCard({
                       {balance.unpaidOnRegisterAccount && (
                         <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
                           {balance.chargedBills} {balance.chargedBills === 1 ? "bill is" : "bills are"} still marked
-                          unpaid on a supplier you pay at the register, holding {formatCurrency(balance.charged)}.
+                          On Account on a supplier you pay at the register, holding {formatCurrency(balance.charged)}.
                           {actions.setOnAccount ? (
                             <>
                               {" "}
                               If you do have an account here, turn the balance on. If you paid at the counter, mark
-                              those receipts paid in the bills list further down this page.
+                              those receipts Settled in the bills list further down this page.
                               <span className="mt-2 block">
                                 <Button
                                   variant="outline"
@@ -699,7 +907,7 @@ export function SuppliersCard({
                               </span>
                             </>
                           ) : (
-                            <> Mark those receipts paid in the bills list further down this page and this clears.</>
+                            <> Mark those receipts Settled in the bills list further down this page and this clears.</>
                           )}
                         </div>
                       )}
@@ -736,8 +944,12 @@ export function SuppliersCard({
 
                       {shownBills.length > 0 && (
                         <div className="mt-3">
+                          {/* UNDER MODEL B THESE BILLS ARE NOT WHAT THE BALANCE IS MADE OF, and
+                              the heading said they were. The balance is the supplier's own open
+                              documents; this is his paperwork beside it, eleven bills of which
+                              they have closed and one they never issued at all. */}
                           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                            What The Balance Is Made Of
+                            {fromSupplier ? "Your Bills On This Account" : "What The Balance Is Made Of"}
                           </h3>
                           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
                             {shownBills.map((b) => (
@@ -758,6 +970,11 @@ export function SuppliersCard({
                                     {b.isStatement ? " · a statement, several invoices on it" : ""}
                                     {b.supplier ? ` · scanned as ${b.supplier}` : ""}
                                   </span>
+                                  {fromSupplier && noDocIds.has(b.id) && (
+                                    <span className="block text-xs font-medium text-amber-700">
+                                      No document from them covers this one, so it is not in the balance above.
+                                    </span>
+                                  )}
                                 </span>
                                 <span className="shrink-0 text-sm tabular-nums text-slate-800">
                                   {formatCurrency(b.amount)}
@@ -833,6 +1050,16 @@ export function SuppliersCard({
                         </p>
                       )}
                       {account.note && <p className="mt-1 text-xs text-slate-400">{account.note}</p>}
+                      {actions.updateAccount && (
+                        <Button
+                          variant="outline"
+                          className="mt-3 h-11"
+                          disabled={pending}
+                          onClick={() => openEdit(account)}
+                        >
+                          Edit Account
+                        </Button>
+                      )}
                     </div>
                   )}
                 </Card>
@@ -872,6 +1099,62 @@ export function SuppliersCard({
       <SupplierUnfiledSpellings spellings={loose} canSetOnAccount={!!actions.setOnAccount} actions={actions} />
 
       <SupplierDuplicates groups={duplicates} actions={actions} />
+
+      {editFor && actions.updateAccount && (
+        <Modal
+          open
+          onClose={() => setEditFor(null)}
+          title={`Edit ${editFor.name}`}
+          footer={
+            <ModalActions
+              onCancel={() => setEditFor(null)}
+              onSave={saveEdit}
+              saveLabel="Save Account"
+              saving={pending && busy === `editacct:${editFor.id}`}
+              disabled={!editName.trim()}
+            />
+          }
+        >
+          <div className="space-y-3">
+            {sheetError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{sheetError}</div>}
+            <div>
+              <Label htmlFor="acct-name">Name</Label>
+              <Input id="acct-name" value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus />
+              <p className="mt-1 text-xs text-slate-400">
+                What every receipt from them gets filed under. The spellings already filed here do not change.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="acct-number">Account Number</Label>
+              <Input
+                id="acct-number"
+                value={editNumber}
+                onChange={(e) => setEditNumber(e.target.value)}
+                placeholder="TR-34426"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Theirs, not yours. It is how a payment you sent gets matched when they ask about it.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="acct-branch">Branch</Label>
+              <Input
+                id="acct-branch"
+                value={editBranch}
+                onChange={(e) => setEditBranch(e.target.value)}
+                placeholder="8802 Truckee"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                Which counter this account is yours at. The money rolls up here whichever branch a ticket came from.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="acct-note">Note</Label>
+              <Input id="acct-note" value={editNote} onChange={(e) => setEditNote(e.target.value)} />
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {payFor && payBalance && (
         <Modal

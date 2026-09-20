@@ -18,6 +18,8 @@ import {
   perUnitLabel,
   usedCost,
   usedCountFromCost,
+  statedUnitPrice,
+  splitContradictsReceipt,
 } from "./receipt-billing";
 
 describe("what the receipt reader bills by default", () => {
@@ -608,5 +610,196 @@ describe("a receipt with a container split across the shelf and the job", () => 
     const split = splitReceiptBilling(108.36, [{ amount: 108.36, billable: true, billedAmount: 999 }]);
     expect(split.billed).toBe(108.36);
     expect(split.partBilledCount).toBe(1);
+  });
+});
+
+/**
+ * ── CT ON A LOAD CENTRE IS THE CIRCUIT COUNT (audit of cn-v966) ───────────────────────────────
+ *
+ * The amperage/conductor test above was written against invented text and it missed the real
+ * thing: CED and Square D name a panel "<circuits>/<spaces>CT <amps> ...". Two of them are sitting
+ * in his bill_line_items right now, both single physical panels, and the old regex read the second
+ * number of the pair as a pack size and stated it as fact beside a one-press "Use 24".
+ */
+describe("a load centre's circuit count is not a pack size", () => {
+  it("reads nothing out of 12/24CT or 40/60CT", () => {
+    // bill_line_items 3057b2d3 ($203.89) and d2714a07 ($343.59), both quantity 1, both billable.
+    expect(containerCountInDescription("12/24CT 125A N3R Load Center")).toBeNull();
+    expect(containerCountInDescription("40/60CT 200A LD-CTR (PN4060L1200C)")).toBeNull();
+  });
+
+  it("does not backtrack to the left half of the pair either", () => {
+    // A bare "not a slash" lets the engine retreat to the "4" of "12/24CT" and answer 4, which is
+    // a wronger wrong: it would divide a $203.89 panel into four.
+    expect(containerCountInDescription("12/24CT")).toBeNull();
+    expect(containerCountInDescription("40/60CT")).toBeNull();
+    expect(containerHint("12/24CT 125A N3R Load Center", 1).looksLikeContainer).toBe(false);
+    expect(containerHint("40/60CT 200A LD-CTR (PN4060L1200C)", 1).looksLikeContainer).toBe(false);
+  });
+
+  it("still reads every way a supply house really prints a pack size", () => {
+    expect(containerCountInDescription("Wire Nut Red 100PK")).toBe(100);
+    expect(containerCountInDescription("Staples 500/BX")).toBe(500);
+    expect(containerCountInDescription("1/2 in Connector 250 CT")).toBe(250);
+    expect(containerCountInDescription("Heat Shrink Tube 8PK")).toBe(8);
+    // All three off his own receipts.
+    expect(containerCountInDescription("Teks lath sharp pt screw 8x2 in 100 pk")).toBe(100);
+    expect(containerCountInDescription("Teks lath drill pt screw 8x1-5/8 in 120 pk")).toBe(120);
+    expect(
+      containerCountInDescription(
+        "Commercial Electric 3/8 in Flexible Metal Conduit (FMC) AC/MC One-Hole Strap (200-Pack)",
+      ),
+    ).toBe(200);
+  });
+});
+
+/**
+ * ── A DEVICE BOX IS NOT A CONTAINER (audit of cn-v966) ────────────────────────────────────────
+ *
+ * Run against every description in his database, the old word list matched 31 rows and 17 of them
+ * were single outlet boxes and covers. A suggestion that fires on most of a receipt is one that
+ * gets tapped through, which is how the Smartwater reached INV-069 in the first place.
+ */
+describe("the container words do not include the shelf's most common noun", () => {
+  const HIS_DEVICE_BOXES = [
+    "1G WP Box w/3 1/2 Hubs RACO",
+    "1G WP BOX W/4 1/2 HUB BRONZE (RACO 53212)",
+    "1G WP BOX W/4 1/2HUB BRONZE",
+    "2G 7 hole 3/4 in box 2-gang silver",
+    "2G BRZ WP outlet box 3H 3/4 in",
+    "2G ext box 6X SI box extension 2-gang silver",
+    "4/0 REMODEL BOX (PC244OWG)",
+    "Box 1-Gang 3 Hole 1/2 in Silver",
+    "Box Cover Square Blank 4 in",
+    "Carlon 1-Gang 20 cu in Electrical PVC Old Work Electrical Switch and Outlet Box (B120R)",
+    "Carlon 2-Gang 25 cu in Electrical PVC Old Work Electrical Switch and Outlet Box (B225R-UPC)",
+    "Commercial Electric 2-Gang Metallic Weatherproof Outlet Box with (7) 3/4 in Holes and Side Lugs, Gray",
+    "Electrical Box Galvanized Steel 4 in",
+    "Electrical Box New Square Steel",
+    "LIQ-TITE 3/4 in UA grey box (FLEX 3/4UAGREYBOX)",
+    "RACO 292 3-1/2 in round 1/2D NMC box",
+    "Steel City 2-Gang Square Device Wall Box (2G4D1234-10R)",
+  ];
+
+  it.each(HIS_DEVICE_BOXES)("says nothing about %s", (description) => {
+    expect(containerHint(description, 1).looksLikeContainer).toBe(false);
+  });
+
+  it("leaves BX alone, because BX is armoured cable", () => {
+    expect(containerHint("BX 12-2 Armoured Cable 25 ft", 1).looksLikeContainer).toBe(false);
+  });
+
+  // The nine real hits on his data are all coils and reels, and every one of them stays.
+  const HIS_REAL_CONTAINERS = [
+    "NMB 10/3 W/GND (250 ft Coil)",
+    "NMB 12/2 W/GND (250 ft Coil)",
+    "NMB 12/2 w/gnd 250 ft coil",
+    "NMB 12/2 W/GND 250 ft coil (WIRE NMB12/2WGNDX250)",
+    "NMB 12/2 w/gnd wire 250 ft coil",
+    "NMB 14/2 W/GND (250 ft Coil)",
+    "NMB 14/2 w/gnd 250 ft coil",
+    "NMB 6/3 W/GND (1000 ft REEL)",
+    "WIRE NMB 10/3 w/GND 50 ft coil",
+  ];
+
+  it.each(HIS_REAL_CONTAINERS)("still flags %s", (description) => {
+    expect(containerHint(description, 1).looksLikeContainer).toBe(true);
+  });
+
+  it("still flags a box that says how many are in it, because the count is the evidence", () => {
+    expect(containerHint("Wire Nut Red 100/BX", 1).count).toBe(100);
+    expect(containerHint("Wire Nut Red 100/BX", 1).looksLikeContainer).toBe(true);
+    expect(containerHint("Staples 500/BX", 1).looksLikeContainer).toBe(true);
+  });
+
+  it("still catches a quantity over fifty on a description that says nothing", () => {
+    expect(containerHint("Bulk Fastener Assorted", 240).looksLikeContainer).toBe(true);
+  });
+});
+
+/**
+ * ── THE REEL: WHAT THE SPLIT DIVIDED BY, AND WHAT IT SHOULD HAVE (audit of cn-v966) ───────────
+ *
+ * bill_line_items 8cf06c1e, on the CED bill of 2026-07-22: "NMB 6/3 W/GND (1000 ft REEL)",
+ * quantity 55, unit_price 4.32, amount 237.66. Fifty-five feet CUT OFF a reel he does not own.
+ * "reel" flags the row, the sheet printed "1000 ft REEL" above the question, and $237.66 / 1000
+ * billed the job $13.07 for $237.66 of wire while telling him $224.59 went in his stock along with
+ * 945 feet of cable that never existed. Nothing refused it: the only gate was "more than the line
+ * cost", and this failure goes the other way.
+ */
+describe("the receipt's own price checks the split", () => {
+  const REEL = { quantity: 55, unitPrice: 4.32, cost: 237.66 };
+  const TWISTER = { quantity: 500, unitPrice: 108.36, cost: 108.36 };
+  const COIL = { quantity: 250, unitPrice: 0.75, cost: 187.68 };
+  const STRAP = { quantity: 1, unitPrice: 22.65, cost: 22.65 };
+
+  it("reads what one purchased unit cost when the row's own arithmetic closes", () => {
+    // 55 x 4.32 is 237.60 against a stored 237.66, six cents apart on $237.66. A supply house
+    // prices wire per hundred feet and rounds the extension, so the slack is the point.
+    expect(statedUnitPrice(REEL.quantity, REEL.unitPrice, REEL.cost)).toBe(4.32);
+    expect(statedUnitPrice(COIL.quantity, COIL.unitPrice, COIL.cost)).toBe(0.75);
+    expect(statedUnitPrice(250, 1.65, 411.68)).toBe(1.65); // 82 cents out on $411.68, still his
+    expect(statedUnitPrice(STRAP.quantity, STRAP.unitPrice, STRAP.cost)).toBe(22.65);
+  });
+
+  it("says nothing about the Twister row, which is why the old split still works", () => {
+    // quantity 500 came out of the PRODUCT NAME, so 500 x 108.36 is nowhere near 108.36 and the
+    // row states nothing at all. Everything below stands down and cn-v964's behaviour is kept.
+    expect(statedUnitPrice(TWISTER.quantity, TWISTER.unitPrice, TWISTER.cost)).toBeNull();
+    expect(
+      splitContradictsReceipt({ ...TWISTER, boughtQuantity: 1, pieces: 500 }),
+    ).toBeNull();
+    expect(perUnitCost(TWISTER.cost, 1 * 500)).toBeCloseTo(0.21672, 5);
+  });
+
+  it("refuses the reel split that would have moved $224.59", () => {
+    const objection = splitContradictsReceipt({ ...REEL, boughtQuantity: 1, pieces: 1000 });
+    expect(objection).toContain("$4.32 each for 55 of these");
+    expect(objection).toContain("$237.66 each");
+    expect(objection).toContain("Say this line bought 55");
+  });
+
+  it("names a way out rather than just refusing", () => {
+    // 55 feet bought, each one a foot: $4.32 a foot, and 40 of them on this job is $172.84.
+    expect(splitContradictsReceipt({ ...REEL, boughtQuantity: 55, pieces: 55 })).toBeNull();
+    expect(perUnitLabel(perUnitCost(REEL.cost, 55))).toBe("$4.32 each");
+    expect(usedCost(40, perUnitCost(REEL.cost, 55))).toBe(172.84);
+  });
+
+  it("lets a real coil split, which is the case the refusal must not break", () => {
+    // 250 ft at 75 cents. Bought 1 is the old assumption and it is refused; bought 250 is the row.
+    expect(splitContradictsReceipt({ ...COIL, boughtQuantity: 1, pieces: 250 })).toContain(
+      "Say this line bought 250",
+    );
+    expect(splitContradictsReceipt({ ...COIL, boughtQuantity: 250, pieces: 250 })).toBeNull();
+    expect(perUnitLabel(perUnitCost(COIL.cost, 250))).toBe("75.1 cents each");
+  });
+
+  it("leaves an ordinary one-container line exactly as it was", () => {
+    // A 200-Pack strap at $22.65: one purchased unit, 200 pieces, 11.3 cents a strap. If this
+    // ever started refusing, the feature would be gone.
+    expect(splitContradictsReceipt({ ...STRAP, boughtQuantity: 1, pieces: 200 })).toBeNull();
+    expect(perUnitLabel(perUnitCost(STRAP.cost, 1 * 200))).toBe("11.3 cents each");
+  });
+
+  it("gets the multi-container case exactly right instead of half price", () => {
+    // Two boxes of 500 Twisters. The old arithmetic divided the whole $216.72 by 500 and billed
+    // every nut at double, and stocked 500 where a thousand arrived.
+    expect(splitContradictsReceipt({ quantity: 2, unitPrice: 108.36, cost: 216.72, boughtQuantity: 2, pieces: 1000 }))
+      .toBeNull();
+    expect(perUnitCost(216.72, 2 * 500)).toBeCloseTo(0.21672, 5);
+  });
+
+  it("stands down when nothing was divided at all", () => {
+    // By Dollars with no count typed: he named a figure himself and this has no business arguing.
+    expect(splitContradictsReceipt({ ...REEL, boughtQuantity: 1, pieces: 0 })).toBeNull();
+    expect(splitContradictsReceipt({ ...REEL, boughtQuantity: null, pieces: null })).toBeNull();
+  });
+
+  it("stands down on a row with no price column to check against", () => {
+    expect(splitContradictsReceipt({ quantity: 1, unitPrice: null, cost: 42, boughtQuantity: 1, pieces: 500 })).toBeNull();
+    expect(splitContradictsReceipt({ quantity: null, unitPrice: 4.32, cost: 42, boughtQuantity: 1, pieces: 500 })).toBeNull();
+    expect(statedUnitPrice(null, null, null)).toBeNull();
+    expect(statedUnitPrice(1, 0, 0)).toBeNull();
   });
 });

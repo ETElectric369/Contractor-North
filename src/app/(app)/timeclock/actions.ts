@@ -663,7 +663,26 @@ export async function clockOut(input: {
     // clockOut still returned ok — the tech watched a clean clock-out and had no hours.
     .select("id");
 
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // NOBODY GETS LEFT UNABLE TO CLOCK OUT. 0278 put an overlap ceiling under time_entries, and a
+    // clock-out is an UPDATE that sets clock_out — so a live shift running across hours the office
+    // has already recorded for this person now trips that trigger. Its sentence tells whoever is
+    // holding the phone to "edit that entry", and a tech cannot edit entries at all, which is a
+    // wall at the end of a working day.
+    //
+    // Nothing is lost when this happens: the update is refused whole, so the shift is still open
+    // with every minute of it on the row. The answer has to SAY that, and name the person who can
+    // actually clear the way, instead of handing a man in a truck a database's words.
+    const raw = String((error as { message?: unknown } | null)?.message ?? "");
+    if (/overlap a shift already recorded/i.test(raw)) {
+      return {
+        ok: false,
+        error:
+          "These hours overlap a shift already recorded for you, so this one can't close on top of it. Your shift is still running and nothing was lost. The office has to fix that other entry on Timecards first.",
+      };
+    }
+    return { ok: false, error: dbError(error) };
+  }
   if (!closedRows?.length) {
     // Say which failure it is, and refresh the screens so the next tap sees the truth.
     revalidatePath("/timeclock");
@@ -1096,6 +1115,101 @@ export async function completeAutoClockOut(input: {
 }
 
 /**
+ * ONE PERSON, TWO SHIFTS OVER THE SAME HOURS, IS ONE SHIFT PAID TWICE.
+ *
+ * aggregatePayrollEntries (payroll-math.ts) buckets time_entries by profile_id and sums every row
+ * it is handed. No identity check, no overlap check, and nothing above it has one either — so two
+ * rows describing one afternoon are earned twice, owed twice and paid twice, and the man writing
+ * the cheque has nothing on screen telling him so. Brian has an identical 1.5h pair on Aug 18
+ * sitting unpaid in the ledger right now; that pair alone is $60 of his Owed figure.
+ *
+ * cn-v959 built this exact test — but INSIDE the copy button, because that is the door somebody
+ * happened to file a bug about. Add Entry and the edit modal write the same table with the same
+ * consequence and had no check of any kind. So the test lives here now and all three doors call
+ * it: one rule, one wording, and the next door that writes a shift has it already waiting.
+ *
+ * 0278 puts the same rule under the database, which is where it stops being a convention and
+ * becomes a boundary. This layer is not the boundary — it exists so the office reads a sentence
+ * naming the shift the way the timecard shows it, instead of a Postgres exception.
+ *
+ * Returns the sentence to refuse with, or null when the hours are clear.
+ */
+async function overlapRefusal(
+  supabase: SupabaseClient,
+  profileId: string,
+  startMs: number,
+  endMs: number,
+  opts?: {
+    /** The row being edited or copied — it is allowed to overlap itself. */
+    excludeId?: string;
+    /** Already in the caller's hand (the copy reads both to name its target); else read here. */
+    name?: string;
+    tz?: string;
+    /** A copy onto the SAME person: the exact match it finds IS the original, so say that. */
+    samePerson?: boolean;
+  },
+): Promise<string | null> {
+  if (!profileId || !Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+
+  // 0217 caps a shift at 18 hours, so a day back catches every entry that could still be running
+  // into this one.
+  const { data: near, error: nearErr } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, clock_out")
+    .eq("profile_id", profileId)
+    .gte("clock_in", new Date(startMs - 24 * 3_600_000).toISOString())
+    .lte("clock_in", new Date(endMs).toISOString())
+    .limit(100);
+  // A FAILED READ IS NOT A CLEAR DAY. Waving the write through on the one occasion the check could
+  // not be made is how the pair in the ledger got there; 0278 would still refuse it, but the
+  // office would be reading the database's words instead of ours.
+  if (nearErr) return dbError(nearErr);
+
+  const rows = ((near ?? []) as { id: string; clock_in: string; clock_out: string | null }[]).filter(
+    (r) => r.id !== opts?.excludeId && Number.isFinite(new Date(r.clock_in).getTime()),
+  );
+  // An OPEN entry has no end, so it counts as running until now — a man still clocked in cannot
+  // also have worked these hours somewhere else.
+  const endOf = (r: { clock_out: string | null }) => (r.clock_out ? new Date(r.clock_out).getTime() : Date.now());
+  const exact = rows.find((r) => new Date(r.clock_in).getTime() === startMs && r.clock_out != null && endOf(r) === endMs);
+  const clash =
+    exact ??
+    rows.find((r) => {
+      const s = new Date(r.clock_in).getTime();
+      const e = endOf(r);
+      // A MINUTE OF SLACK — the same tolerance 0248 uses and 0278 enforces underneath. Clocking
+      // out and straight back in on the next job is the most ordinary move of the day, and the
+      // second or two of overlap a double tap leaves behind is not a double shift.
+      return s < endMs && e > startMs && Math.min(e, endMs) - Math.max(s, startMs) > 60_000;
+    });
+  if (!clash) return null;
+
+  // Only now, with something to actually say, pay for the two reads the sentence needs.
+  let name = opts?.name;
+  if (!name) {
+    const { data: p } = await supabase.from("profiles").select("full_name").eq("id", profileId).maybeSingle();
+    name = (p as { full_name?: string | null } | null)?.full_name ?? "That person";
+  }
+  let tz = opts?.tz;
+  if (!tz) {
+    const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  }
+
+  if (exact) {
+    const when = shiftWhen(new Date(startMs).toISOString(), new Date(endMs).toISOString(), tz);
+    return opts?.samePerson
+      ? `${name} already has ${when}. Pick the person who worked it with them, or edit that entry.`
+      : `${name} already has ${when} on another entry. Open that one to change it.`;
+  }
+  // An open shift has no finish to name, so it gets its start instead of a made-up one.
+  const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
+  return clash.clock_out
+    ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
+    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Close that shift first.`;
+}
+
+/**
  * Add a past (manual) timecard entry — STAFF ONLY. A tech padding hours with a
  * back-dated manual entry is exactly what mis-billed jobs; techs clock in/out live
  * (rounding the start back to the half hour at most). The office adds corrections
@@ -1158,11 +1272,17 @@ export async function createManualEntry(input: {
   }
   if (co <= ci) return { ok: false, error: "End must be after start." };
 
+  // THE EASIEST WAY IN THE APP TO PAY FOR ONE AFTERNOON TWICE was this button: Add Entry wrote a
+  // second row for a person who already had those hours and said nothing, because nothing here
+  // ever looked. The office reaches for it when it should be EDITING the row that exists.
+  const overlaps = await overlapRefusal(supabase, profileId, ci.getTime(), co.getTime());
+  if (overlaps) return { ok: false, error: overlaps };
+
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
   // persist a cross-org job reference.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
 
-  const { error } = await supabase.from("time_entries").insert({
+  const { data: made, error } = await supabase.from("time_entries").insert({
     profile_id: profileId,
     job_id: jobId,
     job_code: input.job_code,
@@ -1174,8 +1294,11 @@ export async function createManualEntry(input: {
     rate_override: input.rate_override ?? null,
     status: "closed",
     source: "manual",
-  });
+  }).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // The silent-write law: an insert that comes back with no row wrote nothing, and this door was
+  // reporting that as a saved shift. Hours that never landed are hours nobody gets paid for.
+  if (!made?.length) return { ok: false, error: "Those hours didn't save. Reload and try again." };
 
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
@@ -1298,6 +1421,25 @@ export async function updateTimeEntry(input: {
   }
   if (stored.mileage_paid_at && input.miles !== undefined && Math.abs((input.miles ?? 0) - Number(stored.miles ?? 0)) > 0.001) {
     return { ok: false, error: "Entry's mileage is settled — Undo on Payroll first." };
+  }
+
+  // AND A SHIFT MUST NOT BE MOVED ON TOP OF ANOTHER ONE. This door can change both ends of the
+  // span AND hand the entry to a different person (input.profile_id), so a correction here lands
+  // hours on somebody's week just as surely as Add Entry does, and it never once looked to see
+  // whether they already had them.
+  //
+  // Gated on something ACTUALLY MOVING, which is 0217's lesson and 0278's: seven overlapping rows
+  // are already in the ledger, and a note, job, mileage or split fix on one of them has to save
+  // untouched — otherwise the guard traps the very rows it was built to let Erik sort out. Pulling
+  // one of them clear of the other is a move, and it passes, because the new span is clean.
+  const targetProfileId = input.profile_id || stored.profile_id;
+  const movedOrReassigned =
+    timeMoved(ci.toISOString(), stored.clock_in) ||
+    timeMoved(co.toISOString(), stored.clock_out) ||
+    targetProfileId !== stored.profile_id;
+  if (movedOrReassigned) {
+    const overlaps = await overlapRefusal(supabase, targetProfileId, ci.getTime(), co.getTime(), { excludeId: input.id });
+    if (overlaps) return { ok: false, error: overlaps };
   }
 
   // THE INVOICE THAT BILLED THIS SHIFT KEEPS ITS CLAIM (0255). A labor line claims the entry /
@@ -1671,48 +1813,14 @@ export async function duplicateTimeEntry(
   const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
   const when = shiftWhen(clockIn, clockOut, tz);
 
-  // THE GUARD FOLLOWS THE PERSON THE COPY LANDS ON. 0217 refuses a byte-identical second shift
-  // per profile, which is right — and is exactly why a same-person copy could never succeed.
-  // Read the TARGET's own shifts around this span once, and answer in plain words instead of
-  // letting a database exception reach the screen:
-  //   · the same exact times already on that person → there is nothing to add
-  //   · any overlap → those hours would be paid twice
-  const { data: near, error: nearErr } = await supabase
-    .from("time_entries")
-    .select("id, clock_in, clock_out")
-    .eq("profile_id", targetId)
-    // 0217 caps a shift at 18 hours, so a day back catches every entry that could still be
-    // running into this one.
-    .gte("clock_in", new Date(startMs - 24 * 3_600_000).toISOString())
-    .lte("clock_in", clockOut)
-    .limit(100);
-  if (nearErr) return { ok: false, error: dbError(nearErr) };
-  const rows = ((near ?? []) as { id: string; clock_in: string; clock_out: string | null }[]).filter((r) =>
-    Number.isFinite(new Date(r.clock_in).getTime()),
-  );
-  const endOf = (r: { clock_out: string | null }) => (r.clock_out ? new Date(r.clock_out).getTime() : Date.now());
-  const exact = rows.find((r) => new Date(r.clock_in).getTime() === startMs && r.clock_out != null && endOf(r) === endMs);
-  if (exact) {
-    // On a same-person copy the row it finds IS the original, which is the honest reason the
-    // old one-tap duplicate could never work. Point at the picker instead of at a wall.
-    return {
-      ok: false,
-      error: samePerson
-        ? `${name} already has ${when}. Pick the person who worked it with them, or edit that entry.`
-        : `${name} already has ${when} on another entry. Open that one to change it.`,
-    };
-  }
-  const clash = rows.find((r) => new Date(r.clock_in).getTime() < endMs && endOf(r) > startMs);
-  if (clash) {
-    // An OPEN entry has no end to name, so it gets its start instead of a made-up finish.
-    const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
-    return {
-      ok: false,
-      error: clash.clock_out
-        ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
-        : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Close that shift first.`,
-    };
-  }
+  // THE GUARD FOLLOWS THE PERSON THE COPY LANDS ON. 0217 refuses a byte-identical second shift per
+  // profile, which is right — and is exactly why the old one-tap, same-person duplicate could
+  // never succeed at anything. The test itself now lives in overlapRefusal, because Add Entry and
+  // the edit modal write the same table with the same consequence and had no check at all; this
+  // door keeps its own wording only for the same-person case, where the row it finds IS the
+  // original and the honest answer is to point at the person picker.
+  const overlaps = await overlapRefusal(supabase, targetId, startMs, endMs, { name, tz, samePerson });
+  if (overlaps) return { ok: false, error: overlaps };
 
   const { data: made, error } = await supabase
     .from("time_entries")

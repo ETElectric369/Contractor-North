@@ -232,10 +232,57 @@ export function excludedReceiptCost(allLines: BillLine[]): number {
   const excludedPurchasedCost = sumBy(purchased, notBilledCost);
   const taxLines = allLines.filter(isTaxLine);
   const excludedTaxDirect = sumBy(taxLines, notBilledCost);
-  const sharedTax = sumBy(taxLines, billLineBilledCost);
+  /**
+   * A TAX LINE A PERSON HAS ACTED ON IS ALREADY EXACT (review of cn-v966).
+   *
+   * Nothing stops him from tapping "Bill Only What This Job Used" on the Sales Tax row itself -
+   * the card renders the same switch and the same modal on every line - and when he does, he has
+   * said what he means: bill the customer this much of this tax. That is the rule the boolean has
+   * always had ("a tax line somebody switched off by hand is simply gone in full").
+   *
+   * Only tax NOBODY has touched carries the proportional share of the purchased lines that came
+   * off. Otherwise the same dollars are cut twice by two independent mechanisms: split the Twister
+   * box to $13 and type $2.00 on the tax line, and the $2 he typed reaches the customer as about
+   * 52 cents, because the box's 74% is applied a second time to a figure that was already his
+   * decision. A number he did not choose, on a screen that never shows it.
+   *
+   * For an untouched line billLineCost === billLineBilledCost, so every receipt in his books today
+   * bills the identical cent; only the hand-split case moves.
+   */
+  const untouchedTax = taxLines.filter(
+    (l) => l.billable !== false && billedPortion(billLineCost(l), l.billed_amount) == null,
+  );
+  const sharedTax = sumBy(untouchedTax, billLineCost);
   const excludedShare = purchasedCost > 0 ? excludedPurchasedCost / purchasedCost : 0;
   const excludedTaxShare = Math.round(sharedTax * excludedShare * 100) / 100;
   return Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
+}
+
+/**
+ * WHAT A RECEIPT PUTS IN FRONT OF THE CUSTOMER, AT COST - the figure every panel that promises to
+ * equal the invoice has to sum (review of cn-v966).
+ *
+ * 0268 and 0272 made a receipt's TOTAL stop being the answer to "what will this bill". The
+ * importer has known that since cn-v964; the Unbilled card and the work-to-date panel did not, and
+ * they both say in their own headers that their figure is the figure a draft built from them will
+ * carry. On Erik's OSH run for Jason Waldow that promise was off by his own ice cream bar with 25%
+ * on top: the card said $20.35 of unbilled material, the button that bills it wrote $8.13, and the
+ * $12.22 in between was presented to him as money a customer owed.
+ *
+ * So this is billItemisation's own two answers to "is there anything here for the customer",
+ * hoisted out and shared, rather than a second arithmetic that can drift from it:
+ *   - every purchased line came off (all snacks, the container that went on the shelf) -> nothing,
+ *     the same empty itemisation the importer produces, residue on the bill and all;
+ *   - otherwise the bill less what a person took off it, tax share included, floored at zero.
+ * A bill with NO lines (hand-entered, or a scan that read nothing) is its lump, unchanged.
+ */
+export function billableBillCost(amount: unknown, lines: BillLine[] | null | undefined): number {
+  const amt = Number(amount) || 0;
+  const all = lines ?? [];
+  const purchased = all.filter((l) => !isTaxLine(l));
+  if (purchased.length > 0 && !purchased.some(stillBills)) return 0;
+  const net = Math.round((amt - excludedReceiptCost(all)) * 100) / 100;
+  return net > 0 ? net : 0;
 }
 
 export function billItemisation(

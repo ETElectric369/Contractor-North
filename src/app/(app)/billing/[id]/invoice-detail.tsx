@@ -624,7 +624,23 @@ export function InvoiceDetail({
             className="w-36"
             disabled={pending}
             onChange={(e) => {
-              const next = e.target.value;
+              /* "SENT AGAIN" IS A DEED YOU DECLARE, NOT A STATE THE BILL IS IN — AND A <select>
+                 COULD NOT TELL THE TWO APART (INV-071, 2026-09-20).
+                 The declaration below used to carry value="sent", the same value the locked
+                 current-status option carries once the invoice really is sent. A browser resolves
+                 a select's value by the FIRST option in tree order that matches it, and the
+                 declaration sits above the status, so on any bill that went out and was then
+                 revised the CLOSED dropdown read "Sent Again - I re-sent it myself" as though the
+                 corrected copy were already in Karen Wucher's hands. Three inches below, the amber
+                 banner was asking him to go do that exact thing. The picker said done; the banner
+                 said not done; only one of them was right.
+                 Two options sharing a value broke the declaration as well as the label: picking
+                 the one the browser already considers selected fires no change event, so the
+                 re-send was a no-op. The door therefore gets its own value and is translated back
+                 here, one line from the option, because the server accepts only real statuses
+                 (setInvoiceStatus's whitelist) and its cn-v962 `redelivered` branch keys off
+                 "sent". Everything past this line still sees the status, never the door. */
+              const next = e.target.value === "sent-by-hand" ? "sent" : e.target.value;
               start(async () => {
                 const res = await setInvoiceStatus(invoice.id, next);
                 if (!res?.ok) { toast(res?.error ?? "Couldn't change the status — try again.", "error"); return; }
@@ -655,7 +671,12 @@ export function InvoiceDetail({
                 asks. It now appears in exactly the two cases the server accepts, with the words
                 that match what each one does. */}
             {(invoice.status === "draft" || customerHoldsOlderCopy) && (
-              <option value="sent">
+              /* ITS OWN VALUE, NEVER A STATUS'S. Both labels name a deed the person is declaring,
+                 and the option that shows what the invoice IS is the disabled one below. Give this
+                 one the same value and the browser picks whichever comes first in the file, which
+                 is how a sent-and-revised bill ended up describing itself as re-sent. Translated
+                 back to "sent" in the onChange above. */
+              <option value="sent-by-hand">
                 {invoice.status === "draft" ? "Sent - I sent it myself" : "Sent Again - I re-sent it myself"}
               </option>
             )}

@@ -607,3 +607,75 @@ describe("paying someone who is switched off in People", () => {
       .not.toContain("switched off");
   });
 });
+
+// ── TWO ROWS, ONE AFTERNOON ──────────────────────────────────────────────────
+// Erik's own ledger, read 2026-09-19. Brian Taylor has entries 297671dc and 4b72bee8: both
+// 2026-08-18, 18:30 to 20:00 UTC, both on J-039, 1.5h each, both still UNPAID — and six more
+// overlapping pairs behind them. Nothing in this file notices, and until cn-v967 nothing above it
+// did either: aggregatePayrollEntries buckets by profile_id and adds up whatever it is handed.
+//
+// THAT IS DELIBERATE, AND THIS IS WHERE IT IS SAID OUT LOUD. Adding up given hours is arithmetic;
+// deciding that two rows describe one shift is a judgement about a day in the world, and it
+// belongs at the door writing the second row — createManualEntry, updateTimeEntry and
+// duplicateTimeEntry all call overlapRefusal now, with 0278's trigger under them as the ceiling.
+// If somebody ever "fixes" the double-count HERE instead, these numbers move and this test fails,
+// which is exactly the conversation worth having before payroll starts quietly subtracting hours
+// nobody asked it to subtract.
+describe("overlapping entries for one person are NOT deduped by the aggregator", () => {
+  // Brian's real rate and his real Aug 18 shift.
+  const brian = (over: Partial<any>) => ({
+    profile_id: "07b85435-02ff-4382-a4f1-1f932c561d9f",
+    clock_in: "2026-08-18T18:30:00.000Z",
+    clock_out: "2026-08-18T20:00:00.000Z",
+    lunch_minutes: 0,
+    miles: 0,
+    paid_at: null,
+    mileage_paid_at: null,
+    profiles: { full_name: "Brian Taylor", hourly_rate: 40 },
+    ...over,
+  });
+
+  it("a byte-identical pair is summed twice — 3h and $120 where one shift was worked", () => {
+    const [one] = aggregatePayrollEntries([brian({})]);
+    expect(one).toMatchObject({ unpaidHours: 1.5, unpaidGross: 60 });
+
+    const [both] = aggregatePayrollEntries([brian({}), brian({})]);
+    // The live pair, priced: $60 of Brian's Owed figure that nobody worked for.
+    expect(both).toMatchObject({ unpaidHours: 3, unpaidGross: 120 });
+    expect(both.unpaidGross - one.unpaidGross).toBe(60);
+  });
+
+  it("a MERELY overlapping pair counts just as fully — the 0214/0217 identity test never saw these", () => {
+    // Brian, 2026-09-11: 41de44f3 (18:00 to 02:30, 8.5h) beside 4b64f579 (17:31:49 to 01:57:01,
+    // 8.42h). Different timestamps to the second, so the old exact-match guard let it straight in.
+    const a = brian({ clock_in: "2026-09-11T18:00:00.000Z", clock_out: "2026-09-12T02:30:00.000Z" });
+    const b = brian({ clock_in: "2026-09-11T17:31:49.399Z", clock_out: "2026-09-12T01:57:01.107Z" });
+    const [row] = aggregatePayrollEntries([a, b]);
+    expect(row.unpaidHours).toBeCloseTo(16.92, 2); // 8.5 + 8.42, for one day on one job
+    expect(row.unpaidGross).toBeCloseTo(676.8, 2);
+  });
+
+  it("balanceForPerson inherits the inflated total without a word — Owed is Earned", () => {
+    const one = balanceForPerson({
+      profileId: "07b85435-02ff-4382-a4f1-1f932c561d9f",
+      name: "Brian Taylor",
+      entries: [brian({})],
+      lockedRuns: [],
+      payments: [],
+      tz: "America/Los_Angeles",
+    });
+    const both = balanceForPerson({
+      profileId: "07b85435-02ff-4382-a4f1-1f932c561d9f",
+      name: "Brian Taylor",
+      entries: [brian({}), brian({})],
+      lockedRuns: [],
+      payments: [],
+      tz: "America/Los_Angeles",
+    });
+    expect(one).toMatchObject({ earned: 60, owed: 60 });
+    expect(both).toMatchObject({ earned: 120, owed: 120 });
+    // No flag, no warning, no second figure: the Pay page would read $120 and the cheque would be
+    // written for $120. The refusal has to happen before the row exists.
+    expect(Object.keys(both)).not.toContain("overlapWarning");
+  });
+});

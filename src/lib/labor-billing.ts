@@ -27,12 +27,55 @@ export function withoutClaimedLabor(
   jobEntries: any[],
   jobAllocs: any[],
   claimed: ReadonlySet<string>,
+  /** id → the invoice holding that claim, for its date alone (ClaimedSources.owner fits as is).
+   *  Without it this function can still refuse, it just cannot tell an OLD split apart from one
+   *  made after the bill — see the parent-claim note below. */
+  heldBy?: ReadonlyMap<string, { created_at?: string | null }>,
 ): { jobEntries: any[]; jobAllocs: any[]; skippedIds: string[] } {
   const skippedIds: string[] = [];
   const isClaimed = (id: unknown) => !!id && claimed.has(String(id));
+  const at = (v: unknown): number => {
+    const t = Date.parse(String(v ?? ""));
+    return Number.isFinite(t) ? t : NaN;
+  };
+  /**
+   * AN ALLOCATION MADE AFTER THE INVOICE THAT BILLS ITS SHIFT IS THE SAME HOURS, COMING BACK
+   * (review of cn-v966).
+   *
+   * An UN-SPLIT shift is claimed by its own time_entries.id - that is what path (3) of
+   * computeJobLaborBilling bills (GROSS hours) and it is 90 of the 98 labor claims in Erik's books.
+   * Split that shift AFTERWARDS and the allocation rows are brand-new ids no invoice has ever held,
+   * so this filter used to hand them straight back as free hours on whatever job they were filed
+   * to. The door is replace_time_allocations: SECURITY DEFINER, granted to `authenticated`, it
+   * deletes and re-inserts a shift's rows while checking only ownership, the payroll lock and the
+   * hours ceiling - never a claim. Brian Taylor's shift 3acf00cd (2 h on J-028, billed whole on
+   * INV-061, PAID) is one of 84 closed, un-split, already-billed shifts in his books today.
+   *
+   * THE DATE IS THE WHOLE TEST, and it is there because the blunt version lies about his books.
+   * INV-00032 on J-016 holds Brian's and Erik's entry ids from 2026-06-25, but those shifts were
+   * ALREADY split when it was written (10:19) and it billed one hour of each (10:22): the other
+   * 2.5 h and 3 h sit on J-013 for Sue Waltz, unbilled to this day. Refusing those would put
+   * "already on INV-00032 (J-016)" in front of him about hours that invoice never billed, which is
+   * the app telling him he is wrong about his own work. A row that existed when the invoice was
+   * written was looked at and left off ON PURPOSE; a row that did not exist could only have been
+   * made to bill the same hours again.
+   *
+   * Unknown reads as claimed. Without a date on either side the honest answer is that we cannot
+   * tell, and between billing an hour twice and asking him to void an invoice, only one of them
+   * takes money from a customer who already paid.
+   */
+  const parentClaimOn = (a: any): string | null => {
+    const parent = a?.time_entries?.id;
+    if (!isClaimed(parent)) return null;
+    const made = at(a?.created_at);
+    const billed = at(heldBy?.get(String(parent))?.created_at);
+    if (Number.isFinite(made) && Number.isFinite(billed) && made <= billed) return null;
+    return String(parent);
+  };
   const allocs = (jobAllocs ?? []).filter((a) => {
-    if (!isClaimed(a?.id)) return true;
-    skippedIds.push(String(a.id));
+    const held = isClaimed(a?.id) ? String(a.id) : parentClaimOn(a);
+    if (!held) return true;
+    skippedIds.push(held);
     return false;
   });
   const entries: any[] = [];
@@ -258,7 +301,12 @@ export async function fetchJobLaborRows(
       .eq("status", "closed"),
     supabase
       .from("time_allocations")
-      .select("id, hours, job_code, time_entries!inner(status, profiles(id, full_name))")
+      // `time_entries.id` and `created_at` (review of cn-v966): the PARENT shift's identity is what
+      // an un-split shift's claim is written against, and the row's own age is what tells a split
+      // made BEFORE the invoice (looked at, left off on purpose) from one made after it (the same
+      // hours coming back for a second bill) - see withoutClaimedLabor. The projection law, on the
+      // read that decides whether a customer is charged for the same hour twice.
+      .select("id, hours, job_code, created_at, time_entries!inner(id, status, profiles(id, full_name))")
       .eq("job_id", jobId)
       .eq("time_entries.status", "closed"),
     // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all

@@ -15,41 +15,13 @@ import { dbError } from "@/lib/db-error";
  */
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
-import { getOrgSettings } from "@/lib/org-settings";
-import { prettyDay, todayStrInTz, weekDayStrs } from "@/lib/tz";
+import { prettyDay } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { setJobCrew } from "../schedule/actions";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { pickScheduledJobForDay } from "./crew-plan";
 
 export type CrewActionResult = { ok: boolean; error?: string };
-
-/** One week-grid row: an assignment joined with its job's label fields (both
- *  label worlds — job_number·name for codes-on, customer·address for codes-off). */
-export type CrewDayAssignmentRow = {
-  profile_id: string;
-  work_date: string; // YYYY-MM-DD (org-local day)
-  /** null on an OFF row (0170) — a day somebody is deliberately away names no job. */
-  job_id: string | null;
-  kind?: "job" | "off";
-  is_crew_lead: boolean;
-  job: {
-    id: string;
-    job_number: string | null;
-    name: string | null;
-    address: string | null;
-    customer_name: string | null;
-  } | null;
-};
-
-export type WeekAssignmentsResult = CrewActionResult & {
-  /** The 7 org-local day-strings of the requested week (org week_start honored). */
-  days?: string[];
-  rows?: CrewDayAssignmentRow[];
-};
 
 const isYmd = (s: string): boolean =>
   /^\d{4}-\d{2}-\d{2}$/.test(s ?? "") && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
@@ -211,67 +183,9 @@ export async function setCrewDayAssignment(input: {
     await sendPushToProfiles([profileId], "assigned", payload);
   }
 
-  revalidatePath("/timeclock"); // the board + week grid
+  revalidatePath("/timeclock"); // the day-picker board
   revalidatePath("/planner"); // My-Day law: the clock-in default / current job follow this
   return { ok: true };
-}
-
-/**
- * The week grid's read: the org's assignments for the week `weekOffset` weeks
- * from the current one — SIGNED, and **positive = FUTURE** (planning looks
- * ahead; /timecards' back-paging offset points the other way on purpose).
- * Any org member may call it (RLS crew_day_assignments_read — a tech can see
- * where the week puts them); rows join the job's label fields for both label
- * worlds. Fails soft to an empty week until migration 0139 lands.
- */
-export async function listWeekAssignments(weekOffset = 0): Promise<WeekAssignmentsResult> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
-
-  const offset = Math.max(-52, Math.min(52, Math.trunc(Number(weekOffset) || 0)));
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
-  const days = weekDayStrs(todayStrInTz(settings.timezone), settings.week_start, offset);
-
-  const { data, error } = await supabase
-    .from("crew_day_assignments")
-    .select("profile_id, work_date, job_id, kind, is_crew_lead, job:job_id(id, job_number, name, address, customers(name))")
-    .gte("work_date", days[0])
-    .lte("work_date", days[6])
-    .order("work_date", { ascending: true });
-  // Pre-0139 (or transient) failure: an empty week, never a dead page — the
-  // 0128 fail-soft precedent.
-  if (error) return { ok: true, days, rows: [] };
-
-  const rows: CrewDayAssignmentRow[] = ((data ?? []) as any[]).map((r) => {
-    const j = (r.job ?? null) as {
-      id: string;
-      job_number: string | null;
-      name: string | null;
-      address: string | null;
-      customers?: { name?: string | null } | null;
-    } | null;
-    return {
-      profile_id: r.profile_id as string,
-      work_date: r.work_date as string,
-      job_id: (r.job_id ?? null) as string | null,
-      kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
-      is_crew_lead: !!r.is_crew_lead,
-      job: j
-        ? {
-            id: j.id,
-            job_number: j.job_number ?? null,
-            name: j.name ?? null,
-            address: j.address ?? null,
-            customer_name: j.customers?.name ?? null,
-          }
-        : null,
-    };
-  });
-  return { ok: true, days, rows };
 }
 
 /**

@@ -16,6 +16,12 @@
  * I read those forty-seven by hand. This file is so that nobody has to again: it turns the TEXT of
  * a CED invoice PDF into the rows migration 0273 holds.
  *
+ * FOUR KINDS OF PAPER COME OFF THAT PORTAL, not one, and the cn-v967 audit found that only two of
+ * them were ever reaching this file: forty itemised invoices and credit memos, three
+ * service-charge bills (1.5%-a-month interest, on a template with no line items and no "NO." in
+ * its header) and four monthly statements (no invoice number of their own at all). The last seven
+ * matched nothing and returned nothing. Every one of them now either reads or refuses BY NAME.
+ *
  * ────────────────────────────────────────────────────────────────────────────────────────────
  * THE SELF-CHECK IS THE ENTIRE POINT.
  *
@@ -271,8 +277,14 @@ function tokensOf(lines: string[], start: number, end: number): string[] {
 // SPLITTING A DOWNLOAD INTO DOCUMENTS
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-/** 8802-1101363, and the bare form some templates print. */
-const INVOICE_NUMBER = /^\d{3,6}-\d{4,9}$|^\d{6,9}$/;
+/** 8802-1101363, and the bare form some templates print.
+ *
+ *  TEN DIGITS, NOT NINE (cn-v967). His service-charge invoices are numbered 9019059048,
+ *  9019682437, 9019994306 - ten digits, no branch prefix, no hyphen. The old ceiling of nine cut
+ *  all three off at the knees: the anchor below found them and this pattern threw them away, so
+ *  the document vanished instead of refusing. Eleven is headroom, and nothing shorter than six
+ *  digits is a CED number, so the floor stays. */
+const INVOICE_NUMBER = /^\d{3,6}-\d{4,9}$|^\d{6,11}$/;
 
 /**
  * The heading, with the number allowed to sit on the same line as well as on the next one. CED's
@@ -287,6 +299,118 @@ const INVOICE_NUMBER = /^\d{3,6}-\d{4,9}$|^\d{6,9}$/;
 const DOC_ANCHOR = /(?:^|\s)(?:INVOICE|CREDIT\s+MEMO)\s+NO\.(?:\s+\S+)?$/i;
 
 /**
+ * THE SERVICE CHARGE INVOICE DOES NOT PRINT "NO." ANYWHERE (cn-v967 audit).
+ *
+ * I checked this against the seven documents in his September download that were NOT itemised
+ * invoices, and it is not close: the interest bill's header is the bare word INVOICE with the
+ * number on the very next line -
+ *
+ *     DATE            INVOICE
+ *     05/25/26        9019059048
+ *
+ * - and the word "NO." appears nowhere on the page. So DOC_ANCHOR, the only gate in this file,
+ * never matched one, and all three of his service charges came back from parseCedDocuments as an
+ * EMPTY ARRAY. Not a refusal that names the document. Nothing. The import screen then says the
+ * text "has no CED invoice number in it", about a page with a ten-digit invoice number printed on
+ * it three times, and $60.42 of 1.5%-a-month interest stays invisible - which is the exact figure
+ * this whole wave exists to put in front of him.
+ *
+ * Kept SEPARATE from DOC_ANCHOR rather than loosened into it, because a bare "INVOICE" is a common
+ * word on an itemised invoice too (the template prints it as a title). What makes it safe is the
+ * same rule DOC_ANCHOR leans on: an anchor only counts when a real invoice NUMBER follows it. The
+ * title on page one is followed by "SOLD TO:", and the stub's own bare INVOICE on line three is
+ * followed by "RETURN THIS PORTION WITH YOUR PAYMENT", so neither becomes a document.
+ */
+const SERVICE_ANCHOR = /(?:^|\s)INVOICE$/i;
+
+/**
+ * A MONTHLY STATEMENT IS NOT A BILL, AND IT HAS TO SAY SO OUT LOUD (cn-v967 audit).
+ *
+ * The statement has no per-document invoice number at all: its header is STATEMENT / ACCOUNT /
+ * LOCATION / DATE / PAGE, and the invoice numbers on it sit in an unlabelled REFERENCE column,
+ * one per line of the account's history. Four of them came down in his September batch.
+ *
+ * Before this it matched no anchor, which had two costs and the second one is the expensive one:
+ *
+ *   1. pasted on its own it came back as zero documents, so the screen said it had no invoice
+ *      number in it - wrong, and nothing he can act on.
+ *   2. pasted in a batch it was INVISIBLE NOISE between two anchors, so its text was swallowed
+ *      into whichever invoice came after it. Its footer reads "...monthly statements and service
+ *      charge / invoices...", which flattens to "service charge invoice" and threw the document
+ *      that followed it down the service-charge branch. His real $355.17 invoice 1099048 came
+ *      back refused, with a sentence about an amount a service charge would have printed.
+ *
+ * So the statement gets an anchor of its own and becomes a document that REFUSES BY NAME. The
+ * value is not a row - this file has no shape for a statement and 0273 says only a person files
+ * one - it is that the text can never again be absorbed into the next invoice, and that the
+ * summary names it instead of skipping it.
+ *
+ * The word is required to be the whole line, with the account header under it, because
+ * "statements" shows up in the footer prose of every one of these documents.
+ */
+const STATEMENT_ANCHOR = /^STATEMENT$/i;
+const STATEMENT_HEADER = /^(?:ACCOUNT|LOCATION|DATE|PAGE)$/i;
+
+/** One chunk of the paste, bounded at both ends. A null `invoiceNumber` is a statement: it is
+ *  still a document, it still owns its own lines, and it is still named back to him - it just has
+ *  no number of its own and nothing this file can read. */
+type DocumentChunk = { invoiceNumber: string | null; pages: string[][] };
+
+/** How far under a bare "STATEMENT" the account header has to appear for it to be the real
+ *  heading rather than the word in a sentence. His four statements put ACCOUNT eight lines under
+ *  it; twenty is room for an extractor that pads and still far short of the next document. */
+function looksLikeStatementHead(lines: string[], at: number): boolean {
+  const seen = new Set<string>();
+  for (let i = at + 1; i < lines.length && i <= at + 20; i++) {
+    if (STATEMENT_HEADER.test(lines[i])) seen.add(lines[i].toUpperCase());
+  }
+  return seen.has("ACCOUNT") && seen.has("LOCATION") && seen.has("DATE");
+}
+
+/**
+ * THE DATE OFF A BARE COLUMN HEADER, VERBATIM. The statement and the service charge share one
+ * header template - ACCOUNT / LOCATION / DATE, four bare words with their values on the lines
+ * underneath - and neither prints the phrase "INVOICE DATE" that the itemised template uses.
+ * Returned exactly as printed, MM/DD/YY and all, because a refusal quotes it and a caller that
+ * wants a real day has to say out loud what it did with the two-digit year.
+ */
+function headerDatePrinted(lines: string[]): string | null {
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^DATE$/i.test(lines[i])) continue;
+    const next = lines[i + 1] ?? "";
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(next)) return next;
+  }
+  return null;
+}
+
+/**
+ * THE SERVICE CHARGE'S OWN DATE, AS A DAY. Its stub prints 05/25/26 where an itemised invoice
+ * prints 06/15/2026, so the century has to be read in rather than parsed out. 20xx is the only
+ * reading that is not nonsense on a document downloaded from a live account this month, and it is
+ * the reading Erik made himself: he typed 2026-05-25 onto 9019059048 by hand during the
+ * reconciliation, off this same page. Stated here rather than buried in toIsoDate, which stays
+ * strict about four digits for every other document in the file.
+ */
+function serviceStubDate(doc: string[]): string | null {
+  const printed = headerDatePrinted(doc.slice(0, 40));
+  if (!printed) return null;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(printed);
+  return m ? toIsoDate(`${m[1]}/${m[2]}/20${m[3]}`) : toIsoDate(printed);
+}
+
+/** The account number under the stub's bare ACCOUNT heading: "ACCOUNT" then "TR-34426". The words
+ *  are required to BE the line, so the boilerplate "STATUS OF ACCOUNT" further down the same page
+ *  can never answer for it. */
+function serviceStubAccount(doc: string[]): string | null {
+  for (let i = 0; i < doc.length && i < 40; i++) {
+    if (!/^ACCOUNT$/i.test(doc[i])) continue;
+    const next = (doc[i + 1] ?? "").trim();
+    if (/^[A-Z]{1,4}-?\d{3,9}$/i.test(next)) return next;
+  }
+  return null;
+}
+
+/**
  * WHERE EACH DOCUMENT STARTS. One downloaded PDF is very often several invoices - his 07-11 file
  * holds four - so the anchor is the header field, not the file.
  *
@@ -299,22 +423,49 @@ const DOC_ANCHOR = /(?:^|\s)(?:INVOICE|CREDIT\s+MEMO)\s+NO\.(?:\s+\S+)?$/i;
  *     items across both pages and its totals only on the last. Splitting there would produce one
  *     chunk with no totals block and one with half the items. Consecutive pages carrying the same
  *     invoice number are therefore joined back into one document before anything is read.
+ *
+ * AND A THIRD, FOUND BY THE cn-v967 AUDIT: not every document CED sends is an itemised invoice.
+ * Seven of the forty-seven in his September download were not, and none of them matched
+ * DOC_ANCHOR, so each one either came back as nothing at all or was swallowed whole into the
+ * document pasted after it. Anything with an anchor is BOUNDED, and anything bounded can be
+ * refused by name; anything without one is silent. So the service charge and the statement get
+ * anchors of their own, scanned separately and put back in reading order.
  */
-function splitDocuments(lines: string[]): { invoiceNumber: string; pages: string[][] }[] {
-  const starts: { at: number; number: string }[] = [];
-  let cursor = 0;
-  for (;;) {
-    const hit = findLabel(lines, DOC_ANCHOR, cursor);
-    if (!hit) break;
-    cursor = hit.after;
-    // The number is the last token of the heading's own window when they share a line, and the
-    // first token of the line after it when they do not.
-    const tail = lines[hit.after - 1]?.split(/\s+/).pop() ?? "";
-    const candidate = INVOICE_NUMBER.test(tail) ? tail : lines[hit.after]?.split(/\s+/)[0] ?? "";
-    if (!INVOICE_NUMBER.test(candidate)) continue; // "PLEASE SHOW INVOICE NO. AND REMIT TO:"
-    starts.push({ at: hit.start, number: candidate });
+function splitDocuments(lines: string[]): DocumentChunk[] {
+  /** `key` is what decides whether the NEXT start is another page of this document or a new one.
+   *  For an invoice it is the printed number; for a statement it is the printed date, so a
+   *  two-page statement joins back up and two different months never do. */
+  const starts: { at: number; key: string; number: string | null }[] = [];
+  const scan = (anchor: RegExp) => {
+    let cursor = 0;
+    for (;;) {
+      const hit = findLabel(lines, anchor, cursor);
+      if (!hit) break;
+      cursor = hit.after;
+      // The number is the last token of the heading's own window when they share a line, and the
+      // first token of the line after it when they do not.
+      const tail = lines[hit.after - 1]?.split(/\s+/).pop() ?? "";
+      const candidate = INVOICE_NUMBER.test(tail) ? tail : lines[hit.after]?.split(/\s+/)[0] ?? "";
+      if (!INVOICE_NUMBER.test(candidate)) continue; // "PLEASE SHOW INVOICE NO. AND REMIT TO:"
+      starts.push({ at: hit.start, key: candidate, number: candidate });
+    }
+  };
+  scan(DOC_ANCHOR);
+  scan(SERVICE_ANCHOR);
+  for (let i = 0; i < lines.length; i++) {
+    if (!STATEMENT_ANCHOR.test(lines[i]) || !looksLikeStatementHead(lines, i)) continue;
+    const printed = headerDatePrinted(lines.slice(i, i + 20));
+    // No printed date means no key, so this statement is keyed on where it sits and can never be
+    // merged into another one. Two statements wrongly read as one page-pair would hide a month.
+    starts.push({ at: i, key: `statement ${printed ?? `@${i}`}`, number: null });
   }
   if (!starts.length) return [];
+  // THE ANCHORS ARE SCANNED SEPARATELY AND PUT BACK IN READING ORDER. The pages of a document have
+  // to arrive in the order they were printed or the walk-back below picks the wrong boundary. Two
+  // anchors landing on the SAME line is the "INVOICE" / "NO." split some extractors produce, and
+  // that is one heading, not two documents.
+  starts.sort((a, b) => a.at - b.at);
+  for (let i = starts.length - 1; i > 0; i--) if (starts[i].at === starts[i - 1].at) starts.splice(i, 1);
 
   // WHERE EACH PAGE BEGINS, WORKED OUT FOR ALL OF THEM BEFORE ANY SLICING. Taking the next
   // document's raw anchor as this one's end undoes the whole walk-back below: the next page's
@@ -329,7 +480,7 @@ function splitDocuments(lines: string[]): { invoiceNumber: string; pages: string
     return start.at;
   });
 
-  const docs: { invoiceNumber: string; pages: string[][] }[] = [];
+  const docs: (DocumentChunk & { key: string })[] = [];
   for (let i = 0; i < starts.length; i++) {
     // A DOCUMENT STARTS AT ITS PAGE, NOT AT ITS INVOICE NUMBER. CED stamps
     // "CED - TRUCKEE (*** CREDIT MEMO ***)" across the top of the page, a dozen lines ABOVE
@@ -351,10 +502,10 @@ function splitDocuments(lines: string[]): { invoiceNumber: string; pages: string
     // than poured into one list. Each page carries its own set of column runs, and reading two
     // pages' runs as one is how his 16-line invoice 1080836 came out $7.94 short of its own
     // merchandise figure.
-    if (previous && previous.invoiceNumber === starts[i].number) previous.pages.push(page);
-    else docs.push({ invoiceNumber: starts[i].number, pages: [page] });
+    if (previous && previous.key === starts[i].key) previous.pages.push(page);
+    else docs.push({ key: starts[i].key, invoiceNumber: starts[i].number, pages: [page] });
   }
-  return docs;
+  return docs.map(({ invoiceNumber, pages }) => ({ invoiceNumber, pages }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -510,6 +661,29 @@ function readLines(doc: string[], itemsFrom: number, totalsAt: number): CedInvoi
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * THE STATEMENT, SAID OUT LOUD INSTEAD OF SWALLOWED (cn-v967 audit).
+ *
+ * A refusal rather than a row, because there is no honest row to write: a statement's "total" is
+ * the account's balance on one day, and 0273's header is explicit that a statement covering two
+ * invoices recorded as a single $3,034.54 bill is the shape that broke his books in the first
+ * place. Filing one is a person's decision, made once, by hand.
+ *
+ * What this DOES buy is the two things that were costing him:
+ *   * the statement's own text is now bounded, so it can never again be read as part of the
+ *     invoice that follows it in a batched paste.
+ *   * the summary names it, so a document he pasted is never silently missing from the count.
+ */
+function refuseStatement(doc: string[]): CedParseResult {
+  const printed = headerDatePrinted(doc.slice(0, 20));
+  const which = printed ? ` dated ${printed}` : "";
+  return {
+    ok: false,
+    invoiceNumber: null,
+    error: `A CED monthly statement${which} is a summary of the account, not an invoice, so nothing was read from it. Every invoice it lists has its own document in the portal, and those are what to paste.`,
+  };
+}
+
+/**
  * THE SERVICE CHARGE INVOICE IS A DIFFERENT PIECE OF PAPER ENTIRELY. No line items, no
  * merchandise, no tax: a single "INVOICE TOTAL - PAY THIS AMOUNT" and a dollar figure. It is the
  * 1.5%-a-month interest he was paying while $123.46 of prompt-pay discount sat unclaimed, so it
@@ -529,9 +703,23 @@ function readServiceCharge(doc: string[], invoiceNumber: string): CedParseResult
     return { ok: false, invoiceNumber, error: `service charge invoice ${invoiceNumber}: could not read the amount after "INVOICE TOTAL - PAY THIS AMOUNT"` };
   }
   const dateLabel = findLabel(doc, /(?:^|\s)INVOICE\s+DATE$/i);
-  const invoiceDate = dateLabel ? toIsoDate(valueAfter(doc, dateLabel.after, /PLEASE\s+SHOW|ACCOUNT\s*#/i)) : null;
+  const invoiceDate =
+    (dateLabel ? toIsoDate(valueAfter(doc, dateLabel.after, /PLEASE\s+SHOW|ACCOUNT\s*#/i)) : null) ??
+    // THE REMIT STUB'S OWN HEADER, because this is the only header a real one has (cn-v967).
+    // The interest bill prints ACCOUNT / LOCATION / DATE / INVOICE as four bare words with their
+    // values underneath, and never the phrases "INVOICE DATE" or "ACCOUNT #/NAME" that the
+    // itemised template uses. Until the anchor above was fixed this function had never once run
+    // on a real one, so both reads came back null on a page that plainly prints both.
+    serviceStubDate(doc);
   const accountLabel = findLabel(doc, /(?:^|\s)ACCOUNT\s*#\s*\/?\s*NAME$/i);
-  const account = accountLabel ? valueAfter(doc, accountLabel.after, /JOB\s+NAME|CUSTOMER\s+ORDER/i) : null;
+  const account =
+    (accountLabel ? valueAfter(doc, accountLabel.after, /JOB\s+NAME|CUSTOMER\s+ORDER/i) : null) ??
+    // WITHOUT THIS THE CHARGE LANDS ON NO SUPPLIER ACCOUNT AT ALL. The importer matches a document
+    // to his CED account on the printed account number TR-34426, falling back to the branch code
+    // in the invoice number - and a service charge is numbered 9019059048, no branch, no hyphen,
+    // so there is no fallback. A null here is an interest bill that never reaches the balance it
+    // is interest on.
+    serviceStubAccount(doc);
   return {
     ok: true,
     invoice: {
@@ -557,7 +745,19 @@ function readServiceCharge(doc: string[], invoiceNumber: string): CedParseResult
 function readDocument(pages: string[][], invoiceNumber: string): CedParseResult {
   const doc = pages.flat();
   const flat = doc.join(" ");
-  if (/SERVICE\s+CHARGE\s+INVOICE/i.test(flat)) return readServiceCharge(doc, invoiceNumber);
+  // A DOCUMENT WITH ITS OWN MERCHANDISE BLOCK IS NEVER A SERVICE CHARGE, whatever words are
+  // sitting next to it (cn-v967 audit). The phrase "SERVICE CHARGE INVOICE" is not rare: the
+  // monthly statement's footer reads "...monthly statements and service charge / invoices...",
+  // which flattens straight into it, and the boilerplate at the foot of every itemised invoice
+  // says "A SERVICE CHARGE OF 1 1/2% PER MONTH...". Testing the flattened text alone meant a
+  // neighbour's words could RE-TYPE a real invoice: paste his $998.77 invoice 1103832 under the
+  // May service charge and it came back ok, kind service_charge, total $14.00 - the interest
+  // bill's figure on the materials bill's number, with no refusal and nothing on screen to
+  // suggest a number had been swapped. A real service charge has no line items and therefore no
+  // MERCHANDISE line of its own, so that is what decides it, not a phrase.
+  if (/SERVICE\s+CHARGE\s+INVOICE/i.test(flat) && findTotalsStart(doc, 0) === -1) {
+    return readServiceCharge(doc, invoiceNumber);
+  }
 
   const kind: CedInvoice["kind"] = /CREDIT\s+MEMO/i.test(flat) ? "credit_memo" : "invoice";
 
@@ -572,19 +772,37 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
   const customerOrderRaw = orderLabel ? valueAfter(doc, orderLabel.after, /SALESPERSON|SHIPPING\s+INFORMATION/i) : null;
   /**
    * WHEN THE TWO COLUMNS CARRY THE SAME WORDS, CED PRINTS ONE VALUE UNDER BOTH HEADINGS. The text
-   * then reads "JOB NAME CUSTOMER ORDER NO." on one line and "235 TIMBER CREEK" on the next, with
-   * nothing else between it and SALESPERSON. Looking only for a heading that ENDS in "JOB NAME"
-   * left invoice 1101419 with no job name at all - $1,513.71 of material with nothing on it to
-   * say which job it belongs to, which is the single most useful thing on a CED invoice.
+   * then reads "JOB NAME" and "CUSTOMER ORDER NO." with a single "235 TIMBER CREEK" underneath
+   * them both, and nothing else between it and SALESPERSON. Looking only for a heading that ENDS
+   * in "JOB NAME" left invoice 1101419 with no job name at all - $1,513.71 of material with
+   * nothing on it to say which job it belongs to, which is the single most useful thing on a CED
+   * invoice.
    *
-   * The fallback is only taken when the two headings genuinely share a line. On every other
-   * invoice the two are read separately, even where they say the same thing.
+   * WHICH HEADING THE VALUE APPEARS TO SIT UNDER IS THE EXTRACTOR'S CHOICE, NOT THE DOCUMENT'S,
+   * and the first version of this fix only covered one of the two (cn-v967 audit). It asked
+   * whether the words landed on ONE line - and his own PDFs, pulled through PyMuPDF, put them on
+   * two:
+   *
+   *     JOB NAME / CUSTOMER ORDER NO. / 235 TIMBER CREEK
+   *
+   * so the heading WAS found, the fallback never ran, and the read under JOB NAME stopped dead on
+   * the very next line at CUSTOMER ORDER NO. with nothing gathered. jobNameRaw came back null on
+   * 1101419 and on 1102291 while customerOrderRaw came back "235 TIMBER CREEK" out of the same
+   * text in the same call. The one invoice this fix was written for, still dropping its job.
+   *
+   * So the fallback now keys off an EMPTY read rather than a missing label, and the two headings
+   * count as sharing when nothing at all sits between them - `orderLabel.start === jobLabel.after`
+   * - which is the same "one value under both columns" the line test was reaching for. No looser
+   * than what already shipped: where the two headings have their own separate values, the read
+   * under JOB NAME is not empty and the fallback never fires. And nothing here picks a job
+   * anyway. The raw name is stored, a person resolves it, and job_id is never written by the
+   * importer - see 0273's header on why, with five jobs on one road.
    */
-  const jobNameRaw = jobLabel
-    ? valueAfter(doc, jobLabel.after, /CUSTOMER\s+ORDER\s+NO\./i)
-    : doc.some((l) => /JOB\s+NAME\s+CUSTOMER\s+ORDER\s+NO\./i.test(l))
-      ? customerOrderRaw
-      : null;
+  const underJobName = jobLabel ? valueAfter(doc, jobLabel.after, /CUSTOMER\s+ORDER\s+NO\./i) : null;
+  const headingsTouch =
+    doc.some((l) => /JOB\s+NAME\s+CUSTOMER\s+ORDER\s+NO\./i.test(l)) ||
+    (jobLabel !== null && orderLabel !== null && orderLabel.start === jobLabel.after);
+  const jobNameRaw = underJobName ?? (headingsTouch ? customerOrderRaw : null);
 
   // ── THE TOTALS, READ AS A RUN OF VALUES UNDER A RUN OF LABELS ──────────────────────────────
   const totalsAt = findTotalsStart(doc, jobLabel?.after ?? 0);
@@ -697,7 +915,9 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
 export function parseCedDocuments(text: string): CedParseResult[] {
   const lines = toLines(text);
   if (!lines.length) return [];
-  return splitDocuments(lines).map((doc) => readDocument(doc.pages, doc.invoiceNumber));
+  return splitDocuments(lines).map((doc) =>
+    doc.invoiceNumber === null ? refuseStatement(doc.pages.flat()) : readDocument(doc.pages, doc.invoiceNumber),
+  );
 }
 
 /**

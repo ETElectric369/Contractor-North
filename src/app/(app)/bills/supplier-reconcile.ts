@@ -299,7 +299,21 @@ export function claimableDiscounts(invoices: SupplierInvoiceRow[], today: string
 export function missedDiscounts(invoices: SupplierInvoiceRow[], today: string): DiscountSlice {
   const rows: DiscountSlice["rows"] = [];
   let total = 0;
+  /**
+   * AND THE SAME REVERSAL RULE ITS SIBLING RUNS (review, 2026-09-20). `claimableDiscounts` and
+   * `supplierSaysBalance` both drop the discount on an invoice a credit memo has cancelled to the
+   * cent; this one did not, and it is the function that prints "The Discount You Are Missing".
+   *
+   * It is dormant only until a deadline passes. The $4.14 on 8802-1107230 is excluded from the
+   * money still on the table tonight, and on 11 October - if CED has not yet closed that invoice
+   * and its credit memo together, which they only do when he pays the covering statement - it
+   * would have walked straight into the missed column instead. A discount on money he was never
+   * billed for was never money he could have had, so it is not money he lost, and telling him he
+   * lost it is the same invented figure this file was rewritten to stop printing.
+   */
+  const reversed = reversedInvoiceIds(invoices ?? []);
   for (const invoice of invoices ?? []) {
+    if (reversed.has(String((invoice as { id?: unknown })?.id ?? ""))) continue;
     const reading = discountReading(invoice, today);
     if (reading.state !== "expired") continue;
     rows.push({ invoice, reading });

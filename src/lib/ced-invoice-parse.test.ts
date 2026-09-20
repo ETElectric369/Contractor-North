@@ -590,3 +590,300 @@ describe("a credit memo is negative twice (cn-v965 review)", () => {
     expect(doc.invoice.lines[0]?.extension).toBe(-237.66);
   });
 });
+
+/**
+ * THE SEVEN DOCUMENTS THAT WERE NOT INVOICES (cn-v967 audit).
+ *
+ * Of the forty-seven PDFs Erik downloaded on 2026-09-19, seven were not itemised invoices: three
+ * service-charge bills and four monthly statements. Every one of them came back from
+ * parseCedDocuments as an EMPTY ARRAY - no row, no refusal, nothing - and the service-charge test
+ * above was green the whole time, because its fixture was invented. It gives the interest bill a
+ * header ("INVOICE NO.", "ACCOUNT #/NAME") that appears on no service charge CED has ever sent
+ * him.
+ *
+ * So these fixtures are the REAL extracted text, character for character, out of
+ * invoice_9019059048.pdf and document_15114885485.pdf. That is the whole lesson of the finding:
+ * an invented fixture proves the reader, never the door.
+ */
+describe("the documents that are not itemised invoices", () => {
+  /** invoice_9019059048.pdf, 05/25/26, $14.00 of 1.5%-a-month interest. Its header is the bare
+   *  word INVOICE with a ten-digit number on the next line, and the word "NO." is nowhere on the
+   *  page. Both halves of that broke the old anchor. */
+  const SERVICE_CHARGE = `
+CED TRUCKEE
+PO BOX 888835 LOS ANGELES, CA 90088-8835 916-569-1770
+INVOICE
+RETURN THIS PORTION WITH YOUR PAYMENT
+Remit to:
+CED TRUCKEE
+PO BOX 888835 LOS ANGELES, CA 90088-8835
+Phone: 916-569-1770
+Erik Taylor
+ACCOUNT
+TR-34426
+LOCATION
+8802
+DATE
+05/25/26
+INVOICE
+9019059048
+ACCOUNT
+TR-34426
+LOCATION
+8802
+DATE
+05/25/26
+INVOICE
+9019059048
+ERIK TAYLOR
+PO BOX 132
+CHILCOOT CA 96105-0132
+SERVICE CHARGE INVOICE
+TO CHARGE YOUR ACCOUNT FOR UNPAID PAST DUE BALANCE AS FOLLOWS:
+AMOUNT SUBJECT TO SVC CHRG:
+LESS PRIOR SERVICE CHARGES
+LESS MISC. ADJUSTMENTS
+SERVICE CHARGE
+--------------------------------------------------------
+INVOICE TOTAL
+--------------------------------------------------------
+TOTAL
+X %
+$1,014.15
+80.31
+.00
+--------------
+933.84
+1.500
+--------------
+$14.00
+$14.00
+SERVICE CHARGE INVOICE
+Number
+Amount
+9019059048
+$14.00
+STATUS OF ACCOUNT
+TOTAL DUE
+$1,028.15
+CURRENT / 1 - 30
+-$1,527.44
+PAST DUE 31 - 60
+$145.04
+PAST DUE 61 - 90
+$524.77
+PAST DUE OVER 90
+$1,885.78
+SERVICE CHARGE INVOICE
+INVOICE TOTAL - PAY THIS AMOUNT
+$14.00
+`;
+
+  /** document_15114885485.pdf, the 05/25/26 statement. Header and footer verbatim; the middle is
+   *  forty-odd lines of account history in unlabelled columns, cut here to the few that show the
+   *  shape. The footer sentence is the one that matters: it wraps as "...service charge" then
+   *  "invoices...", which flattens to the exact phrase that used to re-type the next document. */
+  const STATEMENT = `
+CED TRUCKEE
+PO BOX 888835 LOS ANGELES, CA 90088-8835 916-569-1770
+STATEMENT
+Remit to:
+CED TRUCKEE
+PO BOX 888835 LOS ANGELES CA 90088-8835
+Phone: 916-569-1770
+• Refer To Invoice For Terms
+• A Service Charge Will Be Made
+For Past Due Accounts
+ACCOUNT
+TR-34426
+LOCATION
+8802
+DATE
+05/25/26
+PAGE
+1 of 1
+Erik Taylor
+PO Box 132
+Chilcoot, CA 96105
+AGE
+90
+60
+DATE
+02-12-26
+05-28-26
+CODE
+PP
+SVC
+REFERENCE
+8802-1093225
+8802-9019059048
+CUSTOMER PO #
+AMOUNT
+22.84
+14.00
+TOTAL DUE
+$1,028.15
+CURRENT / 1 - 30
+-$1,527.44
+PAST DUE 31 - 60
+$145.04
+PAST DUE 61 - 90
+$524.77
+PAST DUE OVER 90
+$1,885.78
+CODE: CDC = DISCOUNT CHARGEBACK • CRM = CREDIT MEMO • CSR = CASH RECEIVED • FRT = FREIGHT • NSF = NSF CHECK • PAI =
+PAYMENT AWAITING INVOICE • SVC = SERVICE CHARGE • TAX = TAX • PP = PARTIAL PAY • DD = DEDUCTION • TF = TAX AND FREIGHT
+DAI = DEBIT AWAITING INVOICE
+SAVE TIME AND MONEY WITH ELECTRONIC DELIVERY!
+We offer electronic delivery of your monthly statements and service charge
+invoices. Please call the number above for more information and to get set-up.
+`;
+
+  it("reads a real service charge, whose header never says NO.", () => {
+    const result = parseCedInvoice(SERVICE_CHARGE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.invoice.invoiceNumber).toBe("9019059048");
+    expect(result.invoice.kind).toBe("service_charge");
+    expect(result.invoice.total).toBe(14);
+    expect(result.invoice.lines).toEqual([]);
+  });
+
+  /** Ten digits, no branch, no hyphen. The old number pattern stopped at nine, so the anchor found
+   *  the heading and the pattern threw the number away. */
+  it("accepts the ten-digit number a service charge is issued under", () => {
+    const result = parseCedInvoice(SERVICE_CHARGE.replace(/9019059048/g, "9019994306"));
+    expect(result.ok && result.invoice.invoiceNumber).toBe("9019994306");
+  });
+
+  /**
+   * WITHOUT THE ACCOUNT NUMBER THE CHARGE LANDS ON NOTHING. The importer matches a document to his
+   * CED account on the printed TR-34426, falling back to the branch code in the invoice number -
+   * and 9019059048 has no branch in it, so there is no fallback. The date matters the same way:
+   * 2026-05-25 is what Erik typed onto this row by hand off this same page.
+   */
+  it("reads the date and the account off the service charge's own stub header", () => {
+    const result = parseCedInvoice(SERVICE_CHARGE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.invoice.invoiceDate).toBe("2026-05-25");
+    expect(result.invoice.accountNumber).toBe("TR-34426");
+  });
+
+  it("names the monthly statement instead of returning nothing at all", () => {
+    const results = parseCedDocuments(STATEMENT);
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) return;
+    expect(results[0].error).toContain("monthly statement");
+    // WHICH statement. He downloads four at a time, and "a statement" names none of them.
+    expect(results[0].error).toContain("05/25/26");
+  });
+
+  /**
+   * THE EXPENSIVE HALF OF THE FINDING. Paste the statement above his real $355.17 invoice 1099048
+   * and the statement's footer - "...monthly statements and service charge / invoices..." - used
+   * to flatten into "service charge invoice" and send a fully itemised invoice down the
+   * service-charge branch. It came back refused, with a sentence about an amount only an interest
+   * bill prints.
+   */
+  it("keeps a statement's words out of the invoice pasted after it", () => {
+    const results = parseCedDocuments(`${STATEMENT}\n${TIMBER_CREEK}`);
+    expect(results).toHaveLength(2);
+    expect(results[0].ok).toBe(false);
+    expect(results[1].ok).toBe(true);
+    if (!results[1].ok) return;
+    expect(results[1].invoice.kind).toBe("invoice");
+    expect(results[1].invoice.total).toBe(162.45);
+    expect(results[1].invoice.lines).toHaveLength(5);
+  });
+
+  /**
+   * THE SAME CLASS, THROUGH THE OTHER DOOR AND WORSE: no refusal at all. With the real service
+   * charge above pasted over his real $998.77 invoice, the phrase "SERVICE CHARGE INVOICE" sat in
+   * the next chunk and the invoice came back ok, kind service_charge, total $14.00. The interest
+   * bill's figure on the materials bill's number, silently. A document with its own MERCHANDISE
+   * block is never a service charge, whatever words are sitting next to it.
+   */
+  it("never re-types an itemised invoice as the service charge beside it", () => {
+    const results = parseCedDocuments(`${SERVICE_CHARGE}\n${TIMBER_CREEK}`);
+    expect(results).toHaveLength(2);
+    expect(results[0].ok && results[0].invoice.kind).toBe("service_charge");
+    expect(results[0].ok && results[0].invoice.total).toBe(14);
+    expect(results[1].ok && results[1].invoice.kind).toBe("invoice");
+    expect(results[1].ok && results[1].invoice.total).toBe(162.45);
+  });
+
+  /** And in the other order, because which document is "next" is whichever he pasted second. */
+  it("reads both when the itemised invoice comes first", () => {
+    const results = parseCedDocuments(`${TIMBER_CREEK}\n${SERVICE_CHARGE}`);
+    expect(results.map((r) => (r.ok ? `${r.invoice.invoiceNumber}:${r.invoice.total}` : "refused"))).toEqual([
+      "8802-1101363:162.45",
+      "9019059048:14",
+    ]);
+  });
+
+  /** Two statements in one paste are two documents, not one. Merging them would hide a month. */
+  it("keeps two months' statements apart", () => {
+    const june = STATEMENT.replace(/05\/25\/26/g, "06/25/26");
+    const results = parseCedDocuments(`${STATEMENT}\n${june}`);
+    expect(results).toHaveLength(2);
+    expect(results[0].ok).toBe(false);
+    expect(results[1].ok).toBe(false);
+    if (results[0].ok || results[1].ok) return;
+    expect(results[0].error).toContain("05/25/26");
+    expect(results[1].error).toContain("06/25/26");
+  });
+});
+
+/**
+ * THE JOB NAME, WHEN THE TWO HEADINGS SIT ON SEPARATE LINES (cn-v967 audit).
+ *
+ * The fix that shipped for invoice 1101419 asked whether "JOB NAME" and "CUSTOMER ORDER NO."
+ * landed on ONE line. His own PDF does not extract that way: it puts the two headings on two
+ * consecutive lines with the single shared value under both of them. So the heading WAS found,
+ * the read under it stopped dead on the very next line with nothing gathered, and 1101419 came
+ * back with jobNameRaw null while customerOrderRaw held "235 TIMBER CREEK" from the same call.
+ * 1102291 too. Those are the only two documents of his forty-seven with this layout, and they are
+ * the two whose rows carry the literal column header "CUSTOMER ORDER NO." as a job name today,
+ * typed in by hand during the reconciliation.
+ */
+describe("the job name under two touching headings", () => {
+  /** Exactly how PyMuPDF hands over invoice_8802-1101419.pdf: three separate lines. */
+  const REAL_LAYOUT = TIMBER_CREEK.replace(
+    "JOB NAME\n235 TIMBER CREEK\nCUSTOMER ORDER NO.\n235 TIMBER CREEK",
+    "JOB NAME\nCUSTOMER ORDER NO.\n235 TIMBER CREEK",
+  );
+
+  it("reads the job name off the value under both headings", () => {
+    const result = parseCedInvoice(REAL_LAYOUT);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.invoice.jobNameRaw).toBe("235 TIMBER CREEK");
+    expect(result.invoice.customerOrderRaw).toBe("235 TIMBER CREEK");
+  });
+
+  /** The fallback must stay shut where the two headings have values of their own, or a customer
+   *  order number would start standing in for a job name on documents that never asked it to. */
+  it("still reads the two columns separately when each has its own value", () => {
+    const apart = TIMBER_CREEK.replace(
+      "CUSTOMER ORDER NO.\n235 TIMBER CREEK",
+      "CUSTOMER ORDER NO.\nPO 4471",
+    );
+    const result = parseCedInvoice(apart);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.invoice.jobNameRaw).toBe("235 TIMBER CREEK");
+    expect(result.invoice.customerOrderRaw).toBe("PO 4471");
+  });
+
+  /** An invoice with no job name at all still reports none, rather than borrowing the order
+   *  number. CED prints the heading on every invoice; the value is sometimes blank. */
+  it("reports no job name when the column is empty", () => {
+    const blank = TIMBER_CREEK.replace("JOB NAME\n235 TIMBER CREEK\n", "");
+    const result = parseCedInvoice(blank);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.invoice.jobNameRaw).toBeNull();
+  });
+});

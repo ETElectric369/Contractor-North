@@ -242,6 +242,12 @@ function JobBillEditModal({
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
   const [poId, setPoId] = useState(bill.po_id ?? "");
   const [error, setError] = useState<string | null>(null);
+  // A save that WENT THROUGH and still has something to say: the receipt an invoice bills was
+  // re-priced, so the invoice and the receipt now describe the same purchase at two figures.
+  // It holds the modal open instead of riding a toast, for the same reason the timecard editor
+  // does it that way — this sentence names an invoice and two dollar amounts, and 2.8 seconds
+  // on a phone at a jobsite is not reading time.
+  const [billedNote, setBilledNote] = useState<string | null>(null);
   // Offer the real orders, PLUS whichever PO this bill already claims even if it was since
   // cancelled — otherwise the picker would render blank and saving would silently drop the
   // link, putting the double-charge back.
@@ -263,6 +269,11 @@ function JobBillEditModal({
         po_id: poId || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (res.warning) {
+        setBilledNote(res.warning);
+        router.refresh();
+        return;
+      }
       onClose();
       router.refresh();
     });
@@ -277,6 +288,15 @@ function JobBillEditModal({
     >
       <div className="space-y-3">
         {error && <p className="text-sm text-red-600">{error}</p>}
+        {billedNote && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <div className="font-semibold">Saved. One thing about the invoice:</div>
+            <div className="mt-1">{billedNote}</div>
+            <Button variant="outline" size="sm" onClick={onClose} className="mt-2">
+              Got It
+            </Button>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <Label htmlFor="be-supplier">Supplier *</Label>

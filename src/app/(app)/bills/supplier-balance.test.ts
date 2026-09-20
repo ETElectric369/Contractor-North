@@ -5,6 +5,7 @@ import {
   isOnAccountBill,
   openBalanceOf,
   proposalTotals,
+  reversedPurchaseIds,
   sayAge,
   supplierBalance,
   supplierNetIfPaidBy,
@@ -585,5 +586,80 @@ describe("the two models are never mixed", () => {
     const b = supplierBalance(account({ onAccount: false, bills: [bill({ amount: 40 })] }), TODAY);
     expect(b.unpaidOnRegisterAccount).toBe(true);
     expect(b.openDocumentsOnRegisterAccount).toBe(false);
+  });
+});
+
+
+// ── WHICH PURCHASE CAME BACK ────────────────────────────────────────────────────────────────────
+//
+// `reversedPurchaseIds` is the rule standing between "Record It As A Bill" and a customer being
+// charged for merchandise Erik sent back. It answers a question that never expires, so it is the
+// one reading in this file that keeps working after CED closes the pair - and the one whose wrong
+// answer is silent in both directions: the purchase he KEPT becomes unbillable, and the one he
+// returned keeps a live button on it.
+
+describe("reversedPurchaseIds - which purchase a credit memo took back", () => {
+  it("pairs his real return to the cent, and still does after CED closes the pair", () => {
+    // 8802-1107230 ($225.47, five light almond USB receptacles) taken straight back off the
+    // account by 8802-1107337 (-$225.47). Both documents are open tonight.
+    const book = [
+      open("1107230", 225.47),
+      open("1107337", -225.47, { kind: "credit_memo" }),
+    ];
+    expect([...reversedPurchaseIds(book)]).toEqual([book[0].id]);
+
+    // The day he pays the September statement CED marks both closed. "Did he keep what was on
+    // this invoice?" is not a question a settled balance answers differently.
+    const settled = book.map((i) => ({ ...i, closed: true, openBalance: 0 }));
+    expect([...reversedPurchaseIds(settled)]).toEqual([settled[0].id]);
+  });
+
+  it("refuses to guess between two purchases at one total with a single credit memo", () => {
+    // Two $150.00 orders, one $150.00 return. Nothing in these rows says which one came back, and
+    // the old rule took whichever the caller's ORDER BY happened to put first - so the answer
+    // depended on the query, and the two callers do not sort the same way.
+    const a = open("1150001", 150);
+    const b = open("1150002", 150);
+    const memo = open("1150003", -150, { kind: "credit_memo" });
+    expect([...reversedPurchaseIds([a, b, memo])]).toEqual([]);
+    // The same rows the other way round give the same answer, which is the whole point.
+    expect([...reversedPurchaseIds([b, a, memo])]).toEqual([]);
+  });
+
+  it("pairs both twins when each one has its own credit memo", () => {
+    // Nothing is being guessed at here: two returns, two purchases, same cent. The guard has to
+    // keep firing or two real returns walk back onto the Record button.
+    const a = open("1150001", 150);
+    const b = open("1150002", 150);
+    const memos = [open("1150003", -150, { kind: "credit_memo" }), open("1150004", -150, { kind: "credit_memo" })];
+    expect([...reversedPurchaseIds([a, b, ...memos])].sort()).toEqual([a.id, b.id].sort());
+  });
+
+  it("never lets a statement or a late-payment charge spend a credit memo", () => {
+    // A statement carries the same money as the invoices inside it. If it could spend the memo,
+    // the memo would be gone and the real $225.47 return would read as merchandise he kept.
+    const statement = open("1150010", 225.47, { kind: "statement" });
+    const invoiceRow = open("1107230", 225.47);
+    const memo = open("1107337", -225.47, { kind: "credit_memo" });
+    expect([...reversedPurchaseIds([statement, invoiceRow, memo])]).toEqual([invoiceRow.id]);
+
+    const interest = open("1150011", 60.42, { kind: "service_charge" });
+    expect([...reversedPurchaseIds([interest, open("1150012", -60.42, { kind: "credit_memo" })])]).toEqual([]);
+  });
+
+  it("keeps an open credit memo away from a settled purchase", () => {
+    const settledPurchase = invoice({ invoiceNumber: "8802-1150020", total: 95.27, openBalance: 0, closed: true });
+    const liveMemo = open("1150021", -95.27, { kind: "credit_memo" });
+    expect([...reversedPurchaseIds([settledPurchase, liveMemo])]).toEqual([]);
+  });
+
+  it("judges a row with no kind on it by its amount alone, the way it always has", () => {
+    // `InvoiceBalanceShape` has no `kind`, and a caller holding only the four balance fields must
+    // still get an answer rather than a silent empty set.
+    const bare = [
+      { id: "p-1", total: 225.47, openBalance: 225.47, closed: false },
+      { id: "c-1", total: -225.47, openBalance: -225.47, closed: false },
+    ];
+    expect([...reversedPurchaseIds(bare)]).toEqual(["p-1"]);
   });
 });

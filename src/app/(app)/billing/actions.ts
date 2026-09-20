@@ -896,7 +896,7 @@ export async function parkInvoice(invoiceId: string, until: string | null, reaso
     .eq("id", invoiceId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wrote?.length) return { ok: false, error: "That didn't save — check your access and try again." };
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
   revalidateMoney(invoiceId);
   revalidatePath("/planner");
   return { ok: true };
@@ -1327,7 +1327,15 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   // old rule has to hold — never bill a second invoice's labor blind (one sentence with costs).
   if (!claims.schemaReady && claims.invoices.length) return midUpgradeRefusal(claims);
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
-  const free = withoutClaimedLabor(labor.jobEntries, labor.jobAllocs, new Set(claims.owner.keys()));
+  // THE DATE MAP, WHICH THIS CALLER WAS THE ONLY ONE NOT PASSING (review of the fix wave,
+  // 2026-09-20). withoutClaimedLabor's parent-claim rule needs to know WHEN the invoice was
+  // raised: a split made after the bill went out is hours that were billed whole and must not be
+  // billed again, while a split that predates it is a shape the invoice never covered. Without
+  // the map it reads every claimed parent as billed, so Import Labor refused work the Unbilled
+  // card on the same job was still offering - $587.50 on J-013 today - and told him it was
+  // "already on INV-00032", which was not true. computeUnbilledWork has always passed it; this is
+  // the read that writes the rows, and the two have to agree or the screen lies about his books.
+  const free = withoutClaimedLabor(labor.jobEntries, labor.jobAllocs, new Set(claims.owner.keys()), claims.owner);
   const { lines } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
   if (lines.length === 0) {
     // Nothing free to bill — and the reason is the difference between "no hours yet" and "every
@@ -1512,7 +1520,12 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
     // exactly that state on 13631 Northwoods today.
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, amount, po_id")
+      // `pricing_provisional` (0271) rides in the same projection as `superseded_by_bill_id`, for
+      // the same reason: both are facts about whether this receipt is a real cost, and this is the
+      // read that decides what a CUSTOMER pays. THE PROJECTION LAW - the column existed, the
+      // receipt reader set it, the price book already honoured it, and the one door where the
+      // money reaches a homeowner never asked. See the flag below.
+      .select("id, supplier, bill_number, amount, po_id, pricing_provisional")
       .eq("job_id", inv.job_id)
       .is("superseded_by_bill_id", null),
   ]);
@@ -1537,6 +1550,22 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   const poCovered: { billId: string; poId: string }[] = [];
   /** Bills whose every line is marked not billable (0268): a real receipt, nothing on it to bill. */
   const nothingBillable: string[] = [];
+  /**
+   * A COUNTER PREVIEW IS NOT HIS PRICE, AND IT WENT OUT TO A CUSTOMER ANYWAY (0271, cn-v967).
+   *
+   * CED's Sunnyvale branch is not Erik's priced account. It masks the contract price with a run of
+   * asterisks and prints its own retail counter price beside it, and the receipt reader records
+   * those retail figures while correctly flagging the receipt `pricing_provisional`. 0271 taught
+   * the price book to ignore those rows. Nothing taught THIS loop, so the $467.87 Sunnyvale ticket
+   * on Jason Waldow's job was marked up and itemised onto his invoice at the counter's numbers, and
+   * no screen ever said the prices were unconfirmed. When the real Truckee-priced invoice arrives
+   * there is no mechanism to true up a bill that has already gone out.
+   *
+   * This SUGGESTS rather than blocks: billing the preview and truing up later is a legitimate call,
+   * and it is Erik's to make. What is not negotiable is making it without being told. So the flag
+   * rides out on the same toast the office already reads before it sends.
+   */
+  const provisional: string[] = [];
   const linesByBill = new Map<string, any[]>();
   for (const l of blis.lines) {
     if (!linesByBill.has(l.bill_id)) linesByBill.set(l.bill_id, []);
@@ -1599,6 +1628,10 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
       nothingBillable.push(String(b.id));
       continue;
     }
+    // Counted only for bills that actually produce lines: a receipt skipped above puts nothing on
+    // this invoice, so warning about its prices would send the office looking for a charge that
+    // isn't there.
+    if (b.pricing_provisional === true) provisional.push(String(b.id));
     // Every row of a bill claims the BILL (0255): a bill is billed as a unit (its rows sum to the
     // marked-up BILLABLE total — the anchor invariant), so the claim is at bill level, not per line.
     rows.push(...billRows.map((r) => ({ ...r, source_ids: [String(b.id)] })));
@@ -1635,6 +1668,16 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
     const n = poCovered.length;
     stats.skipped_claimed += n;
     stats.summary += ` · ${n} ${n === 1 ? "bill" : "bills"} left off — the order ${n === 1 ? "it names is" : "they name are"} already on ${joinNumbers(claimantNumbers(claims, poCovered.map((c) => c.poId)))}; bill any difference by hand`;
+  }
+  // Say the preview pricing out loud, and only about receipts whose lines are ON this invoice —
+  // `after` is what the read-back found, so a bill held back behind a line the office edited by
+  // hand isn't named (that line carries the office's own typed number, not the counter's). When
+  // the read-back itself failed we can't tell, so every flagged receipt is named rather than none:
+  // an extra look costs a minute, an unflagged counter price costs his word to a customer.
+  const flagged = after ? provisional.filter((id) => after.has(id)) : provisional;
+  if (flagged.length) {
+    const n = flagged.length;
+    stats.summary += ` · ${n === 1 ? "one receipt's prices are" : `${n} receipts' prices are`} a counter preview, not your account's pricing - check ${n === 1 ? "it" : "them"} before you send`;
   }
   return { ok: true, stats };
 }
@@ -1691,7 +1734,19 @@ export async function createProgressReportInvoice(
   if (stdBlocker) return standardBillingConflictError(stdBlocker);
   // THE DELTA, decided before a row is written. unbilledWorkForJob is the same arithmetic the
   // importers run below, so "nothing unclaimed" is known up front and no empty draft is minted.
-  const [unbilled, fixedToNet] = await Promise.all([unbilledWorkForJob(supabase, jobId), fixedBillingsNotYetNetted(supabase, jobId)]);
+  // IT THROWS NOW, AND A RAW POSTGREST ERROR IS NOT A SENTENCE (review, 2026-09-20). The bills
+  // read inside unbilledWorkForJob was changed to throw rather than report $0 of material - right,
+  // because a lost read that reads as "no materials" bills a customer short - but this caller had
+  // no catch, so the failure would have surfaced as library text on the one button that creates a
+  // document a customer sees.
+  let unbilled: Awaited<ReturnType<typeof unbilledWorkForJob>>;
+  let fixedToNet: Awaited<ReturnType<typeof fixedBillingsNotYetNetted>>;
+  try {
+    [unbilled, fixedToNet] = await Promise.all([unbilledWorkForJob(supabase, jobId), fixedBillingsNotYetNetted(supabase, jobId)]);
+  } catch (e) {
+    reportError("createProgressReportInvoice.unbilled", e, { jobId });
+    return { ok: false, error: "Couldn't read this job's work just now, so nothing was billed. Try again in a moment." };
+  }
   if (!unbilled.schemaReady) {
     return { ok: false, error: "Billing is mid-upgrade for a few minutes — a progress payment can't tell new time from billed time until it finishes. Try again shortly." };
   }
@@ -1732,12 +1787,41 @@ export async function createProgressReportInvoice(
   }
 
   // Itemize the UNCLAIMED work (labor at bill rate + materials with markup): both importers drop
-  // the rows another non-void invoice claims. A real import failure here would silently understate
-  // the draw — log it instead of swallowing (empty:true = nothing to bill on that side).
+  // the rows another non-void invoice claims.
+  //
+  // A REAL IMPORT FAILURE IS THE ONE THING THIS MUST NOT SWALLOW (cn-v967). It used to log and
+  // carry on, which is how the single failure 0260 was built to make LOUD got muffled by the one
+  // function that mints a customer-facing document. Two staff tap progress billing on the same job
+  // in the same second; the advisory lock serialises them and the loser's import comes back with
+  // 'hours already billed on INV-062'. Logged server-side, shrugged off here: the draw shipped
+  // with no labor line at all and a clean success toast, or - if both sides lost - the fresh
+  // invoice was deleted and the office was told "No labor or materials are logged on this job yet
+  // to bill", which is a lie in exactly the case that caused it. There ARE logged hours. The
+  // import to itemise them failed.
+  //
+  // `empty: true` still means "nothing on that side to bill" and still passes quietly, so a
+  // labor-only or materials-only job behaves exactly as before. Only a genuine failure changes,
+  // and it changes from a false success into the importer's own sentence.
+  //
+  // Why DELETE rather than keep the half-built draft: invoices_one_open_draft_draw means an
+  // orphaned draft draw blocks every future attempt on this job ("Draft INV-0xx is still open on
+  // this job"), which is a dead end. Deleting takes the lines - and the claims that ride on them -
+  // with it, the same thing the no-work branch below already does, so a retry starts clean.
   const pLabor = await importLaborIntoInvoice(inv.id);
-  if (!pLabor.ok && !pLabor.empty) reportError("createProgressReportInvoice.labor", pLabor.error, { jobId, invoiceId: inv.id });
+  if (!pLabor.ok && !pLabor.empty) {
+    reportError("createProgressReportInvoice.labor", pLabor.error, { jobId, invoiceId: inv.id });
+    const rolled = await rollBackDraw(supabase, inv.id, jobId, "labor");
+    return {
+      ok: false,
+      error: (pLabor.error ?? "Couldn't pull this job's hours onto the draw just now, so nothing was billed.") + rolled,
+    };
+  }
   const pCosts = await importCostsIntoInvoice(inv.id, markup);
-  if (!pCosts.ok && !pCosts.empty) reportError("createProgressReportInvoice.costs", pCosts.error, { jobId, invoiceId: inv.id });
+  if (!pCosts.ok && !pCosts.empty) {
+    reportError("createProgressReportInvoice.costs", pCosts.error, { jobId, invoiceId: inv.id });
+    const rolledC = await rollBackDraw(supabase, inv.id, jobId, "materials");
+    return { ok: false, error: (pCosts.error ?? "Couldn't pull this job's materials onto the draw just now - nothing was billed. Try again in a moment.") + rolledC };
+  }
 
   // SUBTOTAL, not total (audit 8): the credit line is inserted INSIDE this draw's subtotal, so
   // netting a tax-INCLUSIVE figure against pre-tax work credited the customer their own tax.
@@ -1864,6 +1948,29 @@ export async function setPaymentSchedule(
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
+}
+
+/**
+ * TAKE THE HALF-BUILT DRAW BACK OUT, AND SAY SO IF IT WILL NOT GO.
+ *
+ * A draw whose importer failed has to be deleted: `invoices_one_open_draft_draw` means an orphaned
+ * draft blocks every future attempt on this job, which is a dead end. But the delete was written
+ * and thrown away (review of the audit fix wave, 2026-09-20) - no `.select`, no error check - in
+ * the one function that mints a customer-facing document. If it refused, the office read "nothing
+ * was billed" while an empty draw sat on the job barring the retry the sentence just invited.
+ */
+async function rollBackDraw(
+  supabase: { from: (t: string) => any },
+  invoiceId: string,
+  jobId: string,
+  side: string,
+): Promise<string> {
+  const { data, error } = await supabase.from("invoices").delete().eq("id", invoiceId).select("id");
+  if (error || !data?.length) {
+    reportError("createProgressReportInvoice.rollback", error ?? "zero rows deleted", { jobId, invoiceId, side });
+    return " The empty draw it started could not be removed either, so open this job's billing and delete that draft before trying again.";
+  }
+  return " Nothing was billed and the draft was removed, so you can try again.";
 }
 
 /** Request the next payment per the job's structure:
@@ -2602,11 +2709,30 @@ export async function setInvoiceDescription(
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { error } = await ctx.supabase
+  const supabase = ctx.supabase;
+  /**
+   * THE SCOPE BLOCK IS ON THE CUSTOMER'S PAPER, SO IT IS A REVISION (cn-v967).
+   *
+   * 0269 traded the draft lock for a record: `revised_at > sent_at` is how the page says "the
+   * customer is holding an older bill than this one". Nine line-level money writes stamp it. These
+   * three - scope, title, due date - did not, and they are the three that change what the document
+   * SAYS. Rewrite the scope on a delivered INV-071 and the shared /i link serves the new wording
+   * the instant it saves while the homeowner's saved PDF still says the old one, with no banner, no
+   * "Sent Again", and nothing anywhere recording that it changed. That is the exact sentence 0269
+   * exists to prevent, arriving through a door the stamp was never wired to.
+   *
+   * The `.select("id")` is not decoration: it is what makes the stamp follow a write that actually
+   * landed. A zero-row UPDATE is a 204, and an RLS refusal here used to report a saved scope the
+   * row never took.
+   */
+  const { data: wrote, error } = await supabase
     .from("invoices")
     .update({ description: description.trim() || null })
-    .eq("id", invoiceId);
+    .eq("id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
+  await stampInvoiceRevised(supabase, invoiceId, "setInvoiceDescription");
   // The description IS the scope block above the line items on the customer's document
   // (invoice-document.tsx), and the stored PDF only ever drops on an explicit bust — so
   // editing the scope on a SENT invoice left /i showing the new wording while Download PDF
@@ -2623,11 +2749,17 @@ export async function setInvoiceTitle(
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { error } = await ctx.supabase
+  const supabase = ctx.supabase;
+  // Same door, same law as setInvoiceDescription above: the title prints on the customer's
+  // document, so changing it after delivery is a revision and goes on the record.
+  const { data: wrote, error } = await supabase
     .from("invoices")
     .update({ title: title.trim() || null })
-    .eq("id", invoiceId);
+    .eq("id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
+  await stampInvoiceRevised(supabase, invoiceId, "setInvoiceTitle");
   await bustDocPdf("invoice", invoiceId); // the title renders on the PDF (audit 7)
   revalidateMoney(invoiceId);
   revalidateMoney();
@@ -2644,11 +2776,17 @@ export async function setInvoiceDueDate(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const dueDate = date ? dateToIso(date, await orgTz(supabase)) ?? null : null;
-  const { error } = await supabase
+  // Same law again, and this one moves money's DEADLINE: pulling a delivered invoice's due date
+  // from the 30th to the 15th starts the Overdue tracker chasing a customer whose copy still says
+  // the 30th. A record, not a lock - 0269's whole shape.
+  const { data: wrote, error } = await supabase
     .from("invoices")
     .update({ due_date: dueDate })
-    .eq("id", invoiceId);
+    .eq("id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
+  await stampInvoiceRevised(supabase, invoiceId, "setInvoiceDueDate");
   await bustDocPdf("invoice", invoiceId); // the due date renders on the PDF (audit 7)
   revalidateMoney(invoiceId);
   revalidateMoney();
@@ -2718,11 +2856,17 @@ export async function setInvoiceCustomerJob(
   const { data: prevInv } = await supabase.from("invoices").select("job_id").eq("id", invoiceId).maybeSingle();
   const oldJobId = (prevInv as { job_id: string | null } | null)?.job_id ?? null;
 
-  const { error } = await supabase
+  // THE CLASS, NOT THE INSTANCE (cn-v967): this was the fourth `invoices` update in this file with
+  // no `.select("id")`. It is draft-only so there is no revision to stamp, but the silent-write law
+  // holds all the same - re-pointing an invoice at a customer RLS won't let this person touch would
+  // return ok and the page would redraw the old link, the app arguing with itself.
+  const { data: wrote, error } = await supabase
     .from("invoices")
     .update(clean)
-    .eq("id", invoiceId);
+    .eq("id", invoiceId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
   revalidateMoney(invoiceId);
   for (const jid of new Set([oldJobId, jobId].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   return { ok: true };

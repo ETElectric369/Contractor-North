@@ -20,9 +20,19 @@ export type ActionResult = {
    *  write (e.g. "Recorded: 09:00 to 12:00 (3.00h)"). Handlers set it; the surface must relay
    *  it. Typed here because the chat route's projection silently dropped it (audit v800). */
   recorded?: string;
-  /** A handler's hard warning that the write did NOT do what was asked — the surface MUST
-   *  relay it and must not report success (e.g. a seconds-long clock-out standing in for
-   *  "log 3 hours yesterday"). */
+  /**
+   * A handler's warning the surface MUST relay. Two shapes, and the difference is whether `ok` is
+   * true beside it:
+   *
+   *   ok: false  the write did NOT do what was asked, and success must not be reported (a
+   *              seconds-long clock-out standing in for "log 3 hours yesterday").
+   *   ok: true   the write DID land, and something about what it landed on has to be said - a
+   *              re-priced receipt a live invoice is still billing at the old figure, which is
+   *              deliberate, since the customer was told a number (audit fix wave, 2026-09-20).
+   *
+   * A surface that closes on the second shape is the silent direction wearing a success toast, so
+   * both bill-edit modals hold open on it.
+   */
   warning?: string;
   /** Set by executeAction when a confirm/tier-2 action was invoked by the agent/voice
    *  WITHOUT explicit consent — the surface must read confirmPrompt back and re-call

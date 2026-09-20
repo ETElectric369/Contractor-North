@@ -6,7 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { billLineCost } from "@/lib/bill-itemisation";
 import { drawStockForJob, stockFromReceiptLine } from "@/lib/stock-flow";
 import { formatCurrency } from "@/lib/utils";
-import { perUnitCost, round2, usedCountFromCost } from "./receipt-billing";
+import { perUnitCost, round2, splitContradictsReceipt, usedCountFromCost } from "./receipt-billing";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -87,8 +87,18 @@ export async function setReceiptLineUsage(input: {
   lineId: string;
   /** Dollars of this line THIS job used. Null puts the whole line back on the customer's bill. */
   billedAmount: number | null;
-  /** How many the container holds - typed by a person, never inferred. Null skips the shelf. */
+  /**
+   * HOW MANY PIECES THIS LINE BOUGHT: units bought x pieces per unit, both typed by a person and
+   * neither inferred. Null skips the shelf.
+   *
+   * It is the product and not the container count because this is the figure the shelf stores as
+   * `quantity_on_hand` and divides the line cost by for `unit_cost`. Sending one box's count for a
+   * two box line put half the real per-unit price into the price book along with half the stock.
+   */
   containerCount: number | null;
+  /** How many units of the container the line bought, from the sheet's own field. Carried
+   *  separately from the product above so the refusal below can check it against the receipt. */
+  boughtQuantity?: number | null;
   /** How many this job used, when he counted them rather than typing a dollar figure. */
   usedQuantity: number | null;
 }): Promise<ReceiptLineUsageResult> {
@@ -130,6 +140,27 @@ export async function setReceiptLineUsage(input: {
         error: `This job can't use more than the line cost, ${formatCurrency(cost)}. Lower the amount, or bill the whole line.`,
       };
     }
+    /**
+     * AND THE REFUSAL THAT GOES THE OTHER WAY (audit of cn-v966).
+     *
+     * The ceiling above is the only thing that ever stood between a split and the invoice, and the
+     * failure it cannot see comes in UNDER it. "NMB 6/3 W/GND (1000 ft REEL)" on his CED ticket is
+     * 55 feet at $4.32 for $237.66; divided as one thousand-piece container it bills $13.07, which
+     * is comfortably less than the line cost and quietly walks $224.59 off the customer's invoice
+     * while putting 945 feet of imaginary cable on the shelf.
+     *
+     * The receipt's own price column is the only witness to that, and the card checks it too. This
+     * is here because a rule at one read path is a convention and not a boundary (0173): the same
+     * function, the same sentence, so the screen and the database cannot say different things.
+     */
+    const objection = splitContradictsReceipt({
+      cost,
+      quantity: Number(line.quantity),
+      unitPrice: Number(line.unit_price),
+      boughtQuantity: input.boughtQuantity == null ? null : Number(input.boughtQuantity),
+      pieces: input.containerCount == null ? null : Number(input.containerCount),
+    });
+    if (objection) return { ok: false, error: objection };
     amount = round2(n);
   }
 
@@ -163,14 +194,18 @@ export async function setReceiptLineUsage(input: {
    * A shelf failure never undoes the money. It comes back as a note the card says out loud.
    */
   let note: string | undefined;
-  const containerCount = Number(input.containerCount) || 0;
-  if (amount != null && containerCount > 0 && line.is_stock !== true) {
+  /** PIECES, not containers. `stockFromReceiptLine` stores this as `quantity_on_hand` and divides
+   *  the line cost by it for `unit_cost`, so on a two box line the old container count halved both
+   *  the shelf and the price book at once. The name says which figure it is now. */
+  const pieces = Number(input.containerCount) || 0;
+  if (amount != null && pieces > 0 && line.is_stock !== true) {
     const added = await stockFromReceiptLine({
       lineId,
       description: String(line.description ?? ""),
-      // What ONE CONTAINER cost on the receipt - $108.36 for the box, not 21 cents for a nut.
+      // What the whole LINE cost on the receipt - $108.36 for the box, not 21 cents for a nut.
+      // Paired with the piece count above, that is what makes the stored per-unit right.
       unitCost: cost,
-      containerCount,
+      containerCount: pieces,
       vendor: bill?.supplier ?? null,
       // There is no part-number column on a receipt line. The catalogue number is inside the
       // description ("IDEAL 30641 Twister 341-Tan 500") and parsing one out of it would be a
@@ -187,7 +222,7 @@ export async function setReceiptLineUsage(input: {
       const used =
         input.usedQuantity != null && Number(input.usedQuantity) > 0
           ? Math.round(Number(input.usedQuantity) * 100) / 100
-          : usedCountFromCost(amount, perUnitCost(cost, containerCount));
+          : usedCountFromCost(amount, perUnitCost(cost, pieces));
       if (used && used > 0) {
         const drew = await drawStockForJob({
           inventoryItemId: added.inventoryItemId,

@@ -9,7 +9,7 @@ import { todayStrInTz } from "@/lib/tz";
 import {
   reversedPurchaseIds,
   SUPPLIER_PAY_METHODS,
-  type InvoiceBalanceShape,
+  type PurchaseReversalShape,
   type SupplierActionResult,
   type SupplierPayMethod,
 } from "./supplier-balance";
@@ -22,6 +22,10 @@ import { sayMoney } from "@/lib/payroll-math";
 // checkable without a database. It routes category/billable through decideReceiptLine, the one
 // door every other receipt path already passes through.
 import { supplierBillLines } from "./supplier-bill-lines";
+// What a set of invoice lines CLAIMS - both shapes, the `bill:<id>` import key older invoices carry
+// and the source_ids array 0255 added. The Bills page reads claims with this same function, so the
+// sentence an action writes and the sentence the card prints can never drift apart.
+import { claimedIdsOfLines } from "@/lib/unbilled-work";
 
 /**
  * PAYING A SUPPLIER, AND SAYING WHO THE SUPPLIER IS (migration 0270).
@@ -298,7 +302,7 @@ export async function addSupplierAlias(input: {
 
   const owner = await aliasOwner(ctx.supabase, org.orgId, alias);
   if (owner && owner.accountId !== accountId) {
-    return { ok: false, error: aliasTakenSentence(alias, owner.name) };
+    return { ok: false, error: aliasTakenSentence(alias, owner.name, "so it wasn't saved here") };
   }
   if (owner) return { ok: true, message: `"${alias}" was already saved for this supplier.` };
 
@@ -309,7 +313,7 @@ export async function addSupplierAlias(input: {
   if (error) {
     // The race the read above cannot close: two taps, two tabs. The unique index
     // (supplier_aliases_one_per_spelling) is the boundary; this is the sentence for it.
-    if (isDuplicateKey(error)) return { ok: false, error: aliasTakenSentence(alias, "another supplier") };
+    if (isDuplicateKey(error)) return { ok: false, error: aliasTakenSentence(alias, "another supplier", "so it wasn't saved here") };
     return { ok: false, error: `That name didn't save. ${dbError(error)}` };
   }
   if (!data?.length) {
@@ -321,8 +325,20 @@ export async function addSupplierAlias(input: {
   return { ok: true, aliasId: String(data[0].id) };
 }
 
-const aliasTakenSentence = (alias: string, owner: string) =>
-  `"${alias}" is already saved as a name for ${owner}. Take it off there first, or file these bills one at a time.`;
+/**
+ * NAME NO DOOR THAT IS NOT THERE (review, 2026-09-20). This sentence used to end "Take it off there
+ * first, or file these bills one at a time", and NEITHER of those controls exists on any screen:
+ * `removeSupplierAlias` takes a spelling off an account and `linkBillToSupplierAccount` files one
+ * bill by hand, and a grep of the whole app finds no caller for either. So the one sentence he
+ * reads when the app refuses to move his bills sent him hunting for two buttons that were never
+ * wired, and left him at the same wall with less trust in the screen.
+ *
+ * Until they are wired it says where the spelling is filed and what happened to the bills, and
+ * stops there. A wall you can see is not a dead end; a wall with a made-up door on it is worse
+ * than both.
+ */
+const aliasTakenSentence = (alias: string, owner: string, whatHappened = "so these bills were left alone") =>
+  `"${alias}" is already saved as a name for ${owner}, ${whatHappened}.`;
 
 /** Who owns a spelling right now, matched the way the database matches it. A read, so a second tab
  *  can still beat it - which is why every writer below also handles the unique-index error. The
@@ -1019,6 +1035,88 @@ export async function resolveDuplicateBill(input: {
   if (error) return { ok: false, error: `That didn't save, so both copies still count. ${dbError(error)}` };
   if (!moved?.length) return { ok: false, error: "Someone else just sorted that one out. Reload the page." };
 
+  const movedIds = (moved as any[]).map((m) => String(m.id));
+
+  /**
+   * THE CLAIM FOLLOWS THE COST (review, 2026-09-20). 0277 made `bill_supplier_invoices` the
+   * sentence "this purchase is already covered", and from this write on the copy that counts is
+   * the keeper. Left sitting on the copy he set aside, that link names a bill every cost reader in
+   * the app deliberately ignores: the reconcile card stops asking for an invoice nothing carries,
+   * and Record It As A Bill refuses with the set-aside copy's job in the refusal - with no way
+   * forward, because 0277 is unique on the invoice so a corrective link could never be written.
+   *
+   * It is safe against both indexes: unique on the INVOICE alone means at most one row exists per
+   * supplier invoice, so the keeper cannot already be holding a row this one would collide with.
+   *
+   * ZERO ROWS IS NORMAL HERE, not a refusal - most duplicate pairs are two phone photographs with
+   * no supplier document behind either of them. Only an error is worth saying, and even then the
+   * supersede has landed and the money is already right, so it is a sentence and not a failure.
+   *
+   * PUT BACK DOES NOT CARRY IT HOME AGAIN, and that is deliberate rather than forgotten: which
+   * copy the supplier's invoice was tied to before is written down nowhere, and after an undo both
+   * copies count anyway, so the tie is sitting on a real live bill either way and not a dollar
+   * moves. Guessing it back would be the app inventing a fact nobody wrote.
+   */
+  const { error: relinkErr } = await supabase
+    .from("bill_supplier_invoices")
+    .update({ bill_id: keepBillId })
+    .in("bill_id", movedIds)
+    .eq("org_id", org.orgId)
+    .select("id");
+  if (relinkErr) reportError("bills:resolveDuplicate.relink", relinkErr, { keepBillId, losers: movedIds });
+
+  /**
+   * AND A COPY HE SETS ASIDE MAY ALREADY BE ON A CUSTOMER'S BILL (review, 2026-09-20).
+   *
+   * Both of his $95.27 CED copies are: 8ce93d0a rides on INV-050 (paid, 13631 Northwoods) and
+   * 31b489e4 on INV-061 (paid, 85 Whitney Place), eight lines each. Setting one aside is still the
+   * right move and the COST should stop counting - but what he CHARGED for it does not stop, so
+   * the job keeps $119.09 of revenue for a $95.27 purchase the app now calls a duplicate, and its
+   * margin moves by both numbers with nothing on any screen accounting for it.
+   *
+   * The receipt card two components over already says this sentence on a claimed receipt. It
+   * cannot say it here: after this write that card no longer renders the bill at all. So the
+   * action that moves the money is the last place left to say it out loud.
+   *
+   * It reads the claim exactly the way the Bills page builds `billedOn` - by the LOSING copies'
+   * jobs, both claim shapes, skipping voided invoices - so the two agree word for word. A read
+   * that fails leaves the sentence off and nothing else changes, which is yesterday's behaviour
+   * rather than a refusal over a supersede that has already landed.
+   */
+  const claimants = new Map<string, string>();
+  const lostJobIds = [...new Set((moved as any[]).map((m) => m.job_id).filter(Boolean))].map(String);
+  if (lostJobIds.length) {
+    const lost = new Set(movedIds);
+    const { data: claimRows, error: claimErr } = await supabase
+      .from("invoice_items")
+      .select("import_key, source_ids, invoices!inner(invoice_number, status, job_id)")
+      .in("invoices.job_id", lostJobIds)
+      .neq("invoices.status", "void")
+      .limit(5000);
+    if (claimErr) reportError("bills:resolveDuplicate.claims", claimErr, { billIds: movedIds });
+    for (const r of (claimRows ?? []) as any[]) {
+      const claims = claimedIdsOfLines([{ import_key: r.import_key, source_ids: r.source_ids }]);
+      if (!claims.some((id) => lost.has(id))) continue;
+      const label = String(r.invoices?.invoice_number || "an invoice");
+      if (!claimants.has(label)) claimants.set(label, String(r.invoices?.status ?? ""));
+    }
+  }
+  // A DRAFT IS NOT A BILL HE SENT. Its lines are still his to edit, so the way back is the invoice
+  // itself; on one that has gone out the only way back is a credit. Same split the receipt card
+  // and the invoice page both make, in the same words.
+  const sent = [...claimants].filter(([, status]) => status !== "draft").map(([label]) => label);
+  const drafts = [...claimants].filter(([, status]) => status === "draft").map(([label]) => label);
+  // A group can hold more than two copies, so the sentence has to count them. "That copy is" over
+  // three set-aside tickets reads like a different, smaller fact than the one that happened.
+  const thatCopy = movedIds.length > 1 ? "Those copies are" : "That copy is";
+  const alsoBilled =
+    (sent.length
+      ? ` ${thatCopy} already billed to the customer on ${sayList(sent)}: the cost stops counting, but what you charged for it does not. To give that back, use Credit / Refund in the Actions menu on the invoice.`
+      : "") +
+    (drafts.length
+      ? ` ${thatCopy} on ${sayList(drafts)}, still a draft, so take its lines off there if you do not want to charge for it.`
+      : "");
+
   const keptOn = (keeper as any).jobs?.name ?? "no job";
   const droppedOn = sayList([...new Set((moved as any[]).map((m) => m.jobs?.name ?? "no job"))]);
   const amount = sayMoney(money((keeper as any).amount));
@@ -1029,7 +1127,12 @@ export async function resolveDuplicateBill(input: {
 
   return {
     ok: true,
-    message: `Kept the ${amount} ticket on ${keptOn}. The copy on ${droppedOn} stops counting against that job and stays on your bills list.`,
+    message:
+      `Kept the ${amount} ticket on ${keptOn}. The copy on ${droppedOn} stops counting against that job and stays on your bills list.` +
+      alsoBilled +
+      (relinkErr
+        ? " The supplier's own invoice is still tied to the copy you set aside, so that list may keep asking for it."
+        : ""),
   };
 }
 
@@ -1268,17 +1371,27 @@ export async function setSupplierInvoiceJob(input: {
    * when there IS a next step, because a document that already has a bill against it shows no
    * button and copy must never point at a control that is not on the screen.
    */
-  const { data: hasBill } = await ctx.supabase
+  // A SET-ASIDE COPY IS NOT "IN YOUR BOOKS" (review, 2026-09-20). Every cost reader in the app
+  // ignores a superseded bill (0271), so a link pointing at one would have this sentence tell him
+  // the cost had landed while the job carried none of it. resolveDuplicateBill now moves the link
+  // onto the keeper, which is the real fix; this filter is what makes the guard true for any link
+  // written before that, and for any copy set aside by hand.
+  const { data: billLinks } = await ctx.supabase
     .from("bill_supplier_invoices")
-    .select("bill_id")
+    .select("bill_id, bills(superseded_by_bill_id)")
     .eq("org_id", org.orgId)
     .eq("supplier_invoice_id", invoiceId)
-    .limit(1);
+    .limit(5);
+  // Read back and judged here rather than filtered in the query: one row, at most, comes back
+  // (0277 is unique on the invoice), and a set-aside copy is a fact about the bill the link names,
+  // not about the link. A missing embed reads as "no live bill", which is the safe lean - it
+  // offers him the next step instead of telling him a cost has landed.
+  const hasLiveBill = ((billLinks ?? []) as any[]).some((r) => r?.bills && !r.bills.superseded_by_bill_id);
 
   revalidatePath("/bills");
   return {
     ok: true,
-    message: hasBill?.length
+    message: hasLiveBill
       ? `${number} is on ${label} now, and its bill is already in your books.`
       : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
   };
@@ -1386,12 +1499,20 @@ export async function recordSupplierInvoiceAsBill(input: {
   // ALREADY IN THE BOOKS, TWO WAYS. A link is the certain one. A bill carrying this invoice number
   // without a link is the same purchase filed by hand or by an earlier scan - and the answer to
   // that is the link it is missing, not a second bill for the same money.
-  const { data: linked } = await ctx.supabase
+  const { data: linked, error: linkedErr } = await ctx.supabase
     .from("bill_supplier_invoices")
     .select("bill_id, bills(job_id, jobs(name))")
     .eq("org_id", org.orgId)
     .eq("supplier_invoice_id", invoiceId)
     .limit(1);
+  // A FAILED READ IS NOT "NO BILL" (review, 2026-09-20). This read is the one thing standing
+  // between a genuine second tap and a second bill for the same money, and its error was being
+  // dropped on the floor: a refused query read as "nothing found" and walked straight into the
+  // insert. 0277's index would catch it and roll back, but a job's cost should not depend on the
+  // rollback path being right.
+  if (linkedErr) {
+    return { ok: false, error: `Couldn't check whether ${number} is already in your books, so nothing was written. ${dbError(linkedErr)}` };
+  }
   if (linked?.length) {
     // THE BILL'S JOB, NOT THE INVOICE'S. They are usually the same and the case where they differ
     // is exactly the one he needs told: the cost is sitting on a job he is not looking at.
@@ -1409,17 +1530,28 @@ export async function recordSupplierInvoiceAsBill(input: {
    * credit memo has reversed, but a list is a screen and this is a write: 8802-1107230 is five
    * light almond receptacles that went back to the counter, and recording it would put $225.47 of
    * merchandise he does not have onto a customer's job. The rule is read from the account's own
-   * documents with the same function the balance and the discount use, so all three agree.
+   * documents with the same function the list and the balance use, and since that function stopped
+   * pairing by array position (review, 2026-09-20) it gives all three the same answer whatever
+   * order the rows arrive in.
    */
+  // NEWEST FIRST, THE WAY THE PAGE READS THEM (review, 2026-09-20). The rule itself no longer
+  // depends on the order it is handed - two purchases at one total with one credit memo between
+  // them are now BOTH left billable rather than paired by array position - but a query with no
+  // ORDER BY hands back whatever the planner felt like, and a list and a button that read the same
+  // rows in different orders is a difference waiting to become a wrong job cost again.
   const { data: siblings } = await ctx.supabase
     .from("supplier_invoices")
-    .select("id, total, open_balance, closed")
+    .select("id, kind, total, open_balance, closed")
     .eq("org_id", org.orgId)
-    .eq("supplier_account_id", accountId);
+    .eq("supplier_account_id", accountId)
+    .order("invoice_date", { ascending: false });
   // Mapped, not cast: PostgREST says `open_balance` and the rule reads `openBalance`, and a cast
-  // would compile while quietly reading every part-paid invoice as fully owed.
-  const siblingBalances: InvoiceBalanceShape[] = ((siblings ?? []) as any[]).map((r) => ({
+  // would compile while quietly reading every part-paid invoice as fully owed. `kind` rides along
+  // so a statement or a late-payment charge can never spend a credit memo that belongs to a real
+  // invoice - only an invoice is a purchase, and the wrapper around several of them is not.
+  const siblingBalances: PurchaseReversalShape[] = ((siblings ?? []) as any[]).map((r) => ({
     id: String(r?.id ?? ""),
+    kind: String(r?.kind ?? "invoice"),
     total: Number(r?.total) || 0,
     openBalance: r?.open_balance == null ? null : Number(r.open_balance),
     closed: !!r?.closed,
@@ -1549,18 +1681,65 @@ export async function recordSupplierInvoiceAsBill(input: {
     .from("bill_supplier_invoices")
     .insert({ org_id: org.orgId, bill_id: billId, supplier_invoice_id: invoiceId })
     .select("id");
+  let tied = !joinErr && !!joined?.length;
   if (joinErr && isDuplicateKey(joinErr)) {
-    // Somebody else got there between the read and the write. The bill just written is the
-    // duplicate, it holds no lines yet, and a second bill is a cost the job never incurred - so it
-    // goes back out and he reads the sentence the check above would have given him.
-    await ctx.supabase.from("bills").delete().eq("org_id", org.orgId).eq("id", billId).select("id");
-    revalidatePath("/bills");
-    return { ok: false, error: `${number} is already recorded as a bill. Reload the page and you'll see it.` };
+    /**
+     * SOMEBODY ELSE GOT THERE - BUT FIND OUT WHOSE BILL WON BEFORE TAKING ANYTHING BACK
+     * (review, 2026-09-20). This used to delete "the bill it just wrote" and never look at the
+     * result, which is the only write in this file that asks for `.select("id")` and then ignores
+     * the answer. Two things were wrong with that. `bill_supplier_invoices.bill_id` is
+     * `on delete cascade` (0273), so the delete takes the winning claim with it - and in the one
+     * race this branch can actually lose, the other tap took the join-only path above and tied the
+     * invoice to THE BILL THIS CALL JUST WROTE (0276 permits no second live bill with this
+     * number). Deleting it would cascade away a tie the other screen was already told about, and
+     * leave the invoice with no live bill at all. And a rollback that removed no rows is a
+     * refusal, not a success: the second bill would still be sitting in Bills, doubling the job's
+     * cost, with a sentence on screen saying it had been taken back out.
+     */
+    const { data: winner, error: winnerErr } = await ctx.supabase
+      .from("bill_supplier_invoices")
+      .select("bill_id")
+      .eq("org_id", org.orgId)
+      .eq("supplier_invoice_id", invoiceId)
+      .limit(1);
+    const winningBillId = String((winner?.[0] as { bill_id?: string } | undefined)?.bill_id ?? "");
+    // AN UNKNOWN WINNER LEANS TO TAKING IT BACK OUT. If the read fails there is still certainly a
+    // claim on this invoice - that is what the unique index just said - and the two wrongs are not
+    // the same size: a bill left behind doubles a job's cost silently and forever, while one taken
+    // back out shows up again on Purchases Not In Your Books with a button on it. The sentence
+    // below says which of the two happened rather than guessing at a tidy one.
+    if (winnerErr || winningBillId !== billId) {
+      // A different bill carries it. This one is a cost the job never incurred, so it goes back out.
+      const { data: removed, error: delErr } = await ctx.supabase
+        .from("bills")
+        .delete()
+        .eq("org_id", org.orgId)
+        .eq("id", billId)
+        .select("id");
+      revalidatePath("/bills");
+      if (delErr || !removed?.length) {
+        reportError("bills:recordAsBill.rollback", delErr ?? new Error("rollback delete removed no rows"), { billId, invoiceId });
+        return {
+          ok: false,
+          error: `${number} was already recorded as a bill, and the second one this just wrote is still sitting in Bills at ${sayMoney(total)}. Delete it there, or ${jobLabel} carries the cost twice.`,
+        };
+      }
+      return {
+        ok: false,
+        error: winnerErr
+          ? `${number} is already recorded as a bill somewhere, so this second copy was taken back out. Reload the page, and if it still shows under Purchases Not In Your Books, record it again.`
+          : `${number} is already recorded as a bill. Reload the page and you'll see it.`,
+      };
+    }
+    // THE WINNING CLAIM IS THIS BILL'S OWN, so there is nothing to take back: the other tap tied
+    // the invoice to this very bill. Falling through finishes the job - the lines, the revalidates
+    // and the sentence below all still run - instead of deleting a bill that is now the right one.
+    tied = true;
   }
   // The bill is real and the cost is on the job whether or not the tie-line landed. Without it the
   // reconcile card will go on asking for this invoice, which is a nuisance and a wrong number on a
   // screen, so it gets its own sentence rather than a shrug.
-  if (joinErr || !joined?.length) {
+  if (!tied) {
     reportError("bills:recordAsBill.link", joinErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, invoiceId });
     lineNote += " The bill is on the job, but it didn't get tied to the supplier's invoice, so this list may still ask for it.";
   }

@@ -17,6 +17,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { billableBillCost } from "@/lib/bill-itemisation";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -27,9 +28,20 @@ export type UnbilledWork = {
   hours: number;
   laborAmount: number;
   laborByPerson: { name: string; hours: number; amount: number }[];
-  /** Unclaimed supplier bills + live purchase orders, AT COST (before markup). */
+  /** Unclaimed supplier bills + live purchase orders, AT COST (before markup) - and since
+   *  0268/0272 only the part of a receipt that reaches the customer: the snacks, and the share of
+   *  a container that went on the shelf, are already off it. `billsAmount + excluded` is what the
+   *  supplier actually charged for those same receipts. */
   billsAmount: number;
-  /** How many of them — bills and live POs together (a PO is a materials cost the importer bills the same way). */
+  /** What a PERSON took off those receipts: lines switched off as the company's own, plus the
+   *  shelf's share of a split container, tax included. Carried so the card can say "$16.28 less
+   *  $9.78 your own cost" instead of showing two figures that read as a typo - the client never
+   *  re-derives this, because there is one copy of that arithmetic and it lives in
+   *  bill-itemisation. */
+  excluded: number;
+  /** How many of them — bills and live POs together (a PO is a materials cost the importer bills
+   *  the same way). A receipt that was ENTIRELY the company's own is not one of them: it bills the
+   *  customer nothing, which is exactly what the importer would write for it. */
   billsCount: number;
   markupPct: number;
   /** bills $ with markup — what the customer would be charged for them. */
@@ -104,14 +116,25 @@ export function claimedIdsOfLines(items: ClaimLine[] | null | undefined): string
 }
 
 /** Every entry / allocation id in a fetchJobLaborRows result — the candidates a claim read looks
- *  up BY ID (an entry billed on one job and moved to another is claimed wherever it now sits). */
+ *  up BY ID (an entry billed on one job and moved to another is claimed wherever it now sits).
+ *
+ *  A STANDALONE ALLOCATION'S PARENT ENTRY IS A CANDIDATE TOO (review of cn-v966). 90 of the 98
+ *  labor claims in Erik's books are ENTRY ids - an un-split shift is billed whole, by its own id
+ *  (0256's backfill). Split that shift afterwards and the new allocation rows have brand-new ids
+ *  that no invoice has ever seen; file them onto a DIFFERENT job and this job's claim read never
+ *  asks about the entry that INV-061 still holds, so the same two hours read as free and bill a
+ *  second time. Asking for the parent id costs one uuid in a query string and is what makes
+ *  withoutClaimedLabor's parent test able to answer. */
 export function laborRowIds(labor: { jobEntries: any[]; jobAllocs: any[] }): string[] {
   const ids = new Set<string>();
   for (const e of labor.jobEntries ?? []) {
     if (e?.id) ids.add(String(e.id));
     for (const a of e?.time_allocations ?? []) if (a?.id) ids.add(String(a.id));
   }
-  for (const a of labor.jobAllocs ?? []) if (a?.id) ids.add(String(a.id));
+  for (const a of labor.jobAllocs ?? []) {
+    if (a?.id) ids.add(String(a.id));
+    if (a?.time_entries?.id) ids.add(String(a.time_entries.id));
+  }
   return [...ids];
 }
 
@@ -280,7 +303,10 @@ export type UnbilledInput = {
  */
 export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const claimed = new Set(input.claims.owner.keys());
-  const free = withoutClaimedLabor(input.jobEntries, input.jobAllocs, claimed);
+  // The owner map rides along, not just its keys: a shift billed WHOLE by its entry id must not
+  // come back as free hours the moment somebody re-splits it, and only the claiming invoice's date
+  // tells that apart from an old split the invoice deliberately left off (see withoutClaimedLabor).
+  const free = withoutClaimedLabor(input.jobEntries, input.jobAllocs, claimed, input.claims.owner);
   const { lines, total: laborAmount } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, input.defaultRate, input.levelRate, input.nonBillableCodes);
   const laborByPerson = lines.map((l) => ({ name: l.name, hours: l.quantity, amount: l.amount }));
   const hours = cents(lines.reduce((s, l) => s + l.quantity, 0));
@@ -291,6 +317,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   let billsAmount = 0;
   let billsBilled = 0;
   let billsCount = 0;
+  let excluded = 0;
   let poCoveredBills = 0;
   for (const p of livePurchaseOrders(input.pos ?? [], input.bills ?? [])) {
     const cost = Number(p.total) || 0;
@@ -304,8 +331,8 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsCount += 1;
   }
   for (const b of input.bills ?? []) {
-    const cost = Number(b.amount) || 0;
-    if (!(cost > 0)) continue;
+    const paid = Number(b.amount) || 0;
+    if (!(paid > 0)) continue;
     if (claimed.has(b.id)) {
       skippedIds.push(b.id);
       continue;
@@ -315,6 +342,24 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
       poCoveredBills += 1;
       continue;
     }
+    /**
+     * THE RECEIPT, LESS WHAT IS NOT THE CUSTOMER'S (review of cn-v966).
+     *
+     * This card's header promises "nothing here is a second arithmetic: if this figure and the
+     * invoice that gets drafted from it ever differ, one of them is a defect". Since 0268/0272 it
+     * differed. His OSH run for Jason Waldow is $16.28 with two bags of Kettle Chips and an ice
+     * cream bar switched off: the card said $20.35 of unbilled material and the button beside it
+     * wrote $8.13. He was being shown $12.22 of his own snacks, marked up 25%, as money a customer
+     * owed - and createProgressReportInvoice decides from this same figure whether a job has
+     * anything left to bill at all, so the snacks were deciding that too.
+     *
+     * billableBillCost is the importer's own reading, shared rather than copied. A receipt that
+     * was entirely the company's own bills nothing and is not counted at all: the importer emits
+     * no rows for it, so "1 bill" beside "$0.00" would be a promise the button cannot keep.
+     */
+    const cost = billableBillCost(b.amount, b.bill_line_items);
+    excluded = cents(excluded + (paid - cost));
+    if (!(cost > 0)) continue;
     billsAmount = cents(billsAmount + cost);
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
@@ -326,6 +371,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     laborAmount,
     laborByPerson,
     billsAmount,
+    excluded,
     billsCount,
     markupPct,
     billsBilled,
@@ -340,29 +386,75 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   };
 }
 
+/**
+ * A JOB'S LIVE RECEIPTS, WITH THE LINES THAT DECIDE WHO PAYS FOR THEM.
+ *
+ * THE PROJECTION LAW, on the read every "what is still open to bill" figure hangs off. `billable`
+ * (0268) and `billed_amount` (0272) are what a person decided about a receipt line, and a summer
+ * that never selects them cannot help but bill the snacks. Shared by unbilledWorkForJob and
+ * jobProgressFinancials so the Unbilled card, the progress panel, Nort's job numbers and the
+ * printed report all read the same receipt the same way.
+ *
+ * The retry is the cn-v576 deploy-window shape, copied from the importer's own billLinesForBills:
+ * a push can land before its migration runs, and a select naming a column that is not there yet
+ * fails the WHOLE read - which would take the job page's money panel down for those minutes.
+ * Falling back leaves both columns undefined, which the arithmetic reads as "the whole line",
+ * exactly the behaviour of the minute before 0268.
+ *
+ * A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
+ * Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
+ * 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
+ * counting against that job" - a sentence that was false everywhere, because every cost reader summed
+ * bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
+ * arrives and supersedes it, which is the case that has not happened yet and would otherwise have
+ * counted one purchase twice on the same job.
+ */
+export async function readJobBillsWithLines(
+  supabase: { from: (t: string) => any },
+  jobId: string,
+): Promise<{ data: (MaterialBill & { id: string })[]; error: unknown | null }> {
+  // id + po_id feed the claim key and the shared PO-supersede rule; the line columns feed
+  // billableBillCost. `amount` on the line is the supplier's own extension - see billLineCost.
+  const read = (withLineStates: boolean) =>
+    supabase
+      .from("bills")
+      .select(`id, amount, po_id, bill_line_items(id, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
+      .eq("job_id", jobId)
+      .is("superseded_by_bill_id", null);
+  let res = await read(true);
+  if (res.error && isMissingBillLineState(res.error)) res = await read(false);
+  return { data: (res.data ?? []) as (MaterialBill & { id: string })[], error: res.error ?? null };
+}
+
+/** The one error shape a database without 0268/0272 produces for the line-state columns. */
+function isMissingBillLineState(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42703" || code === "PGRST204" || (/billable|billed_amount/i.test(msg) && /does not exist|could not find/i.test(msg));
+}
+
 /** The fetcher — the ONE call a page, an action or Nort makes. Same resolvers as the importers
  *  (fetchJobLaborRows, customerLaborRateForJob, customerMaterialMarkupForJob), so the figure it
  *  returns is the figure a draft built from it will carry. */
 export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string): Promise<UnbilledWork> {
-  const [labor, { data: org }, levelRate, { data: pos }, { data: bills }] = await Promise.all([
+  const [labor, { data: org }, levelRate, { data: pos }, billsRead] = await Promise.all([
     fetchJobLaborRows(supabase, jobId),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     customerLaborRateForJob(supabase, jobId),
     // id + status + po_id feed the shared live-PO rule (see livePurchaseOrders) — and id is the claim key.
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
-    // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
-    // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
-    // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
-    // counting against that job" - a sentence that was false everywhere, because every cost reader summed
-    // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
-    // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
-    // counted one purchase twice on the same job.
-    supabase.from("bills").select("id, amount, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
+    // The receipts WITH their lines — see readJobBillsWithLines.
+    readJobBillsWithLines(supabase, jobId),
   ]);
+  // A LOST RECEIPT READ IS NOT AN EMPTY JOB. Reporting $0 of material because a query failed is a
+  // money statement nobody made, and this figure is what the draw gate bills from; the claim read
+  // below already refuses the same way.
+  if (billsRead.error) throw billsRead.error;
+  const bills = billsRead.data;
   const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   // Claims AFTER the rows, never beside them: the read wants every candidate id so a row billed on
   // another job (moved since) is still seen as claimed. The markup resolver rides along.
-  const candidates = [...laborRowIds(labor), ...((pos ?? []) as { id: string }[]).map((p) => String(p.id)), ...((bills ?? []) as { id: string }[]).map((b) => String(b.id))];
+  const candidates = [...laborRowIds(labor), ...((pos ?? []) as { id: string }[]).map((p) => String(p.id)), ...bills.map((b) => String(b.id))];
   const [claims, markupPct] = await Promise.all([
     claimedSourcesOnJob(supabase, jobId, null, candidates),
     customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent),
@@ -375,7 +467,7 @@ export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string
     defaultRate: settings.default_labor_rate,
     levelRate,
     pos: (pos ?? []) as (MaterialPo & { id: string })[],
-    bills: (bills ?? []) as (MaterialBill & { id: string })[],
+    bills,
     markupPct,
   });
 }

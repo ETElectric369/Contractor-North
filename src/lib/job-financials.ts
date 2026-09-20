@@ -1,6 +1,7 @@
 import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
+import { readJobBillsWithLines } from "@/lib/unbilled-work";
 
 export type { JobProgressFinancials };
 
@@ -10,7 +11,7 @@ export type { JobProgressFinancials };
  *  the sum of the lines importLaborIntoInvoice / importCostsIntoInvoice actually
  *  bill (labor at charge rate via computeJobLaborBilling, materials per-row markup). */
 export async function jobProgressFinancials(supabase: any, jobId: string): Promise<JobProgressFinancials> {
-  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, { data: bills }, { data: org }] =
+  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }] =
     await Promise.all([
       supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
       supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
@@ -19,17 +20,18 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
       // id + status + po_id feed the shared live-PO rule (a draft/cancelled order isn't a
       // cost, and a PO already paid by a bill is superseded by it — see livePurchaseOrders).
       supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
-      // A SUPERSEDED BILL IS A DUPLICATE, AND A DUPLICATE IS NOT A COST (0271, review of cn-v963).
-      // Erik's books carry one proven case: the same CED ticket, line for line to the penny, filed to both
-      // 13631 Northwoods and 85 Whitney Place. The duplicate picker tells him the copy he sets aside "stops
-      // counting against that job" - a sentence that was false everywhere, because every cost reader summed
-      // bills unfiltered. The same column also catches the Sunnyvale preview once its Truckee-priced invoice
-      // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
-      // counted one purchase twice on the same job.
-      supabase.from("bills").select("amount, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
+      // The job's live receipts WITH their lines, through the ONE reader the Unbilled card uses
+      // (readJobBillsWithLines): a receipt counts for what it BILLS, and this panel's whole promise
+      // is that its work-to-date equals the lines importCostsIntoInvoice writes. Selecting only
+      // `amount` here is what put Erik's snacks, marked up, into the figure a draw is measured
+      // against - the projection law, on the read that decides the reference number.
+      readJobBillsWithLines(supabase, jobId),
       supabase.from("organizations").select("settings").maybeSingle(),
     ]);
 
+  // A failed receipt read is tolerated here exactly as the quotes/invoices reads beside it are
+  // (empty data, no throw) so a print or analytics page still renders. It is NOT tolerated in
+  // unbilledWorkForJob, which is the figure a draw actually bills from.
   // Labor: the exact helper importLaborIntoInvoice uses (per-person, quarter-hour,
   // default-rate fallback) — so the panel can't diverge from the billed lines.
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
@@ -43,13 +45,20 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
   );
   const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
 
+  // A LOST RECEIPT READ IS NOT A JOB WITH NO MATERIALS (review, 2026-09-20). unbilled-work throws
+  // on this same failure, deliberately, because a reader that shrugs bills a customer short. This
+  // one was passing `billsRead.data` straight through, so the draw modal's reference figure would
+  // have quietly shown $0 of material on a job carrying thousands - two screens, one read, two
+  // different meanings for the same lost row.
+  if (billsRead.error) throw billsRead.error;
+
   return computeJobProgress({
     billingTypeRaw: (job as any)?.billing_type,
     quotes: (quotes ?? []) as any,
     invoices: (invoices ?? []) as any,
     billableLabor,
     pos: (pos ?? []) as any,
-    bills: (bills ?? []) as any,
+    bills: billsRead.data as any,
     markupPercent,
   });
 }

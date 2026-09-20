@@ -81,6 +81,15 @@ type Mode =
 type Art = { payUrl?: string; payQr?: string; venmoQr?: string; venmoHandle?: string; balance?: number; invoiceNumber?: string | null };
 
 /**
+ * THE DOOR: the PaymentIntent this screen is holding open on the tenant's Stripe account.
+ * `amount` is integer CENTS straight off the mint — Stripe's own copy of what this card will be
+ * charged, and therefore the ONLY figure allowed to reach the card prompt. Anything else (the
+ * balance the page was rendered with, a number captured before Apple's sheets went up) is a
+ * figure that can have moved since.
+ */
+type TapDoor = { invoiceId: string; clientSecret: string; paymentIntentId: string; amount: number };
+
+/**
  * How a tap ended when it didn't go through (Apple 5.9 wants approved / declined / timed out
  * named; the rest is our own bookkeeping for what to offer next):
  *   declined     the card said no — Try Again on the same PaymentIntent, and a receipt (5.10)
@@ -105,6 +114,28 @@ type TapState =
 type Receipt = { link: string; business: string; invoiceNumber: string | null } | { error: string };
 
 const money = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * The last thing WE say before Apple owns the screen, and it carries the figure read straight off
+ * the PaymentIntent — never off a balance captured earlier in the flow. A label built from a
+ * stale number is how a tech reads "$500" aloud while the reader is armed for something else.
+ */
+export const holdCardLine = (cents: number) => `Hold their card to the top of the phone: ${money(cents / 100)}`;
+
+/** What invoiceCollectStatus answers with: the one row this screen re-checks the money against. */
+type LiveBalance = { ok: boolean; total?: number; amountPaid?: number } | null;
+
+/**
+ * IS THIS DOOR STILL GOOD FOR WHAT THE INVOICE SAYS RIGHT NOW? To the cent, or it isn't.
+ *
+ * A read that didn't answer is FALSE, not true: not knowing what the invoice says is not the same
+ * as knowing it agrees, and the cost of being wrong here is a card charged a figure nobody typed.
+ * The door is cheap to replace (one Stripe call); the wrong charge is not.
+ */
+export function doorAmountStillMatches(cents: number, live: LiveBalance): boolean {
+  if (!live?.ok) return false;
+  return Math.round(invoiceBalance(live.total, live.amountPaid) * 100) === cents;
+}
 
 /** Apple 3.8.1, word for word what a non-admin needs to hear. */
 const ASK_ADMIN = "Ask an owner or admin to enable Tap to Pay on iPhone first.";
@@ -472,7 +503,7 @@ export function PayNowButton(props: Mode & {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   /** The PaymentIntent for THIS open of the screen. A declined card retries on the SAME one —
    *  Stripe re-uses it; a fresh one per attempt would be a second door onto the same balance. */
-  const tapPi = useRef<{ invoiceId: string; clientSecret: string; paymentIntentId: string; amount: number } | null>(null);
+  const tapPi = useRef<TapDoor | null>(null);
   /** The device probe from opening. ONE SDK conversation at a time from this screen: a tap
    *  pressed before the probe answers waits for it rather than talking over it. */
   const probe = useRef<Promise<void> | null>(null);
@@ -577,6 +608,72 @@ export function PayNowButton(props: Mode & {
       if (armed) void cancelTapPayment();
       return true;
     };
+    /**
+     * THE DOOR ONTO THIS INVOICE, GOOD FOR THE FIGURE THE INVOICE SAYS RIGHT NOW.
+     *
+     * NEVER CHARGE A FIGURE THE INVOICE NO LONGER SAYS. A PaymentIntent is fixed at the balance
+     * of the moment it was minted; a payment landing, a credit applied, a line edited from the
+     * office while this sheet sat open leaves the card reading the old number. So the live
+     * balance is read before the reader is ever armed and the two must agree to the cent. They
+     * don't — or the read didn't answer, which is the same as not knowing — and that door is
+     * cancelled and a fresh one minted, which re-reads the balance on the server. One row, no
+     * Stripe call: it is the only thing between the press and the reader (5.6).
+     *
+     * THIS IS A FUNCTION BECAUSE THERE ARE TWO WAYS TO THE READER, NOT ONE. The check used to sit
+     * inline at the press, and the second way — the retry after Apple's terms and how-to sheets —
+     * walked straight past it, re-using the `pi` captured before any of that happened. That
+     * branch only ever runs on a company's FIRST tap, where the connect alone is allowed eight
+     * minutes and Apple's guide ten more: a quarter of an hour in which the office does not know
+     * this screen is up, and the invoice is exactly the one they're most likely to still be
+     * touching. One door-builder, called from both, or the next new way in skips it too.
+     *
+     * Returns the door, and whether the one we were handed had to be thrown away because the
+     * figure had moved. null = it has stopped: the sheet closed (nothing painted), or the mint
+     * refused and its sentence is already on the screen.
+     */
+    async function doorFor(id: string): Promise<{ pi: TapDoor; moved: boolean } | null> {
+      let held = tapPi.current;
+      let moved = false;
+      if (held && held.invoiceId !== id) {
+        // A door onto a different invoice: let it go rather than leave it open on the tenant's
+        // Stripe account.
+        void cancelTapPaymentIntent(held.paymentIntentId).catch(() => {});
+        tapPi.current = null;
+        held = null;
+      }
+      if (held) {
+        const live = await invoiceCollectStatus(id).catch(() => null);
+        if (stale()) return null;
+        if (!doorAmountStillMatches(held.amount, live)) {
+          void cancelTapPaymentIntent(held.paymentIntentId).catch(() => {});
+          tapPi.current = null;
+          held = null;
+          moved = true;
+        }
+      }
+      if (!held) {
+        const r = await createTapPaymentIntent(id);
+        // The sheet went while this was in flight. tapPi was still empty, so close() and the
+        // unmount both found nothing to cancel and this intent would sit OPEN on the tenant's
+        // Stripe account for good — a card_present door with a customer's invoice on it, live in
+        // Erik's dashboard days later. So it cancels itself, the way the open-time mint already
+        // does; this one (every job and appointment tap comes through here) never did.
+        if (stale()) {
+          if (r.ok) void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
+          return null;
+        }
+        if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return null; }
+        // Who this phone is signed in as, straight off the answer it just got. The bridge keys
+        // its page-long caches (the company's Stripe location, the role, the reader itself) to
+        // this; a sign-out into another company is a soft transition, so nothing else tells it.
+        noteTapIdentity(r.identity);
+        held = { invoiceId: id, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
+        tapPi.current = held;
+        balanceRef.current = r.balance;
+      }
+      return { pi: held, moved };
+    }
+
     setTap({ kind: "busy", phase: "pay", label: "Getting Tap to Pay on iPhone ready…" });
     try {
       // The device probe from opening may still hold the SDK's turn — let it finish first.
@@ -588,49 +685,14 @@ export function PayNowButton(props: Mode & {
       // The open-time mint may still be in flight — wait for it rather than mint a second door.
       await preMint.current;
       if (stale()) return;
-      let pi = tapPi.current;
-      if (pi && pi.invoiceId !== id) {
-        // A door onto a different invoice: let it go rather than leave it open on the tenant's
-        // Stripe account.
-        void cancelTapPaymentIntent(pi.paymentIntentId).catch(() => {});
-        tapPi.current = null;
-        pi = null;
-      }
-      if (pi) {
-        // NEVER CHARGE A FIGURE THE INVOICE NO LONGER SAYS. The PaymentIntent minted when this
-        // sheet opened is fixed at the balance of that moment; a payment landing, a credit
-        // applied, a line edited while the sheet sat open would leave the card reading the old
-        // number. So the live balance is read at the PRESS and the two must agree to the cent.
-        // They don't — or the read didn't answer, which is the same as not knowing — and this
-        // door is cancelled and a fresh one minted, which re-reads the balance on the server.
-        // One row, no Stripe call: it is the only thing between the press and the reader (5.6).
-        const live = await invoiceCollectStatus(id).catch(() => null);
-        if (stale()) return;
-        const cents = live?.ok ? Math.round(invoiceBalance(live.total, live.amountPaid) * 100) : null;
-        if (cents !== pi.amount) {
-          void cancelTapPaymentIntent(pi.paymentIntentId).catch(() => {});
-          tapPi.current = null;
-          pi = null;
-        }
-      }
-      if (!pi) {
-        const r = await createTapPaymentIntent(id);
-        if (stale()) return;
-        if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return; }
-        // Who this phone is signed in as, straight off the answer it just got. The bridge keys
-        // its page-long caches (the company's Stripe location, the role, the reader itself) to
-        // this; a sign-out into another company is a soft transition, so nothing else tells it.
-        noteTapIdentity(r.identity);
-        pi = { invoiceId: id, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
-        tapPi.current = pi;
-        balanceRef.current = r.balance;
-      }
+      const first = await doorFor(id);
+      if (!first) return;
+      let pi = first.pi;
       // THE WATCH RUNS FROM HERE — whichever open minted the door. It used to be switched on
       // only when THIS press minted it; the open-time mint (Apple 5.6) skipped that branch, and a
       // confirmed tap sat on "recording it…" forever while the invoice had long read Paid.
       setTapStarted(true);
-      const holdCard = `Hold their card to the top of the phone — ${money(pi.amount / 100)}`;
-      setTap({ kind: "busy", phase: "pay", label: holdCard });
+      setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
       let c = await collectTapPayment(pi);
       if (stale(true)) return;
       if (!c.ok && c.notEnabled) {
@@ -647,7 +709,27 @@ export function PayNowButton(props: Mode & {
         // No guide on this iOS (< 18) or this build: the written steps live in Settings, and the
         // person is told so once, under the card prompt — not a wall, the card is still next.
         if (!guide?.ok) setTapNote("Apple's guide isn't available on this iPhone — the steps are in Settings › Getting Paid › How to Tap.");
-        setTap({ kind: "busy", phase: "pay", label: holdCard });
+        // THE DOOR IS CHECKED AGAIN HERE, and this is the whole reason doorFor exists. Apple's
+        // terms sheet and the connect behind it are allowed eight minutes; the how-to guide ten
+        // more. The `pi` above was minted before any of that, at the balance of that moment, and
+        // this branch is a company's very first tap — the one time the office is still editing.
+        // A retry that reuses it charges the old figure at the new invoice.
+        const again = await doorFor(id);
+        if (!again) return;
+        if (again.moved) {
+          // NOT silently re-priced. The tech said a number out loud to the person holding the
+          // card before Apple's sheet went up; he finds out the bill moved HERE, not from a
+          // receipt afterwards. The fresh door is already minted and waiting, so the press he
+          // makes next goes straight to the reader. (Apple 5.3: the button is never disabled.)
+          setTap({
+            kind: "error",
+            outcome: "setup",
+            error: "The balance changed while Apple's terms were up. Press Tap to Pay again for the new amount.",
+          });
+          return;
+        }
+        pi = again.pi;
+        setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
         c = await collectTapPayment(pi);
         if (stale(true)) return;
       }

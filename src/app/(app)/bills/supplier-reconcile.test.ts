@@ -290,6 +290,32 @@ describe("what the supplier says is open", () => {
     );
   });
 
+  it("still agrees the day after the deadline, which is when the missed column fills up", () => {
+    /**
+     * THE $4.14 THAT WAS GOING TO BECOME MONEY HE LOST (review, 2026-09-20).
+     *
+     * Invoice 8802-1107230 is reversed to the cent by open credit memo 8802-1107337, so its $4.14
+     * is correctly left out of what is still on the table. `missedDiscounts` had no such rule -
+     * it was the one of the three discount readings with no reversal filter - and it was dormant
+     * only because that deadline had not passed. On 11 October, if CED has not yet closed the
+     * invoice and its memo together (they close only when he pays the covering statement), the
+     * card would have told him he let a prompt-pay discount expire on five receptacles he sent
+     * back and was never billed for. Before the fix this read 55.61 against the balance's 51.47.
+     *
+     * Asserting it at a date PAST the deadline is the point: at TODAY both sides are 25.99 and
+     * the parity above passes either way, which is why this went unnoticed.
+     */
+    const AFTER = "2026-10-11";
+    const book = hisBook();
+    expect(missedDiscounts(book, AFTER).total).toBe(
+      supplierSaysBalance(book, AFTER)!.discountExpiredUnclaimed,
+    );
+    expect(missedDiscounts(book, AFTER).rows.some((r) => r.invoice.invoiceNumber === "8802-1107230")).toBe(false);
+    // And the rebill CED wrote in its place - 8802-1107338, the $223.29 he really owes - is still
+    // counted, because only the reversed half drops out.
+    expect(missedDiscounts(book, AFTER).rows.some((r) => r.invoice.invoiceNumber === "8802-1107338")).toBe(true);
+  });
+
   it("falls back to the total when the supplier gave no open figure, never to zero", () => {
     const one = [invoice({ total: 120.5, openBalance: null, closed: false })];
     expect(supplierSaysOpen(one).owed).toBe(120.5);

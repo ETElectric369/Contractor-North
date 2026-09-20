@@ -22,6 +22,7 @@ import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
+import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -335,7 +336,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_bills",
     description:
-      "List supplier BILLS (money owed to suppliers) with supplier, amount, status, and the linked job. Use for 'what bills are unpaid', 'how much do I owe suppliers'.",
+      "List supplier BILLS (money owed to suppliers) with supplier, amount, status, and the linked job. A bill a later one REPLACED is left out (a replaced copy is not a second debt), and each row says whether its pricing is still provisional — counter-ticket prices the supplier's own invoice will overwrite. Use for 'what bills are unpaid', 'how much do I owe suppliers'.",
     input_schema: {
       type: "object",
       properties: {
@@ -535,7 +536,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      "Read ONE supplier BILL in full — supplier, amount, status, category, the linked job, and every line item (qty, unit price, amount). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it.",
+      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost.",
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {
@@ -1427,23 +1428,40 @@ export async function runDataTool(
         const lim = clampLimit(input.limit, 20);
         let q = supabase
           .from("bills")
-          .select("id, supplier, bill_number, amount, status, jobs(name)")
+          .select("id, supplier, bill_number, amount, status, pricing_provisional, superseded_by_bill_id, jobs(name)")
+          // A REPLACED COPY IS NOT A SECOND DEBT (0271). When the supplier's own invoice arrives
+          // for a purchase already on the books as a counter ticket, the ticket stays — its
+          // history is real — and points at the bill that took over. Every other cost reader hides
+          // those rows (job-financials, unbilled-work, job-profitability, /analytics, the job
+          // page, billing/actions); this tool did not, so "what do I owe CED" counted the
+          // superseded $95.27 ticket AND the copy that replaced it. Nort double-counting a debt is
+          // the same lie as a screen doing it, told somewhere Erik trusts more.
+          .is("superseded_by_bill_id", null)
           .order("created_at", { ascending: false })
           .limit(lim);
         const st = sanitize(input.status);
         if (st) q = q.eq("status", st);
         const { data, error } = await q;
         if (error) throw error;
+        const rows = (data ?? []) as any[];
         return JSON.stringify({
-          count: data?.length ?? 0,
-          bills: (data ?? []).map((b: any) => ({
+          count: rows.length,
+          bills: rows.map((b: any) => ({
             id: b.id,
             supplier: b.supplier,
             bill_number: b.bill_number,
             amount: money(b.amount),
             status: b.status,
+            // A counter preview is not his price (0271): the Sunnyvale ticket printed retail where
+            // his contract price belongs. Say "provisional" when reading one of these back.
+            pricing_provisional: b.pricing_provisional === true,
             job: embedName(b.jobs),
           })),
+          ...(rows.some((b: any) => b.pricing_provisional === true)
+            ? {
+                note: "A bill marked pricing_provisional carries counter-ticket prices, not his contract price — the supplier's own invoice replaces it later. Call those out as provisional instead of quoting them as settled.",
+              }
+            : {}),
         });
       }
 
@@ -2258,31 +2276,80 @@ export async function runDataTool(
         if (!bid) return JSON.stringify({ error: "Provide a bill_id." });
         const { data: bill, error } = await supabase
           .from("bills")
-          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category)")
+          // 0268 and 0272 put THREE states on a receipt line — billed in full, the company's own,
+          // or a container used in pieces — and this select list knew about none of them, so Nort
+          // read the Kettle Chips and the whole 500ct Twister box back as the customer's cost.
+          // The projection law: a field that is missing at runtime is missing from a select list.
+          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
           .eq("id", bid)
           .maybeSingle();
         if (error) throw error;
         if (!bill) return JSON.stringify({ found: false, message: "Bill not found." });
         const b = bill as any;
+        const lines = (b.bill_line_items ?? []) as any[];
+        /**
+         * TWO NUMBERS BECAUSE THERE ARE TWO QUESTIONS, AND THEY ARE NOT THE SAME NUMBER.
+         *
+         * `amount` is the whole receipt — what left his bank, and what job cost still eats (0272's
+         * closing note). `billable_amount` is what an invoice built off this receipt charges the
+         * customer, at cost before markup. On the OSH run for Jason Waldow that is $16.28 against
+         * $6.50: two bags of chips and an ice cream bar are the company's, not the customer's, and
+         * before this projection Nort presented all five lines as theirs.
+         *
+         * It is billableBillCost — the importer's own arithmetic — and deliberately NOT a sum of
+         * the line figures below. Untouched sales tax rides proportionally with the materials it
+         * was charged on, so a sum hand-rolled here comes out 61 cents high on this very receipt,
+         * and Nort would be quoting a number the Bill It button never writes. A screen and the
+         * money disagreeing by a few dollars is what this whole wave came from (cn-v964, $7.86 of
+         * it), so there is one reading of it and everybody reads it.
+         */
+        const billableAmount = billableBillCost(b.amount, lines);
+        // NOTHING SILENT: the model is told which figure answers which question, and warned off
+        // adding the lines up, because the shared tax means they will not match.
+        const moneyNote = [
+          "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
+        ];
+        if (b.pricing_provisional === true)
+          moneyNote.push(
+            "Pricing is PROVISIONAL: counter-ticket prices, not his contract price. The supplier's own invoice replaces them later.",
+          );
+        if (b.superseded_by_bill_id != null)
+          moneyNote.push(
+            "This receipt has been REPLACED by a later bill for the same purchase. It is kept for its history, it is not a second debt, and it must not be counted in what he owes.",
+          );
         return JSON.stringify({
           found: true,
           bill_id: b.id,
           supplier: b.supplier,
           bill_number: b.bill_number,
           amount: money(b.amount),
+          billable_amount: billableAmount,
+          pricing_provisional: b.pricing_provisional === true,
+          superseded: b.superseded_by_bill_id != null,
           status: b.status,
           category: b.category,
           bill_date: b.bill_date,
           notes: b.notes,
           job: embedName(b.jobs),
-          items: (b.bill_line_items ?? []).map((it: any) => ({
+          items: lines.map((it: any) => ({
             item_id: it.id,
             description: it.description,
             quantity: it.quantity,
             unit_price: money(it.unit_price),
             amount: money(it.amount),
             category: it.category,
+            // The three states in the order Erik says them: billed in full, the company's own
+            // (snacks, a tool for the truck), or SHOP STOCK — a container bought whole and used in
+            // pieces, where billed_to_customer is the part this job took and the rest went on the
+            // shelf. billLineBilledCost is the same reading the invoice itemisation uses, so a
+            // line can never say one thing here and another on the invoice.
+            billable: it.billable !== false,
+            billed_to_customer: money(billLineBilledCost(it)),
+            is_stock: it.is_stock === true,
           })),
+          // Keyed `money_note` and not `note` on purpose: `notes` right above is the bill's OWN
+          // typed note, and two keys a letter apart would get quoted back as each other.
+          money_note: moneyNote.join(" "),
         });
       }
 

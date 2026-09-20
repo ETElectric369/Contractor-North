@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { billItemisation, billLineCost, billLineBilledCost, billedPortion, type BillLine } from "@/lib/bill-itemisation";
+import { billableBillCost, billItemisation, billLineCost, billLineBilledCost, billedPortion, excludedReceiptCost, type BillLine } from "@/lib/bill-itemisation";
 
 /** The invariant, said once: a bill's rows sum to the marked-up BILLABLE total, to the cent. */
 const sum = (rows: { quantity: number; unit_price: number }[]) =>
@@ -291,6 +291,32 @@ describe("billItemisation — a container billed by what the job used", () => {
     ]);
   });
 
+  /**
+   * TAX A PERSON TYPED IS THE TAX THAT BILLS (review of cn-v966).
+   *
+   * Nothing on the Bills card exempts the Sales Tax row from the same switch and the same "Bill
+   * Only What This Job Used" box every other line gets, so he can act on it directly. When he does
+   * on a receipt that ALSO has a split purchased line, the tax he chose to bill used to be shaved a
+   * SECOND time by the proportional share of that split: $2.00 typed, about 52 cents billed, and no
+   * screen anywhere showing him the difference.
+   */
+  it("bills the tax a person typed, not a share of it", () => {
+    const rows = billItemisation(
+      twisterBill,
+      [{ ...twister, billed_amount: 13 }, oxide, { ...twisterTax, billed_amount: 2 }],
+      25,
+    );
+    // $13 of nuts + $20.65 of jar + the $2 of tax he chose = $35.65 of cost, marked up once.
+    expect(sum(rows)).toBe(mark(35.65, 25));
+    expect(excludedReceiptCost([{ ...twister, billed_amount: 13 }, oxide, { ...twisterTax, billed_amount: 2 }])).toBe(104);
+  });
+
+  it("an UNTOUCHED tax line still carries the shelf's share, to the same cent as before", () => {
+    // The whole safety of the clause above: only tax nobody has acted on is proportional.
+    expect(excludedReceiptCost([{ ...twister, billed_amount: 13 }, oxide, twisterTax])).toBe(103.22); // 95.36 + 7.86
+    expect(excludedReceiptCost([{ ...twister, billable: false }, oxide, { ...twisterTax, billable: false }])).toBe(119);
+  });
+
   it("ignores a split stored against a return, rather than halving a credit", () => {
     // "Half of minus nine dollars" is an invented number wearing arithmetic's clothes.
     const withReturn = { id: "b8", supplier: "CED", bill_number: null, amount: 91.36 };
@@ -298,6 +324,49 @@ describe("billItemisation — a container billed by what the job used", () => {
     const rows = billItemisation(withReturn, [twister, credit], 25);
     expect(sum(rows)).toBe(mark(91.36, 25));
     expect(rows.find((r) => r.import_key === "bli:r1")?.unit_price).toBe(-21.25);
+  });
+});
+
+describe("billableBillCost — the one figure a panel may promise", () => {
+  /**
+   * HIS OSH RUN FOR JASON WALDOW, from the live row (bills 905c9f3d, J-046): $16.28 of receipt,
+   * two bags of Kettle Chips and an ice cream bar switched off, ten bulk fasteners and the tax on.
+   * The Unbilled card said $20.35 of material; the button beside it writes $8.13.
+   */
+  const oshBill = { id: "b9", supplier: "OSH - Cupertino", bill_number: null, amount: 16.28 };
+  const oshLines: BillLine[] = [
+    { id: "o1", description: "Kettle Chip Honey Dijon", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+    { id: "o2", description: "Kettle Chips Salt/Pepper", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+    { id: "o3", description: "Ice Cream Bar Choc Almond", quantity: 1, unit_price: 4.99, amount: 4.99, category: "Other", billable: false },
+    { id: "o4", description: "Bulk Fastener", quantity: 10, unit_price: 0.61, amount: 6.1, category: "Fasteners", billable: true },
+    { id: "o5", description: "Tax", quantity: 1, unit_price: 1.01, amount: 1.01, category: "Tax", billable: true },
+  ];
+
+  it("equals what the importer will actually bill, to the cent", () => {
+    expect(billableBillCost(oshBill.amount, oshLines)).toBe(6.5); // 16.28 − 9.17 of snacks − their 0.61 of tax
+    const rows = billItemisation(oshBill, oshLines, 25);
+    expect(sum(rows)).toBe(mark(6.5, 25)); // $8.13 — the figure on the button
+  });
+
+  it("is the whole bill when nothing was read off it (a hand-entered bill is its lump)", () => {
+    expect(billableBillCost(16.28, [])).toBe(16.28);
+    expect(billableBillCost(16.28, null)).toBe(16.28);
+    expect(billableBillCost("139.65", [twister, oxide, twisterTax])).toBe(139.65);
+  });
+
+  it("is ZERO when every purchased line was the company's own, residue and all", () => {
+    // billItemisation returns no rows for this receipt, so no panel may promise a dollar of it.
+    const allOff = oshLines.map((l) => (l.category === "Tax" ? l : { ...l, billable: false }));
+    expect(billableBillCost(oshBill.amount, allOff)).toBe(0);
+    expect(billItemisation(oshBill, allOff, 25)).toEqual([]);
+    // Even when the receipt total is larger than the lines add up to: unreadable residue on a
+    // receipt nobody is billing is not a charge either.
+    expect(billableBillCost(25, allOff)).toBe(0);
+  });
+
+  it("never returns less than nothing", () => {
+    expect(billableBillCost(5, [{ id: "x", amount: 40, billable: false, category: "Materials" }, { id: "y", amount: 8, category: "Materials" }])).toBe(0);
+    expect(billableBillCost(null, oshLines)).toBe(0);
   });
 });
 

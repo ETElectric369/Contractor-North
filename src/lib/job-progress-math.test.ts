@@ -168,6 +168,49 @@ describe("computeJobProgress", () => {
   });
 });
 
+describe("computeJobProgress — work to date is what the customer will be billed (0268/0272)", () => {
+  /** His OSH run for Jason Waldow, from the live row (bills 905c9f3d on J-046). */
+  const osh = {
+    amount: 16.28,
+    po_id: null,
+    bill_line_items: [
+      { id: "o1", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+      { id: "o2", quantity: 1, unit_price: 2.09, amount: 2.09, category: "Other", billable: false },
+      { id: "o3", quantity: 1, unit_price: 4.99, amount: 4.99, category: "Other", billable: false },
+      { id: "o4", quantity: 10, unit_price: 0.61, amount: 6.1, category: "Fasteners", billable: true },
+      { id: "o5", quantity: 1, unit_price: 1.01, amount: 1.01, category: "Tax", billable: true },
+    ],
+  };
+
+  it("leaves the snacks out of the reference figure a draw is measured against", () => {
+    const r = computeJobProgress({ ...base, billableLabor: 0, pos: [], bills: [osh], markupPercent: 25 });
+    expect(r.workToDate).toBe(8.13); // NOT 20.35 — the same $8.13 importCostsIntoInvoice writes
+  });
+
+  it("counts a receipt whose lines were never read exactly as it always did", () => {
+    const r = computeJobProgress({ ...base, billableLabor: 0, pos: [], bills: [{ amount: 16.28 }], markupPercent: 25 });
+    expect(r.workToDate).toBe(20.35);
+  });
+
+  it("a receipt that was entirely the company's own adds nothing", () => {
+    const allOff = { ...osh, bill_line_items: osh.bill_line_items.map((l) => (l.category === "Tax" ? l : { ...l, billable: false })) };
+    const r = computeJobProgress({ ...base, billableLabor: 0, pos: [], bills: [allOff], markupPercent: 25 });
+    expect(r.workToDate).toBe(0);
+  });
+
+  it("still supersedes its PO at the SUPPLIER'S charge, never at the customer's price", () => {
+    // Netting only the billable part would leave $9.78 of snacks on the job as a PO remainder.
+    const r = computeJobProgress({
+      ...base,
+      billableLabor: 0,
+      pos: [{ id: "po-osh", total: 16.28, status: "sent" }],
+      bills: [{ ...osh, po_id: "po-osh" }],
+      markupPercent: 25,
+    });
+    expect(r.workToDate).toBe(8.13);
+  });
+});
+
 describe("livePurchaseOrders", () => {
   it("treats a status-less PO as live (partial selects + old fixtures must not lose costs)", () => {
     expect(livePurchaseOrders([{ total: 100 }], [])).toHaveLength(1);

@@ -212,7 +212,16 @@ export default async function JobDetailPage({
       : Promise.resolve({ data: [] as any[] }),
     supabase
       .from("bills")
-      .select("id, supplier, bill_number, amount, status, bill_date, po_id")
+      // THE LINE STATE RIDES WITH THE BILL (review of the fix wave, 2026-09-20). computeJobProgress
+      // now nets a receipt down to what it can BILL - the snacks and the shop stock come off - and
+      // MaterialBill.bill_line_items is optional, so a row that arrives without them silently
+      // bills its whole amount exactly as it always did. job-financials went through
+      // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
+      // that opens from it disagreed by $12.22 on the Waldow job while both claimed to be the
+      // same number. The projection law, on the one figure the two screens share.
+      .select(
+        "id, supplier, bill_number, amount, status, bill_date, po_id, bill_line_items(id, quantity, unit_price, amount, category, billable, billed_amount)",
+      )
       .eq("job_id", id)
       // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
       // this the hub counted the $95.27 duplicate on 13631 Northwoods in cost, in profit and in
@@ -514,6 +523,19 @@ export default async function JobDetailPage({
     (s: number, p: any) => s + Number(p.total ?? 0),
     0,
   );
+  /**
+   * JOB COST IS THE WHOLE RECEIPT, ON PURPOSE - and it is written down here because the codebase
+   * now does both things and, until this line, said neither (review of the fix wave, 2026-09-20).
+   *
+   * `billableBillCost` nets a receipt down for the figures about what a CUSTOMER pays: work to
+   * date, unbilled work, the draw. This one is what the job COST the company, and the company did
+   * pay for the Kettle Chips and for the whole box of wire nuts, whoever ends up using them. So
+   * the full amount stands here, and the gap between the two numbers is real rather than a bug.
+   *
+   * The open question Erik has not answered yet is the shelf: the unused $88 of a wire-nut box is
+   * on the job that bought it and belongs to the van. That is a stock-ledger decision, his to
+   * make, and not something this line should quietly pre-empt by netting it off.
+   */
   const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
   // Billable work to date + the progress rollups — via the extracted computeJobProgress
   // SSOT (the exact rollup the draw modal / print report use: estimate = accepted contract

@@ -19,6 +19,7 @@ import { shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
+import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -29,7 +30,11 @@ import {
   emailInvoice,
 } from "../billing/actions";
 
-export type Result = { ok: boolean; error?: string };
+/** `warning` is the "it saved, AND here is what you now have to deal with" slot: a write that
+ *  went through but left something for a person to decide (ClockResult at timeclock/actions.ts:27
+ *  is the precedent). A surface that shows only `error` would swallow it, so every door that can
+ *  set one renders it where its error already goes. */
+export type Result = { ok: boolean; error?: string; warning?: string };
 
 /** What the callers of createInvoiceForJob get back. `importWarning` is misnamed by history —
  *  it is THE note the caller must put in front of the user (an info toast before the redirect),
@@ -916,6 +921,53 @@ export async function linkReceiptToBill(billId: string, documentId: string): Pro
   return { ok: true };
 }
 
+/**
+ * WHICH LIVE INVOICE ALREADY BILLS THIS RECEIPT, asked the way the database asks it.
+ *
+ * 0278's guard_billed_bill calls invoice_holding_claim(): source_ids && [id], invoice not void,
+ * earliest invoice wins a contested receipt. That function is SECURITY DEFINER and the same
+ * migration revoked its EXECUTE grant from `authenticated`, so a door cannot simply call it - it
+ * has to put the identical question to the same two tables. Kept identical on purpose, including
+ * what it does NOT look at: the legacy `bill:<id>` import_key shape is not part of the boundary
+ * (0256 backfilled every one of them into source_ids - none are left in his book), and a door
+ * that refuses what the database would allow is a dead end of its own making.
+ *
+ * `{ holder: null }` means nothing bills it. An ERROR is not "nothing": editing blind is how a
+ * claim gets lost, so it comes back as a refusal - except a missing source_ids column, which is a
+ * push landing ahead of its migration and means there are no claims yet to protect. Same two
+ * answers, for the same two reasons, as claimsOnSources on the time side.
+ */
+async function invoiceBillingBill(
+  supabase: SupabaseClient,
+  billId: string,
+): Promise<{ holder: BillClaimHolder } | { error: string }> {
+  const { data, error } = await supabase
+    .from("invoice_items")
+    .select("id, invoices!inner(invoice_number, status, created_at)")
+    .contains("source_ids", [billId])
+    .neq("invoices.status", "void")
+    .limit(200);
+  if (error) {
+    const code = String((error as { code?: string })?.code ?? "");
+    const msg = String((error as { message?: string })?.message ?? "");
+    if (code === "42703" || /source_ids/i.test(msg) || /does not exist/i.test(msg)) return { holder: null };
+    reportError("invoiceBillingBill", error, { billId });
+    return { error: "Couldn't check which invoice bills this receipt, so nothing was changed. Try again in a moment." };
+  }
+  // Earliest claimant wins, decided here rather than in the query, because PostgREST orders an
+  // embedded table by its own rules and the sentence Erik reads must name the same invoice every
+  // time he opens the modal. Same fold as the bills list does for the card copy.
+  let best: { invoice_number: string | null; created_at: string } | null = null;
+  for (const row of (data ?? []) as { invoices?: unknown }[]) {
+    const raw = row.invoices;
+    const inv = (Array.isArray(raw) ? raw[0] : raw) as { invoice_number: string | null; created_at: string } | undefined;
+    if (!inv) continue;
+    const at = String(inv.created_at ?? "");
+    if (!best || at < best.created_at) best = { invoice_number: inv.invoice_number ?? null, created_at: at };
+  }
+  return { holder: best ? { invoice_number: best.invoice_number } : null };
+}
+
 export async function updateBill(
   id: string,
   patch: {
@@ -946,13 +998,36 @@ export async function updateBill(
   if (patch.category !== undefined) clean.category = patch.category ?? null;
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
-  // One stored-row read of the bill's current job — feeds BOTH the old-job revalidation (a
-  // re-pointed bill's cost must leave its old job) AND the PO same-job check below. Read
-  // whenever either needs it: a job move, or a PO link on a bill whose job isn't changing.
+  // One stored-row read of the bill as it stands — feeds THREE things: the old-job revalidation
+  // (a re-pointed bill's cost must leave its old job), the PO same-job check below, and the claim
+  // guard. It asks for `amount` as well as `job_id` because "did the price actually move" cannot
+  // be answered from the patch alone: the bills list sends `amount` on every save whether it
+  // changed or not, so without the stored figure every save would look like a re-price.
   let oldJobId: string | null = null;
-  if (patch.job_id !== undefined || (patch.po_id !== undefined && !!patch.po_id)) {
-    const { data: prev } = await supabase.from("bills").select("job_id").eq("id", id).maybeSingle();
+  let oldAmount = 0;
+  if (patch.job_id !== undefined || patch.amount !== undefined || (patch.po_id !== undefined && !!patch.po_id)) {
+    const { data: prev } = await supabase.from("bills").select("job_id, amount").eq("id", id).maybeSingle();
     oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
+    oldAmount = Number((prev as { amount?: number | string | null } | null)?.amount ?? 0);
+  }
+
+  // A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE IN SILENCE.
+  // The claim is by id and survives the move (0255/0258), so a claimed receipt re-pointed at the
+  // right job leaves the old invoice charging the old customer while importCostsIntoInvoice skips
+  // that same id on the new job forever: one purchase billed to the wrong person and unbillable to
+  // the right one, out of a save that looked clean. The rule and both sentences live in
+  // bill-claims.ts (pure, unit-tested); this door does the two reads.
+  // The claim read only ever runs when one of the two guarded fields actually moved, so a receipt
+  // nobody has billed, or an edit to the supplier / date / status / notes / PO link, costs nothing.
+  const edit = { storedJobId: oldJobId, storedAmount: oldAmount, nextJobId: patch.job_id, nextAmount: patch.amount };
+  const moved = guardedFieldsMoved(edit);
+  let warning: string | undefined;
+  if (moved.movingJob || moved.repricing) {
+    const claim = await invoiceBillingBill(supabase, id);
+    if ("error" in claim) return { ok: false, error: claim.error };
+    const plan = planBillEdit(edit, claim.holder);
+    if (!plan.ok) return { ok: false, error: plan.error };
+    warning = plan.warning;
   }
 
   // Linking/unlinking the PO this bill pays MOVES money: a linked PO stops being counted
@@ -967,12 +1042,26 @@ export async function updateBill(
 
   const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
+  // A ZERO-ROW UPDATE IS A 204 (the silent-write law). It already asked for the row back, and then
+  // threw the answer away for everything except revalidation — so an RLS refusal, or a bill
+  // deleted in the other tab, closed the modal on a cheerful "Saved" over an amount that never
+  // landed. updateJobNotes forty lines down has had this right the whole time.
+  if (!data) return { ok: false, error: "Nothing saved. That bill isn't here, or this login can't edit it." };
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability
-  return { ok: true };
+  return warning ? { ok: true, warning } : { ok: true };
 }
 
+/**
+ * THE ONE CONTROL THAT MOVES A BILL IN OR OUT OF THE SUPPLIER BALANCE, so it is the last place a
+ * write that did not land may read as one that did. It wrote with no `.select()` and never looked
+ * at the row count: a 204 came back clean, the badge toasted "Marked settled - it comes out of the
+ * supplier balance", the refresh snapped it straight back to unpaid, and nothing in the answer
+ * could tell that apart from a real write. Its neighbours in this same wave (setReceiptLineBillable,
+ * setReceiptLineUsage) already carry both halves — the org_id on the WRITE, because a rule at one
+ * read path is a convention and not a boundary (0173), and the row check after it.
+ */
 export async function setBillStatus(
   id: string,
   status: string,
@@ -981,19 +1070,42 @@ export async function setBillStatus(
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("bills").update({ status }).eq("id", id);
+  // The `if` is load-bearing: an unconditional .eq("org_id", null) matches no row ever, which
+  // would turn a missing org on the profile into every tap of this badge silently refusing.
+  let write = supabase.from("bills").update({ status }).eq("id", id);
+  if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
+  const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
-  revalidatePath(`/jobs/${jobId}`);
+  if (!data?.length) return { ok: false, error: "That bill wasn't changed. Reload the page and try again." };
+  // An OVERHEAD bill has no job, and the callers pass `b.job_id ?? ""` — which revalidated the
+  // literal path "/jobs/" and never the screen the control actually lives on.
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/bills");
   return { ok: true };
 }
 
+/**
+ * THE CLAIM IS THE DATABASE'S JOB HERE, not this door's. 0278 put guard_billed_bill on
+ * `bills` BEFORE DELETE: a receipt a live invoice bills cannot be deleted, and the trigger raises
+ * the sentence Erik needs to read ("INV-069 already bills this receipt. Void that invoice, or take
+ * its materials lines off, then delete this receipt."), which dbError hands straight back. A
+ * second claim read at this door would only be a second opinion that can drift from the boundary.
+ *
+ * What the trigger cannot answer is the row count. A delete RLS refuses is a 204 with no error,
+ * and this function reported that as "Bill deleted" while the bill stayed on the screen.
+ */
 export async function deleteBill(id: string, jobId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("bills").delete().eq("id", id);
+  let write = supabase.from("bills").delete().eq("id", id);
+  if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
+  const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
-  revalidatePath(`/jobs/${jobId}`);
+  if (!data?.length) return { ok: false, error: "Nothing was deleted. That bill isn't here, or this login can't delete it." };
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/bills");
+  revalidatePath("/analytics"); // a deleted cost moves job profitability
   return { ok: true };
 }
 
