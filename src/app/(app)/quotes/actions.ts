@@ -19,6 +19,13 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { QUOTE_STATUSES } from "@/lib/statuses";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import {
+  ITEM_OPTIONS_EMBED,
+  chooseItemOption,
+  defaultItemOptionId,
+  missingOptionMessage,
+  type OptionedPriceItem,
+} from "@/lib/pricing/item-options";
 import { reviewAgainstBook, type BookReview } from "@/lib/pricing/book-review";
 import { CALC_TOOLS, runCalc } from "@/lib/electrical-calc";
 import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
@@ -413,6 +420,43 @@ async function recalcQuote(supabase: any, quoteId: string) {
   return { subtotal, tax, total };
 }
 
+/** The insert itself, shared by the hand-typed door and the price-list door below, so the two can
+ *  never drift on sort order, rounding or what a refusal sounds like. Assumes the caller has
+ *  already passed requireStaff + requireEditableQuote. */
+async function appendQuoteLine(
+  supabase: any,
+  quoteId: string,
+  item: { description: string; quantity: number; unit?: string; unit_price: number },
+): Promise<{ ok: boolean; error?: string }> {
+  const { data: last } = await supabase
+    .from("quote_line_items")
+    .select("sort_order")
+    .eq("quote_id", quoteId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // .select("id") — THE SILENT-WRITE LAW. A zero-row insert (RLS refusing a foreign-org quote id)
+  // came back as `error: null` and this reported success, so the line simply was not there and
+  // nothing said so. A write that wrote nothing is a refusal, out loud.
+  const { data: added, error } = await supabase
+    .from("quote_line_items")
+    .insert({
+      quote_id: quoteId,
+      description: item.description.trim(),
+      quantity: item.quantity || 1,
+      unit: item.unit || "ea",
+      unit_price: item.unit_price || 0,
+      sort_order: (last?.sort_order ?? -1) + 1,
+    })
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!added?.length) return { ok: false, error: "That line didn't save. Reload the estimate and try again." };
+  await recalcQuote(supabase, quoteId);
+  revalidatePath(`/quotes/${quoteId}`);
+  revalidatePath("/quotes");
+  return { ok: true };
+}
+
 export async function addQuoteItem(
   quoteId: string,
   item: { description: string; quantity: number; unit?: string; unit_price: number },
@@ -423,26 +467,82 @@ export async function addQuoteItem(
   if (!item.description.trim()) return { ok: false, error: "Description is required." };
   const editable = await requireEditableQuote(supabase, quoteId);
   if (!editable.ok) return editable;
-  const { data: last } = await supabase
-    .from("quote_line_items")
-    .select("sort_order")
-    .eq("quote_id", quoteId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const { error } = await supabase.from("quote_line_items").insert({
-    quote_id: quoteId,
-    description: item.description.trim(),
-    quantity: item.quantity || 1,
-    unit: item.unit || "ea",
-    unit_price: item.unit_price || 0,
-    sort_order: (last?.sort_order ?? -1) + 1,
+  return appendQuoteLine(supabase, quoteId, item);
+}
+
+/**
+ * ADD A PRICE-LIST LINE BY ITS IDS, AND LET THE SERVER SAY WHAT IT COSTS.
+ *
+ * 0282 gave a code a list of makers — 830 "Windows (Materials) (Allowance)" can be filled by an
+ * Andersen, a Milgard or a Marvin, and the three are hundreds of dollars apart. The moment a price
+ * can be CHOSEN rather than looked up, a client that posts its own `unit_price` is a client that
+ * can post any price: a stale dropdown, a tab left open while the book was re-imported, or simply
+ * the wrong maker's number attached to the right maker's name.
+ *
+ * So this door takes ids and a quantity, and nothing else. It re-reads the item and its makers
+ * under RLS, resolves the pick through the SAME pure rule the screen used to render the dropdown
+ * (lib/pricing/item-options → effectiveMarkupPct → sellPrice), and writes the line it computed
+ * itself. The customer's pricing level and the org default come from the database on this request,
+ * not from whatever the page was holding.
+ *
+ * `optionId` has three states, and they are three different answers:
+ *   absent      → nobody chose, so the maker the org FLAGGED wins (0282: "what a kit or an import
+ *                 resolves to"). This is a suggestion, and the description says whose window it is.
+ *   "" or null  → somebody chose the item's own allowance price. Honoured as typed.
+ *   an id       → that maker. Gone from the code since the page rendered? REFUSED, by name. Never
+ *                 quietly re-priced at the allowance, which is the one outcome that puts a wrong
+ *                 number on a customer's paper without anybody seeing it happen.
+ */
+export async function addQuoteItemFromPriceItem(
+  quoteId: string,
+  pick: { priceItemId: string; optionId?: string | null; quantity?: number },
+): Promise<{ ok: boolean; error?: string; description?: string; unit_price?: number }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!pick?.priceItemId) return { ok: false, error: "Pick an item from your price list first." };
+  const editable = await requireEditableQuote(supabase, quoteId);
+  if (!editable.ok) return editable;
+
+  const [{ data: itemRow, error: itemErr }, { data: quoteRow, error: quoteErr }, { data: orgRow }] = await Promise.all([
+    supabase
+      .from("price_list_items")
+      .select(`id, code, description, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
+      .eq("id", pick.priceItemId)
+      .eq("archived", false)
+      .eq("price_list_item_options.archived", false)
+      .maybeSingle(),
+    // THE CUSTOMER'S LEVEL, read here rather than trusted from the page — a level always wins over
+    // an item's or a maker's markup, so it decides the money on this line.
+    supabase.from("quotes").select("customers(pricing_levels(markup_pct))").eq("id", quoteId).maybeSingle(),
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+  ]);
+  // A FAILED READ IS NOT AN ITEM WITHOUT MAKERS. Carrying on here would price the Marvin somebody
+  // picked at the $830 allowance and call it a success.
+  if (itemErr) return { ok: false, error: dbError(itemErr) };
+  if (quoteErr) return { ok: false, error: dbError(quoteErr) };
+  if (!itemRow) return { ok: false, error: "That item is no longer in your price list. Pick another one." };
+
+  const item = itemRow as unknown as OptionedPriceItem;
+  const optionId = pick.optionId === undefined ? defaultItemOptionId(item) : pick.optionId;
+  const choice = chooseItemOption(item, optionId, {
+    // `?? null` and never `?? 0`: effectiveMarkupPct returns on ANY finite level, so a 0 here
+    // would price every customer-without-a-level at net cost.
+    levelPct: (quoteRow as any)?.customers?.pricing_levels?.markup_pct ?? null,
+    orgDefaultPct: getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).default_markup_pct,
   });
-  if (error) return { ok: false, error: dbError(error) };
-  await recalcQuote(supabase, quoteId);
-  revalidatePath(`/quotes/${quoteId}`);
-  revalidatePath("/quotes");
-  return { ok: true };
+  if (!choice) return { ok: false, error: missingOptionMessage(item) };
+
+  const qty = Number(pick.quantity);
+  const res = await appendQuoteLine(supabase, quoteId, {
+    description: choice.description,
+    quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+    unit: choice.unit,
+    unit_price: choice.unitPrice,
+  });
+  // Hand back what actually landed, so the screen can show the line it got rather than the line it
+  // assumed — the maker is in the description and the price came from here, not from the browser.
+  return res.ok ? { ...res, description: choice.description, unit_price: choice.unitPrice } : res;
 }
 
 export async function updateQuoteItem(

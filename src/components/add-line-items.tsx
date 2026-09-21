@@ -5,6 +5,14 @@ import { ListPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { sellPrice } from "@/lib/pricing/markup";
+import {
+  hasItemOptions,
+  itemOptionChoices,
+  normalizeItemOptions,
+  type ItemOptionChoice,
+  type OptionPricing,
+  type PriceItemOptionRow,
+} from "@/lib/pricing/item-options";
 import { KitPickerModal, type KitForPicker } from "@/app/(app)/quotes/new/kit-picker-modal";
 import type { KitPickerPricing } from "@/lib/kit-picker";
 import type { KitLinkedItem } from "@/lib/kit-line";
@@ -50,6 +58,21 @@ export type PriceItemLite = {
   unit: string;
   buy_price: number;
   markup_pct: number;
+  /**
+   * THE MAKERS UNDER THIS CODE (0282). Andrew, for Justin Vivian: "increase drop down options for
+   * each item code, multiple vendors, ie. windows - mfg Andersen, mfg Milgard, mfg Marvin".
+   *
+   * Optional, and absent on most items forever - 830 Windows has three, and the other 318 items
+   * across his three price lists have none. An item without them behaves here exactly as it did
+   * before this existed, which is the whole reason the code stayed one row and grew a list.
+   *
+   * THIS COMPONENT IS THE DOOR. The wave that built the table also wrote a server action and a
+   * pure resolver, and wired NEITHER to a screen: every quote still priced at the allowance while
+   * the price-list tab said the item now priced at Marvin. That is the third time in four waves,
+   * and it is why the reviewer's sentence was "shipping the admin half alone is worse than
+   * shipping nothing".
+   */
+  price_list_item_options?: PriceItemOptionRow[] | null;
 };
 
 export function AddLineItems({
@@ -79,6 +102,9 @@ export function AddLineItems({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [pickerKit, setPickerKit] = useState<KitForPicker | null>(null);
+  /** The code whose makers are open. One at a time: a phone list that expands three rows in two
+   *  places is a list nobody can read. */
+  const [makersFor, setMakersFor] = useState<string | null>(null);
 
   const markup = (p: PriceItemLite) => (markupFor ? markupFor(p) : p.markup_pct || 0);
 
@@ -114,6 +140,10 @@ export function AddLineItems({
     return pool.slice(0, q ? 25 : 200);
   }, [query, priceItems]);
 
+  /** THE MAKER RULE'S TWO RUNGS, from the props this component already takes. An option that
+   *  states its own markup answers for the item; a customer's pricing level outranks both. */
+  const optionPricing: OptionPricing = { levelPct: levelPct ?? null, orgDefaultPct: orgDefaultPct ?? null };
+
   const addOne = (p: PriceItemLite) => {
     onAdd([
       {
@@ -125,6 +155,20 @@ export function AddLineItems({
     ]);
     setQuery("");
     setOpen(false);
+  };
+
+  /**
+   * ADD THE MAKER SOMEBODY PICKED, not the code's allowance.
+   *
+   * The maker goes in the DESCRIPTION because that is what the customer reads on the quote and
+   * what the crew orders from: "830 Windows (Andersen 400 Series)", not "830 Windows". The price
+   * is the option's own, through the same markup ladder, never recomputed here.
+   */
+  const addChoice = (choice: ItemOptionChoice) => {
+    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice }]);
+    setQuery("");
+    setOpen(false);
+    setMakersFor(null);
   };
 
   if (!priceItems.length && !kits.length) return null;
@@ -146,22 +190,57 @@ export function AddLineItems({
           />
           {open && (
             <ul className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-              {matches.map((p) => (
-                <li key={p.id}>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => addOne(p)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                  >
-                    <span className="min-w-0 truncate">
-                      {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
-                      {p.description}
-                    </span>
-                    <span className="shrink-0 text-slate-600">{formatCurrency(sellPrice(p.buy_price, markup(p)))}</span>
-                  </button>
-                </li>
-              ))}
+              {matches.map((p) => {
+                const makers = hasItemOptions(p);
+                const openMakers = makers && makersFor === p.id;
+                return (
+                  <li key={p.id}>
+                    {/* A CODE WITH MAKERS ASKS WHICH ONE; every other code adds on the first tap,
+                        exactly as it always has. Two taps only where there is a real choice, and
+                        the second tap is the answer rather than a confirmation. */}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => (makers ? setMakersFor(openMakers ? null : p.id) : addOne(p))}
+                      className="flex min-h-[44px] w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    >
+                      <span className="min-w-0 truncate">
+                        {p.code && <span className="mr-1 font-mono text-xs text-slate-400">{p.code}</span>}
+                        {p.description}
+                      </span>
+                      <span className="shrink-0 text-slate-600">
+                        {makers ? (
+                          <span className="text-xs font-medium text-brand">
+                            {normalizeItemOptions(p.price_list_item_options).length} Makers
+                          </span>
+                        ) : (
+                          formatCurrency(sellPrice(p.buy_price, markup(p)))
+                        )}
+                      </span>
+                    </button>
+                    {openMakers && (
+                      <ul className="border-t border-slate-100 bg-slate-50/60">
+                        {itemOptionChoices(p, optionPricing).map((choice) => (
+                          <li key={choice.id || "own"}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => addChoice(choice)}
+                              className="flex min-h-[44px] w-full items-center justify-between gap-3 py-2 pl-7 pr-3 text-left text-sm hover:bg-white"
+                            >
+                              <span className="min-w-0 truncate">
+                                {choice.makerLabel}
+                                {choice.isDefault && <span className="ml-1.5 text-xs text-slate-400">default</span>}
+                              </span>
+                              <span className="shrink-0 text-slate-600">{formatCurrency(choice.unitPrice)}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                );
+              })}
               {matches.length === 0 && (
                 <li className="px-3 py-2 text-sm text-slate-400">
                   {priceItems.length === 0 ? "Your price list is empty." : "Nothing matches that."}

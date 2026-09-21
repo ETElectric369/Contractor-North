@@ -70,6 +70,26 @@ function declineReason(err: Stripe.PaymentIntent.LastPaymentError | null | undef
  * by default: a tap is charged but never booked (or never declines to the tech) until the
  * "connected accounts" destination in the Stripe dashboard carries both. Added 2026-09-11.
  */
+/**
+ * WHAT GOES ON THE INVOICE, WHICH IS NOT ALWAYS WHAT STRIPE CHARGED.
+ *
+ * `amount_total` is what the customer's card was billed. From the day a card processing fee rides
+ * as its own Checkout line, that is MORE than the invoice: $1,875.98 of work at a 3% fee charges
+ * $1,932.26, and crediting the charge would book $56.28 the invoice never asked for. The balance
+ * goes negative, recalc calls it overpaid, and the office gets an "Overpaid, action needed" push
+ * about money that was only ever the processor's (found by the reviewer of this wave, 2026-09-20).
+ *
+ * So both pay doors stamp `invoice_amount` on the session AND the PaymentIntent, and it wins when
+ * it is there. The fallback is the old reading exactly, so every session created before this
+ * shipped - and every Tap to Pay charge, which has no fee and no line items - books as it always
+ * did. A fee is the processor's money; the invoice is only ever credited its own balance.
+ */
+function invoiceCredit(charged: number, metadata: Record<string, string> | null | undefined): number {
+  const stated = Number(metadata?.invoice_amount);
+  if (Number.isFinite(stated) && stated > 0) return Math.round(stated * 100) / 100;
+  return Math.round((Number(charged) || 0) * 100) / 100;
+}
+
 export async function POST(req: Request) {
   // TWO SIGNING SECRETS. Stripe issues one per endpoint, and Connect needs two endpoints at this
   // same URL: one for OUR account's events (subscriptions, our checkout) and one that "listens to
@@ -472,7 +492,7 @@ export async function POST(req: Request) {
           await recordInvoicePayment(
             session.metadata.invoice_id,
             session.metadata.org_id,
-            (session.amount_total ?? 0) / 100,
+            invoiceCredit((session.amount_total ?? 0) / 100, session.metadata),
             event.id,
             typeof session.payment_intent === "string"
               ? session.payment_intent
@@ -627,7 +647,7 @@ export async function POST(req: Request) {
           md.invoice_id,
           md.org_id,
           // amount_received is the settled figure; with capture_method automatic it equals amount.
-          (pi.amount_received ?? 0) / 100,
+          invoiceCredit((pi.amount_received ?? 0) / 100, pi.metadata as Record<string, string> | null),
           event.id,
           pi.id,
           eventAccount,

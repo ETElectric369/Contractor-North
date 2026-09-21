@@ -23,6 +23,7 @@ import { createWorkOrderFromQuote } from "../../work-orders/actions";
 import { createInvoiceFromQuote } from "../../billing/actions";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
+import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -62,7 +63,7 @@ export default async function QuoteDetailPage({
   // Has this quote already been turned into these records? (Drives idempotent UI:
   // the map shows "View …" instead of minting a duplicate.) Plus the org's
   // customers so the attached customer can be changed inline.
-  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems }, { data: kits }, { data: orgRow }] = await Promise.all([
+  const [{ data: existingInv }, { data: existingWo }, { data: existingMl }, { data: customers }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: orgRow }] = await Promise.all([
     supabase.from("invoices").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("work_orders").select("id").eq("quote_id", id).limit(1).maybeSingle(),
     supabase.from("material_lists").select("id").eq("quote_id", id).limit(1).maybeSingle(),
@@ -70,10 +71,16 @@ export default async function QuoteDetailPage({
     // THE SAME CATALOG THE COMPOSER GETS. A saved estimate used to offer only a bare
     // "Add a line item…" text box — no price list, no kits — so the one place you're most likely
     // to be adjusting a real quote was the one place you had to type prices from memory.
+    // …AND THE MAKERS UNDER EACH CODE (0282). Same embed the composer reads, from the same
+    // constant, because this is the screen you are most likely to be on with a customer in front
+    // of you — the one place a code that has an Andersen, a Milgard and a Marvin must not quietly
+    // offer only its allowance. The archived filter lands on the EMBEDDED rows (no !inner), so an
+    // item keeps its place in the book even when every maker under it has been retired.
     supabase
       .from("price_list_items")
-      .select("id, code, description, category, unit, buy_price, markup_pct")
+      .select(`id, code, description, category, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
       .eq("archived", false)
+      .eq("price_list_item_options.archived", false)
       .order("description")
       .limit(2000),
     // THE SHARED SELECT SHAPE (kit-line.ts) — sizing + the 0240 price-list link, tolerant of
@@ -193,6 +200,17 @@ export default async function QuoteDetailPage({
         </CardContent>
       </Card>
 
+      {/* NOTHING SILENT. The picker inside the editor renders nothing at all when it is handed no
+          book, which on this page reads as a broken control rather than a failed read — and an
+          item whose makers did not arrive would price at its allowance for a window somebody had
+          already decided was a Marvin. The editor keeps working either way; this only says what
+          the list below is missing. */}
+      {priceItemsErr && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
+          <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
+        </div>
+      )}
       <QuoteItemsEditor
         quote={q}
         // Asked of the server rule itself, never guessed from the status: acceptance alone locks

@@ -96,6 +96,58 @@ export interface OrgSettings {
   payment_methods: string[];
   /** The org's Venmo username (no @). Pay now's Venmo chip shows its QR with the amount filled. */
   venmo_handle: string;
+  /**
+   * SURCHARGE ADDED TO A CARD PAYMENT, IN PERCENT. 0 = off, and 0 is the default, so an org that
+   * never sets it behaves exactly as it did before this existed. It is a number, not a switch:
+   * "2.5" means the card door charges the balance plus 2.5% of it, stated on the invoice page
+   * before the customer taps, as a separate "Card processing fee" line inside Stripe Checkout.
+   *
+   * THERE IS NO SETTINGS SCREEN FOR THIS ON PURPOSE. Charging it is a business decision with real
+   * rules attached, and the rules are the reason the number is documented here instead of behind
+   * a tick box nobody reads:
+   *
+   *  - SURCHARGING IS LEGAL WHERE THE COMPANY WORKS. California and Nevada both allow a credit
+   *    card surcharge. Some other states do not, so an org outside those two has to check its own
+   *    before setting this.
+   *  - NOT ON DEBIT, NOT ON PREPAID. Federal law (Durbin) forbids surcharging a debit or prepaid
+   *    card, full stop, no matter what the state allows.
+   *  - AND A HOSTED CHECKOUT PAGE CANNOT TELL THEM APART BEFORE IT CHARGES. Stripe returns the
+   *    funding type on the charge, AFTER the money moves. So a flat surcharge on a hosted page
+   *    will land on some debit cards. That is the single biggest reason this ships off: it is not
+   *    a bug to fix in code, it is a decision about who you are willing to refund the fee to.
+   *  - THE NETWORKS CAP IT AND WANT TO BE TOLD. Visa and Mastercard both require written notice
+   *    (30 days) to the network AND to the processor before the first surcharged transaction, and
+   *    both cap the amount. CARD_FEE_MAX_PCT below is the ceiling this app will honor.
+   *  - AND IT MAY NEVER EXCEED THE ACTUAL COST OF ACCEPTANCE. Every rule above agrees on this one:
+   *    a surcharge recovers what the card cost you, it is not margin. At 2.9% + 30c, a $1,875.98
+   *    invoice costs about $54.70 to accept, which is 2.92% — so anything above roughly 3 is
+   *    already charging the customer more than the card cost, and that is the line.
+   *
+   * The honest alternative, and the one that is actually switched ON in this build, is the bank
+   * transfer door beside the card door on the invoice page: same money, no fee to the customer,
+   * and about $10 instead of about $231 on a day like 2026-09-20.
+   */
+  card_fee_percent: number;
+
+  /**
+   * THE BANK TRANSFER DOOR ON PAY NOW, AND WHY IT IS OFF UNTIL HE SAYS OTHERWISE.
+   *
+   * A card settles inside Stripe Checkout and arrives as checkout.session.completed with
+   * payment_status "paid", which the webhook books. ACH does not. It arrives as completed and
+   * UNPAID - correctly booked as nothing, because the money is days away and can still be refused
+   * - and then, when it clears, as `checkout.session.async_payment_succeeded`. That event is NOT
+   * on a connected-accounts webhook destination by default.
+   *
+   * So a bank button on an account without those events is a door that takes a customer's money
+   * and never closes the invoice: the customer pays, the office sees nothing, and the next
+   * reminder chases a man who has already paid. Three reviewers called it the same way.
+   *
+   * Erik turns this on AFTER adding `checkout.session.async_payment_succeeded` and
+   * `checkout.session.async_payment_failed` to the connected-accounts destination in Stripe, and
+   * after confirming ACH is switched on for the account at all. Same shape as the Tap to Pay
+   * entitlement: the capability lives somewhere this app cannot read, so a person confirms it.
+   */
+  bank_transfer_enabled: boolean;
 
   // Notifications (reminder engine — toggles stored now, engine wires later)
   remind_quote_followup: boolean;
@@ -312,6 +364,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
 
   payment_methods: ["Cash", "Check", "Card", "Zelle", "Venmo", "Transfer"],
   venmo_handle: "",
+  card_fee_percent: 0, // off — see the field's comment for what turning it on actually commits you to
+  bank_transfer_enabled: false, // off until the two async Stripe events are subscribed — see the field's comment
   remind_quote_followup: false,
   remind_invoice_due: false,
   remind_appointments: false,
@@ -523,7 +577,159 @@ export function getOrgSettings(raw: unknown): OrgSettings {
     const v = typeof merged[k] === "string" ? merged[k].trim() : "";
     merged[k] = /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : "";
   }
+  {
+    // THE SURCHARGE IS MONEY, SO IT GETS THE SAME SANITIZE-ON-READ THE TIMEZONE GETS. There is no
+    // settings screen for card_fee_percent, which means the only way a value gets in there is a
+    // hand-edit of the jsonb — exactly the write path with no validation in front of it. A stored
+    // "30", or a string, or a negative, must never reach a customer's card. Clamped to the network
+    // ceiling here, once, so every reader (the pay route AND the invoice page) agrees by
+    // construction instead of each remembering to clamp.
+    // typeof, not Number(): coercion would read `true` as 1% and the string "3" as 3%, and a
+    // surcharge is not a thing to infer from a value that was never a number.
+    const n = merged.card_fee_percent;
+    merged.card_fee_percent =
+      typeof n === "number" && Number.isFinite(n) && n > 0
+        ? Math.min(CARD_FEE_MAX_PCT, Math.round(n * 100) / 100)
+        : 0;
+    // Same treatment, same reason: there is no settings screen for this yet either, so a stored
+    // "true" or 1 must not read as a door being open. A payment door opens on a boolean somebody
+    // meant, or it stays shut.
+    merged.bank_transfer_enabled = merged.bank_transfer_enabled === true;
+  }
   return merged;
+}
+
+// ── PAY NOW: THE TWO DOORS, AND THE FEE THAT IS BUILT BUT SHUT ────────────────────────────────
+//
+// These live here, beside the setting they read, because BOTH ends of the payment need the same
+// answer and they run in different places: /api/pay/[token] builds the Stripe session on the
+// server, and /i/[token] prints the amount the customer is about to be charged. Two copies of
+// "what does the card door cost" is how a page promises one number and a checkout charges
+// another, which is the precise thing Andrew's note asked us not to do ("Transparency, clearly
+// visible"). One function, both callers, no drift.
+
+/**
+ * The most this app will ever add to a card charge, whatever the stored setting says.
+ *
+ * 3 is not a taste call. Visa's surcharge cap is 3% and Mastercard's is 4%, so 3 is the number
+ * that is inside both rails at once; and at Stripe's 2.9% + 30c a surcharge above ~3% is already
+ * more than the card actually cost to accept, which every surcharge rule forbids. A stored 15 is
+ * a typo or a hostile write, not a decision, and it gets clamped rather than honored.
+ */
+export const CARD_FEE_MAX_PCT = 3;
+
+/**
+ * THE MASTER SHUTOFF, AND THE TWO THINGS THAT HAVE TO BE TRUE BEFORE IT CAN FLIP (2026-09-20).
+ *
+ * The fee is fully built below and in both doors. It is held shut by this one constant because
+ * charging it TODAY would break money in two places this build does not own:
+ *
+ *  1. THE WEBHOOK CREDITS THE STRIPE AMOUNT, NOT THE BALANCE. api/stripe/webhook/route.ts books
+ *     `(session.amount_total ?? 0) / 100` as the payment. amount_total includes the fee line, so a
+ *     $1,875.98 invoice paid with a 3% fee would be credited $1,932.26, recalc would read it as
+ *     overpaid by $56.28, and the office would get an "Overpaid — action needed" push for money
+ *     that was never on the invoice. The fee is the PROCESSOR'S money passing through; the invoice
+ *     must be credited by its own balance. Both doors already stamp `invoice_amount` into session
+ *     and payment-intent metadata so that fix is a one-line read.
+ *  2. THE PUBLIC INVOICE PAGE CANNOT SEE THE SETTING. public_invoice()'s org projection (migration
+ *     0247) does not carry card_fee_percent, so /i/[token] reads 0 and would print the bare
+ *     balance on a button that charges more. A surcharge the customer is not shown before the tap
+ *     is the opposite of what was asked for.
+ *
+ * Flip this to true in the SAME change that clears both, and the setting starts working with no
+ * other edit. Until then a non-zero card_fee_percent is REFUSED OUT LOUD (see cardFeeDecision) —
+ * never silently ignored, and never silently charged.
+ */
+export const CARD_FEE_READY = false;
+
+export type PayMethod = "card" | "bank";
+
+/**
+ * Which door the customer picked, from `?method=`.
+ *
+ * ANYTHING THAT IS NOT EXACTLY "bank" IS A CARD. Every invoice email ever sent carries a bare
+ * /api/pay/<token> with no method on it, and those links live in inboxes forever — so the absent,
+ * the empty, the misspelled and the hostile all have to land on the behavior that link already
+ * had. Card is not a preference here, it is backward compatibility.
+ */
+export function parsePayMethod(raw: string | null | undefined): PayMethod {
+  return String(raw ?? "").trim().toLowerCase() === "bank" ? "bank" : "card";
+}
+
+/** THE one place a Pay link is spelled. Card keeps the exact URL it has always had (no query at
+ *  all) so nothing about an existing emailed link changes; bank is the same route plus a method. */
+export function payUrl(token: string, method: PayMethod): string {
+  const t = encodeURIComponent(token);
+  return method === "bank" ? `/api/pay/${t}?method=bank` : `/api/pay/${t}`;
+}
+
+/** "2.5" not "2.50", "3" not "3.00" — a percent a person would say out loud. */
+export function feePctLabel(pct: number): string {
+  const n = Number.isFinite(pct) ? Math.round(pct * 100) / 100 : 0;
+  return String(n);
+}
+
+/**
+ * The surcharge in dollars, rounded to the cent Stripe will actually charge.
+ *
+ * Done in cents on purpose: balance * pct is already the fee in cents (a percent of dollars), so
+ * one Math.round lands on the integer Stripe wants and nothing downstream has to re-round a float
+ * and disagree by a penny with the number printed on the page.
+ */
+export function cardFeeAmount(balance: number, pct: number): number {
+  const b = Number(balance);
+  const p = Number(pct);
+  if (!Number.isFinite(b) || !Number.isFinite(p) || b <= 0 || p <= 0) return 0;
+  return Math.round(b * Math.min(CARD_FEE_MAX_PCT, p)) / 100;
+}
+
+export type CardFeeDecision = {
+  /** the percent actually being charged (0 when off, clamped, or refused) */
+  pct: number;
+  /** dollars added on top of the balance, already rounded to the cent */
+  fee: number;
+  /** what the CARD door charges: balance + fee. Equals the balance when the fee is 0. */
+  cardTotal: number;
+  /** the invoice's own balance — what the invoice gets credited, fee or no fee */
+  invoiceAmount: number;
+  /** set only when a fee WAS configured and we would not charge it, in words for the ops log */
+  refused: string | null;
+};
+
+/**
+ * THE WHOLE CARD-DOOR PRICE, DECIDED ONCE.
+ *
+ * `ready` is a parameter rather than a straight read of CARD_FEE_READY so the arithmetic that
+ * runs the day the flag flips is provable today — the tests drive both sides of the gate. No
+ * caller passes it; the default IS the flag.
+ */
+export function cardFeeDecision(
+  balance: number,
+  pct: number,
+  ready: boolean = CARD_FEE_READY,
+): CardFeeDecision {
+  const b = Number.isFinite(Number(balance)) ? Math.max(0, Math.round(Number(balance) * 100) / 100) : 0;
+  const wanted = Number.isFinite(Number(pct)) ? Math.min(CARD_FEE_MAX_PCT, Math.max(0, Number(pct))) : 0;
+  const off = { pct: 0, fee: 0, cardTotal: b, invoiceAmount: b, refused: null as string | null };
+  if (wanted <= 0) return off;
+  if (!ready) {
+    return {
+      ...off,
+      refused:
+        `card_fee_percent is set to ${feePctLabel(wanted)} but the card fee is held shut ` +
+        `(CARD_FEE_READY is false): the payment webhook still credits the invoice by Stripe's ` +
+        `charge amount, and public_invoice() does not carry card_fee_percent, so the fee would ` +
+        `over-credit the invoice and would not be shown before the tap. Charged the balance only.`,
+    };
+  }
+  const fee = cardFeeAmount(b, wanted);
+  return {
+    pct: wanted,
+    fee,
+    cardTotal: Math.round((b + fee) * 100) / 100,
+    invoiceAmount: b,
+    refused: null,
+  };
 }
 
 /** The auto-numbered document types, in display order. `key` is the doc_counters/settings

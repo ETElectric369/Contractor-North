@@ -8,6 +8,7 @@ import { searchPaidPrices, type LearnedPrice } from "@/lib/pricing/learned-price
 import { normalizeUnit } from "@/lib/pricing/units";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { lineDisplayName } from "@/lib/kit-line";
+import { cleanOptionFields, optionName, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
 
@@ -627,4 +628,273 @@ export async function applyPriceBookReview(
 
   revalidatePath("/price-list");
   return { ok: true, updated, added };
+}
+
+/* ── VENDOR OPTIONS UNDER ONE CODE (0282) ──────────────────────────────────────────────────────
+   Andrew, for Justin Vivian: "increase drop down options for each item code / multiple vendors /
+   multiple items / ie. windows - mfg Andersen - mfg Milgard - mfg Marvin".
+
+   Code 830 is "Windows (Materials) (Allowance)" at $830.00. The allowance is a placeholder for a
+   decision nobody has made, and the decision is WHOSE window. The options live UNDER the code
+   rather than the code appearing three times, so 830 still means ONE line on an estimate and the
+   twelve places that read the book on "a code names one thing" keep working.
+
+   THE ITEM'S OWN PRICE STAYS THE DEFAULT. An option is what gets used INSTEAD, once somebody picks
+   a maker — which is also why nothing here ever writes to price_list_items.
+
+   Archive, never delete: a price he put on a quote last month must not evaporate. There is
+   deliberately no deleteItemOption.
+   ─────────────────────────────────────────────────────────────────────────────────────────── */
+
+/** Option writes answer in sentences, and sometimes have something extra worth saying out loud
+ *  (a default that moved, an item back on its own price) — that is `note`, never a silent side
+ *  effect. */
+export type OptionResult = { ok: boolean; error?: string; note?: string };
+
+// (StaffDb — the authed, org-scoped client requireStaff hands back — is already declared above.)
+
+const NO_ORG = "Your account isn't attached to a company yet, so there's no price list to change.";
+
+/** Is this item one of ours? RLS would refuse the write anyway, but "that item isn't in your price
+ *  list" is an ANSWER and a bare policy refusal is not. Also org-scopes the id explicitly, so a
+ *  guessed uuid can never reach a write (defense in depth — RLS stays the boundary). */
+async function ownItem(supabase: StaffDb, orgId: string, itemId: string): Promise<{ id: string } | string> {
+  if (!itemId) return "No item was named, so there is nothing to add an option to.";
+  const { data, error } = await supabase.from("price_list_items").select("id").eq("id", itemId).eq("org_id", orgId).maybeSingle();
+  if (error) return dbError(error);
+  if (!data) return "That item isn't in your price list any more. Reload the page.";
+  return data as { id: string };
+}
+
+/** Stand every OTHER option on this item down from default. Returns a sentence on failure, null
+ *  on success — and ZERO ROWS IS SUCCESS here, because most items have never had a default. */
+async function clearOtherDefaults(supabase: StaffDb, orgId: string, itemId: string, keepId: string | null): Promise<string | null> {
+  let q = supabase
+    .from("price_list_item_options")
+    .update({ is_default: false })
+    .eq("item_id", itemId)
+    .eq("org_id", orgId)
+    .eq("is_default", true)
+    .eq("archived", false);
+  if (keepId) q = q.neq("id", keepId);
+  const { error } = await q.select("id");
+  return error ? optionWriteRefusal(error) : null;
+}
+
+/** Where a new option sits in the list: after the ones already there. */
+async function nextSortOrder(supabase: StaffDb, orgId: string, itemId: string): Promise<number> {
+  const { data } = await supabase
+    .from("price_list_item_options")
+    .select("sort_order")
+    .eq("item_id", itemId)
+    .eq("org_id", orgId)
+    .order("sort_order", { ascending: false })
+    .limit(1);
+  return (Number((data as { sort_order?: number }[] | null)?.[0]?.sort_order) || 0) + 1;
+}
+
+export async function addItemOption(
+  input: { itemId: string; isDefault?: boolean } & OptionFieldsInput,
+): Promise<OptionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId, userId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  const cleaned = cleanOptionFields(input, "create");
+  if ("error" in cleaned) return { ok: false, error: cleaned.error };
+  const owned = await ownItem(supabase, orgId, input.itemId);
+  if (typeof owned === "string") return { ok: false, error: owned };
+
+  // 0282's one-default index is partial (is_default AND NOT archived), so the sitting default has
+  // to step down BEFORE the new row lands — the other order is a guaranteed unique violation.
+  if (input.isDefault) {
+    const failed = await clearOtherDefaults(supabase, orgId, input.itemId, null);
+    if (failed) return { ok: false, error: failed };
+  }
+
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .insert({
+      item_id: input.itemId,
+      ...cleaned.clean,
+      is_default: Boolean(input.isDefault),
+      sort_order: await nextSortOrder(supabase, orgId, input.itemId),
+      created_by: userId,
+      // org_id is left to the set_org_id trigger, exactly like every other table in 0270+.
+    })
+    .select("id");
+  if (error) return { ok: false, error: optionWriteRefusal(error, { vendor: input.vendor, label: input.label }) };
+  // THE SILENT-WRITE LAW: an insert RLS refused comes back as zero rows, not an error.
+  if (!data?.length) return { ok: false, error: "Nothing was saved. Reload the page and try again." };
+  revalidatePath("/price-list");
+  // The toast already names what was added, so this note says the CONSEQUENCE rather than the name
+  // again: the item's own number just stopped being the one that prices it.
+  return { ok: true, note: input.isDefault ? "This item prices at it now, instead of its own number." : undefined };
+}
+
+/** Patch one option. Writes ONLY what the caller passed, so a change to the part number can never
+ *  blank the price. A blank markup stays NULL (fall through), never a 0. */
+export async function updateItemOption(
+  input: { optionId: string; isDefault?: boolean } & OptionFieldsInput,
+): Promise<OptionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  const cleaned = cleanOptionFields(input, "update");
+  if ("error" in cleaned) return { ok: false, error: cleaned.error };
+
+  const { data: rowData, error: readErr } = await supabase
+    .from("price_list_item_options")
+    .select("id, item_id, vendor, label, is_default, archived")
+    .eq("id", input.optionId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const row = rowData as { id: string; item_id: string; vendor: string; label: string | null; is_default: boolean; archived: boolean } | null;
+  if (!row) return { ok: false, error: "That option isn't there any more. Reload the page." };
+  if (input.isDefault && row.archived) {
+    return { ok: false, error: "Restore this option first. An archived one can't be what the item prices at." };
+  }
+
+  const patch: Record<string, unknown> = { ...cleaned.clean };
+  if (input.isDefault !== undefined) patch.is_default = Boolean(input.isDefault);
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  if (input.isDefault) {
+    const failed = await clearOtherDefaults(supabase, orgId, row.item_id, row.id);
+    if (failed) return { ok: false, error: failed };
+  }
+
+  // The refusal sentence has to name what he JUST typed, not what the row used to say — including
+  // a label he deliberately cleared, which `??` would have quietly put back.
+  const named = {
+    vendor: "vendor" in patch ? (patch.vendor as string) : row.vendor,
+    label: "label" in patch ? (patch.label as string | null) : row.label,
+  };
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .update(patch)
+    .eq("id", input.optionId)
+    .eq("org_id", orgId)
+    .select("id");
+  if (error) return { ok: false, error: optionWriteRefusal(error, named) };
+  if (!data?.length) return { ok: false, error: "Nothing was saved. That option may have been removed, so reload the page." };
+  revalidatePath("/price-list");
+  // What PRICES this item is the one thing on this form that moves money, so it is said out loud
+  // when it MOVES — both directions, and never when the box was simply left where it was.
+  const promoted = input.isDefault === true && !row.is_default;
+  const demoted = input.isDefault === false && row.is_default;
+  return {
+    ok: true,
+    note: promoted
+      ? `${optionName(named)} is now what this item prices at.`
+      : demoted
+        ? "This item is priced at its own number again."
+        : undefined,
+  };
+}
+
+/**
+ * ARCHIVE, NOT DELETE — a price he used on a quote last month must still be findable. Pass
+ * archived=false to bring it back (the toast's Undo, and the Restore button on the archived list).
+ */
+export async function archiveItemOption(optionId: string, archived = true): Promise<OptionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  const { data: rowData, error: readErr } = await supabase
+    .from("price_list_item_options")
+    .select("id, item_id, vendor, label, is_default")
+    .eq("id", optionId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const row = rowData as { id: string; item_id: string; vendor: string; label: string | null; is_default: boolean } | null;
+  if (!row) return { ok: false, error: "That option isn't there any more. Reload the page." };
+
+  const patch: Record<string, unknown> = { archived };
+  let note: string | undefined;
+  if (archived && row.is_default) {
+    // Archiving the default doesn't break the partial index, but it DOES change what the item
+    // prices at — and a price that moves without a sentence is the silent write this app bans.
+    note = "That was the default, so this item is back to its own price.";
+  }
+  if (!archived && row.is_default) {
+    // It went into the archive as the default and something else has taken the seat since.
+    // Bringing it back as default would break 0282's one-default index, so the RETURNING row steps
+    // down (never the one currently in use) and the toast says which one still holds it.
+    const { data: sitting } = await supabase
+      .from("price_list_item_options")
+      .select("vendor, label")
+      .eq("item_id", row.item_id)
+      .eq("org_id", orgId)
+      .eq("is_default", true)
+      .eq("archived", false)
+      .neq("id", optionId)
+      .limit(1);
+    const held = (sitting as { vendor: string; label: string | null }[] | null)?.[0];
+    if (held) {
+      patch.is_default = false;
+      note = `${optionName(held)} is still the default, so this one came back as an alternative.`;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .update(patch)
+    .eq("id", optionId)
+    .eq("org_id", orgId)
+    .select("id");
+  if (error) return { ok: false, error: optionWriteRefusal(error, row) };
+  if (!data?.length) return { ok: false, error: "Nothing changed. That option may have been removed, so reload the page." };
+  revalidatePath("/price-list");
+  return { ok: true, note };
+}
+
+/**
+ * WHICH OPTION THIS ITEM PRICES AT. `optionId: null` hands the item back to its own allowance
+ * price, which is where every item starts and where most of them stay.
+ *
+ * Two statements, and they have to be in this order: 0282's one-default index is a real database
+ * rule, so the sitting default steps down first and the new one sits down second. There is a
+ * blink where the item has no default; if the second statement fails, the refusal says reload,
+ * and reloading shows the truth (the item on its own price) rather than a lie.
+ */
+export async function setDefaultItemOption(input: { itemId: string; optionId: string | null }): Promise<OptionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  const owned = await ownItem(supabase, orgId, input.itemId);
+  if (typeof owned === "string") return { ok: false, error: owned };
+
+  const failed = await clearOtherDefaults(supabase, orgId, input.itemId, input.optionId);
+  if (failed) return { ok: false, error: failed };
+
+  if (!input.optionId) {
+    revalidatePath("/price-list");
+    return { ok: true, note: "This item is priced at its own number again." };
+  }
+
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .update({ is_default: true })
+    .eq("id", input.optionId)
+    .eq("item_id", input.itemId)
+    .eq("org_id", orgId)
+    .eq("archived", false)
+    .select("id, vendor, label");
+  if (error) return { ok: false, error: optionWriteRefusal(error) };
+  if (!data?.length) {
+    return { ok: false, error: "That option isn't there any more, or it's archived. Reload the page and pick again." };
+  }
+  revalidatePath("/price-list");
+  const picked = (data as { vendor: string; label: string | null }[])[0];
+  return { ok: true, note: `${optionName(picked)} is now what this item prices at.` };
 }

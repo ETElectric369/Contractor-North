@@ -13,6 +13,7 @@ import type { DraftLineItem } from "@/lib/estimate/line-map";
 import { sheetFromPlaybook } from "@/lib/playbook/from-sheet";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
+import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
 
@@ -287,7 +288,7 @@ export default async function NewQuotePage({
       if (parts.length > 1) initialScope = parts.join("\n\n");
     }
   }
-  const [{ data: customers }, { data: leadRows }, { data: priceItems }, { data: taxRates }, { data: kits }, { data: org }] =
+  const [{ data: customers }, { data: leadRows }, { data: priceItems, error: priceItemsErr }, { data: taxRates }, { data: kits }, { data: org }] =
     await Promise.all([
       supabase.from("customers").select("id, name, company_name, pricing_levels(markup_pct, labor_rate)").order("name"),
       // AN ESTIMATE IS OFTEN FOR A LEAD, NOT A CUSTOMER (Erik: "I should be able to select from
@@ -305,10 +306,20 @@ export default async function NewQuotePage({
         .not("status", "in", "(lost,won)")
         .order("created_at", { ascending: false })
         .limit(500),
+      // THE MAKERS RIDE WITH THE CODE (0282, Andrew for Justin Vivian). Code 830 is "Windows
+      // (Materials) (Allowance)" and the decision nobody has made yet is WHOSE window — so the
+      // picker has to be handed Andersen, Milgard and Marvin at the same moment it is handed 830,
+      // or it offers the allowance price for a choice the estimator already made in his head.
+      // One embed, one round trip; the pick itself resolves through lib/pricing/item-options.
+      //
+      // `.eq("price_list_item_options.archived", false)` filters the EMBEDDED rows only (it is not
+      // an !inner join), so an item whose every maker is archived still appears, priced at its own
+      // allowance — which is exactly right. A maker the org stopped carrying is never offered.
       supabase
         .from("price_list_items")
-        .select("id, code, description, category, unit, buy_price, markup_pct, updated_at")
+        .select(`id, code, description, category, unit, buy_price, markup_pct, updated_at, ${ITEM_OPTIONS_EMBED}`)
         .eq("archived", false)
+        .eq("price_list_item_options.archived", false)
         .order("description")
         .limit(2000),
       supabase.from("tax_rates").select("id, name, rate, is_default").order("created_at"),
@@ -376,6 +387,18 @@ export default async function NewQuotePage({
             on the capture page; Start estimate there routes back here prefilled. */}
         {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
+      {/* NOTHING SILENT, AND THE CONSEQUENCE NAMED. The price book and its makers arrive in one
+          read, so a failure hands the picker below an empty list — which on screen reads as "you
+          have no price list" rather than "this did not load". Worse, if the embed alone were ever
+          to fail we would be rendering 830 as though it had no makers, and quoting the $830
+          allowance for a window somebody had already decided was a Marvin. Say it at the top,
+          before anybody prices anything, and leave every other control on the page working. */}
+      {priceItemsErr && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
+          <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
+        </div>
+      )}
       <QuoteBuilder
         initialQuoteId={adoptedDraftId}
         adoptedSeed={adoptedSeed}

@@ -10,6 +10,8 @@ import type { PriceItem } from "./price-list-math";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
+import { ItemOptionsManager } from "./item-options-manager";
+import type { ItemOption } from "./item-options-math";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +27,14 @@ const ITEM_SIZING_V2 = `${ITEM_SIZING}, sized_by, qty_per`;
  *  the quote pages run, so a kit line prices identically here and on an estimate. */
 type KitRow = { id: string; name: string; category: string | null; kit_items: (KitLineRaw & { id: string })[] };
 
+/** 0282's vendor options, as the screen classifies them. THE PROJECTION LAW: every field the
+ *  option row, the modal and the sell-price resolution read has to be named right here, or it is
+ *  undefined at runtime with nothing to show for it. */
+const OPTION_SELECT = "id, item_id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, archived, sort_order";
+
 export default async function PriceListPage() {
   const supabase = await createClient();
-  const [itemsRes, kitsRes, { data: org }] = await Promise.all([
+  const [itemsRes, kitsRes, { data: org }, optionsRes] = await Promise.all([
     (async () => {
       // Active rows first so the cap trims archived ones, never live ones.
       const withV2 = await supabase
@@ -52,6 +59,11 @@ export default async function PriceListPage() {
     // default_markup_pct rides to both tabs so a row's Sell and a kit line picked from the book
     // price through THE markup rule (item → org default), not the item's raw markup alone.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // 0282 is a whole NEW TABLE, so the same rule the new columns above follow applies harder: a
+    // deploy that lands before its migration must degrade, not blank the page. An error here just
+    // means "no options yet as far as this deploy can tell", and the tab stays away rather than
+    // offering a door that opens onto a database error.
+    supabase.from("price_list_item_options").select(OPTION_SELECT).order("item_id").order("sort_order").limit(2000),
   ]);
   // 0241: what THIS company can count an item by — every form's playbook, measured number needs.
   // Best-effort: no forms (or a pre-playbook org) just means the two built-in dimensions.
@@ -81,11 +93,40 @@ export default async function PriceListPage() {
   }
   for (const id of Object.keys(kitsByItem)) kitsByItem[id] = [...new Set(kitsByItem[id])].sort();
 
+  // 0282 VENDOR OPTIONS. PostgREST hands `numeric` back as a STRING, and the screen does real
+  // arithmetic with these — so the coercion happens once, here at the read boundary, rather than
+  // in four components that would each have to remember. markup_pct keeps its NULL: null is "not
+  // stated", which falls through to the item and then the org default, and a 0 here would quietly
+  // sell at cost forever (that fall-through is the whole point of the nullable column).
+  const optionsAvailable = !optionsRes.error;
+  const options: ItemOption[] = ((optionsRes.data ?? []) as Record<string, unknown>[]).map((o) => ({
+    id: String(o.id),
+    item_id: String(o.item_id),
+    vendor: String(o.vendor ?? ""),
+    label: (o.label as string | null) ?? null,
+    part_number: (o.part_number as string | null) ?? null,
+    unit: (o.unit as string | null) ?? null,
+    buy_price: Number(o.buy_price) || 0,
+    markup_pct: o.markup_pct === null || o.markup_pct === undefined ? null : Number(o.markup_pct),
+    is_default: Boolean(o.is_default),
+    archived: Boolean(o.archived),
+    sort_order: Number(o.sort_order) || 0,
+  }));
+  const optionsByItem: Record<string, ItemOption[]> = {};
+  for (const o of options) (optionsByItem[o.item_id] ??= []).push(o);
+  // The tab's count is the WORKING SET: codes that actually carry a live option. Archived ones
+  // still ride in optionsByItem so they stay findable under their item, but they are not news.
+  const itemsWithOptions = activeItems.filter((i) => (optionsByItem[i.id] ?? []).some((o) => !o.archived)).length;
+
   return (
     <div>
       <PageHeader
         title="Price List"
-        description="Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier list (e.g. CED) via CSV."
+        description={
+          "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier list (e.g. CED) via CSV." +
+          // Only said when the tab is actually there — copy never names a control that doesn't exist.
+          (optionsAvailable ? " One code can carry several makers: see Vendor Options." : "")
+        }
       />
       {/* ONE unit vocabulary, one list: every unit input on the page points at this datalist. */}
       <datalist id={UNIT_DATALIST_ID}>
@@ -110,6 +151,21 @@ export default async function PriceListPage() {
               />
             ),
           },
+          // ONE CODE, SEVERAL MAKERS (0282) — next to the book it belongs to, not off in Settings.
+          // Andrew, for Justin: "windows - mfg Andersen - mfg Milgard - mfg Marvin". The Price List
+          // tab beside it is untouched: an item with no options looks and prices exactly as it did.
+          ...(optionsAvailable
+            ? [
+                {
+                  id: "options",
+                  label: "Vendor Options",
+                  count: itemsWithOptions,
+                  content: (
+                    <ItemOptionsManager items={activeItems} optionsByItem={optionsByItem} defaultMarkupPct={defaultMarkupPct} />
+                  ),
+                },
+              ]
+            : []),
           {
             id: "kits",
             label: "Kits",
