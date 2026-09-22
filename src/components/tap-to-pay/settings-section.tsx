@@ -79,7 +79,7 @@ const REGIONS_URL = "https://developer.apple.com/tap-to-pay/regions/";
 const HOW_TO_PARAM = "howto";
 
 const LOCATION_DENIED =
-  "Location was turned down, so Tap to Pay on iPhone can't be enabled — Apple requires a location fix to accept a card. Allow it in Settings › North › Location (While Using the App), then tap Enable Tap to Pay on iPhone again.";
+  "Location was turned down, so Tap to Pay on iPhone can't be enabled. Apple requires a location fix to accept a card. Allow it in Settings › North › Location (While Using the App), then tap Enable Tap to Pay on iPhone again.";
 
 /** How long the Enable tap waits on a location fix. The timer is armed BEFORE the request. */
 const GEO_TIMEOUT_MS = 15_000;
@@ -125,7 +125,7 @@ function linkedLine(l: Linked): string {
   if (l === "checking") return "Checking with Apple whether this company has accepted the Tap to Pay on iPhone terms…";
   if (l === true) return "Enabled: Apple confirms this company has accepted the Tap to Pay on iPhone terms.";
   if (l === false) return "Not enabled yet: Apple says this company hasn't accepted the Tap to Pay on iPhone terms.";
-  return "Whether the Tap to Pay on iPhone terms are accepted is Apple's answer, read at the first tap — nothing here stores it.";
+  return "Whether the Tap to Pay on iPhone terms are accepted is Apple's answer, read at the first tap. Nothing here stores it.";
 }
 
 /**
@@ -141,7 +141,7 @@ function ProgressLine({ p }: { p: TapProgress }) {
       <p className="flex items-center gap-2 text-slate-700">
         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-500" />
         <span>
-          Preparing Tap to Pay on iPhone — {p.stage}
+          Preparing Tap to Pay on iPhone: {p.stage}
           {determinate ? ` · ${p.percent}%` : ""}. Not ready for a card yet.
         </span>
       </p>
@@ -180,6 +180,13 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
   const [enabling, setEnabling] = useState(false);
   const [enableError, setEnableError] = useState<string | null>(null);
   const [enabled, setEnabled] = useState(false);
+  // THE PHONE'S MEMORY IS THE READER, NOT THIS FLAG. `enabled` only remembers an Enable tap made on
+  // THIS visit; it is never stored, so every fresh open of Settings showed "Get This iPhone Ready"
+  // and "before the first card" to a phone that took its first card days earlier (Erik, the
+  // morning after iOS 27, 2026-09-22). The bridge's resting "ready" is a connected, configured
+  // reader — which is what set-up means — and it is replayed on subscribe, so it is the truth here
+  // whether the connect came from an Enable tap, the shell's warm-up, or a foreground reconnect.
+  const ready = enabled || progress?.stage === "ready";
   const [guide, setGuide] = useState<{ busy: boolean; note: string | null }>({ busy: false, note: null });
   const [announce, setAnnounce] = useState<{ busy: boolean; line: string | null; bad: boolean }>({
     busy: false,
@@ -302,7 +309,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
         ? {
             busy: false,
             bad: false,
-            line: `Sent to ${r.sent} ${r.sent === 1 ? "person" : "people"} — each phone's own notification settings still apply.`,
+            line: `Sent to ${r.sent} ${r.sent === 1 ? "person" : "people"}. Each phone's own notification settings still apply.`,
           }
         : { busy: false, bad: true, line: r.error },
     );
@@ -350,14 +357,14 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
         canAccept &&
         (isAdmin ? (
           <div className="space-y-3">
-            {!enabled && (
+            {!ready && (
               <>
                 <p>
-                  Before the first card, iOS will ask to use this iPhone&apos;s location — Apple requires a location
+                  If it hasn&apos;t already, iOS will ask to use this iPhone&apos;s location. Apple requires a location
                   fix to accept a card, so allow it or Tap to Pay on iPhone can&apos;t run.
                   {linked === true
-                    ? " Then this iPhone gets its one-time setup from Apple; you'll see the progress here."
-                    : " Then Apple's Tap to Pay on iPhone terms appear once, for you to accept on the company's behalf, and this iPhone gets its one-time setup — you'll see the progress here."}
+                    ? " Then this iPhone gets ready; you'll see the progress here."
+                    : " Then Apple's Tap to Pay on iPhone terms appear once, for you to accept on the company's behalf, and this iPhone gets its one-time setup. You'll see the progress here."}
                 </p>
                 {/* "Enable Tap to Pay on iPhone" is Apple's own label for the terms step. Once
                     Apple says the terms are accepted, the same door is only this iPhone's
@@ -377,10 +384,10 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
               </>
             )}
             {enableError && <p className={ERROR_BOX}>{enableError}</p>}
-            {enabled && (
+            {ready && (
               // Apple 3.9: the invitation to try it, right after the terms and the walkthrough.
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800">
-                <p className="font-medium">You are set — try it out.</p>
+                <p className="font-medium">You are set. Try it out.</p>
                 <p className="mt-1">Open any unpaid invoice → Pay Now → Tap to Pay on iPhone.</p>
                 <Link
                   href="/billing"
@@ -415,7 +422,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
               <p className="mt-2">
                 The written steps: open the unpaid invoice, tap Pay Now, then Tap to Pay on iPhone. Hold the iPhone
                 still and ask the customer to hold their contactless card, iPhone or Apple Watch to the top of it
-                until the screen shows Done. If Apple asks for a PIN, hand the customer the iPhone — the PIN screen
+                until the screen shows Done. If Apple asks for a PIN, hand the customer the iPhone. The PIN screen
                 has accessibility options for anyone who can&apos;t see it. A card that won&apos;t read can pay by
                 the pay link instead.
               </p>
@@ -430,8 +437,8 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
         // once (the server keeps the once; a second press is answered with the date).
         <div className="space-y-2 border-t border-slate-100 pt-4">
           <p>
-            Tell the crew, once, by push: every active owner, admin and office phone gets Apple&rsquo;s own line —
-            &ldquo;Accept in-person payments with Tap to Pay on iPhone.&rdquo; — and where to find it. It goes out one time per company.
+            Tell the crew, once, by push: every active owner, admin and office phone gets Apple&rsquo;s own line
+            (&ldquo;Accept in-person payments with Tap to Pay on iPhone.&rdquo;) and where to find it. It goes out one time per company.
           </p>
           <Button size="sm" variant="outline" onClick={() => void onAnnounce()} disabled={announce.busy}>
             {announce.busy && <Loader2 className="animate-spin" />}
