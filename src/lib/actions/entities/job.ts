@@ -114,7 +114,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Schedule job on a day",
     description:
-      "Schedule a job's work window (YYYY-MM-DD). Pass date alone for a one-day job, or date + end for a MULTI-DAY span — 'schedule the Miller job June 10 through 13'. Replaces the planned window, EXCEPT days already worked (time logged or a visit held) — those stay on the calendar as history; when the result's `recorded` says which days were kept, tell the user.",
+      "Schedule a job's work window (YYYY-MM-DD). Pass date alone for a one-day job, or date + end for a MULTI-DAY span — 'schedule the Miller job June 10 through 13'. Replaces the planned window, EXCEPT days already worked (time logged, or a visit closed out as done) — those stay on the calendar as history, while the job's listed start date follows the new window. When the result's `recorded` says which days were kept, tell the user.",
     input: z.object({ id: z.string(), date: z.string(), end: z.string().optional() }),
     auth: "staff", // jobs are staff-only in RLS — the registry gate now matches (Phase C)
     effect: "write",
@@ -134,7 +134,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Move job to a day",
     description:
-      "Move ONE day/range of a job's schedule to a new day, keeping its length and every other scheduled range — use for 'push the Chmura job to Friday'. (job.scheduleDay REPLACES the planned schedule; this SHIFTS one range. Either way, days already worked stay on the calendar.) to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
+      "Move ONE day/range of a job's schedule to a new day, keeping every other scheduled range — use for 'push the Chmura job to Friday'. (job.scheduleDay REPLACES the planned schedule; this SHIFTS one range.) Days of that range already worked (time logged, or a visit closed out as done) stay where they happened and only the days not yet worked move, so a 3-day range with 2 days worked lands as 1 day; `recorded` says so — tell the user. to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
     input: z.object({
       id: z.string(),
       to_date: z.string(),

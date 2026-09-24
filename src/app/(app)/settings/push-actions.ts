@@ -106,13 +106,21 @@ export async function saveDeviceToken(
   // is invisible to anything that prunes or counts by org. The org is the signed-in person's own
   // (read through RLS, their own row), and it rides on the re-point too: a phone handed to a
   // person in another org has to move orgs with them.
-  const { data: me } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
+  // An org we couldn't read is left OFF the claim, never written as null: a re-point would
+  // otherwise blank a row whose org is already right (0294 fixed them). The sender keys on
+  // profile_id, so a missing org here costs housekeeping, not an alert.
+  const { data: me, error: meErr } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (meErr) reportError("saveDeviceToken.org", meErr, { background: !!opts?.background });
   const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
 
   const svc = createServiceClient();
   const claim = {
     profile_id: user.id,
-    org_id: orgId,
+    ...(orgId ? { org_id: orgId } : {}),
     platform: "ios",
     user_agent: userAgent ?? null,
     // Null: the sender probes production, then sandbox, and writes back whichever answered.
