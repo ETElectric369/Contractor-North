@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
+import { standDownReaderForVoice } from "@/lib/native-tap";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import * as speech from "@/lib/voice";
@@ -1105,6 +1106,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       if (synth) { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; synth.speak(w); }
     } catch {}
     unlockAudio();
+    void standDownReaderForVoice(); // the Tap to Pay reader and Nort's voice don't share the phone (native-tap)
     setVoiceMode(true);
     if (confirmRef.current) confirmListen(); // a proposal is waiting → hear yes/no
     else startMic();

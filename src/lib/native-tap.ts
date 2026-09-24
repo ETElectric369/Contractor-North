@@ -1736,6 +1736,21 @@ export async function cancelTapPayment(): Promise<void> {
   }
 }
 
+/**
+ * NORT'S VOICE AND THE READER (Erik's phone, 2026-09-24). Every spoken reply crackled in the app
+ * and played clean in Safari, and neither releasing the mic nor swapping the player changed it.
+ * A live device console during a three-turn conversation showed the app doing nothing native while
+ * Nort talked, except that the Tap to Pay reader had connected in the background a moment before
+ * and stayed connected; the crackle was first heard the night the listener fix made that connect
+ * reliable. So while Nort's voice is on, the reader stands down. It costs nothing: Pay Now connects
+ * on demand (connectIfNeeded) and the warm-up reconnects on the next return to the foreground.
+ * Never mid-payment or mid-setup.
+ */
+export async function standDownReaderForVoice(): Promise<void> {
+  if (!plugin() || inFlight || enabling) return;
+  await disconnectTapReader();
+}
+
 /** Let go of the reader (Settings, sign-out). Resolves immediately if nothing is connected. */
 export async function disconnectTapReader(): Promise<void> {
   const p = plugin();

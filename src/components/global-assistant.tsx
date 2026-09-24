@@ -8,6 +8,7 @@ import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "l
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { createClient } from "@/lib/supabase/client";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
+import { standDownReaderForVoice } from "@/lib/native-tap";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
 
@@ -86,6 +87,7 @@ export function GlobalAssistant() {
       if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
     } catch {}
     unlockAudio();
+    void standDownReaderForVoice(); // the Tap to Pay reader and Nort's voice don't share the phone (native-tap)
     // START THE MIC RIGHT HERE, INSIDE THE TAP. iOS only honors SpeechRecognition.start() inside the
     // user gesture — starting it later (the old post-mount effect) was the "mic never starts on iPhone"
     // bug. The chat panel (mounted next / already mounted) picks up the transcript via the shared service.
