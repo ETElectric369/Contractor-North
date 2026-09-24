@@ -141,6 +141,9 @@ export const AGENT_READ_ALLOWED = new Set<string>([
   // hands back the link that opens Split This Shift filled in. It writes nothing; a person taps
   // Split Shift. A new write power would have to clear the agent-write freeze; a fill does not.
   "time.splitEntry",
+  // The entry ids time.splitEntry and time.fixEntry need: nothing else Nort can call returns a
+  // finished entry's id (hours_summary gives totals, who_is_clocked_in only open rows). Staff only.
+  "time.listEntries",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

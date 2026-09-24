@@ -927,6 +927,15 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                   if (res.ok && (actionName === "quote.create" || actionName === "quote.convertToJob")) {
                     emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", cleared: true }) + DRAFT_CLOSE);
                   }
+                  // A FILL ALWAYS REACHES A BUTTON (fill vs execute). A registry READ that hands back
+                  // a card (time.splitEntry: the Split This Shift sheet, filled in) is projected here,
+                  // by the route, rather than trusting the model to follow up with show_card: a
+                  // spoken "tap Split Shift" with nothing on the glass to tap is a dead end. Same
+                  // href clamp as show_card.
+                  const card = (res.data as { card?: unknown } | undefined)?.card;
+                  if (res.ok && readOnlyAction && card && typeof card === "object") {
+                    emit(HUD_OPEN + JSON.stringify(sanitizeHudCard(card)) + HUD_CLOSE);
+                  }
                 }
               }
             } else {

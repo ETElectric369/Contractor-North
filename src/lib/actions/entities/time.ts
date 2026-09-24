@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, switchJob, updateTimeEntry } from "@/app/(app)/timeclock/actions";
-import { splitClock, splitPreview } from "@/lib/split-preview";
+import { clockInputValue, splitClock, splitPreview } from "@/lib/split-preview";
 import { hoursBetween } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
-import { tzNaiveIsoToUtc } from "@/lib/tz";
+import { todayStrInTz, tzDayStartUtc, tzNaiveIsoToUtc } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 
 /**
@@ -340,6 +340,71 @@ export const timeActions: Record<string, ActionDef> = {
     },
   },
   /**
+   * WHICH SHIFT DID THEY MEAN? A read of one day's finished and running entries, with the ids the
+   * split and fix verbs need. Before this, "the last hour of Brian's Tuesday was Herringbone" had no
+   * way to an entry id: hours_summary gives totals and who_is_clocked_in only open rows, so Nort
+   * would have had to guess a uuid. Office only; it writes nothing.
+   */
+  "time.listEntries": {
+    name: "time.listEntries",
+    group: "time",
+    label: "List timecard entries",
+    description:
+      "Read the timecard entries for ONE day, optionally for one person: each entry's id (what time.splitEntry and time.fixEntry need), its local clock-in and clock-out (HH:MM, company timezone, and a naive local YYYY-MM-DDTHH:MM you can pass straight back as `at`), job, lunch minutes and hours. day = YYYY-MM-DD in the company's timezone (work out 'Tuesday' yourself); person = a crew member's name or id, omitted for everyone. Call it BEFORE time.splitEntry or time.fixEntry whenever you don't already have the entry id; if more than one entry could match, ask which.",
+    input: z.object({
+      day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+      person: z.string().nullable().optional(),
+    }),
+    auth: "staff", // everyone's timecards are office reading
+    effect: "read",
+    handler: async (i) => {
+      const supabase = await createClient();
+      const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+      const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone || "America/Los_Angeles";
+      const start = tzDayStartUtc(i.day, tz);
+      const nextDay = new Date(Date.parse(`${i.day}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+      const end = tzDayStartUtc(nextDay, tz);
+      if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
+        return { ok: false, missingFields: ["day"], error: "Which day?" };
+      }
+      let q = supabase
+        .from("time_entries")
+        .select("id, profile_id, clock_in, clock_out, status, lunch_minutes, job_id, job_code, job:job_id(job_number, name), profiles(full_name)")
+        .gte("clock_in", start.toISOString())
+        .lt("clock_in", end.toISOString())
+        .order("clock_in", { ascending: true })
+        .limit(60);
+      if (i.person) {
+        const who = await resolveProfileId(supabase, i.person);
+        if ("error" in who) return { ok: false, error: who.error };
+        if (who.id) q = q.eq("profile_id", who.id);
+      }
+      const { data, error } = await q;
+      if (error) return { ok: false, error: "I couldn't read the timecards just now." };
+      // The naive local form time.splitEntry and time.fixEntry take back as input.
+      const naive = (iso: string) => `${todayStrInTz(tz, new Date(iso))}T${clockInputValue(iso, tz)}`;
+      const entries = ((data ?? []) as any[]).map((e) => {
+        const prof = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
+        const job = Array.isArray(e.job) ? e.job[0] : e.job;
+        return {
+          entry_id: e.id,
+          person: prof?.full_name ?? null,
+          job: job ? `${job.job_number ?? ""}${job.name ? ` ${job.name}` : ""}`.trim() : null,
+          job_id: e.job_id ?? null,
+          job_code: e.job_code ?? null,
+          status: e.status,
+          clock_in: clockInputValue(e.clock_in, tz),
+          clock_in_local: naive(e.clock_in),
+          clock_out: e.clock_out ? clockInputValue(e.clock_out, tz) : null,
+          clock_out_local: e.clock_out ? naive(e.clock_out) : null,
+          lunch_minutes: Number(e.lunch_minutes) || 0,
+          hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out, Number(e.lunch_minutes) || 0) : null,
+        };
+      });
+      return { ok: true, data: { day: i.day, timezone: tz, entries } };
+    },
+  },
+  /**
    * SPLIT A FINISHED SHIFT: FILL THE SHEET, NEVER SAVE IT (fill vs execute). Nort works out ONE cut
    * (a clock time and the job the second part goes to) and hands back the link that opens Split
    * This Shift already filled in; a person reads it and taps Split Shift. Nothing is written here.
@@ -349,7 +414,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Split a shift",
     description:
-      "Propose ONE cut of a finished timecard entry into two ('the last hour of Brian's Tuesday was Herringbone', 'Erik switched to the Miller job at 2'). This does NOT save anything: it checks the cut and returns an href that opens the Split This Shift sheet filled in, and the person taps Split Shift. Pass entry_id (from listed entries), `at` = the split time as a NAIVE local time (YYYY-MM-DDTHH:MM, company timezone, no Z), and the SECOND part's job_id (uuid, resolve names with list_jobs) or job_code (Drive/Shop). If the user gave HOURS instead of a time ('the last hour'), work the clock time out from the entry's clock-in/clock-out yourself and SAY the time back. A three-job day is two cuts: propose one, let them split it, then the next. After this returns, show_card with its href so they can tap it, and speak its `speak` line.",
+      "Propose ONE cut of a finished timecard entry into two ('the last hour of Brian's Tuesday was Herringbone', 'Erik switched to the Miller job at 2'). This does NOT save anything: it checks the cut and returns an href that opens the Split This Shift sheet filled in, and the person taps Split Shift. Pass entry_id (from time.listEntries), `at` = the split time as a NAIVE local time (YYYY-MM-DDTHH:MM, company timezone, no Z), and the SECOND part's job_id (uuid, resolve names with list_jobs) or job_code (Drive/Shop). If the user gave HOURS instead of a time ('the last hour'), work the clock time out from the entry's clock-in/clock-out yourself and SAY the time back. A three-job day is two cuts: propose one, let them split it, then the next. The sheet's card is put on the screen for you; speak its `speak` line.",
     input: z
       .object({
         entry_id: z.string().uuid(),
@@ -396,9 +461,23 @@ export const timeActions: Record<string, ActionDef> = {
       const who = (Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name ?? "the shift";
       const first = e.job?.name || e.job?.job_number || "its job";
       const second = jobName ?? code ?? "the new job";
+      const href = `/timecards?${qs.toString()}`;
       return {
         ok: true,
-        data: { href: `/timecards?${qs.toString()}`, left_hours: p.left.hours, right_hours: p.right.hours },
+        data: {
+          href,
+          left_hours: p.left.hours,
+          right_hours: p.right.hours,
+          // THE FILL ALWAYS REACHES A BUTTON: the chat route projects this card itself, so the
+          // sheet is one tap away whether or not the model remembers show_card.
+          card: {
+            kind: "task",
+            title: `Split ${who}'s shift at ${splitClock(p.at, tz)}`,
+            scope: `${first} ${p.left.hours} h, then ${second} ${p.right.hours} h. Same ${p.shiftHours} h in total.`,
+            href,
+            next: "Open it and tap Split Shift to save it.",
+          },
+        },
         speak: `Ready to split ${who}'s shift at ${splitClock(p.at, tz)}: ${splitClock(e.clock_in, tz)} to ${splitClock(p.at, tz)} on ${first} (${p.left.hours} h), then ${splitClock(p.at, tz)} to ${splitClock(e.clock_out, tz)} on ${second} (${p.right.hours} h). Same ${p.shiftHours} h in total. Tap Split Shift to save it.`,
       };
     },

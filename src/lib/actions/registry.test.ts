@@ -44,7 +44,7 @@ describe("action registry — time entity (Fault #3)", () => {
 
   it("listActions can surface the whole time group", () => {
     const ids = listActions({ group: "time" }).map((a) => a.name).sort();
-    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut", "time.fixEntry", "time.splitEntry", "time.switchJob"]);
+    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut", "time.fixEntry", "time.listEntries", "time.splitEntry", "time.switchJob"]);
   });
 
   // 0288: a day on two jobs is two entries. Clock-out asks for no breakdown; a live switch is a
@@ -74,6 +74,19 @@ describe("action registry — time entity (Fault #3)", () => {
     expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30", job_id: "j" }).success).toBe(true);
     expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30", job_code: "DRIVE" }).success).toBe(true);
     expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30" }).success).toBe(false); // which job?
+  });
+
+  it("time.listEntries is the staff read that hands Nort the entry ids the split and fix verbs need", () => {
+    const a = REGISTRY["time.listEntries"];
+    expect(a.auth).toBe("staff");
+    expect(a.effect).toBe("read");
+    expect(AGENT_WRITE_ALLOWED.has("time.listEntries")).toBe(false);
+    expect(agentWriteToolsForRole("owner").tools.map((t) => t.name)).toContain("time__listEntries");
+    expect(agentWriteToolsForRole("tech").tools.map((t) => t.name)).not.toContain("time__listEntries");
+    expect(a.input.safeParse({ day: "2001-07-14", person: "Brian" }).success).toBe(true);
+    expect(a.input.safeParse({ day: "2001-07-14" }).success).toBe(true);
+    expect(a.input.safeParse({ day: "Tuesday" }).success).toBe(false); // the model works the date out
+    expect(REGISTRY["time.splitEntry"].description).toMatch(/time\.listEntries/);
   });
 
   it("time.clockIn validates a minimal (jobless) clock-in", () => {
