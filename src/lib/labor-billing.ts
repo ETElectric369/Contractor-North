@@ -168,28 +168,62 @@ export function computeJobLaborBilling(
   return { lines, total };
 }
 
+/**
+ * profile_pay (0215/0216), row for row, for a server that has no signed-in user. The view is
+ * `where org_id = auth_org_id()`, so the SERVICE ROLE reads nothing from it and every rate would be
+ * $0. The customer portal prices the work not on a bill yet exactly as the importer will, as the
+ * service role, so it reads profiles in the one org the portal link names and applies the view's
+ * own CASE: an owner is paid by draw (hourly 0) and bills at bill_rate, else his hourly figure.
+ * Keep in step with the view.
+ */
+export function payViewRow(p: { id: string; role?: string | null; hourly_rate?: number | string | null; bill_rate?: number | string | null }) {
+  const owner = p.role === "owner";
+  const hourly = p.hourly_rate == null ? null : Number(p.hourly_rate);
+  const bill = p.bill_rate == null ? null : Number(p.bill_rate);
+  return { id: p.id, hourly_rate: owner ? 0 : hourly, bill_rate: owner ? (bill ?? hourly) : bill };
+}
+
 /** The reads computeJobLaborBilling needs, run against a job_id. Centralised so import and
- *  financials fetch identical data. */
+ *  financials fetch identical data.
+ *
+ *  `scope.orgId`: the caller is the SERVICE ROLE (the customer portal), which RLS does not narrow.
+ *  Every read is then pinned to that org by hand, and the rates come from payViewRow. A signed-in
+ *  caller leaves it out and RLS scopes the reads as it always has. */
 export async function fetchJobLaborRows(
   supabase: any,
   jobId: string,
+  scope?: { orgId: string },
 ): Promise<{ jobEntries: any[]; nonBillableCodes: Set<string> }> {
+  const orgId = scope?.orgId ?? null;
+  let entriesQ = supabase
+    .from("time_entries")
+    // job_code on the ENTRY: an un-billable code (SHOP, PTO) is read here and nowhere else.
+    // `id` (0255): the row's identity is what a labor line CLAIMS. The projection law: the fix
+    // for "which hours did that invoice cover" was a select list.
+    .select("id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
+    .eq("job_id", jobId)
+    .eq("status", "closed");
+  // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all
+  // three consumers (the job hub, the invoice import and the progress draw) cannot disagree.
+  let codesQ = supabase.from("job_codes").select("code").eq("billable", false);
+  if (orgId) {
+    entriesQ = entriesQ.eq("org_id", orgId);
+    codesQ = codesQ.eq("org_id", orgId);
+  }
   const [{ data: jobEntries }, { data: codes }, { data: payRows }] = await Promise.all([
-    supabase
-      .from("time_entries")
-      // job_code on the ENTRY: an un-billable code (SHOP, PTO) is read here and nowhere else.
-      // `id` (0255): the row's identity is what a labor line CLAIMS. The projection law: the fix
-      // for "which hours did that invoice cover" was a select list.
-      .select("id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
-      .eq("job_id", jobId)
-      .eq("status", "closed"),
-    // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all
-    // three consumers (the job hub, the invoice import and the progress draw) cannot disagree.
-    supabase.from("job_codes").select("code").eq("billable", false),
+    entriesQ,
+    codesQ,
     // BILL RATES COME FROM THE STAFF-SCOPED VIEW (0215/0216), not from an embed on profiles:
     // those columns are revoked from the authenticated role. The view returns the whole org to
-    // office staff and nothing but your own row to a tech.
-    supabase.from("profile_pay").select("id, hourly_rate, bill_rate"),
+    // office staff and nothing but your own row to a tech. The service role reads the table in
+    // the one org it was handed, through the view's own rule (payViewRow).
+    orgId
+      ? supabase
+          .from("profiles")
+          .select("id, role, hourly_rate, bill_rate")
+          .eq("org_id", orgId)
+          .then((r: { data: any[] | null }) => ({ data: (r.data ?? []).map(payViewRow) }))
+      : supabase.from("profile_pay").select("id, hourly_rate, bill_rate"),
   ]);
   const rateById = new Map<string, { hourly_rate: number | null; bill_rate: number | null }>();
   for (const r of (payRows ?? []) as any[]) if (r?.id) rateById.set(String(r.id), r);

@@ -200,6 +200,8 @@ export async function claimedSourcesOnJob(
   jobId: string | null,
   exceptInvoiceId?: string | null,
   candidateIds?: Iterable<string>,
+  /** The service role (customer portal): pin every read to this org by hand; RLS does not. */
+  scope?: { orgId: string },
 ): Promise<ClaimedSources> {
   type Read = { data: ClaimRow[]; error: unknown | null };
   const readJob = async (withSourceIds: boolean): Promise<Read> => {
@@ -209,6 +211,7 @@ export async function claimedSourcesOnJob(
       .select(`id, invoice_number, status, created_at, job_id, invoice_items(import_key${withSourceIds ? ", source_ids" : ""})`)
       .eq("job_id", jobId)
       .neq("status", "void");
+    if (scope?.orgId) q = q.eq("org_id", scope.orgId);
     if (exceptInvoiceId) q = q.neq("id", exceptInvoiceId);
     const { data, error } = await q;
     return { data: (data ?? []) as ClaimRow[], error };
@@ -222,6 +225,7 @@ export async function claimedSourcesOnJob(
         .select("import_key, source_ids, invoices!inner(id, invoice_number, status, created_at, job_id, jobs(job_number))")
         .overlaps("source_ids", ids.slice(i, i + OVERLAP_CHUNK))
         .neq("invoices.status", "void");
+      if (scope?.orgId) q = q.eq("org_id", scope.orgId);
       if (exceptInvoiceId) q = q.neq("invoice_id", exceptInvoiceId);
       const { data, error } = await q;
       if (error) return { data: [], error };
@@ -405,6 +409,42 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
 }
 
 /**
+ * THE WORK NOT ON A BILL YET, AS THE CUSTOMER WOULD BE BILLED FOR IT (customer portal, 2026-09-24).
+ *
+ * The office's UnbilledWork carries what the office needs to decide: the receipts AT COST, what a
+ * person took off them as the company's own, the markup, how many rows another invoice holds. None
+ * of that is the customer's. This is the same arithmetic cut down to what the next bill would say:
+ * each person's hours and dollars at the rate they bill, the materials at the customer's price,
+ * returns as a credit at the customer's price, and the total. Nothing is re-derived here, so the
+ * portal's figure is the figure the "Create Invoice" door would draft (or one of them is a defect).
+ * A running shift is never in it: fetchJobLaborRows reads closed time only.
+ *
+ * An explicit allowlist, not a spread of UnbilledWork minus some keys: a field added to the
+ * office's shape later must not reach a customer by default.
+ */
+export type CustomerUnbilled = {
+  hours: number;
+  laborByPerson: { name: string; hours: number; amount: number }[];
+  laborAmount: number;
+  /** Materials not billed yet, at the customer's price. */
+  materials: number;
+  /** Supplier returns not credited yet, at the customer's price, as a positive figure. */
+  returnsCredit: number;
+  /** laborAmount + materials − returnsCredit. Below zero when only a credit is pending. */
+  total: number;
+};
+export function customerUnbilled(u: UnbilledWork): CustomerUnbilled {
+  return {
+    hours: u.hours,
+    laborByPerson: u.laborByPerson.map((p) => ({ name: p.name, hours: p.hours, amount: p.amount })),
+    laborAmount: u.laborAmount,
+    materials: u.billsBilled,
+    returnsCredit: u.returnsCredit,
+    total: u.total,
+  };
+}
+
+/**
  * A JOB'S LIVE RECEIPTS, WITH THE LINES THAT DECIDE WHO PAYS FOR THEM.
  *
  * THE PROJECTION LAW, on the read every "what is still open to bill" figure hangs off. `billable`
@@ -430,16 +470,20 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
 export async function readJobBillsWithLines(
   supabase: { from: (t: string) => any },
   jobId: string,
+  /** The service role: pin the read to this org by hand (see unbilledWorkForJob). */
+  scope?: { orgId: string },
 ): Promise<{ data: (MaterialBill & { id: string })[]; error: unknown | null }> {
   // id + po_id feed the claim key and the shared PO-supersede rule; the line columns feed
   // billableBillCost. `amount` on the line is the supplier's own extension - see billLineCost.
-  const read = (withLineStates: boolean) =>
-    supabase
+  const read = (withLineStates: boolean) => {
+    const q = supabase
       .from("bills")
       // `description` matches a supplier return to the purchase it reverses (returnLinesAgainstPurchases).
       .select(`id, amount, po_id, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
       .eq("job_id", jobId)
       .is("superseded_by_bill_id", null);
+    return scope?.orgId ? q.eq("org_id", scope.orgId) : q;
+  };
   let res = await read(true);
   if (res.error && isMissingBillLineState(res.error)) res = await read(false);
   return { data: (res.data ?? []) as (MaterialBill & { id: string })[], error: res.error ?? null };
@@ -455,15 +499,31 @@ function isMissingBillLineState(err: unknown): boolean {
 /** The fetcher — the ONE call a page, an action or Nort makes. Same resolvers as the importers
  *  (fetchJobLaborRows, customerLaborRateForJob, customerMaterialMarkupForJob), so the figure it
  *  returns is the figure a draft built from it will carry. */
-export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string): Promise<UnbilledWork> {
+export async function unbilledWorkForJob(
+  supabase: SupabaseClient,
+  jobId: string,
+  /**
+   * THE SERVICE ROLE PINS ITS OWN ORG. A signed-in caller is scoped by RLS, which is why this
+   * fetcher could read "the" organization with limit(1). The customer portal calls it as the
+   * service role, after portal_job_view has proved the job is the link's customer's: then every
+   * read below is pinned to that org by hand (organizations by id, job codes, rates, bills,
+   * orders, claims), because the service role would otherwise read the first org it found.
+   */
+  scope?: { orgId: string },
+): Promise<UnbilledWork> {
+  const orgId = scope?.orgId ?? null;
+  let posQ = supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId);
+  if (orgId) posQ = posQ.eq("org_id", orgId);
   const [labor, { data: org }, levelRate, { data: pos }, billsRead] = await Promise.all([
-    fetchJobLaborRows(supabase, jobId),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    fetchJobLaborRows(supabase, jobId, scope),
+    orgId
+      ? supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
+      : supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     customerLaborRateForJob(supabase, jobId),
     // id + status + po_id feed the shared live-PO rule (see livePurchaseOrders) — and id is the claim key.
-    supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
+    posQ,
     // The receipts WITH their lines — see readJobBillsWithLines.
-    readJobBillsWithLines(supabase, jobId),
+    readJobBillsWithLines(supabase, jobId, scope),
   ]);
   // A LOST RECEIPT READ IS NOT AN EMPTY JOB. Reporting $0 of material because a query failed is a
   // money statement nobody made, and this figure is what the draw gate bills from; the claim read
@@ -475,7 +535,7 @@ export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string
   // another job (moved since) is still seen as claimed. The markup resolver rides along.
   const candidates = [...laborRowIds(labor), ...((pos ?? []) as { id: string }[]).map((p) => String(p.id)), ...bills.map((b) => String(b.id))];
   const [claims, markupPct] = await Promise.all([
-    claimedSourcesOnJob(supabase, jobId, null, candidates),
+    claimedSourcesOnJob(supabase, jobId, null, candidates, scope),
     customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent),
   ]);
   return computeUnbilledWork({

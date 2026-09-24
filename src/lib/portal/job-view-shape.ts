@@ -1,0 +1,250 @@
+/**
+ * THE CUSTOMER'S JOB PAGE, AS DATA: the one place the portal's raw read becomes what the page may
+ * render. Pure (no I/O), so the allowlist is a unit test, not a promise.
+ *
+ * portal_job_view (0301) returns building blocks: the gate already ran inside it (the link is on,
+ * the job is this customer's in this org), and it never selected a cost, a pay rate, a note, GPS, a
+ * supplier's paper or another customer's anything. But it also returns what the SERVER needs and
+ * the customer does not: the org/job/customer ids, the storage paths of the files, the labor
+ * entries behind each line, the invoice ids that tie lines to bills. This module keeps the page to
+ * an explicit list of fields, built field by field (never a spread of a database row), so a column
+ * added to a table or to the function later cannot reach a customer by default. The test pins the
+ * keys.
+ *
+ * Files: a pick's picture or PDF and a shared photo leave here only as the short-lived signed URL
+ * the server minted for exactly that path; the path itself never does. A path that is not where
+ * that kind of file must live (a pick outside <org>/picks/<job>/, a photo outside <org>/<job>/) is
+ * dropped even though the database already refuses to store one, because this is the last door.
+ */
+import { buildJobLedger, type JobLedger, type LedgerInvoiceIn, type LedgerLineIn, type LedgerPaymentIn, type LedgerStretchIn } from "./stretch-ledger";
+import { accentHex, getOrgSettings } from "@/lib/org-settings";
+import { invoiceBalance } from "@/lib/invoice-math";
+import { todayStrInTz } from "@/lib/tz";
+import type { CustomerUnbilled } from "@/lib/unbilled-work";
+
+/** What portal_job_view returns (0301), as the server reads it. */
+export type PortalJobRaw = {
+  scope: { org_id: string; job_id: string; customer_id: string };
+  org: {
+    name: string | null;
+    logo_url: string | null;
+    phone: string | null;
+    email: string | null;
+    license: string | null;
+    brand_color: string | null;
+    glass_tint: string | null;
+    timezone: string | null;
+  } | null;
+  customer: { name: string | null; company_name: string | null } | null;
+  job: {
+    id: string;
+    name: string | null;
+    job_number: string | null;
+    status: string | null;
+    address: string | null;
+    unit: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+  };
+  billing: { billing_type: string | null; quote_statuses: (string | null)[]; milestones: number } | null;
+  stretches: LedgerStretchIn[] | null;
+  invoices: (LedgerInvoiceIn & { invoice_kind?: string | null; public_token: string | null; doc: PublicInvoiceDoc | null })[] | null;
+  lines: LedgerLineIn[] | null;
+  payments: LedgerPaymentIn[] | null;
+  picks: RawPick[] | null;
+  photos: { id: string; file_path: string | null; taken_at: string | null }[] | null;
+};
+
+/** The invoice document exactly as /i receives it from public_invoice (the same projection,
+ *  invoice_document_projection). Rendered by the same InvoiceDocument, never re-shaped here. */
+export type PublicInvoiceDoc = {
+  invoice: Record<string, unknown>;
+  items: Record<string, unknown>[];
+  payments: { amount: number; paid_at: string; method: string | null }[];
+  customer: Record<string, unknown> | null;
+  site_candidates: unknown[];
+  org: Record<string, unknown> | null;
+};
+
+type RawPick = {
+  id: string;
+  category: string | null;
+  brand: string | null;
+  name: string | null;
+  code: string | null;
+  location: string | null;
+  note: string | null;
+  color_hex: string | null;
+  link_url: string | null;
+  file_path: string | null;
+  file_kind: string | null;
+  updated_at: string | null;
+};
+
+export type PortalInvoice = {
+  number: string | null;
+  status: string;
+  isDraft: boolean;
+  total: number;
+  amountPaid: number;
+  balance: number;
+  /** The /i/<token> pay door: only for a bill that was sent. A draft has none (no Pay button). */
+  payToken: string | null;
+  doc: PublicInvoiceDoc | null;
+};
+export type PortalPick = {
+  id: string;
+  category: string;
+  brand: string | null;
+  name: string | null;
+  code: string | null;
+  location: string | null;
+  note: string | null;
+  colorHex: string | null;
+  linkUrl: string | null;
+  file: { url: string; kind: "image" | "pdf" } | null;
+};
+export type PortalPhoto = { id: string; url: string; takenOn: string | null };
+
+export type PortalJobView = {
+  org: { name: string; logoUrl: string | null; phone: string | null; email: string | null; license: string | null; accent: string };
+  customer: { name: string | null; companyName: string | null };
+  job: {
+    id: string;
+    name: string;
+    number: string | null;
+    status: string;
+    site: { address: string | null; unit: string | null; city: string | null; state: string | null; zip: string | null };
+  };
+  /** When this was read, and the org's day for it: the page says "as of". */
+  asOf: string;
+  asOfDay: string;
+  timezone: string;
+  /** A bill on the job is still a draft: "Running total, not a bill yet", and no Pay button for it. */
+  running: boolean;
+  ledger: JobLedger;
+  invoices: PortalInvoice[];
+  picks: PortalPick[];
+  photos: PortalPhoto[];
+  /** The work not on a bill yet, at the customer's price. null on a job that bills a contract or draws. */
+  unbilled: CustomerUnbilled | null;
+};
+
+const SENT = new Set(["sent", "partial", "paid", "overdue"]);
+const HEX = /^#[0-9a-f]{6}$/i;
+const HTTPS = /^https:\/\/[^\s]+$/i;
+const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+const num = (v: unknown): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+/** Is this pick file where a pick file for this job must live? */
+export function isPickPath(path: string | null | undefined, orgId: string, jobId: string): path is string {
+  return typeof path === "string" && path.startsWith(`${orgId}/picks/${jobId}/`) && !path.includes("..");
+}
+/** Is this photo filed under this job's own folder? */
+export function isJobPhotoPath(path: string | null | undefined, orgId: string, jobId: string): path is string {
+  return typeof path === "string" && path.startsWith(`${orgId}/${jobId}/`) && !path.includes("..");
+}
+
+/** The storage paths the server has to sign for this page, and nothing else. */
+export function portalPathsToSign(raw: PortalJobRaw): string[] {
+  const { org_id: orgId, job_id: jobId } = raw.scope;
+  const out: string[] = [];
+  for (const p of raw.picks ?? []) if (isPickPath(p.file_path, orgId, jobId) && (p.file_kind === "image" || p.file_kind === "pdf")) out.push(p.file_path);
+  for (const p of raw.photos ?? []) if (isJobPhotoPath(p.file_path, orgId, jobId)) out.push(p.file_path);
+  return out;
+}
+
+export function shapePortalJob(
+  raw: PortalJobRaw,
+  extra: { signed: ReadonlyMap<string, string>; unbilled: CustomerUnbilled | null; now: Date },
+): PortalJobView {
+  const { org_id: orgId, job_id: jobId } = raw.scope;
+  const tz = getOrgSettings({ timezone: raw.org?.timezone ?? undefined }).timezone;
+  const invoicesRaw = raw.invoices ?? [];
+
+  const ledger = buildJobLedger({
+    stretches: raw.stretches ?? [],
+    invoices: invoicesRaw,
+    lines: raw.lines ?? [],
+    payments: raw.payments ?? [],
+    tz,
+  });
+
+  const invoices: PortalInvoice[] = invoicesRaw.map((i) => {
+    const sent = SENT.has(i.status);
+    return {
+      number: i.invoice_number ?? null,
+      status: i.status,
+      isDraft: i.status === "draft",
+      total: num(i.total),
+      amountPaid: num(i.amount_paid),
+      balance: invoiceBalance(num(i.total), num(i.amount_paid)),
+      payToken: sent ? str(i.public_token) : null,
+      doc: i.doc ?? null,
+    };
+  });
+
+  const picks: PortalPick[] = (raw.picks ?? []).map((p) => {
+    const kind = p.file_kind === "image" || p.file_kind === "pdf" ? p.file_kind : null;
+    const url = kind && isPickPath(p.file_path, orgId, jobId) ? extra.signed.get(p.file_path) : undefined;
+    return {
+      id: p.id,
+      category: str(p.category) ?? "Pick",
+      brand: str(p.brand),
+      name: str(p.name),
+      code: str(p.code),
+      location: str(p.location),
+      note: str(p.note),
+      colorHex: p.color_hex && HEX.test(p.color_hex) ? p.color_hex : null,
+      linkUrl: p.link_url && HTTPS.test(p.link_url) ? p.link_url : null,
+      file: url && kind ? { url, kind } : null,
+    };
+  });
+
+  const photos: PortalPhoto[] = [];
+  for (const p of raw.photos ?? []) {
+    if (!isJobPhotoPath(p.file_path, orgId, jobId)) continue;
+    const url = extra.signed.get(p.file_path);
+    if (!url) continue;
+    photos.push({ id: p.id, url, takenOn: p.taken_at ? todayStrInTz(tz, new Date(p.taken_at)) : null });
+  }
+
+  const org = raw.org;
+  return {
+    org: {
+      name: str(org?.name) ?? "Your contractor",
+      logoUrl: str(org?.logo_url),
+      phone: str(org?.phone),
+      email: str(org?.email),
+      license: str(org?.license),
+      accent: accentHex(str(org?.glass_tint)),
+    },
+    customer: { name: str(raw.customer?.name), companyName: str(raw.customer?.company_name) },
+    job: {
+      id: raw.job.id,
+      name: str(raw.job.name) ?? "Your job",
+      number: str(raw.job.job_number),
+      status: str(raw.job.status) ?? "in_progress",
+      site: {
+        address: str(raw.job.address),
+        unit: str(raw.job.unit),
+        city: str(raw.job.city),
+        state: str(raw.job.state),
+        zip: str(raw.job.zip),
+      },
+    },
+    asOf: extra.now.toISOString(),
+    asOfDay: todayStrInTz(tz, extra.now),
+    timezone: tz,
+    running: invoices.some((i) => i.isDraft),
+    ledger,
+    invoices,
+    picks,
+    photos,
+    unbilled: extra.unbilled,
+  };
+}

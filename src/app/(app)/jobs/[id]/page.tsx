@@ -37,6 +37,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { JobPhotos } from "./job-photos";
 import { JobNotes } from "./job-notes";
@@ -327,8 +328,9 @@ export default async function JobDetailPage({
   // contract. On any of those, "Create Invoice for $X" would not draft $X, so the Overview carries
   // no UnbilledCard at all (a quoted job's "time since INV-061" would also be every hour ever
   // worked, since no labor line ever claims them) and the page skips the read.
-  const liveQuotes = (quotes ?? []).filter((q: any) => q.status !== "declined" && q.status !== "expired");
-  const billsActuals = j.billing_type === "tm" && liveQuotes.length === 0 && (paymentMilestones ?? []).length === 0;
+  // One rule with the customer portal (jobBillsItsActuals), so the customer is shown "not on a
+  // bill yet" on exactly the jobs the office is.
+  const billsActuals = jobBillsItsActuals(j.billing_type, (quotes ?? []).map((q: any) => q.status), (paymentMilestones ?? []).length);
   const [
     { data: canonicalItems },
     { data: permits },

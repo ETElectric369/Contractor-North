@@ -1,0 +1,70 @@
+import { describe, it, expect } from "vitest";
+import { computeUnbilledWork, customerUnbilled, foldClaims } from "@/lib/unbilled-work";
+import { payViewRow } from "@/lib/labor-billing";
+import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
+
+/**
+ * THE WORK NOT ON A BILL YET, AS THE CUSTOMER SEES IT: the office's arithmetic, cut to the fields a
+ * customer may read. The office shape carries the receipts at cost, what was taken off them as the
+ * company's own and the markup; none of it may reach the portal.
+ */
+describe("customerUnbilled", () => {
+  const u = computeUnbilledWork({
+    claims: foldClaims([], true),
+    jobEntries: [
+      { id: "t1", clock_in: "2026-09-24T16:00:00Z", clock_out: "2026-09-24T20:10:00Z", lunch_minutes: 0, profiles: { id: "b", full_name: "Brian", bill_rate: 50 } },
+    ],
+    nonBillableCodes: new Set(),
+    defaultRate: 100,
+    levelRate: null,
+    pos: [],
+    bills: [{ id: "b1", amount: 100, po_id: null, bill_line_items: [] } as never],
+    markupPct: 15,
+  });
+
+  it("is the office figure, at the customer's prices", () => {
+    const c = customerUnbilled(u);
+    expect(c).toEqual({
+      hours: 4.25,
+      laborByPerson: [{ name: "Brian", hours: 4.25, amount: 212.5 }],
+      laborAmount: 212.5,
+      materials: 115,
+      returnsCredit: 0,
+      total: 327.5,
+    });
+  });
+
+  it("carries none of the office's cost fields", () => {
+    const c = customerUnbilled(u);
+    expect(Object.keys(c).sort()).toEqual(["hours", "laborAmount", "laborByPerson", "materials", "returnsCredit", "total"]);
+    const text = JSON.stringify(c);
+    for (const banned of ["billsAmount", "excluded", "markupPct", "returnsAmount", "claimed", "lastInvoice", "poCovered", "schemaReady", "rate"]) {
+      expect(text).not.toContain(banned);
+    }
+    expect(u.billsAmount).toBe(100); // the office still sees its cost
+  });
+});
+
+describe("payViewRow is profile_pay, row for row, for the service role", () => {
+  it("an owner is paid by draw and bills at his bill rate, else his hourly figure", () => {
+    expect(payViewRow({ id: "o", role: "owner", hourly_rate: 80, bill_rate: 100 })).toEqual({ id: "o", hourly_rate: 0, bill_rate: 100 });
+    expect(payViewRow({ id: "o", role: "owner", hourly_rate: 80, bill_rate: null })).toEqual({ id: "o", hourly_rate: 0, bill_rate: 80 });
+  });
+  it("anyone else keeps both figures as stored", () => {
+    expect(payViewRow({ id: "t", role: "tech", hourly_rate: "32.50", bill_rate: null })).toEqual({ id: "t", hourly_rate: 32.5, bill_rate: null });
+    expect(payViewRow({ id: "t", role: "office", hourly_rate: null, bill_rate: "65" })).toEqual({ id: "t", hourly_rate: null, bill_rate: 65 });
+  });
+});
+
+describe("jobBillsItsActuals: the Unbilled card's rule, shared with the portal", () => {
+  it("a T&M job with no live quote and no schedule bills its actuals", () => {
+    expect(jobBillsItsActuals("tm", [], 0)).toBe(true);
+    expect(jobBillsItsActuals("tm", ["declined", "expired"], 0)).toBe(true);
+  });
+  it("a quote, a schedule or a fixed job bills something else", () => {
+    expect(jobBillsItsActuals("tm", ["accepted"], 0)).toBe(false);
+    expect(jobBillsItsActuals("tm", ["draft"], 0)).toBe(false);
+    expect(jobBillsItsActuals("tm", [], 2)).toBe(false);
+    expect(jobBillsItsActuals("fixed", [], 0)).toBe(false);
+  });
+});
