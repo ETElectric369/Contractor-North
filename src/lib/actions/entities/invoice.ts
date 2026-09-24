@@ -15,6 +15,7 @@ import {
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
 import { paymentMethodLabel } from "@/lib/payment-method";
+import { localDay, orgTimezone } from "@/lib/org-local-time";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -236,7 +237,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "payment",
     label: "Record a payment",
     description:
-      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the Jones job paid me $3,000 by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, transfer, venmo, zelle or other. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
+      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the Jones job paid me $3,000 by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, transfer, venmo, zelle or other. paid_at is the DAY the money came in, YYYY-MM-DD in the company's local calendar; omit it for today. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
     input: z.object({
       invoice_id: z.string(),
       amount: z.number(),
@@ -249,12 +250,21 @@ export const invoiceActions: Record<string, ActionDef> = {
     confirm: "financial",
     describe: (i) => `Record a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount} against this invoice — say yes to confirm.`,
     handler: async (i) => {
+      // recordPayment reads paid_at as a bare YYYY-MM-DD and quietly stamps NOW on anything else,
+      // so "they paid last Tuesday" sent as "2026-09-15T00:00:00Z" was recorded as today. Bring a
+      // date-time down to its company-local day first; a string with no date in it is an error.
+      let paidAt: string | null = null;
+      if (i.paid_at) {
+        const needsTz = String(i.paid_at).trim().length > 10;
+        paidAt = localDay(i.paid_at, needsTz ? await orgTimezone(await createClient()) : "UTC");
+        if (!paidAt) return { ok: false, error: `I couldn't read "${i.paid_at}" as a date. Pass YYYY-MM-DD.` };
+      }
       const r = await recordPayment({
         invoice_id: i.invoice_id,
         amount: i.amount,
         method: i.method ?? "check",
         note: i.note ?? "",
-        paid_at: i.paid_at ?? null,
+        paid_at: paidAt,
       });
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: `Recorded a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount}.` };
