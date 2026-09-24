@@ -176,6 +176,16 @@ export function setResultHandler(cb: ResultCb | null) {
  *  AFTER the reply, so this is mostly a safety net. */
 export function setMuted(b: boolean) {
   muted = b;
+  // CLEAN VOICE IN THE SHELL (Erik, 2026-09-24: "still crackling ... less though"). A mic held open
+  // with echo cancellation keeps iOS in its voice-call audio mode, which runs Nort's spoken reply
+  // through call processing: a crackle every half second on every reply, and the same interruption
+  // that left the next turn on a muted track. So in the app the mic is RELEASED while Nort thinks
+  // and speaks, and the re-arm afterwards opens it fresh (startListening finds no stream and asks
+  // again; the shell grants that without a tap, proven by cn-v972's reopen). The cost is talk-over
+  // barge-in, which needs the mic during playback: analyserRms() now answers null then, and the
+  // monitor never interrupts. Stop still cuts Nort off. The web keeps the old behaviour, because
+  // Safari may refuse a mic request that isn't inside a tap.
+  if (b && !active && stream && isNativeShell()) dropCapture();
 }
 
 function pickMime(): string {
