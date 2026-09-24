@@ -168,18 +168,19 @@ export function escapeLike(input: string | undefined | null): string {
   return (input ?? "").replace(/[\\%_]/g, "\\$&");
 }
 
-/** Format a US phone number progressively: "(530) 933-6686". */
+/** Format a US phone number progressively: "(530) 933-6686".
+ *
+ *  A leading US country code ("+1 (916) 992-4711", "1-916-992-4711", "19169924711") is DROPPED,
+ *  not kept: Nort saved Tom Goodman as "1 (916) 992-4711" (2026-09-24) because this formatter
+ *  used to print the 1 back out, so the same number read two ways across the book. No US area
+ *  code starts with 1, so eleven digits led by a 1 is always the country code. */
 export function formatPhone(input: string | null | undefined): string {
   let digits = (input ?? "").replace(/\D/g, "").slice(0, 11);
-  let country = "";
-  if (digits.length === 11 && digits.startsWith("1")) {
-    country = "1 ";
-    digits = digits.slice(1);
-  }
+  if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
   if (digits.length === 0) return "";
-  if (digits.length < 4) return `${country}(${digits}`;
-  if (digits.length < 7) return `${country}(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `${country}(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
+  if (digits.length < 4) return `(${digits}`;
+  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6, 10)}`;
 }
 
 /** Title-case a string ("dallas" → "Dallas"); good enough for city names. */

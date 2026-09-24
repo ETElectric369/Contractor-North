@@ -281,7 +281,7 @@ export async function POST(req: Request) {
   {
     const tz = orgS.timezone;
     const stamp = new Date().toLocaleString("en-US", { timeZone: tz, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
-    volatilePrompt += `\n\nRIGHT NOW: ${stamp} (${tz}). Today is ${todayStrInTz(tz)} — derive EVERY date/time you pass to a tool ('today', 'tomorrow', 'Friday', 'right now', 'in an hour') from this, never from memory.`;
+    volatilePrompt += `\n\nRIGHT NOW: ${stamp} (${tz}). Today is ${todayStrInTz(tz)} — derive EVERY date/time you pass to a tool ('today', 'tomorrow', 'Friday', 'right now', 'in an hour') from this, never from memory. Pass times as this company's LOCAL wall-clock time (YYYY-MM-DDTHH:MM, no Z, no offset); the app converts. When a write's result carries \`recorded\`, that is what was stored: confirm from it, and if its time differs from what the user asked, say so instead of confirming.`;
   }
   // HOW THIS PERSON WANTS TO BE TALKED TO (0183). PER-PERSON, so it belongs in the VOLATILE block —
   // putting it in the cached prefix would key the cache per user instead of per org/role and throw

@@ -12,7 +12,7 @@ export const workOrderActions: Record<string, ActionDef> = {
     group: "workorder",
     label: "Create work order",
     description:
-      "Open a WORK ORDER — the field crew's instruction sheet — e.g. 'create a work order to swap the panel on the Miller job'. Pass a title (required) and optional description, job_id (resolve with list_jobs — the customer is inherited from it), assigned_to (a user id), status (default draft), and scheduled_for (an ISO datetime). Returns the new work order's id.",
+      "Open a WORK ORDER — the field crew's instruction sheet — e.g. 'create a work order to swap the panel on the Miller job'. Pass a title (required) and optional description, job_id (resolve with list_jobs — the customer is inherited from it), assigned_to (a user id), status (default draft), and scheduled_for (the company's LOCAL wall-clock time, YYYY-MM-DDTHH:MM, no Z, no offset; the app converts). Returns the new work order's id.",
     input: z.object({
       title: z.string().min(1),
       description: z.string().nullable().optional(),
@@ -39,7 +39,7 @@ export const workOrderActions: Record<string, ActionDef> = {
     group: "workorder",
     label: "Edit work order",
     description:
-      "Edit a WORK ORDER's core fields — title, description, job_id (customer follows the job), assigned_to, scheduled_for (ISO datetime). Resolve the work order's id first and pass ONLY the fields to change (an omitted field is left alone; an explicit null clears one). Reversible field edit.",
+      "Edit a WORK ORDER's core fields — title, description, job_id (customer follows the job), assigned_to, scheduled_for (company-local YYYY-MM-DDTHH:MM, no Z, no offset; the app converts). Resolve the work order's id first and pass ONLY the fields to change (an omitted field is left alone; an explicit null clears one). Reversible field edit.",
     // A true PATCH: title used to be required and the handler dropped every omitted
     // field from the FormData, which the old updateWorkOrder then WROTE as null —
     // wiping the description/assignee/schedule on any partial edit.

@@ -5,8 +5,23 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { WORK_ORDER_STATUSES } from "@/lib/statuses";
+import { localToInstant, orgTimezone } from "@/lib/org-local-time";
 
 export type Result = { ok: boolean; error?: string; id?: string };
+
+/** "Scheduled for" as the instant to store. The form's datetime-local posts a NAIVE
+ *  "2026-09-25T10:00" and `new Date()` on the server read it as UTC, so a 10 AM work order was
+ *  stored for 3 AM Pacific (the same bug as Nort's appointments, 2026-09-24). Naive = the org's
+ *  wall clock; an explicit offset is kept; blank clears; junk is an error, not a RangeError 500. */
+async function scheduledInstant(
+  supabase: Parameters<typeof orgTimezone>[0],
+  raw: FormDataEntryValue | null,
+): Promise<{ iso: string | null } | { error: string }> {
+  const v = String(raw ?? "").trim();
+  if (!v) return { iso: null };
+  const r = localToInstant(v, await orgTimezone(supabase));
+  return "error" in r ? { error: r.error } : { iso: r.iso };
+}
 
 export async function createWorkOrder(formData: FormData): Promise<Result> {
   const ctx = await requireStaff();
@@ -17,7 +32,8 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
   if (!title) return { ok: false, error: "Title is required." };
 
   const jobId = emptyToNull(formData.get("job_id"));
-  const scheduled = String(formData.get("scheduled_for") ?? "");
+  const sched = await scheduledInstant(supabase, formData.get("scheduled_for"));
+  if ("error" in sched) return { ok: false, error: sched.error };
 
   // Inherit the customer from the chosen job, if any.
   let customerId: string | null = null;
@@ -39,7 +55,7 @@ export async function createWorkOrder(formData: FormData): Promise<Result> {
       customer_id: customerId,
       status: String(formData.get("status") ?? "draft"),
       assigned_to: emptyToNull(formData.get("assigned_to")),
-      scheduled_for: scheduled ? new Date(scheduled).toISOString() : null,
+      scheduled_for: sched.iso,
       created_by: userId,
     })
     .select("id")
@@ -147,8 +163,9 @@ export async function updateWorkOrder(id: string, formData: FormData): Promise<R
   }
   if (formData.has("assigned_to")) clean.assigned_to = emptyToNull(formData.get("assigned_to"));
   if (formData.has("scheduled_for")) {
-    const scheduled = String(formData.get("scheduled_for") ?? "");
-    clean.scheduled_for = scheduled ? new Date(scheduled).toISOString() : null;
+    const sched = await scheduledInstant(supabase, formData.get("scheduled_for"));
+    if ("error" in sched) return { ok: false, error: sched.error };
+    clean.scheduled_for = sched.iso;
   }
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 

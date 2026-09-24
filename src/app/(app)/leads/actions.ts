@@ -668,7 +668,7 @@ export async function convertInquiry(
         type: inq.type ?? "residential",
         status: "active",
         email: inq.email,
-        phone: inq.phone,
+        phone: formatPhone(inq.phone) || null, // a web lead's phone arrives however they typed it
         // THE PERSON'S ADDRESS, not the site (0189) — one helper, both directions, so the write
         // side and this read side cannot drift into printing a home address as a job site.
         ...customerAddressFrom(inq),

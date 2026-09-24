@@ -26,6 +26,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "appointment.create",
   "appointment.update", // reschedule by voice (no cancel+recreate)
   "appointment.setStatus", // mark completed / cancelled
+  // Put a customer on a visit (2026-09-24, Tom Goodman: Nort offered "want me to link him?" with no
+  // verb to do it). The same tier-1 weight as appointment.create, which could already set
+  // customer_id at booking; the tool description makes it run only on the user's yes.
+  "appointment.linkCustomer",
   // Quotes are DRAFTS (reversible, reviewable, not sent, no money moved). The agent must
   // read the whole quote back + get a spoken "yes" before calling it — that conversational
   // confirm is enforced in the tool description, and saveQuote is staff-gated + audited.
