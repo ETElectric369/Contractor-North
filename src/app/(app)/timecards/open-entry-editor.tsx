@@ -21,6 +21,7 @@ export function OpenEntryEditor({
   tz,
   neighbors,
   initialSplit = null,
+  rebuiltFromOldSplit = false,
 }: {
   entry: { id: string } & Record<string, any>;
   jobCodes: JobCode[];
@@ -33,6 +34,7 @@ export function OpenEntryEditor({
   neighbors?: { prev?: SplitNeighbor | null; next?: SplitNeighbor | null } | null;
   /** ?split=1&at=…&job=…: open straight onto Split This Shift, filled in (Nort's fill). */
   initialSplit?: SplitPrefill | null;
+  rebuiltFromOldSplit?: boolean;
 }) {
   const searchParams = useSearchParams();
   if (searchParams.get("entry") !== entry.id) return null;
@@ -55,6 +57,7 @@ export function OpenEntryEditor({
       tz={tz}
       neighbors={neighbors}
       initialSplit={initialSplit}
+      rebuiltFromOldSplit={rebuiltFromOldSplit}
       initialOpen
       hideTrigger
       onClosed={stripParam}

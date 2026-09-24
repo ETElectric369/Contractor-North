@@ -384,7 +384,7 @@ export default async function JobDetailPage({
     // part started, and the "Switch here" confirm names now - clock_in as the outgoing hours.
     supabase
       .from("time_entries")
-      .select("id, clock_in, job_id, job:job_id(job_number, name)")
+      .select("id, clock_in, job_id, job_code, job:job_id(job_number, name)")
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
@@ -436,6 +436,7 @@ export default async function JobDetailPage({
         id: oe.id as string,
         clock_in: oe.clock_in as string,
         job_id: (oe.job_id ?? null) as string | null,
+        job_code: (oe.job_code ?? null) as string | null,
         jobLabel: oe.job ? jobLabel(oe.job) : null,
       }
     : null;
@@ -613,6 +614,24 @@ export default async function JobDetailPage({
   const empty = (label: string) => (
     <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
   );
+
+  // THE FIRST PIECE OF A SPLIT SAYS SO TOO. It keeps the shift's id and carries no split_from or
+  // split_how of its own (its children point at it), so on this page it read as an unexplained short
+  // day. One read: which of these entries have pieces cut from them, and whether any was rebuilt
+  // from an old split by 0289. The pieces may sit on other jobs, which is exactly why this is asked.
+  const entryIds = ((entries ?? []) as { id: string }[]).map((e) => e.id);
+  const splitParents = new Map<string, { converted: boolean }>();
+  if (entryIds.length) {
+    const { data: kids } = await supabase
+      .from("time_entries")
+      .select("split_from, split_how")
+      .in("split_from", entryIds);
+    for (const k of (kids ?? []) as { split_from: string | null; split_how: string | null }[]) {
+      if (!k.split_from) continue;
+      const cur = splitParents.get(k.split_from) ?? { converted: false };
+      splitParents.set(k.split_from, { converted: cur.converted || k.split_how === "converted" });
+    }
+  }
 
   // Time-tab serialization gate (same class as the gated techs select above):
   // `entries` keeps rate_override + the joined hourly_rate/bill_rate because the
@@ -975,9 +994,9 @@ export default async function JobDetailPage({
                     {e.job_code && <Badge tone="slate" className="ml-2">{e.job_code}</Badge>}
                     {/* A piece of a split shift says so: the rest of that shift is on another job's
                         page, and a row that looks like a short day with no reason is a question. */}
-                    {e.split_how === "converted" ? (
+                    {e.split_how === "converted" || splitParents.get(e.id)?.converted ? (
                       <Badge tone="blue" className="ml-2">Rebuilt From An Old Split</Badge>
-                    ) : e.split_from ? (
+                    ) : e.split_from || splitParents.has(e.id) ? (
                       <Badge tone="blue" className="ml-2">part of a split shift</Badge>
                     ) : null}
                   </div>
@@ -991,6 +1010,7 @@ export default async function JobDetailPage({
                       isStaff={viewerIsStaff}
                       jobCodesEnabled={jobCodesEnabled}
                       tz={tz}
+                      rebuiltFromOldSplit={!!splitParents.get(e.id)?.converted}
                     />
                   </div>
                 </li>

@@ -441,8 +441,26 @@ export default async function TimecardsPage({
   const neighborLabel = (r: any) => (r?.job ? jobLabel(r.job) : (r?.job_code ?? "no job"));
   const neighborsOf = (rows: any[], id: string) => {
     const n = splitNeighbors(rows, id);
-    const pack = (r: any) => (r ? { id: String(r.id), clock_in: String(r.clock_in), clock_out: String(r.clock_out), label: neighborLabel(r) } : null);
+    const pack = (r: any) =>
+      r
+        ? {
+            id: String(r.id),
+            clock_in: String(r.clock_in),
+            clock_out: String(r.clock_out),
+            label: neighborLabel(r),
+            // Join Back names whose job the hours land on, and its Undo cuts the shift back the way it was.
+            job_id: r.job_id ?? null,
+            job_code: r.job_code ?? null,
+            lunch_minutes: r.lunch_minutes ?? 0,
+            miles: r.miles ?? 0,
+          }
+        : null;
     return n.prev || n.next ? { prev: pack(n.prev), next: pack(n.next) } : null;
+  };
+  /** The first piece of a rebuilt split carries no split_how of its own; its family says it. */
+  const rebuiltOf = (rows: any[], id: string) => {
+    const key = splitFamilies(rows).get(id);
+    return !!key && familyWasConverted(rows, key);
   };
   const detailById = new Map<string, { controls: ReactNode }>();
   for (const e of weekRows) {
@@ -466,6 +484,7 @@ export default async function TimecardsPage({
             jobCodesEnabled={orgSettings.timeclock_job_codes}
             tz={tz}
             neighbors={neighborsOf(weekRows, String(e.id))}
+            rebuiltFromOldSplit={rebuiltOf(weekRows, String(e.id))}
           />
         </>
       ),
@@ -784,6 +803,14 @@ export default async function TimecardsPage({
       focusEntry = one as any;
     }
   }
+  // NORT'S FILL NAMES ITS JOB. time.splitEntry resolves any job the office can see, and the list
+  // above is only the 50 newest: without this the sheet's second part read "That job", and a person
+  // was asked to tap Split Shift without seeing whose job the hours were going to.
+  let focusJobs = (jobs ?? []) as { id: string; job_number: string; name: string }[];
+  if (focusEntry && splitParam === "1" && splitJobParam && !focusJobs.some((j) => j.id === splitJobParam)) {
+    const { data: fj } = await supabase.from("jobs").select("id, job_number, name").eq("id", splitJobParam).maybeSingle();
+    if (fj) focusJobs = [fj as { id: string; job_number: string; name: string }, ...focusJobs];
+  }
 
   return (
     <div>
@@ -914,11 +941,12 @@ export default async function TimecardsPage({
           key={focusEntry.id}
           entry={focusEntry}
           jobCodes={(jobCodes ?? []) as JobCode[]}
-          jobs={jobs ?? []}
+          jobs={focusJobs}
           members={members ?? []}
           jobCodesEnabled={orgSettings.timeclock_job_codes}
           tz={tz}
           neighbors={neighborsOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
+          rebuiltFromOldSplit={rebuiltOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
           /* Nort's fill (time.splitEntry): the sheet opens with its cut in it; a person taps Split Shift. */
           initialSplit={splitParam === "1" ? { at: splitAtParam ?? null, jobId: splitJobParam ?? null, code: splitCodeParam ?? null } : null}
         />

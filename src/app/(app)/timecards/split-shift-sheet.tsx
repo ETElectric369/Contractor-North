@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Coffee, Car, Scissors } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import {
 } from "@/lib/split-preview";
 import { formatDateTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
-import { splitTimeEntry, type SplitResult } from "../timeclock/actions";
+import { shiftClaim, splitTimeEntry, type SplitResult } from "../timeclock/actions";
 
 /** The columns of an entry the sheet reads. The edit modal's projection already carries all of them. */
 export type SplitSheetEntry = {
@@ -68,6 +68,8 @@ export function SplitShiftSheet({
   onSplit,
   prefill,
   action = splitTimeEntry,
+  claimLookup = shiftClaim,
+  knownClaim,
 }: {
   entry: SplitSheetEntry;
   jobs: JobOption[];
@@ -80,6 +82,10 @@ export function SplitShiftSheet({
   prefill?: SplitPrefill | null;
   /** The write. Injected only so a static preview can render the sheet without a server. */
   action?: typeof splitTimeEntry;
+  /** Which invoice bills this shift, read when the sheet opens. Injected for the static preview. */
+  claimLookup?: typeof shiftClaim;
+  /** The caller already knows which invoice bills this shift (null = none): no lookup is made. */
+  knownClaim?: { id: string; invoice_number: string | null } | null;
 }) {
   const firstAt = (prefill?.at && atFromClockTime(entry, clockInputValue(prefill.at, tz), tz)) || defaultSplitAt(entry, tz);
   const [hm, setHm] = useState(firstAt ? clockInputValue(firstAt, tz) : "");
@@ -92,6 +98,23 @@ export function SplitShiftSheet({
   const [error, setError] = useState<string | null>(null);
   const [invoiceHref, setInvoiceHref] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // CARRIED CLAIMS ARE STATED ON THE SHEET, BEFORE THE TAP. Which invoice bills this shift decides
+  // what a split may do: a part on the same job carries that claim, a part on another job is refused.
+  // The office reads that here, not in a toast after the sheet has gone.
+  const [holder, setHolder] = useState<{ id: string; invoice_number: string | null } | null>(knownClaim ?? null);
+  useEffect(() => {
+    if (knownClaim !== undefined) return;
+    let live = true;
+    claimLookup(entry.id)
+      .then((r) => {
+        if (live && r.ok) setHolder(r.holder);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [claimLookup, entry.id, knownClaim]);
 
   const at = atFromClockTime(entry, hm, tz);
   const preview = splitPreview(entry, at ?? "not a time", lunchOn, { milesOn, tz });
@@ -122,8 +145,15 @@ export function SplitShiftSheet({
   const nudge = (min: number) => {
     const base = at ?? firstAt;
     if (!base) return;
-    setHm(clockInputValue(nudgeSplitAt(entry, base, min), tz));
+    setError(null);
+    setHm(clockInputValue(nudgeSplitAt(entry, base, min, { lunchOn }), tz));
   };
+
+  // The same rule split_time_entry applies: the new part is "the same job" when it names the
+  // shift's own job (or, on a job-less shift, no job at all).
+  const sameJob = pick ? (kind === "job" ? val === entry.job_id : !entry.job_id) : null;
+  const holderName = holder ? (holder.invoice_number ?? "An invoice") : null;
+  const crossJobBlocked = !!holder && sameJob === false;
 
   function save() {
     setError(null);
@@ -146,6 +176,8 @@ export function SplitShiftSheet({
         return;
       }
       if (!res.ok) {
+        // Said beside the button that was tapped (the footer), not at the foot of a sheet taller than
+        // the phone, under a green "same as the shift" that made a refusal look like success.
         setError(res.error ?? "That split didn't save.");
         if (res.invoiceHref) setInvoiceHref(res.invoiceHref);
         return;
@@ -167,26 +199,39 @@ export function SplitShiftSheet({
         <div className="w-full space-y-2">
           {/* NOTHING SILENT: a greyed button has its reason right beside it, in the database's words,
               pinned with the button rather than somewhere up the scroll. */}
-          <p
-            className={`text-center text-sm ${
-              !preview.ok ? "text-amber-800" : preview.sameAsShift && pick ? "text-emerald-700" : "text-slate-500"
-            }`}
-            aria-live="polite"
-          >
-            {!preview.ok
-              ? (preview.problem ?? "Pick a split time inside the shift.")
-              : !pick
-                ? `Total ${hoursText(preview.totalHours)}, same as the shift. Pick a job for the second part.`
-                : preview.sameAsShift
-                  ? `Total ${hoursText(preview.totalHours)}, same as the shift`
-                  : `Total ${hoursText(preview.totalHours)} (the shift is ${hoursText(preview.shiftHours)})`}
-          </p>
+          {error ? (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700" role="alert" aria-live="assertive">
+              {error}
+              {invoiceHref && (
+                <Link href={invoiceHref} className="mt-1 flex min-h-[44px] items-center justify-center font-semibold text-red-800 underline">
+                  Open That Invoice
+                </Link>
+              )}
+            </div>
+          ) : (
+            <p
+              className={`text-center text-sm ${
+                !preview.ok || crossJobBlocked ? "text-amber-800" : preview.sameAsShift && pick ? "text-emerald-700" : "text-slate-500"
+              }`}
+              aria-live="polite"
+            >
+              {!preview.ok
+                ? (preview.problem ?? "Pick a split time inside the shift.")
+                : !pick
+                  ? `Total ${hoursText(preview.totalHours)}, same as the shift. Pick a job for the second part.`
+                  : crossJobBlocked
+                    ? `${holderName} bills this whole shift to ${leftLabel}, so the second part has to stay on ${leftLabel}.`
+                    : preview.sameAsShift
+                      ? `Total ${hoursText(preview.totalHours)}, same as the shift`
+                      : `Total ${hoursText(preview.totalHours)} (the shift is ${hoursText(preview.shiftHours)})`}
+            </p>
+          )}
           <div className="flex items-center justify-end gap-2">
             <ModalActions
               onCancel={onClose}
               onSave={save}
               saving={pending}
-              disabled={!preview.ok || !pick}
+              disabled={!preview.ok || !pick || crossJobBlocked}
               saveLabel="Split Shift"
             />
           </div>
@@ -215,6 +260,15 @@ export function SplitShiftSheet({
           </p>
         )}
 
+        {holder && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {`${holderName} bills this shift. A second part on the same job stays on ${holderName} and won't be billed again; a part on another job can't be split off until the shift comes off that invoice.`}
+            <Link href={`/billing/${holder.id}`} className="mt-1 flex min-h-[44px] items-center font-semibold underline">
+              Open That Invoice
+            </Link>
+          </div>
+        )}
+
         {/* ONE "SPLIT AT" TIME. Defaults to the middle, rounded to 15 minutes; the chips move it. */}
         <div>
           <Label htmlFor="split-at">Split At</Label>
@@ -226,7 +280,10 @@ export function SplitShiftSheet({
               id="split-at"
               type="time"
               value={hm}
-              onChange={(e) => setHm(e.target.value)}
+              onChange={(e) => {
+                setError(null);
+                setHm(e.target.value);
+              }}
               className="h-11 min-w-0 flex-1 text-center text-base"
             />
             <Button type="button" variant="outline" className="h-11 w-16 shrink-0" onClick={() => nudge(15)} aria-label="15 minutes later">
@@ -270,7 +327,15 @@ export function SplitShiftSheet({
                 aria-label="Search jobs"
                 className="h-11"
               />
-              <Select value={pick} onChange={(e) => setPick(e.target.value)} className="h-11 w-full" aria-label="Job for the second part">
+              <Select
+                value={pick}
+                onChange={(e) => {
+                  setError(null);
+                  setPick(e.target.value);
+                }}
+                className="h-11 w-full"
+                aria-label="Job for the second part"
+              >
                 <option value="">Pick A Job</option>
                 {pick.startsWith("job:") && !shownJobs.some((j) => `job:${j.id}` === pick) && rightLabel && (
                   <option value={pick}>{rightLabel}</option>
@@ -297,17 +362,6 @@ export function SplitShiftSheet({
             </div>
           </PieceCard>
         </div>
-
-        {error && (
-          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-            {invoiceHref && (
-              <Link href={invoiceHref} className="mt-1 flex min-h-[44px] items-center font-semibold text-red-800 underline">
-                Open That Invoice
-              </Link>
-            )}
-          </div>
-        )}
       </div>
     </Modal>
   );
