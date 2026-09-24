@@ -98,6 +98,30 @@ export function undoPatch(patch: InlinePatch, before: Pick<PriceItem, "buy_price
   return back;
 }
 
+/* ── the Add New Item form ──────────────────────────────────────────────────────────────────── */
+
+/** The add form's fields, as the Price List tab holds them. */
+export type AddItemDraft = { code: string; description: string; category: string; unit: string; buy: number; markup: number };
+
+export const EMPTY_ADD_ITEM: AddItemDraft = { code: "", description: "", category: "", unit: "ea", buy: 0, markup: 0 };
+
+/**
+ * True when the add form holds something typed. The form hides behind "Add New Item" (Justin,
+ * Vivian Builders, 2026-09-24: the tile should not sit over the book unless asked for), and
+ * closing it keeps what was typed — so the button has to SAY a draft is waiting behind it, or a
+ * half-typed item would sit there silently. `unit` counts only when moved off the "ea" default.
+ */
+export function addItemHasDraft(d: AddItemDraft): boolean {
+  return (
+    d.code.trim() !== "" ||
+    d.description.trim() !== "" ||
+    d.category.trim() !== "" ||
+    (d.unit.trim() !== "" && d.unit.trim() !== EMPTY_ADD_ITEM.unit) ||
+    (Number(d.buy) || 0) !== 0 ||
+    (Number(d.markup) || 0) !== 0
+  );
+}
+
 /* ── CSV → rows ─────────────────────────────────────────────────────────────────────────────── */
 
 export type CsvField = "code" | "description" | "category" | "supplier" | "unit" | "buy_price" | "markup_pct" | "kit" | "quantity";

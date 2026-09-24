@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Upload, Search, AlertTriangle, Archive, ArchiveRestore, Package } from "lucide-react";
+import { Plus, Trash2, Upload, Search, AlertTriangle, Archive, ArchiveRestore, Package, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -19,7 +19,7 @@ import { addItemsToKit } from "./kit-actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
 import { ImportCsvModal } from "./import-preview";
 import { PriceCell } from "./price-cell";
-import { patchForEdit, rowView, undoPatch, type InlineField, type InlinePatch, type PriceItem } from "./price-list-math";
+import { addItemHasDraft, patchForEdit, rowView, undoPatch, type InlineField, type InlinePatch, type PriceItem } from "./price-list-math";
 
 /** A table row: the item plus what the table computes from it. A type alias (not an interface)
  *  so it satisfies sortRows' Record<string, unknown> — the sort key is looked up by name. */
@@ -116,6 +116,13 @@ export function PriceListManager({
   const [markup, setMarkup] = useState(0);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // THE ADD FORM HIDES until asked for (Justin, Vivian Builders 2026-09-24: "that entire tile
+  // should be hidden unless somebody hits a button … that says Add New Item"). Closing only hides
+  // it: what was typed stays in the state above, and the toolbar says a draft is waiting.
+  const [addOpen, setAddOpen] = useState(false);
+  const addFirstField = useRef<HTMLInputElement>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const hasDraft = addItemHasDraft({ code, description: desc, category, unit, buy, markup });
   // KIT BUILDING FROM THE LIST (Erik): tick rows, name a kit (or pick one), Add to Kit.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [kitTarget, setKitTarget] = useState("");
@@ -257,8 +264,22 @@ export function PriceListManager({
     setAdding(false);
     if (!res.ok) { setError(res.error ?? "Could not save."); toast(res.error ?? "Could not save.", "error"); return; }
     setCode(""); setDesc(""); setCategory(""); setUnit("ea"); setBuy(0); setMarkup(0);
-    toast("Added", "success");
+    // The form stays open for the next one (a supply-house list goes in a row at a time): the
+    // toast names what went in, and focus goes back to the first field.
+    toast(`Added ${desc.trim()}`, "success");
+    addFirstField.current?.focus();
     startRefresh(() => router.refresh());
+  }
+
+  function openAdd() {
+    setAddOpen(true);
+    // After the card mounts. Code first: it is the first field, and the one read off a ticket.
+    requestAnimationFrame(() => addFirstField.current?.focus());
+  }
+  function closeAdd() {
+    setAddOpen(false);
+    setError(null);
+    requestAnimationFrame(() => addButton.current?.focus());
   }
 
   const visibleIds = groups.flatMap((g) => g.rows.map((r) => r.id));
@@ -300,26 +321,60 @@ export function PriceListManager({
 
   return (
     <div className="space-y-4">
-      {/* Add + import */}
-      <Card className="p-4">
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
-          <div><Label htmlFor="pl-code">Code</Label><Input id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
-          <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter") void add(); }} /></div>
-          <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
-          <div><Label htmlFor="pl-unit">Unit</Label><UnitSelect id="pl-unit" value={unit} onChange={setUnit} /></div>
-          <div><Label htmlFor="pl-buy">Cost $</Label><NumberInput id="pl-buy" value={buy} onValueChange={setBuy} /></div>
-          <div><Label htmlFor="pl-mk">Markup %</Label><NumberInput id="pl-mk" value={markup} onValueChange={setMarkup} placeholder={defaultMarkupPct > 0 ? `default ${defaultMarkupPct}` : undefined} /></div>
-        </div>
-        <div className="mt-3 flex items-center justify-between">
-          <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-            <Upload className="h-3.5 w-3.5" /> Import CSV
+      {/* The book's two doors in: one item by hand, or a whole supplier list. The hand form sits
+          behind its button so the page leads with the list, not a seven-field tile. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {!addOpen && (
+          <Button ref={addButton} onClick={openAdd} aria-expanded={false} aria-controls="pl-add-form">
+            <Plus className="h-4 w-4" /> Add New Item
           </Button>
-          <Button size="sm" onClick={() => void add()} disabled={adding || !desc.trim()}>
-            <Plus className="h-3.5 w-3.5" /> Add Item
-          </Button>
-        </div>
-      </Card>
+        )}
+        <Button variant="outline" onClick={() => setImportOpen(true)}>
+          <Upload className="h-4 w-4" /> Import CSV
+        </Button>
+        {!addOpen && hasDraft && (
+          <span className="text-xs text-slate-500">
+            The item you started{desc.trim() ? ` (${desc.trim().slice(0, 40)})` : ""} is kept. Add New Item picks it back up.
+          </span>
+        )}
+      </div>
+
+      {addOpen && (
+        <Card
+          id="pl-add-form"
+          className="p-4"
+          role="group"
+          aria-label="New Item"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              closeAdd();
+            }
+          }}
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">New Item</h3>
+            <Button variant="ghost" onClick={closeAdd} aria-expanded={true} aria-controls="pl-add-form" title="Close (Esc). Anything typed is kept.">
+              <X className="h-4 w-4" /> Close
+            </Button>
+          </div>
+          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
+            <div><Label htmlFor="pl-code">Code</Label><Input ref={addFirstField} id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
+            <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter") void add(); }} /></div>
+            <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
+            <div><Label htmlFor="pl-unit">Unit</Label><UnitSelect id="pl-unit" value={unit} onChange={setUnit} /></div>
+            <div><Label htmlFor="pl-buy">Cost $</Label><NumberInput id="pl-buy" value={buy} onValueChange={setBuy} /></div>
+            <div><Label htmlFor="pl-mk">Markup %</Label><NumberInput id="pl-mk" value={markup} onValueChange={setMarkup} placeholder={defaultMarkupPct > 0 ? `default ${defaultMarkupPct}` : undefined} /></div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+            {!desc.trim() && <span className="mr-auto text-xs text-slate-500">A description is all it needs to go in.</span>}
+            <Button onClick={() => void add()} disabled={adding || !desc.trim()}>
+              <Plus className="h-4 w-4" /> {adding ? "Adding…" : "Add Item"}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* THE BOOK TELLING YOU IT IS WRONG. Until cn-v696 the shared CSV parser read an inch mark
           (`4" RND LS`) as an opening quote, swallowed the comma after it, and shifted every
@@ -403,9 +458,26 @@ export function PriceListManager({
           <span className="hidden text-slate-400 sm:inline">Click a unit, cost, markup, margin or sell to change it · Enter saves · Esc cancels</span>
         </div>
         {shown === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-slate-400">
-            {items.length === 0 ? "No items yet. Add one, or import your CED price list via CSV." : showArchived && archivedRows.length === 0 ? "Nothing archived." : "No matches."}
-          </p>
+          items.length === 0 ? (
+            // An empty book leads with its two ways in, as buttons rather than a sentence about them.
+            <div className="flex flex-col items-center gap-3 px-4 py-10 text-center">
+              <p className="text-sm text-slate-500">No items yet. Add one by hand, or bring in your supplier&apos;s price list.</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {!addOpen && (
+                  <Button onClick={openAdd}>
+                    <Plus className="h-4 w-4" /> Add New Item
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => setImportOpen(true)}>
+                  <Upload className="h-4 w-4" /> Import CSV
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <p className="px-4 py-10 text-center text-sm text-slate-400">
+              {showArchived && archivedRows.length === 0 ? "Nothing archived." : "No matches."}
+            </p>
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1080px] text-sm">
