@@ -9,11 +9,13 @@
 // HARD BOUNDARY: detectors only DETECT — they never infer hours, dollars, or
 // clock-out times. Every finding is a question ("has no job", "no costs yet"),
 // never a filled-in answer.
+import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
 
-/** A same-day shift can run long, but nothing legit runs this long: an open entry
- *  past this many hours is flagged even when the UTC date-cut (below) misses an
- *  evening start. Can never flag a normal shift opened this morning. */
-export const OPEN_ENTRY_STALE_HOURS = 14;
+/** An open entry past this many hours is flagged even when the UTC date-cut (below)
+ *  misses an evening start. THE SHARED LONG-SHIFT RULE (lib/long-shift, 2026-09-24):
+ *  the inbox, the office's Stop The Clock sheet, the crew's Timeclock and the hourly
+ *  nudge all call a clock forgotten at the same hour, instead of 12 here, 14 there. */
+export const OPEN_ENTRY_STALE_HOURS = LONG_SHIFT_HOURS;
 /** How far back to look for closed-with-no-job entries (covers Fri → Mon). */
 export const STRAY_CLOSED_LOOKBACK_DAYS = 3;
 /** A job worked within this window with zero costs/materials = the Romex leak. */

@@ -4,6 +4,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
@@ -525,7 +526,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "needs_attention",
     description:
-      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone clocked in 12h+ — probably forgot to clock out). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone clocked in 10h+ — probably forgot to clock out; the office stops it at the real time with Stop The Clock on Timecards). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -2190,7 +2191,7 @@ export async function runDataTool(
 
         const clocks_running = await safe(async () => {
           const { data } = await supabase.from("time_entries").select("clock_in, profiles(full_name)")
-            .is("clock_out", null).lt("clock_in", iso(now - 12 * 36e5)).limit(20);
+            .is("clock_out", null).lte("clock_in", iso(now - LONG_SHIFT_HOURS * 36e5)).limit(20);
           return (data ?? []).map((e: any) => ({ person: e.profiles?.full_name ?? null, hours_running: Math.round((now - new Date(e.clock_in).getTime()) / 36e5) }));
         }, []);
 

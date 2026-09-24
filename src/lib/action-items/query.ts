@@ -8,7 +8,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
-import { formatCurrency, formatDateShort } from "@/lib/utils";
+import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import {
   NEEDS_RETURN_DAYS,
@@ -786,12 +786,17 @@ async function buildActionItems(ctx: {
       title: f.openStill
         ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
-      subtitle: f.openStill ? "Still clocked in — hours accruing" : "Closed hours nobody can bill",
+      // An open shift counts ZERO hours until somebody stops it (payroll never pays on a guess),
+      // so "hours accruing" was false. What is true: it is still running, and one tap stops it.
+      subtitle: f.openStill
+        ? `Still on the clock since ${formatTime(f.when, tz || undefined)}. Tap to stop it.`
+        : "Closed hours nobody can bill",
       who: f.name,
       when: f.when,
-      urgency: f.openStill ? 2 : 1, // a running clock is accruing payroll right now
+      urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      href: "/timecards",
+      // The open one lands on its own Stop The Clock sheet (/timecards finds the entry in any week).
+      href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
       affordances: AFFORDANCES.time_stray,
     });
   }

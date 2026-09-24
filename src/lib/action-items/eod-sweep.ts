@@ -20,10 +20,10 @@ import {
  * staff get one push naming the top gaps, deep-linked to /planner?debrief=1
  * (which auto-opens Nort's debrief).
  *
- * TIMING (v1): the daily cron runs each MORNING, so this sweeps YESTERDAY's gaps —
- * "close out your day" arrives with the day-ahead digest, before the new day buries
- * them. The evening SMS (/api/timeclock/eod-reminder) already chases techs same-day;
- * this is the OWNER's money view the morning after.
+ * TIMING: this rides the 6 PM run, /api/timeclock/eod-reminder (vercel.json "0 1 * * *",
+ * 01:00 UTC, which is 6 PM Pacific in summer and 5 PM in winter), so "close out your day"
+ * arrives the same evening the gaps were made, beside the tech-facing reminder that route
+ * also sends. It is the OWNER's money view of the day that just ended.
  *
  * The service client BYPASSES RLS: time_entries queries filter org_id explicitly,
  * and every job-level query is scoped through those org-owned job ids. Opt-out is
