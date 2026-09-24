@@ -39,7 +39,10 @@ export type VoiceBranch =
   | "transcribe-error"
   | "transcribe-unreachable"
   | "empty-transcript"
-  | "no-handler";
+  | "no-handler"
+  // Not a lost turn: the mic came back interrupted after a spoken reply (iOS mutes capture while
+  // audio plays) and was recovered. The detail says how, so the row shows which fix iOS needs.
+  | "capture-interrupted";
 
 export type VoiceSnapshot = {
   mimeType: string;

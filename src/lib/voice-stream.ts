@@ -122,7 +122,7 @@ function retryOrGiveUp(detail: string, branch: VoiceBranch, fact?: string) {
   report(branch, line, fact);
   if (retrying) {
     silentTurns++;
-    beginTurn();
+    nextTurn();
   }
 }
 
@@ -206,7 +206,7 @@ export function startListening(_lang?: string): boolean {
   silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
   reported.reset(); // …and is a new turn for reporting
   if (stream && audioCtx && analyser) {
-    beginTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
+    nextTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
     return true;
   }
   wantStream = true;
@@ -269,6 +269,95 @@ export function startListening(_lang?: string): boolean {
 // it. Same here — an ambient FLOOR learned from the first quiet moments and tracked slowly after,
 // speech = well above the floor, quiet = back near it (hysteresis, so the in-between band neither
 // counts as a pause nor cancels one), on a smoothed level so a single loud frame can't reset.
+/**
+ * THE SECOND TURN (Erik's phone, 2026-09-24, iOS 27). The first turn worked ("Hey, Nora" → "What's
+ * up, Erik?"); the next one recorded nine seconds of nothing. Its row said why: trackMuted true,
+ * audioCtx suspended, peak equal to the floor. Nort's spoken reply had played through the speaker,
+ * iOS interrupted capture while it did, and the re-arm then recorded from a mic iOS had muted and
+ * metered it on a context iOS had suspended. So a turn that reuses the stream checks first: give
+ * the track a moment to come back and resume the context, and if it is still dead, drop it and
+ * open the mic fresh. The shell grants the mic without a new tap (Capacitor's media-capture
+ * delegate answers .grant), so the conversation carries on by itself.
+ */
+function captureInterrupted(): boolean {
+  const track = stream?.getAudioTracks?.()[0];
+  if (!track || !audioCtx) return true;
+  return track.muted || track.readyState !== "live" || audioCtx.state !== "running";
+}
+
+function waitForUnmute(track: MediaStreamTrack, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (!track.muted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      track.removeEventListener("unmute", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    track.addEventListener("unmute", done);
+  });
+}
+
+/** Tear down the capture but keep the conversation: wantStream, the handler and the session stay. */
+function dropCapture() {
+  try {
+    if (recorder && recorder.state !== "inactive") {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.stop();
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    stream?.getTracks().forEach((t) => t.stop());
+  } catch {
+    /* ignore */
+  }
+  try {
+    void audioCtx?.close();
+  } catch {
+    /* ignore */
+  }
+  recorder = null;
+  stream = null;
+  analyser = null;
+  audioCtx = null;
+  chunks = [];
+}
+
+/** Record the next turn on the open stream, or get the mic back first if a reply interrupted it. */
+function nextTurn() {
+  if (!captureInterrupted()) {
+    beginTurn();
+    return;
+  }
+  void recoverCapture();
+}
+
+async function recoverCapture() {
+  const mine = session;
+  const track = stream?.getAudioTracks?.()[0];
+  const was = `${track?.muted ? "muted" : "unmuted"} ${track?.readyState ?? "no track"}, context ${audioCtx?.state ?? "none"}`;
+  status("Getting the mic back…");
+  if (track) await waitForUnmute(track, 1500);
+  try {
+    await audioCtx?.resume();
+  } catch {
+    /* a context iOS still holds interrupted refuses; the fresh mic below is the answer */
+  }
+  if (mine !== session || !wantStream) return; // Nort was closed while this waited
+  if (!captureInterrupted()) {
+    report("capture-interrupted", "Listening. Go ahead.", `recovered in place (was ${was})`);
+    beginTurn();
+    return;
+  }
+  // Still dead. Say so with the evidence while it still exists, then start over on a fresh mic.
+  report("capture-interrupted", "Getting the mic back…", `reopened the mic (was ${was}; now context ${audioCtx?.state ?? "none"})`);
+  dropCapture();
+  startListening();
+}
+
 const SPEAK_MIN_GATE = 0.012; // never call anything quieter than this "speech" (the old 0.01 gate + a hair)
 const QUIET_MIN_GATE = 0.008; // …and never count anything louder than this as a pause on a silent floor
 const FLOOR_CAP = 0.04; // the floor may not learn a shout as "the room" (AGC speech sits ~0.1–0.3)
