@@ -415,11 +415,14 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
       });
     });
 
-    it("join refuses pieces billed differently, paid differently, or not touching", async () => {
+    it("join refuses pieces billed differently, paid differently, not touching, or not from one shift", async () => {
       if (!needs("0288")) return;
       await step(async () => {
-        const a = await entry({ in: "2001-01-13T16:00:00Z", out: "2001-01-13T18:00:00Z" });
-        const b = await entry({ in: "2001-01-13T18:00:00Z", out: "2001-01-13T20:00:00Z", job: jobB });
+        // Two pieces of one shift, the first billed on a draft after the cut.
+        const a = await entry({ in: "2001-01-13T16:00:00Z", out: "2001-01-13T20:00:00Z" });
+        await as(staffId);
+        const b = (await rpc("split_time_entry", [a, "2001-01-13T18:00:00Z", jobB, null, null, null])).right_id;
+        await asServer();
         const gap = await entry({ in: "2001-01-13T21:00:00Z", out: "2001-01-13T22:00:00Z" });
         const inv = await invoice("draft", jobA);
         await line(inv.id, [a]);
@@ -428,10 +431,97 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect(billed?.message).toBe(`${inv.number} bills the first part and not the second, so joining them would make unbilled hours look billed.`);
         expect((await refusal(() => rpc("join_time_entries", [b, gap])))?.message).toMatch(/do not touch/);
         await asServer();
-        const p1 = await entry({ in: "2001-01-14T16:00:00Z", out: "2001-01-14T18:00:00Z", paidAt: "2001-01-20T00:00:00Z" });
-        const p2 = await entry({ in: "2001-01-14T18:00:00Z", out: "2001-01-14T20:00:00Z" });
+        const p1 = await entry({ in: "2001-01-14T16:00:00Z", out: "2001-01-14T20:00:00Z" });
+        await as(staffId);
+        const p2 = (await rpc("split_time_entry", [p1, "2001-01-14T18:00:00Z", jobB, null, null, null])).right_id;
+        await asServer();
+        await c.query("update public.time_entries set paid_at = '2001-01-20T00:00:00Z' where id = $1", [p1]);
         await as(staffId);
         expect((await refusal(() => rpc("join_time_entries", [p1, p2])))?.message).toMatch(/paid period/);
+        await asServer();
+
+        // Two ordinary entries that merely touch are not one shift: a join would take an original
+        // source id off a paid line that billed the second in its own right.
+        const o1 = await entry({ in: "2001-01-24T16:00:00Z", out: "2001-01-24T18:00:00Z" });
+        const o2 = await entry({ in: "2001-01-24T18:00:00Z", out: "2001-01-24T20:00:00Z" });
+        const paid = await invoice("paid", jobA);
+        const both = await line(paid.id, [o1, o2], 4);
+        await as(staffId);
+        const strangers = await refusal(() => rpc("join_time_entries", [o1, o2]));
+        await asServer();
+        expect(strangers?.message).toBe("Those two entries were not split from one shift, so they cannot be joined. Edit their times instead.");
+        expect(await lineIds(both)).toEqual([o1, o2]);
+        expect(await row(o2)).toBeDefined();
+      });
+    });
+
+    it("move refuses to hand billed hours to a part billed differently, and still moves between parts billed together", async () => {
+      if (!needs("0288")) return;
+      await step(async () => {
+        // A cross-job split, then the first part billed on a PAID invoice: sliding the cut earlier
+        // would move an hour INV paid for onto the unbilled part on job B, and the importer would
+        // bill it again.
+        const id = await entry({ in: "2001-01-26T16:00:00Z", out: "2001-01-26T22:00:00Z" });
+        await as(staffId);
+        const r = await rpc("split_time_entry", [id, "2001-01-26T19:00:00Z", jobB, null, null, null]);
+        await asServer();
+        const inv = await invoice("paid", jobA);
+        const l = await line(inv.id, [id], 3);
+        await as(staffId);
+        const out = await refusal(() => rpc("move_time_entry_cut", [id, r.right_id, "2001-01-26T18:00:00Z"]));
+        // The other way too: the unbilled part may not swallow billed time either.
+        const back = await refusal(() => rpc("move_time_entry_cut", [id, r.right_id, "2001-01-26T20:00:00Z"]));
+        await asServer();
+        expect(out?.message).toBe(
+          `${inv.number} (paid) bills the first part and not the second, so moving the split would hand billed hours to a part that could be billed again.`,
+        );
+        expect(out?.detail).toBe(`invoice:${inv.id}`);
+        expect(back?.message).toMatch(/bills the first part and not the second/);
+        expect(iso((await row(id)).clock_out)).toBe("2001-01-26T19:00:00.000Z");
+        expect(iso((await row(r.right_id)).clock_in)).toBe("2001-01-26T19:00:00.000Z");
+        expect(await lineIds(l)).toEqual([id]);
+
+        // A same-job split shares one claim: the typo fix still moves, and names the invoice.
+        const id2 = await entry({ in: "2001-01-27T16:00:00Z", out: "2001-01-27T22:00:00Z" });
+        const inv2 = await invoice("sent", jobA);
+        await line(inv2.id, [id2], 6);
+        await as(staffId);
+        const r2 = await rpc("split_time_entry", [id2, "2001-01-27T19:00:00Z", jobA, "TRIM", null, null]);
+        const m = await rpc("move_time_entry_cut", [id2, r2.right_id, "2001-01-27T20:00:00Z"]);
+        await asServer();
+        expect(m.moved).toBe(true);
+        expect(m.billed.map((b: any) => b.invoice_number)).toEqual([inv2.number, inv2.number]);
+        expect(await workedS([id2, r2.right_id])).toBe(6 * 3600);
+      });
+    });
+
+    it("a same-job split of a shift held by a void line and a live line carries the claim onto both", async () => {
+      if (!needs("0288")) return;
+      await step(async () => {
+        // Void-and-rebill leaves exactly this: the old void invoice and the live one both hold the shift.
+        const id = await entry({ in: "2001-01-29T16:00:00Z", out: "2001-01-29T22:00:00Z" });
+        const dead = await invoice("void", jobA);
+        const deadLine = await line(dead.id, [id], 6);
+        const live = await invoice("sent", jobA);
+        const liveLine = await line(live.id, [id], 6);
+        await as(staffId);
+        const r = await rpc("split_time_entry", [id, "2001-01-29T19:00:00Z", jobA, null, null, null]);
+        await asServer();
+        expect(await lineIds(deadLine)).toEqual([id, r.right_id]);
+        expect(await lineIds(liveLine)).toEqual([id, r.right_id]);
+        expect(r.carried.map((x: any) => x.status).sort()).toEqual(["sent", "void"]);
+      });
+    });
+
+    it("a forgotten-punch shift over 18 hours keeps its reason on every piece still over 18 hours", async () => {
+      if (!needs("0288")) return;
+      await step(async () => {
+        const id = await entry({ in: "2001-01-30T16:00:00Z", out: "2001-01-31T12:00:00Z", reason: "Forgot to clock out" });
+        await as(staffId);
+        const r = await rpc("split_time_entry", [id, "2001-01-31T11:00:00Z", jobB, null, null, null]);
+        await asServer();
+        expect((await row(id)).auto_closed_reason).toBe("Forgot to clock out");
+        expect(await workedS([id, r.right_id])).toBe(20 * 3600);
       });
     });
 
@@ -506,7 +596,9 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         const odd = await entry({ in: "2001-01-23T16:00:00Z", out: "2001-01-23T19:30:30Z", rate: 40, paidAt });
         await as(staffId);
         const cent = await refusal(() => rpc("split_time_entry", [odd, "2001-01-23T17:00:15Z", jobB, null, null, null]));
-        expect(cent?.message).toMatch(/rounding cent/);
+        expect(cent?.message).toBe(
+          "Cutting at 9:00am would change the paid hours on this shift by 0.01 h. Move the split a minute earlier or later.",
+        );
       });
     });
 
@@ -571,6 +663,38 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect(same?.message).toMatch(/already clocked into that job/);
         await asServer();
         expect((await row(r.entry_id)).job_id).toBe(jobC);
+      });
+    });
+
+    it("a lunch already on the running row moves to the new part when it does not fit the part before", async () => {
+      if (!needs("0288")) return;
+      await step(async () => {
+        const t = await one(
+          `select p.id from public.profiles p
+            where p.org_id = $1 and p.role = 'tech' and coalesce(p.active, true)
+              and not exists (select 1 from public.time_entries x where x.profile_id = p.id
+                               and (x.status = 'open' or coalesce(x.clock_out, now()) > now() - interval '30 minutes'))
+            limit 1`,
+          [orgId],
+        );
+        if (!t) return;
+        // The office set "his lunch was 45" on the open row; he switches 10 minutes in.
+        const open = (
+          await one(
+            `insert into public.time_entries (org_id, profile_id, job_id, clock_in, status, source, lunch_minutes)
+             values ($1, $2, $3, now() - interval '10 minutes', 'open', 'app', 45) returning id`,
+            [orgId, t.id, jobA],
+          )
+        ).id;
+        await as(t.id);
+        const r = await rpc("switch_job", [open, jobB, null, null]);
+        await asServer();
+        expect(r.mode).toBe("cut");
+        expect(num(r.lunch_moved)).toBe(45);
+        expect(num((await row(open)).lunch_minutes)).toBe(0);
+        expect(num((await row(r.entry_id)).lunch_minutes)).toBe(45);
+        // The closed part worked its whole 10 minutes, not less than nothing.
+        expect(num(r.closed_hours)).toBeGreaterThan(0.1);
       });
     });
 
@@ -750,6 +874,21 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
           one("select public.carve_legacy_allocations(false, $1::uuid[], $2::jsonb)", [[e], JSON.stringify({ [e]: [e] })]),
         );
         expect(wrongOrder?.message).toMatch(/names a row that is not on that entry/);
+      });
+    });
+
+    it("an entry whose rows cover its clock on another job or code takes that job, and its notes say so", async () => {
+      if (!needs("0289")) return;
+      await step(async () => {
+        // On job A, one code-only row covering the whole clock: the entry becomes that DRIVE time.
+        const e = await entry({ in: "2001-02-13T16:00:00Z", out: "2001-02-13T18:00:00Z", code: null });
+        await alloc(e, null, 2, 0, "DRIVE");
+        await one("select public.carve_legacy_allocations(false, $1::uuid[], null) as r", [[e]]);
+        const k = await one("select job_id, job_code, notes from public.time_entries where id = $1", [e]);
+        expect(k.job_id).toBeNull();
+        expect(k.job_code).toBe("DRIVE");
+        expect(k.notes).toBe("[Rebuilt from an old split: this time was recorded on DRIVE, not TEST split job A.]");
+        expect(await workedS([e])).toBe(2 * 3600);
       });
     });
 
