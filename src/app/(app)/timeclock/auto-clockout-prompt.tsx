@@ -13,6 +13,7 @@ import { atFromClockTime, clockInputValue, defaultSplitAt, splitClock, splitPrev
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
+import { useToast } from "@/components/toast";
 
 type JobOpt = {
   id: string;
@@ -61,6 +62,7 @@ export function AutoClockoutPrompt({
   tz?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
   // Save may only RAISE lunch on a closed shift (the 0143 guard), so a pre-existing 45-minute lunch
   // is the floor, never lowered here.
@@ -104,7 +106,9 @@ export function AutoClockoutPrompt({
         return setError("No connection — nothing was saved. Try again when you have a bar or two.");
       }
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      if (res.warning) setError(res.warning);
+      // The card leaves once it is answered, so what it has to say rides the toast, not the card.
+      toast(switched ? "Saved. The shift is split into 2 entries." : "Saved your hours.", "success");
+      if (res.warning) toast(res.warning, "info");
       router.refresh();
     });
   }
