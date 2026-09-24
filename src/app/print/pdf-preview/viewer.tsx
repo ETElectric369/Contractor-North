@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, Loader2, Printer, RefreshCw } from "lucide-react";
 import { BackLink } from "@/components/back-link";
+import { pdfPreviewBackHref } from "@/lib/pdf-preview-back";
 
 const MARGINS = [
   { v: 0.5, label: "Narrow · ½ in" },
@@ -139,25 +140,31 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     window.print();
   }
 
-  // `back` arrives from the query string: only an in-app PATH may be followed. A value like
-  // "//evil.tld" or "https://evil.tld" would turn our own Back button into an off-site
-  // redirect wearing the app's URL — and this page is reached straight from a money document.
-  const safeBack = back && /^\/(?!\/)/.test(back) ? back : "/";
+  // `back` arrives from the query string: only an in-app PATH may be followed (the guard lives in
+  // pdfPreviewBackHref). Without one, Back goes to the document's own page, never to "/".
+  const safeBack = pdfPreviewBackHref(doc, id, back);
 
   // GO BACK, don't push forward — via the house detector, not document.referrer (audit 7:
   // client-side navigation never sets referrer, so the cn-v730 heuristic was DEAD in the
   // installed PWA — the exact environment Erik reported the loop from). BackLinkTracker in the
   // root layout already tracks in-app navigation for every route including /print/*; BackLink
   // unwinds history when the arrival was in-app and falls back to the href on a cold open.
+  //
+  // THE TOOLBAR CLEARS THE STATUS BAR (be3dca81). /print sits outside the app shell, so when the
+  // iOS shell went full-bleed (cn-v917) this toolbar was left starting at y=0, and Back, the only
+  // way off this page (no dock, no topbar, no swipe-back in the shell), was drawn under the clock
+  // where a tap can't reach it. Erik had to kill the app. --sat is 0 in a browser and the PWA, so
+  // only the shell moves. Back is a full 44px target, and the controls on the right wrap onto
+  // their own row at phone width instead of running off the edge.
   return (
     <div className="pdf-preview-root flex h-screen flex-col bg-slate-200">
-      <div className="no-print flex flex-wrap items-center justify-between gap-3 border-b border-slate-300 bg-white px-4 py-2.5">
+      <div className="no-print flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-300 bg-white px-4 pb-2.5 pt-[max(0.625rem,var(--sat,0px))]">
         <BackLink
           fallback={safeBack}
           fallbackLabel="Back"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900"
+          className="-ml-2 inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-slate-600 hover:text-slate-900"
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <label htmlFor="pdf-margin" className="text-xs font-medium text-slate-500">Margins</label>
           <select
             id="pdf-margin"
