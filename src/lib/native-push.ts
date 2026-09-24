@@ -127,19 +127,51 @@ export function registerForNativePush(): Promise<
  * Tapping a notification should open the thing it is ABOUT. The APNs payload carries the same
  * `url` the Web Push service worker reads, so both transports land on the same screen.
  * Returns a teardown so the mounting component can clean up.
+ *
+ * REGISTERED AGAIN EVERY TIME THE APP COMES BACK ON SCREEN (2026-09-23). Capacitor empties every
+ * native plugin listener the moment a main-frame navigation STARTS, and one that then fails on
+ * bad signal leaves this page running with nothing listening (native-tap.ts armListeners has the
+ * whole story). A tapped notification then opened the app and went nowhere, and its target
+ * popped up later, out of context, whenever the next page load registered. Remove BEFORE add,
+ * so there is only ever one registration and a tap is never opened twice; and because the push
+ * plugin HOLDS a tap nobody was listening for, the add also delivers the tap that brought the
+ * app forward. Swaps take turns so two quick foregrounds can't both add.
  */
 export async function onNativePushTap(go: (url: string) => void): Promise<() => void> {
   const p = plugin();
   if (!p) return () => {};
-  try {
-    const sub = await p.addListener("pushNotificationActionPerformed", (a: any) => {
-      const url = a?.notification?.data?.url;
-      // Only ever navigate INSIDE the app: the payload is data from the network, and a bare
-      // href from it would let a malformed push send the crew to another origin.
-      if (typeof url === "string" && url.startsWith("/") && !url.startsWith("//")) go(url);
+  const onTap = (a: any) => {
+    const url = a?.notification?.data?.url;
+    // Only ever navigate INSIDE the app: the payload is data from the network, and a bare
+    // href from it would let a malformed push send the crew to another origin.
+    if (typeof url === "string" && url.startsWith("/") && !url.startsWith("//")) go(url);
+  };
+  let sub: { remove: () => Promise<void> } | null = null;
+  let live = true;
+  let swaps: Promise<void> = Promise.resolve();
+  const arm = (): Promise<void> => {
+    swaps = swaps.then(async () => {
+      const old = sub;
+      sub = null;
+      if (old) await old.remove().catch(() => {});
+      if (!live) return;
+      try {
+        sub = await p.addListener("pushNotificationActionPerformed", onTap);
+      } catch {
+        /* a bridge that refuses the listener can't be helped from here; the next foreground asks again */
+      }
     });
-    return () => void sub.remove();
-  } catch {
-    return () => {};
-  }
+    return swaps;
+  };
+  const onVisible = () => {
+    if (document.visibilityState === "visible") void arm();
+  };
+  await arm();
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    live = false;
+    document.removeEventListener("visibilitychange", onVisible);
+    // With `live` down the swap only removes: the last registration goes and nothing replaces it.
+    void arm();
+  };
 }
