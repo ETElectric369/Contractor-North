@@ -25,6 +25,10 @@ export function isStaleBuildError(e: unknown): boolean {
   return (
     msg.includes("unexpected response was received from the server") ||
     msg.includes("failed to find server action") ||
+    // Newer Next.js words the same thing differently: 'Server Action "4044…" was not found on the
+    // server.' Erik's phone met exactly this on /login right after cn-v972 went out (2026-09-24) and
+    // got the red card instead of a quiet reload, because only the older wording was matched.
+    (msg.includes("server action") && msg.includes("was not found on the server")) ||
     /e\[o\] is not a function|\(a,a\.exports,r\)/.test(msg)
   );
 }

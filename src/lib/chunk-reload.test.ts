@@ -14,6 +14,8 @@ describe("boundary error classification", () => {
     expect(isStaleBuildError(new TypeError("e[o] is not a function"))).toBe(true);
     expect(isStaleBuildError(new TypeError("e[o] is not a function. (In 'e[o](a,a.exports,r)', 'e[o]' is undefined)"))).toBe(true);
     expect(isStaleBuildError(new Error("Failed to find Server Action \"abc\". This request might be from an older or newer deployment."))).toBe(true);
+    // The newer wording (the row Erik's phone filed from /login, 2026-09-24).
+    expect(isStaleBuildError(new Error('Server Action "4044bfbf687ef9ae1ed91d55316bc124a9114c39c8" was not found on the server. \nRead more: https://nextjs.org/docs/messages/failed-to-find-server-action'))).toBe(true);
   });
   it("recognises a dropped connection in every browser's words", () => {
     expect(isTransportError(new TypeError("Load failed"))).toBe(true);

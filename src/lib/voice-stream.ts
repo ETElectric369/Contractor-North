@@ -413,6 +413,32 @@ function beginTurn() {
   active = true;
   emit();
 
+  // MUTED MID-TURN (Erik's first try on cn-v972): the tap that opens Nort also primes the speaker,
+  // and that sliver of audio can mute the brand-new mic a moment AFTER the turn starts. The check
+  // in nextTurn only runs between turns, so the turn listened to nine seconds of silence and came
+  // back "Heard sound but no words". If iOS mutes the track while a turn records, that recording
+  // is dead: drop it unsent and get the mic back, the same way a reply's interruption is handled.
+  const turnTrack = stream.getAudioTracks?.()[0];
+  const turnRecorder = recorder;
+  if (turnTrack) {
+    turnTrack.onmute = () => {
+      turnTrack.onmute = null;
+      if (!active || recorder !== turnRecorder) return;
+      cancelAnimationFrame(rafId);
+      active = false;
+      try {
+        turnRecorder.ondataavailable = null;
+        turnRecorder.onstop = null;
+        if (turnRecorder.state !== "inactive") turnRecorder.stop();
+      } catch {
+        /* ignore */
+      }
+      chunks = [];
+      emit();
+      void recoverCapture();
+    };
+  }
+
   status("Listening. Go ahead.");
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let spoke = false;
