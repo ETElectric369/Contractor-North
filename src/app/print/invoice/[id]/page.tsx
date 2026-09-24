@@ -36,7 +36,10 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
 
   const [{ data: items }, { data: payments }] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
-    supabase.from("payments").select("*").eq("invoice_id", id).order("paid_at", { ascending: false }),
+    // What the customer's copy prints and nothing more: never `note`, which is the office's
+    // (a check number, a reminder) and which the public invoice door leaves out on purpose (0247).
+    // Oldest first, the order the statement's running balance reads in.
+    supabase.from("payments").select("id, amount, paid_at, method").eq("invoice_id", id).order("paid_at", { ascending: true }),
   ]);
 
   const { data: org } = await supabase.from("organizations").select("*").maybeSingle();
@@ -45,7 +48,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   const settings = getOrgSettings((org as any)?.settings);
 
   const lineItems = (items ?? []) as InvoiceItem[];
-  const pays = (payments ?? []) as Payment[];
+  const pays = (payments ?? []) as Pick<Payment, "id" | "amount" | "paid_at" | "method">[];
 
   // A deposit/progress/final invoice on a job shows a progress-report summary.
   const drawKind = (inv as any).invoice_kind as string | undefined;
@@ -91,8 +94,10 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         terms={settings.invoice_terms}
         documentFooter={settings.document_footer}
         docStyle={settings.doc_style}
+        // Nothing to measure against, nothing to print: a progress bill on a T&M job with no
+        // quote printed "Estimate $0.00" beside its Balance Due (INV-078).
         progress={
-          fin
+          fin && fin.estimate > 0
             ? {
                 estimate: fin.estimate,
                 workToDate: fin.workToDate,

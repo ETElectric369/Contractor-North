@@ -57,12 +57,12 @@ export default async function PublicInvoicePage({
   // WHAT THE CARD DOOR COSTS, FROM THE SAME FUNCTION /api/pay CHARGES FROM — so the number on the
   // button and the number on the Stripe page cannot drift apart.
   //
-  // THE PROJECTION LAW, STATED OUT LOUD: public_invoice()'s org projection (migration 0247) does
-  // NOT carry card_fee_percent yet, so this reads undefined → 0 → no fee shown. That is correct
-  // and safe today only because the fee is also held shut in /api/pay (CARD_FEE_READY), so both
-  // ends agree on zero. Turning the fee on REQUIRES adding card_fee_percent to that projection in
-  // the same change; without it this page would print the bare balance on a button that charges
-  // more, which is the one thing a surcharge must never do.
+  // THE PROJECTION LAW, STATED OUT LOUD: public_invoice()'s org projection carries
+  // card_fee_percent since 0283, so this page reads the same percent /api/pay charges from. The
+  // fee itself is still held shut in both places (CARD_FEE_READY), so both ends agree on zero
+  // today; if the projection ever drops the field again, this reads undefined → 0 and the page
+  // would print the bare balance on a button that charges more, which is the one thing a
+  // surcharge must never do.
   const fee = cardFeeDecision(balance, Number((data.org as { card_fee_percent?: number | string | null } | null)?.card_fee_percent ?? 0));
   /**
    * THE BANK DOOR OPENS ONLY WHERE ITS SETTLEMENT EVENT EXISTS (three reviewers, 2026-09-20).
@@ -216,7 +216,12 @@ export default async function PublicInvoicePage({
         tax={inv.tax}
         total={inv.total}
         amountPaid={inv.amount_paid}
+        // public_invoice has returned all three since 0247/0283; the page just never passed them,
+        // so the customer's live link showed less than the PDF of the same bill.
+        payments={((data as { payments?: never[] }).payments) ?? []}
         notes={inv.notes}
+        terms={(data.org as { invoice_terms?: string | null } | null)?.invoice_terms ?? null}
+        documentFooter={(data.org as { document_footer?: string | null } | null)?.document_footer ?? null}
       />
     </div>
   );

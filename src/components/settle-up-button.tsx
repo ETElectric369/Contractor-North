@@ -8,7 +8,7 @@ import { BadgeDollarSign, Check, Copy, CreditCard, Loader2, Mail, MessageSquare,
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
-import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice } from "@/app/(app)/billing/actions";
+import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
 import {
@@ -1170,7 +1170,7 @@ export function RecordPaymentButton(props: Mode & {
   /** The org's Settings → Payment methods list. Card is filtered OUT here — it belongs to Pay
    *  Now — so an org that lists "Card" can't record a phantom through this door. */
   methods?: string[];
-  /** false = org has no Venmo handle: the venmo tap dead-ends BEFORE minting a sent invoice. */
+  /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
   venmoConfigured?: boolean;
   compact?: boolean;
   label?: string;
@@ -1203,24 +1203,15 @@ export function RecordPaymentButton(props: Mode & {
     router.refresh();
   }
 
+  /**
+   * RECORD IT — every method, Venmo included (2026-09-24, INV-078). A Venmo payment that landed
+   * three weeks ago is written down exactly like cash, with its paid date: no handle required, no
+   * QR in the way. On an invoice source a draft stays a draft (recordPayment's paidStatus); only
+   * the QR below is optional.
+   */
   function go() {
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
-    if (key === "venmo" && props.venmoConfigured === false) {
-      toast("Add your Venmo username in Settings → Payment methods first.", "error");
-      return;
-    }
     start(async () => {
-      if (key === "venmo") {
-        const id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
-        if (!id) return;
-        const art = await collectArtifacts(id, amt());
-        if (!art.ok || !art.venmoQr) {
-          toast(art.error ?? "Add your Venmo username in Settings → Payment methods first.", "error");
-          return;
-        }
-        setVenmo({ qr: art.venmoQr, handle: art.venmoHandle, invoiceId: id, amount: Math.min(amt(), art.balance ?? amt()) });
-        return;
-      }
       const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
       if (!id) return;
       toast(`Paid — ${money(amt())} ${method.toLowerCase()}. Done.`, "success");
@@ -1228,11 +1219,37 @@ export function RecordPaymentButton(props: Mode & {
     });
   }
 
+  /**
+   * SHOW VENMO QR — the optional door for a customer standing in front of you. On an existing
+   * invoice it only READS (venmoQrFor writes nothing, so a draft is not sent by showing a QR).
+   * A visit/job still mints its invoice at the doorstep through settleUp, as it always has: the
+   * QR needs an invoice number to ask for.
+   */
+  function showVenmoQr() {
+    if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they're paying.", "error"); return; }
+    start(async () => {
+      let id: string | null;
+      if (props.source === "invoice") {
+        id = props.invoiceId;
+      } else {
+        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
+        if (!id) return;
+      }
+      const art = await venmoQrFor(id, amt());
+      if (!art.ok || !art.venmoQr) {
+        toast(art.error ?? "Add your Venmo username in Settings → Payment methods first.", "error");
+        return;
+      }
+      setVenmo({ qr: art.venmoQr, handle: art.venmoHandle, invoiceId: id, amount: Math.min(amt(), art.balance ?? amt()) });
+    });
+  }
+
   /** Venmo's half-blind ending: the app can't hear the payment land, so the person says so. */
   function venmoPaid() {
     if (!venmo) return;
     start(async () => {
-      const r = await recordPayment({ invoice_id: venmo.invoiceId, amount: venmo.amount, method: "venmo", note, paid_at: paidAt || null });
+      // The chip label as picked; recordPayment stores its key.
+      const r = await recordPayment({ invoice_id: venmo.invoiceId, amount: venmo.amount, method, note, paid_at: paidAt || null });
       if (!r.ok) { toast(r.error ?? "Couldn't record that.", "error"); return; }
       toast(`Paid — ${money(venmo.amount)} Venmo. Done.`, "success");
       close();
@@ -1263,7 +1280,19 @@ export function RecordPaymentButton(props: Mode & {
           venmo ? (
             <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
           ) : (
-            <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel={key === "venmo" ? "Show Venmo QR" : "Record It"} />
+            <ModalActions
+              onCancel={close}
+              onSave={go}
+              saving={pending}
+              saveLabel="Record It"
+              extra={
+                key === "venmo" && props.venmoConfigured !== false ? (
+                  <Button size="sm" variant="outline" onClick={showVenmoQr} disabled={pending}>
+                    Show Venmo QR
+                  </Button>
+                ) : undefined
+              }
+            />
           )
         }
       >

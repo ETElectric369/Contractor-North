@@ -14,6 +14,7 @@ import {
 } from "@/app/(app)/billing/actions";
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
+import { paymentMethodLabel } from "@/lib/payment-method";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -235,7 +236,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "payment",
     label: "Record a payment",
     description:
-      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the Jones job paid me $3,000 by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, or other. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
+      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the Jones job paid me $3,000 by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, transfer, venmo, zelle or other. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
     input: z.object({
       invoice_id: z.string(),
       amount: z.number(),
@@ -246,7 +247,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
-    describe: (i) => `Record a ${i.method || "check"} payment of $${i.amount} against this invoice — say yes to confirm.`,
+    describe: (i) => `Record a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount} against this invoice — say yes to confirm.`,
     handler: async (i) => {
       const r = await recordPayment({
         invoice_id: i.invoice_id,
@@ -256,7 +257,7 @@ export const invoiceActions: Record<string, ActionDef> = {
         paid_at: i.paid_at ?? null,
       });
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, speak: `Recorded a ${i.method ?? "check"} payment of $${i.amount}.` };
+      return { ok: true, speak: `Recorded a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount}.` };
     },
   },
   "payment.setSchedule": {

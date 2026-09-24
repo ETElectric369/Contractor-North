@@ -30,6 +30,7 @@ import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
+import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
@@ -2509,7 +2510,8 @@ export async function recordPayment(input: {
   const { error } = await supabase.from("payments").insert({
     invoice_id: input.invoice_id,
     amount: input.amount,
-    method: input.method || "check",
+    // A KEY, never the chip label (0287): "Cash" and "cash" are one way of being paid.
+    method: input.method?.trim() ? paymentMethodKey(input.method) : "check",
     note: input.note || null,
     recorded_by: ctx.userId,
     ...(paidAt ? { paid_at: paidAt } : {}),
@@ -2576,7 +2578,7 @@ export async function updatePayment(
     .from("payments")
     .update({
       amount: patch.amount,
-      method: patch.method || "check",
+      method: patch.method?.trim() ? paymentMethodKey(patch.method) : "check",
       note: patch.note || null,
       ...(paidAt ? { paid_at: paidAt } : {}),
     })
@@ -2948,7 +2950,7 @@ export async function settleUp(input: {
   source: "appointment" | "job";
   id: string;
   amount: number;
-  method: string; // cash | check | card | venmo | other
+  method: string; // a payment-method key or label; recordPayment normalizes
   note?: string;
   /** "record" (default) books the payment here and now — cash in hand. "later" builds and sends
    *  the invoice and completes the visit but leaves the balance open: the Venmo QR or the Stripe
@@ -3300,11 +3302,76 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
   const asking = Math.min(Math.max(Number(collectAmount ?? balance), 0.01), balance);
   const handle = getOrgSettings((org as { settings?: unknown } | null)?.settings).venmo_handle?.trim();
   if (handle) {
-    const note = encodeURIComponent(inv.invoice_number ? `Invoice ${inv.invoice_number}` : "Work completed");
-    const venmoUrl = `https://venmo.com/u/${encodeURIComponent(handle)}?txn=pay&amount=${asking.toFixed(2)}&note=${note}`;
     out.venmoHandle = handle;
-    out.venmoQr = await QRCode.toDataURL(venmoUrl, { margin: 1, width: 480, color: { dark: "#0f172a" } });
+    out.venmoQr = await venmoQrData(handle, inv.invoice_number ?? null, asking);
   }
 
   return out;
+}
+
+/** The org's Venmo pay link with the amount and invoice number filled in, as a QR data URL.
+ *  One builder for both doors (collectArtifacts and venmoQrFor), so the two QRs never disagree. */
+async function venmoQrData(handle: string, invoiceNumber: string | null, asking: number): Promise<string> {
+  const note = encodeURIComponent(invoiceNumber ? `Invoice ${invoiceNumber}` : "Work completed");
+  const venmoUrl = `https://venmo.com/u/${encodeURIComponent(handle)}?txn=pay&amount=${asking.toFixed(2)}&note=${note}`;
+  return QRCode.toDataURL(venmoUrl, { margin: 1, width: 480, color: { dark: "#0f172a" } });
+}
+
+/**
+ * THE VENMO QR, AND NOTHING ELSE (2026-09-24, INV-078).
+ *
+ * The Record Payment modal used to fetch its Venmo QR through collectArtifacts, which is the CARD
+ * door and promotes a draft to sent (a Stripe QR is the bill in the customer's hand). So choosing
+ * Venmo in Record Payment on a draft sent the invoice, stamped it and locked every line, for money
+ * that was only ever going to be written down by hand.
+ *
+ * This QR is the company's Venmo link, not the bill, so showing it is not a delivery (0267). It
+ * reads and draws and writes nothing: no send stamp, no recalc, no revalidate.
+ */
+export async function venmoQrFor(invoiceId: string, amount?: number): Promise<{
+  ok: boolean;
+  error?: string;
+  balance?: number;
+  invoiceNumber?: string | null;
+  venmoQr?: string;
+  venmoHandle?: string;
+}> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: inv } = await supabase
+    .from("invoices")
+    .select("id, invoice_number, status, total, amount_paid, org_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  if (!inv) return { ok: false, error: "Invoice not found." };
+  if ((inv as { status?: string }).status === "void") {
+    return { ok: false, error: "This invoice is void, so there's nothing to collect on it." };
+  }
+
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .select("settings")
+    .eq("id", inv.org_id)
+    .maybeSingle();
+  if (orgErr || !org) {
+    return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  }
+
+  const handle = getOrgSettings((org as { settings?: unknown }).settings).venmo_handle?.trim();
+  if (!handle) {
+    return { ok: false, error: "Add your Venmo username in Settings → Payment methods first." };
+  }
+
+  const balance = invoiceBalance(inv.total, inv.amount_paid);
+  // THE QR ASKS FOR WHAT WILL BE RECORDED: the same clamp collectArtifacts uses.
+  const asking = Math.min(Math.max(Number(amount ?? balance), 0.01), balance);
+  return {
+    ok: true,
+    balance,
+    invoiceNumber: inv.invoice_number ?? null,
+    venmoHandle: handle,
+    venmoQr: await venmoQrData(handle, inv.invoice_number ?? null, asking),
+  };
 }

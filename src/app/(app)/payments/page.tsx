@@ -7,6 +7,7 @@ import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { paymentMethodLabel } from "@/lib/payment-method";
 import { computeCollected, fetchCollectedRows } from "@/lib/analytics/money-metrics";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { RecordPaymentButton } from "./record-payment-button";
@@ -87,7 +88,7 @@ export default async function PaymentsPage() {
                 { header: "Date", span: 3, className: "text-sm text-slate-600", cell: (p) => formatDate(p.paid_at) },
                 { header: "Customer", span: 4, className: "text-sm font-medium text-slate-900", cell: (p) => p.invoices?.customers?.name ?? "—" },
                 { header: "Invoice", span: 2, className: "text-sm text-slate-500", cell: (p) => p.invoices?.invoice_number ?? "—" },
-                { header: "Method", span: 1, className: "text-xs capitalize text-slate-500", cell: (p) => p.method },
+                { header: "Method", span: 1, className: "text-xs text-slate-500", cell: (p) => paymentMethodLabel(p.method) },
                 { header: "Amount", span: 2, align: "right", className: "text-sm font-semibold text-green-700", cell: (p) => formatCurrency(p.amount) },
               ]}
             />
