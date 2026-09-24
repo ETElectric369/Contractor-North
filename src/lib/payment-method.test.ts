@@ -23,6 +23,10 @@ describe("paymentMethodKey / paymentMethodLabel", () => {
     ["ach", "ach", "ACH"],
     ["us_bank_account", "ach", "ACH"],
     ["  Wire   Transfer ", "transfer", "Transfer"],
+    // A custom method that happens to name an Object.prototype member is still just text.
+    ["Constructor", "constructor", "Constructor"],
+    ["__proto__", "__proto__", "__proto__"],
+    ["toString", "tostring", "Tostring"],
   ];
   for (const [raw, key, label] of cases) {
     it(`${JSON.stringify(raw)} is stored as ${key} and reads ${label}`, () => {

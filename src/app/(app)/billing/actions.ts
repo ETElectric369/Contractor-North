@@ -3365,6 +3365,11 @@ export async function venmoQrFor(invoiceId: string, amount?: number): Promise<{
   }
 
   const balance = invoiceBalance(inv.total, inv.amount_paid);
+  // NOTHING OWED, NO QR. The clamp below would ask for $0.00 (a stale page, or a visit whose
+  // bill is already settled), and "They Paid — Record It" after it is a dead door.
+  if (balance < 0.005) {
+    return { ok: false, error: `${inv.invoice_number ?? "This invoice"} is paid in full, so there's nothing to collect.` };
+  }
   // THE QR ASKS FOR WHAT WILL BE RECORDED: the same clamp collectArtifacts uses.
   const asking = Math.min(Math.max(Number(amount ?? balance), 0.01), balance);
   return {

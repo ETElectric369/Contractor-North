@@ -198,6 +198,18 @@ describe("Record Payment records Venmo like cash, and its QR writes nothing", ()
     expect(qr).toMatch(/if \(props\.source === "invoice"\) \{\s*id = props\.invoiceId;/);
     expect(qr).not.toContain('"record"');
   });
+
+  it("drops Card by its key, so a \"Credit Card\" chip can't file a manual payment as a Stripe card", () => {
+    expect(BODY).toContain('source.filter((m) => paymentMethodKey(m) !== "card")');
+    expect(BODY).toContain("const key = paymentMethodKey(method);");
+  });
+
+  it("says the QR sends the bill when it does, and never reads Saving over a read", () => {
+    expect(BODY).toContain('props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"');
+    const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
+    expect(qr).toContain("startQr(");
+    expect(qr).not.toMatch(/\bstart\(/);
+  });
 });
 
 describe("venmoQrFor only reads and draws", () => {
@@ -215,6 +227,11 @@ describe("venmoQrFor only reads and draws", () => {
     for (const s of ["markInvoiceSent", "recalcInvoice", "revalidateMoney", ".update(", ".insert(", ".upsert(", ".delete("]) {
       expect(FN).not.toContain(s);
     }
+  });
+
+  it("refuses a paid-in-full invoice instead of drawing a $0.00 QR", () => {
+    expect(FN).toMatch(/if \(balance < 0\.005\) \{\s*return \{ ok: false/);
+    expect(FN.indexOf("balance < 0.005")).toBeLessThan(FN.indexOf("venmoQrData("));
   });
 
   it("builds its QR with the same helper as the card door", () => {

@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { paymentMethodKey } from "@/lib/payment-method";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
 import {
   cancelTapPayment,
@@ -1168,7 +1169,8 @@ export function PayNowButton(props: Mode & {
 
 export function RecordPaymentButton(props: Mode & {
   /** The org's Settings → Payment methods list. Card is filtered OUT here — it belongs to Pay
-   *  Now — so an org that lists "Card" can't record a phantom through this door. */
+   *  Now — so an org that lists "Card" can't record a phantom through this door. Filtered by
+   *  KEY, not spelling: "Credit Card" or "Debit" is stored as card too (paymentMethodKey). */
   methods?: string[];
   /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
   venmoConfigured?: boolean;
@@ -1178,17 +1180,20 @@ export function RecordPaymentButton(props: Mode & {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
+  // The QR fetch has its own pending: on an invoice it only READS, so the sheet must not say
+  // "Saving…" over a payment nobody is recording.
+  const [qrPending, startQr] = useTransition();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(props.source === "invoice" ? String(props.balance || "") : "");
   const [note, setNote] = useState("");
   const [paidAt, setPaidAt] = useState("");
   const source = props.methods?.length ? props.methods : ["Cash", "Check", "Venmo", "Other"];
-  const chips = source.filter((m) => m.toLowerCase() !== "card");
+  const chips = source.filter((m) => paymentMethodKey(m) !== "card");
   const [method, setMethod] = useState(chips[0] ?? "Cash");
   const [venmo, setVenmo] = useState<{ qr: string; handle?: string; invoiceId: string; amount: number } | null>(null);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
-  const key = method.toLowerCase();
+  const key = paymentMethodKey(method);
   const dirty = note.trim().length > 0 || paidAt.length > 0;
 
   function reset() {
@@ -1210,6 +1215,7 @@ export function RecordPaymentButton(props: Mode & {
    * the QR below is optional.
    */
   function go() {
+    if (qrPending) return; // Enter in the amount box while the QR is still coming
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
     start(async () => {
       const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
@@ -1227,7 +1233,7 @@ export function RecordPaymentButton(props: Mode & {
    */
   function showVenmoQr() {
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they're paying.", "error"); return; }
-    start(async () => {
+    startQr(async () => {
       let id: string | null;
       if (props.source === "invoice") {
         id = props.invoiceId;
@@ -1280,19 +1286,7 @@ export function RecordPaymentButton(props: Mode & {
           venmo ? (
             <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
           ) : (
-            <ModalActions
-              onCancel={close}
-              onSave={go}
-              saving={pending}
-              saveLabel="Record It"
-              extra={
-                key === "venmo" && props.venmoConfigured !== false ? (
-                  <Button size="sm" variant="outline" onClick={showVenmoQr} disabled={pending}>
-                    Show Venmo QR
-                  </Button>
-                ) : undefined
-              }
-            />
+            <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel="Record It" disabled={qrPending} />
           )
         }
       >
@@ -1339,6 +1333,19 @@ export function RecordPaymentButton(props: Mode & {
                 ))}
               </div>
             </div>
+            {/* THE OPTIONAL QR, in the body at full width: a 44px target for a customer standing
+                right there, and the footer keeps two buttons that fit a 375px sheet. Away from an
+                invoice it mints and sends the bill first (settleUp at the doorstep), so it says so,
+                the way Pay Now's "Send the bill & show the QR" does. */}
+            {key === "venmo" && props.venmoConfigured !== false && (
+              <Button type="button" variant="outline" className="w-full" onClick={showVenmoQr} disabled={pending || qrPending}>
+                {qrPending ? (
+                  <><Loader2 className="animate-spin" /> Getting It Ready…</>
+                ) : (
+                  <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"}</>
+                )}
+              </Button>
+            )}
             {/* The two bookkeeping fields the old form had: WHEN it was paid (a check that arrived
                 last Tuesday) and a note (the check number). Date only means something on an
                 existing invoice — a visit being settled right now was paid right now. */}

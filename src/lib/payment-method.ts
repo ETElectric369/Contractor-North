@@ -47,14 +47,17 @@ export const PAYMENT_METHOD_ALIASES: Record<string, string> = {
 export function paymentMethodKey(raw: string | null | undefined): string {
   const k = String(raw ?? "").replace(/\s+/g, " ").trim().toLowerCase();
   if (!k) return "other";
-  return PAYMENT_METHOD_ALIASES[k] ?? k;
+  // OWN keys only: these tables are indexed by whatever a person typed into Settings, and a
+  // plain object answers "constructor" or "__proto__" with Object.prototype's members. That
+  // stored the column default through a dropped JSON key and crashed the label (review 09-24).
+  return Object.hasOwn(PAYMENT_METHOD_ALIASES, k) ? PAYMENT_METHOD_ALIASES[k] : k;
 }
 
 /** How a stored method reads on a page, a PDF or out loud. */
 export function paymentMethodLabel(raw: string | null | undefined): string {
   const key = paymentMethodKey(raw);
+  if (Object.hasOwn(PAYMENT_METHOD_LABELS, key)) return PAYMENT_METHOD_LABELS[key];
   return (
-    PAYMENT_METHOD_LABELS[key] ??
     key
       .split(" ")
       .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
