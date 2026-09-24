@@ -1,3 +1,4 @@
+import { isNativeShell } from "@/lib/native-shell";
 // Speak with a real, intelligence-grade NEURAL voice (ElevenLabs / OpenAI via /api/tts),
 // not the OS's robotic speech synthesis. The browser voice is only a last-ditch fallback
 // when no neural provider is configured or audio playback is blocked.
@@ -45,8 +46,104 @@ function getAudio(): HTMLAudioElement | null {
 // play neural audio later (iOS only lets a gesture-touched element play programmatically).
 const SILENT = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
 
+/**
+ * TWO THINGS THE <audio> ELEMENT DID ON ERIK'S PHONE (2026-09-24, iOS 27).
+ *
+ * 1. IN THE APP, EVERY REPLY CRACKLED, about every half second, on every word and between them. The
+ *    same clips played clean in Safari on the same phone, and releasing the mic during playback
+ *    changed nothing (cn-v974, reverted), so it is the in-app media-element path. In the shell each
+ *    clip is now decoded ONCE and played through Web Audio instead: a different render path, and no
+ *    real-time resampling of a 44.1 kHz MP3 against the hardware rate.
+ * 2. A "NOW PLAYING" CARD ON THE LOCK SCREEN, titled with the page ("Team login") and still there
+ *    after signing out. iOS treats an <audio> element that has played as music and keeps its card
+ *    until the element lets go of its media. Web Audio never registers one, and the element (still
+ *    used on the web, and as the shell's fallback) is emptied after every clip and on every stop.
+ */
+let playCtx: AudioContext | null = null;
+let playSource: AudioBufferSourceNode | null = null;
+
+function playsThroughWebAudio(): boolean {
+  return isNativeShell();
+}
+
+function getPlayCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!playCtx) {
+    const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!AC) return null;
+    try {
+      playCtx = new AC();
+    } catch {
+      return null;
+    }
+  }
+  return playCtx;
+}
+
+/** Let the element go so iOS drops its lock-screen card. Safe to call at any time. */
+function releaseElement(a: HTMLAudioElement | null) {
+  if (!a) return;
+  try {
+    a.removeAttribute("src");
+    a.load();
+  } catch {}
+  try {
+    const ms = (navigator as any).mediaSession;
+    if (ms) {
+      ms.metadata = null;
+      ms.playbackState = "none";
+    }
+  } catch {}
+}
+
+/**
+ * Play one object-URL clip through Web Audio. Resolves true when it played to the end (or was
+ * stopped), false when Web Audio could not play it at all, so the caller can fall back to the
+ * element. The URL is NOT revoked here: a false answer hands it to the element fallback.
+ */
+async function playViaWebAudio(url: string): Promise<boolean> {
+  const ctx = getPlayCtx();
+  if (!ctx) return false;
+  try {
+    if (ctx.state !== "running") await ctx.resume();
+    if (ctx.state !== "running") return false;
+    const bytes = await (await fetch(url)).arrayBuffer();
+    const buffer = await ctx.decodeAudioData(bytes);
+    try { window.speechSynthesis?.cancel(); } catch {}
+    await new Promise<void>((resolve) => {
+      const src = ctx.createBufferSource();
+      src.buffer = buffer;
+      src.connect(ctx.destination);
+      src.onended = () => {
+        if (playSource === src) playSource = null;
+        resolve();
+      };
+      playSource = src;
+      src.start();
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Call from a user gesture (the mic tap) so neural audio can play afterward on iOS. */
 export function unlockAudio() {
+  // The shell's Web Audio context has to be started inside the tap too; a silent one-sample buffer
+  // is enough to take it out of 'suspended'.
+  if (playsThroughWebAudio()) {
+    const ctx = getPlayCtx();
+    if (ctx) {
+      try {
+        void ctx.resume();
+        const b = ctx.createBuffer(1, 1, 22050);
+        const s0 = ctx.createBufferSource();
+        s0.buffer = b;
+        s0.connect(ctx.destination);
+        s0.start();
+      } catch {}
+    }
+  }
   const a = getAudio();
   if (!a) return;
   try {
@@ -60,10 +157,18 @@ export function unlockAudio() {
 export function stopSpeaking() {
   try { window.speechSynthesis?.cancel(); } catch {}
   try {
+    if (playSource) {
+      const src = playSource;
+      playSource = null;
+      src.stop(); // fires onended, which resolves the clip's await
+    }
+  } catch {}
+  try {
     if (audioEl) {
       audioEl.onended = null;
       audioEl.pause();
       audioEl.currentTime = 0;
+      releaseElement(audioEl);
     }
   } catch {}
 }
@@ -170,12 +275,17 @@ export function speakSmart(text: string, onEnd?: () => void) {
       if (!r.ok) throw new Error("tts " + r.status);
       const buf = await r.arrayBuffer();
       const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
+      if (playsThroughWebAudio() && (await playViaWebAudio(url))) {
+        URL.revokeObjectURL(url);
+        fire();
+        return;
+      }
       const a = getAudio();
       if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
       try { window.speechSynthesis?.cancel(); } catch {}
-      a.onended = () => { URL.revokeObjectURL(url); fire(); };
+      a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
       a.src = url;
-      a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); browserSpeak(t, fire); });
+      a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire); });
     })
     .catch(() => browserSpeak(t, fire));
 }
@@ -252,7 +362,15 @@ function synthClip(speakableText: string): Promise<string | null> {
 /** Play one object-URL clip on the shared audio element; resolves when it ends, fails, OR is paused
  *  (a stopSpeaking() during a barge-in/Stop pauses the element — resolving on pause keeps the speak
  *  queue's pump from hanging on a clip that will never fire `ended`). Idempotent: resolves once. */
-function playClipUrl(url: string): Promise<void> {
+async function playClipUrl(url: string): Promise<void> {
+  if (playsThroughWebAudio() && (await playViaWebAudio(url))) {
+    try { URL.revokeObjectURL(url); } catch {}
+    return;
+  }
+  return playClipOnElement(url);
+}
+
+function playClipOnElement(url: string): Promise<void> {
   return new Promise((resolve) => {
     const a = getAudio();
     if (!a) { URL.revokeObjectURL(url); resolve(); return; }
@@ -265,6 +383,7 @@ function playClipUrl(url: string): Promise<void> {
       a.onerror = null;
       try { a.removeEventListener("pause", onPause); } catch {}
       try { URL.revokeObjectURL(url); } catch {}
+      releaseElement(a);
       resolve();
     };
     try { window.speechSynthesis?.cancel(); } catch {}
