@@ -165,15 +165,21 @@ export function SplitShiftSheet({
       portal
       footer={
         <div className="w-full space-y-2">
+          {/* NOTHING SILENT: a greyed button has its reason right beside it, in the database's words,
+              pinned with the button rather than somewhere up the scroll. */}
           <p
-            className={`text-center text-sm ${preview.ok && preview.sameAsShift ? "text-emerald-700" : "text-slate-500"}`}
+            className={`text-center text-sm ${
+              !preview.ok ? "text-amber-800" : preview.sameAsShift && pick ? "text-emerald-700" : "text-slate-500"
+            }`}
             aria-live="polite"
           >
-            {preview.ok
-              ? preview.sameAsShift
-                ? `Total ${hoursText(preview.totalHours)}, same as the shift`
-                : `Total ${hoursText(preview.totalHours)} (the shift is ${hoursText(preview.shiftHours)})`
-              : `The shift is ${hoursText(preview.shiftHours)}`}
+            {!preview.ok
+              ? (preview.problem ?? "Pick a split time inside the shift.")
+              : !pick
+                ? `Total ${hoursText(preview.totalHours)}, same as the shift. Pick a job for the second part.`
+                : preview.sameAsShift
+                  ? `Total ${hoursText(preview.totalHours)}, same as the shift`
+                  : `Total ${hoursText(preview.totalHours)} (the shift is ${hoursText(preview.shiftHours)})`}
           </p>
           <div className="flex items-center justify-end gap-2">
             <ModalActions
@@ -292,10 +298,6 @@ export function SplitShiftSheet({
           </PieceCard>
         </div>
 
-        {/* NOTHING SILENT: a greyed button always has its reason beside it, in the database's words. */}
-        {!preview.ok && preview.problem && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{preview.problem}</p>
-        )}
         {error && (
           <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
             {error}
