@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { customerHoldsOlderCopy, invoiceLineEditRefusal, shouldStampRevision } from "@/lib/invoice-revision";
+import { customerHoldsOlderCopy, hasUnsentRevision, invoiceLineEditRefusal, shouldStampRevision } from "@/lib/invoice-revision";
 
 /**
  * 2026-09-18 — "even if i did sent it ill always need to be able to go back and make changes as
@@ -110,5 +110,72 @@ describe("customerHoldsOlderCopy — the sentence the invoice page says out loud
     // and hide a real revision.
     expect(customerHoldsOlderCopy(sent, "2026-09-17T11:08:00.000-07:00")).toBe(true);
     expect(customerHoldsOlderCopy(sent, "2026-09-17T11:00:00.000-07:00")).toBe(false);
+  });
+});
+
+describe("customerHoldsOlderCopy — paying the corrected bill in full settles it (INV-071)", () => {
+  // Karen Wucher's row, straight off the database: sent, revised that night, paid in full through
+  // her own live link the next afternoon.
+  const sent = "2026-09-19T20:54:55.199Z";
+  const revised = "2026-09-20T05:21:57.343Z";
+  const karen = { total: 1875.98, amountPaid: 1875.98, paidAt: ["2026-09-20T23:40:27.000Z"] };
+
+  it("leaves the lane and the banner once the new total is paid after the change", () => {
+    expect(customerHoldsOlderCopy(sent, revised)).toBe(true); // the old two-input answer, unchanged
+    expect(customerHoldsOlderCopy(sent, revised, karen)).toBe(false);
+  });
+
+  it("PAID BEFORE THE CHANGE STAYS — the bill reissued in the property owner's name", () => {
+    // Settled in June, corrected in September. What is wrong is the paper in the customer's
+    // hands, and no payment since has shown them the new one.
+    const paidInJune = { total: 4200, amountPaid: 4200, paidAt: ["2026-06-03T17:00:00.000Z"] };
+    expect(customerHoldsOlderCopy("2026-06-01T17:00:00.000Z", "2026-09-01T17:00:00.000Z", paidInJune)).toBe(true);
+  });
+
+  it("a balance still owed after the change stays", () => {
+    // A pay link opened before a change that RAISED the total pays the old figure.
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, amountPaid: 1800 })).toBe(true);
+  });
+
+  it("an overpaid bill stays — the old, higher figure was paid, so they hold the old bill", () => {
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, total: 1850 })).toBe(true);
+  });
+
+  it("cent dust is not a balance, and PostgREST's string numerics read the same", () => {
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, amountPaid: 1875.9800000001 })).toBe(false);
+    const asText = { total: "1875.98", amountPaid: "1875.98", paidAt: karen.paidAt } as unknown as typeof karen;
+    expect(customerHoldsOlderCopy(sent, revised, asText)).toBe(false);
+  });
+
+  it("no payment at all, or only unreadable dates, stays", () => {
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: [] })).toBe(true);
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: [null, undefined, "not a date"] })).toBe(true);
+  });
+
+  it("one payment after the change is enough, beside a deposit taken before it", () => {
+    expect(customerHoldsOlderCopy(sent, revised, { ...karen, paidAt: ["2026-09-19T21:00:00.000Z", "2026-09-20T23:40:27.000Z"] })).toBe(false);
+  });
+
+  it("a re-sent bill is already settled, paid or not", () => {
+    expect(customerHoldsOlderCopy("2026-09-20T06:00:00.000Z", revised, { ...karen, paidAt: [] })).toBe(false);
+  });
+
+  it("the share sheet asks the same question, from the columns the rule needs", async () => {
+    // hasUnsentRevision is what makes Share ask "re-send?". Asking it about a bill the page no
+    // longer flags would put the old nag back one tap later.
+    const asked: string[] = [];
+    const client = (row: Record<string, unknown>) => ({
+      from: () => ({
+        select: (cols: string) => {
+          asked.push(cols);
+          const chain = { eq: () => chain, maybeSingle: async () => ({ data: row, error: null }) };
+          return chain;
+        },
+      }),
+    });
+    const inv071 = { status: "paid", sent_at: sent, revised_at: revised, total: 1875.98, amount_paid: 1875.98 };
+    expect(await hasUnsentRevision(client({ ...inv071, payments: [{ paid_at: karen.paidAt[0] }] }), "inv-071")).toBe(false);
+    expect(await hasUnsentRevision(client({ ...inv071, payments: [] }), "inv-071")).toBe(true);
+    expect(asked[0]).toMatch(/\bamount_paid\b.*\bpayments\(paid_at\)/);
   });
 });

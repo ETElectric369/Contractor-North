@@ -1,3 +1,5 @@
+import { formatCurrency } from "@/lib/utils";
+
 /**
  * HOW MUCH OF A SUPPLIER BILL THE CUSTOMER PAYS — THE ARITHMETIC, ON ITS OWN.
  *
@@ -409,7 +411,67 @@ export function billItemisation(
   if (remainder <= -0.01) return lump();
 
   if (remainder >= 0.01) {
-    billRows.push({ import_key: `bill:${bill.id}:remainder`, description: `Supplies & tax — ${bill.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
+    billRows.push({ import_key: remainderKey(bill.id), description: `Supplies & tax — ${bill.supplier}`, quantity: 1, unit: "ea", unit_price: remainder });
   }
   return billRows;
+}
+
+/** The key of a bill's "Supplies & tax" row. One spelling, shared with the check below. */
+export function remainderKey(billId: string | number): string {
+  return `bill:${billId}:remainder`;
+}
+
+/** A bill whose hand-edited "Supplies & tax" row no longer matches its re-priced parts. */
+export type EditedRemainderDrift = {
+  billId: string;
+  supplier: string;
+  /** What the edited row bills now, which the importer never touches. */
+  kept: number;
+  /** What billItemisation says the row is at this markup ($0 when it no longer makes one). */
+  computed: number;
+};
+
+/**
+ * AN EDITED "SUPPLIES & TAX" ROW STAYS BEHIND WHEN ITS PARTS MOVE (INV-074, Kathy Walker).
+ *
+ * One `edited` flag covers both the words and the money on a line (0175), so renaming the row -
+ * Erik took the supplier's name off all three on INV-074 - also froze its amount. When the markup
+ * then went from 25% to 30%, the import re-priced the parts and left the three tax rows at their
+ * 25% figures: each bill's rows stopped adding up to its marked-up total, and the invoice went
+ * out 77 cents short with a toast that said only "3 of your edits kept".
+ *
+ * The importer is right not to touch an edited line, so this does not change what anyone is
+ * charged. It names the bills where that choice now leaves a gap, with the figure the row would
+ * carry, so the office decides with the number in front of it.
+ *
+ * A bill is named only when its parts were actually refreshed (some other row of it is on the
+ * invoice and not edited). A bill the office froze entirely is internally consistent at whatever
+ * numbers they typed, and nagging about it would be noise.
+ */
+export function editedRemainderDrift(
+  bills: readonly { id: string | number; supplier?: string | null }[],
+  offered: readonly { import_key: string; quantity: number; unit_price: number; source_ids?: string[] }[],
+  onInvoice: readonly { import_key?: string | null; line_total?: unknown; edited?: boolean | null }[],
+): EditedRemainderDrift[] {
+  const out: EditedRemainderDrift[] = [];
+  for (const b of bills) {
+    const id = String(b.id);
+    const key = remainderKey(id);
+    const kept = onInvoice.find((r) => r.import_key === key && r.edited === true);
+    if (!kept) continue;
+    const partKeys = new Set(offered.filter((r) => r.import_key !== key && (r.source_ids ?? []).includes(id)).map((r) => r.import_key));
+    if (!onInvoice.some((r) => r.edited !== true && partKeys.has(String(r.import_key ?? "")))) continue;
+    const row = offered.find((r) => r.import_key === key);
+    const computed = row ? Math.round(row.quantity * row.unit_price * 100) / 100 : 0;
+    const keptAmt = Math.round((Number(kept.line_total) || 0) * 100) / 100;
+    if (Math.round(keptAmt * 100) === Math.round(computed * 100)) continue;
+    out.push({ billId: id, supplier: String(b.supplier ?? "").trim() || "A receipt", kept: keptAmt, computed });
+  }
+  return out;
+}
+
+/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" */
+export function editedRemainderSentence(d: EditedRemainderDrift, markupPct: unknown): string {
+  const pct = +(Number(markupPct) || 0).toFixed(2);
+  return `${d.supplier}: your edited Supplies & tax row stayed at ${formatCurrency(d.kept)}; at ${pct}% it would be ${formatCurrency(d.computed)}`;
 }

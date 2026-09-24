@@ -114,7 +114,7 @@ const WALDOW_LINES = [
 ];
 
 /** The reads importCostsIntoInvoice makes that aren't about the bills themselves. */
-function costsImportRoute(opts: { bills: any[]; lines: any[]; landedAfter: string[]; rpcError?: any }) {
+function costsImportRoute(opts: { bills: any[]; lines: any[]; landedAfter: string[]; rpcError?: any; onInvoice?: any[] }) {
   return (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select") {
       if (q.cols.includes("invoice_kind") && q.cols.includes("job_id") && q.single) return { data: { id: INV, job_id: JOB, invoice_kind: "standard" } };
@@ -136,6 +136,7 @@ function costsImportRoute(opts: { bills: any[]; lines: any[]; landedAfter: strin
         return { data: seen === 0 ? [] : opts.landedAfter.map((id) => ({ import_key: `bill:${id}`, edited: false, source_ids: [id] })) };
       }
       if (q.cols === "line_total") return { data: [] };                       // recalcInvoice
+      if (q.cols === "import_key, line_total, edited") return { data: opts.onInvoice ?? [] }; // edited tax rows
     }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
@@ -208,6 +209,70 @@ describe("importCostsIntoInvoice — a counter preview is not his price (0271)",
   });
 });
 
+describe("importCostsIntoInvoice — an edited tax row left behind is said out loud (INV-074)", () => {
+  /** Swigard's, $17.15: a Duct Flex at $15.99 and $1.16 of tax. */
+  const SWIG = { id: "5a1f0000-0000-4000-8000-000000000074", supplier: "Swigard's", bill_number: null, amount: "17.15", po_id: null, pricing_provisional: false };
+  const SWIG_LINES = [
+    { id: "flex", bill_id: SWIG.id, description: "Duct Flex", quantity: "1.00", unit_price: "15.99", amount: "15.99", category: "Materials", sort_order: 0, billable: true, billed_amount: null },
+    { id: "tax", bill_id: SWIG.id, description: "Sales Tax", quantity: "1.00", unit_price: "1.16", amount: "1.16", category: "Sales Tax", sort_order: 1, billable: true, billed_amount: null },
+  ];
+
+  it("names the bill, the kept figure and billItemisation's figure at the new markup", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [SWIG],
+        lines: SWIG_LINES,
+        landedAfter: [SWIG.id],
+        // After the 30% run: the part refreshed, the renamed tax row still at its 25% figure.
+        onInvoice: [
+          { import_key: "bli:flex", line_total: 20.79, edited: false },
+          { import_key: `bill:${SWIG.id}:remainder`, line_total: 1.45, edited: true },
+        ],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 30);
+    expect(res.ok).toBe(true);
+    expect(res.stats.warnings).toEqual(["Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51"]);
+    // Nothing about what is charged moved: the offer is billItemisation's, edited row or not.
+    const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items");
+    expect((rpc?.payload?.p_rows ?? []).map((r: any) => [r.import_key, r.unit_price])).toEqual([
+      ["bli:flex", 20.79],
+      [`bill:${SWIG.id}:remainder`, 1.51],
+    ]);
+  });
+
+  it("says nothing when no tax row was edited", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [SWIG],
+        lines: SWIG_LINES,
+        landedAfter: [SWIG.id],
+        onInvoice: [
+          { import_key: "bli:flex", line_total: 20.79, edited: false },
+          { import_key: `bill:${SWIG.id}:remainder`, line_total: 1.51, edited: false },
+        ],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 30);
+    expect(res.ok).toBe(true);
+    expect(res.stats.warnings).toBeUndefined();
+  });
+
+  it("a failed read of the invoice's rows does not fail an import that already landed", async () => {
+    const route = costsImportRoute({ bills: [SWIG], lines: SWIG_LINES, landedAfter: [SWIG.id] });
+    state.client = fakeSupabase((q) => (q.cols === "import_key, line_total, edited" ? { error: { message: "boom" } } : route(q)), calls);
+    const reported: any[] = [];
+    spies.reportError = (...a: any[]) => reported.push(a);
+    const res: any = await importCostsIntoInvoice(INV, 30);
+    spies.reportError = () => {};
+    expect(res.ok).toBe(true);
+    expect(res.stats.warnings).toBeUndefined();
+    expect(reported.map((a) => a[0])).toContain("importCostsIntoInvoice.remainderDrift");
+  });
+});
+
 // ── Finding 2: the draw must not swallow a real import failure ────────────────────────────────
 
 const NEW_DRAW = "0dda0000-0000-4000-8000-00000000000d";
@@ -247,6 +312,7 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols.includes("import_key, edited")) return { data: [] };
       if (q.cols === "invoice_id") return { data: [] };
       if (q.cols === "line_total") return { data: [] };
+      if (q.cols === "import_key, line_total, edited") return { data: [] };
     }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };

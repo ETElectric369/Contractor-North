@@ -62,6 +62,19 @@ describe("the Revised - Send Again lane, on his real rows", () => {
     expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-FIXED");
   });
 
+  it("KAREN PAID THE CORRECTED BILL IN FULL, SO SHE LEAVES (7711aba4)", () => {
+    // What the board reads today: status paid, her $1,875.98 through her own live link, 18 hours
+    // after the change. The link shows the live bill, so she paid the one Erik is looking at.
+    type Row = { total: number; amount_paid: number; sent_at: string; revised_at: string; payments: { paid_at: string }[] };
+    const onBoard = (i: Row) =>
+      customerHoldsOlderCopy(i.sent_at, i.revised_at, { total: i.total, amountPaid: i.amount_paid, paidAt: i.payments.map((p) => p.paid_at) });
+    const karen: Row = { total: 1875.98, amount_paid: 1875.98, sent_at: ROWS[0].sent_at!, revised_at: ROWS[0].revised_at, payments: [{ paid_at: "2026-09-20T23:40:27.000Z" }] };
+    expect(onBoard(karen)).toBe(false);
+    // The paid-in-June bill keeps its place: its only payment came before the change.
+    const june: Row = { total: 4200, amount_paid: 4200, sent_at: ROWS[1].sent_at!, revised_at: ROWS[1].revised_at, payments: [{ paid_at: "2026-06-02T17:00:00.000Z" }] };
+    expect(onBoard(june)).toBe(true);
+  });
+
   it("a bill nobody ever received raises nothing", () => {
     // Telling Erik to re-send INV-069 would be a sentence about a person who does not exist.
     expect(lane(ROWS).map((r) => r.invoice_number)).not.toContain("INV-069");
@@ -69,6 +82,11 @@ describe("the Revised - Send Again lane, on his real rows", () => {
 });
 
 describe("the board asks the question", () => {
+  it("selects what the paid-in-full rule reads, and hands it to the one rule", () => {
+    expect(code).toMatch(/select\("[^"]*\bamount_paid\b[^"]*\bpayments\(paid_at\)[^"]*"\)/);
+    expect(code).toMatch(/customerHoldsOlderCopy\(i\.sent_at, i\.revised_at, \{/);
+  });
+
   it("selects both stamps — a field missing at runtime is a select list", () => {
     // THE PROJECTION LAW, and the precise way this defect happened: the board's invoice select was
     // `id, invoice_number, total, amount_paid, status, due_date, customers(name)`. No sent_at, no

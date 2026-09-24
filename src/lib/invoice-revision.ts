@@ -1,5 +1,6 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
+import { invoiceBalance, invoiceOverpayment } from "@/lib/invoice-math";
 
 /**
  * A BILL GETS REVISED. THAT IS THE JOB — the lock comes off and the record goes on
@@ -68,21 +69,53 @@ export function shouldStampRevision(sentAt: string | null | undefined): boolean 
   return typeof sentAt === "string" && sentAt.trim() !== "";
 }
 
+/** What the customer has paid on the invoice, for the one case that settles a revision without a
+ *  re-send. `paidAt` is every payment's paid_at (a voided payment is deleted, not flagged). */
+export type PaidSinceRevision = {
+  total: number | null | undefined;
+  amountPaid: number | null | undefined;
+  paidAt: readonly (string | null | undefined)[];
+};
+
 /**
  * THE QUESTION THE PAGE ASKS OUT LOUD: is what the customer is holding older than this?
  *
  * Equal timestamps are NOT a revision. A re-send stamps `sent_at` at the same instant the office
  * is looking at, and a stamp that compared `>=` would nag forever about the copy it had just sent.
+ *
+ * PAYING THE CORRECTED BILL IN FULL ANSWERS IT TOO (INV-071, Karen Wucher, 2026-09-20). Erik
+ * changed her bill at 10:21 PM; at 4:40 PM the next day she paid the new $1,875.98 through her
+ * own link, which always shows the live bill. Nothing moves `sent_at` when a customer pays (a pay
+ * door is never a delivery, 0267), so the board kept telling him to re-send a paid bill forever.
+ * Pass `paid` and an invoice whose balance is exactly zero, with a payment that landed AFTER the
+ * change, leaves the lane and the banner. Both halves matter:
+ *   - after the change: the bill his client asked to have reissued in the owner's name was
+ *     settled months BEFORE the revision, and that customer really is holding the old paper;
+ *   - exactly zero: a pay link opened on the old bill and paid after a change that LOWERED the
+ *     total pays the old figure, and an overpaid bill must stay in front of him, not vanish.
  */
 export function customerHoldsOlderCopy(
   sentAt: string | null | undefined,
   revisedAt: string | null | undefined,
+  paid?: PaidSinceRevision,
 ): boolean {
   if (!sentAt || !revisedAt) return false;
   const sent = Date.parse(sentAt);
   const revised = Date.parse(revisedAt);
   if (Number.isNaN(sent) || Number.isNaN(revised)) return false;
-  return revised > sent;
+  if (!(revised > sent)) return false;
+  if (paid && paidInFullSince(paid, revised)) return false;
+  return true;
+}
+
+/** Balance exactly zero to the cent, and at least one payment dated after `revisedMs`. */
+function paidInFullSince(paid: PaidSinceRevision, revisedMs: number): boolean {
+  if (invoiceBalance(paid.total, paid.amountPaid) !== 0) return false;
+  if (invoiceOverpayment(paid.total, paid.amountPaid) !== 0) return false;
+  return paid.paidAt.some((at) => {
+    const t = at ? Date.parse(at) : NaN;
+    return !Number.isNaN(t) && t > revisedMs;
+  });
 }
 
 /**
@@ -150,16 +183,29 @@ export async function hasUnsentRevision(
   try {
     const { data, error } = await supabase
       .from("invoices")
-      .select("status, sent_at, revised_at")
+      .select("status, sent_at, revised_at, total, amount_paid, payments(paid_at)")
       .eq("id", invoiceId)
       .maybeSingle();
     if (error || !data) return false;
-    const row = data as { status?: string | null; sent_at?: string | null; revised_at?: string | null };
+    const row = data as {
+      status?: string | null;
+      sent_at?: string | null;
+      revised_at?: string | null;
+      total?: number | null;
+      amount_paid?: number | null;
+      payments?: { paid_at?: string | null }[] | null;
+    };
     // A VOID invoice is never "waiting to be re-sent". Its lines are refused, so its stamp can
     // only be older than the void itself, and its customer link does not even open - asking the
     // office to re-send a cancelled bill would be a nag with nothing behind it.
     if (String(row.status ?? "") === "void") return false;
-    return customerHoldsOlderCopy(row.sent_at, row.revised_at);
+    // The same answer the board and the banner give, paid-in-full case included (INV-071), so the
+    // share sheet never asks to re-send a bill the page says the customer already has.
+    return customerHoldsOlderCopy(row.sent_at, row.revised_at, {
+      total: row.total,
+      amountPaid: row.amount_paid,
+      paidAt: (row.payments ?? []).map((p) => p.paid_at),
+    });
   } catch {
     return false;
   }

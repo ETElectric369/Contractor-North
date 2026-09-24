@@ -14,7 +14,7 @@ import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
-import { billItemisation } from "@/lib/bill-itemisation";
+import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "@/lib/bill-itemisation";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
@@ -520,6 +520,9 @@ export type ImportStats = {
   claimed_on: string[];
   /** The sentence, ready to show: "5 time entries pulled in · 9 already on INV-061 skipped". */
   summary: string;
+  /** Money the office should look at before sending, one sentence each (materials only, so far):
+   *  an edited "Supplies & tax" row left behind by its re-priced parts (INV-074). */
+  warnings?: string[];
 };
 type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
 type RpcStats = { inserted: number; updated: number; kept_edited: number; removed: number };
@@ -1679,7 +1682,41 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
     const n = flagged.length;
     stats.summary += ` · ${n === 1 ? "one receipt's prices are" : `${n} receipts' prices are`} a counter preview, not your account's pricing - check ${n === 1 ? "it" : "them"} before you send`;
   }
+  const drift = await editedRemainderWarnings(supabase, invoiceId, (bills ?? []) as { id: string; supplier?: string | null }[], rows, markup);
+  if (drift.length) stats.warnings = drift;
   return { ok: true, stats };
+}
+
+/**
+ * NAME THE EDITED "SUPPLIES & TAX" ROWS THIS IMPORT LEFT BEHIND (INV-074, $0.77 short).
+ *
+ * Read after the RPC, because only the invoice knows which rows the office edited. A failed read
+ * does not fail the import (it already landed and the office is about to be told so); it goes to
+ * the ops log, and the toast says what it can.
+ */
+async function editedRemainderWarnings(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string,
+  bills: { id: string; supplier?: string | null }[],
+  offered: ImportRow[],
+  markup: number | undefined,
+): Promise<string[]> {
+  try {
+    const { data, error } = await supabase
+      .from("invoice_items")
+      .select("import_key, line_total, edited")
+      .eq("invoice_id", invoiceId)
+      .eq("import_source", "costs");
+    if (error) {
+      reportError("importCostsIntoInvoice.remainderDrift", error, { invoiceId });
+      return [];
+    }
+    const lines = (data ?? []) as { import_key?: string | null; line_total?: unknown; edited?: boolean | null }[];
+    return editedRemainderDrift(bills, offered, lines).map((d) => editedRemainderSentence(d, markup));
+  } catch (e) {
+    reportError("importCostsIntoInvoice.remainderDrift", e, { invoiceId });
+    return [];
+  }
 }
 
 /**

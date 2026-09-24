@@ -5,7 +5,7 @@ import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style"
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
-import { invoiceBalance, type InvoiceLine } from "@/lib/invoice-math";
+import { invoiceBalance, mergeSuppliesAndTax, type InvoiceLine } from "@/lib/invoice-math";
 
 /**
  * THE single invoice document body. Every read-only surface — the print/PDF page,
@@ -78,6 +78,9 @@ export function InvoiceDocument({
   const coSized = { ...co, logoSize: ds.logo_size };
   const rowPad = DENSITY_ROW[ds.density];
   const gap = { paddingLeft: ds.col_gap };
+  // Every receipt's "Supplies & tax - <supplier>" row prints as ONE "Supplies & Tax" line on the
+  // customer's copy (INV-074). Same cents; the office editor and the stored rows stay per receipt.
+  const lines = mergeSuppliesAndTax(items);
 
   return (
     <div className="print-page mx-auto bg-white shadow-sm" style={sheetStyleVars(ds) as React.CSSProperties}>
@@ -142,7 +145,7 @@ export function InvoiceDocument({
             </tr>
           </thead>
           <tbody>
-            {items.map((it, i) => (
+            {lines.map((it, i) => (
               <tr key={it.id ?? i} className="border-b border-slate-100">
                 <td className={`${rowPad} pr-2 text-slate-800`}>
                   <LineItemText description={it.description ?? ""} />
@@ -161,7 +164,7 @@ export function InvoiceDocument({
       <div className="totals-group">
         {ds.show_breakdown && (
           <div className="mt-4 flex justify-end">
-            <CostBreakdown items={items} className="w-64" />
+            <CostBreakdown items={lines} className="w-64" />
           </div>
         )}
 
