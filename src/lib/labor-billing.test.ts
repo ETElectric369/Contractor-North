@@ -5,21 +5,21 @@ describe("laborCostForJob — allocation-aware pay cost (job hub == analytics)",
   const prof = (hourly: number) => ({ hourly_rate: hourly });
   it("un-split closed entry on the job: gross hours × pay rate", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 , unratedHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 , unratedHours: 0, ownerHours: 0 });
   });
   it("honors rate_override (supervisor rate) over the base", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, rate_override: 60, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 , unratedHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 , unratedHours: 0, ownerHours: 0 });
   });
   it("a split shift costs ONLY this job's allocated hours, not the whole day", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40),
       time_allocations: [{ job_id: "J", hours: 1 }, { job_id: "OTHER", hours: 7 }] };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 1, cost: 40 , unratedHours: 0 });
-    expect(laborCostForJob([e], "OTHER")).toEqual({ hours: 7, cost: 280 , unratedHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 1, cost: 40 , unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([e], "OTHER")).toEqual({ hours: 7, cost: 280 , unratedHours: 0, ownerHours: 0 });
   });
   it("unlabeled allocation rows count toward the entry's own job", () => {
     const e = { job_id: "J", status: "closed", profiles: prof(50), time_allocations: [{ job_id: null, hours: 2 }] };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 2, cost: 100 , unratedHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 2, cost: 100 , unratedHours: 0, ownerHours: 0 });
   });
 });
 
@@ -293,7 +293,7 @@ describe("laborCostForJob — unrated hours are reported, never swallowed (v800 
       lunch_minutes: 0,
       profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
     };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 8 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 8, ownerHours: 0 });
   });
 
   it("an explicit fallback rate prices them, and nothing is left unrated", () => {
@@ -305,7 +305,7 @@ describe("laborCostForJob — unrated hours are reported, never swallowed (v800 
       lunch_minutes: 0,
       profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
     };
-    expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0 });
+    expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0, ownerHours: 0 });
   });
 });
 
@@ -453,5 +453,71 @@ describe("labor lines claim their hours (0255)", () => {
     // unknown parent is not a claimed one.
     const allocs = [{ id: "a1", hours: 4, time_entries: { profiles: brianP } }];
     expect(withoutClaimedLabor([], allocs, new Set(["e-brian"])).jobAllocs.map((a) => a.id)).toEqual(["a1"]);
+  });
+});
+
+/**
+ * THE OWNER IS PAID BY DRAW (0286). Erik bills his own hours at $125 and the app ALSO costed them
+ * at $125, so every hour he worked netted $0 and all-time job profit read -$1,085 instead of about
+ * +$35,847. The view now reads his hourly_rate as 0 and carries paid_by_draw; these pin what every
+ * cost reader does with that, and that billing did not move by a cent.
+ */
+describe("the owner's hours are hours, never a cost (0286)", () => {
+  // Exactly what profile_pay hands back for Erik after 0286: pay 0, bill kept, the flag set.
+  const erikDraw = { id: "e", full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125, paid_by_draw: true };
+  const brianCrew = { id: "b", full_name: "Brian Taylor", hourly_rate: 40, bill_rate: 85, paid_by_draw: false };
+  const shift = (profiles: any, extra: Record<string, unknown> = {}) => ({
+    id: `${profiles.id}-1`,
+    job_id: "J",
+    status: "closed",
+    clock_in: "2026-06-01T15:00:00Z",
+    clock_out: "2026-06-01T23:00:00Z",
+    lunch_minutes: 0,
+    profiles,
+    ...extra,
+  });
+
+  it("an owner's 8 hours cost $0, count as hours and as owner hours, and are never unrated", () => {
+    expect(laborCostForJob([shift(erikDraw)], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  });
+
+  it("even a leftover rate_override on the owner's shift costs nothing", () => {
+    expect(laborCostForJob([shift(erikDraw, { rate_override: 125 })], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  });
+
+  it("a fallback rate never prices the owner either", () => {
+    expect(laborCostForJob([shift(erikDraw)], "J", 125)).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  });
+
+  it("split shifts: the owner's allocated hours land in ownerHours for the job they belong to", () => {
+    const e = shift(erikDraw, { time_allocations: [{ job_id: "J", hours: 3 }, { job_id: "K", hours: 5 }] });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 3, cost: 0, unratedHours: 0, ownerHours: 3 });
+    expect(laborCostForJob([e], "K")).toEqual({ hours: 5, cost: 0, unratedHours: 0, ownerHours: 5 });
+  });
+
+  it("a crew member beside him is costed exactly as before", () => {
+    expect(laborCostForJob([shift(erikDraw), shift(brianCrew)], "J")).toEqual({ hours: 16, cost: 320, unratedHours: 0, ownerHours: 8 });
+  });
+
+  it("a row without the flag still costs whatever the view says, so the view is the boundary", () => {
+    // A reader that never heard of paid_by_draw gets hourly_rate 0 from the view: $0, just unflagged.
+    const legacy = { id: "e", full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125 };
+    expect(laborCostForJob([shift(legacy)], "J").cost).toBe(0);
+  });
+
+  it("billing is unchanged: the owner still bills at his $125 bill rate, the crew at theirs", () => {
+    const e1 = { ...entry(erikDraw, 8), id: "e1" };
+    const e2 = { ...entry(brianCrew, 8), id: "b1" };
+    const { lines, total } = computeJobLaborBilling([e1, e2], [], 0);
+    expect(lines.find((l) => l.personId === "e")).toMatchObject({ rate: 125, quantity: 8, amount: 1000 });
+    expect(lines.find((l) => l.personId === "b")).toMatchObject({ rate: 85, quantity: 8, amount: 680 });
+    expect(total).toBe(1680);
+  });
+
+  it("the same owner hours bill $125 and cost $0 on one job: the whole $1,000 is left, not $0", () => {
+    const e = { ...shift(erikDraw), id: "e1" };
+    const billed = computeJobLaborBilling([e], [], 0).total;
+    const cost = laborCostForJob([e], "J").cost;
+    expect(billed - cost).toBe(1000);
   });
 });

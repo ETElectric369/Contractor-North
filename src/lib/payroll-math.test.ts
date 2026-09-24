@@ -236,6 +236,20 @@ describe("payRateForEntry — pay rate source of truth", () => {
   it("never returns NaN", () => {
     expect(payRateForEntry({ rate_override: "x" } as any)).toBe(0);
   });
+  // 0286: the owner is paid by owner's draw. His hour is never a wage, whatever the row says.
+  it("an owner's entry pays 0, even with a rate_override", () => {
+    const owner = (over: any) => ({ rate_override: over, profiles: { hourly_rate: 0, paid_by_draw: true } });
+    expect(payRateForEntry(owner(null))).toBe(0);
+    expect(payRateForEntry(owner(125))).toBe(0);
+    expect(payRateForEntry(owner(null), 125)).toBe(0); // no fallback restores the wage
+  });
+  it("the view's 0 alone (no flag) already reads 0, and 0 ?? fallback stays 0", () => {
+    expect(payRateForEntry({ rate_override: null, profiles: { hourly_rate: 0 } }, 125)).toBe(0);
+  });
+  it("a crew member with the flag false is untouched", () => {
+    expect(payRateForEntry({ rate_override: 50, profiles: { hourly_rate: 40, paid_by_draw: false } })).toBe(50);
+    expect(payRateForEntry({ rate_override: null, profiles: { hourly_rate: 40, paid_by_draw: false } })).toBe(40);
+  });
 });
 
 // ── OWED = EARNED − PAID (0264) ──────────────────────────────────────────────

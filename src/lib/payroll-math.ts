@@ -40,8 +40,14 @@ export type PayrollRow = {
 /** THE single source of truth for what an entry PAYS per hour: a per-entry
  *  rate_override (e.g. a supervisor rate for that shift) wins, else the person's
  *  profile hourly_rate (or an explicit fallback when the row carries no profile).
- *  PAY-rate only — what we CHARGE the customer is the bill_rate in labor-billing. */
+ *  PAY-rate only — what we CHARGE the customer is the bill_rate in labor-billing.
+ *
+ *  AN OWNER'S HOUR PAYS NOTHING (0286). The owner is paid by owner's draw, so his hours are never a
+ *  wage and never a cost, whatever the entry says: a stray rate_override on one of his shifts (the
+ *  DB now refuses a new one, but an old row could carry one) does not bring the wage back. The view
+ *  already reads his hourly_rate as 0; this covers the override, the only other door. */
 export function payRateForEntry(e: any, fallbackRate?: number): number {
+  if (e?.profiles?.paid_by_draw === true || e?.paid_by_draw === true) return 0;
   const ov = Number(e?.rate_override);
   if (Number.isFinite(ov) && ov > 0) return ov;
   return fin(e?.profiles?.hourly_rate ?? fallbackRate);
