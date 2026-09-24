@@ -14,7 +14,6 @@ import {
   FileText,
   Sparkles,
   Briefcase,
-  Wallet,
   Check,
   AlertCircle,
   Archive,
@@ -34,6 +33,7 @@ import { useDictation } from "@/lib/use-dictation";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { prepareImageForUpload } from "@/lib/image-prep";
+import { sha256Hex } from "@/lib/content-hash";
 import {
   analyzeAndFile,
   fileItem,
@@ -44,14 +44,17 @@ import {
   unarchiveItem,
   aiReviewItem,
 } from "./actions";
-import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
+import { fingerprintSeen } from "./paperwork-actions";
+import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobLabel } from "@/lib/schedule-options";
+import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
+import type { NumberMatch } from "@/lib/paperwork";
 
 // The categories Claude assigns during extraction — offered so the owner can
 // correct a mis-classified item to any valid kind. Mirrors analyzeAndFile.
 const ITEM_CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Note", "Other"];
 
-export interface OrganizedItemRow {
+export interface OrganizedItemRow extends PaperRowItem {
   id: string;
   kind: string;
   title: string;
@@ -67,6 +70,7 @@ export interface OrganizedItemRow {
   created_at: string;
   signedUrl: string | null;
   jobs: { job_number: string; name: string } | null;
+  tied_bill_id?: string | null;
 }
 
 interface JobOption {
@@ -87,10 +91,13 @@ export function OrganizeManager({
   orgId,
   items,
   jobs,
+  matches,
 }: {
   orgId: string;
   items: OrganizedItemRow[];
   jobs: JobOption[];
+  /** "Already on the books" offers per paper, computed on the server (0295). */
+  matches: Record<string, NumberMatch[]>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -100,6 +107,7 @@ export function OrganizeManager({
   const [aiBusy, setAiBusy] = useState<string | null>(null);
   const [aiMsg, setAiMsg] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<OrganizedItemRow | null>(null);
+  const [notePick, setNotePick] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
 
@@ -133,6 +141,11 @@ export function OrganizeManager({
 
   const busy = uploads.some((u) => u.status === "uploading" || u.status === "reading");
   const tray = items.filter((i) => i.status === "needs_review");
+  // ONE INBOX, ONE ACTION (0295): every paper in the tray renders the SAME row Drop Paperwork on
+  // /bills renders, and files through the same File It. A note keeps its own card, because what
+  // matters on a note is the words on it.
+  const trayPapers = tray.filter((i) => i.kind !== "note");
+  const trayNotes = tray.filter((i) => i.kind === "note");
   const archived = items.filter((i) => i.status === "filed" || i.status === "archived");
 
   async function processFiles(files: File[]) {
@@ -146,6 +159,21 @@ export function OrganizeManager({
         setUploads((u) => u.map((x) => (x.name === label ? { ...x, status, message } : x)));
 
       try {
+        // THE SAME FILE ONCE (0295): fingerprinted from its ORIGINAL bytes, before any resize, and
+        // checked before anything is uploaded.
+        let sha: string | null = null;
+        try {
+          sha = await sha256Hex(await raw.arrayBuffer());
+        } catch {
+          sha = null; // an old browser: the file still goes in, it just can't be matched
+        }
+        if (sha) {
+          const seen = await fingerprintSeen(sha);
+          if (seen.seen) {
+            setState("done", `${seen.seen} Nothing was added twice.`);
+            continue;
+          }
+        }
         const file = await prepareImageForUpload(raw);
         if (file.size > 8 * 1024 * 1024) throw new Error("Over 8 MB — try a smaller photo.");
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -154,18 +182,19 @@ export function OrganizeManager({
         if (upErr) throw upErr;
 
         setState("reading");
-        const res = await analyzeAndFile({ path, name: file.name, mime: file.type, size: file.size });
+        const res = await analyzeAndFile({ path, name: file.name, mime: file.type, size: file.size, sha256: sha });
         if (!res.ok) throw new Error(res.error);
         const it = res.item!;
+        // NOTHING IS FILED BY THE READ (Erik, 2026-09-24). The line says what was read and where
+        // it is waiting; a person presses File It in Needs Attention.
+        const total = it.amount != null ? formatCurrency(it.amount) : "no total read";
         setState(
           "done",
-          it.status === "needs_review"
-            ? "Needs your call — see the tray"
-            : it.destination === "job"
-              ? `Filed to ${it.job_label}`
-              : it.destination === "overhead"
-                ? `Filed as a Business Cost: ${bucketOf(it.bucket)}`
-                : "Filed",
+          it.destination === "note"
+            ? "Kept as a note"
+            : `Read: ${it.vendor ?? it.title}, ${total}. Waiting in Needs Attention for File It${
+                it.suggestion?.jobLabel ? ` (suggested: ${it.suggestion.jobLabel})` : it.suggestion?.bucket ? ` (suggested: Business Cost, ${bucketOf(it.suggestion.bucket)})` : ""
+              }.`,
         );
       } catch (err: any) {
         setState("error", err?.message ?? "Failed.");
@@ -210,7 +239,7 @@ export function OrganizeManager({
     start(async () => {
       const res = await unarchiveItem(item.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't restore — try again.", "error"); return; }
-      toast("Moved back to needs-attention", "success");
+      toast(res && "message" in res && res.message ? String(res.message) : "Moved back to Needs Attention", "success");
       router.refresh();
     });
   }
@@ -272,8 +301,9 @@ export function OrganizeManager({
     );
   }
 
-  /** Needs-attention card: full filing exits + AI review + archive. Archive is the
-   *  safe inline remove — hard Delete lives only on archived (already-triaged) cards. */
+  /** A NOTE in the tray: its words, then where it goes. Papers use PaperworkRow instead. Picking a
+   *  job only picks; Keep It On The Job is the press (the dropdown used to file the moment it
+   *  changed). Archive is the safe inline remove. */
   function AttentionCard({ item }: { item: OrganizedItemRow }) {
     const meta = KIND_META[item.kind] ?? KIND_META.job_document;
     return (
@@ -306,58 +336,43 @@ export function OrganizeManager({
               </div>
             )}
 
-            {/* THE TRAY'S DOORS, AT FINGER SIZE (2026-09-24). Every control in this row is 44px
-                tall and Title Case: they were 32px, with "File to job…" and "Overhead…" in lower
-                case. "Overhead…" is now Business Cost… with the six buckets. There is no Petty
-                Cash button any more: filing a receipt there dropped its job and its category,
-                which is how a CED job purchase ended up in the cash box. */}
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <Button onClick={() => aiReview(item)} disabled={pending || aiBusy === item.id}>
-                {aiBusy === item.id ? <Loader2 className="animate-spin" /> : <Sparkles />}
-                {aiBusy === item.id ? "Reviewing…" : "AI Review & File"}
-              </Button>
-              <span className="flex items-center gap-1.5">
-                <Briefcase className="h-4 w-4 text-slate-400" />
-                <Select
-                  value={item.job_id ?? ""}
-                  onChange={(e) =>
-                    e.target.value ? file(item, { type: "job", jobId: e.target.value }) : file(item, { type: "unfiled" })
-                  }
-                  disabled={pending}
-                  className="h-11 w-48"
-                  aria-label="File to Job"
-                >
-                  <option value="">File to Job…</option>
-                  {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-                  ))}
-                </Select>
-              </span>
-              {item.kind === "receipt" && (
-                <span className="flex items-center gap-1.5">
-                  <Wallet className="h-4 w-4 text-slate-400" />
-                  <Select
-                    value=""
-                    onChange={(e) => e.target.value && file(item, { type: "overhead", category: e.target.value })}
-                    disabled={pending}
-                    className="h-11 w-48"
-                    aria-label="File as a Business Cost"
-                  >
-                    <option value="">Business Cost…</option>
-                    {BUSINESS_COST_BUCKETS.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </Select>
-                </span>
-              )}
-              <Button variant="outline" onClick={() => setEditing(item)} disabled={pending}>
-                <Pencil /> Edit
-              </Button>
-              <Button variant="outline" onClick={() => archive(item)} disabled={pending}>
-                <Archive /> Archive
-              </Button>
-            </div>
+            <NoteDoors item={item} />
           </div>
         </div>
       </Card>
+    );
+  }
+
+  function NoteDoors({ item }: { item: OrganizedItemRow }) {
+    // Held by the manager, not here: this card is re-created on every render of the page, and a
+    // pick kept in its own state would reset each time an upload line moved.
+    const pick = notePick[item.id] ?? item.job_id ?? "";
+    const setPick = (v: string) => setNotePick((m) => ({ ...m, [item.id]: v }));
+    return (
+      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+        <Button onClick={() => aiReview(item)} disabled={pending || aiBusy === item.id}>
+          {aiBusy === item.id ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          {aiBusy === item.id ? "Looking…" : "AI Suggest"}
+        </Button>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Briefcase className="h-4 w-4 shrink-0 text-slate-400" />
+          <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={pending} className="h-11 w-48" aria-label="Pick a Job">
+            <option value="">Pick a Job…</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>{jobLabel(j)}</option>
+            ))}
+          </Select>
+        </span>
+        <Button variant="outline" onClick={() => pick && file(item, { type: "job", jobId: pick })} disabled={pending || !pick}>
+          <Check /> Keep It On The Job
+        </Button>
+        <Button variant="outline" onClick={() => setEditing(item)} disabled={pending}>
+          <Pencil /> Edit
+        </Button>
+        <Button variant="outline" onClick={() => archive(item)} disabled={pending}>
+          <Archive /> Archive
+        </Button>
+      </div>
     );
   }
 
@@ -379,13 +394,15 @@ export function OrganizeManager({
               <span>{formatDate(item.created_at)}</span>
             </div>
           </div>
-          <button onClick={() => restore(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Back to needs-attention">
+          {/* 44px targets. Back undoes a filing (its bill comes down under the 0278 ceiling), so
+              the paper never sits in the tray over a bill that is still live. */}
+          <button onClick={() => restore(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title={item.bill_id || item.job_id || item.tied_bill_id ? "Undo Filing (Back To Needs Attention)" : "Back To Needs Attention"} aria-label="Back To Needs Attention">
             <RotateCcw className="h-4 w-4" />
           </button>
-          <button onClick={() => setEditing(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit details">
+          <button onClick={() => setEditing(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit Details" aria-label="Edit Details">
             <Pencil className="h-4 w-4" />
           </button>
-          <button onClick={() => remove(item)} disabled={pending} className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete">
+          <button onClick={() => remove(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete" aria-label="Delete">
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
@@ -481,8 +498,8 @@ export function OrganizeManager({
           <div>
             <div className="font-semibold text-slate-900">Snap it, speak it — I&apos;ll sort and file it.</div>
             <p className="mt-1 text-sm text-slate-500">
-              Receipts, handwritten notes, plans, permits, or a quick voice memo. I file what I&apos;m sure
-              about and leave the rest in your needs-attention list.
+              Receipts, handwritten notes, plans, permits, or a quick voice memo. I read each one and put it in
+              Needs Attention with what I read; nothing becomes a cost until you press File It.
             </p>
           </div>
           <div className="flex flex-wrap justify-center gap-2">
@@ -513,7 +530,7 @@ export function OrganizeManager({
                 <span className="min-w-0 flex-1 truncate text-slate-700">{u.name}</span>
                 <span className={`text-xs ${u.status === "error" ? "text-red-600" : "text-slate-400"}`}>
                   {u.status === "uploading" && "Uploading…"}
-                  {u.status === "reading" && "Reading & filing…"}
+                  {u.status === "reading" && "Reading…"}
                   {(u.status === "done" || u.status === "error") && (u.message ?? "")}
                 </span>
               </li>
@@ -535,9 +552,14 @@ export function OrganizeManager({
               tray.length === 0 ? (
                 <p className="py-10 text-center text-sm text-slate-400">All caught up — nothing needs your attention. 🎉</p>
               ) : (
-                <ul className="space-y-3">
-                  {tray.map((item) => <li key={item.id}><AttentionCard item={item} /></li>)}
-                </ul>
+                <div className="space-y-3">
+                  <PaperworkList items={trayPapers} jobs={jobs} matches={matches} showAiSuggest />
+                  {trayNotes.length > 0 && (
+                    <ul className="space-y-3">
+                      {trayNotes.map((item) => <li key={item.id}><AttentionCard item={item} /></li>)}
+                    </ul>
+                  )}
+                </div>
               ),
           },
           {

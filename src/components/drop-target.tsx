@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useSyncExternalStore } from "react";
+import { describeLeftBehind, sortDrop } from "@/lib/drop-sort";
 
 /* The zone's interior is a PATTERN, not words (Erik: "how about a pattern — or nothing"): the
    classic diagonal-stripe drop texture, keyed to the brand color, faint at reveal and solid-er
@@ -91,19 +92,6 @@ export function useFileDragActive(): boolean {
   return useSyncExternalStore(subscribe, () => dragActive, () => false);
 }
 
-function matchesAccept(file: File, accept?: string): boolean {
-  if (!accept) return true;
-  const type = (file.type || "").toLowerCase();
-  const name = file.name.toLowerCase();
-  return accept.split(",").some((raw) => {
-    const a = raw.trim().toLowerCase();
-    if (!a) return false;
-    if (a.startsWith(".")) return name.endsWith(a);
-    if (a.endsWith("/*")) return type.startsWith(a.slice(0, -1));
-    return type === a;
-  });
-}
-
 export function DropTarget({
   onFiles,
   accept,
@@ -128,6 +116,10 @@ export function DropTarget({
   const active = useFileDragActive();
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState(false);
+  // WHAT A MIXED DROP LEFT BEHIND, BY NAME. The door gets the files that fit; this line names
+  // every one it did not take, and stays until the next drag or a tap, because a two-second
+  // flash is gone before a person has read which file it was.
+  const [leftBehind, setLeftBehind] = useState<string | null>(null);
   const depthRef = useRef(0);
   const refuseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -139,6 +131,7 @@ export function DropTarget({
       onDragEnter={(e) => {
         if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
         depthRef.current++;
+        setLeftBehind(null);
         setOver(true);
       }}
       onDragLeave={() => {
@@ -156,18 +149,31 @@ export function DropTarget({
         depthRef.current = 0;
         setOver(false);
         const dropped = Array.from(e.dataTransfer.files ?? []);
-        const files = dropped.filter((f) => matchesAccept(f, accept));
-        if (!files.length) {
+        const sorted = sortDrop(dropped, accept, multiple);
+        if (!sorted.take.length) {
           // The wrong file type gets an answer, not silence.
           setRefused(true);
           if (refuseTimer.current) clearTimeout(refuseTimer.current);
           refuseTimer.current = setTimeout(() => setRefused(false), 2000);
+          setLeftBehind(describeLeftBehind(sorted));
           return;
         }
-        onFiles(multiple ? files : files.slice(0, 1));
+        setLeftBehind(describeLeftBehind(sorted));
+        onFiles(sorted.take);
       }}
     >
       {children}
+      {leftBehind && (
+        <button
+          type="button"
+          onClick={() => setLeftBehind(null)}
+          className="mt-2 block min-h-11 w-full rounded-lg bg-amber-50 px-3 py-2 text-left text-sm text-amber-900"
+          role="status"
+          title="Tap To Dismiss"
+        >
+          {leftBehind}
+        </button>
+      )}
       {(active || refused) && (
         <div
           // OPAQUE, not frosted — a translucent cover let the buttons' own labels ghost through

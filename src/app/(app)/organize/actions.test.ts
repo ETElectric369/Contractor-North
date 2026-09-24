@@ -62,6 +62,7 @@ const GUARD = {
 const WALDOW_RECEIPT = {
   id: "bf638150-21c9-4290-ae0f-d6608c31d331",
   kind: "receipt",
+  status: "needs_review",
   title: "Contractors Electrical Distributors — $467.87",
   vendor: "Contractors Electrical Distributors",
   amount: 467.87,
@@ -146,6 +147,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       {
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -165,6 +167,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       {
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -178,7 +181,9 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     // importCostsIntoInvoice bills the same $467.87 purchase to a second customer.
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("documents", "insert")).toBeUndefined();
-    expect(did("organized_items", "update")).toBeUndefined();
+    // The only writes to the row are this press's claim and its release: it ends where it began.
+    const rowWrites = calls.filter((c) => c.table === "organized_items" && c.verb === "update").map((c) => c.payload);
+    expect(rowWrites).toEqual([{ status: "filed" }, { status: "needs_review" }]);
   });
 
   it("asks for the row back (.select('id')) so an RLS refusal can never read as a 204", async () => {
@@ -186,6 +191,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       {
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -202,7 +208,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
         "documents.insert": [{ data: { id: "doc-2" }, error: null }],
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
         "bill_line_items.insert": [{ data: [{ id: "bli-1" }], error: null }],
-        "organized_items.update": [{ error: null }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -210,7 +216,8 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res).toEqual({ ok: true });
     expect(did("bills", "insert")?.payload).toMatchObject({ job_id: "job-047", amount: 467.87 });
-    expect(did("organized_items", "update")?.payload).toMatchObject({ job_id: "job-047", bill_id: "bill-new" });
+    const rowWrites = calls.filter((c) => c.table === "organized_items" && c.verb === "update");
+    expect(rowWrites[rowWrites.length - 1]?.payload).toMatchObject({ job_id: "job-047", bill_id: "bill-new" });
   });
 
   it("a stale bill link (zero rows, no error) must not dead-end the move", async () => {
@@ -225,7 +232,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
         "documents.insert": [{ data: { id: "doc-2" }, error: null }],
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
         "bill_line_items.insert": [{ data: [{ id: "bli-1" }], error: null }],
-        "organized_items.update": [{ error: null }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -244,6 +251,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
           data: null,
           error: { code: "P0001", message: "another invoice already bills this receipt. Void that invoice, or take its materials lines off, then delete this receipt." },
         }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -257,6 +265,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       {
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: { message: 'new row violates row-level security policy for table "bills"' } }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -273,6 +282,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: null, error: { message: "boom" } }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
@@ -287,6 +297,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       {
         "organized_items.select": [{ data: { ...WALDOW_RECEIPT, bill_id: null, document_id: null, petty_cash_id: "pc-1" }, error: null }],
         "petty_cash.delete": [{ data: null, error: { message: "boom" } }],
+        "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
