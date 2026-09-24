@@ -29,8 +29,8 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
  * gone): clocked out → one big "Clock In" (a job-less punch; the server resolves
  * today's job for every role now); clocked in → the ticking timer + job label + a
  * one-tap "Clock Out" with the one opt-in lunch box beside it (Erik 2026-09-08 — nothing
- * is deducted unless it's ticked), allocations stay omitted so mid-shift switch segments survive,
- * and the entry's own note rides through untouched. No week/today hour stats, no
+ * is deducted unless it's ticked), and the entry's own note rides through untouched. A mid-shift
+ * switch is its own entry already (0288), so a clock-out closes only the part still running. No week/today hour stats, no
  * pickers, no questionnaire — the "Timeclock →" link carries anything more.
  */
 export function MyDayClock({

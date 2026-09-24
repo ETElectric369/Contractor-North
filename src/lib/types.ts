@@ -229,6 +229,10 @@ export interface TimeEntry {
   translated_notes: string | null;
   status: TimeEntryStatus;
   source: TimeEntrySource;
+  /** 0288: the first entry of the shift this piece was cut from (null on an ordinary entry). */
+  split_from?: string | null;
+  /** 0288: how the piece was made: live (Switch Job), after (split on Timecards), converted (0289). */
+  split_how?: "live" | "after" | "converted" | null;
   created_at: string;
   updated_at: string;
 }
@@ -237,18 +241,6 @@ export interface GeoPoint {
   lat: number;
   lng: number;
   accuracy?: number;
-}
-
-export interface TimeAllocation {
-  id: string;
-  time_entry_id: string;
-  org_id: string;
-  job_id: string | null;
-  job_code: string | null;
-  hours: number;
-  description: string | null;
-  sort_order: number;
-  created_at: string;
 }
 
 export interface ChangeOrder {

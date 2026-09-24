@@ -27,6 +27,7 @@ import { hmToMin } from "@/lib/tz";
 import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { OpenEntryEditor } from "./open-entry-editor";
+import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-family";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
@@ -105,9 +106,9 @@ async function readAll<T>(
 export default async function TimecardsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ week?: string; entry?: string; group?: string }>;
+  searchParams: Promise<{ week?: string; entry?: string; group?: string; split?: string; at?: string; job?: string; code?: string }>;
 }) {
-  const { week, entry: entryParam, group } = await searchParams;
+  const { week, entry: entryParam, group, split: splitParam, at: splitAtParam, job: splitJobParam, code: splitCodeParam } = await searchParams;
   const offset = Math.max(0, parseInt(week ?? "0", 10) || 0);
   /* ── HOW THE LEDGER IS STACKED ────────────────────────────────────────────────────────────
    *  By Day or By Person, in the URL, because he is not choosing it once: he pages weeks with
@@ -164,7 +165,7 @@ export default async function TimecardsPage({
   const { data: entries } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
     )
     .gte("clock_in", start.toISOString())
     .lt("clock_in", end.toISOString())
@@ -196,7 +197,7 @@ export default async function TimecardsPage({
   const { data: openNow } = await supabase
     .from("time_entries")
     .select(
-      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, rate_override, auto_closed_reason, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+      "id, profile_id, clock_in, clock_out, lunch_minutes, miles, job_id, job_code, status, notes, source, rate_override, auto_closed_reason, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
     )
     .or("status.eq.open,auto_closed_reason.not.is.null")
     .order("clock_in", { ascending: true });
@@ -390,7 +391,7 @@ export default async function TimecardsPage({
   /* ── THE SCROLLING RECORD ────────────────────────────────────────────────────────────────
      Erik: "continuous scroll which should also be on timecards with pay period break lines."
      A separate, LIGHT read: only what a pill needs, over a wide span, so the stack has weeks to
-     scroll through without dragging the edit modal's whole projection (rate_override, allocations,
+     scroll through without dragging the edit modal's whole projection (rate_override,
      payroll locks) across six months of rows. The single-week `entries` above still feeds the
      per-person lists and the editor, unchanged. */
   const stackFrom = new Date(start.getTime() - 26 * 7 * 86_400_000).toISOString();
@@ -401,9 +402,8 @@ export default async function TimecardsPage({
       /* job_code / source / notes / miles ride along now that this list is THE list: they are
          four flat columns, not the editor's projection, and two of them are disclosures (0168's
          manual/offline provenance) that must not go quiet just because a row is three weeks old.
-         time_allocations is still NOT here — an embed across six months of rows is the thing this
-         read exists to avoid, so split lines stay on the anchored week's deep read below. */
-      "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, profiles:profile_id(full_name), job:job_id(job_number, name)",
+         split_from / split_how (0288) are what brackets the pieces of one split shift. */
+      "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
     )
     .gte("clock_in", stackFrom)
     .lt("clock_in", stackTo)
@@ -426,28 +426,27 @@ export default async function TimecardsPage({
   };
   /* ── THE DETAIL THAT USED TO BE A SECOND LIST ─────────────────────────────────────────────
    *
-   *  Under the stack sat one Card per person, re-listing that person's week: the job, the code
-   *  badge, manual/offline, lunch, the hours, the notes, the split lines, and a duplicate +
-   *  pencil pair. The SAME SHIFTS the stack was already drawing. Erik: "it looks like duplicates
-   *  … lets try and mold as much together as possible." So the detail moves ONTO the stack's row
-   *  and the cards go; By Person is now a grouping of this one ledger, not a second copy of it.
+   *  Under the stack sat one Card per person, re-listing that person's week. The SAME SHIFTS the
+   *  stack was already drawing. Erik: "it looks like duplicates … lets try and mold as much
+   *  together as possible." So the detail moves ONTO the stack's row and the cards go.
    *
-   *  Split lines and the two controls need the editor's whole projection (allocations, the
-   *  payroll locks, rate_override), which is read for the ANCHORED WEEK only — which is exactly
-   *  the span those cards ever covered, so nothing that existed is lost. A row from an older week
-   *  still opens its editor with one tap (the ?entry= door below fetches the row it needs), so an
-   *  older row is never a dead end, just quieter. */
-  const detailById = new Map<
-    string,
-    { allocations: { jobCode: string | null; hours: number; description: string | null }[]; controls: ReactNode }
-  >();
-  for (const e of (entries ?? []) as any[]) {
+   *  The two controls need the editor's whole projection (the payroll locks, rate_override), which
+   *  is read for the ANCHORED WEEK only. A row from an older week still opens its editor with one
+   *  tap (the ?entry= door below fetches the row it needs), so an older row is never a dead end.
+   *
+   *  A SPLIT SHIFT IS ENTRIES (0288). The pieces of one shift are ordinary rows; the editor offers
+   *  Move The Split and Join Back between two touching pieces of the same family, found here from
+   *  the same week's rows. */
+  const weekRows = (entries ?? []) as any[];
+  const neighborLabel = (r: any) => (r?.job ? jobLabel(r.job) : (r?.job_code ?? "no job"));
+  const neighborsOf = (rows: any[], id: string) => {
+    const n = splitNeighbors(rows, id);
+    const pack = (r: any) => (r ? { id: String(r.id), clock_in: String(r.clock_in), clock_out: String(r.clock_out), label: neighborLabel(r) } : null);
+    return n.prev || n.next ? { prev: pack(n.prev), next: pack(n.next) } : null;
+  };
+  const detailById = new Map<string, { controls: ReactNode }>();
+  for (const e of weekRows) {
     detailById.set(String(e.id), {
-      allocations: ((e.time_allocations ?? []) as any[]).map((a) => ({
-        jobCode: a.job_code ?? null,
-        hours: Number(a.hours ?? 0),
-        description: a.description ?? null,
-      })),
       controls: (
         <>
           {e.status === "closed" && (
@@ -465,11 +464,17 @@ export default async function TimecardsPage({
             members={members ?? []}
             isStaff
             jobCodesEnabled={orgSettings.timeclock_job_codes}
+            tz={tz}
+            neighbors={neighborsOf(weekRows, String(e.id))}
           />
         </>
       ),
     });
   }
+  /* WHICH ROWS ARE ONE SHIFT: families over everything the stack draws (the wide read plus the
+     anchored week), so the bracket holds whichever pieces are on screen. */
+  const familyRows = [...((stackRows ?? []) as any[]), ...weekRows];
+  const familyById = splitFamilies(familyRows);
 
   const toStackEntry = (e: any): StackEntry => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
@@ -529,7 +534,11 @@ export default async function TimecardsPage({
       source: e.source === "manual" ? "manual" : e.source === "offline" ? "offline" : null,
       lunchMin: Number(e.lunch_minutes ?? 0),
       notes: e.notes ?? null,
-      allocations: detail?.allocations,
+      family: familyById.get(String(e.id)) ?? null,
+      familyConverted: (() => {
+        const f = familyById.get(String(e.id));
+        return f ? familyWasConverted(familyRows, f) : false;
+      })(),
       controls: detail?.controls,
     };
   };
@@ -764,7 +773,7 @@ export default async function TimecardsPage({
     const { data: one } = await supabase
       .from("time_entries")
       .select(
-        "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, profiles:profile_id(full_name), job:job_id(job_number, name), time_allocations(job_id, job_code, hours, description)",
+        "id, profile_id, clock_in, clock_out, lunch_minutes, miles, rate_override, paid_at, mileage_paid_at, job_id, job_code, status, notes, source, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
       )
       .eq("id", entryParam)
       .maybeSingle();
@@ -908,6 +917,10 @@ export default async function TimecardsPage({
           jobs={jobs ?? []}
           members={members ?? []}
           jobCodesEnabled={orgSettings.timeclock_job_codes}
+          tz={tz}
+          neighbors={neighborsOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
+          /* Nort's fill (time.splitEntry): the sheet opens with its cut in it; a person taps Split Shift. */
+          initialSplit={splitParam === "1" ? { at: splitAtParam ?? null, jobId: splitJobParam ?? null, code: splitCodeParam ?? null } : null}
         />
       )}
 
@@ -1056,8 +1069,8 @@ export default async function TimecardsPage({
           reason: they were not a summary of the stack, they were a SECOND RENDERING of its
           shifts, which is the duplicate Erik was actually looking at. Everything they carried —
           the initials header, the week hours, the mileage split, and per shift the times, the job
-          link, the code badge, manual/offline, lunch, the hours, duplicate, pencil, the notes and
-          the split lines — now rides on the stack's one row, under [By Day | By Person] above.
+          link, the code badge, manual/offline, lunch, the hours, duplicate, pencil and the notes —
+          now rides on the stack's one row, under [By Day | By Person] above.
           The EmptyState that stood in for them went too: the stack says "No hours this week" in
           each week it owns, so there is exactly one of those on screen instead of two.
 

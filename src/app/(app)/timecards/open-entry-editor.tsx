@@ -1,7 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { EditEntryButton } from "./edit-entry-button";
+import { EditEntryButton, type SplitNeighbor } from "./edit-entry-button";
+import type { SplitPrefill } from "./split-shift-sheet";
 import type { JobCode } from "@/lib/types";
 
 /**
@@ -17,6 +18,9 @@ export function OpenEntryEditor({
   jobs,
   members,
   jobCodesEnabled = true,
+  tz,
+  neighbors,
+  initialSplit = null,
 }: {
   entry: { id: string } & Record<string, any>;
   jobCodes: JobCode[];
@@ -25,13 +29,18 @@ export function OpenEntryEditor({
   /** Org setting timeclock_job_codes — must ride through to the editor so the deep-link
    *  path hides the code picker exactly like the page's other editor mounts. */
   jobCodesEnabled?: boolean;
+  tz?: string;
+  neighbors?: { prev?: SplitNeighbor | null; next?: SplitNeighbor | null } | null;
+  /** ?split=1&at=…&job=…: open straight onto Split This Shift, filled in (Nort's fill). */
+  initialSplit?: SplitPrefill | null;
 }) {
   const searchParams = useSearchParams();
   if (searchParams.get("entry") !== entry.id) return null;
 
   const stripParam = () => {
     const url = new URL(window.location.href);
-    url.searchParams.delete("entry");
+    // The split fill rides the same link, and goes with it.
+    for (const k of ["entry", "split", "at", "job", "code"]) url.searchParams.delete(k);
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   };
 
@@ -43,6 +52,9 @@ export function OpenEntryEditor({
       members={members}
       isStaff
       jobCodesEnabled={jobCodesEnabled}
+      tz={tz}
+      neighbors={neighbors}
+      initialSplit={initialSplit}
       initialOpen
       hideTrigger
       onClosed={stripParam}

@@ -41,9 +41,8 @@ const fmtTime = (iso: string) => formatTime(iso);
  * Sets job_id on the caller's OWN, OPEN, still job-less time entry, so every hour since the
  * punch lands on the job (and the Now block's doors come back). Why this is its own small
  * action and not one of the two that already exist:
- *   · switchJob records the OUTGOING segment first, and on a job-less punch that segment is
- *     written with job_id NULL — the morning is banked to nothing and the job gets only the
- *     minutes after the tap (timeclock-panel.tsx says so above its own "no job" line).
+ *   · switchJob (0288 switch_job) re-points a job-less punch whole, exactly as this does, but it
+ *     is the office's More Options door and needs a job the caller is not already on.
  *   · updateTimeEntry is the Timecards edit path — it demands clock_out and writes
  *     status 'closed', so on an OPEN punch it would clock the person out to name the job.
  * Self-scoped like switchJob (own entry, status open), job visible to the caller's RLS-scoped

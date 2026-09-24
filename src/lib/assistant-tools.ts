@@ -123,7 +123,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_job_codes",
     description:
-      "List the company's active job/cost codes (code + description). Use to map a spoken name like 'rough-in' or 'service call' to its code when allocating hours on a clock-out (time.clockOut allocations).",
+      "List the company's active job/cost codes (code + description). Use to map a spoken name like 'rough-in' or 'service call' to its code when switching or splitting a shift onto a time code (time.switchJob, time.splitEntry).",
     input_schema: { type: "object", properties: {} },
   },
   {

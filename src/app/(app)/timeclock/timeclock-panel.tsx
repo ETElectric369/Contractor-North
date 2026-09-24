@@ -8,15 +8,12 @@ import {
   Mic,
   MicOff,
   Loader2,
-  Plus,
-  Trash2,
-  Briefcase,
   ArrowLeftRight,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
@@ -32,24 +29,6 @@ import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
-
-interface AllocRow {
-  job_id: string;
-  job_code: string;
-  hours: number;
-  minutes: number;
-  description: string;
-}
-
-// A switch-recorded split segment already on the OPEN entry (server-written by
-// switchJob), passed in so a page reload re-seeds the breakdown instead of
-// losing the split at clock-out (which REPLACES the entry's allocations).
-interface OpenAlloc {
-  job_id: string | null;
-  job_code: string | null;
-  hours: number;
-  description: string | null;
-}
 
 interface JobOption {
   id: string;
@@ -96,16 +75,9 @@ async function getGps(capMs?: number): Promise<GeoPoint | null> {
 // error boundary and eat the whole form).
 const OFFLINE_MSG = "No connection — your entry is kept, try again when you have bars.";
 
-// Split fractional hours into the h/m boxes (carrying a rounded-up 60m into the hour).
-function toHM(hours: number): { hours: number; minutes: number } {
-  const h = Math.max(0, Math.floor(hours));
-  const m = Math.max(0, Math.round((hours - h) * 60));
-  return m === 60 ? { hours: h + 1, minutes: 0 } : { hours: h, minutes: m };
-}
-
 export function TimeclockPanel({
   openEntry,
-  openAllocations = [],
+  previousPiece = null,
   jobCodes,
   jobs,
   lang,
@@ -115,7 +87,9 @@ export function TimeclockPanel({
   jobCodesEnabled = true,
 }: {
   openEntry: TimeEntry | null;
-  openAllocations?: OpenAlloc[];
+  /** The part of today's shift that ended exactly when this one began (a Switch Job cut, 0288):
+   *  where the lunch can go instead, when it was taken before the switch. */
+  previousPiece?: { id: string; jobLabel: string; clock_in: string; clock_out: string; lunch_minutes: number | null } | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
@@ -151,10 +125,10 @@ export function TimeclockPanel({
   const [error, setError] = useState<string | null>(null);
   const [gpsNote, setGpsNote] = useState<string | null>(null); // "punch wasn't GPS-stamped" — surfaced, not silent
   const [pending, start] = useTransition();
-  // SIMPLE BY DEFAULT FOR EVERYONE (Erik, cn-v502): Clock Out is ONE tap for every role —
-  // the server auto-deducts lunch and the job was resolved at clock-in. The day-breakdown
-  // questionnaire (jobs/hours, lunch/breaks, mileage, notes) still exists IN FULL, but
-  // only behind the staff "More options → Clock out with details…" door; this flag opens it.
+  // SIMPLE BY DEFAULT FOR EVERYONE (Erik, cn-v502): Clock Out is ONE tap for every role, and
+  // the job was resolved at clock-in. A day on two jobs is two entries (Switch Job), never a
+  // breakdown typed at the end of it. Mileage and notes still exist behind the staff
+  // "More options → Clock out with details…" door; this flag opens it.
   const [clockingOut, setClockingOut] = useState(false);
   // The ONE quiet staff disclosure ("More options") — collapsed by default on both the
   // clock-in view (job + code pickers) and the running view (Switch Job + the details
@@ -174,15 +148,11 @@ export function TimeclockPanel({
   // Last notes value the server has — the debounced mid-shift autosave only fires
   // when the textarea actually moved past this.
   const lastSavedNotes = useRef(openEntry?.notes ?? "");
-  const [allocations, setAllocations] = useState<AllocRow[]>([]);
-  // True once the tech touches the breakdown — the live auto-ticking row stops,
-  // and the amber "doesn't add up" warning becomes meaningful.
-  const [allocsDirty, setAllocsDirty] = useState(false);
-  // When the CURRENT job segment started: clock-in, or the last mid-shift switch.
-  const [segmentStartIso, setSegmentStartIso] = useState<string | null>(null);
   const [miles, setMiles] = useState(0);
   // Unpaid lunch — off by default; nothing is deducted unless the tech says so.
   const [tookLunch, setTookLunch] = useState(false);
+  // Where that lunch goes: this running part, or (after a Switch Job) the part before it.
+  const [lunchOnPrevious, setLunchOnPrevious] = useState(false);
   const [calcingMiles, setCalcingMiles] = useState(false);
 
   // mid-shift job switch — its own transition so the clock-out button doesn't
@@ -191,28 +161,6 @@ export function TimeclockPanel({
   const [switchJobId, setSwitchJobId] = useState("");
   const [switchJobCode, setSwitchJobCode] = useState("");
   const [switchPending, startSwitch] = useTransition();
-
-  function addAlloc() {
-    setAllocsDirty(true);
-    setAllocations((p) => [
-      ...p,
-      { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" },
-    ]);
-  }
-  function updateAlloc(i: number, patch: Partial<AllocRow>) {
-    setAllocsDirty(true);
-    setAllocations((p) => p.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
-  }
-  function removeAlloc(i: number) {
-    setAllocsDirty(true);
-    setAllocations((p) => p.filter((_, idx) => idx !== i));
-  }
-  const allocatedHours = allocations.reduce(
-    (s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60,
-    0,
-  );
-  // (The old mandatory-allocation gate lived here — removed with the v497 two-button
-  // tech flow: only STAFF reach this questionnaire now, and staff were never gated.)
 
   // Narrow the code picker to a job's template codes (so people pick the right code for
   // the job type). No template / unknown job → all org codes.
@@ -235,38 +183,6 @@ export function TimeclockPanel({
   // Gate the timezone-local clock-in time until mounted; the ticking totals use suppressHydrationWarning.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  // Pre-seed the "jobs worked today" breakdown so the everyday case (one code all
-  // day) is a single confirm. Segments already recorded by mid-shift switches seed
-  // first (so the clock-out REPLACE round-trips them), then one LIVE row for the
-  // current job — kept ticking by the effect below until the tech edits the split.
-  // Seeds once per open entry (a ref keeps a cleared row from re-appearing).
-  const seededRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!openEntry) {
-      seededRef.current = null;
-      return;
-    }
-    if (seededRef.current === openEntry.id) return;
-    seededRef.current = openEntry.id;
-    const prior = (openAllocations ?? []).map((a) => ({
-      job_id: a.job_id ?? "",
-      job_code: a.job_code ?? "",
-      ...toHM(Number(a.hours) || 0),
-      description: a.description ?? "",
-    }));
-    // The live segment starts where the recorded switches left off (clock-in + the
-    // hours already allocated) — mirrors how switchJob derives it server-side.
-    const priorHours = (openAllocations ?? []).reduce((s, a) => s + (Number(a.hours) || 0), 0);
-    const segStart = new Date(new Date(openEntry.clock_in).getTime() + priorHours * 3_600_000).toISOString();
-    setSegmentStartIso(segStart);
-    setAllocsDirty(false);
-    const seg = hoursBetween(segStart, new Date(), 0); // gross at open
-    setAllocations([
-      ...prior,
-      { job_id: openEntry.job_id ?? "", job_code: openEntry.job_code ?? "", ...toHM(seg), description: "" },
-    ]);
-  }, [openEntry, openAllocations]);
 
   // Voice dictation — the shared press-to-talk turn (MediaRecorder → /api/transcribe), the same
   // door /organize, the inspector and the tour use. This ran on raw webkitSpeechRecognition with
@@ -316,24 +232,6 @@ export function TimeclockPanel({
   // AND the minutes sent at the punch, so what the tech sees is what gets paid.
   const lunchToUse = lunchMinutesFor(tookLunch);
 
-  // The everyday-case row used to be computed ONCE (at mount) and go stale — by
-  // clock-out time the numbers didn't match the shift and the row rendered a
-  // scary amber mismatch. Keep the CURRENT segment's row live (net of lunch)
-  // until the tech actually edits the breakdown; amber is then reserved for
-  // genuinely user-edited mismatches. Bails on identical h/m so the every-second
-  // tick doesn't churn state.
-  useEffect(() => {
-    if (!openEntry || allocsDirty) return;
-    const seg = hoursBetween(segmentStartIso ?? openEntry.clock_in, new Date(now), lunchToUse);
-    const { hours, minutes } = toHM(seg);
-    setAllocations((p) => {
-      if (!p.length) return p;
-      const last = p[p.length - 1];
-      if (last.hours === hours && last.minutes === minutes) return p;
-      return [...p.slice(0, -1), { ...last, hours, minutes }];
-    });
-  }, [openEntry, allocsDirty, segmentStartIso, now, lunchToUse]);
-
   // Autosave the "what did you do today?" note mid-shift (debounced) — the
   // saveEntryNotes action existed but nothing called it, so a note typed during
   // the day only survived if the tech clocked out from this same screen session.
@@ -353,7 +251,7 @@ export function TimeclockPanel({
   // clock-out never captured mileage before (only manual entries did), so it was
   // missing on most timecards.
   function jobAddressForMiles(): string {
-    const id = allocations.find((a) => a.job_id)?.job_id || openEntry?.job_id || "";
+    const id = openEntry?.job_id || "";
     const j = jobOptions.find((x) => x.id === id);
     return j ? formatFullAddress(j.address, j.city, j.state, j.zip) : "";
   }
@@ -369,19 +267,17 @@ export function TimeclockPanel({
       .finally(() => setCalcingMiles(false));
   }
 
-  // Mid-shift job switch: the server records the outgoing job's hours as an
-  // allocation + re-points the entry (and appends a notes breadcrumb); we mirror
-  // that split locally so the clock-out REPLACE doesn't wipe it.
+  // Mid-shift job switch (0288 switch_job): the running entry closes now and the next one opens on
+  // the new job at the same instant, so the day is two ordinary entries. A job-less start (or one
+  // under two minutes old) moves over whole instead. The page refreshes onto the new open entry.
   function doSwitchJob() {
     if (!openEntry || !switchJobId) return;
     setError(null);
     startSwitch(async () => {
       try {
-        // Same short cap as the punch: give GPS 2.5s and switch regardless. The fix
-        // becomes the entry's NEW geofence anchor — leaving the old job's centre armed
-        // is what let the fence auto-close the shift at the time they drove away from
-        // the FIRST site. No fix ⇒ the server clears the anchor (it never keeps a stale
-        // one) and the monitor re-adopts once there's a good fix at the new site.
+        // Same short cap as the punch: give GPS 2.5s and switch regardless. The fix becomes the new
+        // part's geofence anchor; no fix means no anchor (never the old site's centre left armed),
+        // and the monitor re-adopts once there's a good fix at the new site.
         const gps = await getGps(2500);
         const res = await switchJob({
           entry_id: openEntry.id,
@@ -394,39 +290,33 @@ export function TimeclockPanel({
           setError(res.error ?? "Could not switch jobs.");
           return;
         }
-        const done: AllocRow = {
-          job_id: openEntry.job_id ?? "",
-          job_code: openEntry.job_code ?? "",
-          ...toHM(res.segment_hours ?? 0),
-          description: "before switching jobs",
-        };
-        const live: AllocRow = { job_id: switchJobId, job_code: switchJobCode, hours: 0, minutes: 0, description: "" };
-        // Untouched: the last row IS the outgoing job's live row — swap it for the
-        // finished segment + a fresh live row. Edited: only add the fresh row (the
-        // tech owns the numbers now; the notes breadcrumb keeps the ground truth).
-        setAllocations((p) => (allocsDirty ? [...p, live] : [...p.slice(0, -1), done, live]));
-        setSegmentStartIso(new Date().toISOString());
-        // The server appended the breadcrumb to the notes — sync the textarea so a
-        // later notes save can't clobber it.
-        if (res.notes != null) {
-          lastSavedNotes.current = res.notes;
-          setNotes(res.notes);
-        }
+        // The note typed so far stayed on the part that just closed; the new part starts clean
+        // (or, on a re-point, carries the note with its breadcrumb).
+        lastSavedNotes.current = res.notes ?? "";
+        setNotes(res.notes ?? "");
+        setTookLunch(false);
+        setLunchOnPrevious(false);
         setSwitching(false);
         setSwitchJobId("");
         setSwitchJobCode("");
         const j = jobOptions.find((x) => x.id === switchJobId);
-        toast(`Switched to ${j ? optionLabel(j) : "the new job"}`, "success");
+        const name = j ? optionLabel(j) : "the new job";
+        toast(
+          res.mode === "repointed"
+            ? `Now on ${name}. This whole shift moved over.`
+            : `Switched to ${name}. The first part is its own entry (${formatDuration(res.closed_hours ?? 0)}).`,
+          "success",
+        );
+        if (res.warning) toast(res.warning, "info");
       } catch {
         setError(OFFLINE_MSG);
       }
     });
   }
 
-  // ONE clock-out for both doors — the one-tap button AND the details questionnaire
-  // send the identical payload, including the same lunch answer: whatever the single
-  // opt-in box says, 0 by default (Erik 2026-09-08). Either way the seeded allocation
-  // rows ride along, so a mid-shift switchJob split round-trips.
+  // ONE clock-out for both doors — the one-tap button AND the details questionnaire send the
+  // identical payload, including the same lunch answer: whatever the single opt-in box says, 0 by
+  // default (Erik 2026-09-08), on the part the box names.
   function doClockOut() {
     if (!openEntry) return;
     setError(null);
@@ -434,39 +324,17 @@ export function TimeclockPanel({
       // Same short GPS cap as clock-in — the button used to sit disabled and
       // silent for up to the full 8s highAccuracy round-trip.
       const gps = await getGps(3000);
-      // The lunch the server will deduct — exactly what the checkbox says — so the live row
-      // below nets out to the same paid hours the timecard will show.
-      const punchLunch = lunchToUse;
-      // Recompute the live row's hours AT THE PUNCH (net of lunch, exact) — the
-      // displayed h/m round to the minute, and the old mount-time seed went stale.
-      let rows = allocations;
-      if (!allocsDirty && rows.length) {
-        const seg = hoursBetween(segmentStartIso ?? openEntry.clock_in, new Date(), punchLunch);
-        rows = [...rows.slice(0, -1), { ...rows[rows.length - 1], hours: seg, minutes: 0 }];
-      }
-      // A plain one-tap punch (untouched seed, no mid-shift switch → exactly the one
-      // live row) should NOT manufacture an allocation row: a single row whose job_id is
-      // null used to be COSTED to the entry's job (laborCostForJob) yet never BILLED
-      // (the importer skipped any entry that had allocations) — a silent unbilled shift.
-      // Omitting allocations leaves the entry split-free, so cost and bill both read its
-      // gross hours. A dirtied split or a mid-shift switch (>1 row) still rides along.
-      const plainPunch = !allocsDirty && rows.length === 1;
+      const onPrevious = lunchOnPrevious && !!previousPiece && lunchToUse > 0;
       try {
         const res = await clockOut({
           entry_id: openEntry.id,
           // STATED on both doors — 0 is a real answer now, not "wasn't asked".
-          lunch_minutes: punchLunch,
+          lunch_minutes: onPrevious ? 0 : lunchToUse,
+          lunch_on_entry_id: onPrevious ? previousPiece!.id : null,
+          lunch_on_minutes: onPrevious ? lunchToUse : null,
           notes,
           gps,
           miles,
-          allocations: plainPunch
-            ? undefined
-            : rows.map((a) => ({
-                job_id: a.job_id || null,
-                job_code: a.job_code || null,
-                hours: (a.hours || 0) + (a.minutes || 0) / 60,
-                description: a.description,
-              })),
         });
         if (!res.ok) setError(res.error ?? "Could not clock out.");
         else {
@@ -475,44 +343,13 @@ export function TimeclockPanel({
           setClockingOut(false);
           setShowTools(false);
           setSwitching(false);
+          if (res.warning) toast(res.warning, "info");
           // Crew leads owe the office the end-of-day debrief — Nort asks right here.
           if (crewLead) setDebriefOpen(true);
         }
       } catch {
         // Dead spot — the entry stays open and every field on this form is kept;
         // tapping again with signal completes the same clock-out.
-        setError(OFFLINE_MSG);
-      }
-    });
-  }
-
-  // "Clock out now — break it down later." Defers the job/hours breakdown: passes auto:true so
-  // the codes-and-hours requirement is skipped (the SAME escape the geofence auto-close uses), and
-  // the entry lands with no allocations. /timeclock resurfaces it (the AutoClockoutPrompt) the next
-  // time they open the page — which is every clock-in — so nothing bills to the wrong job silently.
-  function doClockOutLater() {
-    if (!openEntry) return;
-    setError(null);
-    start(async () => {
-      const gps = await getGps(3000);
-      try {
-        const res = await clockOut({
-          entry_id: openEntry.id,
-          lunch_minutes: lunchToUse, // whatever the checkbox says — same as every other punch
-          notes,
-          gps,
-          miles,
-          auto: true,
-          allocations: [],
-        });
-        if (!res.ok) setError(res.error ?? "Could not clock out.");
-        else {
-          setClockingOut(false);
-          setShowTools(false);
-          setSwitching(false);
-          if (crewLead) setDebriefOpen(true);
-        }
-      } catch {
         setError(OFFLINE_MSG);
       }
     });
@@ -525,8 +362,27 @@ export function TimeclockPanel({
     <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} />
   ) : null;
 
+  // WHERE THE LUNCH GOES, SAID. After a Switch Job the day is two entries, and a lunch taken before
+  // the switch belongs on the part before it. The box names the part it lands on, with the other
+  // one a tap away. Nothing to say on an ordinary one-part shift.
+  const lunchWhere =
+    openEntry && tookLunch && previousPiece ? (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        <span>
+          {lunchOnPrevious ? `The lunch goes on ${previousPiece.jobLabel}.` : "The lunch goes on this part of your shift."}
+        </span>
+        <button
+          type="button"
+          onClick={() => setLunchOnPrevious((v) => !v)}
+          className="min-h-[44px] font-semibold text-brand hover:underline"
+        >
+          {lunchOnPrevious ? "Put It On This Part Instead" : `Put It On ${previousPiece.jobLabel} Instead`}
+        </button>
+      </div>
+    ) : null;
+
   if (openEntry) {
-    const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchToUse);
+    const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchOnPrevious && previousPiece ? 0 : lunchToUse);
     // Codes on: name only (not the shared number·name jobLabel helper) — the running
     // banner reads better without the job number; renamed so the helper isn't shadowed.
     // Codes off: the customer · address identity IS the name the crew knows.
@@ -554,16 +410,13 @@ export function TimeclockPanel({
           {/* A job-less punch is a real, intended outcome (the server resolves today's crew
               day-assignment → a job scheduled today → the org's only in-progress job → none),
               but "No job selected" reads like a mistake with nowhere to go. Say who fixes it.
-              NOT "use Switch Job": switchJob records the OUTGOING segment first, and on a punch
-              with no job that segment is written with job_id NULL — so tapping it at 3pm on a
-              job-less morning banks every hour so far to nothing and gives the job only the
-              minutes after the tap. Those rows survive the close (clockOut preserves and scales
-              recorded allocations), so the job would be quietly under-costed. Timecards sets the
-              job on the WHOLE entry, which is what somebody reading this line actually wants. */}
-          {!openEntry.job_id && (
+              Switch Job is the right door now: on a job-less punch it moves the WHOLE shift onto
+              the job (0288 switch_job re-points rather than cutting), which is what somebody
+              reading this line wants. */}
+          {!openEntry.job_id && !openEntry.job_code && (
             <p className="text-center text-xs text-slate-500">
               {isStaff
-                ? "No job on this punch yet — put it on the right job from Timecards when you're done."
+                ? "No job on this punch yet. Switch Job under More Options puts the whole shift on one."
                 : "No job on this punch yet — the office puts it on the right job."}
             </p>
           )}
@@ -587,16 +440,15 @@ export function TimeclockPanel({
           )}
 
           {/* The big Clock Out — ONE tap for EVERY role now (Erik, cn-v502: "simple by
-              default for everyone"): no questionnaire, no mileage. The single lunch box
-              above is the only question, and any mid-shift split already recorded on the
-              entry rides along via the seeded allocation rows.
-              The full wrap-up still exists behind More options → "Clock out with details…". */}
+              default for everyone"): no questionnaire, no mileage. The single lunch box is the
+              only question. Mileage and notes live behind More Options → "Clock out with details…". */}
           {!clockingOut && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
               {/* A tech never opens the details questionnaire, so the lunch box lives here —
                   the only place they can say a meal was taken. Off = paid gross. */}
               <LunchCheckbox id="tc-lunch" checked={tookLunch} onChange={setTookLunch} />
+              {lunchWhere}
               <Button
                 variant="destructive"
                 size="lg"
@@ -616,9 +468,9 @@ export function TimeclockPanel({
               </Button>
 
               {/* STAFF power tools, re-homed (nothing deleted) behind the ONE quiet
-                  disclosure: the mid-shift Switch Job flow (captures the split AS IT
-                  HAPPENS — outgoing hours recorded server-side + a notes breadcrumb)
-                  and the door to the full clock-out questionnaire. A tech renders no
+                  disclosure: the mid-shift Switch Job flow (the split AS IT HAPPENS: the
+                  running entry closes and the next opens, 0288) and the door to the
+                  clock-out details (miles, notes). A tech renders no
                   disclosure at all — their clock stays two buttons. */}
               {isStaff && (
                 <div>
@@ -639,7 +491,9 @@ export function TimeclockPanel({
                             <ArrowLeftRight className="h-4 w-4 text-brand" /> Switch job
                           </Label>
                           <p className="text-xs text-slate-500">
-                            Your time on {currentJobName} so far is recorded; the clock keeps running on the new job.
+                            {openEntry.job_id || openEntry.job_code
+                              ? `Your time on ${currentJobName} closes as its own entry now, and the clock keeps running on the new job.`
+                              : "This shift has no job yet, so the whole shift moves onto the job you pick."}
                           </p>
                           <Select
                             value={switchJobId}
@@ -669,7 +523,7 @@ export function TimeclockPanel({
                             }}
                           />
                           {/* Codes off: the switch is just "which job now" — no code question;
-                              the allocation the server records carries a null code. */}
+                              the new entry carries a null code. */}
                           {jobCodesEnabled && (
                             <Select
                               value={switchJobCode}
@@ -699,8 +553,7 @@ export function TimeclockPanel({
                           <ArrowLeftRight className="h-4 w-4" /> Switch Job
                         </Button>
                       )}
-                      {/* The EXISTING wrap-up questionnaire (lunch/breaks/split/miles/notes),
-                          exactly as it was — just no longer the default path. */}
+                      {/* The wrap-up details (lunch, miles, notes) — not the default path. */}
                       <button
                         type="button"
                         onClick={() => setClockingOut(true)}
@@ -715,137 +568,19 @@ export function TimeclockPanel({
             </>
           )}
 
-          {/* WRAPPING UP — the clock-out questionnaire: confirm breaks, break the day into jobs,
-              mileage + notes, then clock out. Hidden until the Clock Out tap above. */}
+          {/* WRAPPING UP — the clock-out details: lunch, mileage + notes, then clock out. Hidden until
+              "Clock out with details…" above. */}
           {clockingOut && (
             <>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-sm font-semibold text-slate-900">Wrapping up your day</p>
-                <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)}. Break it down below, then clock out.</p>
+                <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)} on {currentJobName}. Add miles and a note, then clock out.</p>
               </div>
 
           {/* The one lunch question, off by default (Erik 2026-09-08). Ticking it nets the
               live hours row below straight away, so the deduction is never a surprise. */}
           <LunchCheckbox id="tc-lunch-details" checked={tookLunch} onChange={setTookLunch} />
-
-          {/* Jobs worked today — the PRIMARY clock-out question: which code(s) + hours.
-              This is the wrong-hours-on-wrong-jobs fix; required for the field crew. */}
-          <div className="rounded-xl border border-brand/30 bg-brand/5 p-3">
-            <div className="mb-1 flex items-center justify-between">
-              <Label className="mb-0 flex items-center gap-1.5 text-slate-900">
-                <Briefcase className="h-4 w-4 text-brand" /> {t("tc_jobsToday")}
-              </Label>
-              <button
-                type="button"
-                onClick={addAlloc}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-              >
-                <Plus className="h-4 w-4 shrink-0" /> {t("tc_addJob")}
-              </button>
-            </div>
-            <p className="mb-2 text-xs text-slate-500">
-              {jobCodesEnabled
-                ? "Which job code(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one."
-                : "Which job(s) did you work today, and how many hours on each? Usually one — split it if you worked more than one."}
-            </p>
-            {allocations.length === 0 ? (
-              <p className="text-xs text-slate-400">{t("tc_breakdownHint")}</p>
-            ) : (
-              <div className="space-y-2">
-                {allocations.map((a, i) => (
-                  <div key={i} className="space-y-2 rounded-lg border border-slate-100 p-2">
-                    {/* Row 1: the job + remove. Job select takes the full width so the
-                        long "number · name" label is readable on a phone. */}
-                    <div className="flex items-center gap-2">
-                      <Select
-                        value={a.job_id}
-                        onChange={(e) => updateAlloc(i, { job_id: e.target.value })}
-                        className="h-11 min-w-0 flex-1"
-                      >
-                        <option value="">— Job —</option>
-                        {jobOptions.map((j) => (
-                          <option key={j.id} value={j.id}>
-                            {optionLabel(j)}
-                          </option>
-                        ))}
-                      </Select>
-                      <button
-                        type="button"
-                        onClick={() => removeAlloc(i)}
-                        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                        aria-label="Remove job"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    {/* Row 2: code + hours/minutes. STACKS under the job on a narrow phone
-                        (instead of cramming 5 controls into one 327px row, where a minute
-                        got typed into the hours box). The h/m boxes are wider here too.
-                        Codes off: no code question — the row is just the job + its hours. */}
-                    <div className={jobCodesEnabled ? "flex items-center gap-2" : "flex items-center justify-end gap-2"}>
-                      {jobCodesEnabled && (
-                        <Select
-                          value={a.job_code}
-                          onChange={(e) => updateAlloc(i, { job_code: e.target.value })}
-                          className="h-11 min-w-0 flex-1"
-                        >
-                          <option value="">Code</option>
-                          {codesForJob(a.job_id).map((c) => (
-                            <option key={c.id} value={c.code}>
-                              {c.code}{c.description ? ` · ${c.description}` : ""}
-                            </option>
-                          ))}
-                        </Select>
-                      )}
-                      <div className="flex shrink-0 items-center gap-1">
-                        <NumberInput
-                          value={a.hours}
-                          onValueChange={(n) => updateAlloc(i, { hours: n })}
-                          className="h-11 w-14 text-center"
-                          placeholder="h"
-                          aria-label="Hours"
-                        />
-                        <span className="text-xs text-slate-400">h</span>
-                        <NumberInput
-                          value={a.minutes}
-                          onValueChange={(n) => updateAlloc(i, { minutes: n })}
-                          className="h-11 w-14 text-center"
-                          placeholder="m"
-                          aria-label="Minutes"
-                        />
-                        <span className="text-xs text-slate-400">m</span>
-                      </div>
-                    </div>
-                    <Input
-                      placeholder={t("tc_whatDone")}
-                      value={a.description}
-                      onChange={(e) => updateAlloc(i, { description: e.target.value })}
-                    />
-                  </div>
-                ))}
-                {/* Amber only when the TECH's edits don't add up — the untouched live
-                    row tracks the shift, so it can't drift into a false warning. */}
-                <div className={`text-right text-xs ${allocsDirty && Math.abs(allocatedHours - elapsed) > 0.1 ? "text-amber-600" : "text-slate-500"}`} suppressHydrationWarning>
-                  {t("tc_allocated")}: {formatDuration(allocatedHours)} of {formatDuration(elapsed)} worked
-                </div>
-              </div>
-            )}
-            {/* "Add Job" above adds a ROW for a job that exists; this opens a job that doesn't,
-                and gives it its own row — so a day spent on an unlogged site can still be broken
-                down honestly at the end of it instead of landing on the nearest wrong job. */}
-            <div className="mt-2">
-              <NewJobInline
-                onCreated={(j) => {
-                  addNewJob(j);
-                  setAllocsDirty(true);
-                  setAllocations((p) => [
-                    ...p,
-                    { job_id: j.id, job_code: "", hours: 0, minutes: 0, description: "" },
-                  ]);
-                }}
-              />
-            </div>
-          </div>
+          {lunchWhere}
 
           {/* Mileage — round-trip home → job, captured right on clock-out (it used
               to only exist on manual entries, so most timecards had none). Miles
@@ -925,17 +660,6 @@ export function TimeclockPanel({
                 </Button>
               </div>
 
-              {/* The escape hatch: clock out clean now, answer the breakdown later. It lands as an
-                  incomplete entry that /timeclock re-prompts on your next visit — so a busy crew
-                  never has to stand in the driveway filling in job codes. */}
-              <button
-                type="button"
-                onClick={doClockOutLater}
-                disabled={pending}
-                className="w-full pt-1 text-center text-xs font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline disabled:opacity-50"
-              >
-                Clock out now — I&apos;ll break it down later
-              </button>
             </>
           )}
         </CardContent>

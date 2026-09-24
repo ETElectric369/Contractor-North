@@ -44,7 +44,36 @@ describe("action registry — time entity (Fault #3)", () => {
 
   it("listActions can surface the whole time group", () => {
     const ids = listActions({ group: "time" }).map((a) => a.name).sort();
-    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut", "time.fixEntry"]);
+    expect(ids).toEqual(["time.addEntry", "time.clockIn", "time.clockOut", "time.fixEntry", "time.splitEntry", "time.switchJob"]);
+  });
+
+  // 0288: a day on two jobs is two entries. Clock-out asks for no breakdown; a live switch is a
+  // tech's own write; a finished-shift split is a FILL (the sheet), never a write by Nort.
+  it("time.clockOut takes no job/hours breakdown any more", () => {
+    const shape = (REGISTRY["time.clockOut"].input as any).shape ?? {};
+    expect(Object.keys(shape).sort()).toEqual(["lunch_minutes", "miles", "notes"]);
+    expect(REGISTRY["time.clockOut"].description).not.toMatch(/allocations/);
+  });
+
+  it("time.switchJob is the caller's own live write, offered to a tech", () => {
+    expect(REGISTRY["time.switchJob"].auth).toBe("any");
+    expect(REGISTRY["time.switchJob"].effect).toBe("write");
+    expect(AGENT_WRITE_ALLOWED.has("time.switchJob")).toBe(true);
+    expect(agentWriteToolsForRole("tech").tools.map((t) => t.name)).toContain("time__switchJob");
+    expect(REGISTRY["time.switchJob"].input.safeParse({}).success).toBe(false);
+  });
+
+  it("time.splitEntry only FILLS the sheet: a staff read, never a write, never offered to a tech", () => {
+    const a = REGISTRY["time.splitEntry"];
+    expect(a.auth).toBe("staff");
+    expect(a.effect).toBe("read");
+    expect(AGENT_WRITE_ALLOWED.has("time.splitEntry")).toBe(false);
+    expect(agentWriteToolsForRole("owner").tools.map((t) => t.name)).toContain("time__splitEntry");
+    expect(agentWriteToolsForRole("tech").tools.map((t) => t.name)).not.toContain("time__splitEntry");
+    const id = "11111111-1111-4111-8111-111111111111";
+    expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30", job_id: "j" }).success).toBe(true);
+    expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30", job_code: "DRIVE" }).success).toBe(true);
+    expect(a.input.safeParse({ entry_id: id, at: "2001-07-14T16:30" }).success).toBe(false); // which job?
   });
 
   it("time.clockIn validates a minimal (jobless) clock-in", () => {

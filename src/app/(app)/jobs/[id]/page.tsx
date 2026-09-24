@@ -990,6 +990,7 @@ export default async function JobDetailPage({
                       members={(techs ?? []) as any}
                       isStaff={viewerIsStaff}
                       jobCodesEnabled={jobCodesEnabled}
+                      tz={tz}
                     />
                   </div>
                 </li>

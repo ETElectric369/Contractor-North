@@ -256,10 +256,12 @@ export function GeofenceMonitor({
     // `auto` here means "nobody answered" — the same flag the notification below keys on. It is
     // what marks the row for review, so an unattended close is never indistinguishable from one a
     // person agreed to.
-    geoClockOut(gps, atIso, auto)
+    // The entry this monitor fenced rides along: a Switch Job closes it and opens a new one (0288),
+    // and a leave-site verdict about the old shift must never close the new one.
+    geoClockOut(gps, atIso, auto, entryId)
       .then((res) => {
         if (!res.ok) {
-          if (/not clocked in/i.test(res.error ?? "")) {
+          if (/not clocked in|already ended/i.test(res.error ?? "")) {
             // Already closed elsewhere (the panel, the office) — terminal; sync the UI.
             doneRef.current = true;
             setPhase("idle");

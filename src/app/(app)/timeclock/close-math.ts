@@ -1,86 +1,54 @@
 /**
- * Pure arithmetic for closing a shift that already carries RECORDED SEGMENTS —
- * the time_allocations rows switchJob writes on every mid-shift job switch.
+ * Pure arithmetic for closing a shift, and for the /timeclock "finish your timecard" prompt.
  *
- * Two invariants live here, both wage/billing-critical, both previously missing:
+ * A split shift used to keep its clock times on the entry and write its hours per job into a second
+ * table, so closing one had to protect those rows (a floor at the last recorded segment, a tail row
+ * for the part after the last switch). Since 0288 a Switch Job CLOSES the running entry and opens the
+ * next one, so every part of a day is its own entry with its own clock times, and a close only ever
+ * touches the one entry that is still running. What is left here is the part that never depended
+ * on the split: a close may not land before the shift started or in the future.
  *
- *  1. A backdated close may never erase recorded work. The geofence's unanswered-prompt
- *     fallback closes an entry at "the time GPS last saw you at the site". With the
- *     anchor stuck on the FIRST job that timestamp was hours before the switch, so the
- *     close wiped the rest of the day's pay. The floor makes that impossible for EVERY
- *     caller (geofence, voice, registry, a crafted call), not just the fixed one.
- *
- *  2. The final segment — from the last switch to clock-out — has to be allocated.
- *     switchJob records only the OUTGOING job; only the timeclock panel seeded a row for
- *     the incoming one, so a close from My Day / the job page / voice left the entry
- *     PARTIALLY allocated. computeJobLaborBilling treats "has any allocation rows" as
- *     fully allocated, so those tail hours were billed to no job and disappeared from
- *     job cost and from the invoice.
- *
- * Neither function touches payroll: hours paid come from clock_in/clock_out/lunch as
- * they always have (see payroll-math). These decide only WHICH JOB the hours bill to,
- * and stop a close from destroying hours already committed.
+ * Neither function touches payroll arithmetic: hours paid come from clock_in/clock_out/lunch as
+ * they always have (see payroll-math).
  */
 
 /**
- * The clock-out instant to persist for an explicitly-supplied `at`.
- * Clamped to [clock_in + 1min, now] as before, and additionally floored at the end of
- * the last recorded segment (clock_in + recorded hours) so a close can't predate work
- * the entry already recorded.
+ * The clock-out instant to persist for an explicitly supplied `at` (the geofence "time they left",
+ * a picked time). Clamped to [clock_in + 1 min, now + 1 min]: never negative hours, never a close
+ * in the future.
  *
- * @param atMs          the caller's requested clock-out (epoch ms)
- * @param clockInMs     the entry's clock-in (epoch ms); 0/NaN when unknown
- * @param recordedHours sum of the entry's existing time_allocations hours
- * @param nowMs         current time (epoch ms)
+ * @param atMs       the caller's requested clock-out (epoch ms)
+ * @param clockInMs  the entry's clock-in (epoch ms); 0/NaN when unknown
+ * @param nowMs      current time (epoch ms)
  */
-export function clampCloseAtMs(
-  atMs: number,
-  clockInMs: number,
-  recordedHours: number,
-  nowMs: number,
-): number {
+export function clampCloseAtMs(atMs: number, clockInMs: number, nowMs: number): number {
   const ci = Number.isFinite(clockInMs) ? clockInMs : 0;
-  const rec = Number.isFinite(recordedHours) && recordedHours > 0 ? recordedHours : 0;
-  const floor = Math.max(ci + 60_000, ci + rec * 3_600_000);
-  return Math.min(Math.max(atMs, floor), nowMs + 60_000);
+  return Math.min(Math.max(atMs, ci + 60_000), nowMs + 60_000);
+}
+
+/** Written onto an auto-closed shift's notes once its owner has answered the after-the-fact
+ *  questions, so the prompt stops asking. Human-readable on purpose: the office reads it too. */
+export const AUTO_CONFIRMED_CRUMB = "[hours confirmed after the auto clock-out]";
+
+/** The notes with the confirmation crumb added once (never twice). */
+export function withAutoConfirmedCrumb(notes: string | null | undefined): string {
+  const base = (notes ?? "").trim();
+  if (base.includes(AUTO_CONFIRMED_CRUMB)) return base;
+  return base ? `${base}\n${AUTO_CONFIRMED_CRUMB}` : AUTO_CONFIRMED_CRUMB;
 }
 
 /**
- * Hours to allocate to the entry's CURRENT job at close — the un-recorded remainder,
- * rounded to cents of an hour. 0 when the entry is already fully (or over-) allocated,
- * so this can never inflate billable time beyond the worked shift.
- */
-export function tailAllocationHours(workedHours: number, recordedHours: number): number {
-  const worked = Number.isFinite(workedHours) ? workedHours : 0;
-  const rec = Number.isFinite(recordedHours) && recordedHours > 0 ? recordedHours : 0;
-  const tail = Math.round((worked - rec) * 100) / 100;
-  return tail > 0.01 ? tail : 0;
-}
-
-/**
- * Whether the /timeclock "finish your timecard" prompt should surface for an auto-closed
- * entry. ONE reason: an UNBILLED REMAINDER — worked hours exceed what's already allocated,
- * so the tech still has to break the rest of the day down by job/code.
+ * Whether the /timeclock "finish your timecard" prompt should surface for an auto-closed entry.
  *
- * (Until 2026-09-08 there was a second reason — a >5h shift whose lunch was still 0 read as
- * a "missing meal" and prompted on its own. Lunch is opt-in now and 0 is the default answer,
- * so an untaken lunch is nothing to chase. The prompt still carries a lunch box, because an
- * auto-closed shift is exactly the one nobody got to answer for.)
+ * A geofence close (or "clock out now, I'll answer later") asked nobody anything, so the prompt asks
+ * the one thing a tech can still answer after the fact: did you take a lunch. (The office's own
+ * prompt also offers "I switched at [time]", which is a split.) It stays until somebody answers,
+ * and answering writes AUTO_CONFIRMED_CRUMB. Until 2026-09-24 the gate was "hours not yet broken
+ * down by job"; every hour of an entry now belongs to its own job, so there is nothing left to break
+ * down and the only question left is whether it was answered.
  *
- * Payroll-neutral: this only decides whether to ASK. Hours paid still come from
- * clock_in/clock_out/lunch.
+ * Payroll-neutral: this only decides whether to ASK.
  */
-export function autoClockoutPromptState(input: {
-  /** clock_out − clock_in, with NO lunch removed. */
-  grossHours: number;
-  /** lunch minutes currently recorded on the entry. */
-  lunchMinutes: number;
-  /** sum of the entry's existing time_allocations (switch segments + any tail). */
-  allocatedHours: number;
-}): { show: boolean } {
-  const gross = Number.isFinite(input.grossHours) && input.grossHours > 0 ? input.grossHours : 0;
-  const lunch = Number.isFinite(input.lunchMinutes) && input.lunchMinutes > 0 ? input.lunchMinutes : 0;
-  const allocated = Number.isFinite(input.allocatedHours) && input.allocatedHours > 0 ? input.allocatedHours : 0;
-  const worked = Math.max(0, gross - lunch / 60);
-  return { show: worked - allocated > 0.05 };
+export function autoClockoutPromptState(input: { notes: string | null | undefined }): { show: boolean } {
+  return { show: !String(input.notes ?? "").includes(AUTO_CONFIRMED_CRUMB) };
 }

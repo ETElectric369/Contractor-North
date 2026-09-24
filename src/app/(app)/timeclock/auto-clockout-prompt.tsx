@@ -2,14 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, Plus, Trash2, Coffee, Loader2 } from "lucide-react";
+import { Clock, Coffee, Loader2, ArrowLeftRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Select, Input } from "@/components/ui/input";
-import { NumberInput } from "@/components/ui/number-input";
-import { hoursBetween, formatDuration } from "@/lib/utils";
+import { Input, Label, Select } from "@/components/ui/input";
+import { formatDuration } from "@/lib/utils";
 import { lunchMinutesFor, LUNCH_MIN } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
+import { atFromClockTime, clockInputValue, defaultSplitAt, splitClock, splitPreview } from "@/lib/split-preview";
 import type { JobCode } from "@/lib/types";
 import { completeAutoClockOut } from "./actions";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
@@ -29,88 +29,82 @@ type Entry = {
   lunch_minutes: number;
   jobId: string | null;
   jobLabel: string;
-  /** Hours ALREADY recorded on the entry — the segments a mid-shift job switch wrote,
-   *  which now survive a geofence close instead of being deleted by it. Everything here
-   *  is about the REMAINDER: completeAutoClockOut inserts alongside those rows, so
-   *  seeding the full shift would double-bill them (and, since the entry points at the
-   *  post-switch job, would re-file the whole day onto the wrong customer). */
-  allocatedHours?: number;
 };
-type AllocRow = { job_id: string; job_code: string; hours: number; minutes: number; description: string };
 
-/** Shown on /timeclock when a clock-out left the breakdown unfinished — either the geofence
- *  auto-clocked the tech out (they drove off the job) OR they tapped "break it down later" at
- *  clock-out. They answer the questions after the fact: which code(s) + hours (codes-off orgs:
- *  which JOB(s) + hours — no code question), and whether they took lunch. The clock in/out
- *  times are locked; only the split + lunch are added here. */
+/**
+ * Shown on /timeclock when a shift closed with nobody answering: the geofence auto-clocked the tech
+ * out (they drove off the job), or they tapped "clock out now, answer later". The clock times are
+ * locked at the close; what is asked after the fact is what the close could not ask:
+ *
+ *   * Lunch (everyone): the one question a tech can still answer on a finished shift.
+ *   * "I Switched Jobs" (the office's own shifts only): a switch time and the job it went to, which
+ *     SPLITS the shift into two ordinary entries (0288). After-the-fact splits are office work; a
+ *     tech's switch is fixed on Timecards.
+ *
+ * The old job/hours breakdown is gone: every hour of an entry belongs to its own job now, so there
+ * is nothing left to break down.
+ */
 export function AutoClockoutPrompt({
   entry,
   jobCodes,
   jobs,
   jobCodesEnabled = true,
+  isStaff = false,
+  tz = "America/Los_Angeles",
 }: {
   entry: Entry;
   jobCodes: JobCode[];
   jobs: JobOpt[];
   /** org setting timeclock_job_codes — false hides every code control here. */
   jobCodesEnabled?: boolean;
+  isStaff?: boolean;
+  tz?: string;
 }) {
   const router = useRouter();
   const optionLabel = (j: JobOpt) => (jobCodesEnabled ? jobLabel(j) : jobSiteLabel(j));
-  const already = Math.max(0, Number(entry.allocatedHours) || 0);
-  const worked0 = hoursBetween(entry.clock_in, entry.clock_out, entry.lunch_minutes);
-  const remaining0 = Math.max(0, worked0 - already);
-  const [allocations, setAllocations] = useState<AllocRow[]>([
-    {
-      job_id: entry.jobId ?? "",
-      job_code: "",
-      hours: Math.max(0, Math.floor(remaining0)),
-      minutes: Math.max(0, Math.round((remaining0 - Math.floor(remaining0)) * 60)),
-      description: "",
-    },
-  ]);
-  // An auto-closed shift is the ONE nobody got to answer for — a geofence close asked
-  // nothing. So the box is here too, seeded from whatever the entry already carries
-  // (0 unless the office typed something). Save may only RAISE lunch on a closed shift
-  // (the 0143 guard), so a pre-existing 45-minute lunch is the floor, never lowered here.
+  // Save may only RAISE lunch on a closed shift (the 0143 guard), so a pre-existing 45-minute lunch
+  // is the floor, never lowered here.
   const storedLunch = Math.max(0, Number(entry.lunch_minutes) || 0);
   const [tookLunch, setTookLunch] = useState(storedLunch > 0);
   const lunchMin = Math.max(storedLunch, lunchMinutesFor(tookLunch));
+
+  const [switched, setSwitched] = useState(false);
+  const firstAt = defaultSplitAt({ clock_in: entry.clock_in, clock_out: entry.clock_out }, tz);
+  const [hm, setHm] = useState(firstAt ? clockInputValue(firstAt, tz) : "");
+  const [pick, setPick] = useState("");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // The number this form is filling: hours worked MINUS what the shift already recorded.
-  const worked = Math.max(0, hoursBetween(entry.clock_in, entry.clock_out, lunchMin) - already);
-  const allocated = allocations.reduce((s, a) => s + (a.hours || 0) + (a.minutes || 0) / 60, 0);
-  // Codes off: the split identifies work by the JOB, so a job (not a code) unlocks Save.
-  // Meal-only: the hours are already on the entry, so Save just writes the lunch.
-  const ok =
-    allocations.some(
-      (a) => (jobCodesEnabled ? a.job_code : a.job_id) && (a.hours || 0) + (a.minutes || 0) / 60 > 0,
-    );
+  const at = switched ? atFromClockTime({ clock_in: entry.clock_in, clock_out: entry.clock_out }, hm, tz) : null;
+  const shiftLike = { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: lunchMin };
+  const preview = splitPreview(shiftLike, at ?? "not a time", null, { tz });
+  // The lunch lands on the part it fits; the server tries the other part when the longer one can't
+  // hold it, and says so when neither can.
+  const fitsOther = !preview.ok && lunchMin > 0 && at ? splitPreview(shiftLike, at, preview.lunchOn === "left" ? "right" : "left", { tz }) : null;
+  const shown = fitsOther?.ok ? fitsOther : preview;
+  const [kind, val] = pick.split(":");
+  const pickedLabel =
+    kind === "job" ? (jobs.find((j) => j.id === val) ? optionLabel(jobs.find((j) => j.id === val)!) : "that job") : kind === "code" ? val : null;
+  const canSave = !switched || (!!at && shown.ok && !!pick);
 
-  function update(i: number, patch: Partial<AllocRow>) {
-    setAllocations((p) => p.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
-  }
-  function codesForJob(jobId: string): JobCode[] {
-    const j = jobs.find((x) => x.id === jobId);
-    if (j?.codes && j.codes.length) return jobCodes.filter((c) => j.codes!.includes(c.code));
-    return jobCodes;
-  }
   function save() {
     setError(null);
     start(async () => {
-      const res = await completeAutoClockOut({
-        entry_id: entry.id,
-        lunch_minutes: lunchMin,
-        allocations: allocations.map((a) => ({
-          job_id: a.job_id || null,
-          job_code: a.job_code || null,
-          hours: (a.hours || 0) + (a.minutes || 0) / 60,
-          description: a.description,
-        })),
-      });
+      let res: { ok: boolean; error?: string; warning?: string };
+      try {
+        res = await completeAutoClockOut({
+          entry_id: entry.id,
+          lunch_minutes: lunchMin,
+          switched:
+            switched && at
+              ? { at, job_id: kind === "job" ? val : null, job_code: kind === "code" ? val : null }
+              : null,
+        });
+      } catch {
+        return setError("No connection — nothing was saved. Try again when you have a bar or two.");
+      }
       if (!res.ok) return setError(res.error ?? "Could not save.");
+      if (res.warning) setError(res.warning);
       router.refresh();
     });
   }
@@ -122,18 +116,11 @@ export function AutoClockoutPrompt({
           <Clock className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
           <div>
             <div className="text-sm font-semibold text-amber-800">
-              Finish your timecard — you clocked out at {new Date(entry.clock_out).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
+              Finish your timecard — you clocked out at {splitClock(entry.clock_out, tz)}.
             </div>
             <div className="text-xs text-amber-700">
-              {jobCodesEnabled
-                ? "Break down the hours you worked: which code(s) and how long, so they bill to the right job."
-                : "Break down the hours you worked: which job(s) and how long, so they bill to the right job."}
+              {splitClock(entry.clock_in, tz)}–{splitClock(entry.clock_out, tz)} on {entry.jobLabel}. Nobody was asked about lunch when it closed.
             </div>
-            {already > 0.01 && (
-              <div className="mt-1 text-xs text-amber-700">
-                {`${formatDuration(already)} is already recorded from switching jobs — this is just the rest of the day.`}
-              </div>
-            )}
           </div>
         </div>
 
@@ -146,52 +133,70 @@ export function AutoClockoutPrompt({
           <LunchCheckbox id="ac-lunch" checked={tookLunch} onChange={setTookLunch} className="border-amber-200 bg-white/60" />
         )}
 
-        {(
-        <div className="space-y-2">
-          {allocations.map((a, i) => (
-            <div key={i} className="space-y-2 rounded-lg border border-amber-100 bg-white/60 p-2">
-              <div className="flex items-center gap-2">
-                <Select value={a.job_id} onChange={(e) => update(i, { job_id: e.target.value })} className="h-9 flex-1">
-                  <option value="">— Job —</option>
-                  {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{optionLabel(j)}</option>
-                  ))}
-                </Select>
-                {jobCodesEnabled && (
-                  <Select value={a.job_code} onChange={(e) => update(i, { job_code: e.target.value })} className="h-9 w-28">
-                    <option value="">Code</option>
-                    {codesForJob(a.job_id).map((c) => (
-                      <option key={c.id} value={c.code}>{c.code}</option>
-                    ))}
-                  </Select>
-                )}
-                <div className="flex items-center gap-1">
-                  <NumberInput value={a.hours} onValueChange={(n) => update(i, { hours: n })} className="h-9 w-12 text-center" placeholder="h" />
-                  <span className="text-xs text-slate-400">h</span>
-                  <NumberInput value={a.minutes} onValueChange={(n) => update(i, { minutes: n })} className="h-9 w-12 text-center" placeholder="m" />
-                  <span className="text-xs text-slate-400">m</span>
+        {isStaff && (
+          <div className="space-y-2 rounded-lg border border-amber-200 bg-white/60 p-3">
+            <label htmlFor="ac-switched" className="flex min-h-[44px] cursor-pointer items-center gap-3 text-sm text-slate-700">
+              <input
+                id="ac-switched"
+                type="checkbox"
+                checked={switched}
+                onChange={(e) => setSwitched(e.target.checked)}
+                className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand"
+              />
+              <ArrowLeftRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+              <span>I Switched Jobs During This Shift</span>
+            </label>
+            {switched && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-[auto_1fr] items-center gap-2">
+                  <Label htmlFor="ac-at" className="mb-0">
+                    At
+                  </Label>
+                  <Input id="ac-at" type="time" value={hm} onChange={(e) => setHm(e.target.value)} className="h-11" />
                 </div>
-                <button type="button" onClick={() => setAllocations((p) => p.filter((_, idx) => idx !== i))} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600" aria-label="Remove">
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <Select value={pick} onChange={(e) => setPick(e.target.value)} className="h-11 w-full" aria-label="The job you switched to">
+                  <option value="">Pick A Job</option>
+                  <optgroup label="Jobs">
+                    {jobs.map((j) => (
+                      <option key={j.id} value={`job:${j.id}`}>
+                        {optionLabel(j)}
+                      </option>
+                    ))}
+                  </optgroup>
+                  {jobCodes.length > 0 && (
+                    <optgroup label="Time Codes — Paid, Not Billed">
+                      {jobCodes.map((c) => (
+                        <option key={c.id} value={`code:${c.code}`}>
+                          {c.code}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </Select>
+                {at && shown.ok ? (
+                  <p className="text-xs text-slate-600">
+                    {`${splitClock(entry.clock_in, tz)}–${splitClock(at, tz)} on ${entry.jobLabel} (${formatDuration(shown.left.hours)})`}
+                    {shown.left.lunchMinutes > 0 ? " with the lunch" : ""}
+                    {`, then ${splitClock(at, tz)}–${splitClock(entry.clock_out, tz)} on ${pickedLabel ?? "the job you pick"} (${formatDuration(shown.right.hours)})`}
+                    {shown.right.lunchMinutes > 0 ? " with the lunch" : ""}.
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-800">{shown.problem ?? "Pick the time you switched."}</p>
+                )}
               </div>
-              <Input placeholder="What did you do? (optional)" value={a.description} onChange={(e) => update(i, { description: e.target.value })} />
-            </div>
-          ))}
-          <div className="flex items-center justify-between">
-            <button type="button" onClick={() => setAllocations((p) => [...p, { job_id: "", job_code: "", hours: 0, minutes: 0, description: "" }])} className="inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50">
-              <Plus className="h-4 w-4 shrink-0" /> {jobCodesEnabled ? "Add Another Code" : "Add Another Job"}
-            </button>
-            <span className={`text-xs ${Math.abs(allocated - worked) > 0.1 ? "text-amber-600" : "text-slate-500"}`}>
-              {formatDuration(allocated)} of {formatDuration(worked)} {already > 0.01 ? "left to log" : "worked"}
-            </span>
+            )}
           </div>
-        </div>
         )}
 
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <Button onClick={save} disabled={pending || !ok} className="w-full">
-          {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving</> : "Save My Hours"}
+        <Button onClick={save} disabled={pending || !canSave} className="h-11 w-full">
+          {pending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" /> Saving
+            </>
+          ) : (
+            "Save My Hours"
+          )}
         </Button>
       </CardContent>
     </Card>
