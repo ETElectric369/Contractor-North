@@ -4,10 +4,15 @@
 -- ORDER: after 0288 (a split is a cut) and 0289 (the old splits became entries; the table was
 -- emptied, archived and frozen), and at least one deploy after the code that stopped reading it
 -- (cn-v985). Apply AFTER this branch's code is live: the DB suite it ships no longer builds
--- old-style rows, and the one on main before it still does. ONE transaction
--- (scripts/run-one-migration.mjs wraps the file); any failed check at the bottom rolls ALL of it
--- back. Writes no data. Not re-runnable by design: a second run stops at the first DROP, loudly,
--- and changes nothing.
+-- old-style rows, and the one on main before it still does.
+--
+-- ONE TRANSACTION, AND ONLY IF THE RUNNER MAKES IT ONE. The file has no BEGIN/COMMIT of its own
+-- (no migration here does; the runners own the transaction). Apply it with
+-- scripts/run-one-migration.mjs (begin/commit around the file), `psql -1 -f`, or the Supabase SQL
+-- editor or CLI (one implicit transaction). Under any of those a failed check at the bottom rolls
+-- ALL of it back. NEVER a plain `psql -f` without -1: each statement would commit on its own, and a
+-- failure half way would leave the table dropped with the checks unrun. Writes no data. Not
+-- re-runnable by design: a second run stops at the first DROP, loudly, and changes nothing.
 --
 -- WHAT THIS CLOSES. Phase 5 of "a split shift is separate timecard entries" (Erik, 2026-09-24).
 -- public.time_allocations was the second ledger: a list of HOURS beside the clock times, tied to
@@ -62,14 +67,19 @@
 --   3. DROP, dependency order, plain DROP with no CASCADE so anything unexpected fails loudly:
 --      the four triggers on the table, then the five functions that only served it, the policy,
 --      the two indexes, and the table (asserted empty first).
---   4. Check: the table is gone, no public function names it, the archive still holds 20 rows,
---      the guards that stay exist and are enabled, and the snapshot in 1 is unchanged.
+--   4. Check: the table is gone, no public function names it and no comment in public describes
+--      it as live (invoice_items.source_ids is rewritten just before), the archive still holds 20
+--      rows, the guards that stay exist and are enabled, and the snapshot in 1 is unchanged.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── 1. WHAT MUST NOT MOVE ─────────────────────────────────────────────────────────────────────
 -- ET Electric's draft INV-078 labor line (the only invoice line 0289 wrote) and the entries 0289
 -- built from old splits. This file writes neither; the check at the bottom proves it by count.
-create temp table _drop_before on commit drop as
+-- A plain session temp table, dropped after the check, NOT `on commit drop`: at the top level
+-- that clause would drop it the moment its own statement committed if the file were ever run
+-- without a wrapping transaction, and the check would then fail on a missing table instead of
+-- saying what it found.
+create temp table _drop_before as
 select
   (select count(*) from public.invoice_items x
      join public.invoices i on i.id = x.invoice_id
@@ -435,6 +445,10 @@ drop table public.time_allocations;
 comment on table archive.time_allocations is
   'Every time_allocations row as it stood when 0289 converted the old splits into ordinary time entries; public.time_allocations was dropped by 0290. Not exposed to PostgREST. became = the time entry that carries its hours now (null when that entry was an empty punch 0289 deleted).';
 
+-- The column comment 0255 wrote still called allocation ids a live kind of labor claim.
+comment on column public.invoice_items.source_ids is
+  'The source rows this imported line bills — time_entry ids on a labor line; bill, purchase_order, change_order or quote_line_item ids on the others. A row is billed on at most ONE non-void invoice: the importers skip ids claimed elsewhere on the job. Empty on hand-typed lines. 0255; since 0290 only a time entry id counts as hours (an older line may still carry a retired id from archive.time_allocations beside the entry that took its hours).';
+
 -- ── 4. THE CHECK ──────────────────────────────────────────────────────────────────────────────
 do $$
 declare
@@ -460,6 +474,22 @@ begin
                        'replace_time_allocations', 'carve_legacy_allocations');
   if v_names is not null then
     raise exception '0290: these functions should be gone: %. Nothing was changed.', v_names;
+  end if;
+
+  -- No comment on anything in public still describes the table as live. A mention is allowed only
+  -- when it names the archive, or on time_entries.split_how, whose 'converted' says where those
+  -- pieces came from (history, not a live table).
+  select string_agg(coalesce(c.relname || coalesce('.' || a.attname, ''), pr.proname), ', ') into v_names
+    from pg_description d
+    left join pg_class c      on d.classoid = 'pg_class'::regclass and c.oid = d.objoid
+    left join pg_attribute a  on a.attrelid = c.oid and a.attnum = d.objsubid and d.objsubid > 0
+    left join pg_proc pr      on d.classoid = 'pg_proc'::regclass and pr.oid = d.objoid
+   where coalesce(c.relnamespace, pr.pronamespace) = 'public'::regnamespace
+     and d.description ilike '%time_allocation%'
+     and d.description not ilike '%archive.time_allocations%'
+     and not (c.relname = 'time_entries' and a.attname = 'split_how');
+  if v_names is not null then
+    raise exception '0290: these comments still describe time_allocations as live: %. Nothing was changed.', v_names;
   end if;
 
   select count(*) into v_n from archive.time_allocations;
@@ -515,3 +545,5 @@ begin
   raise notice '0290: time_allocations dropped; archive 20 rows; INV-078 line % / %, converted entries %, carriers %.',
     b.inv078_line, b.inv078_same, b.converted, b.carriers;
 end $$;
+
+drop table _drop_before;
