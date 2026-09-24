@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { addressPrefillOnCustomerPick } from "@/lib/schedule-options";
 import { useOrgPublicBase } from "@/components/use-org-public-base";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
@@ -22,6 +22,7 @@ import {
   createJobFromAppointment,
   createAppointmentProposal,
 } from "./actions";
+import { createParamClaim } from "@/lib/param-claim";
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 const ymd = (d: Date) => `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
@@ -141,7 +142,9 @@ interface ApptForm {
 
 // A page can mount several "new appointment" buttons; only the FIRST mounted
 // instance may answer ?new=1 or two modals would stack.
-let newParamClaimed = false;
+// Named per holder (lib/param-claim), so a strip that died on a dropped connection can't
+// leave this door shut for the rest of the session.
+const newParam = createParamClaim();
 
 /** Create or edit an appointment / inspection. */
 export function AppointmentButton({
@@ -275,23 +278,26 @@ export function AppointmentButton({
     draftStateRef.current = draftState;
   }, [draftState]);
 
+  // This instance's name on the ?new=1 claim; it lets go on unmount as well as below.
+  const claimant = useId();
+  useEffect(() => () => newParam.release(claimant), [claimant]);
+
   // Open straight from the quick-add menu's "New appointment"
   // (/schedule?view=appointments&new=1), then strip the param so a refresh or
   // back-button doesn't reopen the form. Edit instances never answer it.
   useEffect(() => {
     if (editing) return;
     if (searchParams.get("new") !== "1") {
-      newParamClaimed = false; // param gone → release for the next quick-add tap
+      newParam.release(claimant); // param gone → release for the next quick-add tap
       return;
     }
-    if (newParamClaimed) return;
-    newParamClaimed = true;
+    if (!newParam.take(claimant)) return;
     setOpen(true);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchParams, pathname, router, editing]);
+  }, [searchParams, pathname, router, editing, claimant]);
 
   // Ask for the business's timezone as soon as this mounts, so an edit form is on the right clock
   // before it is ever opened (and so the ?new=1 quick-add door, which opens the modal without

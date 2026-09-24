@@ -991,10 +991,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 >
                   Materials
                 </Link>
+                {/* snapFirst: on the clock, a cost is a bill in his hand, so the sheet opens on
+                    Snap the Bill instead of a focused Supplier field. */}
                 {isStaff && (
                   <QuickCostButton
                     orgId={(org as any)?.id ?? ""}
                     jobId={currentJob.id}
+                    snapFirst
                     className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   />
                 )}

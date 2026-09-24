@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,13 @@ import { useDraft } from "@/lib/use-draft";
 import { InquiryFields, inquiryFormValue } from "./inquiry-fields";
 import { createInquiry, updateInquiry, deleteInquiry } from "./actions";
 import type { Inquiry } from "@/lib/types";
+import { createParamClaim } from "@/lib/param-claim";
 
 // The leads page mounts the "new" button TWICE (header + empty state); only the
 // FIRST mounted instance may answer ?new=1 or two modals would stack.
-let newParamClaimed = false;
+// Named per holder (lib/param-claim), so a strip that died on a dropped connection can't
+// leave this door shut for the rest of the session.
+const newParam = createParamClaim();
 
 /** New-inquiry button, or (mode="edit") an edit trigger for an existing one. */
 export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mode?: "new" | "edit" }) {
@@ -49,22 +52,25 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   if (initialSnap.current === null) initialSnap.current = JSON.stringify(inquiryFormValue(inquiry));
   const dirty = JSON.stringify(form) !== initialSnap.current;
 
+  // This instance's name on the ?new=1 claim; it lets go on unmount as well as below.
+  const claimant = useId();
+  useEffect(() => () => newParam.release(claimant), [claimant]);
+
   // Open straight from the quick-add menu's "New lead" (/leads?new=1), then
   // strip the param so a refresh or back-button doesn't reopen the form.
   useEffect(() => {
     if (editing) return;
     if (searchParams.get("new") !== "1") {
-      newParamClaimed = false; // param gone → release for the next quick-add tap
+      newParam.release(claimant); // param gone → release for the next quick-add tap
       return;
     }
-    if (newParamClaimed) return;
-    newParamClaimed = true;
+    if (!newParam.take(claimant)) return;
     setOpen(true);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchParams, pathname, router, editing]);
+  }, [searchParams, pathname, router, editing, claimant]);
 
   function openModal() {
     setConfirmDel(false);

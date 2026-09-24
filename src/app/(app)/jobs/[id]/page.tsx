@@ -1061,6 +1061,10 @@ export default async function JobDetailPage({
     {
       id: "costs",
       label: "Costs",
+      // The job's live supplier bills: the same `bills` rows (set-aside duplicates excluded) that
+      // the Costs total sums and the Supplier bills list prints as "N bills", so the chip and the
+      // tab can't disagree. POs are not counted; they are orders, not money spent yet.
+      count: bills?.length ?? 0,
       content: (
         <div className="space-y-4">
           {/* THE ADD COST DOOR, camera first, at the top of the tab where the dock's Add Cost

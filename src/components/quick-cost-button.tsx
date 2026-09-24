@@ -7,6 +7,7 @@ import { Wallet, DollarSign, Camera, Check, Paperclip } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
+import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { todayStrInTz } from "@/lib/tz";
@@ -30,7 +31,7 @@ const MAX_PHOTO = 15 * 1024 * 1024;
 // happened while the camera was open (see the notice effect in the component).
 const SNAP_KEY = "cn-quick-cost-snap";
 const SNAP_STALE_MS = 10 * 60 * 1000;
-// Once per page load, however many Add Cost doors the page mounts (My Day has two).
+// Once per page load, however many Add Cost doors the page mounts.
 let reloadAnnounced = false;
 
 /** Same test JobDocuments uses: a touch device gets a straight-to-camera door. */
@@ -66,6 +67,7 @@ export function QuickCostButton({
   label = "Add Cost",
   icon = "wallet",
   className,
+  snapFirst = false,
   onOpen,
   onClose,
 }: {
@@ -73,6 +75,12 @@ export function QuickCostButton({
   jobId?: string;
   jobs?: { id: string; label: string }[];
   label?: string;
+  /** On a phone, open the sheet camera first: Snap the Bill leads the sheet and the Supplier
+   *  field doesn't grab focus, so no keyboard comes up over the camera door. My Day sets it (the
+   *  person there is standing at the truck with the paper in hand). The Costs tab's sheet leaves
+   *  it off, because that sheet is the typed door for costs with no paper, next to its own Snap
+   *  the Bill. */
+  snapFirst?: boolean;
   /** Trigger glyph. A STRING (not a LucideIcon reference) so server components can
    *  pick it across the RSC boundary. The job action dock passes "dollar": at icon
    *  size a wallet and the Materials tab's Package box share the same rounded-rect
@@ -442,6 +450,119 @@ export function QuickCostButton({
     });
   }
 
+  // SNAP FIRST, FROM MY DAY (Erik 2026-09-23, f79b48d9: My Day's Add Cost opened a typing form
+  // with the camera at the bottom, under a focused Supplier field whose keyboard could cover it).
+  // With snapFirst on a phone the receipt block below leads the sheet as a full-width Snap the
+  // Bill, the Costs tab's own verb, and Supplier doesn't take focus. It is the SAME block in
+  // either place, hidden inputs and all, so the typed path and the reader behave identically.
+  const snapTop = snapFirst && phone;
+  const receiptBlock = (
+    <div>
+      {!snapTop && <Label>Receipt</Label>}
+      {/* TWO inputs, because one `capture` attribute lied somewhere on every platform:
+          it forced iOS STRAIGHT to the camera (no library, no files) while desktop
+          ignored it and opened a folder. So the camera door (capture="environment") is
+          its own input that only a phone gets a button for, and the no-capture input
+          keeps the native Take Photo / Photo Library / Choose File sheet on mobile and
+          the file picker on desktop — the emailed-PDF case stays covered. */}
+      <input
+        ref={captureRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => {
+          clearSnapWatch();
+          pick(e.target.files?.[0] ?? null);
+        }}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          setCameraHint(null);
+          pick(e.target.files?.[0] ?? null);
+        }}
+      />
+      <DropTarget
+        onFiles={(files) => pick(files[0] ?? null)}
+        accept="image/*,application/pdf,.pdf"
+        multiple={false}
+        label="Drop the Receipt"
+      >
+        {receipt ? (
+          <button
+            type="button"
+            onClick={pickFromLibrary}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
+          >
+            <Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt attached"}</span>
+          </button>
+        ) : snapTop ? (
+          <div className="space-y-2">
+            <Button type="button" size="lg" onClick={snap} className="w-full">
+              <Camera /> Snap the Bill
+            </Button>
+            <button
+              type="button"
+              onClick={pickFromLibrary}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              <Paperclip className="h-4 w-4" /> Photo or PDF
+            </button>
+          </div>
+        ) : (
+          <div className={phone ? "grid grid-cols-2 gap-2" : ""}>
+            {phone && (
+              <button
+                type="button"
+                onClick={snap}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                <Camera className="h-4 w-4" /> Snap the Receipt
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={pickFromLibrary}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
+            >
+              {phone ? (
+                <><Paperclip className="h-4 w-4" /> Photo or PDF</>
+              ) : (
+                <><Camera className="h-4 w-4" /> Add Receipt — Photo or PDF</>
+              )}
+            </button>
+          </div>
+        )}
+      </DropTarget>
+      {cameraHint && !receipt && <p className="mt-1 text-xs text-amber-600">{cameraHint}</p>}
+      {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt with it.</p>}
+      {/* The "Read the Receipt" affordance — a choice the person can see and flip, not a
+          rule buried in which fields happen to be blank. */}
+      {canRead && !costSaved && (
+        <div className="mt-2 space-y-1.5">
+          <SegmentedControl
+            stretch
+            activeId={useReader ? "read" : "type"}
+            onSelect={(id) => setReadMode(id === "read" ? "read" : "type")}
+            items={[
+              { id: "read", label: "Read the Receipt" },
+              { id: "type", label: "Type It In" },
+            ]}
+          />
+          <p className="text-xs text-slate-500">
+            {useReader
+              ? "Nort reads the supplier, total and every line off the paper. Date, category and Already Paid are yours."
+              : "Saves the amount you type, with the receipt attached. Nort won't read it."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
       <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
@@ -460,13 +581,14 @@ export function QuickCostButton({
         footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"} />}
       >
         <div className="space-y-4">
+          {snapTop && receiptBlock}
           <div>
             {/* The asterisk is the truth of the save path: a supplier is REQUIRED only when
                 there is no receipt to carry it (fragment-first) — with a photo attached, Nort
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
             <Label htmlFor="qc-supplier">Paid to / supplier{receipt ? "" : " *"}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? "Nort reads it off the receipt" : "e.g. CED, Home Depot"} autoFocus disabled={costSaved || useReader} />
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? "Nort reads it off the receipt" : "e.g. CED, Home Depot"} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -501,97 +623,7 @@ export function QuickCostButton({
             <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} className="h-4 w-4 rounded border-slate-300" disabled={costSaved} />
             Already paid (cash / card) — skip the bill
           </label>
-          <div>
-            <Label>Receipt</Label>
-            {/* TWO inputs, because one `capture` attribute lied somewhere on every platform:
-                it forced iOS STRAIGHT to the camera (no library, no files) while desktop
-                ignored it and opened a folder. So the camera door (capture="environment") is
-                its own input that only a phone gets a button for, and the no-capture input
-                keeps the native Take Photo / Photo Library / Choose File sheet on mobile and
-                the file picker on desktop — the emailed-PDF case stays covered. */}
-            <input
-              ref={captureRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="hidden"
-              onChange={(e) => {
-                clearSnapWatch();
-                pick(e.target.files?.[0] ?? null);
-              }}
-            />
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*,application/pdf,.pdf"
-              className="hidden"
-              onChange={(e) => {
-                setCameraHint(null);
-                pick(e.target.files?.[0] ?? null);
-              }}
-            />
-            <DropTarget
-              onFiles={(files) => pick(files[0] ?? null)}
-              accept="image/*,application/pdf,.pdf"
-              multiple={false}
-              label="Drop the Receipt"
-            >
-              {receipt ? (
-                <button
-                  type="button"
-                  onClick={pickFromLibrary}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
-                >
-                  <Check className="h-4 w-4 text-green-600" /> <span className="truncate">{receipt.name || "Receipt attached"}</span>
-                </button>
-              ) : (
-                <div className={phone ? "grid grid-cols-2 gap-2" : ""}>
-                  {phone && (
-                    <button
-                      type="button"
-                      onClick={snap}
-                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
-                    >
-                      <Camera className="h-4 w-4" /> Snap the Receipt
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={pickFromLibrary}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600 hover:bg-slate-50"
-                  >
-                    {phone ? (
-                      <><Paperclip className="h-4 w-4" /> Photo or PDF</>
-                    ) : (
-                      <><Camera className="h-4 w-4" /> Add Receipt — Photo or PDF</>
-                    )}
-                  </button>
-                </div>
-              )}
-            </DropTarget>
-            {cameraHint && !receipt && <p className="mt-1 text-xs text-amber-600">{cameraHint}</p>}
-            {receipt && !targetJob && <p className="mt-1 text-xs text-amber-600">Pick a job to file the receipt with it.</p>}
-            {/* The "Read the Receipt" affordance — a choice the person can see and flip, not a
-                rule buried in which fields happen to be blank. */}
-            {canRead && !costSaved && (
-              <div className="mt-2 space-y-1.5">
-                <SegmentedControl
-                  stretch
-                  activeId={useReader ? "read" : "type"}
-                  onSelect={(id) => setReadMode(id === "read" ? "read" : "type")}
-                  items={[
-                    { id: "read", label: "Read the Receipt" },
-                    { id: "type", label: "Type It In" },
-                  ]}
-                />
-                <p className="text-xs text-slate-500">
-                  {useReader
-                    ? "Nort reads the supplier, total and every line off the paper. Date, category and Already Paid are yours."
-                    : "Saves the amount you type, with the receipt attached. Nort won't read it."}
-                </p>
-              </div>
-            )}
-          </div>
+          {!snapTop && receiptBlock}
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>

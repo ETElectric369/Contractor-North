@@ -137,7 +137,8 @@ function LineDescInput({
       />
       {open && priceItems.length === 0 && (
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg">
-          No price book yet — upload or build one under Tools → Price List and these will autocomplete.
+          {/* Price List sits in the dock's Money group (lib/dock.ts); Tools holds only Calculators & Tools. */}
+          No price book yet. Upload or build one under Money → Price List and these will autocomplete.
         </div>
       )}
       {open && priceItems.length > 0 && (
@@ -146,7 +147,8 @@ function LineDescInput({
             <li key={p.id}>
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50"
+                // min-h-[44px]: the 44px touch-target rule. These rows were about 32px on a phone.
+                className="flex min-h-[44px] w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50"
                 // preventDefault on mousedown keeps the input focused so the blur-timer doesn't
                 // pull the list out from under the tap; the PICK itself rides onClick. It used to
                 // ride mousedown alone, and iOS only synthesizes mouse events for a tap that
@@ -1179,8 +1181,8 @@ export function QuoteBuilder({
                 Say which it is, and where to go. */}
             {priceItems.length === 0 && kits.length === 0 && (
               <p className="mb-3 text-xs text-slate-500">
-                No price list or kits yet, so there&apos;s nothing to pick from — type the lines by hand below, or build
-                your catalog under Tools → Price List and they&apos;ll show up here.
+                No price list or kits yet, so there&apos;s nothing to pick from. Type the lines by hand below, or build
+                your catalog under Money → Price List and they&apos;ll show up here.
               </p>
             )}
 
