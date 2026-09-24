@@ -220,9 +220,19 @@ export function EditEntryButton({
         // the stored value so an unrelated edit can't wipe a supervisor rate. (Number-cast the
         // seed — a numeric column can arrive as a string and must round-trip as the same value.)
         // The owner's shift never takes a NEW rate (0286), even one typed before the person was
-        // switched to him: the stored value round-trips instead.
+        // switched to him: the stored value round-trips instead. A shift MOVED onto him drops its
+        // crew override: he is paid by draw, the Rate field is hidden for him, and 0286's trigger
+        // refuses an override riding along on the move (a save the office could never fix here).
         rate_override:
-          rateDirty && !ownerShift ? (rate > 0 ? rate : null) : entry.rate_override == null ? null : Number(entry.rate_override),
+          ownerShift && (profileId || entry.profile_id) !== entry.profile_id
+            ? null
+            : rateDirty && !ownerShift
+              ? rate > 0
+                ? rate
+                : null
+              : entry.rate_override == null
+                ? null
+                : Number(entry.rate_override),
           profile_id: profileId || undefined,
           allocations,
         });

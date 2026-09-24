@@ -78,6 +78,29 @@ d("an owner is paid by draw (0286)", () => {
     expect(msg).toMatch(/owner's draw/);
   });
 
+  it("a crew shift carrying a pay rate cannot be moved onto the owner with it; without it, it can", async () => {
+    const { rows: crew } = await client.query(
+      "select id from public.profiles where org_id = $1 and role <> 'owner' order by created_at limit 1",
+      [orgId],
+    );
+    if (!crew[0]) return; // an org with nobody but its owner has no crew shift to move
+    await client.query("savepoint move");
+    try {
+      const { rows: [e] } = await client.query(
+        `insert into public.time_entries (org_id, profile_id, clock_in, clock_out, status, rate_override)
+         values ($1, $2, '2026-09-10T15:00:00Z', '2026-09-10T23:00:00Z', 'closed', 40) returning id`,
+        [orgId, crew[0].id],
+      );
+      // Same override, new person: the trigger must look at the move, not only at the rate.
+      const msg = await refused("update public.time_entries set profile_id = $2 where id = $1", [e.id, ownerId]);
+      expect(msg).toMatch(/owner's draw/);
+      // The editor's own move drops the override, and that goes through.
+      expect(await refused("update public.time_entries set profile_id = $2, rate_override = null where id = $1", [e.id, ownerId])).toBeNull();
+    } finally {
+      await client.query("rollback to savepoint move");
+    }
+  });
+
   it("profile_pay reads the owner's pay rate as 0 and says paid_by_draw", async () => {
     await client.query("savepoint look");
     await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: ownerId, role: "authenticated" })]);

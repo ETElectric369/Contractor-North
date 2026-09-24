@@ -126,9 +126,13 @@ create trigger refuse_wages_for_an_owner
   for each row execute function public.refuse_wages_for_an_owner();
 
 -- A pay-rate override on an owner's shift is a wage by another name. Refused only when the override
--- is being SET or CHANGED to something above zero: the time-entry editor round-trips rate_override on
--- every save, so an unrelated edit to an existing row (notes, job, times) must never start failing
--- because of a value that was already there. Clearing one (null or 0) is always allowed.
+-- is being SET or CHANGED to something above zero, or the shift is being MOVED onto an owner while it
+-- carries one: the time-entry editor round-trips rate_override on every save, so an unrelated edit to
+-- an existing row (notes, job, times) must never start failing because of a value that was already
+-- there. But a crew shift at $40 reassigned to the owner would otherwise keep a pay rate nobody can
+-- see or clear (the editor hides Rate on his shifts), and it would be live pay again the moment the
+-- shift moved back. The editor drops the override on that move. Clearing one (null or 0) is always
+-- allowed.
 create or replace function public.refuse_pay_rate_on_owner_entry()
 returns trigger
 language plpgsql
@@ -141,7 +145,12 @@ begin
   if coalesce(new.rate_override, 0) <= 0 then
     return new;
   end if;
-  if tg_op = 'UPDATE' and new.rate_override is not distinct from old.rate_override then
+  -- Unchanged override on the SAME person: an unrelated edit, never refused. A shift MOVED onto the
+  -- owner is checked even when its override did not change: otherwise a crew shift carrying $40
+  -- reassigned to him would keep a pay rate nobody can see (the editor hides Rate for his shifts).
+  if tg_op = 'UPDATE'
+     and new.rate_override is not distinct from old.rate_override
+     and new.profile_id is not distinct from old.profile_id then
     return new;
   end if;
   select coalesce(nullif(btrim(p.full_name), ''), 'This person')
@@ -157,7 +166,7 @@ end $$;
 
 drop trigger if exists refuse_pay_rate_on_owner_entry on public.time_entries;
 create trigger refuse_pay_rate_on_owner_entry
-  before insert or update of rate_override on public.time_entries
+  before insert or update of rate_override, profile_id on public.time_entries
   for each row execute function public.refuse_pay_rate_on_owner_entry();
 
 -- ── WHO MAY HIDE "LEFT FOR YOU" FROM THE OFFICE ─────────────────────────────────────────────────
