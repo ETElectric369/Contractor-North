@@ -6,6 +6,7 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
+import { bucketOf } from "@/lib/business-cost-buckets";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -100,7 +101,9 @@ async function createOccurrence(supabase: any, t: any, userId: string | null, or
       amount: t.amount ?? 0,
       status: "unpaid",
       bill_date: t.next_date,
-      category: t.category,
+      // A no-job bill is a business cost, so it lands in one of the six buckets even from a
+      // template saved before the Recurring form offered only those (0285 moves the stored ones).
+      category: bucketOf(t.category),
       notes: `Recurring expense: ${t.title}`,
       created_by: userId,
     });

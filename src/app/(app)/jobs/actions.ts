@@ -20,6 +20,7 @@ import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
+import { bucketOf } from "@/lib/business-cost-buckets";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -825,6 +826,11 @@ export async function createBill(input: {
   // may only supersede a PO on its own job, or the supersede silently drops another job's
   // order from the cost rollup. A mismatched/foreign id is ignored (the bill still saves).
   const poId = await visiblePoIdOnJobOrNull(supabase, input.po_id ?? null, jobId);
+  // A COST WITH NO JOB IS A BUSINESS COST, AND IT LANDS IN ONE OF THE SIX BUCKETS whichever door
+  // sent it: the Bills page, Add Business Cost, Add Cost, or Nort. bucketOf reads an old word
+  // ("Fuel") as its bucket and anything unknown as Other, so no door can start a seventh list.
+  // A job bill's category is the kind of paper it is (Receipt, Materials) and passes untouched.
+  const category = jobId ? (input.category ?? null) : bucketOf(input.category);
 
   const { data: created, error } = await supabase
     .from("bills")
@@ -837,7 +843,7 @@ export async function createBill(input: {
       status: input.status || "unpaid",
       bill_date: input.bill_date || null,
       notes: input.notes.trim() || null,
-      category: input.category ?? null,
+      category,
       created_by: ctx.userId,
     })
     .select("id")
@@ -859,7 +865,7 @@ export async function createBill(input: {
         vendor: input.supplier.trim(),
         amount: input.amount || 0,
         item_date: input.bill_date || null,
-        category: input.category ?? null,
+        category,
         status: "filed",
         job_id: jobId,
         document_id: doc.id,
@@ -995,7 +1001,10 @@ export async function updateBill(
   if (patch.status !== undefined) clean.status = patch.status;
   if (patch.bill_date !== undefined) clean.bill_date = patch.bill_date || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
-  if (patch.category !== undefined) clean.category = patch.category ?? null;
+  // The same rule as createBill: an edit that says this bill has no job puts its category in one
+  // of the six buckets. (A patch that leaves job_id out is not told which it is, and passes as sent.)
+  if (patch.category !== undefined)
+    clean.category = patch.job_id !== undefined && !patch.job_id ? bucketOf(patch.category) : (patch.category ?? null);
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
   // One stored-row read of the bill as it stands — feeds THREE things: the old-job revalidation

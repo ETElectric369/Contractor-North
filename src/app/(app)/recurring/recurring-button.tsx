@@ -9,6 +9,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { saveRecurring, deleteRecurring } from "./actions";
+import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 
 interface CustomerOpt { id: string; name: string }
 interface LineItem { description: string; quantity: number; unit_price: number }
@@ -209,9 +210,22 @@ export function RecurringButton({
                 <Label htmlFor="r-amt">Amount</Label>
                 <Input id="r-amt" name="amount" type="number" step="0.01" min="0" defaultValue={template?.amount ?? ""} />
               </div>
+              {/* THE SAME SIX BUCKETS AS EVERY OTHER BUSINESS COST. This was a free-text box, so
+                  a phone bill could be "Phone" one month and "Verizon" the next and never add up
+                  with the rest. The bill each run writes carries this bucket. */}
               <div className="col-span-3">
-                <Label htmlFor="r-cat">Category</Label>
-                <Input id="r-cat" name="category" defaultValue={template?.category ?? ""} placeholder="e.g. Rent, Insurance, Software" />
+                <Label htmlFor="r-cat">Business cost bucket</Label>
+                <Select
+                  id="r-cat"
+                  name="category"
+                  defaultValue={template?.kind === "expense" && template.category ? bucketOf(template.category) : ""}
+                  required
+                >
+                  <option value="">Pick a Bucket</option>
+                  {BUSINESS_COST_BUCKETS.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </Select>
               </div>
             </div>
           )}

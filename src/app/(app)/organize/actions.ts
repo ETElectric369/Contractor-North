@@ -11,7 +11,7 @@ import { modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
-import { OVERHEAD_CATEGORIES } from "./constants";
+import { AUTO_FILE_BUCKETS, bucketOf, isBusinessCostBucket, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the Organize
 // My classifier (any upload) and the job-receipt reader (a receipt already filed to a job). They
 // were two hand-maintained copies of one list, which is how "Food & Drink" would have shipped to
@@ -43,6 +43,8 @@ export interface OrganizedResult {
     confidence: string;
     status: string; // filed | needs_review
     destination: string; // job | overhead | note | none
+    /** The business-cost bucket it was filed in, when destination is overhead. */
+    bucket?: string | null;
   };
 }
 
@@ -272,13 +274,13 @@ Respond with ONLY a JSON object (no prose):
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
   "payment": "paid_at_purchase" | "on_account" | "unknown" — receipts only. "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases); "unknown" when you cannot tell,
-  "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (fuel/gas station, shop supplies, small tools, office, vehicle, insurance); "unsure" otherwise,
-  "overhead_category": "Fuel" | "Shop supplies" | "Tools" | "Office" | "Insurance" | "Vehicle" | "Other" or null — only when destination is "overhead",
+  "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (gas station, truck, shop supplies, small tools, phone, office, insurance, licenses); "unsure" otherwise,
+  "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
   "job_id": the id of the matching job ONLY if the content clearly points to one (job number, customer name, or address visible), else null,
   "confidence": "low" | "medium" | "high"
 }
 
-Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Fuel). Generic supply-house receipts with no job reference are "unsure", not overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead: those come in with the supplier's own paperwork and must not be filed twice. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 
@@ -310,7 +312,15 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
   const amount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
-  const overheadCategory = String(parsed.overhead_category || "Other");
+  // THE READER'S BUCKET IS CHECKED BEFORE IT IS WRITTEN. It used to be saved exactly as the model
+  // spelled it, so a model slip ("Fuel", "gas") became a seventh category no other door knew.
+  // bucketOf always answers with one of the six. Fees is the one the reader may not pick: a
+  // supplier's late or service charge is already on the supplier's own paperwork, so a fee-shaped
+  // paper, by the model's word or by its own words, waits in Needs Review for a person.
+  const overheadCategory = bucketOf(parsed.overhead_category);
+  const feeShaped =
+    overheadCategory === "Fees" ||
+    looksLikeSupplierFee(title, parsed.vendor ? String(parsed.vendor) : null, parsed.summary ? String(parsed.summary) : null);
   // What the paper says about PAYMENT decides paid/unpaid — not the category heuristic.
   // billStatusFor() calls anything not named "bill/invoice" paid, so an ON-ACCT supply-house
   // ticket filed here vanished from payables until the monthly statement arrived. Unknown
@@ -323,11 +333,11 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
 
   // Decide where it goes — auto-file only when confident, else the tray.
   // - job matched → file to that job (any kind)
-  // - clear overhead receipt with an amount → overhead bill (no job)
+  // - clear overhead receipt with an amount → business-cost bill (no job), never a fee
   // - notes stand alone fine → filed
   // - everything else → needs_review
   const isOverhead =
-    kind === "receipt" && parsed.destination === "overhead" && amount != null && confidence !== "low";
+    kind === "receipt" && parsed.destination === "overhead" && amount != null && confidence !== "low" && !feeShaped;
   let destination: "job" | "overhead" | "note" | "none" = "none";
   let status = "needs_review";
   if (jobId && confidence !== "low") {
@@ -398,6 +408,13 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       lines,
       billStatus,
     );
+    // A business cost IS its bill: there is no copy on a job to fall back on. If the bill did not
+    // land, the receipt stays in Needs Review, so the screen never reads "Filed as a Business
+    // Cost" over a cost that does not exist.
+    if (!billId) {
+      destination = "none";
+      status = "needs_review";
+    }
   }
 
   // Upgrade the placeholder row with the AI's read (UPDATE, not a second insert,
@@ -444,6 +461,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       confidence,
       status,
       destination,
+      bucket: destination === "overhead" ? overheadCategory : null,
     },
   };
 }
@@ -713,10 +731,15 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
   return `${held[1][0].toUpperCase()}${held[1].slice(1)} ${tail}`;
 }
 
+// NO PETTY CASH DESTINATION (2026-09-24). Filing a receipt to petty cash wrote an expense with no
+// job and replaced the receipt's category with "Receipt", so a job purchase quietly became a
+// business cost: that is how CED 8802-1101094, $379.35 of parts for the Rhodesia job, ended up in
+// the cash box. A receipt now goes to a job or to one of the six business-cost buckets. An item
+// filed to petty cash before this still has its petty_cash_id, and re-filing it tears that row
+// down below exactly as before.
 export type FileDestination =
   | { type: "job"; jobId: string }
   | { type: "overhead"; category: string }
-  | { type: "petty_cash" }
   | { type: "unfiled" };
 
 /**
@@ -728,6 +751,9 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
+  if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
+    return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
 
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
@@ -782,7 +808,6 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
 
   let documentId: string | null = null;
   let billId: string | null = null;
-  let pettyCashId: string | null = null;
   let jobId: string | null = null;
   let category: string | null = item.category;
 
@@ -820,29 +845,25 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       lines,
       billStatusFromItem(item),
     );
-  } else if (dest.type === "petty_cash") {
-    category = "Petty cash";
-    const { data: pc, error: pcErr } = await supabase
-      .from("petty_cash")
-      .insert({
-        tx_date: item.item_date ?? new Date().toISOString().slice(0, 10),
-        kind: "expense",
-        amount: item.amount ?? 0,
-        category: item.kind === "receipt" ? "Receipt" : "Other",
-        description: item.title,
-        created_by: ctx.userId,
-      })
-      .select("id")
-      .single();
-    if (pcErr) return { ok: false, error: pcErr.message };
-    pettyCashId = pc?.id ?? null;
+    // A business cost IS its bill; there is no copy on a job to show for it. If the bill did not
+    // land, the old filing is already gone, so the item goes back to Needs Review holding nothing
+    // and the tap says so, instead of reading "Filed" over a cost that does not exist.
+    if (!billId) {
+      await supabase
+        .from("organized_items")
+        .update({ job_id: null, document_id: null, bill_id: null, petty_cash_id: null, status: "needs_review" })
+        .eq("id", id);
+      revalidatePath("/organize");
+      if (prevJob) revalidatePath(`/jobs/${prevJob}`);
+      return { ok: false, error: "The business cost didn't save, so this receipt is back in Needs Review. Try again." };
+    }
   }
 
   const { error } = await supabase
     .from("organized_items")
-    // petty_cash_id rides in the SAME write as the others, so moving a receipt from petty cash
-    // to a job clears the stale link instead of leaving it to be torn down twice (audit 9).
-    .update({ job_id: jobId, document_id: documentId, bill_id: billId, petty_cash_id: pettyCashId, category, status: "filed" })
+    // petty_cash_id is cleared in the SAME write as the others, so a receipt filed to petty cash
+    // before that door closed leaves no stale link once it is re-filed (audit 9).
+    .update({ job_id: jobId, document_id: documentId, bill_id: billId, petty_cash_id: null, category, status: "filed" })
     .eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
 
@@ -1044,12 +1065,12 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
   "job_id": an id from the list below, or null,
-  "overhead_category": one of [${OVERHEAD_CATEGORIES.join(", ")}], or null,
+  "overhead_category": one of [${AUTO_FILE_BUCKETS.join(", ")}], or null,
   "task_title": short imperative (e.g. "Call inspector Tuesday"), or null,
   "task_category": "office" | "operations" | "sales",
   "reason": one short sentence
 }
-Rules: "file_job" ONLY if the content clearly points to a job in the list. "overhead" only for a company-expense receipt with an amount. "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+Rules: "file_job" ONLY if the content clearly points to a job in the list. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
 
 Jobs (id — label):
 ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
@@ -1084,10 +1105,19 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       return { ok: true, message: `Filed to ${jobList.find((j) => j.id === parsed.job_id)?.label}. ${reason}`.trim() };
     }
     if (action === "overhead") {
-      const cat = OVERHEAD_CATEGORIES.includes(parsed.overhead_category) ? parsed.overhead_category : "Other";
+      // Same two checks as the auto-file path: the bucket is one of the six, and Fees is never
+      // the AI's call, because a supplier's late or service charge is already on that supplier's
+      // own paperwork. Refusing here files nothing and names the door a person can use.
+      const cat = bucketOf(parsed.overhead_category);
+      if (cat === "Fees" || looksLikeSupplierFee(item.title, item.vendor, item.summary))
+        return {
+          ok: false,
+          message:
+            "This looks like a fee or a supplier's late charge, so it was not filed. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost and then Fees.",
+        };
       const r = await fileItem(id, { type: "overhead", category: cat });
       if (!r.ok) return { ok: false, message: r.error ?? "Couldn't file that one — ask the office." };
-      return { ok: true, message: `Filed as overhead (${cat}). ${reason}`.trim() };
+      return { ok: true, message: `Filed as a Business Cost: ${cat}. ${reason}`.trim() };
     }
     if (action === "task") {
       const title = String(parsed.task_title || item.title).slice(0, 200);

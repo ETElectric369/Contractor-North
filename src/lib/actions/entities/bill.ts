@@ -3,6 +3,7 @@ import { createBill, updateBill, deleteBill, setBillStatus } from "@/app/(app)/j
 import { createClient } from "@/lib/supabase/server";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
+import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 
 // Each entry just WRAPS the existing server action — no new business logic.
 export const billActions: Record<string, ActionDef> = {
@@ -10,7 +11,7 @@ export const billActions: Record<string, ActionDef> = {
     name: "bill.create",
     group: "bill",
     label: "Add supplier bill",
-    description: "Record a supplier bill / receipt as a job cost (or company overhead when no job is given).",
+    description: `Record a supplier bill / receipt as a job cost, or as a business cost when no job is given. A business cost's category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}.`,
     input: z.object({
       job_id: z.string().nullable().optional(),
       supplier: z.string(),
@@ -27,10 +28,12 @@ export const billActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
+    // With no job, the confirmation names the bucket createBill will actually save (bucketOf), not
+    // the word Nort happened to pass, so what he says yes to is what lands.
     describe: (i) =>
       `Add a $${Number(i.amount ?? 0).toFixed(2)} cost${i.supplier ? ` from ${i.supplier}` : ""}` +
-      `${i.category ? ` as ${i.category}` : ""}${i.job_id ? " on a job" : ""}${i.notes ? " with a note" : ""}` +
-      ` — say yes to confirm. Check the details below.`,
+      `${i.job_id ? `${i.category ? ` as ${i.category}` : ""} on a job` : ` as a Business Cost: ${bucketOf(i.category)}`}${i.notes ? " with a note" : ""}` +
+      `. Say yes to confirm. Check the details below.`,
     handler: async (i) => {
       // Forgive a job NAME passed as job_id — resolve to a single match so a cost never lands
       // on the wrong (or a fabricated) job. The amount itself is still user-stated + confirmed.

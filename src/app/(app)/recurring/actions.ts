@@ -11,6 +11,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
+import { BUSINESS_COST_BUCKETS, isBusinessCostBucket } from "@/lib/business-cost-buckets";
 
 /** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
  *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw
@@ -62,6 +63,12 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
     if (!customerId) return { ok: false, error: "Pick a customer for the recurring invoice." };
     if (!(invoiceAmount > 0)) return { ok: false, error: "Add at least one line item with an amount." };
   }
+  // A recurring expense writes a bill with no job, which is a business cost, so its category is
+  // one of the six buckets and nothing else. Refused here as well as on the form, because the
+  // form is only one caller of this action.
+  const expenseBucket = kind === "expense" ? String(formData.get("category") ?? "").trim() : "";
+  if (kind === "expense" && !isBusinessCostBucket(expenseBucket))
+    return { ok: false, error: `Pick a bucket for the recurring expense: ${BUSINESS_COST_BUCKETS.join(", ")}.` };
   // The customer must belong to the caller's org — the user client's RLS enforces it,
   // so a forged foreign customer_id resolves to nothing and is rejected.
   if (customerId) {
@@ -83,18 +90,25 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
           ? Number(amountRaw)
           : null,
     line_items: kind === "invoice" ? invoiceItems : null,
-    category: kind === "expense" ? emptyToNull(formData.get("category")) : null,
+    category: kind === "expense" ? expenseBucket : null,
     vendor: kind === "expense" ? emptyToNull(formData.get("vendor")) : null,
     tax_rate: kind === "invoice" && taxRaw ? Math.max(0, Number(taxRaw)) / 100 : 0,
     auto_send: kind === "invoice" ? formData.get("auto_send") === "on" : false,
   };
 
+  // Both writes ask for the row back: an update RLS filters to nothing is a 204 that reads exactly
+  // like a save (the silent-write law), and the form would close on a template that never changed.
   if (id) {
-    const { error } = await supabase.from("recurring_templates").update(row).eq("id", id);
+    const { data, error } = await supabase.from("recurring_templates").update(row).eq("id", id).select("id");
     if (error) return { ok: false, error: dbError(error) };
+    if (!data?.length) return { ok: false, error: "Nothing saved. That recurring item isn't here any more, or this login can't edit it." };
   } else {
-    const { error } = await supabase.from("recurring_templates").insert({ ...row, created_by: ctx.userId });
+    const { data, error } = await supabase
+      .from("recurring_templates")
+      .insert({ ...row, created_by: ctx.userId })
+      .select("id");
     if (error) return { ok: false, error: dbError(error) };
+    if (!data?.length) return { ok: false, error: "Nothing saved. This login can't add recurring items." };
   }
   revalidatePath("/recurring");
   return { ok: true };

@@ -15,7 +15,6 @@ import {
   Sparkles,
   Briefcase,
   Wallet,
-  Coins,
   Check,
   AlertCircle,
   Archive,
@@ -45,7 +44,7 @@ import {
   unarchiveItem,
   aiReviewItem,
 } from "./actions";
-import { OVERHEAD_CATEGORIES } from "./constants";
+import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { jobLabel } from "@/lib/schedule-options";
 
 // The categories Claude assigns during extraction — offered so the owner can
@@ -165,7 +164,7 @@ export function OrganizeManager({
             : it.destination === "job"
               ? `Filed to ${it.job_label}`
               : it.destination === "overhead"
-                ? "Filed as overhead"
+                ? `Filed as a Business Cost: ${bucketOf(it.bucket)}`
                 : "Filed",
         );
       } catch (err: any) {
@@ -186,7 +185,14 @@ export function OrganizeManager({
     start(async () => {
       const res = await fileItem(item.id, dest);
       if (!res?.ok) { toast(res?.error ?? "Couldn't file item — try again.", "error"); return; }
-      toast(dest.type === "unfiled" ? "Moved to unfiled" : "Filed", "success");
+      toast(
+        dest.type === "unfiled"
+          ? "Moved to unfiled"
+          : dest.type === "overhead"
+            ? `Filed as a Business Cost: ${dest.category}`
+            : "Filed",
+        "success",
+      );
       router.refresh();
     });
   }
@@ -233,7 +239,9 @@ export function OrganizeManager({
   function filedBadge(item: OrganizedItemRow) {
     if (item.status === "archived") return <Badge tone="slate">Archived</Badge>;
     if (item.job_id && item.jobs) return <Badge tone="blue">{jobLabel(item.jobs)}</Badge>;
-    if (item.bill_id) return <Badge tone="purple">Overhead · {item.category ?? "Other"}</Badge>;
+    // A bill with no job is a business cost. bucketOf reads an old word ("Fuel") as its bucket, so
+    // the archive and the Bills page name the same cost the same way.
+    if (item.bill_id && !item.job_id) return <Badge tone="purple">Business Cost · {bucketOf(item.category)}</Badge>;
     if (item.category === "Petty cash") return <Badge tone="indigo">Petty cash</Badge>;
     if (item.category === "Task") return <Badge tone="green">Task</Badge>;
     if (item.kind === "note") return <Badge tone="amber">Note</Badge>;
@@ -298,22 +306,28 @@ export function OrganizeManager({
               </div>
             )}
 
+            {/* THE TRAY'S DOORS, AT FINGER SIZE (2026-09-24). Every control in this row is 44px
+                tall and Title Case: they were 32px, with "File to job…" and "Overhead…" in lower
+                case. "Overhead…" is now Business Cost… with the six buckets. There is no Petty
+                Cash button any more: filing a receipt there dropped its job and its category,
+                which is how a CED job purchase ended up in the cash box. */}
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={() => aiReview(item)} disabled={pending || aiBusy === item.id}>
-                {aiBusy === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              <Button onClick={() => aiReview(item)} disabled={pending || aiBusy === item.id}>
+                {aiBusy === item.id ? <Loader2 className="animate-spin" /> : <Sparkles />}
                 {aiBusy === item.id ? "Reviewing…" : "AI Review & File"}
               </Button>
               <span className="flex items-center gap-1.5">
-                <Briefcase className="h-3.5 w-3.5 text-slate-400" />
+                <Briefcase className="h-4 w-4 text-slate-400" />
                 <Select
                   value={item.job_id ?? ""}
                   onChange={(e) =>
                     e.target.value ? file(item, { type: "job", jobId: e.target.value }) : file(item, { type: "unfiled" })
                   }
                   disabled={pending}
-                  className="h-8 w-44 text-xs"
+                  className="h-11 w-48"
+                  aria-label="File To Job"
                 >
-                  <option value="">File to job…</option>
+                  <option value="">File To Job…</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
@@ -321,28 +335,24 @@ export function OrganizeManager({
               </span>
               {item.kind === "receipt" && (
                 <span className="flex items-center gap-1.5">
-                  <Wallet className="h-3.5 w-3.5 text-slate-400" />
+                  <Wallet className="h-4 w-4 text-slate-400" />
                   <Select
                     value=""
                     onChange={(e) => e.target.value && file(item, { type: "overhead", category: e.target.value })}
                     disabled={pending}
-                    className="h-8 w-36 text-xs"
+                    className="h-11 w-48"
+                    aria-label="File As A Business Cost"
                   >
-                    <option value="">Overhead…</option>
-                    {OVERHEAD_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <option value="">Business Cost…</option>
+                    {BUSINESS_COST_BUCKETS.map((c) => <option key={c} value={c}>{c}</option>)}
                   </Select>
                 </span>
               )}
-              {item.kind === "receipt" && item.amount != null && (
-                <Button size="sm" variant="outline" onClick={() => file(item, { type: "petty_cash" })} disabled={pending}>
-                  <Coins className="h-3.5 w-3.5" /> Petty Cash
-                </Button>
-              )}
-              <Button size="sm" variant="outline" onClick={() => setEditing(item)} disabled={pending}>
-                <Pencil className="h-3.5 w-3.5" /> Edit
+              <Button variant="outline" onClick={() => setEditing(item)} disabled={pending}>
+                <Pencil /> Edit
               </Button>
-              <Button size="sm" variant="outline" onClick={() => archive(item)} disabled={pending}>
-                <Archive className="h-3.5 w-3.5" /> Archive
+              <Button variant="outline" onClick={() => archive(item)} disabled={pending}>
+                <Archive /> Archive
               </Button>
             </div>
           </div>
