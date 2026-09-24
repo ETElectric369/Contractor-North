@@ -1,5 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { mapExtraHeaders, mappedFields, parseCellNumber, patchForEdit, rowThroughMapping, rowView, undoPatch, formulaSentence } from "./price-list-math";
+import { addItemHasDraft, EMPTY_ADD_ITEM, mapExtraHeaders, mappedFields, parseCellNumber, patchForEdit, rowThroughMapping, rowView, undoPatch, formulaSentence } from "./price-list-math";
+
+describe("addItemHasDraft — the hidden Add New Item form never hides a half-typed item silently", () => {
+  it("an untouched form is not a draft (ea is the default unit, not something typed)", () => {
+    expect(addItemHasDraft(EMPTY_ADD_ITEM)).toBe(false);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, code: "   ", description: " " })).toBe(false);
+  });
+  it("any field typed makes it one", () => {
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, code: "QO120" })).toBe(true);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, description: "20A breaker" })).toBe(true);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, category: "Breakers" })).toBe(true);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, unit: "ft" })).toBe(true);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, buy: 12.5 })).toBe(true);
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, markup: 30 })).toBe(true);
+  });
+  it("a cleared unit box is not a draft on its own", () => {
+    expect(addItemHasDraft({ ...EMPTY_ADD_ITEM, unit: "" })).toBe(false);
+  });
+});
 
 const item = { buy_price: 38, markup_pct: 35, unit: "ea" };
 

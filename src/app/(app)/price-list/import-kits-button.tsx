@@ -68,7 +68,7 @@ export function ImportKitsButton() {
   return (
     <div className="flex items-center gap-2">
       <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
-      <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+      <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Import Kits
       </Button>
       <button type="button" onClick={downloadTemplate} className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600">

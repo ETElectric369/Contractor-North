@@ -32,6 +32,11 @@ describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
     expect(ar.invoices[0].daysLate).toBe(90);
   });
 
+  it("carries each open row's total and paid, so the AR page can say what the balance is due against", () => {
+    const ar = computeArAging([mk("partial", 10, 8318.62, 6760)], TODAY);
+    expect(ar.invoices[0]).toMatchObject({ balance: 1558.62, total: 8318.62, amountPaid: 6760 });
+  });
+
   it("skips zero-balance invoices from buckets but still counts them open", () => {
     const ar = computeArAging([mk("sent", 45, 500, 500)], TODAY);
     expect(ar.outstanding).toBe(0);

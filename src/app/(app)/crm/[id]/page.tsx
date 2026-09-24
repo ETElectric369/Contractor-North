@@ -12,7 +12,7 @@ import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
-import { invoiceAmount } from "@/lib/invoice-amount";
+import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
@@ -236,15 +236,14 @@ export default async function CustomerDetailPage({
         <Card className="overflow-hidden">
           <RowList
             items={(invoices ?? []).map((iv: any) => {
-              // The billing board's amount language (invoiceAmount): the figure is what is DUE,
-              // and what it is due against sits under the invoice number. A bare total here read
-              // as a different bill from the same invoice on the board.
-              const a = invoiceAmount(iv.total, iv.amount_paid);
+              // The billing board's amount, the same component: "$D due of $T" on one line with
+              // what is paid beneath — on the right from sm up, under the invoice number on a
+              // phone. A bare total here read as a different bill from the same invoice on the board.
               return {
                 key: iv.id,
                 label: iv.invoice_number,
-                sub: a.detail ?? undefined,
-                value: a.due,
+                sub: <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />,
+                value: <InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} />,
                 badge: { tone: statusTone(iv.status), text: iv.status },
                 href: `/billing/${iv.id}`,
               };

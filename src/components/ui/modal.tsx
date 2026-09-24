@@ -6,6 +6,7 @@ import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 import { shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
+import { keyboardClosed, revealScroll } from "./modal-keyboard";
 import { safeAreaTop } from "@/lib/native-shell";
 
 export function Modal({
@@ -93,6 +94,8 @@ export function Modal({
   // (the desktop "shuts the window" report). Track where the pointer went down and
   // only treat a click as a backdrop tap when it both started AND landed there.
   const downOnBackdrop = useRef(false);
+  // The scrolling middle of the panel — where a focused field is scrolled into view (below).
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   /**
    * A HISTORY ENTRY, SO THE SYSTEM BACK GESTURE CLOSES THIS AND NOT THE PAGE.
@@ -190,7 +193,11 @@ export function Modal({
       raf = requestAnimationFrame(() => {
         // Keyboard closed → viewport is full-height again; clamp any residual offset (an iOS
         // WebKit quirk can leave offsetTop stuck briefly after the keyboard dismisses).
-        const kbClosed = vv.height >= window.innerHeight - 1;
+        // Measured against the LAYOUT viewport (documentElement.clientHeight), never innerHeight:
+        // iOS 18 shrinks innerHeight with the keyboard, which read "closed" with the keyboard up,
+        // pinned the overlay 380px above the screen and left only Create Job showing (Erik
+        // 62be0852 — the whole story is in modal-keyboard.ts).
+        const kbClosed = keyboardClosed(vv.height, document.documentElement.clientHeight);
         setVvRect({
           position: "fixed",
           top: kbClosed ? 0 : vv.offsetTop,
@@ -219,6 +226,28 @@ export function Modal({
       setKbMaxH(undefined);
     };
   }, [open]);
+
+  // THE FIELD BEING TYPED IN STAYS ON SCREEN, WITH ITS LABEL. Once the panel has been capped to
+  // the space above the keyboard, a field near the bottom of the form (New Job's Description) sits
+  // below the body's visible slice — so after each geometry change, scroll the BODY (never the
+  // page) until the focused field and the label over it show. Runs after the render that applied
+  // the new cap, so the rects it reads are the capped ones.
+  useEffect(() => {
+    if (!open || !kbMaxH) return;
+    const raf = requestAnimationFrame(() => {
+      const body = bodyRef.current;
+      const el = typeof document === "undefined" ? null : document.activeElement;
+      if (!body || !(el instanceof HTMLElement) || !body.contains(el)) return;
+      if (!el.matches("input, textarea, select, [contenteditable='true']")) return;
+      // The labelled wrapper when it fits (label + field), else the field alone.
+      const wrap = el.parentElement;
+      const view = body.getBoundingClientRect();
+      const box = wrap && wrap !== body && wrap.getBoundingClientRect().height < view.height - 16 ? wrap : el;
+      const delta = revealScroll(box.getBoundingClientRect(), view);
+      if (delta !== 0) body.scrollTop += delta;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, kbMaxH, vvRect]);
 
   if (!open) return null;
 
@@ -273,7 +302,7 @@ export function Modal({
             Tap again to discard what you typed
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer && (
           <div className="flex shrink-0 items-center justify-end gap-2 rounded-b-2xl border-t border-slate-100 bg-white px-6 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             {footer}

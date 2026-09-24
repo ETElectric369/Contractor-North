@@ -422,18 +422,24 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
   const toast = useToast();
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
+  // The New Kit form hides until asked for, like the Price List tab's (Justin 2026-09-24).
+  const [addOpen, setAddOpen] = useState(false);
   const [editingKit, setEditingKit] = useState<Kit | null>(null);
   const [editingItem, setEditingItem] = useState<KitItem | null>(null);
   const [linkingItem, setLinkingItem] = useState<KitItem | null>(null);
   const [pending, start] = useTransition();
 
   function create() {
-    if (!name.trim()) return;
+    // Enter reaches this as well as the button, and the button is the only door `disabled` guards:
+    // a second Enter (or a held key) mid-insert would add the kit twice (kits has no unique name).
+    if (pending || !name.trim()) return;
     start(async () => {
       const res = await createKit({ name, category });
       if (!res.ok) { toast(res.error ?? "Could not add the kit.", "error"); return; }
       toast(`Kit "${name.trim()}" added.`, "success");
       setName(""); setCategory("");
+      // One kit at a time: its lines go in on its own card below, so the form steps aside.
+      setAddOpen(false);
       router.refresh();
     });
   }
@@ -460,20 +466,68 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
 
   return (
     <div className="space-y-4">
-      <Card className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium text-slate-500">Build a kit by hand, or import a spreadsheet of presets.</span>
-          <ImportKitsButton />
-        </div>
-        <div className="flex items-end gap-2">
-          <div className="flex-1"><Label htmlFor="k-name">New kit name</Label><Input id="k-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 200A panel upgrade" /></div>
-          <div className="w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
-          <Button size="sm" onClick={create} disabled={pending || !name.trim()}><Plus className="h-3.5 w-3.5" /> Add Kit</Button>
-        </div>
-      </Card>
+      {/* Same shape as the Price List tab: the hand form waits behind its button, so the kits
+          themselves are what the tab leads with. Closing keeps what was typed. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {!addOpen && (
+          <Button onClick={() => setAddOpen(true)} aria-expanded={false} aria-controls="k-add-form">
+            <Plus className="h-4 w-4" /> Add New Kit
+          </Button>
+        )}
+        <ImportKitsButton />
+        {!addOpen && (name.trim() || category.trim()) && (
+          <span className="text-xs text-slate-500">
+            The kit you started{name.trim() ? ` (${name.trim().slice(0, 40)})` : ` (category ${category.trim().slice(0, 30)})`} is kept. Add New Kit picks it back up.
+          </span>
+        )}
+      </div>
+
+      {addOpen && (
+        <Card
+          id="k-add-form"
+          className="p-4"
+          role="group"
+          aria-label="New Kit"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setAddOpen(false);
+            }
+          }}
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">New Kit</h3>
+            <Button variant="ghost" onClick={() => setAddOpen(false)} aria-expanded={true} aria-controls="k-add-form" title="Close (Esc). Anything typed is kept.">
+              <X className="h-4 w-4" /> Close
+            </Button>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="k-name">New kit name</Label>
+              <Input
+                id="k-name"
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }}
+                placeholder="e.g. 200A panel upgrade"
+              />
+            </div>
+            <div className="sm:w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }} /></div>
+            <Button onClick={create} disabled={pending || !name.trim()}><Plus className="h-4 w-4" /> {pending ? "Adding…" : "Add Kit"}</Button>
+          </div>
+        </Card>
+      )}
 
       {kits.length === 0 ? (
-        <p className="py-8 text-center text-sm text-slate-400">No kits yet. Create one and add the materials + labor you use for a common job.</p>
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-sm text-slate-500">No kits yet. Create one and add the materials + labor you use for a common job.</p>
+          {!addOpen && (
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4" /> Add New Kit
+            </Button>
+          )}
+        </div>
       ) : (
         <div className="space-y-4">
           {kits.map((k) => {

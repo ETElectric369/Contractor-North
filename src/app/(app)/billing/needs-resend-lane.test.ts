@@ -166,20 +166,21 @@ describe("the board speaks one language", () => {
     expect(code).toMatch(/Outstanding · \{unpaid\.length\}/);
   });
 
-  it("prints every row's figure through <Amount, never a bare total or balance", () => {
+  it("prints every row's figure through <InvoiceAmount, never a bare total or balance", () => {
     expect(code).not.toMatch(/money\(inv\.total\)/);
     expect(code).not.toMatch(/money\(inv\.balance\)/);
     expect(code).not.toMatch(/money\(balance\)/);
     expect(code).not.toMatch(/money\(Number\(inv\.total\)/);
-    expect([...code.matchAll(/<Amount /g)].length).toBe(4);
-    expect(src).toContain('from "@/lib/invoice-amount"');
+    // Draft, Revised, Sent and All Invoices (d103cb9f: every row shows the total inline with
+    // what is due).
+    expect([...code.matchAll(/<InvoiceAmount /g)].length).toBe(4);
+    expect(src).toContain('from "@/components/invoice-amount"');
   });
 
-  it("keeps the wide detail out of the shrink-0 column on a phone", () => {
-    // At 393px "of $T · $P paid" beside the verb squeezed the customer to 0-16px. Below sm the
-    // detail sits under the left-hand text and the verb is its chevron.
-    expect([...code.matchAll(/<AmountDetail /g)].length).toBe(4);
-    expect(code).toContain('<span className="hidden whitespace-nowrap text-[11px] text-slate-500 sm:block">{a.detail}</span>');
+  it("keeps the wide line out of the shrink-0 column on a phone", () => {
+    // At 393px a wide amount beside the verb squeezed the customer to 0-16px. Below sm the whole
+    // "$D due of $T" line sits under the left-hand text and the verb is its chevron.
+    expect([...code.matchAll(/<InvoiceAmountDetail /g)].length).toBe(4);
     expect(code).toContain('<span className="hidden sm:inline">{children}&nbsp;</span>');
     expect(code).not.toMatch(/>Review &amp; Send <ChevronRight/);
     expect(code).not.toMatch(/>Record Payment <ChevronRight/);
