@@ -23,7 +23,7 @@ import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
  *     choice, the item's own, whose description / unit / price are byte-identical to what the
  *     pickers already produce. No option data, no change.
  *  2. THE ITEM'S OWN PRICE STAYS A CHOICE. An option is an answer to "instead of the allowance,
- *     use this one" (0282's own words), so "No Maker Picked" is always the first row, and it is
+ *     use this one" (0282's own words), so "No Vendor Picked" is always the first row, and it is
  *     the default until somebody flags one.
  *  3. THE MONEY GOES THROUGH THE ONE MARKUP RULE. Never a hand-rolled buy * (1 + pct/100) here:
  *     effectiveMarkupPct decides the percentage and sellPrice does the arithmetic, exactly as
@@ -43,8 +43,8 @@ export const ITEM_OPTIONS_EMBED =
  *  no makers quotes the ALLOWANCE for a job somebody would have picked Marvin for, and that is a
  *  wrong number on a customer's paper, not an inconvenience. */
 export const ITEM_OPTIONS_UNAVAILABLE =
-  "Your price list did not load, so the maker choices that sit under each code are not here either. " +
-  "A code with makers would quote at its own price instead of the one you picked. Reload the page, or type these lines by hand.";
+  "Your price list did not load, so the vendors that sit under each code are not here either. " +
+  "A code with vendors would quote at its own price instead of the one you picked. Reload the page, or type these lines by hand.";
 
 /** One row of price_list_item_options as the embed projects it. Numerics arrive from PostgREST as
  *  strings, so every number is read through Number() rather than trusted. */
@@ -80,7 +80,7 @@ export type OptionPricing = { levelPct?: number | null; orgDefaultPct?: number |
 export const ITEM_OWN_OPTION_ID = "";
 
 /** What the "no maker" row reads. Title Case, like every other clickable (Erik's law). */
-export const ITEM_OWN_OPTION_LABEL = "No Maker Picked";
+export const ITEM_OWN_OPTION_LABEL = "No Vendor Picked";
 
 /** One row of the maker dropdown, fully resolved: what it reads, and what the line becomes if it
  *  is picked. Nothing here needs recomputing downstream. */
@@ -91,7 +91,7 @@ export type ItemOptionChoice = {
   isItemOwn: boolean;
   /** True when the org flagged this maker as the one to use when nobody picks. */
   isDefault: boolean;
-  /** The dropdown's own wording: "No Maker Picked", "Andersen 400 Series". */
+  /** The dropdown's own wording: "No Vendor Picked", "Andersen 400 Series". */
   makerLabel: string;
   /** What the quote line's description becomes. The customer reads it and the crew orders from it. */
   description: string;
@@ -252,6 +252,36 @@ export function itemOptionChoices(item: OptionedPriceItem, pricing: OptionPricin
   return [itemOwnChoice(item, pricing), ...opts.map((o) => optionChoice(item, o, pricing))];
 }
 
+/**
+ * THE PICKER'S ORDER: the DEFAULT VENDOR FIRST, then the item's own price, then the rest.
+ *
+ * A vendor made the default is the org's answer to "which one when nobody picks" (0282), and the
+ * server (addQuoteItemFromPriceItem) already resolves an unpicked line to it. The dropdown puts
+ * that same answer on top so the first row a thumb lands on is the one the org chose, and the
+ * allowance stays one row down, still pickable. With no default, the item's own price is the
+ * answer and stays first, exactly as before.
+ */
+export function pickerChoices(item: OptionedPriceItem, pricing: OptionPricing = {}): ItemOptionChoice[] {
+  const all = itemOptionChoices(item, pricing);
+  const def = all.find((c) => c.isDefault);
+  if (!def) return all;
+  return [def, ...all.filter((c) => c !== def)];
+}
+
+/** What the picker's collapsed row says for a code with vendors: how many, and the default's
+ *  name and sell (null when no vendor is the default, and the row shows the item's own price). */
+export function pickerSummary(
+  item: OptionedPriceItem,
+  pricing: OptionPricing = {},
+): { count: number; defaultChoice: ItemOptionChoice | null; ownChoice: ItemOptionChoice } {
+  const all = itemOptionChoices(item, pricing);
+  return {
+    count: all.length - 1,
+    defaultChoice: all.find((c) => c.isDefault) ?? null,
+    ownChoice: all[0],
+  };
+}
+
 /** Which row opens selected: the maker the org flagged, else the item's own price. 0282 keeps at
  *  most one default per item in a unique index, so "the first flagged one" is the only one. */
 export function defaultItemOptionId(item: OptionedPriceItem): string {
@@ -280,5 +310,5 @@ export function chooseItemOption(
  *  and any screen that resolves a stale pick refuse with the same words. */
 export function missingOptionMessage(item: OptionedPriceItem): string {
   const code = String(item.code ?? "").trim();
-  return `That maker is no longer listed under ${code ? code : String(item.description ?? "this item").trim()}. Pick one again, or add the line at its own price.`;
+  return `That vendor is no longer listed under ${code ? code : String(item.description ?? "this item").trim()}. Pick one again, or add the line at its own price.`;
 }

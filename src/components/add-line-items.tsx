@@ -7,8 +7,8 @@ import { formatCurrency } from "@/lib/utils";
 import { sellPrice } from "@/lib/pricing/markup";
 import {
   hasItemOptions,
-  itemOptionChoices,
-  normalizeItemOptions,
+  pickerChoices,
+  pickerSummary,
   type ItemOptionChoice,
   type OptionPricing,
   type PriceItemOptionRow,
@@ -193,6 +193,7 @@ export function AddLineItems({
               {matches.map((p) => {
                 const makers = hasItemOptions(p);
                 const openMakers = makers && makersFor === p.id;
+                const summary = makers ? pickerSummary(p, optionPricing) : null;
                 return (
                   <li key={p.id}>
                     {/* A CODE WITH MAKERS ASKS WHICH ONE; every other code adds on the first tap,
@@ -209,9 +210,18 @@ export function AddLineItems({
                         {p.description}
                       </span>
                       <span className="shrink-0 text-slate-600">
-                        {makers ? (
-                          <span className="text-xs font-medium text-brand">
-                            {normalizeItemOptions(p.price_list_item_options).length} Makers
+                        {summary ? (
+                          // THE DEFAULT VENDOR, NAMED, with its price: the one this code uses when
+                          // nobody picks. The count says there are others to pick from.
+                          <span className="flex flex-col items-end leading-tight">
+                            <span>
+                              {summary.defaultChoice
+                                ? `${summary.defaultChoice.makerLabel} ${formatCurrency(summary.defaultChoice.unitPrice)}`
+                                : formatCurrency(summary.ownChoice.unitPrice)}
+                            </span>
+                            <span className="text-xs font-medium text-brand">
+                              {summary.count} Vendor{summary.count === 1 ? "" : "s"}
+                            </span>
                           </span>
                         ) : (
                           formatCurrency(sellPrice(p.buy_price, markup(p)))
@@ -220,7 +230,7 @@ export function AddLineItems({
                     </button>
                     {openMakers && (
                       <ul className="border-t border-slate-100 bg-slate-50/60">
-                        {itemOptionChoices(p, optionPricing).map((choice) => (
+                        {pickerChoices(p, optionPricing).map((choice) => (
                           <li key={choice.id || "own"}>
                             <button
                               type="button"
@@ -230,7 +240,7 @@ export function AddLineItems({
                             >
                               <span className="min-w-0 truncate">
                                 {choice.makerLabel}
-                                {choice.isDefault && <span className="ml-1.5 text-xs text-slate-400">default</span>}
+                                {choice.isDefault && <span className="ml-1.5 text-xs font-medium text-brand">Default</span>}
                               </span>
                               <span className="shrink-0 text-slate-600">{formatCurrency(choice.unitPrice)}</span>
                             </button>

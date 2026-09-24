@@ -15,16 +15,16 @@
  * lib/pricing/markup.ts (the one place cost turns into sell); nothing here re-implements them.
  */
 import { dbError } from "@/lib/db-error";
-import { effectiveMarkupPct, marginFromMarkup, sellPrice } from "@/lib/pricing/markup";
-import { normalizeUnit } from "@/lib/pricing/units";
+import { effectiveMarkupPct, marginFromMarkup, sellPrice } from "@/lib/pricing/markup";import { normalizeUnit } from "@/lib/pricing/units";
 import { parseCellNumber, type PriceItem } from "./price-list-math";
 
 /** One row of 0282's price_list_item_options, as the page selects it. */
 export interface ItemOption {
   id: string;
   item_id: string;
-  /** Who MAKES it — Andersen, Milgard, Marvin. Not the supplier: the supplier is who he buys it
-   *  from, and the same Andersen window comes from three lumber yards. */
+  /** THE VENDOR, which is the brand (Erik for Justin, 2026-09-24: "vendor means what brand with
+   *  its own cost and sell price"): Andersen, Milgard, Marvin. Not the supplier column on the item,
+   *  which is where he buys it; the same Andersen window comes from three lumber yards. */
   vendor: string;
   /** The product line when the maker alone isn't the answer: "400 Series", "Tuscany". */
   label: string | null;
@@ -43,7 +43,7 @@ export interface ItemOption {
 export function optionName(o: { vendor?: string | null; label?: string | null }): string {
   const vendor = String(o.vendor ?? "").trim();
   const label = String(o.label ?? "").trim();
-  return label ? `${vendor} ${label}` : vendor || "This option";
+  return label ? `${vendor} ${label}` : vendor || "This vendor";
 }
 
 /** WHICH RUNG of the one markup rule answered. Shown next to the number so a fall-through is
@@ -89,7 +89,7 @@ export function optionView(
 export function markupSourceTag(source: MarkupSource): string {
   switch (source) {
     case "option":
-      return "this option";
+      return "this vendor";
     case "item":
       return "the item";
     case "org":
@@ -103,7 +103,7 @@ export function markupSourceTag(source: MarkupSource): string {
 export function markupSourceNote(source: MarkupSource): string {
   switch (source) {
     case "option":
-      return "Markup set on this option.";
+      return "Markup set on this vendor.";
     case "item":
       return "Markup from the item itself.";
     case "org":
@@ -162,8 +162,8 @@ export function cleanOptionFields(
 
   if (input.vendor !== undefined || mode === "create") {
     const v = String(input.vendor ?? "").trim();
-    if (!v) return { error: "Say who makes it. That is what an option answers: Andersen, Milgard, Marvin." };
-    if (v.length > 120) return { error: "That maker's name is too long. Keep it under 120 characters." };
+    if (!v) return { error: "Name the vendor: the brand, e.g. Andersen, Milgard or Marvin." };
+    if (v.length > 120) return { error: "That vendor's name is too long. Keep it under 120 characters." };
     clean.vendor = v;
   }
   if (input.label !== undefined) {
@@ -186,7 +186,7 @@ export function cleanOptionFields(
     const n = toNumber(input.buyPrice);
     // NEVER PRINT A NUMBER NOBODY TYPED: a blank cost is refused, not saved as $0.00, because a
     // $0.00 Andersen window on an estimate is a worse answer than no option at all.
-    if (n === null) return { error: "Type what this one costs you. An option with no price of its own has nothing to say." };
+    if (n === null) return { error: "Type what this vendor's one costs you. A vendor with no price of its own has nothing to say." };
     if (n < 0) return { error: "Cost can't be negative." };
     // numeric(12,4) — a CED net price really does carry four decimals.
     clean.buy_price = Math.round(n * 10000) / 10000;
@@ -201,7 +201,9 @@ export function cleanOptionFields(
       const n = toNumber(raw);
       if (n === null) return { error: "That markup isn't a number. Leave it blank to use the item's own." };
       if (n <= -100) return { error: "A markup below -100% would sell for less than nothing." };
-      clean.markup_pct = Math.round(n * 100) / 100;
+      // Up to the column's six decimals (0296), not two: this is also the door Undo writes a
+      // sell-derived markup back through, and rounding it to two would move the sell it restores.
+      clean.markup_pct = roundTo(n, OPTION_MARKUP_DECIMALS);
     }
   }
   return { clean };
@@ -219,11 +221,278 @@ export function cleanOptionFields(
 export function optionWriteRefusal(err: unknown, what?: { vendor?: string | null; label?: string | null }): string {
   const raw = typeof err === "string" ? err : String((err as { message?: unknown } | null)?.message ?? "");
   if (raw.includes("price_list_item_options_one_per_maker")) {
-    const name = what?.vendor ? optionName(what) : "That maker";
-    return `${name} is already an option on this item. Edit the one that's there, or add a product line so the two read differently.`;
+    const name = what?.vendor ? optionName(what) : "That vendor";
+    return `${name} is already a vendor on this item. Edit the one that's there, or add a product line so the two read differently.`;
   }
   if (raw.includes("price_list_item_options_one_default")) {
-    return "Something else is already the default under this item. Reload the page and pick the default again.";
+    return "Another vendor is already the default on this item. Reload the page and pick the default again.";
+  }
+  return dbError(err);
+}
+
+/* ── TYPING A SELL PRICE ────────────────────────────────────────────────────────────────────────
+   "Editable either way: typing a Sell price sets the markup." The markup is what is stored (the
+   book holds cost + markup and every surface derives sell through sellPrice), so a typed sell has
+   to become a markup that, run back through sellPrice, lands on EXACTLY the cents typed. With two
+   decimals of percent that is impossible above a few hundred dollars: 0.01% of a $12,000 window
+   is $1.20. So the markup gets the FEWEST decimals that reproduce the sell (a typed $1,500 on a
+   $1,200 cost is still a clean 25), up to the six migration 0296 gave the column. */
+
+/** How many decimals the option's markup column holds (0296: numeric(12,6)). */
+export const OPTION_MARKUP_DECIMALS = 6;
+
+function roundTo(n: number, places: number): number {
+  const f = 10 ** places;
+  return Math.round(n * f) / f;
+}
+
+/**
+ * The markup % that sells `cost` at exactly `sell` (to the cent), with as few decimals as that
+ * takes. Returns null when no markup can: a cost of zero (sell is cost plus markup, and there is
+ * no cost to mark up) or a negative sell.
+ */
+export function markupForSell(cost: number, sell: number, maxDecimals = OPTION_MARKUP_DECIMALS): number | null {
+  const c = Number(cost);
+  const s = Number(sell);
+  if (!Number.isFinite(c) || !Number.isFinite(s) || c <= 0 || s < 0) return null;
+  const target = roundTo(s, 2);
+  const exact = (target / c - 1) * 100;
+  for (let d = 0; d <= maxDecimals; d += 1) {
+    const m = roundTo(exact, d);
+    if (sellPrice(c, m) === target) return m;
+  }
+  return roundTo(exact, maxDecimals);
+}
+
+/**
+ * A typed Sell on one vendor's row → the patch it writes, or the sentence saying why not.
+ * The patch is always the option's OWN markup: typing a sell on a vendor that was falling
+ * through to the item's markup is a decision about this vendor, so it stops falling through.
+ */
+export function optionSellPatch(
+  option: Pick<ItemOption, "buy_price">,
+  raw: string | number,
+): { patch: { markup_pct: number }; sell: number } | { error: string } {
+  const n = typeof raw === "number" ? (Number.isFinite(raw) ? raw : null) : parseCellNumber(raw);
+  if (n === null) return { error: "That sell price isn't a number." };
+  if (n < 0) return { error: "Sell can't be negative." };
+  const cost = Number(option.buy_price) || 0;
+  if (cost <= 0) return { error: "Type this vendor's cost first. Sell is cost plus markup." };
+  const m = markupForSell(cost, n);
+  if (m === null) return { error: "That sell price can't be reached from this cost." };
+  if (m <= -100) return { error: "A sell of nothing would be a markup of -100%. Archive the vendor instead." };
+  return { patch: { markup_pct: m }, sell: roundTo(n, 2) };
+}
+
+/** A markup for the screen: at most two decimals, so a stored 23.456789 reads "23.46". The
+ *  stored number is what prices; this is only how it is written down. */
+export function showPct(pct: number): string {
+  const n = Number(pct) || 0;
+  return String(roundTo(n, 2));
+}
+
+/* ── VENDORS ACROSS ITEMS ──────────────────────────────────────────────────────────────────────
+   A vendor is a NAME: the same name on price_list_item_options.vendor (0282) and, optionally, a
+   card on price_list_vendors (0296) with the phone number. Compared case-insensitively and with
+   the edges trimmed, exactly as 0282's one-per-maker index and 0296's one-per-name index compare
+   them. Nothing fuzzier: "Andersen Windows" is not "Andersen" until a person says so. */
+
+/** The key two spellings of one vendor share. Mirrors lower(btrim(name)) in both indexes. */
+export function vendorKey(name: string | null | undefined): string {
+  return String(name ?? "").trim().toLowerCase();
+}
+
+/** One vendor card (0296), as the page reads it. */
+export interface VendorCard {
+  id: string;
+  name: string;
+  contact_name: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+  notes: string | null;
+  archived: boolean;
+}
+
+export type VendorCardField = "name" | "contact_name" | "phone" | "email" | "website" | "address" | "notes";
+
+export const VENDOR_CARD_FIELDS: VendorCardField[] = ["name", "contact_name", "phone", "email", "website", "address", "notes"];
+
+/** One item a vendor is on, with the numbers the row shows. */
+export interface VendorItemRow {
+  item: PriceItem;
+  option: ItemOption;
+  cost: number;
+  sell: number;
+  pct: number;
+  source: MarkupSource;
+  unit: string;
+}
+
+/** A vendor as the Vendors tab lists it: its card (when it has one) and every item it is on. */
+export interface VendorSummary {
+  key: string;
+  /** The card's spelling when there is a card, else the most common spelling on the items. */
+  name: string;
+  card: VendorCard | null;
+  /** Live (non-archived) options on live items, sorted by the item's code then description. */
+  items: VendorItemRow[];
+  /** How many of those items price at this vendor when nobody picks. */
+  defaults: number;
+  /** Archived options of this vendor, so "Show Archived" can bring one back. */
+  archivedItems: VendorItemRow[];
+}
+
+/**
+ * Every vendor in the org: one per name, whether it came from a card, from items, or both.
+ * Pure, so the grouping (the one place two spellings could split a vendor in two) is tested.
+ * A card that was archived and is on no live item is left out; one still on items stays listed,
+ * because its prices still quote.
+ */
+export function summarizeVendors(
+  options: ItemOption[],
+  items: PriceItem[],
+  cards: VendorCard[],
+  orgDefaultPct: number,
+): VendorSummary[] {
+  const itemById = new Map(items.map((i) => [i.id, i]));
+  type Acc = VendorSummary & { spellings: Map<string, number> };
+  const byKey = new Map<string, Acc>();
+  const get = (name: string): Acc => {
+    const key = vendorKey(name);
+    let s = byKey.get(key);
+    if (!s) {
+      s = { key, name: name.trim(), card: null, items: [], defaults: 0, archivedItems: [], spellings: new Map() };
+      byKey.set(key, s);
+    }
+    return s;
+  };
+  for (const c of cards) {
+    if (!vendorKey(c.name)) continue;
+    const s = get(c.name);
+    s.card = c;
+    s.name = c.name.trim();
+  }
+  for (const o of options) {
+    if (!vendorKey(o.vendor)) continue;
+    const item = itemById.get(o.item_id);
+    if (!item || item.archived) continue;
+    const s = get(o.vendor);
+    const v = optionView(o, item, orgDefaultPct);
+    const row: VendorItemRow = { item, option: o, cost: v.cost, sell: v.sell, pct: v.pct, source: v.source, unit: v.unit };
+    if (o.archived) {
+      s.archivedItems.push(row);
+      continue;
+    }
+    s.items.push(row);
+    if (o.is_default) s.defaults += 1;
+    const sp = o.vendor.trim();
+    s.spellings.set(sp, (s.spellings.get(sp) ?? 0) + 1);
+  }
+  const byItem = (a: VendorItemRow, b: VendorItemRow) =>
+    String(a.item.code ?? "").localeCompare(String(b.item.code ?? ""), undefined, { numeric: true }) ||
+    a.item.description.localeCompare(b.item.description) ||
+    optionName(a.option).localeCompare(optionName(b.option));
+  return [...byKey.values()]
+    .map(({ spellings, ...s }) => {
+      if (!s.card && spellings.size) {
+        // No card: the spelling most items use is the one the list reads; on a tie, the one that
+        // starts with a capital (a brand is a proper name), then alphabetical so it is stable.
+        const capital = (x: string) => (/^[A-Z]/.test(x) ? 0 : 1);
+        s.name = [...spellings.entries()].sort(
+          (a, b) => b[1] - a[1] || capital(a[0]) - capital(b[0]) || a[0].localeCompare(b[0]),
+        )[0][0];
+      }
+      s.items.sort(byItem);
+      s.archivedItems.sort(byItem);
+      return s;
+    })
+    .filter((s) => !(s.card?.archived && s.items.length === 0))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Every vendor name the org already spells one way, for the vendor box's suggestions, so the
+ *  next item gets "Andersen" and not "Anderson". Cards first (a person chose that spelling). */
+export function knownVendorNames(options: Pick<ItemOption, "vendor">[], cards: Pick<VendorCard, "name" | "archived">[]): string[] {
+  const seen = new Map<string, string>();
+  for (const c of cards) {
+    const k = vendorKey(c.name);
+    if (!c.archived && k && !seen.has(k)) seen.set(k, c.name.trim());
+  }
+  for (const o of options) {
+    const k = vendorKey(o.vendor);
+    if (k && !seen.has(k)) seen.set(k, o.vendor.trim());
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** The spelling the org already uses for this vendor, when it has one; else the typed one,
+ *  trimmed. "andersen" typed on a new item becomes "Andersen" when Andersen is already a vendor,
+ *  so one brand never becomes two spellings (the CED lesson: five spellings, one supplier). */
+export function canonicalVendorName(typed: string, known: string[]): string {
+  const k = vendorKey(typed);
+  return known.find((n) => vendorKey(n) === k) ?? typed.trim();
+}
+
+/** The vendor-card fields a person typed → the columns, or the sentence saying why not. Only the
+ *  fields passed are touched (a phone edit never blanks the email). Blank is null. */
+export function cleanVendorCard(
+  input: Partial<Record<VendorCardField, string | null | undefined>>,
+  mode: "create" | "update",
+): { clean: Partial<Record<VendorCardField, string | null>> } | { error: string } {
+  const clean: Partial<Record<VendorCardField, string | null>> = {};
+  const limits: Record<VendorCardField, number> = {
+    name: 120,
+    contact_name: 120,
+    phone: 40,
+    email: 200,
+    website: 300,
+    address: 300,
+    notes: 2000,
+  };
+  const words: Record<VendorCardField, string> = {
+    name: "name",
+    contact_name: "contact person",
+    phone: "phone number",
+    email: "email",
+    website: "website",
+    address: "address",
+    notes: "note",
+  };
+  for (const f of VENDOR_CARD_FIELDS) {
+    if (input[f] === undefined && !(f === "name" && mode === "create")) continue;
+    const v = String(input[f] ?? "").trim();
+    if (f === "name" && !v) return { error: "Name the vendor: the brand, e.g. Andersen." };
+    if (v.length > limits[f]) return { error: `That ${words[f]} is too long. Keep it under ${limits[f]} characters.` };
+    if (f === "email" && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      return { error: "That email doesn't look right. It needs an @ and a domain." };
+    }
+    clean[f] = v || null;
+  }
+  return { clean };
+}
+
+/** A website as a link: "andersenwindows.com" opens as https://andersenwindows.com. Anything that
+ *  isn't a plain web address comes back null, so a typed note never becomes a link. */
+export function websiteHref(raw: string | null | undefined): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  const withScheme = /^https?:\/\//i.test(s) ? s : `https://${s}`;
+  try {
+    const u = new URL(withScheme);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** A 0296 unique-name refusal, said in English with the way out. */
+export function vendorCardRefusal(err: unknown, name?: string | null): string {
+  const raw = typeof err === "string" ? err : String((err as { message?: unknown } | null)?.message ?? "");
+  if (raw.includes("price_list_vendors_one_per_name")) {
+    return `${name?.trim() || "That vendor"} is already on your Vendors list. Open it there instead of adding it again.`;
   }
   return dbError(err);
 }

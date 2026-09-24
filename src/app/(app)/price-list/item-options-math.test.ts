@@ -62,7 +62,7 @@ describe("optionView — the sell price of one maker's window", () => {
 
 describe("markupSourceTag — a percentage always says where it came from", () => {
   it("names the rung in two or three words", () => {
-    expect(markupSourceTag("option")).toBe("this option");
+    expect(markupSourceTag("option")).toBe("this vendor");
     expect(markupSourceTag("item")).toBe("the item");
     expect(markupSourceTag("org")).toBe("your default");
     expect(markupSourceTag("none")).toBe("none set");
@@ -71,7 +71,7 @@ describe("markupSourceTag — a percentage always says where it came from", () =
 
 describe("cleanOptionFields — what reaches the columns", () => {
   it("a new option needs a maker and a cost, and says which is missing", () => {
-    expect(cleanOptionFields({ buyPrice: 1200 }, "create")).toEqual({ error: expect.stringMatching(/who makes it/i) });
+    expect(cleanOptionFields({ buyPrice: 1200 }, "create")).toEqual({ error: expect.stringMatching(/name the vendor/i) });
     expect(cleanOptionFields({ vendor: "Andersen" }, "create")).toEqual({ error: expect.stringMatching(/costs you/i) });
   });
 
@@ -119,7 +119,7 @@ describe("optionWriteRefusal — 0282's two unique indexes, said in English", ()
   it("the same maker twice names the option and the two ways out", () => {
     const err = { message: 'duplicate key value violates unique constraint "price_list_item_options_one_per_maker"' };
     const said = optionWriteRefusal(err, { vendor: "Andersen", label: "400 Series" });
-    expect(said).toMatch(/^Andersen 400 Series is already an option on this item\./);
+    expect(said).toMatch(/^Andersen 400 Series is already a vendor on this item\./);
     expect(said).toMatch(/product line/);
     expect(said).not.toMatch(/duplicate key|constraint/);
   });
