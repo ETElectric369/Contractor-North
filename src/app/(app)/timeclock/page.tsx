@@ -378,6 +378,7 @@ export default async function TimeclockPage() {
           isStaff={isStaff}
           crewLead={crewLead}
           jobCodesEnabled={jobCodesOn}
+          tz={orgSettings.timezone}
         />
 
         {/* NEXT UP — the OTHER question a tech brings to this page (see next-up.tsx for the

@@ -27,6 +27,7 @@ import type { GeoPoint, JobCode, TimeEntry } from "@/lib/types";
 import { useToast } from "@/components/toast";
 import { clockIn, clockOut, switchJob, saveEntryNotes } from "./actions";
 import { ClockStartPicker } from "./clock-start-picker";
+import { MAX_SHIFT_HOURS, isLongOpenShift, startedEarlierDay, stopProblem } from "@/lib/long-shift";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
 
@@ -86,6 +87,7 @@ export function TimeclockPanel({
   isStaff = true,
   crewLead = false,
   jobCodesEnabled = true,
+  tz,
 }: {
   openEntry: TimeEntry | null;
   /** The part of today's shift that ended exactly when this one began (a Switch Job cut, 0288):
@@ -104,6 +106,9 @@ export function TimeclockPanel({
   /** org setting timeclock_job_codes: false = no code pickers anywhere on the clock,
    *  and job labels lead with customer · street address. Default true = today's flow. */
   jobCodesEnabled?: boolean;
+  /** The org's timezone: the running "since" line names the day when the clock-in was an earlier
+   *  org-local day, and the long-shift heading is written in it. The device's own when omitted. */
+  tz?: string;
 }) {
   const t = translator(lang);
   // The ONE label per mode (both from the schedule-options SSOT — never a local fork):
@@ -165,6 +170,15 @@ export function TimeclockPanel({
   const [switchJobId, setSwitchJobId] = useState("");
   const [switchJobCode, setSwitchJobCode] = useState("");
   const [switchPending, startSwitch] = useTransition();
+
+  // THE LONG-SHIFT BLOCK (2026-09-24). A clock running LONG_SHIFT_HOURS or more was probably
+  // forgotten, so the card asks when he stopped instead of offering a one-tap close at now (which
+  // wrote a 17-hour shift nobody worked). `forceLong` is the server's word for it: a stale tab
+  // whose clock crossed the line while it sat open gets needsTime back and switches here.
+  const [forceLong, setForceLong] = useState(false);
+  const [stopIso, setStopIso] = useState<string | null>(null);
+  /** Remounts the picker on the Now chip, so its fields show what the chip picked. */
+  const [pickerSeed, setPickerSeed] = useState<string | null>(null);
 
   // Narrow the code picker to a job's template codes (so people pick the right code for
   // the job type). No template / unknown job → all org codes.
@@ -322,7 +336,8 @@ export function TimeclockPanel({
   // ONE clock-out for both doors — the one-tap button AND the details questionnaire send the
   // identical payload, including the same lunch answer: whatever the single opt-in box says, 0 by
   // default (Erik 2026-09-08), on the part the box names.
-  function doClockOut() {
+  /** `at` is a STATED stop time (the long-shift block); omitted, the clock closes at now. */
+  function doClockOut(at?: string) {
     if (!openEntry) return;
     setError(null);
     start(async () => {
@@ -340,9 +355,23 @@ export function TimeclockPanel({
           notes,
           gps,
           miles,
+          ...(at ? { at, picked: true } : {}),
         });
-        if (!res.ok) setError(res.error ?? "Could not clock out.");
-        else {
+        if (!res.ok) {
+          // The clock crossed the long-shift line while this tab sat open: ask for the stop time
+          // here instead of showing a sentence that points at the screen he is already on.
+          if (res.needsTime) {
+            setForceLong(true);
+            setClockingOut(false);
+            setShowTools(false);
+            setSwitching(false);
+            return;
+          }
+          setError(res.error ?? "Could not clock out.");
+        } else {
+          setForceLong(false);
+          setStopIso(null);
+          setPickerSeed(null);
           // Reset the view flags so the NEXT punch starts on the simple flow (leaving
           // clockingOut true used to reopen the questionnaire on a later clock-in).
           setClockingOut(false);
@@ -401,6 +430,79 @@ export function TimeclockPanel({
         ? currentJob.name
         : jobSiteLabel(currentJob)
       : "No job selected";
+
+    // THE LONG SHIFT. One rule (lib/long-shift) decides it, and the server answers the same way.
+    const ciMs = Date.parse(openEntry.clock_in);
+    const longShift = forceLong || isLongOpenShift(ciMs, now);
+    const earlierDay = mounted && startedEarlierDay(ciMs, now, tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const zone = tz ? { timeZone: tz } : {};
+    const sinceText = mounted
+      ? earlierDay
+        ? new Date(ciMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : new Date(ciMs).toLocaleTimeString("en-US", { ...zone, hour: "numeric", minute: "2-digit" })
+      : "";
+    const longWhen = mounted
+      ? new Date(ciMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      : "";
+    const stopMs = stopIso ? Date.parse(stopIso) : NaN;
+    const stopSentence = stopIso
+      ? stopProblem({ startMs: ciMs, stopMs, nowMs: now, lunchMin: lunchToUse, who: "you", tz })
+      : null;
+    const stopValid = !!stopIso && !stopSentence;
+    const showNowChip = now - ciMs <= MAX_SHIFT_HOURS * 3_600_000;
+    const longBlock = (
+      <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4">
+        <p className="text-base font-semibold text-amber-900" suppressHydrationWarning>
+          {fillText(t("tc_longShiftTitle"), { when: longWhen })}
+        </p>
+        <p className="text-sm text-amber-900">{t("tc_longShiftBody")}</p>
+        <ClockStartPicker
+          key={pickerSeed ?? "clock-in"}
+          staff
+          startExpanded
+          initialIso={pickerSeed ?? openEntry.clock_in}
+          caption={t("tc_whenStopped")}
+          onChange={(iso) => setStopIso(iso)}
+        />
+        {showNowChip && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11"
+            onClick={() => {
+              const iso = new Date().toISOString();
+              setStopIso(iso);
+              setPickerSeed(iso);
+            }}
+            suppressHydrationWarning
+          >
+            {fillText(t("tc_nowChip"), { hours: ((now - ciMs) / 3_600_000).toFixed(1) })}
+          </Button>
+        )}
+        <LunchCheckbox id="tc-lunch-long" checked={tookLunch} onChange={setTookLunch} />
+        <p aria-live="polite" className={`text-sm ${stopSentence ? "font-medium text-red-700" : "text-amber-900"}`}>
+          {stopSentence ?? (stopIso ? null : t("tc_pickStop"))}
+        </p>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <Button
+          variant="destructive"
+          size="lg"
+          className="w-full"
+          onClick={() => stopIso && doClockOut(stopIso)}
+          disabled={pending || !stopValid}
+        >
+          {pending ? (
+            <>
+              <Loader2 className="h-5 w-5 animate-spin" /> {t("tc_clockingOut")}
+            </>
+          ) : (
+            <>
+              <Square className="h-5 w-5" /> {t("tc_clockOutAtThatTime")}
+            </>
+          )}
+        </Button>
+      </div>
+    );
     return (
       <>
       <Card className="border-green-200">
@@ -435,7 +537,7 @@ export function TimeclockPanel({
               {formatDuration(elapsed)}
             </div>
             <div className="mt-1 text-sm text-slate-400">
-              {t("tc_since")} <span suppressHydrationWarning>{mounted ? new Date(openEntry.clock_in).toLocaleTimeString() : ""}</span>
+              {t("tc_since")} <span suppressHydrationWarning>{sinceText}</span>
               {openEntry.gps_in ? " · 📍" : ""}
             </div>
             {earlier > 0 && (
@@ -453,10 +555,15 @@ export function TimeclockPanel({
             </p>
           )}
 
+          {/* A forgotten clock: the stop-time block stands in for the one-tap Clock Out AND the
+              switch tools (a Switch Job would close the old part at now, the very time that is
+              wrong). */}
+          {longShift && longBlock}
+
           {/* The big Clock Out — ONE tap for EVERY role now (Erik, cn-v502: "simple by
               default for everyone"): no questionnaire, no mileage. The single lunch box is the
               only question. Mileage and notes live behind More Options → "Clock out with details…". */}
-          {!clockingOut && (
+          {!longShift && !clockingOut && (
             <>
               {error && <p className="text-sm text-red-600">{error}</p>}
               {/* A tech never opens the details questionnaire, so the lunch box lives here —
@@ -584,7 +691,7 @@ export function TimeclockPanel({
 
           {/* WRAPPING UP — the clock-out details: lunch, mileage + notes, then clock out. Hidden until
               "Clock out with details…" above. */}
-          {clockingOut && (
+          {!longShift && clockingOut && (
             <>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <p className="text-sm font-semibold text-slate-900">{t("tc_wrapUpTitle")}</p>

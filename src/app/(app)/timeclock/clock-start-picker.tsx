@@ -4,8 +4,9 @@ import { useState } from "react";
 import { Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
-function nowParts() {
-  const d = new Date();
+function nowParts(iso?: string) {
+  const seeded = iso ? new Date(iso) : null;
+  const d = seeded && !isNaN(seeded.getTime()) ? seeded : new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return {
     date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
@@ -27,6 +28,7 @@ export function ClockStartPicker({
   staff = true,
   startExpanded = false,
   caption,
+  initialIso,
 }: {
   onChange: (iso: string | null) => void;
   className?: string;
@@ -39,10 +41,13 @@ export function ClockStartPicker({
   /** Replaces the default "starting the shift…" helper line when the picker is
    *  reused outside the clock-in context (e.g. picking a clock-OUT time). */
   caption?: string;
+  /** Seed the date + time from this instant instead of now (device-local, like now). The long-shift
+   *  stop picker opens on the CLOCK-IN, so a man who forgot yesterday starts from the right day. */
+  initialIso?: string;
 }) {
   const [custom, setCustom] = useState(startExpanded);
   const [rounded, setRounded] = useState(false);
-  const init = nowParts();
+  const init = nowParts(initialIso);
   const [date, setDate] = useState(init.date);
   const [time, setTime] = useState(init.time);
 

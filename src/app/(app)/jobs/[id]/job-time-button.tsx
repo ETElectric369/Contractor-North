@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
+import { isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
@@ -156,6 +157,8 @@ export function JobTimeButton({
     });
 
   const doClockOut = () => run(() => clockOutCurrent({}));
+  /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. */
+  const longShift = state === "here" && !!openEntry && isLongOpenShift(new Date(openEntry.clock_in).getTime(), now);
 
   const doLogHours = () =>
     run(() =>
@@ -264,7 +267,7 @@ export function JobTimeButton({
                 ? doClockIn
                 : state === "switch"
                   ? doSwitch
-                  : isStaff
+                  : isStaff && !longShift
                     ? doClockOut
                     : () => router.push("/timeclock")
             }
@@ -274,9 +277,13 @@ export function JobTimeButton({
                 ? "Clock Me In"
                 : state === "switch"
                   ? "Switch to This Job"
-                  : isStaff
-                    ? "Clock Me Out"
-                    : "Clock Out on the Timeclock"
+                  : longShift
+                    ? // Probably forgotten (lib/long-shift): Timeclock asks when he stopped. A close
+                      // at now would write the night onto payroll, and the server refuses it anyway.
+                      "Set When You Stopped"
+                    : isStaff
+                      ? "Clock Me Out"
+                      : "Clock Out on the Timeclock"
             }
           />
         }
