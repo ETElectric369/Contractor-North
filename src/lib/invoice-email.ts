@@ -20,26 +20,36 @@ export async function deliverInvoiceEmail(
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("*, customers(name, email, portal_token)")
+    .select("*, customers(name, email)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
   const customer = (invoice as any).customers;
   if (!customer?.email) return { ok: false, error: "This customer has no email address." };
 
-  const [{ data: items }, { data: org }] = await Promise.all([
+  const [{ data: items }, { data: org }, { data: portal }] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
     // Scope to THIS invoice's org explicitly — under the RLS-bypassing service client
     // (the recurring cron) an unfiltered query sees every org and would error on
     // .maybeSingle() or leak another tenant's branding/reply-to to this customer.
     supabase.from("organizations").select("name, phone, email, address_line1, address_line2, city, state, zip, license, logo_url, settings").eq("id", (invoice as any).org_id).maybeSingle(),
+    // The customer's portal link lives in customer_portal_access (0298), readable by office staff
+    // and the service role only — the two kinds of caller this function has. Scoped to the
+    // invoice's org for the same reason as the read above. A link the office turned off is left
+    // out of the email rather than sent to open on "this link was turned off".
+    supabase
+      .from("customer_portal_access")
+      .select("token, enabled")
+      .eq("customer_id", (invoice as any).customer_id)
+      .eq("org_id", (invoice as any).org_id)
+      .maybeSingle(),
   ]);
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
 
   const site = orgPublicBaseUrl(getOrgSettings((org as any)?.settings));
   const link = `${site}/i/${(invoice as any).public_token}`;
-  const portalLink = customer.portal_token ? `${site}/portal/${customer.portal_token}` : undefined;
+  const portalLink = portal?.token && portal.enabled ? `${site}/portal/${portal.token}` : undefined;
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   // A basic greeting + the balance + a button to the ONE canonical invoice document
   // (viewable, printable, payable) and the portal — never a re-rendered copy of the
