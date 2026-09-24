@@ -430,7 +430,9 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
   const [pending, start] = useTransition();
 
   function create() {
-    if (!name.trim()) return;
+    // Enter reaches this as well as the button, and the button is the only door `disabled` guards:
+    // a second Enter (or a held key) mid-insert would add the kit twice (kits has no unique name).
+    if (pending || !name.trim()) return;
     start(async () => {
       const res = await createKit({ name, category });
       if (!res.ok) { toast(res.error ?? "Could not add the kit.", "error"); return; }
@@ -473,8 +475,10 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
           </Button>
         )}
         <ImportKitsButton />
-        {!addOpen && name.trim() && (
-          <span className="text-xs text-slate-500">The kit you started ({name.trim().slice(0, 40)}) is kept. Add New Kit picks it back up.</span>
+        {!addOpen && (name.trim() || category.trim()) && (
+          <span className="text-xs text-slate-500">
+            The kit you started{name.trim() ? ` (${name.trim().slice(0, 40)})` : ` (category ${category.trim().slice(0, 30)})`} is kept. Add New Kit picks it back up.
+          </span>
         )}
       </div>
 
@@ -505,11 +509,11 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
                 autoFocus
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") create(); }}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }}
                 placeholder="e.g. 200A panel upgrade"
               />
             </div>
-            <div className="sm:w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") create(); }} /></div>
+            <div className="sm:w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }} /></div>
             <Button onClick={create} disabled={pending || !name.trim()}><Plus className="h-4 w-4" /> {pending ? "Adding…" : "Add Kit"}</Button>
           </div>
         </Card>

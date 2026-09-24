@@ -33,7 +33,9 @@ async function orgClock(supabase: any): Promise<{ tz: string; todayYmd: string }
 
 // ── A/R aging ───────────────────────────────────────────────────────────────
 export type ArBuckets = { current: number; d30: number; d60: number; d90: number };
-export type ArInvoice = { id?: string | null; customer_id?: string | null; invoice_number: string | null; customer: string | null; balance: number; daysLate: number; bucket: keyof ArBuckets };
+/** `total` + `amountPaid` ride along so the AR page's rows can say what the balance is due
+ *  AGAINST, in the same one amount language as every other invoice row (invoiceAmount). */
+export type ArInvoice = { id?: string | null; customer_id?: string | null; invoice_number: string | null; customer: string | null; balance: number; total: number; amountPaid: number; daysLate: number; bucket: keyof ArBuckets };
 export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: number; invoices: ArInvoice[] };
 
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
@@ -58,7 +60,7 @@ export function computeArAging(invoices: any[], todayYmd: string): ArAging {
     const daysLate = dueYmd ? Math.max(0, daysBetweenYmd(dueYmd, todayYmd)) : 0;
     const bucket = bucketOf(daysLate);
     buckets[bucket] += balance;
-    rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), daysLate, bucket });
+    rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), total: round2(Number(i.total) || 0), amountPaid: round2(Number(i.amount_paid) || 0), daysLate, bucket });
   }
   const outstanding = buckets.current + buckets.d30 + buckets.d60 + buckets.d90;
   rows.sort((a, b) => b.daysLate - a.daysLate);

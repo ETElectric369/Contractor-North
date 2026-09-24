@@ -7,6 +7,7 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
+import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { getArAging, computeArByCustomer } from "@/lib/analytics/money-metrics";
 
 export const dynamic = "force-dynamic";
@@ -100,14 +101,19 @@ export default async function ArPage() {
                       href={inv.id ? `/billing/${inv.id}` : "/billing"}
                       className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm hover:bg-slate-50"
                     >
-                      <span className="text-slate-600">{inv.invoice_number ?? "Invoice"}</span>
-                      <span className="flex items-center gap-3">
+                      {/* The same amount as every other invoice row: "$D due of $T", what is
+                          paid beneath — on the right from sm up, under the number on a phone. */}
+                      <div className="min-w-0">
+                        <div className="truncate text-slate-600">{inv.invoice_number ?? "Invoice"}</div>
+                        <InvoiceAmountDetail total={inv.total} paid={inv.amountPaid} overdue={inv.daysLate > 0} />
+                      </div>
+                      <span className="flex shrink-0 items-center gap-3">
                         {inv.daysLate > 0 ? (
                           <span className="text-xs text-red-600">{inv.daysLate} days late</span>
                         ) : (
                           <span className="text-xs text-slate-400">current</span>
                         )}
-                        <span className="font-medium text-slate-800">{formatCurrency(inv.balance)}</span>
+                        <InvoiceAmount total={inv.total} paid={inv.amountPaid} overdue={inv.daysLate > 0} />
                       </span>
                     </Link>
                   </li>

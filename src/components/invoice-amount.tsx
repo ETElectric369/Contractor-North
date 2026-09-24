@@ -14,10 +14,11 @@ import { invoiceAmount } from "@/lib/invoice-amount";
  *   · <InvoiceAmount>       the right-hand column, from `sm` up;
  *   · <InvoiceAmountDetail> the same line under the row's left-hand text, below `sm`, where it
  *                           sits on its own line and the paid note truncates before the line does.
- * Put both in every row; exactly one shows at any width.
+ * Put both in every row; exactly one shows at any width. Pass the row's `status` wherever the
+ * list can hold a void invoice: a void bill reads "Void · was $T", never "due".
  */
-export function InvoiceAmount({ total, paid, overdue = false }: { total: number | null | undefined; paid: number | null | undefined; overdue?: boolean }) {
-  const a = invoiceAmount(total, paid);
+export function InvoiceAmount({ total, paid, overdue = false, status }: { total: number | null | undefined; paid: number | null | undefined; overdue?: boolean; status?: string | null }) {
+  const a = invoiceAmount(total, paid, status);
   return (
     <span className="hidden flex-col items-end text-right sm:flex">
       <span className="whitespace-nowrap text-sm">
@@ -30,8 +31,8 @@ export function InvoiceAmount({ total, paid, overdue = false }: { total: number 
 }
 
 /** The same line, on a phone, under the row's left-hand text. */
-export function InvoiceAmountDetail({ total, paid, overdue = false }: { total: number | null | undefined; paid: number | null | undefined; overdue?: boolean }) {
-  const a = invoiceAmount(total, paid);
+export function InvoiceAmountDetail({ total, paid, overdue = false, status }: { total: number | null | undefined; paid: number | null | undefined; overdue?: boolean; status?: string | null }) {
+  const a = invoiceAmount(total, paid, status);
   return (
     <div className="flex min-w-0 items-baseline gap-1 text-xs sm:hidden">
       <span className="shrink-0 whitespace-nowrap">

@@ -1304,9 +1304,9 @@ export default async function JobDetailPage({
                 <Link href={`/billing/${iv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-slate-50">
                   <span className="min-w-0">
                     <span className="block truncate font-medium text-slate-900">{iv.invoice_number}</span>
-                    <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} />
+                    <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />
                   </span>
-                  <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
+                  <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
                 </Link>
               </li>
             ))}

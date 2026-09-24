@@ -31,11 +31,23 @@ export type InvoiceAmount = {
   detail: string | null;
 };
 
-export function invoiceAmount(total: number | null | undefined, amountPaid: number | null | undefined): InvoiceAmount {
+export function invoiceAmount(
+  total: number | null | undefined,
+  amountPaid: number | null | undefined,
+  status?: string | null,
+): InvoiceAmount {
   const t = Number(total);
   const p = Number(amountPaid);
   const tot = Number.isFinite(t) ? t : 0;
   const paid = Number.isFinite(p) ? p : 0;
+  // A VOID invoice is not a bill (billing-pipeline drops `status === "void"` from every lane), so
+  // nothing is "due" on it: "$X due of $X" beside a void badge told the office it was still owed.
+  // It says what it WAS, and any money that did come in on it, since that money needs a home.
+  if (status === "void") {
+    const was = `was ${formatCurrency(tot)}`;
+    const note = paid >= 0.005 ? `${formatCurrency(paid)} paid` : null;
+    return { due: "Void", against: `· ${was}`, line: `Void · ${was}`, note, detail: note ? `${was} · ${note}` : was };
+  }
   // A CREDIT MEMO (a negative total, which recalcTotals and paidStatus allow) is money going
   // back, not a $0.00 balance: invoiceBalance floors at 0, so it would print as nothing owed.
   if (tot <= -0.005) {

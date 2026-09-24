@@ -34,12 +34,24 @@ describe("the invoice row amount — the total inline with what is due (d103cb9f
     expect(out).toContain("text-red-700");
   });
 
-  it("is the one amount on the customer's and the job's Invoices tabs too", () => {
-    for (const f of ["src/app/(app)/crm/[id]/page.tsx", "src/app/(app)/jobs/[id]/page.tsx"]) {
+  it("says Void, never due, on a void row — on both halves", () => {
+    for (const C of [InvoiceAmount, InvoiceAmountDetail]) {
+      const t = text(html(createElement(C, { total: 766.35, paid: 0, status: "void" })));
+      expect(t).toContain("Void · was $766.35");
+      expect(t).not.toContain("due");
+    }
+  });
+
+  it("is the one amount on the customer's and the job's Invoices tabs, and the AR page, too", () => {
+    for (const f of ["src/app/(app)/crm/[id]/page.tsx", "src/app/(app)/jobs/[id]/page.tsx", "src/app/(app)/billing/ar/page.tsx"]) {
       const src = readFileSync(join(process.cwd(), f), "utf8");
       expect(src, f).toContain('from "@/components/invoice-amount"');
       expect(src, f).toContain("<InvoiceAmount ");
       expect(src, f).toContain("<InvoiceAmountDetail ");
+    }
+    // The lists that can hold a void invoice hand the row's status over, so it never reads "due".
+    for (const f of ["src/app/(app)/crm/[id]/page.tsx", "src/app/(app)/jobs/[id]/page.tsx", "src/app/(app)/billing/page.tsx"]) {
+      expect(readFileSync(join(process.cwd(), f), "utf8"), f).toMatch(/<InvoiceAmount [^>]*status=\{/);
     }
   });
 });

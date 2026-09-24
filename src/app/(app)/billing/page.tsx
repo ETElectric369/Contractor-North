@@ -257,10 +257,10 @@ export default async function BillingPage() {
                         <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
                         <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
                       </div>
-                      <InvoiceAmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
+                      <InvoiceAmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} status={inv.status} />
                     </div>
                     <div className="flex shrink-0 items-center gap-4">
-                      <InvoiceAmount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
+                      <InvoiceAmount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} status={inv.status} />
                       <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
                     </div>
                   </Link>

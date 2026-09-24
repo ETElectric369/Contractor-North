@@ -10,8 +10,9 @@ describe("keyboardClosed — measured against the layout viewport, never innerHe
     const innerHeight = 494; // iOS 18: tracks the visual viewport
     const vvHeight = 494;
     const clientHeight = 874; // the layout viewport: does not move with the keyboard
-    // The old test, `vv.height >= innerHeight - 1`, said closed — the bug.
-    expect(vvHeight >= innerHeight - 1).toBe(true);
+    // The old test, `vv.height >= innerHeight - 1`, read these same figures as closed — the bug.
+    // Measured against innerHeight they still would; against the layout viewport they don't.
+    expect(keyboardClosed(vvHeight, innerHeight)).toBe(true);
     expect(keyboardClosed(vvHeight, clientHeight)).toBe(false);
   });
 

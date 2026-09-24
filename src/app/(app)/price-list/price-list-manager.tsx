@@ -257,6 +257,8 @@ export function PriceListManager({
   }
 
   async function add() {
+    // Enter in Description reaches this as well as the button; only the button is `disabled`.
+    if (adding) return;
     setError(null);
     if (!desc.trim()) return setError("Description is required.");
     setAdding(true);
@@ -348,6 +350,10 @@ export function PriceListManager({
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.stopPropagation();
+              // Blur first: the Unit box's "Other…" field commits what was typed on blur, and an
+              // unmount is not a blur React sees — so without this the custom unit was dropped
+              // while the card said anything typed is kept.
+              if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
               closeAdd();
             }
           }}
@@ -361,7 +367,7 @@ export function PriceListManager({
           {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-7">
             <div><Label htmlFor="pl-code">Code</Label><Input ref={addFirstField} id="pl-code" value={code} onChange={(e) => setCode(e.target.value)} /></div>
-            <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter") void add(); }} /></div>
+            <div className="col-span-2"><Label htmlFor="pl-desc">Description *</Label><Input id="pl-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) void add(); }} /></div>
             <div><Label htmlFor="pl-cat">Category</Label><Input id="pl-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
             <div><Label htmlFor="pl-unit">Unit</Label><UnitSelect id="pl-unit" value={unit} onChange={setUnit} /></div>
             <div><Label htmlFor="pl-buy">Cost $</Label><NumberInput id="pl-buy" value={buy} onValueChange={setBuy} /></div>

@@ -53,6 +53,18 @@ describe("invoiceAmount — what is due, and what it is due against, on one line
     }
   });
 
+  it("never says a VOID invoice is due: it says what the bill was, and any money that came in", () => {
+    expect(invoiceAmount(8318.62, 0, "void")).toEqual({ due: "Void", against: "· was $8,318.62", line: "Void · was $8,318.62", note: null, detail: "was $8,318.62" });
+    const paid = invoiceAmount(1000, 200, "void");
+    expect(paid.line).toBe("Void · was $1,000.00");
+    expect(paid.line).not.toContain("due");
+    expect(paid.note).toBe("$200.00 paid");
+    expect(paid.line).toBe(`${paid.due} ${paid.against}`);
+    // Every other status keeps the one due line.
+    expect(invoiceAmount(1000, 200, "sent").line).toBe("$800.00 due of $1,000.00");
+    expect(invoiceAmount(1000, 200, null).line).toBe("$800.00 due of $1,000.00");
+  });
+
   it("never prints NaN", () => {
     expect(invoiceAmount(Number.NaN, Number.NaN).line).toBe("$0.00 due of $0.00");
     expect(invoiceAmount(undefined, 50).due).toBe("$0.00");

@@ -242,8 +242,8 @@ export default async function CustomerDetailPage({
               return {
                 key: iv.id,
                 label: iv.invoice_number,
-                sub: <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} />,
-                value: <InvoiceAmount total={iv.total} paid={iv.amount_paid} />,
+                sub: <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} status={iv.status} />,
+                value: <InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} />,
                 badge: { tone: statusTone(iv.status), text: iv.status },
                 href: `/billing/${iv.id}`,
               };
