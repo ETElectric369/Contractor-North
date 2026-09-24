@@ -1,23 +1,53 @@
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import { FileText, FileSignature, Receipt, Briefcase } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { accentHex } from "@/lib/org-settings";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { statusTone, toneClasses } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { NO_INDEX } from "@/lib/no-index";
+import { OpenedBeacon } from "./opened-beacon";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * THE LINK IS THE CREDENTIAL, AND ONLY THE OFFICE HOLDS IT (0298). customer_portal is no longer
+ * runnable by anon or a signed-in member: the token lives in customer_portal_access, which only
+ * office staff can read, and this page asks as the service role. The gate (does this token exist,
+ * is it switched on) is INSIDE the function, so there is nothing here to forget.
+ *
+ * No host check, on purpose (tenant-isolation-root-cause): a 128-bit token names exactly one
+ * customer, and links already sit in inboxes on whatever host they were sent from.
+ *
+ * cache(): generateMetadata and the page read the same thing once per request.
+ */
+type PortalData = {
+  disabled?: boolean;
+  customer?: { name?: string | null; company_name?: string | null } | null;
+  org?: { name?: string | null; logo_url?: string | null; phone?: string | null; email?: string | null; license?: string | null; glass_tint?: string } | null;
+  invoices?: any[];
+  contracts?: any[];
+  quotes?: any[];
+  jobs?: any[];
+};
+const readPortal = cache(async (token: string): Promise<PortalData | null> => {
+  const { data, error } = await createServiceClient().rpc("customer_portal", { p_token: token });
+  if (error) return null;
+  return (data ?? null) as PortalData | null;
+});
+
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const supabase = await createClient();
-  const { data } = await supabase.rpc("customer_portal", { p_token: token });
+  const data = await readPortal(token);
+  const name = data?.org?.name;
   // NEVER indexed. This page fans out to EVERY document that customer has — crawling one
   // portal token would expose their whole invoice/quote/contract history. See @/lib/no-index.
   return {
-    title: data?.org?.name ? `${data.org.name} — Your account` : "Your account",
+    title: data?.disabled
+      ? `${name ? `${name} — ` : ""}Link turned off`
+      : name ? `${name} — Your account` : "Your account",
     robots: NO_INDEX,
   };
 }
@@ -27,10 +57,17 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
 // (was amber here), paid/signed/accepted green, overdue red, partial amber.
 const statusColor = (s: string): string => toneClasses(statusTone(s));
 
-export default async function CustomerPortalPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function CustomerPortalPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ look?: string }>;
+}) {
   const { token } = await params;
-  const supabase = await createClient();
-  const { data } = await supabase.rpc("customer_portal", { p_token: token });
+  const { look } = await searchParams;
+  const data = await readPortal(token);
+  if (data?.disabled) return <TurnedOff orgName={data.org?.name ?? null} />;
   if (!data || !data.customer) notFound();
 
   const org = data.org ?? {};
@@ -42,6 +79,10 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
 
   return (
     <div className="min-h-screen bg-slate-100 py-8">
+      {/* Last Opened: stamped from the customer's own browser, so a mail scanner or a link preview
+          that never runs the page doesn't read as "they opened it". The office's own look
+          (See What They See adds ?look=office) doesn't count either. */}
+      {look !== "office" && <OpenedBeacon token={token} />}
       <div className="mx-auto max-w-2xl px-4">
         {/* Branded header */}
         <div className="mb-5 flex items-center gap-3 rounded-2xl px-6 py-5 text-white shadow-sm" style={{ backgroundColor: brand }}>
@@ -131,13 +172,29 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
 
         {invoices.length === 0 && contracts.length === 0 && quotes.length === 0 && jobs.length === 0 && (
           <div className="rounded-2xl bg-white px-6 py-10 text-center text-sm text-slate-500 shadow-sm">
-            Nothing to show yet. Your documents will appear here as they're sent to you.
+            Nothing to show yet. Your documents will appear here as they&apos;re sent to you.
           </div>
         )}
 
         <p className="mt-6 px-1 text-center text-xs text-slate-400">
           Questions? Contact {org.name ?? "us"}{org.phone ? ` at ${org.phone}` : ""}.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/** A link the office turned off or replaced. Plain words, and who to ask — never a dead 404 for a
+ *  customer who was sent this link on purpose. */
+function TurnedOff({ orgName }: { orgName: string | null }) {
+  return (
+    <div className="min-h-screen bg-slate-100 py-16">
+      <div className="mx-auto max-w-md px-4">
+        <div className="rounded-2xl bg-white px-6 py-10 text-center shadow-sm">
+          <p className="text-base font-medium text-slate-900">
+            This link was turned off. Ask {orgName || "the business that sent it"} for a new one.
+          </p>
+        </div>
       </div>
     </div>
   );

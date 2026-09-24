@@ -27,23 +27,45 @@ export async function findDuplicateContacts(): Promise<{ ok: boolean; error?: st
   return { ok: true, groups: findDuplicateGroups((data ?? []) as DupCustomer[]) };
 }
 
+/** A customer's portal link, as the office sees it on the contact page. The token itself is in
+ *  customer_portal_access (0298), which only active office staff of the org can read: a tech's
+ *  session gets no row back, so nothing here can hand one to the crew. */
+export type PortalLinkState = { token: string; enabled: boolean; lastOpenedAt: string | null };
+
+async function readPortalLink(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  customerId: string,
+): Promise<PortalLinkState | null> {
+  const { data } = await supabase
+    .from("customer_portal_access")
+    .select("token, enabled, last_opened_at")
+    .eq("customer_id", customerId)
+    .maybeSingle();
+  if (!data) return null;
+  return { token: data.token, enabled: data.enabled, lastOpenedAt: data.last_opened_at ?? null };
+}
+
 /** Email the customer their passwordless portal link (invoices, contracts, quotes,
- *  project status). The link is their unguessable portal_token — bookmark, no login. */
+ *  project status). The link is their unguessable token — bookmark, no login. */
 export async function emailPortalLink(customerId: string): Promise<ActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const { data: c } = await supabase
     .from("customers")
-    .select("name, email, portal_token")
+    .select("name, email")
     .eq("id", customerId)
     .maybeSingle();
   if (!c) return { ok: false, error: "Customer not found." };
   if (!c.email) return { ok: false, error: "This customer has no email address." };
+  const access = await readPortalLink(supabase, customerId);
+  if (!access) return { ok: false, error: "This customer has no link yet. Tap New Link first." };
+  // Never email a link that opens to "this link was turned off".
+  if (!access.enabled) return { ok: false, error: "Their link is turned off. Tap Turn On first." };
 
   const { data: org } = await supabase.from("organizations").select("name, phone, email, settings").maybeSingle();
   // The customer's portal, on the contractor's own domain — see orgDocUrl in lib/org-settings.
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "portal", c.portal_token!);
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "portal", access.token);
   const html = renderReminderEmail({
     company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: c.name,
@@ -60,6 +82,43 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
     bcc: ownerBcc(getOrgSettings((org as any)?.settings).copy_owner_on_emails, org?.email),
   });
   return res.ok ? { ok: true } : res;
+}
+
+/** New Link: the link the customer holds stops at once (it opens to "This link was turned off"),
+ *  and a fresh one works right away. The swap happens inside portal_link_rotate, which checks
+ *  staff and org itself; this action is the app-layer half of the same gate. */
+export async function rotatePortalLink(
+  customerId: string,
+): Promise<{ ok: boolean; error?: string; link?: PortalLinkState }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.rpc("portal_link_rotate", { p_customer_id: customerId });
+  if (error) return { ok: false, error: dbError(error) };
+  const link = await readPortalLink(ctx.supabase, customerId);
+  if (!link) return { ok: false, error: "The new link was made but couldn't be read back. Refresh the page." };
+  revalidatePath(`/crm/${customerId}`);
+  return { ok: true, link };
+}
+
+/** Turn Off / Turn On. Off: the link opens to "This link was turned off. Ask <business> for a new
+ *  one." On: the same link works again. Read back, so the card shows what the database holds. */
+export async function setPortalEnabled(
+  customerId: string,
+  enabled: boolean,
+): Promise<{ ok: boolean; error?: string; link?: PortalLinkState }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { error } = await ctx.supabase.rpc("portal_link_set_enabled", {
+    p_customer_id: customerId,
+    p_enabled: enabled,
+  });
+  if (error) return { ok: false, error: dbError(error) };
+  const link = await readPortalLink(ctx.supabase, customerId);
+  if (!link || link.enabled !== enabled) {
+    return { ok: false, error: "That didn't take. Refresh the page and try again." };
+  }
+  revalidatePath(`/crm/${customerId}`);
+  return { ok: true, link };
 }
 
 export async function createCustomer(formData: FormData): Promise<ActionResult> {

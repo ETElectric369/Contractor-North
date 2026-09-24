@@ -41,7 +41,11 @@ export default async function CustomerDetailPage({
     .maybeSingle();
   if (customerErr) throw customerErr; // a real failure shouldn't masquerade as 404
   if (!customer) notFound();
-  const c = customer as Customer;
+  // 0298 empties customers.portal_token; until that migration is applied this row still carries it,
+  // and the row goes to EditCustomerButton in the browser for techs too. Never pass it on.
+  const { portal_token: _portalToken, ...row } = customer as Customer & { portal_token?: string | null };
+  void _portalToken;
+  const c = row as Customer;
 
   // Viewer's role gates the staff-only verbs in the Actions menu (New quote/invoice),
   // matching the job page.
@@ -63,6 +67,7 @@ export default async function CustomerDetailPage({
     { data: staffRows },
     { data: linkedRaw },
     { data: otherCustomers },
+    { data: portalRow },
   ] = await Promise.all([
     supabase
       .from("jobs")
@@ -100,7 +105,23 @@ export default async function CustomerDetailPage({
     viewerIsStaff
       ? supabase.from("customers").select("id, name").neq("id", id).order("name")
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    // The customer's portal link. Office only: the table's RLS already gives a tech nothing, and
+    // the card isn't rendered for one either (0298).
+    viewerIsStaff
+      ? supabase
+          .from("customer_portal_access")
+          .select("token, enabled, last_opened_at")
+          .eq("customer_id", id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
+  const portal = portalRow
+    ? {
+        token: (portalRow as { token: string }).token,
+        enabled: (portalRow as { enabled: boolean }).enabled,
+        lastOpenedAt: (portalRow as { last_opened_at: string | null }).last_opened_at ?? null,
+      }
+    : null;
 
   const linkedJobs = (linkedRaw ?? [])
     .filter((r: any) => r.jobs)
@@ -154,15 +175,11 @@ export default async function CustomerDetailPage({
               <p className="text-slate-400">No contact details yet — use Edit to add them.</p>
             )}
             {/* Maintenance verbs live WITH the details they maintain (moved out of
-                the header impulse row): Edit + the portal link, and — staff-only,
-                heavy-confirm — Merge, the cleanup verb for duplicate records. */}
+                the header impulse row): Edit, and — staff-only, heavy-confirm — Merge,
+                the cleanup verb for duplicate records. The portal link card below is
+                staff-only too (0298: a tech never sees the link or its switches). */}
             <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
               <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
-              <PortalLinkButton
-                customerId={c.id}
-                portalToken={(customer as any).portal_token}
-                hasEmail={!!(customer as any).email}
-              />
               {viewerIsStaff && (
                 <MergeCustomerButton
                   customer={{ id: c.id, name: c.name }}
@@ -170,6 +187,16 @@ export default async function CustomerDetailPage({
                 />
               )}
             </div>
+            {viewerIsStaff && (
+              <div className="border-t border-slate-100 pt-3">
+                <PortalLinkButton
+                  customerId={c.id}
+                  customerName={c.name}
+                  initial={portal}
+                  hasEmail={!!c.email}
+                />
+              </div>
+            )}
           </CardContent>
         </Card>
       ),
