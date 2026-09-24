@@ -25,7 +25,7 @@ const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 
 const OFF_ORG_NAME = (j: any) => j?.org?.name;
 
-d("the portal link belongs to the office (0298)", () => {
+d("the portal link belongs to the office (0298)", { timeout: 30_000 }, () => {
   let c: pg.Client;
   let has0298 = false;
   let orgId = "";
