@@ -139,3 +139,39 @@ describe("the lane says the true thing, and points at a door that exists", () =>
     }
   });
 });
+
+/**
+ * ONE AMOUNT LANGUAGE, ONE ROW PER INVOICE, ONE HEADING STYLE (2026-09-24).
+ *
+ * The board printed a total on two lanes and a balance on two others in the same bold figure,
+ * listed a revised bill with money owed in Revised AND in Sent, and titled its lanes in three
+ * styles. Every row now reads what is due over what it is due against (invoiceAmount), an
+ * invoice appears in one lane, and every heading is Title Case with a spaced hyphen.
+ */
+describe("the board speaks one language", () => {
+  it("has no em dash in any lane title", () => {
+    const titles = [...src.matchAll(/title="([^"]*)"/g)].map((m) => m[1]);
+    expect(titles.length).toBeGreaterThanOrEqual(4);
+    for (const t of titles) expect(t).not.toContain("—");
+    for (const t of ["Done - Not Invoiced", "Draft - Not Sent", "Revised - Send Again", "Sent - Awaiting Payment"]) {
+      expect(titles).toContain(t);
+    }
+  });
+
+  it("lists a revised bill with money owed once, in Revised, not again in Sent", () => {
+    expect(code).toMatch(/const awaiting = unpaid\.filter\(/);
+    expect(code).toMatch(/awaiting\.map\(/);
+    expect(code).not.toMatch(/unpaid\.map\(\(inv\)/);
+    // The tiles still count every open invoice once.
+    expect(code).toMatch(/Outstanding · \{unpaid\.length\}/);
+  });
+
+  it("prints every row's figure through <Amount, never a bare total or balance", () => {
+    expect(code).not.toMatch(/money\(inv\.total\)/);
+    expect(code).not.toMatch(/money\(inv\.balance\)/);
+    expect(code).not.toMatch(/money\(balance\)/);
+    expect(code).not.toMatch(/money\(Number\(inv\.total\)/);
+    expect([...code.matchAll(/<Amount /g)].length).toBe(4);
+    expect(src).toContain('from "@/lib/invoice-amount"');
+  });
+});

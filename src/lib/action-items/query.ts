@@ -6,6 +6,7 @@ import { bucketInspections } from "@/lib/inspections";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
@@ -221,7 +222,8 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("invoices")
-          .select("id, invoice_number, total, status, created_at, hold_until, customers(name)")
+          // amount_paid: a draft can carry a deposit, and the item says what is due against it.
+          .select("id, invoice_number, total, amount_paid, status, created_at, hold_until, customers(name)")
           .eq("status", "draft")
           // A PARKED draft is not forgotten work (0206) — it comes back when its date passes.
           .or(`hold_until.is.null,hold_until.lte.${todayStr}`)
@@ -517,11 +519,14 @@ async function buildActionItems(ctx: {
     if (!pastDue && !stale) continue; // not yet worth chasing
     // Urgency tracks the worse of the two clocks: very overdue, or very old.
     const overWindow = Math.max(daysOverDue ?? 0, stale ? daysOld - INVOICE_STALE_DAYS : 0);
+    // The billing board's amount language (invoiceAmount): the balance up top, and what it is
+    // due against underneath once anything has been paid.
+    const a = invoiceAmount(inv.total, inv.amount_paid);
     items.push({
       id: inv.id,
       kind: "invoice_overdue",
-      title: `${inv.invoice_number} · ${formatCurrency(balance)} due`,
-      subtitle: inv.customers?.name ?? null,
+      title: `${inv.invoice_number} · ${a.due} due`,
+      subtitle: [inv.customers?.name, a.detail].filter(Boolean).join(" · ") || null,
       who: null,
       // Prefer the due date for the "when"; fall back to created so undated rows still sort by age.
       when: inv.due_date ?? inv.created_at ?? null,
@@ -563,11 +568,12 @@ async function buildActionItems(ctx: {
   // Draft invoices — money one tap from "sent" sitting in limbo. Every draft
   // surfaces (no age cut): it either goes out or gets deleted, never forgotten.
   for (const d of (draftR.data ?? []) as any[]) {
+    const a = invoiceAmount(d.total, d.amount_paid);
     items.push({
       id: d.id,
       kind: "invoice_draft",
-      title: `Draft invoice ${d.invoice_number}`,
-      subtitle: d.customers?.name ?? formatCurrency(Number(d.total ?? 0)),
+      title: `Draft invoice ${d.invoice_number} · ${a.due}`,
+      subtitle: [d.customers?.name, a.detail].filter(Boolean).join(" · ") || null,
       who: null,
       when: d.created_at ?? null,
       urgency: 0,

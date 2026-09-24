@@ -25,6 +25,8 @@ export type PipelineJob = { id: string; name: string | null; job_number: string 
 export type PipelineInvoice = {
   id: string; invoice_number: string | null; total: number; balance: number; status: string;
   due_date: string | null; customer: string | null; job: string | null; overdue: boolean;
+  /** amount_paid, so a row can say what its balance is due against (invoiceAmount). */
+  paid: number;
 };
 
 export type MoneyPipeline = {
@@ -43,8 +45,8 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     orgTodayStr(supabase),
     // Bounded like its siblings (audit v921): an unbounded select truncates silently at
     // PostgREST's 1000-row max, and invoicedJobIds below is built from whatever survived —
-    // past that cliff a job whose invoice fell outside the window reappears in "Done — not
-    // invoiced" and the Outstanding/Overdue tiles undercount.
+    // past that cliff a job whose invoice fell outside the window reappears in "Done - Not
+    // Invoiced" and the Outstanding/Overdue tiles undercount.
     supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)").limit(50000),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
@@ -104,6 +106,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     id: i.id, invoice_number: i.invoice_number, total: Number(i.total) || 0,
     balance: invoiceBalance(i.total, i.amount_paid), status: i.status,
     due_date: i.due_date, customer: i.customers?.name ?? null, job: i.jobs?.name ?? null, overdue,
+    paid: Number(i.amount_paid) || 0,
   });
 
   const drafts = invoices.filter((i) => i.status === "draft").map((i) => toInv(i, false));
