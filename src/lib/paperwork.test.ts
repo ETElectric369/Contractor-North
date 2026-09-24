@@ -8,6 +8,7 @@ import {
   NOT_FILED_YET,
   parseDestination,
   readinessOf,
+  shownDestination,
   suggestedDestination,
   type PaperItem,
 } from "./paperwork";
@@ -107,6 +108,18 @@ describe("suggestions are picked, never pressed", () => {
     expect(suggestedDestination(receipt({ proposal: { bucket: "Fees" } }), [])).toBe("");
     expect(suggestedDestination(receipt({ proposal: { bucket: "Gas & Truck" } }), [])).toBe("cost:Gas & Truck");
   });
+  it("the picker FOLLOWS the suggestion until a person touches it (a row renders before it is read)", () => {
+    const unread = receipt({ proposal: null });
+    const read = receipt({ proposal: { jobId: "job-1" } });
+    // Untouched: nothing suggested yet, then the reader's job the moment it lands.
+    expect(shownDestination(null, unread, ["job-1"])).toBe("");
+    expect(shownDestination(null, read, ["job-1"])).toBe("job:job-1");
+    // AI Suggest changes its mind after the row is on screen: the picker goes with it.
+    expect(shownDestination(null, receipt({ proposal: { bucket: "Gas & Truck" } }), ["job-1"])).toBe("cost:Gas & Truck");
+    // Touched: the person's pick wins, including picking nothing.
+    expect(shownDestination("cost:Other", read, ["job-1"])).toBe("cost:Other");
+    expect(shownDestination("", read, ["job-1"])).toBe("");
+  });
   it("the picker's values round-trip, and a made-up bucket is nothing", () => {
     expect(parseDestination("job:abc")).toEqual({ type: "job", jobId: "abc" });
     expect(parseDestination("cost:Phone & Office")).toEqual({ type: "overhead", category: "Phone & Office" });
@@ -168,7 +181,41 @@ describe("findSameNumber: the same purchase already on the books", () => {
       { supplierInvoices: [{ id: "si-1", invoice_number: "8802-1108330", supplier_account_id: null, total: 653.25 }] },
       aliases,
     );
-    expect(m).toEqual([expect.objectContaining({ kind: "supplier_invoice", supplierInvoiceId: "si-1" })]);
+    expect(m).toEqual([expect.objectContaining({ kind: "supplier_invoice", supplierInvoiceId: "si-1", invoiceNumber: "8802-1108330" })]);
+    // Not a cost, so nothing to tie to: File It links the bill it makes.
+    expect(m[0].sentence).toBe("On the CED documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.");
+  });
+
+  it("a CED document a bill already covers IS that bill's purchase: offered as a tie to the covering bill", () => {
+    const m = findSameNumber(
+      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill" }),
+      {
+        supplierInvoices: [
+          {
+            id: "si-1",
+            invoice_number: "8802-1108330",
+            supplier_account_id: "acct-ced",
+            total: 653.25,
+            covered_by: { id: "bill-7", job_id: "job-046", jobs: { job_number: "J-046", name: "Jason Waldow" } },
+          },
+        ],
+      },
+      aliases,
+    );
+    expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-7", jobId: "job-046" })]);
+    expect(m[0].sentence).toBe("Already on the books: CED document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+  });
+
+  it("a covering bill that also carries the number is found once, not twice", () => {
+    const m = findSameNumber(
+      receipt({ vendor: "CED", doc_number: "8802-1108330", doc_type: "bill" }),
+      {
+        bills: [bill],
+        supplierInvoices: [{ id: "si-1", invoice_number: "8802-1108330", supplier_account_id: "acct-ced", total: 653.25, covered_by: { id: "bill-1" } }],
+      },
+      aliases,
+    );
+    expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-1" })]);
   });
 
   it("a short number is not matched on number alone", () => {

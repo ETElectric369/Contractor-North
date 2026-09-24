@@ -85,6 +85,45 @@ describe("PaperworkRow", () => {
     expect(html).toContain("Different Purchase: File It Anyway");
   });
 
+  it("a CED document no bill covers: no Tie, and the button says it links the two", () => {
+    const html = render({ doc_type: "bill", vendor: "CED", doc_number: "8802-1108330", proposal: { jobId: "job-046" } }, [
+      {
+        kind: "supplier_invoice",
+        supplierInvoiceId: "si-1",
+        invoiceNumber: "8802-1108330",
+        sentence: "On the CED documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.",
+      },
+    ]);
+    expect(html).not.toContain("Same Purchase: Tie Them");
+    expect(html).not.toContain("Different Purchase");
+    expect(html).toContain("File It And Link To CED 8802-1108330");
+    expect(html).toContain("On the CED documents list with no bill yet");
+  });
+
+  it("a suggestion that arrives with the row is the picked value (the picker follows it until touched)", () => {
+    const html = render({ proposal: { bucket: "Gas & Truck" } });
+    expect(html).toMatch(/<option value="cost:Gas &amp; Truck" selected="">Gas &amp; Truck \(Suggested\)<\/option>/);
+    expect(html).toContain("It is picked below; nothing is filed until you press File It.");
+  });
+
+  it("a CED document in the same PDF that didn't add up is said on the row", () => {
+    const html = render({
+      doc_type: "supplier_documents",
+      kind: "job_document",
+      proposal: {
+        ced: {
+          numbers: ["8802-1101363"],
+          total: 162.45,
+          kinds: ["invoice"],
+          text: "x",
+          name: "a.pdf",
+          refused: [{ number: "8802-1101999", error: "8802-1101999: the lines don't add up to TOTAL DUE" }],
+        },
+      },
+    });
+    expect(html).toContain("Won&#x27;t be added: 8802-1101999: the lines don&#x27;t add up to TOTAL DUE.");
+  });
+
   it("CED documents found in a PDF go on the CED list", () => {
     const html = render({
       doc_type: "supplier_documents",

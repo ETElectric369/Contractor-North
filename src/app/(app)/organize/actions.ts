@@ -18,6 +18,7 @@ import {
   fileRefusal,
   paperTypeOfItem,
   proposalOf,
+  readinessOf,
   type NumberMatch,
   type PaperProposal,
 } from "@/lib/paperwork";
@@ -623,7 +624,7 @@ async function tearDownFiling(supabase: any, item: any, tail: string): Promise<s
  * Re-filing tears down whatever the previous filing made, then creates the new rows, so moving
  * things around can never double-count.
  */
-export async function fileItem(id: string, dest: FileDestination, opts: FileOptions = {}): Promise<Result> {
+export async function fileItem(id: string, dest: FileDestination, opts: FileOptions = {}): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -647,18 +648,54 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // IS THIS PURCHASE ALREADY ON THE BOOKS? Same printed number, same supplier. Asked here, on the
   // server, every time, so no screen that forgot to show the offer can make a second bill. A
   // person who has looked and says it is a different purchase passes differentPurchase.
+  //
+  // Only a BILL refuses (a bill with this number, or the bill that already covers a CED document
+  // with it). A CED document NO bill covers is not a cost - owner-money counts bills - so tying to
+  // it recorded nothing and dropped the job the person picked, and the only other way through made
+  // them sign a note saying it was a different purchase when it was the same one (J-046's counter
+  // sheet 8802-1108330, photographed after the CED PDF went on the list). That document is LINKED
+  // to the bill this makes, in the same press, and the button said so before it was pressed.
+  let linkTo: { id: string; number: string }[] = [];
   if (dest.type !== "unfiled" && isCost && item.doc_number && !opts.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
-    const matches = matchesOnBooks(item, books).filter((m) => m.kind !== "paper");
-    if (matches.length) return { ok: false, error: sameNumberRefusal(matches) };
+    const found = matchesOnBooks(item, books);
+    const onBooks = found.filter((m) => m.kind === "bill");
+    if (onBooks.length) return { ok: false, error: sameNumberRefusal(onBooks) };
+    linkTo = found.flatMap((m) => (m.kind === "supplier_invoice" ? [{ id: m.supplierInvoiceId, number: m.invoiceNumber }] : []));
   }
+
+  // CLAIM THE PAPER BEFORE WRITING A CENT (check-then-insert, the v951 class). The same paper
+  // shows on /bills Sort These and in the /organize tray, and two presses at once both passed the
+  // gate above, both found no bill, and both made one: two bills for one paper, the row pointing at
+  // only one, the other orphaned where Undo could never reach it. The row moves out of
+  // needs_review ONLY IF it is still there, so exactly one press gets past this line. Every way
+  // out below puts it back.
+  const claimed = dest.type !== "unfiled";
+  if (claimed) {
+    const { data: mine, error: claimErr } = await supabase
+      .from("organized_items")
+      .update({ status: "filed" })
+      .eq("id", id)
+      .eq("org_id", ctx.orgId)
+      .eq("status", "needs_review")
+      .select("id");
+    if (claimErr) return { ok: false, error: `${dbError(claimErr)} Nothing was filed.` };
+    if (!mine?.length)
+      return { ok: false, error: "Someone else is filing this paper right now, or just did. Nothing was filed twice; refresh to see where it went." };
+  }
+  const release = async () => {
+    if (claimed) await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  };
 
   const refused = await tearDownFiling(
     supabase,
     item,
     "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
   );
-  if (refused) return { ok: false, error: refused.replace("so nothing was changed", "so this was not re-filed") };
+  if (refused) {
+    await release();
+    return { ok: false, error: refused.replace("so nothing was changed", "so this was not re-filed") };
+  }
   const prevJob = item.job_id;
   const lines = cleanLines(item.line_items);
 
@@ -680,13 +717,17 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     : {};
 
   // A cost that did not land puts the paper back in the tray holding nothing, and says so, instead
-  // of reading "Filed" over a cost that does not exist.
+  // of reading "Filed" over a cost that does not exist. A bill this press made a moment ago comes
+  // down with it: nothing can have claimed it yet.
   const backToTray = async (message: string): Promise<Result> => {
+    if (billId) await supabase.from("bills").delete().eq("id", billId).select("id");
     if (documentId) await supabase.from("documents").delete().eq("id", documentId).select("id");
     await supabase
       .from("organized_items")
       .update({ job_id: null, document_id: null, bill_id: null, petty_cash_id: null, status: "needs_review" })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("org_id", ctx.orgId)
+      .select("id");
     revalidatePath("/organize");
     revalidatePath("/bills");
     if (prevJob) revalidatePath(`/jobs/${prevJob}`);
@@ -752,6 +793,26 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     if (!billId) return backToTray("The business cost didn't save, so this receipt is back in Needs Review. Try again.");
   }
 
+  // THE CED DOCUMENT THIS PAPER IS (see linkTo above). 0277 lets one bill cover an invoice, once:
+  // a duplicate key means another bill covered it between the check and now, so this bill comes
+  // down and the paper goes back to show the Tie. Any other failure keeps the cost, which is real,
+  // and says the link is missing rather than passing quietly.
+  let linkNote = "";
+  if (billId && linkTo.length) {
+    for (const si of linkTo) {
+      const { data: linked, error: linkErr } = await supabase
+        .from("bill_supplier_invoices")
+        .insert({ org_id: ctx.orgId, bill_id: billId, supplier_invoice_id: si.id })
+        .select("id");
+      if (linkErr && String((linkErr as { code?: string }).code ?? "") === "23505")
+        return backToTray(`CED ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
+      if (linkErr || !linked?.length) {
+        reportError("organize:fileItem.link", linkErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, supplierInvoiceId: si.id });
+        linkNote = ` The link to CED ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
+      }
+    }
+  }
+
   const patch: Record<string, unknown> = {
     job_id: jobId,
     document_id: documentId,
@@ -764,15 +825,21 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   };
   // How it was filed rides on the proposal, so Undo takes down exactly this and nothing else.
   if ("proposal" in item) patch.proposal = { ...proposalOf(item), filed: dest.type === "unfiled" ? null : { how: "bill" } };
-  const { error } = await supabase.from("organized_items").update(patch).eq("id", id);
-  if (error) return { ok: false, error: dbError(error) };
+  const { data: wrote, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  if (error || !wrote?.length) {
+    // The row that says where the bill is did not save: a bill nothing points at is one Undo can
+    // never reach, so it comes down and the paper goes back.
+    if (claimed) return backToTray(`${error ? dbError(error) : "The paper's row didn't save."} Nothing was filed; it is back in the tray.`);
+    return { ok: false, error: error ? dbError(error) : "Nothing was moved. That paper isn't here any more, or this login can't change it." };
+  }
 
   revalidatePath("/organize");
   revalidatePath("/bills");
   revalidatePath("/petty-cash");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
-  return { ok: true };
+  const linkedSaid = linkTo.length && !linkNote ? ` Linked to CED ${linkTo.map((l) => l.number).join(", ")}.` : "";
+  return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
 
 /**
@@ -782,8 +849,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
  *
  *   · a TIE made nothing, so undoing one removes nothing but the link.
  *   · CED documents added from a PDF: the ones this paper ADDED come off the list, unless
- *     something already points at them (a bill covering it, or a job a person set), which are
- *     named and kept.
+ *     something already points at them (a bill covering it, a job a person set, or another paper
+ *     tied to it), which are named and kept.
  */
 export async function undoPaperwork(id: string): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
@@ -808,6 +875,13 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       ? await supabase.from("bill_supplier_invoices").select("supplier_invoice_id").in("supplier_invoice_id", ids)
       : { data: [] };
     const linked = new Set((links ?? []).map((l: any) => String(l.supplier_invoice_id)));
+    // ANOTHER PAPER TIED TO ONE OF THEM. tied_supplier_invoice_id is ON DELETE SET NULL (0295), so
+    // deleting the document would leave that paper "filed", tied to nothing, gone from the tray
+    // without a word. It is kept and named like the rest.
+    const { data: tiedPapers } = ids.length
+      ? await supabase.from("organized_items").select("tied_supplier_invoice_id").eq("org_id", ctx.orgId).in("tied_supplier_invoice_id", ids)
+      : { data: [] };
+    for (const t of tiedPapers ?? []) if ((t as any)?.tied_supplier_invoice_id) linked.add(String((t as any).tied_supplier_invoice_id));
     const removable = (docs ?? []).filter((d: any) => !linked.has(String(d.id)) && !d.job_id);
     for (const d of docs ?? []) if (!removable.includes(d)) kept.push(String(d.invoice_number));
     if (removable.length) {
@@ -852,20 +926,19 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
   return {
     ok: true,
-    message: `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.${kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill or a job already points at ${kept.length === 1 ? "it" : "them"}.` : ""}`,
+    message: `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.${kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""}`,
   };
 }
 
 /**
  * SAME PURCHASE: TIE THEM (0295). The paper's number is already on the books; a person says it is
  * the same purchase. Nothing new is written and no money moves: the paper is filed AGAINST the
- * existing record (its own column, never bill_id, so no teardown can ever delete what it points
- * at). Only a record the number check actually found can be tied to.
+ * existing BILL (its own column, never bill_id, so no teardown can ever delete what it points
+ * at). Only a bill the number check actually found can be tied to: a bill with this number, or
+ * the bill that already covers a CED document with it. A CED document no bill covers is not a
+ * cost, so a tie to it would record nothing; File It links it instead.
  */
-export async function tiePaperwork(
-  id: string,
-  target: { billId: string } | { supplierInvoiceId: string },
-): Promise<Result & { message?: string }> {
+export async function tiePaperwork(id: string, target: { billId: string }): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -874,22 +947,25 @@ export async function tiePaperwork(
   if (item.status !== "needs_review" || item.bill_id) return { ok: false, error: "This is already filed. Undo it first." };
   const books = await loadBooks(supabase, ctx.orgId);
   const matches = matchesOnBooks(item, books);
-  const hit =
-    "billId" in target
-      ? matches.find((m) => m.kind === "bill" && m.billId === target.billId)
-      : matches.find((m) => m.kind === "supplier_invoice" && m.supplierInvoiceId === target.supplierInvoiceId);
-  if (!hit) return { ok: false, error: "That record doesn't carry this paper's number and supplier, so they weren't tied. Nothing changed." };
-  const bill = "billId" in target ? books.bills.find((b) => b.id === target.billId) : null;
+  const hit = matches.find((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill" && m.billId === target.billId);
+  if (!hit) return { ok: false, error: "That bill doesn't carry this paper's number and supplier, so they weren't tied. Nothing changed." };
   const patch: Record<string, unknown> = {
     status: "filed",
-    tied_bill_id: "billId" in target ? target.billId : null,
-    tied_supplier_invoice_id: "supplierInvoiceId" in target ? target.supplierInvoiceId : null,
-    job_id: bill?.job_id ?? null,
+    tied_bill_id: target.billId,
+    tied_supplier_invoice_id: null,
+    job_id: hit.jobId ?? null,
     proposal: { ...proposalOf(item), filed: { how: "tie" } } satisfies PaperProposal,
   };
-  const { data: back, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  // Only while it is still waiting: a File It pressed a moment ago on another screen wins.
+  const { data: back, error } = await supabase
+    .from("organized_items")
+    .update(patch)
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!back?.length) return { ok: false, error: "Nothing was tied. That paper isn't here any more, or this login can't change it." };
+  if (!back?.length) return { ok: false, error: "Nothing was tied. That paper was just filed somewhere else, isn't here any more, or this login can't change it." };
   revalidatePath("/organize");
   revalidatePath("/bills");
   return { ok: true, message: `Tied. ${hit.sentence.replace(/^Already on the (books|CED documents list): /, "Filed against ")} Nothing new was added.` };
@@ -1047,7 +1123,13 @@ export async function archiveItem(id: string): Promise<Result> {
 export async function unarchiveItem(id: string): Promise<Result> {
   const supabase = await createClient();
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
-  if (item && (item.bill_id || item.document_id || item.petty_cash_id || item.tied_bill_id || item.tied_supplier_invoice_id))
+  // A filing that wrote none of these columns still has to come down through Undo: Add To CED
+  // Documents records what it added on the proposal only, and a plain restore left those documents
+  // on the list, then a second Add landed nothing and overwrote the record Undo reads.
+  if (
+    item &&
+    (item.bill_id || item.document_id || item.petty_cash_id || item.tied_bill_id || item.tied_supplier_invoice_id || proposalOf(item).filed)
+  )
     return undoPaperwork(id);
   const { error } = await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
@@ -1078,6 +1160,8 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
     label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}`,
   }));
 
+  const orgId = (item as { org_id?: string }).org_id ?? null;
+  const trade = await tradeOf(supabase, orgId);
   let parsed: any;
   try {
     const client = getAnthropic();
@@ -1086,7 +1170,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
       // behind it — not the receipt-reading that becomes billable money.
       model: modelFor("routine"),
       max_tokens: 500,
-      system: `You triage one piece of paperwork for an electrical contractor and decide the single best action. Output ONLY a JSON object:
+      system: `You triage one piece of paperwork for a ${trade} and decide the single best action. Output ONLY a JSON object:
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
   "job_id": an id from the list below, or null,
@@ -1128,10 +1212,11 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // and keep working as before.
     if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
       const label = jobList.find((j) => j.id === parsed.job_id)?.label;
-      const { error: sErr } = await updateItemTolerant(supabase, id, null, {
+      const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), jobId: String(parsed.job_id), bucket: null, why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
+      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
       revalidatePath("/organize");
       revalidatePath("/bills");
       return { ok: true, message: `Suggested: ${label}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
@@ -1146,25 +1231,45 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
           message:
             "This looks like a fee or a supplier's late charge, so nothing was suggested. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost: Fees yourself.",
         };
-      const { error: sErr } = await updateItemTolerant(supabase, id, null, {
+      const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), jobId: null, bucket: cat, why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
+      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
       revalidatePath("/organize");
       revalidatePath("/bills");
       return { ok: true, message: `Suggested: Business Cost, ${cat}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
     }
-    if (action === "task") {
-      const title = String(parsed.task_title || item.title).slice(0, 200);
-      const category = ["office", "operations", "sales"].includes(parsed.task_category) ? parsed.task_category : "operations";
-      await supabase.from("tasks").insert({ title, category, status: "open", created_by: user.id });
-      await supabase.from("organized_items").update({ status: "filed", category: "Task" }).eq("id", id);
-      revalidatePath("/organize");
-      revalidatePath("/tasks");
-      return { ok: true, message: `Made a task: "${title}". ${reason}`.trim() };
-    }
-    if (action === "keep_note") {
-      await supabase.from("organized_items").update({ status: "filed" }).eq("id", id);
+    // A TASK OR A NOTE TAKES THE PAPER OUT OF THE TRAY, so it is only ever done to paper that is
+    // not money. A receipt or bill with a total, a statement, a CED PDF, anything unread: the model
+    // saying "task" or "keep_note" used to set it filed with no bill and no person choosing, and
+    // its cost was never recorded. For those it is said as a suggestion and the row stays waiting.
+    if (action === "task" || action === "keep_note") {
+      const said = action === "task" ? `make a task ("${String(parsed.task_title || item.title).slice(0, 200)}")` : "keep it as a note";
+      if (readinessOf(item).state !== "keep")
+        return {
+          ok: true,
+          message: `Suggested: ${said}. This paper can be money, so it stays here until a person files it or sets it aside. ${reason}`.trim(),
+        };
+      if (action === "task") {
+        const title = String(parsed.task_title || item.title).slice(0, 200);
+        const category = ["office", "operations", "sales"].includes(parsed.task_category) ? parsed.task_category : "operations";
+        const { data: task, error: taskErr } = await supabase.from("tasks").insert({ title, category, status: "open", created_by: user.id }).select("id");
+        if (taskErr || !task?.length) return { ok: false, message: taskErr ? dbError(taskErr) : "The task didn't save, so this note stays here." };
+        let q = supabase.from("organized_items").update({ status: "filed", category: "Task" }).eq("id", id).eq("status", "needs_review");
+        if (orgId) q = q.eq("org_id", orgId);
+        const { data: moved, error: movedErr } = await q.select("id");
+        revalidatePath("/organize");
+        revalidatePath("/tasks");
+        if (movedErr || !moved?.length)
+          return { ok: true, message: `Made a task: "${title}". This note is still in the tray; archive it when you're done with it. ${reason}`.trim() };
+        return { ok: true, message: `Made a task: "${title}". ${reason}`.trim() };
+      }
+      let q = supabase.from("organized_items").update({ status: "filed" }).eq("id", id).eq("status", "needs_review");
+      if (orgId) q = q.eq("org_id", orgId);
+      const { data: kept, error: keptErr } = await q.select("id");
+      if (keptErr) return { ok: false, message: dbError(keptErr) };
+      if (!kept?.length) return { ok: false, message: "Nothing was kept. This paper was already moved, or this login can't change it." };
       revalidatePath("/organize");
       return { ok: true, message: `Kept as a note in your archive. ${reason}`.trim() };
     }

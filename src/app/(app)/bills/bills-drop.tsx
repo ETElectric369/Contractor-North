@@ -134,7 +134,7 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
       return say(id, name, added.already ? `${added.already} Nothing was added twice.` : added.error ?? "Not added.", added.already ? "warn" : "error");
     }
     if (!added.needsRead) {
-      say(id, name, "CED documents found in it. Waiting below: press Add To CED Documents.", "ok");
+      say(id, name, added.line ?? "CED documents found in it. Waiting below: press Add To CED Documents.", added.line?.includes("didn't add up") ? "warn" : "ok");
       return;
     }
     say(id, name, "Reading…", "busy");

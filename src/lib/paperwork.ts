@@ -112,8 +112,16 @@ export type PaperProposal = {
   tooBig?: boolean;
   /** The reader failed; the words it failed with. */
   readError?: string | null;
-  /** CED documents found in a PDF's text layer: numbers, total, and the text itself. */
-  ced?: { numbers: string[]; total: number; kinds: string[]; text: string; name: string } | null;
+  /** CED documents found in a PDF's text layer: numbers, total, and the text itself. `refused` is
+   *  every document in the same PDF that did not add up, said on the row rather than dropped. */
+  ced?: {
+    numbers: string[];
+    total: number;
+    kinds: string[];
+    text: string;
+    name: string;
+    refused?: { number: string | null; error: string }[];
+  } | null;
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
   /** How the row was last filed, so Undo takes down exactly that and nothing else. */
@@ -259,6 +267,17 @@ export function suggestedDestination(item: PaperItem, jobIds: readonly string[])
 }
 
 /**
+ * THE PICKER FOLLOWS THE SUGGESTION UNTIL A PERSON TOUCHES IT. A row renders before its paper is
+ * read (Drop Paperwork adds the row, then reads it), and AI Suggest writes a suggestion after the
+ * row is on screen; a picker seeded once at mount would say "It is picked below" over a picker
+ * still reading "Where Does It Go?". `picked` is null until a person chooses; after that, theirs
+ * wins, including choosing nothing.
+ */
+export function shownDestination(picked: string | null, item: PaperItem, jobIds: readonly string[]): string {
+  return picked ?? suggestedDestination(item, jobIds);
+}
+
+/**
  * THE GATE, asked by the File It button AND by the server before it writes a cent. Null means go.
  * A sentence means stop, and it is the sentence the person sees.
  */
@@ -312,11 +331,22 @@ export type BookedSupplierInvoice = {
   supplier_account_id: string | null;
   total: number | string | null;
   invoice_date?: string | null;
+  /** The bill that already covers this document (bill_supplier_invoices, 0273/0277), if any. */
+  covered_by?: { id: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null;
 };
 
+/**
+ * What the number check found.
+ *   · "bill": the same purchase is already a cost (a bill with this number, or the bill that
+ *     already covers a CED document with this number). File It refuses and offers Tie Them.
+ *   · "supplier_invoice": a CED document with this number that NO bill covers yet. It is not a
+ *     cost (owner-money counts only bills), so there is nothing to tie to: File It goes ahead and
+ *     links the new bill to it, and the button says so.
+ *   · "paper": another paper in the tray with the same number. Said, never blocking.
+ */
 export type NumberMatch =
-  | { kind: "bill"; billId: string; sentence: string }
-  | { kind: "supplier_invoice"; supplierInvoiceId: string; sentence: string }
+  | { kind: "bill"; billId: string; jobId?: string | null; sentence: string }
+  | { kind: "supplier_invoice"; supplierInvoiceId: string; invoiceNumber: string; sentence: string }
   | { kind: "paper"; itemId: string; sentence: string };
 
 function sameSupplier(
@@ -356,6 +386,7 @@ export function findSameNumber(
     out.push({
       kind: "bill",
       billId: b.id,
+      jobId: b.job_id ?? null,
       sentence: `Already on the books: ${b.supplier ?? "a bill"} #${b.bill_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}.`,
     });
   }
@@ -367,10 +398,25 @@ export function findSameNumber(
       if (!mine && number.replace(/\D/g, "").length < 7) continue;
     } else if (number.replace(/\D/g, "").length < 7) continue;
     const total = amountOf({ amount: si.total });
+    const said = `${si.invoice_number}${total !== null ? `, ${money(total)}` : ""}`;
+    const cover = si.covered_by;
+    if (cover?.id) {
+      // Already a cost: the bill that covers it is the purchase. Found once, whichever way.
+      if (cover.id === item.bill_id || out.some((m) => m.kind === "bill" && m.billId === cover.id)) continue;
+      const job = cover.jobs?.job_number ? `${cover.jobs.job_number}${cover.jobs.name ? ` ${cover.jobs.name}` : ""}` : cover.job_id ? "a job" : "business costs";
+      out.push({
+        kind: "bill",
+        billId: cover.id,
+        jobId: cover.job_id ?? null,
+        sentence: `Already on the books: CED document ${said}, covered by a bill on ${job}.`,
+      });
+      continue;
+    }
     out.push({
       kind: "supplier_invoice",
       supplierInvoiceId: si.id,
-      sentence: `Already on the CED documents list: ${si.invoice_number}${total !== null ? `, ${money(total)}` : ""}.`,
+      invoiceNumber: si.invoice_number,
+      sentence: `On the CED documents list with no bill yet: ${said}. File It makes the bill and links it to that document.`,
     });
   }
   for (const p of books.papers ?? []) {

@@ -84,8 +84,9 @@ export async function addPaperwork(input: {
   const seen = await fingerprintSeen(input.sha256);
   if (seen.seen) return { ok: false, already: seen.seen, error: `${name}: ${seen.seen}` };
 
-  // A CED PDF, read from its own text. Only documents that reconciled count; a refusal among them
-  // is carried as a sentence rather than dropped.
+  // A CED PDF, read from its own text. Only documents that reconciled are proposed; every one in
+  // the same PDF that did not add up is carried on the proposal (and in the drop line) as a
+  // sentence rather than dropped, so "CED documents found in it" never hides the one that wasn't.
   let proposal: PaperProposal | null = null;
   let doc_type: "supplier_documents" | null = null;
   let vendor: string | null = null;
@@ -96,10 +97,18 @@ export async function addPaperwork(input: {
   if (text.trim()) {
     const read = parseCedDocuments(text);
     const good = read.flatMap((r) => (r.ok ? [r.invoice] : []));
+    const refused = read.flatMap((r) => (r.ok ? [] : [{ number: r.invoiceNumber, error: r.error }]));
     if (good.length) {
       const total = Math.round(good.reduce((s, d) => s + d.total, 0) * 100) / 100;
       proposal = {
-        ced: { numbers: good.map((d) => d.invoiceNumber), total, kinds: good.map((d) => d.kind), text: text.slice(0, 200_000), name },
+        ced: {
+          numbers: good.map((d) => d.invoiceNumber),
+          total,
+          kinds: good.map((d) => d.kind),
+          text: text.slice(0, 200_000),
+          name,
+          ...(refused.length ? { refused } : {}),
+        },
       };
       doc_type = "supplier_documents";
       vendor = "CED";
@@ -133,7 +142,18 @@ export async function addPaperwork(input: {
 
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, id: placed.id, needsRead: !doc_type };
+  return { ok: true, id: placed.id, needsRead: !doc_type, line: doc_type ? cedDropLine(proposal) : undefined };
+}
+
+/** What the drop line says for a CED PDF: how many were read, and every one that didn't add up. */
+function cedDropLine(p: PaperProposal | null): string {
+  const n = p?.ced?.numbers.length ?? 0;
+  const refused = p?.ced?.refused ?? [];
+  const found = `${n} CED ${n === 1 ? "document" : "documents"} found in it`;
+  const bad = refused.length
+    ? `; ${refused.length} didn't add up and won't be added: ${refused.map((r) => r.error).join("; ")}`
+    : "";
+  return `${found}${bad}. Waiting below: press Add To CED Documents.`;
 }
 
 /**
@@ -209,7 +229,13 @@ export async function keepPaperwork(id: string): Promise<PaperResult> {
     return { ok: false, error: "This is a cost. File it on a job or as a business cost, or change its type in Fix Details." };
   const patch: Record<string, unknown> = { status: "archived" };
   if ("proposal" in item) patch.proposal = { ...proposalOf(item), filed: { how: "kept" } };
-  const { data: back, error } = await ctx.supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  const { data: back, error } = await ctx.supabase
+    .from("organized_items")
+    .update(patch)
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!back?.length) return { ok: false, error: "Nothing was kept. That paper isn't here any more, or this login can't change it." };
   revalidatePath("/bills");
@@ -234,12 +260,15 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
 
   const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "CED PDF"), text: p.ced.text }] });
   if (!result.ok) return { ok: false, error: result.error ?? "Nothing was added." };
-  const landed = result.landed.map((d) => d.invoiceNumber);
+  // MERGED, never replaced: a second Add lands nothing (the importer only reports fresh inserts),
+  // and overwriting the list with [] left Undo unable to remove what this paper first added.
+  const landed = [...new Set([...(p.filed?.landed ?? []), ...result.landed.map((d) => d.invoiceNumber)])];
   const { data: back, error } = await ctx.supabase
     .from("organized_items")
     .update({ status: "filed", proposal: { ...p, filed: { how: "supplier_documents", landed } } })
     .eq("id", id)
     .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
     .select("id");
   if (error || !back?.length) {
     // The documents ARE in (the importer said so); only the paper's own row did not move.

@@ -370,7 +370,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
       return [];
     }
   };
-  const [bills, papers, supplierInvoices, aliasRows] = await Promise.all([
+  const [bills, papers, supplierInvoices, aliasRows, links] = await Promise.all([
     safe<BookedBill>(
       supabase
         .from("bills")
@@ -393,8 +393,27 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     safe<{ alias: string; supplier_account_id: string }>(
       supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
     ),
+    // WHICH CED DOCUMENTS A BILL ALREADY COVERS (0273/0277). A document with a bill behind it is
+    // that bill's purchase; one without is not a cost at all, and File It links the new bill to it.
+    safe<{ supplier_invoice_id: string; bill_id: string; bills?: { id?: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null }>(
+      supabase
+        .from("bill_supplier_invoices")
+        .select("supplier_invoice_id, bill_id, bills(id, job_id, jobs(job_number, name))")
+        .eq("org_id", orgId)
+        .limit(5000),
+    ),
   ]);
-  return { bills, papers, supplierInvoices, aliases: indexSupplierAliases(aliasRows) };
+  const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();
+  for (const l of links) {
+    if (!l?.supplier_invoice_id || !l.bill_id) continue;
+    cover.set(String(l.supplier_invoice_id), { id: String(l.bill_id), job_id: l.bills?.job_id ?? null, jobs: l.bills?.jobs ?? null });
+  }
+  return {
+    bills,
+    papers,
+    supplierInvoices: supplierInvoices.map((si) => ({ ...si, covered_by: cover.get(String(si.id)) ?? null })),
+    aliases: indexSupplierAliases(aliasRows),
+  };
 }
 
 export function matchesOnBooks(item: PaperItem, books: Books): NumberMatch[] {

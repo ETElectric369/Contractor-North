@@ -19,6 +19,7 @@ import {
   parseDestination,
   proposalOf,
   readinessOf,
+  shownDestination,
   suggestedDestination,
   type NumberMatch,
   type PaperItem,
@@ -222,13 +223,18 @@ export function PaperworkRow({
   const [fixing, setFixing] = useState(false);
   const [said, setSaid] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const jobIds = jobs.map((j) => j.id);
-  const [dest, setDest] = useState<string>(() => suggestedDestination(item, jobIds));
+  // null until a person picks: until then the picker FOLLOWS the suggestion, which may arrive after
+  // this row is on screen (Drop Paperwork adds the row, then reads it; AI Suggest writes later).
+  const [picked, setDest] = useState<string | null>(null);
+  const dest = shownDestination(picked, item, jobIds);
 
   const r = readinessOf(item);
   const p = proposalOf(item);
   const type = paperTypeOfItem(item);
   const isCost = type === "receipt" || type === "bill";
-  const onBooks = matches.filter((m) => m.kind !== "paper");
+  // Only a BILL is "already on the books". A CED document no bill covers is linked by File It.
+  const onBooks = matches.filter((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill");
+  const toLink = matches.filter((m): m is Extract<NumberMatch, { kind: "supplier_invoice" }> => m.kind === "supplier_invoice");
   const papers = matches.filter((m) => m.kind === "paper");
   const parsedDest = parseDestination(dest);
   const blocked = fileRefusal(item, parsedDest);
@@ -281,10 +287,15 @@ export function PaperworkRow({
     if (!d) return setSaid({ text: "Pick where it goes first: a job, or a business cost bucket.", tone: "error" });
     if (d.type === "keep") return run("keep", () => keepPaperwork(item.id), "Kept in files.");
     const where = whereSaid(dest);
+    const said = isCost ? `Filed ${where}.` : `Kept ${where}.`;
     run(
       differentPurchase ? "anyway" : "file",
-      () => fileItem(item.id, d.type === "job" ? { type: "job", jobId: d.jobId } : { type: "overhead", category: d.category }, { differentPurchase }),
-      isCost ? `Filed ${where}.` : `Kept ${where}.`,
+      async () => {
+        const res = await fileItem(item.id, d.type === "job" ? { type: "job", jobId: d.jobId } : { type: "overhead", category: d.category }, { differentPurchase });
+        // The server's extra (the CED link, or that it didn't save) rides after where it went.
+        return res.ok && res.message ? { ...res, message: `${said}${res.message.replace(/^Filed\./, "")}` } : res;
+      },
+      said,
     );
   }
 
@@ -349,7 +360,8 @@ export function PaperworkRow({
               Suggested:{" "}
               {suggestedJob ? jobLabel(suggestedJob) : `Business Cost, ${p.bucket}`}
               {p.jobHint && suggestedJob ? ` (the paper says “${p.jobHint}”)` : ""}
-              {p.why ? `. ${p.why}` : ""}. It is picked below; nothing is filed until you press File It.
+              {p.why ? `. ${p.why}` : ""}.{" "}
+              {dest === suggestion ? "It is picked below; nothing" : "Nothing"} is filed until you press File It.
             </p>
           )}
 
@@ -362,13 +374,7 @@ export function PaperworkRow({
                     variant="outline"
                     className="mt-1.5"
                     disabled={working}
-                    onClick={() =>
-                      run(
-                        `tie`,
-                        () => tiePaperwork(item.id, m.kind === "bill" ? { billId: m.billId } : { supplierInvoiceId: (m as { supplierInvoiceId: string }).supplierInvoiceId }),
-                        "Tied to what was already on the books.",
-                      )
-                    }
+                    onClick={() => run(`tie`, () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
                   >
                     {busy === "tie" ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
                   </Button>
@@ -377,6 +383,21 @@ export function PaperworkRow({
               <p className="text-xs">Tying files this paper against it and adds nothing new. If it is a different purchase with the same number, pick where it goes and press Different Purchase: File It Anyway.</p>
             </div>
           )}
+          {toLink.length > 0 && onBooks.length === 0 && r.state === "ready" && (
+            <div className="mt-2 rounded-lg bg-brand/5 px-3 py-2 text-sm text-brand-dark">
+              {toLink.map((m) => (
+                <p key={matchKey(m)}>{m.sentence}</p>
+              ))}
+            </div>
+          )}
+          {p.ced?.refused?.length ? (
+            <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {p.ced.refused.map((x, i) => (
+                <p key={`${x.number ?? "none"}-${i}`}>Won&apos;t be added: {x.error}.</p>
+              ))}
+              <p className="text-xs">Only the documents that add up go on the list. Check the paper for the rest.</p>
+            </div>
+          ) : null}
           {papers.length > 0 && (
             <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {papers.map((m) => (
@@ -401,7 +422,8 @@ export function PaperworkRow({
                   </Button>
                 ) : (
                   <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
-                    {busy === "file" || busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />} {isCost ? "File It" : "Keep It"}
+                    {busy === "file" || busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />}{" "}
+                    {isCost ? (toLink.length && r.state === "ready" ? `File It And Link To CED ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It") : "Keep It"}
                   </Button>
                 )}
               </>
