@@ -10,11 +10,11 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency } from "@/lib/utils";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
-import { computeArAging, computeRevenueTrend, computeQuoteStats, trailing12Months } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeQuoteStats } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { todayStrInTz } from "@/lib/tz";
 import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwnerMoneySelection } from "@/lib/analytics/owner-money";
-import { buildMoneyChartData } from "@/lib/analytics/money-chart";
+import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analytics/money-chart";
 import { ownerRegister } from "@/lib/owner-draw";
 import { LeftForCard } from "./left-for-card";
 import { MoneyChartCard } from "./money-chart-card";
@@ -55,19 +55,18 @@ export default async function AnalyticsPage({
   // covering both, so the chart's August and the card's August are one computation. An office viewer
   // the owner has not allowed still gets the chart, cut to Collected on this server before it is
   // handed to the page (buildMoneyChartData), and no card.
+  //
+  // A month in ?w= is shown only if the chart DRAWS it (drawnMonth, below): a month before the
+  // chart's trimmed start would select nothing on the chart and print a month of $0s from before the
+  // books began. So the segment's window is computed too (same rows, no extra read) as the fallback.
   const selection = resolveOwnerMoneySelection(w, from, todayYmd);
-  const windowKey = selection.windowKey;
-  const ownerMoneyP = getOwnerMoneyViews(
-    supabase,
-    showOwnerMoney ? [ownerMoneyChartWindow(todayYmd), ownerMoneyWindow(windowKey, todayYmd)] : [ownerMoneyChartWindow(todayYmd)],
-    tz,
-    todayYmd,
-  );
-  const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
+  const cardWindows = showOwnerMoney
+    ? [ownerMoneyWindow(selection.segment, todayYmd), ...(selection.month ? [ownerMoneyWindow(selection.month, todayYmd)] : [])]
+    : [];
+  const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
+  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
     await Promise.all([
-      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart).order("paid_at", { ascending: false }).limit(50000),
       // A/R aging reads the WHOLE book or it isn't aging (audit 9) — unbounded meant the 1000
       // newest, so the oldest unpaid invoices, which are exactly what aging is FOR, fell out.
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(50000),
@@ -104,10 +103,6 @@ export default async function AnalyticsPage({
       // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
       // counted one purchase twice on the same job.
       supabase.from("bills").select("job_id, amount, category, po_id").is("superseded_by_bill_id", null).limit(50000),
-      // Cap BOTH sides of the trend (audit 9): bounding the payments that ADD money while leaving
-      // the refunds that SUBTRACT it unbounded would overstate collected at exactly the volume
-      // where the cap starts to bite.
-      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart).order("created_at", { ascending: false }).limit(50000),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
@@ -125,7 +120,6 @@ export default async function AnalyticsPage({
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
   // tools call, so the dashboard and what Nort says can never diverge.
-  const trend = computeRevenueTrend(payments ?? [], refunds ?? [], todayYmd, tz);
   const ar = computeArAging((invoices ?? []) as any[], todayYmd);
   const qs = computeQuoteStats((quotes ?? []) as any[]);
 
@@ -142,11 +136,17 @@ export default async function AnalyticsPage({
 
   const ownerMoney = await ownerMoneyP;
   const chartMoney = ownerMoney.views?.[0] ?? null;
-  const cardMoney = showOwnerMoney ? (ownerMoney.views?.[1] ?? null) : null;
   // Who "you" is on the card and the chart: the owners by name (from the same names profile_pay
   // carries) and the viewer, in the register payroll-view started (lib/owner-draw).
   const voice = ownerRegister(chartMoney?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
   const chartData = chartMoney ? buildMoneyChartData(chartMoney, { ownerFigures: showOwnerMoney, leftLabel: voice.leftFor }) : null;
+  const selectedMonth = drawnMonth(selection.month, chartData);
+  const windowKey = selectedMonth ?? selection.segment;
+  const cardMoney = showOwnerMoney ? (ownerMoney.views?.[selectedMonth ? 2 : 1] ?? null) : null;
+  // "Collected (12 mo)" is the chart's own 12 months (received, net of refunds and voided invoices:
+  // the computeCollected rule), not a second read of the same payments that could drift from it.
+  const collected12 = chartMoney ? chartMoney.totals.received : null;
+  const emptyLine = emptyChartSentence(ownerMoney.firstPaymentDay, ownerMoneyChartWindow(todayYmd).start);
 
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
@@ -183,9 +183,10 @@ export default async function AnalyticsPage({
       <MoneyChartCard
         data={chartData}
         problem={ownerMoney.problem}
-        selectedMonth={selection.month}
+        selectedMonth={selectedMonth}
         segment={selection.segment}
         linkMonths={showOwnerMoney}
+        emptyLine={emptyLine}
       />
 
       {showOwnerMoney && (
@@ -200,7 +201,7 @@ export default async function AnalyticsPage({
       )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {stat("Collected (12 mo)", formatCurrency(trend.collected12), TrendingUp, "bg-green-50 text-green-600")}
+        {stat("Collected (12 mo)", collected12 == null ? "—" : formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}
         {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
         {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
       </div>

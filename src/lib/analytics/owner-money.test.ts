@@ -538,8 +538,10 @@ describe("getOwnerMoney: the fetch half", () => {
     const both: FakeCall[] = [];
     const chart = ownerMoneyChartWindow(TODAY);
     const aug = ownerMoneyWindow("2026-08", TODAY);
-    const { views, problem } = await getOwnerMoneyViews(fakeClient(tables(), both), [chart, aug], TZ, TODAY);
+    const { views, problem, firstPaymentDay } = await getOwnerMoneyViews(fakeClient(tables(), both), [chart, aug], TZ, TODAY);
     expect(problem).toBeNull();
+    // The first payment ever, from the same read: the chart's empty state tells "nothing yet" from "nothing lately".
+    expect(firstPaymentDay).toBe("2026-06-11");
     // Exactly as many requests as ONE window's read, table for table: nothing is fetched twice.
     const count = (calls: FakeCall[]) => calls.reduce<Record<string, number>>((o, c) => ({ ...o, [c.table]: (o[c.table] ?? 0) + 1 }), {});
     expect(count(both)).toEqual(count(single));

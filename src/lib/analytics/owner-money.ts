@@ -250,6 +250,10 @@ export type OwnerMoneyInputs = {
   /** The org-local day of the first payment or first shift (when the books began being kept), or
    *  null when unknown. Backdated receipts do not move it; see getOwnerMoney. */
   recordsStart: string | null;
+  /** The org-local day of the first payment ever received (all time, not just the span read), or
+   *  null when there is none. The chart's empty state reads it: an empty 12 months with money before
+   *  them is "nothing in the last 12 months", not "nothing yet". */
+  firstPaymentDay?: string | null;
   /** supplier_invoices whose kind is 'service_charge' and that no bill covers: late interest the
    *  supplier charged that is not on the books as a cost. total, invoice_date, created_at. */
   unbilledServiceCharges?: any[];
@@ -755,12 +759,12 @@ export async function getOwnerMoneyViews(
   windows: OwnerMoneyWindow[],
   tz: string,
   todayYmd: string,
-): Promise<{ views: OwnerMoney[] | null; problem: string | null }> {
+): Promise<{ views: OwnerMoney[] | null; problem: string | null; firstPaymentDay: string | null }> {
   const span = ownerMoneyReadSpan(windows);
-  if (!windows.every((w) => windowInsideSpan(w, span))) return { views: null, problem: "the months asked for were not all read" };
+  if (!windows.every((w) => windowInsideSpan(w, span))) return { views: null, problem: "the months asked for were not all read", firstPaymentDay: null };
   const { inputs, problem } = await readOwnerMoneyInputs(supabase, span, tz, todayYmd);
-  if (!inputs) return { views: null, problem };
-  return { views: windows.map((w) => computeOwnerMoney(inputs, w, tz, todayYmd)), problem: null };
+  if (!inputs) return { views: null, problem, firstPaymentDay: null };
+  return { views: windows.map((w) => computeOwnerMoney(inputs, w, tz, todayYmd)), problem: null, firstPaymentDay: inputs.firstPaymentDay ?? null };
 }
 
 /** The rows computeOwnerMoney needs for any window inside `span`, read once. */
@@ -884,6 +888,7 @@ export async function readOwnerMoneyInputs(
     (d): d is string => !!d,
   );
   const recordsStart = starts.length ? starts.sort()[0] : null;
+  const firstPaymentDay = recordDay(null, firstPay?.data?.[0]?.paid_at, tz);
 
   return {
     inputs: {
@@ -901,6 +906,7 @@ export async function readOwnerMoneyInputs(
       ),
       people,
       recordsStart,
+      firstPaymentDay,
     },
     problem: null,
   };
