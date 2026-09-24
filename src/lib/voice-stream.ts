@@ -176,10 +176,30 @@ export function setResultHandler(cb: ResultCb | null) {
  *  AFTER the reply, so this is mostly a safety net. */
 export function setMuted(b: boolean) {
   muted = b;
-  // Tried and reverted (cn-v974 → cn-v975, 2026-09-24): releasing the mic here while Nort speaks, on
-  // the theory that an open mic's voice-call processing caused the crackle in replies. The crackle
-  // survived with the mic released, so the mic was not the cause, and talk-over barge-in (which needs
-  // the mic during playback) is back. See memory sweep-0923-cn-v970.
+  // THE LAST OF THE CRACKLE IS APPLE'S (WebKit bug 324811, rdar://188098655, filed 2026-09-22):
+  // periodic clicking through the BUILT-IN SPEAKER while getUserMedia capture is active, on iPhone 16
+  // and 17 running iOS 27.0; clean on headphones, not on iPhone 15 or iOS 26. Nort's mic stayed open
+  // through every reply for talk-over barge-in. Releasing it alone (cn-v974) was not enough, because
+  // WebKit keeps the call-mode session (PlayAndRecord/VideoChat) for as long as audio is playing
+  // after capture stops, unless the page overrides the session type. So in the app, before Nort
+  // speaks: drop the capture AND declare plain playback. The next turn declares 'auto' again before
+  // it opens the mic (startListening), which the shell grants without a tap. The cost: no talking
+  // over Nort on the speaker until Apple ships a fix (Stop still cuts it off). Safari was clean and
+  // keeps the old behaviour.
+  if (b && !active && isNativeShell()) {
+    if (stream) dropCapture();
+    setAudioSessionType("playback");
+  }
+}
+
+/** navigator.audioSession (WebKit's Audio Session API). Absent on older engines: then a no-op. */
+function setAudioSessionType(type: "auto" | "playback" | "play-and-record") {
+  try {
+    const session = (navigator as any).audioSession;
+    if (session && session.type !== type) session.type = type;
+  } catch {
+    /* an engine without the API, or one that refuses the value: nothing to do */
+  }
 }
 
 function pickMime(): string {
@@ -214,6 +234,8 @@ export function startListening(_lang?: string): boolean {
     return true;
   }
   wantStream = true;
+  // Undo setMuted's 'playback' before asking for the mic: capture needs the session back.
+  if (isNativeShell()) setAudioSessionType("auto");
   status("Connecting to the mic…");
   const attempt = ++micAttempt;
   let settled = false;
@@ -578,6 +600,7 @@ async function finishTurn() {
 export function stopListening(opts?: { discard?: boolean }) {
   session++;
   wantStream = false;
+  if (isNativeShell()) setAudioSessionType("auto"); // the conversation is over: leave the session as found
   active = false;
   lastStatus = ""; // this session's line must not replay into the next panel
   cancelAnimationFrame(rafId);
