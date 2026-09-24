@@ -66,15 +66,16 @@ create table if not exists archive.time_allocations (
   created_at    timestamptz not null,
   archived_at   timestamptz not null default now(),
   -- The time entry that carries these hours now: the row's own id when it became an entry, the
-  -- entry it was merged into otherwise.
+  -- entry it was merged into otherwise; null for a 0 h row whose entry this migration deleted
+  -- (the two empty punches, section 5).
   became        uuid,
-  -- piece | merged | home | absorbed | trimmed | zero (see carve_legacy_allocations)
+  -- piece | merged | home | absorbed | trimmed | zero | zero, entry deleted (see carve_legacy_allocations)
   carve_note    text
 );
 alter table archive.time_allocations enable row level security;
 revoke all on archive.time_allocations from public, anon, authenticated, service_role;
 comment on table archive.time_allocations is
-  'Every time_allocations row as it stood when 0289 converted the old splits into ordinary time entries. Not exposed to PostgREST. became = the time entry that carries its hours now.';
+  'Every time_allocations row as it stood when 0289 converted the old splits into ordinary time entries. Not exposed to PostgREST. became = the time entry that carries its hours now (null when that entry was an empty punch 0289 deleted).';
 
 -- ── 2. THE CARVE MAY REMOVE A CLAIMED ROW (ONLY THE CARVE) ──────────────────────────────────────
 -- 0261/0263's guard, unchanged but for one door: the scoped carve deletes the rows it has just
@@ -483,7 +484,21 @@ begin
                gps_in = case when seg.segno = v_first then t.gps_in end,
                gps_out = case when seg.end_at = ent.clock_out then t.gps_out end,
                auto_closed_reason = case when seg.end_at = ent.clock_out or seg.end_at - seg.start_at > interval '18 hours'
-                                         then t.auto_closed_reason end
+                                         then t.auto_closed_reason end,
+               -- NOTHING SILENT: an entry whose rows covered its clock takes the last row's job or
+               -- code, and no piece is inserted, so no "Rebuilt From An Old Split" label can say so.
+               -- The notes do, in the words the timecard shows.
+               notes = case
+                         when seg.absorbs
+                              and (seg.rjob is distinct from t.job_id or seg.rcode is distinct from t.job_code)
+                         then concat_ws(E'\n', nullif(btrim(t.notes), ''),
+                                '[Rebuilt from an old split: this time was recorded on '
+                                || public.split_job_label(seg.rjob, seg.rcode)
+                                || case when t.job_id is null and nullif(btrim(t.job_code), '') is null
+                                        then ', and the shift had no job before.]'
+                                        else ', not ' || public.split_job_label(t.job_id, t.job_code) || '.]' end)
+                         else t.notes
+                       end
          where t.id = ent.id
            and (t.clock_in, t.clock_out, t.job_id, t.job_code)
                is distinct from (seg.start_at, seg.end_at,
@@ -530,6 +545,9 @@ begin
            case when status = 'draft' then orphans else '{}'::uuid[] end as removed
       from need;
 
+    -- VOID LINES FIRST, THEN THE REST, in two statements: guard_invoice_item_claim runs per row and
+    -- sees what this command already wrote, so in one statement a void line reached after a draft
+    -- line would find the draft already holding the id and refuse, on row order alone.
     update public.invoice_items it
        set source_ids = coalesce((select array_agg(u.s order by u.o)
                                     from unnest(it.source_ids) with ordinality as u(s, o)
@@ -537,6 +555,16 @@ begin
                         || w.added
       from _carve_lw w
      where it.id = w.line_id
+       and w.status = 'void'
+       and (cardinality(w.added) > 0 or cardinality(w.removed) > 0);
+    update public.invoice_items it
+       set source_ids = coalesce((select array_agg(u.s order by u.o)
+                                    from unnest(it.source_ids) with ordinality as u(s, o)
+                                   where not (u.s = any (w.removed))), '{}'::uuid[])
+                        || w.added
+      from _carve_lw w
+     where it.id = w.line_id
+       and w.status <> 'void'
        and (cardinality(w.added) > 0 or cardinality(w.removed) > 0);
 
     -- ── the old rows: archived, then gone ──
@@ -704,8 +732,13 @@ begin
                                           where x.org_id = e.org_id and not s.is_home and not s.dropped),
                      'entries_left_whole', count(*) filter (
                         where not exists (select 1 from _carve_s s where s.entry_id = e.id and not s.is_home and not s.dropped)),
-                     'over_splits', count(*) filter (
-                        where (select coalesce(sum(r.secs), 0) from _carve_r r where r.entry_id = e.id) > e.worked_s + 36),
+                     -- Splits whose rows ran past the clock and were TRIMMED to it (the C7 trim). A
+                     -- row total over the clock with nothing to trim (a 0 h row) is not one.
+                     'over_splits_trimmed', count(*) filter (
+                        where exists (select 1 from _carve_s s where s.entry_id = e.id and s.trimmed > 0)),
+                     -- Entries whose lunch is longer than their clock (worked time below zero). The
+                     -- carve leaves them as they were; they are the office's to fix by hand.
+                     'negative_worked_entries', count(*) filter (where e.worked_s < 0),
                      'moved_to_a_row_job', (select count(*) from _carve_s s join _carve_e x on x.id = s.entry_id
                                              where x.org_id = e.org_id and s.absorbs
                                                and (s.rjob is distinct from x.job_id or s.rcode is distinct from x.job_code)),
@@ -897,6 +930,11 @@ begin
     if v_n <> 1 then
       raise exception '0289: the % punch % did not delete. Nothing was changed.', g.day, g.id;
     end if;
+    -- The archive's became names the entry that carries a row's hours now; this one is gone, and a
+    -- 0 h row's hours are carried by nothing.
+    update archive.time_allocations
+       set became = null, carve_note = 'zero, entry deleted'
+     where became = g.id;
     raise notice '0289: deleted the % empty punch %.', g.day, left(g.id::text, 8);
   end loop;
 
