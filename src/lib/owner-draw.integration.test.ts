@@ -86,9 +86,11 @@ d("an owner is paid by draw (0286)", () => {
     if (!crew[0]) return; // an org with nobody but its owner has no crew shift to move
     await client.query("savepoint move");
     try {
+      // A day nobody worked: this runs against real books, and guard_time_entry_sanity refuses a
+      // shift that overlaps one already recorded (the first run used Sep 10 and hit a real shift).
       const { rows: [e] } = await client.query(
         `insert into public.time_entries (org_id, profile_id, clock_in, clock_out, status, rate_override)
-         values ($1, $2, '2026-09-10T15:00:00Z', '2026-09-10T23:00:00Z', 'closed', 40) returning id`,
+         values ($1, $2, '2001-01-01T15:00:00Z', '2001-01-01T23:00:00Z', 'closed', 40) returning id`,
         [orgId, crew[0].id],
       );
       // Same override, new person: the trigger must look at the move, not only at the rate.
