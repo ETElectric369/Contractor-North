@@ -31,7 +31,9 @@
 -- ORDER: deploy the app first, then apply this. The new app reads the old column's world fine
 -- (the portal page calls customer_portal as the service role, which could always run it), while
 -- the OLD app calls customer_portal as anon and would 404 every portal link between this
--- migration and the deploy.
+-- migration and the deploy. In the window between the deploy and this migration the invoice email
+-- (emailInvoice and the recurring cron) finds no customer_portal_access table and falls back to
+-- customers.portal_token, so invoices keep carrying the portal link; apply this soon after anyway.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ── 1. the office's home for the link ──────────────────────────────────────────────────────────

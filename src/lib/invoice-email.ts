@@ -27,7 +27,7 @@ export async function deliverInvoiceEmail(
   const customer = (invoice as any).customers;
   if (!customer?.email) return { ok: false, error: "This customer has no email address." };
 
-  const [{ data: items }, { data: org }, { data: portal }] = await Promise.all([
+  const [{ data: items }, { data: org }, { data: portalRow, error: portalError }] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
     // Scope to THIS invoice's org explicitly — under the RLS-bypassing service client
     // (the recurring cron) an unfiltered query sees every org and would error on
@@ -44,6 +44,22 @@ export async function deliverInvoiceEmail(
       .eq("org_id", (invoice as any).org_id)
       .maybeSingle(),
   ]);
+  // The app deploys before 0298 is applied. In that window customer_portal_access doesn't exist
+  // and the read above errors, which would send every invoice email (the recurring cron included)
+  // without the portal link and say nothing. Only for a missing table, read the link where it
+  // lived before 0298. Any other error leaves the link out, as a turned-off link does.
+  let portal: { token: string | null; enabled: boolean } | null = portalRow ?? null;
+  if (portalError && isMissingTable(portalError)) {
+    const { data: legacy } = await supabase
+      .from("customers")
+      .select("portal_token")
+      .eq("id", (invoice as any).customer_id)
+      .eq("org_id", (invoice as any).org_id)
+      .maybeSingle();
+    portal = legacy?.portal_token ? { token: legacy.portal_token, enabled: true } : null;
+  } else if (portalError) {
+    console.error("[invoice-email] portal link read failed; sending without it", portalError);
+  }
   // Never email an empty invoice (a blank $0 mis-send) — protects every caller.
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
 
@@ -123,4 +139,10 @@ export async function deliverInvoiceEmail(
     await recalcInvoice(supabase, id);
   }
   return { ok: true };
+}
+
+/** Postgres undefined_table (42P01) or PostgREST's "table not in the schema cache" (PGRST205). */
+function isMissingTable(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "");
+  return code === "42P01" || code === "PGRST205";
 }
