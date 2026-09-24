@@ -18,7 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { billableBillCost } from "@/lib/bill-itemisation";
-import { isReturnBill, returnCreditCost } from "@/lib/supplier-returns";
+import { isReturnBill, returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -326,6 +326,9 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   let returnsAmount = 0;
   let returnsCredit = 0;
   let returnsCount = 0;
+  // Each return held to what the customer was billed for the purchase it reverses - the importer's
+  // own call, over the same bills, so the card promises the credit the button writes.
+  const returnLines = returnLinesAgainstPurchases(input.bills ?? [], (b) => b.bill_line_items);
   for (const b of input.bills ?? []) {
     const paid = Number(b.amount) || 0;
     const isReturn = isReturnBill(b.amount);
@@ -347,7 +350,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
      * promises is the credit the button writes.
      */
     if (isReturn) {
-      const back = returnCreditCost(b.amount, b.bill_line_items);
+      const back = returnCreditCost(b.amount, returnLines.get(b) ?? b.bill_line_items);
       if (!(back > 0)) continue;
       returnsAmount = cents(returnsAmount + back);
       returnsCredit = cents(returnsCredit + mk(back));
@@ -433,7 +436,8 @@ export async function readJobBillsWithLines(
   const read = (withLineStates: boolean) =>
     supabase
       .from("bills")
-      .select(`id, amount, po_id, bill_line_items(id, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
+      // `description` matches a supplier return to the purchase it reverses (returnLinesAgainstPurchases).
+      .select(`id, amount, po_id, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
       .eq("job_id", jobId)
       .is("superseded_by_bill_id", null);
   let res = await read(true);

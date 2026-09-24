@@ -94,7 +94,12 @@ export function UnbilledCard({
   // A pending supplier return is something new: money the customer is owed back (INV-078).
   const returns = w.returnsCount ?? 0;
   const nothingNew = w.total <= 0.005 && w.hours <= 0 && w.billsCount === 0 && returns === 0;
-  const owedBack = w.total < -0.005;
+  // The hours and bills on their own, before any return comes off - what an invoice built now
+  // bills at the least. A return lands on it only when it bills more than the credit
+  // (importCostsIntoInvoice holds it otherwise, because an invoice below zero loses the rest).
+  const newWork = Math.round((w.laborAmount + w.billsBilled) * 100) / 100;
+  const workPending = w.hours > 0 || w.billsCount > 0;
+  const owedBack = returns > 0 && w.total < -0.005;
   // THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
   // open draft when there is one — one draft per job, never a second racing the first for the
   // same rows — and pulls what's new into it. Said up front, "Add to INV-062 ($X)", not "Create
@@ -226,15 +231,19 @@ export function UnbilledCard({
             {owedBack && (
               <p className="mt-1 text-sm text-slate-500">
                 {draft
-                  ? `The customer is owed ${formatCurrency(-w.total)} back. Adding it to ${draft} takes it off that invoice.`
-                  : `The customer is owed ${formatCurrency(-w.total)} back. It comes off the next invoice on this job.`}
+                  ? `The return is worth more than the new work. It comes off ${draft} only if that invoice still bills more than the ${formatCurrency(w.returnsCredit)} credit; if not, it waits for the next invoice on this job that does.`
+                  : workPending
+                    ? `The return is worth more than the new work, so the invoice bills the ${formatCurrency(newWork)} of work and the ${formatCurrency(w.returnsCredit)} credit waits for the next invoice on this job that bills more than it.`
+                    : `The ${formatCurrency(w.returnsCredit)} credit waits for the next invoice on this job that bills more than it - an invoice below zero would settle with the credit lost.`}
               </p>
             )}
           </div>
-          {/* The open draft takes a pending return too, even when the credit is all there is: the
-              draft path pulls materials whatever the total, so the credit lands on it. With no
-              draft, a credit alone never mints an invoice - it waits for the next real one. */}
-          {(w.total > 0.005 || (draft && returns > 0)) && (
+          {/* THE DOOR FOLLOWS WHAT IS PENDING, NOT THE SIGN OF THE NET (review of this wave). Hours
+              or bills always get a door, even when a bigger return makes the net negative - that
+              work is real and unbilled. The open draft takes a pending return too (it may already
+              bill enough to hold it). With no draft, a credit alone never mints an invoice. The
+              figure is named only when it is what the click bills. */}
+          {(workPending || (draft && returns > 0)) && (
             <Button type="button" onClick={go} disabled={pending} className="shrink-0">
               <FileText />{" "}
               {pending
@@ -242,8 +251,8 @@ export function UnbilledCard({
                 : draft
                   ? w.total > 0.005
                     ? `Add to ${draft} (${formatCurrency(w.total)})`
-                    : `Add Credit to ${draft} (${formatCurrency(Math.abs(w.total))})`
-                  : `Create Invoice for ${formatCurrency(w.total)}`}
+                    : `Add to ${draft}`
+                  : `Create Invoice for ${formatCurrency(w.total > 0.005 ? w.total : newWork)}`}
             </Button>
           )}
         </div>

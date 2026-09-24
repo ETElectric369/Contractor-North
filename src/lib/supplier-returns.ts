@@ -2,6 +2,7 @@ import { formatCurrency } from "@/lib/utils";
 import {
   PART_USED_SUFFIX,
   billItemisation,
+  billLineBilledCost,
   billLineCost,
   billableBillCost,
   billedPortion,
@@ -64,6 +65,99 @@ function mirrored(l: BillLine): BillLine {
     unit_price: -(Number(l.unit_price) || 0),
     amount: cents(-billLineCost(l)),
   };
+}
+
+/** A line's words, for matching a returned part to the purchase it reverses: case, punctuation
+ *  and spacing are the scanner's, not the part's. */
+function itemWords(desc: unknown): string {
+  return String(desc ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * The same part, read off two pieces of paper. CED prints the return with its catalogue number in
+ * front ("H245ICAT 4 in LED Shallow IC HSG") and the purchase without it ("4 in LED SHALLOW IC
+ * HSG"), so one description has to hold the other as whole words - never a fuzzy score. At least
+ * two words, so "wire" alone never claims every coil on the job.
+ */
+function sameItem(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (short.split(" ").length < 2) return false;
+  return ` ${long} `.includes(` ${short} `);
+}
+
+/**
+ * A RETURN CREDITS WHAT THE CUSTOMER WAS BILLED, NEVER MORE (review of this wave).
+ *
+ * "A shop-stock line credits only its billed part" cannot be read off the return alone: the
+ * return is a new piece of paper, and the decision about how much of that box was the customer's
+ * was made on the PURCHASE - switched off (0268), or split to what this job used (0272). Reading
+ * the return in isolation sends a $108.36 box of Twisters back and credits the customer $135.45 at
+ * 25% when they were billed $16.25 for it: money they were never charged.
+ *
+ * So every returned line is matched, by its words (sameItem), to the purchase lines on this job's
+ * own receipts, and it credits at most what those purchase lines billed - billLineBilledCost, the
+ * one reading the importer bills by. A purchase switched off credits nothing; a container billed in
+ * part credits up to that part; several returns of one purchase share what it billed, in a fixed
+ * order (by bill id, then line id), so the card, the panel and the importer - which all call this
+ * over the same job's bills - agree on which return got which cents.
+ *
+ * A returned line with NO matching purchase on the job (a lump bill, a purchase filed elsewhere,
+ * words the scanner read differently) is credited in full, as a return is by default: the app has
+ * no purchase to hold it to, and inventing one would be a guess. The person decides from the
+ * bill - the same switch that takes a purchase line off takes a return line off.
+ *
+ * Returns the lines each RETURN bill is credited on, keyed by the bill object passed in; a line
+ * the cap touched carries `billed_amount` = what it may credit (the mirror in returnCreditRows
+ * reads that exactly as 0272's split, tax share and all). Purchases are not in the map.
+ */
+export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: unknown }>(
+  bills: readonly T[],
+  linesOf: (b: T) => BillLine[] | null | undefined,
+): Map<T, BillLine[]> {
+  const budgets: { words: string; left: number }[] = [];
+  for (const b of bills) {
+    if (!(Number(b.amount) > 0)) continue;
+    for (const l of linesOf(b) ?? []) {
+      if (isTaxLine(l) || !(billLineCost(l) > 0)) continue;
+      const words = itemWords(l.description);
+      if (words) budgets.push({ words, left: cents(billLineBilledCost(l)) });
+    }
+  }
+  const out = new Map<T, BillLine[]>();
+  const returns = bills
+    .map((b, i) => ({ b, i }))
+    .filter(({ b }) => isReturnBill(b.amount))
+    .sort((x, y) => String(x.b.id ?? "").localeCompare(String(y.b.id ?? "")) || x.i - y.i);
+  for (const { b } of returns) {
+    const lines = linesOf(b) ?? [];
+    const capped = new Map<BillLine, BillLine>();
+    const order = [...lines].sort((x, y) => String(x.id).localeCompare(String(y.id)));
+    for (const l of order) {
+      const cost = billLineCost(l);
+      if (isTaxLine(l) || l.billable === false || !(cost < 0)) continue;
+      const words = itemWords(l.description);
+      const matches = budgets.filter((p) => sameItem(words, p.words));
+      if (!matches.length) continue;
+      const size = cents(-cost);
+      const want = billedPortion(size, l.billed_amount) ?? size;
+      const room = cents(matches.reduce((s, p) => s + p.left, 0));
+      const allowed = cents(Math.max(0, Math.min(want, room)));
+      let take = allowed;
+      for (const p of matches) {
+        const used = cents(Math.min(p.left, take));
+        p.left = cents(p.left - used);
+        take = cents(take - used);
+      }
+      if (l.billed_amount == null && allowed >= size) continue;
+      capped.set(l, { ...l, billed_amount: allowed });
+    }
+    out.set(b, lines.map((l) => capped.get(l) ?? l));
+  }
+  return out;
 }
 
 /**
@@ -129,17 +223,50 @@ export type ReturnOutcome = {
 };
 
 /**
+ * A CREDIT NEVER TAKES AN INVOICE BELOW ZERO (review of this wave).
+ *
+ * An invoice that totals less than nothing settles as paid the moment it is sent (paidStatus) and
+ * its balance floors at zero (invoiceBalance), so the part of a credit bigger than the invoice it
+ * lands on simply disappears - no refund, no account credit, nothing on any screen. "The customer
+ * is owed $40 back" would be a promise the app then breaks by itself.
+ *
+ * So a return lands only on an invoice that bills at least as much as it credits. `base` is what
+ * the invoice will carry without any return (its other lines after this import); the returns are
+ * taken in the order given while they fit, and the rest are HELD: not written, not claimed, still
+ * pending on the Unbilled card for the next invoice that bills more than they do. A net charge (a
+ * restocking fee bigger than the part) always fits.
+ */
+export function returnsThatFit<R extends { billId: string; credit: number }>(base: number, returns: readonly R[]): { land: R[]; held: R[] } {
+  let room = cents(Number(base) || 0);
+  const land: R[] = [];
+  const held: R[] = [];
+  for (const r of returns) {
+    if (r.credit <= 0 || cents(room - r.credit) >= 0) {
+      land.push(r);
+      room = cents(room - r.credit);
+    } else held.push(r);
+  }
+  return { land, held };
+}
+
+/**
  * THE IMPORT SUMMARY'S WORDS FOR RETURNS - one part per fact, in the office's language.
  *
  *   credited      "a supplier return credited back to the customer: -$59.32"
- *   not credited  "the Consolidated Electrical Dist. return of $51.58 not credited - every line on
- *                  it is marked as your own cost, so none of it was the customer's"
+ *   not credited  "the Consolidated Electrical Dist. return of $51.58 not credited - none of what
+ *                  went back was billed to the customer (...)"
+ *   held          "the Consolidated Electrical Dist. return ($59.32 back to the customer) held -
+ *                  it is more than this invoice bills (...)"
  *
- * The second one is the INV-078 case, said rather than swallowed: the return is a real piece
+ * `credited` is only what THIS tap put on the invoice: a re-import of a draft that already holds
+ * the credit does not say it again, because every other count in the summary is "what this added"
+ * and a repeated "credited back" reads as a second credit.
+ *
+ * The not-credited one is the INV-078 case, said rather than swallowed: the return is a real piece
  * of paper on the job, and an import that neither credits it nor mentions it is a screen that
  * disagrees with what he can see.
  */
-export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: ReturnOutcome[]): string[] {
+export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: ReturnOutcome[], held: ReturnOutcome[] = []): string[] {
   const parts: string[] = [];
   if (credited.length) {
     const total = cents(credited.reduce((s, r) => s + r.credit, 0));
@@ -148,7 +275,12 @@ export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: Retu
   }
   for (const r of notCredited) {
     parts.push(
-      `the ${r.supplier} return of ${formatCurrency(Math.abs(r.amount))} not credited — every line on it is marked as your own cost, so none of it was the customer's`,
+      `the ${r.supplier} return of ${formatCurrency(Math.abs(r.amount))} not credited — none of what went back was billed to the customer (its lines, or the purchase they came off, are marked as your own cost)`,
+    );
+  }
+  for (const r of held) {
+    parts.push(
+      `the ${r.supplier} return (${formatCurrency(r.credit)} back to the customer) held — it is more than this invoice bills, and an invoice below zero would settle with the rest of the credit lost; it comes off the next invoice on this job that bills more than it`,
     );
   }
   return parts;

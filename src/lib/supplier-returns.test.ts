@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { billItemisation, type BillLine } from "@/lib/bill-itemisation";
-import { isReturnBill, returnCreditCost, returnCreditRows, returnsSummaryParts } from "@/lib/supplier-returns";
+import { isReturnBill, returnCreditCost, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit } from "@/lib/supplier-returns";
 
 /**
  * A SUPPLIER RETURN REACHES THE INVOICE — the arithmetic, pinned.
@@ -84,9 +84,9 @@ describe("returnCreditRows — a return is the receipt read backwards", () => {
     expect(sum(rows)).toBe(-mark(43.2, 25));
   });
 
-  it("a shop-stock container credits only the part this job was billed, tax in proportion", () => {
-    // The Twister box went back. The job was billed $13.00 of it (0272), so $13.00 is all that
-    // comes off - never the $108.36 of nuts the customer was never charged for.
+  it("a return line carrying a split credits only that part, tax in proportion (the mirror)", () => {
+    // The mechanism the purchase cap below feeds: a split on the RETURN line (which
+    // returnLinesAgainstPurchases writes from the purchase) reads exactly as 0272's split.
     const box: BillLine = { id: "box", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: "-500", unit_price: "-108.36", amount: "-108.36", category: "Electrical", billable: true, billed_amount: "13.00", is_stock: true };
     const tax: BillLine = { id: "t", description: "Sales Tax", quantity: "1", unit_price: "-9.75", amount: "-9.75", category: "Tax", billable: true, billed_amount: null };
     const rows = returnCreditRows(bill("-118.11"), [box, tax], 25);
@@ -167,11 +167,132 @@ describe("returnsSummaryParts — the import says what happened to each return",
 
   it("says why a return was not credited", () => {
     expect(returnsSummaryParts([], [{ supplier: "Consolidated Electrical Dist.", amount: -51.58, credit: 0 }])).toEqual([
-      "the Consolidated Electrical Dist. return of $51.58 not credited — every line on it is marked as your own cost, so none of it was the customer's",
+      "the Consolidated Electrical Dist. return of $51.58 not credited — none of what went back was billed to the customer (its lines, or the purchase they came off, are marked as your own cost)",
+    ]);
+  });
+
+  it("says a held return is held, with the amount and where it goes", () => {
+    expect(returnsSummaryParts([], [], [{ supplier: "CED", amount: -51.58, credit: 59.32 }])).toEqual([
+      "the CED return ($59.32 back to the customer) held — it is more than this invoice bills, and an invoice below zero would settle with the rest of the credit lost; it comes off the next invoice on this job that bills more than it",
     ]);
   });
 
   it("says nothing when there were no returns", () => {
     expect(returnsSummaryParts([], [])).toEqual([]);
+  });
+});
+
+/**
+ * A RETURN CREDITS WHAT THE CUSTOMER WAS BILLED, NEVER MORE - built from a purchase + return pair,
+ * the way the rows sit in the database (the return line carries no split: the app cannot set one).
+ */
+describe("returnLinesAgainstPurchases — the return is held to the purchase it reverses", () => {
+  type B = { id: string; amount: string; lines: BillLine[] };
+  const credit = (bills: B[], pct: number) => {
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines);
+    return bills
+      .filter((b) => isReturnBill(b.amount))
+      .map((b) => sum(returnCreditRows({ id: b.id, supplier: "CED", amount: b.amount }, held.get(b) ?? b.lines, pct)));
+  };
+  const BOX_BUY: BillLine = { id: "p-box", description: "IDEAL 30641 Twister 341-Tan 500", quantity: "1", unit_price: "108.36", amount: "108.36", category: "Electrical", billable: true, billed_amount: null };
+  const BOX_BACK: BillLine = { id: "r-box", description: "IDEAL 30641 Twister 341-Tan 500", quantity: "-1", unit_price: "-108.36", amount: "-108.36", category: "Electrical", billable: true, billed_amount: null };
+  const TAX_BUY: BillLine = { id: "p-tax", description: "Tax", quantity: "1", unit_price: "9.75", amount: "9.75", category: "Tax", billable: true, billed_amount: null };
+  const TAX_BACK: BillLine = { id: "r-tax", description: "Tax", quantity: "1", unit_price: "-9.75", amount: "-9.75", category: "Tax", billable: true, billed_amount: null };
+
+  it("a box billed in part credits only that part: $13.00 of $108.36, tax share and markup included", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "118.11", lines: [{ ...BOX_BUY, billed_amount: "13.00" }, TAX_BUY] },
+      { id: "back", amount: "-118.11", lines: [BOX_BACK, TAX_BACK] },
+    ];
+    // (13.00 + 9.75 × 13/108.36) × 1.25 = 14.17 × 1.25 = $17.71 - what the customer was billed.
+    expect(credit(bills, 25)).toEqual([-17.71]);
+    const purchaseBilled = sum(billItemisation({ id: "buy", supplier: "CED", amount: "118.11" }, bills[0].lines, 25));
+    expect(purchaseBilled).toBe(17.71);
+  });
+
+  it("a purchase switched off credits nothing when it goes back", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "118.11", lines: [{ ...BOX_BUY, billable: false }, TAX_BUY] },
+      { id: "back", amount: "-118.11", lines: [BOX_BACK, TAX_BACK] },
+    ];
+    expect(credit(bills, 25)).toEqual([0]);
+  });
+
+  it("a purchase billed in full credits the whole return, unchanged", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "118.11", lines: [BOX_BUY, TAX_BUY] },
+      { id: "back", amount: "-118.11", lines: [BOX_BACK, TAX_BACK] },
+    ];
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines);
+    expect(held.get(bills[1])).toEqual(bills[1].lines); // untouched
+    expect(credit(bills, 25)).toEqual([-mark(118.11, 25)]);
+  });
+
+  it("two returns of one purchase share what it billed, and never credit more between them", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "108.36", lines: [{ ...BOX_BUY, billed_amount: "13.00" }] },
+      { id: "back-1", amount: "-108.36", lines: [{ ...BOX_BACK, id: "r1" }] },
+      { id: "back-2", amount: "-108.36", lines: [{ ...BOX_BACK, id: "r2" }] },
+    ];
+    expect(credit(bills, 0)).toEqual([-13, 0]);
+  });
+
+  it("matches the return's words to the purchase's even with the catalogue number in front", () => {
+    // The INV-078 pair as CED printed it: the purchase line was switched off, so the return credits
+    // nothing even if nobody had switched the return lines off too.
+    const bills: B[] = [
+      { id: "buy", amount: "873.66", lines: [{ id: "p", description: "4 in LED SHALLOW IC HSG", quantity: "4.00", unit_price: "11.83", amount: "47.32", category: "Electrical", billable: false, billed_amount: null }] },
+      { id: "back", amount: "-51.58", lines: [HSG, TAX] },
+    ];
+    expect(credit(bills, 15)).toEqual([0]);
+  });
+
+  it("a returned line with no matching purchase on the job credits in full", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "95.40", lines: [{ id: "p", description: "4 in RL 600/900LM 5CCT D2W", quantity: "4", unit_price: "23.85", amount: "95.40", category: "Electrical", billable: true, billed_amount: null }] },
+      { id: "back", amount: "-51.58", lines: [HSG, TAX] },
+    ];
+    expect(credit(bills, 15)).toEqual([-59.32]);
+  });
+
+  it("one word in common is not a match", () => {
+    const bills: B[] = [
+      { id: "buy", amount: "10", lines: [{ id: "p", description: "Wire", quantity: "1", unit_price: "10", amount: "10", category: "Electrical", billable: false, billed_amount: null }] },
+      { id: "back", amount: "-10", lines: [{ id: "r", description: "Wire nuts", quantity: "-1", unit_price: "-10", amount: "-10", category: "Electrical", billable: true, billed_amount: null }] },
+    ];
+    expect(credit(bills, 0)).toEqual([-10]);
+  });
+
+  it("the Herringbone job as it sits today reads the same: nothing new to credit on INV-078", () => {
+    // Every return line is switched off (Erik's hand fix), and so is the purchase line it reverses.
+    const bills: B[] = [
+      {
+        id: "0c93fb13",
+        amount: "873.66",
+        lines: [
+          { id: "51f476d0", description: "4 in LED SHALLOW IC HSG", quantity: "4.00", unit_price: "11.83", amount: "47.32", category: "Electrical", billable: false, billed_amount: null },
+          { id: "479c0ea0", description: "Tax @ 9.00000%", quantity: "1.00", unit_price: "72.14", amount: "72.14", category: "Tax", billable: true, billed_amount: null },
+        ],
+      },
+      { id: RETURN_ID, amount: "-51.58", lines: [{ ...HSG, billable: false }, { ...TAX, billable: false }] },
+    ];
+    expect(credit(bills, 15)).toEqual([0]);
+  });
+});
+
+describe("returnsThatFit — a credit never takes an invoice below zero", () => {
+  it("lands a return the invoice bills more than, and holds one it does not", () => {
+    const a = { billId: "a", credit: 40 };
+    const b = { billId: "b", credit: 70 };
+    expect(returnsThatFit(100, [a, b])).toEqual({ land: [a], held: [b] });
+  });
+  it("a credit exactly the size of the invoice lands (the invoice reads $0, nothing lost)", () => {
+    const a = { billId: "a", credit: 59.32 };
+    expect(returnsThatFit(59.32, [a])).toEqual({ land: [a], held: [] });
+  });
+  it("an empty invoice holds every credit, and a net charge always fits", () => {
+    const a = { billId: "a", credit: 0.01 };
+    const fee = { billId: "f", credit: -5 };
+    expect(returnsThatFit(0, [a, fee])).toEqual({ land: [fee], held: [a] });
   });
 });

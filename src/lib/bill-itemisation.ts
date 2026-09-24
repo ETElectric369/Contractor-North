@@ -436,6 +436,10 @@ export type EditedRemainderDrift = {
   kept: number;
   /** What billItemisation says the row is at this markup ($0 when it no longer makes one). */
   computed: number;
+  /** The bill is a supplier RETURN, so the row is its credit row ("Returned: tax"), not a
+   *  "Supplies & tax" row - the warning has to name the row the office can actually see. This is
+   *  that row's name as the importer writes it. */
+  returnRow?: string;
 };
 
 /**
@@ -456,8 +460,8 @@ export type EditedRemainderDrift = {
  * numbers they typed, and nagging about it would be noise.
  */
 export function editedRemainderDrift(
-  bills: readonly { id: string | number; supplier?: string | null }[],
-  offered: readonly { import_key: string; quantity: number; unit_price: number; source_ids?: string[] }[],
+  bills: readonly { id: string | number; supplier?: string | null; amount?: unknown }[],
+  offered: readonly { import_key: string; description?: string; quantity: number; unit_price: number; source_ids?: string[] }[],
   onInvoice: readonly { import_key?: string | null; line_total?: unknown; edited?: boolean | null }[],
 ): EditedRemainderDrift[] {
   const out: EditedRemainderDrift[] = [];
@@ -472,13 +476,22 @@ export function editedRemainderDrift(
     const computed = row ? Math.round(row.quantity * row.unit_price * 100) / 100 : 0;
     const keptAmt = Math.round((Number(kept.line_total) || 0) * 100) / 100;
     if (Math.round(keptAmt * 100) === Math.round(computed * 100)) continue;
-    out.push({ billId: id, supplier: String(b.supplier ?? "").trim() || "A receipt", kept: keptAmt, computed });
+    const isReturn = Math.round((Number(b.amount) || 0) * 100) < 0;
+    out.push({
+      billId: id,
+      supplier: String(b.supplier ?? "").trim() || "A receipt",
+      kept: keptAmt,
+      computed,
+      ...(isReturn ? { returnRow: row?.description || "Returned: tax" } : {}),
+    });
   }
   return out;
 }
 
-/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" */
+/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" - or, on a
+ *  supplier return, "CED: your edited Returned: tax row stayed at -$4.88; ...". */
 export function editedRemainderSentence(d: EditedRemainderDrift, markupPct: unknown): string {
   const pct = +(Number(markupPct) || 0).toFixed(2);
-  return `${d.supplier}: your edited Supplies & tax row stayed at ${formatCurrency(d.kept)}; at ${pct}% it would be ${formatCurrency(d.computed)}`;
+  const row = d.returnRow ?? "Supplies & tax";
+  return `${d.supplier}: your edited ${row} row stayed at ${formatCurrency(d.kept)}; at ${pct}% it would be ${formatCurrency(d.computed)}`;
 }

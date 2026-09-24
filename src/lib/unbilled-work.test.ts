@@ -308,6 +308,22 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.total).toBe(0);
   });
 
+  it("a return credits no more than the purchase it reverses billed — the card reads the importer's cap", () => {
+    // The purchase line was switched off, so sending it back owes the customer nothing, even with
+    // the return's own lines left on. The words match with CED's catalogue number in front.
+    const buy = {
+      id: "bill-buy",
+      amount: 47.32,
+      po_id: null,
+      bill_line_items: [{ id: "p1", description: "4 in LED SHALLOW IC HSG", quantity: 4, unit_price: 11.83, amount: 47.32, category: "Electrical", billable: false }],
+    };
+    const back = ledReturn(true);
+    back.bill_line_items[0] = { ...back.bill_line_items[0], description: "H245ICAT 4 in LED Shallow IC HSG" } as (typeof back.bill_line_items)[0];
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [buy, back], markupPct: 15 });
+    expect(w.returnsCount).toBe(0);
+    expect(w.returnsCredit).toBe(0);
+  });
+
   it("a return another invoice already credited is claimed there, never counted again", () => {
     const w = computeUnbilledWork({ ...base, claims: claimsHolding(["bill-ret"]), jobEntries: [], bills: [ledReturn(true)], markupPct: 15 });
     expect(w.returnsCount).toBe(0);

@@ -335,7 +335,7 @@ export async function createInvoiceForJob(
       // A pending supplier return alone never mints an invoice (a document for a credit and
       // nothing else), but "nothing new" must not hide money the customer is owed (INV-078).
       if (picture.returnsCredit > 0.005 && (!quote || wantCosts)) {
-        refusal.error += ` A supplier return of ${formatCurrency(picture.returnsCredit)} is still owed back to the customer; it comes off the next invoice on this job.`;
+        refusal.error += ` A supplier return of ${formatCurrency(picture.returnsCredit)} is still owed back to the customer; it comes off the next invoice on this job that bills more than it.`;
       }
       return refusal;
     }
