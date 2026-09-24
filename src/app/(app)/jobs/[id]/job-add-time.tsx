@@ -22,6 +22,8 @@ interface Tech {
   // bill_rate is never offered or defaulted into the pay field.
   hourly_rate?: number | null;
   bill_rate?: number | null;
+  /** 0286: the owner is paid by owner's draw, so his shifts carry no pay-rate override. */
+  paid_by_draw?: boolean | null;
 }
 
 export function JobAddTimeEntry({
@@ -82,6 +84,9 @@ export function JobAddTimeEntry({
   const billRate = Number(person?.bill_rate ?? 0);
   const billRateTyped =
     rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
+  // The owner's shift has no pay rate at all (0286): the field is not offered, and a figure typed
+  // for somebody else before switching the person to him is never sent.
+  const ownerShift = person?.paid_by_draw === true;
 
 
   function save() {
@@ -101,7 +106,7 @@ export function JobAddTimeEntry({
         lunch_minutes: lunchMinutesFor(tookLunch),
         notes,
         miles,
-        rate_override: rate > 0 ? rate : null,
+        rate_override: !ownerShift && rate > 0 ? rate : null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       setOpen(false);
@@ -164,6 +169,7 @@ export function JobAddTimeEntry({
               </div>
             )}
           </div>
+          {!ownerShift && (
           <div>
             <Label htmlFor="at-rate">Pay rate ($/hr) — supervisor / override</Label>
             <NumberInput id="at-rate" value={rate} onValueChange={setRate} placeholder="Default rate" />
@@ -178,6 +184,7 @@ export function JobAddTimeEntry({
               </div>
             )}
           </div>
+          )}
           {/* Miles only — no dollar preview; mileage pay is settled on /payroll by a
               human-typed amount, never an app-computed rate×miles figure. */}
           <div>

@@ -365,6 +365,93 @@ export function balanceForPerson(input: {
   };
 }
 
+// ── WHO IS ON THE WAGES BOARD (0286) ─────────────────────────────────────────
+// Erik, 2026-09-23: "get rid of the owners wages". The owner is paid by owner's draw, so he has no
+// balance, no owed periods and no line on the accountant's wage file. The Pay board used to list
+// him as owed $42,640 (341 h x $125), money nobody ever owed anyone. The ids come from the same
+// profile_pay read that prices everyone else (paid_by_draw rides beside the rates), so the page
+// that refuses on a broken rates read also refuses before it could mistake the owner for crew.
+
+/** WHAT THE WAGE DOORS SAY TO AN OWNER. He is paid by owner's draw, so a payment, a period lock
+ *  and a mileage settlement all have nothing to record for him. The DB refuses too
+ *  (refuse_wages_for_an_owner on pay_payments and payroll_runs); the actions say it first, in plain
+ *  words, before anything is written or locked. */
+export function ownerWagesRefusal(name: string | null | undefined): string {
+  const who = String(name ?? "").trim() || "This person";
+  return `${who} is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.`;
+}
+
+/** The ids of everyone paid by owner's draw, out of a payRateMap(Read) result. */
+export function drawIdsFrom(rates: ReadonlyMap<string, { paid_by_draw?: boolean | null }>): Set<string> {
+  const out = new Set<string>();
+  for (const [id, r] of rates) if (r?.paid_by_draw === true) out.add(String(id));
+  return out;
+}
+
+/** Keep only the wage crew: any row whose person is paid by owner's draw is left off the board. */
+export function wagesOnly<T extends { profileId: string }>(rows: T[] | null | undefined, drawIds: ReadonlySet<string>): T[] {
+  return (rows ?? []).filter((r) => r && !drawIds.has(String(r.profileId)));
+}
+
+/**
+ * THE ACCOUNTANT'S PAYROLL FILE, as rows of cells (the view escapes and downloads them). Pure, so a
+ * test can hold it to its two laws: base pay and mileage never sum into one figure (no Total
+ * column), and whoever is paid by owner's draw is NAMED at the foot rather than silently missing,
+ * because an accountant who knows the owner worked 341 hours will otherwise ask where they went.
+ *
+ * `rows` must already be wages-only (wagesOnly above); `notOnFile` is the owners left off.
+ */
+export function payrollCsvRows(input: {
+  label: string;
+  taxNumber?: string;
+  rows: PayrollRow[];
+  frozenBase: Record<string, { hours: number; gross: number; rates: number[] }>;
+  settledMileage: Record<string, number>;
+  notOnFile: { name: string }[];
+}): (string | number)[][] {
+  const { rows, frozenBase, settledMileage } = input;
+  // Two buckets, two statuses, NO combined Total column — base wages and the
+  // mileage settlement must never sum into one figure on the accountant file.
+  const header = ["Employee", "Hours", "Rate ($/hr)", "Gross ($)", "Base status", "Business miles", "Mileage ($)", "Mileage status"];
+  const lines = rows.map((r) => {
+    // THE FROZEN GROSS, NOT TODAY'S RATE. Re-exporting a period after a raise used to hand the
+    // accountant a different file from the one he already had for the same fortnight. A lock froze
+    // what those hours came to; read that. The unpaid slice is still live, because nothing has
+    // frozen it yet.
+    const frozen = frozenBase[r.profileId];
+    const paidHrs = frozen ? frozen.hours : r.paidHours;
+    const paidGross = frozen ? frozen.gross : r.paidGross;
+    const hrs = paidHrs + r.unpaidHours;
+    const grossAcc = r2(paidGross + r.unpaidGross);
+    const paidRateCols = frozen ? frozen.rates : r.paidRates.map((x) => x.rate);
+    const distinct = [...new Set([...paidRateCols, ...r.unpaidRates.map((x) => x.rate)])].sort((a, b) => a - b);
+    const rateCol =
+      distinct.length > 1 ? `mixed (${distinct.map((x) => x.toFixed(2)).join("/")})` : (distinct[0] ?? r.rate).toFixed(2);
+    const baseStatus = r.unpaidHours === 0 ? "Paid" : r.paidHours > 0 ? "Partly paid" : "Unpaid";
+    const businessMi = Math.round((r.heldMiles + r.settledMiles) * 10) / 10;
+    const settled = settledMileage[r.profileId];
+    const mileageCol = settled !== undefined ? settled.toFixed(2) : "held";
+    const mileageStatus = settled !== undefined ? (r.heldMiles > 0 ? "Partly settled" : "Settled") : "Held";
+    return [r.name, hrs.toFixed(2), rateCol, grossAcc.toFixed(2), baseStatus, businessMi.toFixed(1), mileageCol, mileageStatus];
+  });
+  const unpaidHours = rows.reduce((s, r) => s + r.unpaidHours, 0);
+  const unpaidGross = r2(rows.reduce((s, r) => s + r.unpaidGross, 0));
+  const out: (string | number)[][] = [
+    [`Payroll — ${input.label}`],
+    // Company identity for the accountant: the org's EIN (Settings → Company). Only when set, so
+    // an org without one keeps the exact old file shape.
+    ...(input.taxNumber ? [["Company EIN", input.taxNumber]] : []),
+    header,
+    ...lines,
+    ["TOTAL (unpaid base)", unpaidHours.toFixed(2), "", unpaidGross.toFixed(2), "", "", "", ""],
+  ];
+  for (const o of input.notOnFile ?? []) {
+    const name = String(o?.name ?? "").trim() || "The owner";
+    out.push([`Not on this file: ${name}, owner, paid by owner's draw`]);
+  }
+  return out;
+}
+
 // ── THE SENTENCES ────────────────────────────────────────────────────────────
 // These come back from the actions and get read on screen, so they are built here where a test
 // can hold them to being true. Plain words, no jargon, and no em-dashes.

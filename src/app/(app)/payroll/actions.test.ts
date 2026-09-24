@@ -31,7 +31,7 @@ vi.mock("@/lib/observe", () => ({
   },
 }));
 
-import { markPeriodPaid } from "./actions";
+import { markPeriodPaid, recordPayment, settleMileage } from "./actions";
 
 type Call = { table: string; verb: string; payload?: any; ids?: string[] };
 
@@ -185,5 +185,61 @@ describe("markPeriodPaid — the snapshot is priced from the rows it CLAIMED", (
     expect(updates[1]?.payload).toEqual({ paid_at: null });
     expect(updates[1]?.ids).toEqual(claimed); // the three it took, never the three it only read
     expect(reported.calls).toEqual([]); // the release landed, so there is nothing stuck to log
+  });
+});
+
+/**
+ * THE OWNER IS PAID BY DRAW (0286). All three wage doors refuse him in plain words BEFORE anything
+ * is read for locking, stamped or inserted. The scripts below carry only the reads a refusal needs:
+ * any further statement is unscripted and would throw, so the tests also prove nothing else ran.
+ */
+describe("the wage doors refuse the owner (0286)", () => {
+  const ERIK = "e0000000-0000-4000-8000-000000000001";
+  const said = "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.";
+
+  it("markPeriodPaid refuses before any period check or lock", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [{ data: { role: "owner" }, error: null }],
+        "profile_pay.select": [{ data: { hourly_rate: "0.00", full_name: "Erik Taylor", paid_by_draw: true }, error: null }],
+      },
+      calls,
+    );
+    expect(await markPeriodPaid({ profileId: ERIK, periodStart: "2026-09-07", periodEnd: "2026-09-21" })).toEqual({ ok: false, error: said });
+    expect(calls.some((c) => c.verb !== "select")).toBe(false);
+  });
+
+  it("settleMileage refuses before any mileage is stamped", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [{ data: { role: "owner" }, error: null }],
+        "profile_pay.select": [{ data: { commute_baseline_miles: 0, full_name: "Erik Taylor", paid_by_draw: true }, error: null }],
+      },
+      calls,
+    );
+    expect(await settleMileage({ profileId: ERIK, periodStart: "2026-09-07", periodEnd: "2026-09-21", amount: 50 })).toEqual({ ok: false, error: said });
+    expect(calls.some((c) => c.verb !== "select")).toBe(false);
+  });
+
+  it("recordPayment refuses before the payment row is inserted", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [
+          { data: { role: "owner" }, error: null }, // the caller (staff check)
+          { data: { id: ERIK, full_name: "Erik Taylor", active: true, role: "owner" }, error: null }, // the payee
+        ],
+        "organizations.select": [{ data: { settings: { timezone: "America/Los_Angeles" } }, error: null }],
+      },
+      calls,
+    );
+    const res = await recordPayment({ profileId: ERIK, amount: 500, paidOn: "2026-09-20", method: "cash" });
+    expect(res).toEqual({ ok: false, error: said });
+    expect(calls.find((c) => c.table === "pay_payments")).toBeUndefined();
+  });
+
+  it("a crew member still goes through markPeriodPaid exactly as before", async () => {
+    state.client = fakeSupabase(scriptFor({ entries: BRIAN_JUNE, claimed: BRIAN_JUNE.map((e) => e.id) }), calls);
+    expect(await markPeriodPaid(PERIOD)).toEqual({ ok: true });
+    expect(runInsert()).toMatchObject({ gross: 1360 });
   });
 });

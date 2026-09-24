@@ -688,8 +688,12 @@ export async function updateMember(
 
   // Same-org + row check (audit v921 silent-write): the update was id-keyed with no org guard and
   // no .select, so a zero-row write (foreign or vanished member) reported success.
-  const { data: tgt } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  const { data: tgt } = await supabase.from("profiles").select("org_id, role").eq("id", id).maybeSingle();
   if (!tgt || (tgt as { org_id?: string | null }).org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  // The owner is paid by owner's draw (0286): there is no pay rate of his to set, here or anywhere.
+  if ("hourly_rate" in clean && (tgt as { role?: string | null }).role === "owner") {
+    return { ok: false, error: "The owner is paid by owner's draw, so there is no pay rate to set." };
+  }
   const { data: wroteM, error } = await supabase.from("profiles").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteM?.length) return { ok: false, error: "That didn't save - reload and try again." };
@@ -897,10 +901,15 @@ export async function removeMember(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Owner/admin sets a team member's billable hourly rate. */
+/** Owner/admin sets a team member's pay rate and/or bill rate.
+ *
+ *  `hourlyRate` UNDEFINED MEANS "LEAVE THE PAY RATE ALONE" (0286). It used to be written on every
+ *  save as `pay || null`, which for the owner's row (no Pay box any more, only Bill) would have
+ *  nulled profiles.hourly_rate, the column his bill rate falls back to (0054). And an owner has no
+ *  pay rate to set at all: he is paid by owner's draw, so a pay figure for him is refused. */
 export async function updateMemberRate(
   id: string,
-  hourlyRate: number | null,
+  hourlyRate: number | null | undefined,
   billRate?: number | null,
 ): Promise<Result> {
   const supabase = await createClient();
@@ -911,11 +920,17 @@ export async function updateMemberRate(
   const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   // Same-org + row check (audit v921 silent-write).
-  const { data: rt } = await supabase.from("profiles").select("org_id").eq("id", id).maybeSingle();
+  const { data: rt } = await supabase.from("profiles").select("org_id, role, full_name").eq("id", id).maybeSingle();
   if (!rt || (rt as { org_id?: string | null }).org_id !== me.org_id) return { ok: false, error: "Member not found." };
+  if (hourlyRate !== undefined && (rt as { role?: string | null }).role === "owner") {
+    const who = String((rt as { full_name?: string | null }).full_name ?? "").trim() || "The owner";
+    return { ok: false, error: `${who} is the owner and is paid by owner's draw, so there is no pay rate to set. The bill rate still applies.` };
+  }
 
-  const patch: Record<string, unknown> = { hourly_rate: hourlyRate };
+  const patch: Record<string, unknown> = {};
+  if (hourlyRate !== undefined) patch.hourly_rate = hourlyRate;
   if (billRate !== undefined) patch.bill_rate = billRate;
+  if (!Object.keys(patch).length) return { ok: true };
   const { data: wroteR, error } = await supabase.from("profiles").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteR?.length) return { ok: false, error: "That didn't save - reload and try again." };

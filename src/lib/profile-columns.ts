@@ -67,7 +67,6 @@ export function payById(rows: ProfilePayRow[] | null | undefined): Map<string, P
  *  would break for everyone. Surfaces that legitimately show rates therefore fetch them from the
  *  staff-scoped `profile_pay` view and merge them onto the embedded profile. A tech who reaches
  *  one of these code paths simply gets no rates, which is the point. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function payRateMap(supabase: any): Promise<Map<string, PayRates>> {
   return (await payRateMapRead(supabase)).rates;
 }

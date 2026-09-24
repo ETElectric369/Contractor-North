@@ -19,7 +19,7 @@ import {
 } from "@/lib/utils";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
-import { balanceForPerson, toPayPaymentRow, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
+import { balanceForPerson, drawIdsFrom, toPayPaymentRow, wagesOnly, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimecardStack, type Grouping, type StackEntry } from "./timecard-stack";
@@ -138,7 +138,7 @@ export default async function TimecardsPage({
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
-    supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate").eq("active", true).order("full_name"),
+    supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate, paid_by_draw").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
     supabase
       .from("jobs")
@@ -585,7 +585,7 @@ export default async function TimecardsPage({
     return d.toISOString().slice(0, 10);
   })();
   const balanceWindowIso = tzDayStartUtc(balanceWindowYmd, tz).toISOString();
-  const [balClosed, balOpen, balPayments, balRuns, balRates, rolesRes] = await Promise.all([
+  const [balClosed, balOpen, balPayments, balRuns, balRates] = await Promise.all([
     readAll<any>((from, to) =>
       supabase
         .from("time_entries")
@@ -627,35 +627,19 @@ export default async function TimecardsPage({
         .range(from, to),
     ),
     // The rate multiplies every unlocked dollar, so a dropped read prices every unpaid hour at
-    // zero and "You Owe $0" is a lie. It refuses with the other four.
+    // zero and "You Owe $0" is a lie. It refuses with the other four. It also says who is paid by
+    // owner's draw (0286), so the crew/owner split can never be read from a separate query that
+    // fails on its own: if this read breaks, no figure is shown at all.
     payRateMapRead(supabase),
-    /* WHO IS THE CREW AND WHO IS THE HOUSE (2026-09-18). Erik, on this row reading "You Owe
-     * $47,855.95 across 3 people": $40,498 of it is HIS OWN time at his own $125 rate, which is a
-     * draw against the business, not a wage he owes an employee. So the headline was a debt to
-     * Brian and Jimmy nearly six times bigger than the one he actually has, and that headline is
-     * the figure he acts on. The ROLE is the only thing that separates the two and it is not on
-     * profile_pay (0215 carries the PAY columns, not role), so it comes off `profiles` — the same
-     * read, for the same reason, that /payroll made tonight, so the two screens compose the total
-     * the same way. Not a money read: it changes how the total is COMPOSED, never what any one
-     * person is owed. */
-    supabase.from("profiles").select("id, role"),
   ]);
   const owedUnreadable = [balClosed, balOpen, balPayments, balRuns, balRates].some((r) => !!r.problem);
-  /* NOTHING SILENT, BUT NOT A REFUSAL. If the roles read broke, every person's balance is still
-   * exactly right and only the split is unknown — so the headline keeps counting everyone (the old
-   * behaviour, which is never LOW) and the line underneath says why, out loud. Shrinking a figure
-   * he pays people off, quietly, on a read we are not sure of, is the one move not available. */
-  const rolesKnown = !rolesRes.error && Array.isArray(rolesRes.data);
-  const ownerIds = new Set<string>(
-    ((rolesRes.data ?? []) as { id?: string | null; role?: string | null }[])
-      .filter((p) => p?.id && p.role === "owner")
-      .map((p) => String(p!.id)),
-  );
+  /* YOU OWE COUNTS THE CREW ONLY (0286). The owner is paid by owner's draw, not wages, so he has
+   * no balance here at all: the old "Your own $40,498 is a draw" line was his hours priced at his
+   * own $125 rate, a figure nobody ever owed anyone. His hours stay in the week ledger below, with
+   * no dollars beside them. */
+  const drawIds = drawIdsFrom(balRates.rates);
   let owedTotal = 0;
   let owedPeople = 0;
-  let ownerDraw = 0;
-  let ownerDrawNames: string[] = [];
-  let ownerDrawIsViewer = false;
   if (!owedUnreadable) {
     // Rates come from the staff-scoped profile_pay view, not the embed (0215/0216 revoked those
     // columns from the authenticated role).
@@ -686,6 +670,7 @@ export default async function TimecardsPage({
     for (const p of balPayments.rows.map(toPayPaymentRow)) push(paymentsByPerson, p.profileId, p);
 
     const ids = new Set<string>([...entriesByPerson.keys(), ...lockedByPerson.keys(), ...paymentsByPerson.keys()]);
+    for (const id of drawIds) ids.delete(id); // the owner has no wages balance (0286)
     const balances: PersonBalance[] = [...ids].map((id) =>
       balanceForPerson({
         profileId: id,
@@ -700,27 +685,12 @@ export default async function TimecardsPage({
     // /payroll's rule, word for word: what he OWES, not a net position. A man who is ahead does
     // not reduce what the next man is owed, so only positive balances are summed — and a zero or
     // negative balance is not a person he owes, so it is not in the count either.
-    const owing = balances.filter((b) => b.owed > 0.005);
-    // THE HEADLINE COUNTS THE CREW. An owner's balance keeps a line of its own below, so the
-    // figure is neither lost nor misread — the same split /payroll's board makes, said shorter.
-    const crewOwing = rolesKnown ? owing.filter((b) => !ownerIds.has(b.profileId)) : owing;
-    const ownerOwing = rolesKnown ? owing.filter((b) => ownerIds.has(b.profileId)) : [];
-    owedPeople = crewOwing.length;
-    owedTotal = Math.round(crewOwing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
-    ownerDraw = Math.round(ownerOwing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
-    ownerDrawNames = ownerOwing.map((b) => firstNameOf(b.name));
-    ownerDrawIsViewer = ownerOwing.length === 1 && ownerOwing[0].profileId === (user?.id ?? "");
+    // wagesOnly is the same filter /payroll's board runs, so the two screens cannot disagree about
+    // who is on it.
+    const owing = wagesOnly(balances, drawIds).filter((b) => b.owed > 0.005);
+    owedPeople = owing.length;
+    owedTotal = Math.round(owing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
   }
-  /* Said once, in the register of whoever is reading it: Erik sees "your own", an office manager
-   * sees the name. Either way it names the money, says what kind of money it is, and the whole row
-   * is already the way in to Pay, where it can be recorded (NO DEAD ENDS). */
-  const ownerDrawLine = !rolesKnown
-    ? "Everyone with a balance is counted here. The roles could not be read just now, so an owner draw cannot be told apart from wages."
-    : ownerDraw > 0.005
-      ? ownerDrawIsViewer
-        ? `Your own ${formatCurrency(ownerDraw)} is a draw, not wages, so it is not in that figure.`
-        : `${ownerDrawNames.join(" and ")} ${ownerDrawNames.length > 1 ? "are owners" : "is an owner"}, so ${formatCurrency(ownerDraw)} of draw is not in that figure.`
-      : null;
 
   /* ── FIX THESE ─────────────────────────────────────────────────────────────────────────────
    *
@@ -961,11 +931,8 @@ export default async function TimecardsPage({
             </>
           ) : owedPeople === 0 ? (
             <>
-              {/* "The crew" when he is carrying a draw of his own, because "everyone" with a figure
-                  sitting right under it contradicts itself. */}
-              <span className="block text-base font-semibold text-slate-900">
-                {ownerDraw > 0.005 ? "The crew is paid up" : "Everyone is paid up"}
-              </span>
+              {/* "The crew": the owner is paid by owner's draw and is never on this figure (0286). */}
+              <span className="block text-base font-semibold text-slate-900">The crew is paid up</span>
               <span className="block text-sm text-slate-500">Open Pay</span>
             </>
           ) : (
@@ -975,11 +942,6 @@ export default async function TimecardsPage({
                 across {owedPeople} {owedPeople === 1 ? "person" : "people"} · Open Pay
               </span>
             </>
-          )}
-          {/* THE OWNER'S OWN MONEY, QUIETER AND STILL SAID. It is not wages, so it is not in the
-              headline; it is real, so it does not disappear. */}
-          {!owedUnreadable && ownerDrawLine && (owedPeople > 0 || ownerDraw > 0.005) && (
-            <span className="mt-0.5 block text-xs text-slate-500">{ownerDrawLine}</span>
           )}
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />

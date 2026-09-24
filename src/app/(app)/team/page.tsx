@@ -1,4 +1,4 @@
-import { payById, PROFILE_PAY_COLS, PROFILE_SAFE_COLS, type ProfilePayRow } from "@/lib/profile-columns";
+import { isPaidByDraw, payById, PROFILE_PAY_COLS, PROFILE_SAFE_COLS, type ProfilePayRow } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
@@ -106,7 +106,14 @@ export default async function TeamPage() {
                     <div className="truncate text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
                     <div className="truncate text-xs text-slate-400">{m.email}</div>
                   </div>
-                  {isAdmin && <MemberRate id={m.id} rate={m.hourly_rate ?? null} billRate={m.bill_rate ?? null} />}
+                  {isAdmin && (
+                    <MemberRate
+                      id={m.id}
+                      rate={m.hourly_rate ?? null}
+                      billRate={m.bill_rate ?? null}
+                      paidByDraw={isPaidByDraw(payRows.get(String(m.id)))}
+                    />
+                  )}
                   {!m.active && <Badge tone="red">inactive</Badge>}
                   {!!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
                   <Badge tone={roleTone[m.role]}>{m.role}</Badge>

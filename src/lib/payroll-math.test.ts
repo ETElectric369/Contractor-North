@@ -14,7 +14,12 @@ import {
   periodLabel,
   toPayPaymentRow,
   lockRefusalReason,
+  drawIdsFrom,
+  wagesOnly,
+  payrollCsvRows,
+  ownerWagesRefusal,
   type PayPaymentRow,
+  type PayrollRow,
 } from "@/lib/payroll-math";
 
 describe("payLine (gross pay)", () => {
@@ -691,5 +696,69 @@ describe("overlapping entries for one person are NOT deduped by the aggregator",
     // No flag, no warning, no second figure: the Pay page would read $120 and the cheque would be
     // written for $120. The refusal has to happen before the row exists.
     expect(Object.keys(both)).not.toContain("overlapWarning");
+  });
+});
+
+// ── THE WAGES BOARD IS THE CREW (0286) ──────────────────────────────────────
+// The old board listed Erik as owed $42,640 (341 h x $125), money nobody ever owed anyone. The owner
+// is paid by owner's draw: no row, no owed periods, no CSV line, and a footer naming him.
+describe("the Pay board and its CSV leave the owner off, and say so (0286)", () => {
+  const rates = new Map([
+    ["erik", { hourly_rate: 0, bill_rate: 125, commute_baseline_miles: 0, paid_by_draw: true }],
+    ["brian", { hourly_rate: 40, bill_rate: 85, commute_baseline_miles: 0, paid_by_draw: false }],
+    ["jimmy", { hourly_rate: 50, bill_rate: 95, commute_baseline_miles: 0, paid_by_draw: false }],
+  ]);
+  const row = (profileId: string, name: string, unpaidHours: number, rate: number): PayrollRow => ({
+    profileId,
+    name,
+    rate,
+    unpaidHours,
+    unpaidGross: unpaidHours * rate,
+    paidHours: 0,
+    paidGross: 0,
+    unpaidRates: [{ rate, hours: unpaidHours }],
+    paidRates: [],
+    heldMiles: 0,
+    settledMiles: 0,
+    loggedMiles: 0,
+  });
+
+  it("drawIdsFrom reads the flag off the rates read; a missing flag is crew", () => {
+    expect([...drawIdsFrom(rates)]).toEqual(["erik"]);
+    expect([...drawIdsFrom(new Map([["x", { hourly_rate: 0 } as any]]))]).toEqual([]);
+  });
+
+  it("wagesOnly drops the owner and keeps every crew member in order", () => {
+    const board = [row("brian", "Brian Taylor", 10, 40), row("erik", "Erik Taylor", 341, 0), row("jimmy", "Jimmy Santoliva", 5, 50)];
+    expect(wagesOnly(board, drawIdsFrom(rates)).map((r) => r.profileId)).toEqual(["brian", "jimmy"]);
+  });
+
+  it("the CSV has no owner line, no combined total column, and names the owner at the foot", () => {
+    const rows = wagesOnly([row("brian", "Brian Taylor", 10, 40), row("erik", "Erik Taylor", 30, 0)], drawIdsFrom(rates));
+    const csv = payrollCsvRows({
+      label: "Sep 7 – Sep 20",
+      rows,
+      frozenBase: {},
+      settledMileage: {},
+      notOnFile: [{ name: "Erik Taylor" }],
+    });
+    const flat = csv.map((r) => r.join("|"));
+    expect(flat.some((l) => l.startsWith("Erik Taylor|"))).toBe(false);
+    expect(csv[1]).not.toContain("Total");
+    // The total is the crew's alone: Brian's 10 h at $40, nothing of the owner's 30 h.
+    expect(csv.find((r) => r[0] === "TOTAL (unpaid base)")).toEqual(["TOTAL (unpaid base)", "10.00", "", "400.00", "", "", "", ""]);
+    expect(csv[csv.length - 1]).toEqual(["Not on this file: Erik Taylor, owner, paid by owner's draw"]);
+  });
+
+  it("an org with no owner hours in the period keeps the exact old file shape", () => {
+    const csv = payrollCsvRows({ label: "L", rows: [row("brian", "Brian Taylor", 1, 40)], frozenBase: {}, settledMileage: {}, notOnFile: [] });
+    expect(csv[csv.length - 1][0]).toBe("TOTAL (unpaid base)");
+  });
+
+  it("the wage doors' refusal is plain words with the real name", () => {
+    expect(ownerWagesRefusal("Erik Taylor")).toBe(
+      "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.",
+    );
+    expect(ownerWagesRefusal("")).toMatch(/^This person is the owner/);
   });
 });

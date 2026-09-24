@@ -70,6 +70,7 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
+import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
 import { IntakeFiles } from "../../leads/intake-files";
@@ -368,6 +369,7 @@ export default async function JobDetailPage({
     jobLevelRate,
     { data: refundRows },
     unbilled,
+    { data: pettyRows },
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -389,9 +391,10 @@ export default async function JobDetailPage({
     // anchor; NON-staff keep the narrow select. The gate matters here: this array
     // serializes into client-component props (RSC), so an unconditional enrichment
     // would hand every tech the whole crew's pay + bill rates — "the modal returns
-    // null for non-staff" is not a serialization defense.
+    // null for non-staff" is not a serialization defense. paid_by_draw (0286) tells the add-time
+    // modal to hide the pay-rate override for the owner, whose shifts have no pay rate.
     viewerIsStaff
-      ? supabase.from("profile_pay").select("id, full_name, home_address, hourly_rate, bill_rate").order("full_name")
+      ? supabase.from("profile_pay").select("id, full_name, home_address, hourly_rate, bill_rate, paid_by_draw").order("full_name")
       : supabase.from("profile_pay").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
@@ -431,6 +434,13 @@ export default async function JobDetailPage({
           return null;
         })
       : Promise.resolve(null),
+    // THE JOB'S PETTY CASH IS COST HERE TOO (0286 build). /analytics and Nort have counted it since
+    // audit v800 (computeJobProfitRows), and this hub did not, so one job carried two profits. Staff
+    // only by RLS (0056), which is fine: the Costs tab is staff-only. `replenish` is the tin being
+    // refilled, a transfer, never a cost.
+    viewerIsStaff
+      ? supabase.from("petty_cash").select("amount, kind").eq("job_id", id)
+      : Promise.resolve({ data: [] as any[] }),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -514,7 +524,17 @@ export default async function JobDetailPage({
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
   // laborCost (what we PAY) via the shared allocation-aware helper — identical math to /analytics.
-  const { hours: laborHours, cost: laborCost } = laborCostForJob(entries ?? [], id);
+  //
+  // THE OWNER'S HOURS ARE NOT A COST (0286). Erik is paid by owner's draw, so laborCostForJob adds
+  // $0 for his hours and hands them back as ownerHours. `laborCost` is therefore CREW labor, and
+  // the tiles below show his hours as hours only, beside a "$X per hour you worked" that answers
+  // the question the old -$1,085 profit could not: what did this job leave him for his time.
+  const { hours: laborHours, cost: laborCost, ownerHours } = laborCostForJob(entries ?? [], id);
+  const crewHours = Math.max(0, Math.round((laborHours - ownerHours) * 100) / 100);
+  const ownersOnJob = ((entries ?? []) as any[])
+    .filter((e: any) => e?.profiles?.paid_by_draw === true && e.profile_id)
+    .map((e: any) => ({ id: String(e.profile_id), name: e.profiles?.full_name ?? null }));
+  const ownerVoice = ownerRegister(ownersOnJob, user?.id ?? null);
   // Materials, via the ONE shared rule (livePurchaseOrders): a draft/cancelled PO isn't a
   // cost, and a PO whose supplier bill has arrived is SUPERSEDED by that bill (bills.po_id,
   // migration 0142) — so one CED delivery entered as both a PO and the supplier's invoice
@@ -561,11 +581,9 @@ export default async function JobDetailPage({
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
-  // totals (which double-counts a progress invoice + the final). invoiced/quoted
-  // stay for context only. `invoiced` is deliberately the RAW all-invoices sum
-  // (drafts included) — it only picks the "Invoiced vs Estimated" label below,
-  // not a money figure; the billed money figure is progress.invoiced.
-  const invoiced = (invoices ?? []).reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
+  // totals (which double-counts a progress invoice + the final). The tile says
+  // "Collected" because that is what the figure is: it used to be labelled
+  // "Invoiced" or "Estimated" by whether any invoice existed, over a cash number.
   // Estimate base = the ACCEPTED contract (progress.estimate). Same value under two
   // names: `quoted` feeds the draw UI, `contractTotal` the payment schedule.
   const quoted = progress.estimate;
@@ -597,8 +615,18 @@ export default async function JobDetailPage({
   // is surfaced below as MILES ONLY — no app-computed dollars (mileage pay is a human-typed
   // settlement on /payroll, never rate×miles). If mileage dollars are ever folded back in,
   // they must be added to BOTH surfaces.
-  const profit = revenue - laborCost - materialCost - billsCost;
+  //
+  // PETTY CASH TOO: /analytics and Nort (computeJobProfitRows) have subtracted the job's petty cash
+  // since audit v800, and this hub did not, so the three disagreed on the same job. Now all three
+  // are collected − crew labor − materials − bills − petty cash.
+  const pettyCost = ((pettyRows ?? []) as any[])
+    .filter((pc: any) => pc?.kind !== "replenish")
+    .reduce((s: number, pc: any) => s + (Number(pc?.amount) || 0), 0);
+  const profit = revenue - laborCost - materialCost - billsCost - pettyCost;
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  // What the job left the owner for each hour he put into it. Only when both halves are real: no
+  // owner hours means no such rate, and nothing collected yet means the job has not paid anything.
+  const perOwnerHour = ownerHours > 0 && revenue > 0 ? profit / ownerHours : null;
 
   // ONE signing call for the whole tab, not one per document (2026-09-08 phone-lag sweep).
   // Organize notes filed to a job are documents rows with NO file (file_url null); the helper
@@ -1080,10 +1108,19 @@ export default async function JobDetailPage({
                   wraps by the space the card actually has. */}
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-6 gap-y-3">
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{invoiced > 0 ? "Invoiced" : "Estimated"}</div></div>
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Labor · {formatDuration(laborHours)}</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Collected</div></div>
+                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Crew Labor · {formatDuration(crewHours)}</div></div>
+                  {/* HOURS ONLY, NO DOLLARS (0286): the owner is paid by owner's draw, so his time
+                      is not a cost. It is still time the job took, and it is what the "per hour"
+                      figure beside Profit divides by. */}
+                  {ownerHours > 0 && (
+                    <div><div className="text-base font-semibold text-slate-700">{formatDuration(ownerHours)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{ownerVoice.hoursLabel}</div></div>
+                  )}
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div></div>
+                  {Math.abs(pettyCost) > 0.005 && (
+                    <div><div className="text-base font-semibold text-slate-700">{formatCurrency(pettyCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Petty Cash</div></div>
+                  )}
                   {/* Miles only — mileage dollars are a /payroll settlement decision,
                       never an app-computed figure (and never in profit above). */}
                   <div><div className="text-base font-semibold text-slate-700">{totalMiles.toFixed(1)} mi</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Mileage</div></div>
@@ -1091,6 +1128,9 @@ export default async function JobDetailPage({
                 <div className="flex shrink-0 gap-6 border-t border-slate-100 pt-3 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
                   <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs font-medium text-slate-500">Profit</div></div>
                   <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs font-medium text-slate-500">Margin</div></div>
+                  {perOwnerHour !== null && (
+                    <div><div className={`text-2xl font-bold ${perOwnerHour >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(perOwnerHour)}</div><div className="text-xs font-medium text-slate-500">{ownerVoice.perHourPhrase}</div></div>
+                  )}
                 </div>
               </div>
             </CardContent>

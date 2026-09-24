@@ -10,8 +10,10 @@ import { hoursBetween } from "@/lib/utils";
 import {
   aggregatePayrollEntries,
   balanceForPerson,
+  drawIdsFrom,
   payRateForEntry,
   toPayPaymentRow,
+  wagesOnly,
   type PayPaymentRow,
   type PersonBalance,
 } from "@/lib/payroll-math";
@@ -131,7 +133,7 @@ export default async function PayrollPage({
 
   // THE SIX READS EVERY FIGURE ON THIS PAGE IS MADE OF. Each is paged to the end and each reports
   // its own failure (see readAll above); nothing below does arithmetic until they are all whole.
-  const [closedRead, openRead, autoClosedRead, paymentsRead, baseRunsRead, mileageRead, { data: people }, ratesRead, rolesRes] =
+  const [closedRead, openRead, autoClosedRead, paymentsRead, baseRunsRead, mileageRead, { data: people }, ratesRead] =
     await Promise.all([
       readAll<any>("hours", (from, to) =>
         supabase
@@ -193,14 +195,13 @@ export default async function PayrollPage({
       // THE SEVENTH MONEY READ. The rate multiplies every live dollar on this board, so a dropped
       // read prices every unlocked hour at zero and a man owed thousands reads "Paid Up" — the exact
       // confident wrong number the rule below exists to prevent. It refuses with the other six.
+      //
+      // WHO IS THE CREW AND WHO IS THE OWNER rides this same read now (0286: paid_by_draw sits
+      // beside the rates). It used to be a separate `profiles` roles read with a soft fallback that
+      // counted everyone when it broke. That fallback is gone on purpose: this read already refuses
+      // the whole page when it fails, so there is no state left in which the owner could be mistaken
+      // for crew and the board still show a figure.
       payRateMapRead(supabase),
-      // WHO IS THE CREW AND WHO IS THE HOUSE (2026-09-18). Erik's own balance is an owner DRAW, not
-      // a wage he owes an employee, and summing it into "You Owe" made the headline read as a debt
-      // to Brian and Jimmy when most of it was himself. The ROLE is the only thing that separates
-      // the two, and it is not on profile_pay — 0215's view carries the PAY columns, not role — so
-      // it comes off `profiles`, where every other staff page reads its roles from. Not a money
-      // read: it changes how the total is COMPOSED, never what any one person is owed.
-      supabase.from("profiles").select("id, role"),
     ]);
 
   // NOTHING SILENT. One rule, because a simple rule is the only kind that holds: if ANY of those
@@ -262,19 +263,19 @@ export default async function PayrollPage({
     if (id && !nameById[id] && e.profiles?.full_name) nameById[id] = e.profiles.full_name;
   }
 
-  // OWNERS. Their balances are draws against the business, not wages owed to a crew member, so the
-  // headline leaves them out of "You Owe" and names them on their own line. Their ROWS are
-  // untouched: an owner is still tappable and still recordable, because Erik may well want to
-  // record what he has drawn.
-  const ownerIds: string[] = [];
-  for (const p of (rolesRes?.data ?? []) as { id?: string | null; role?: string | null }[]) {
-    if (p?.id && p.role === "owner") ownerIds.push(String(p.id));
-  }
-  // NOTHING SILENT, but NOT a refusal. If that read broke we cannot tell an owner from a tech —
-  // every person's own balance is still exactly right, only the way the total is composed is
-  // unknown. So the headline keeps counting everyone (the old behaviour, which is never LOW) and
-  // the view says why, out loud, instead of quietly shrinking a figure Erik pays people off.
-  const rolesKnown = !rolesRes?.error && Array.isArray(rolesRes?.data);
+  // OWNERS ARE NOT ON THIS BOARD (0286). An owner is paid by owner's draw, not wages: no balance
+  // row, no owed periods, no CSV line. The old board listed Erik as owed $42,640 (341 h x $125),
+  // money nobody ever owed anyone, and then explained it away underneath. His hours stay on
+  // Timecards; recording what he takes out belongs to the accountant's books, not this page.
+  const drawIds = drawIdsFrom(ratesRead.rates);
+  const ownersWithHours = (list: any[]) => {
+    const seen = new Map<string, { id: string; name: string }>();
+    for (const e of list) {
+      const id = e.profile_id ? String(e.profile_id) : "";
+      if (id && drawIds.has(id) && !seen.has(id)) seen.set(id, { id, name: nameById[id] ?? e.profiles?.full_name ?? "" });
+    }
+    return [...seen.values()];
+  };
 
   // One mapper, shared with the actions (toPayPaymentRow), so a database row can never mean one
   // thing on the page and another thing in the write path.
@@ -305,6 +306,7 @@ export default async function PayrollPage({
   // with none of the three has no balance to be right or wrong about, and a row for him would be
   // the fluff Erik asked to skim.
   const personIds = new Set<string>([...entriesByPerson.keys(), ...lockedByPerson.keys(), ...paymentsByPerson.keys()]);
+  for (const id of drawIds) personIds.delete(id);
 
   const balances: PersonBalance[] = [...personIds]
     .map((id) =>
@@ -331,7 +333,7 @@ export default async function PayrollPage({
     for (const e of closed) {
       if (e.paid_at) continue;
       const id = e.profile_id ? String(e.profile_id) : "";
-      if (!id) continue;
+      if (!id || drawIds.has(id)) continue;
       const day = todayStrInTz(tz, new Date(e.clock_in));
       const p = payPeriodBounds(settings.pay_schedule, settings.pay_anchor, day);
       const key = `${p.start}|${p.end}`;
@@ -355,7 +357,11 @@ export default async function PayrollPage({
     const t = new Date(e.clock_in).getTime();
     return Number.isFinite(t) && t >= startMs && t < endMs;
   });
-  const rows = aggregatePayrollEntries(inPeriod, tz);
+  // Wages people only: the mileage block and the accountant's file carry no owner row (0286). The
+  // owners who did work in this period are named at the foot of the file instead.
+  const rows = wagesOnly(aggregatePayrollEntries(inPeriod, tz), drawIds);
+  const ownersOnFile = ownersWithHours(inPeriod);
+  const ownersOnBoard = ownersWithHours([...closed, ...open]);
 
   const settledMileage: Record<string, number> = {};
   for (const run of mileageRead.rows) {
@@ -386,11 +392,13 @@ export default async function PayrollPage({
   const openShifts: { profileId: string; name: string; entryId: string }[] = [];
   for (const e of open) {
     const id = e.profile_id ? String(e.profile_id) : "";
-    if (!id || openShifts.some((o) => o.profileId === id)) continue;
+    // The owner's running shift moves no wage, so it is no reason to hold this board's figures.
+    if (!id || drawIds.has(id) || openShifts.some((o) => o.profileId === id)) continue;
     openShifts.push({ profileId: id, name: nameById[id] ?? e.profiles?.full_name ?? "Someone", entryId: String(e.id) });
   }
 
-  const autoClosed = autoClosedRead.rows;
+  // Same for an auto-closed shift: it blocks a pay period from locking, and the owner has none.
+  const autoClosed = autoClosedRead.rows.filter((e: any) => !drawIds.has(String(e.profile_id ?? "")));
   const autoClosedNames = [...new Set(autoClosed.map((e: any) => e.profiles?.full_name ?? nameById[String(e.profile_id)]).filter(Boolean))];
 
   return (
@@ -409,9 +417,9 @@ export default async function PayrollPage({
         balances={balances}
         payments={payments}
         nameById={nameById}
-        ownerIds={ownerIds}
+        ownersOnBoard={ownersOnBoard}
+        ownersOnFile={ownersOnFile}
         viewerId={user?.id ?? null}
-        rolesKnown={rolesKnown}
         owedPeriods={owedPeriods}
         openShifts={openShifts}
         today={today}
