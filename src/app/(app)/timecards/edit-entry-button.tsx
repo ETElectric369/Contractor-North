@@ -15,6 +15,7 @@ import { useToast } from "@/components/toast";
 import { atFromClockTime, clockInputValue, splitClock } from "@/lib/split-preview";
 import { hoursBetween } from "@/lib/utils";
 import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
+import { StopClockSheet } from "./stop-clock-sheet";
 
 interface Entry {
   id: string;
@@ -95,6 +96,7 @@ export function EditEntryButton({
   neighbors,
   initialSplit = null,
   rebuiltFromOldSplit = false,
+  workDayEnd,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
@@ -120,8 +122,14 @@ export function EditEntryButton({
   /** Any piece of this entry's shift was rebuilt from an old split by 0289, this entry included
    *  when it is the first piece (which carries no split_how of its own). */
   rebuiltFromOldSplit?: boolean;
+  /** "HH:MM", the org's work-day end (workDayWindowHm(settings).end): the Stop The Clock sheet
+   *  offers it as a chip on the clock-in day. */
+  workDayEnd?: string;
 }) {
   const router = useRouter();
+  /** A RUNNING clock is stopped, not edited (2026-09-24): the trigger reads Stop The Clock and the
+   *  modal is the stop sheet. The closed-entry form below is untouched. */
+  const isOpen = entry.status === "open" && !entry.clock_out;
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
@@ -415,6 +423,32 @@ export function EditEntryButton({
   }
 
   if (!isStaff) return null; // techs can't edit times/job after the fact — office only
+
+  if (isOpen) {
+    return (
+      <>
+        {!hideTrigger && (
+          <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => setOpen(true)}>
+            Stop The Clock
+          </Button>
+        )}
+        {open && (
+          <StopClockSheet
+            entry={entry}
+            jobs={jobs}
+            jobCodes={jobCodes}
+            jobCodesEnabled={jobCodesEnabled}
+            tz={tz}
+            workDayEnd={workDayEnd}
+            open={open}
+            onClose={close}
+            onDelete={remove}
+            deleting={pending}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <>

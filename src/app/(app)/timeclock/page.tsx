@@ -420,8 +420,8 @@ export default async function TimeclockPage() {
          *
          *  WHAT SURVIVES THE BOARD: the crew_day_assignments ROWS, and the writers in
          *  crew-actions.ts that make them. A day-assignment is still tier 0 of the job-less
-         *  clock-in (timeclock/actions.ts, migration 0139 — the precedence law) and still feeds
-         *  plan-vs-actual on /timecards. Deleting those writers would break a punch, not a board.
+         *  clock-in (timeclock/actions.ts, migration 0139 — the precedence law). Deleting those
+         *  writers would break a punch, not a board.
          *
          *  NOTHING SILENT / NO DEAD ENDS: a door that closes gets another named where it stood,
          *  and the whole row is the target (44px, easier to hit than a link inside it). */}

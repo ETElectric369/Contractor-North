@@ -22,6 +22,7 @@ export function OpenEntryEditor({
   neighbors,
   initialSplit = null,
   rebuiltFromOldSplit = false,
+  workDayEnd,
 }: {
   entry: { id: string } & Record<string, any>;
   jobCodes: JobCode[];
@@ -35,6 +36,8 @@ export function OpenEntryEditor({
   /** ?split=1&at=…&job=…: open straight onto Split This Shift, filled in (Nort's fill). */
   initialSplit?: SplitPrefill | null;
   rebuiltFromOldSplit?: boolean;
+  /** "HH:MM", the org's work-day end: the Stop The Clock sheet offers it on the clock-in day. */
+  workDayEnd?: string;
 }) {
   const searchParams = useSearchParams();
   if (searchParams.get("entry") !== entry.id) return null;
@@ -58,6 +61,7 @@ export function OpenEntryEditor({
       neighbors={neighbors}
       initialSplit={initialSplit}
       rebuiltFromOldSplit={rebuiltFromOldSplit}
+      workDayEnd={workDayEnd}
       initialOpen
       hideTrigger
       onClosed={stripParam}

@@ -19,11 +19,12 @@ import { CrewBoard, type Lane, type CrewJob, type CrewAppt, type JobOption } fro
  *  one had looked identical for seven weeks. Erik: "do we need the crew week? lets try and mold as
  *  much together as possible and simplify, i lean towards the schedule".
  *
- *  So the ROW survives the grid. crew_day_assignments is load-bearing in two places that never had
- *  a UI of their own: timeclock/actions.ts reads the day's row FIRST when somebody clocks in
- *  without picking a job (THE PRECEDENCE LAW, migration 0139), and /timecards feeds the week's
- *  rows to comparePlanToActual for the "Fix These" plan-drift card. This board is now the only
- *  writer, and it writes through the same crew-actions.ts verbs the grid called.
+ *  So the ROW survives the grid. crew_day_assignments is load-bearing where it never had a UI of
+ *  its own: timeclock/actions.ts reads the day's row FIRST when somebody clocks in without picking
+ *  a job (THE PRECEDENCE LAW, migration 0139). (/timecards used to feed the week's rows to a
+ *  plan-drift half of "Fix These"; that half was deleted 2026-09-24 because no row could act on
+ *  what it found.) This board is now the only writer, and it writes through the same
+ *  crew-actions.ts verbs the grid called.
  *
  *  WHAT IT DOES NOT DO: guess. There is no "newest active job" fallback and no dashed suggestion
  *  pill inside a person's row. cn-v590 deleted those on Erik's own instruction ("i dont think we
