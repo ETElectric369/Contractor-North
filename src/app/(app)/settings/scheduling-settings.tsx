@@ -97,23 +97,28 @@ export function SchedulingSettings({
           any number of minutes from Timecards.
         </p>
         {/* NOT ACTIVE UNTIL IT CAN TEXT (2026-09-24). This box sat ticked on an org that could not
-            send a single text: the onboarding-truth problem. While texting isn't set up it shows
-            unticked and can't be changed, and says why in one line; the stored choice is kept, so
-            the day texting is set up the reminders start as chosen with no code change. */}
-        <label className={`flex items-start gap-2 text-sm ${textReady ? "text-slate-600" : "text-slate-400"}`}>
+            send a single text: the onboarding-truth problem. It shows the SAVED choice as it is and
+            stays changeable while texting isn't set up, with a line saying it isn't active yet: a
+            tick means "text them once texting is set up", and unticking it now keeps them off on
+            that day. Showing it unticked while it was stored ON meant the box turned itself on,
+            unseen, the day a texting number was typed. The 12-hour question's text rides this
+            same choice (api/timeclock/long-shift), so no text goes out without this box. */}
+        <label className="flex items-start gap-2 text-sm text-slate-600">
           <input
             type="checkbox"
-            checked={textReady ? remindClock : false}
-            disabled={!textReady}
+            checked={remindClock}
             onChange={(e) => setRemindClock(e.target.checked)}
-            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand disabled:opacity-60"
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand"
           />
           <span>
-            Text timeclock reminders to techs: a morning nudge if they haven&apos;t clocked in, and an end-of-day
-            reminder to clock out and fill in the day&apos;s details.
+            Text timeclock reminders to techs: a morning nudge if they haven&apos;t clocked in, an end-of-day
+            reminder to clock out and fill in the day&apos;s details, and the 12-hour &ldquo;still on the
+            clock?&rdquo; question (it always comes as a notification too).
             {!textReady && (
               <span className="mt-0.5 block text-xs text-amber-700">
-                Not active. {TEXTS_NOT_READY_LINE} {TEXTING_CARD_PLACE} shows what&apos;s missing.
+                Not active yet. {TEXTS_NOT_READY_LINE}{" "}
+                {remindClock ? "Ticked, they start then; untick to keep them off." : "Unticked, they stay off then too."}{" "}
+                {TEXTING_CARD_PLACE} shows what&apos;s missing.
               </span>
             )}
           </span>

@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
 import {
@@ -285,6 +286,7 @@ function ReceiptRow({
   amount,
   qr,
   toast,
+  textReady = true,
 }: {
   outcome: "paid" | "declined";
   receipt: Receipt | null;
@@ -292,12 +294,18 @@ function ReceiptRow({
   amount: number;
   qr?: string;
   toast: (m: string, k?: "success" | "error" | "info") => void;
+  /** Can the business text (smsReadiness(org).ready, from the page)? false: the row leads with
+   *  Text From This Phone and never offers Text Receipt, which could only refuse. */
+  textReady?: boolean;
 }) {
   const [texting, setTexting] = useState(false);
   const [texted, setTexted] = useState(false);
-  /** The SMS service said this customer has no number, or that texting isn't set up yet
-   *  (lib/sms-readiness): either way the text door becomes this phone's. */
+  /** The SMS service said this customer has no number: the text door becomes this phone's. */
   const [noPhone, setNoPhone] = useState(false);
+  /** The server said texting isn't set up (the page's answer went stale since it rendered). */
+  const [notReadySeen, setNotReadySeen] = useState(false);
+  /** The business's own text door works: texting is set up, as far as anyone has said. */
+  const serviceText = textReady && !notReadySeen;
   const [emailing, setEmailing] = useState(false);
   const [emailed, setEmailed] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -307,7 +315,8 @@ function ReceiptRow({
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
   /** The text door from this phone: the decline always (see above); paid only once the service
    *  has said there is no number to send to. */
-  const fromThisPhone = outcome === "declined" || noPhone;
+  const fromThisPhone = outcome === "declined" || noPhone || !serviceText;
+  const offerServiceText = outcome === "paid" && !noPhone && serviceText;
 
   async function textIt() {
     if (texting) return;
@@ -327,7 +336,7 @@ function ReceiptRow({
       }
       // Texting isn't set up: say so here, where he tapped, and hand him the door that works.
       if (r.notReady) {
-        setNoPhone(true);
+        setNotReadySeen(true);
         toast("Texting isn't set up yet, so the business can't text it. Text From This Phone sends it from yours.", "info");
         return;
       }
@@ -386,7 +395,7 @@ function ReceiptRow({
   }
 
   const note = [
-    outcome === "paid" && !noPhone && "Text Receipt sends from the business’s number.",
+    offerServiceText && "Text Receipt sends from the business’s number.",
     fromThisPhone && "Text From This Phone sends from this phone’s number.",
     outcome === "paid" && "Email Receipt sends from the business’s email.",
     canShare && "Share opens this phone’s share sheet.",
@@ -404,7 +413,7 @@ function ReceiptRow({
       ) : (
         <>
           <div className="flex flex-wrap justify-center gap-2">
-            {outcome === "paid" && !noPhone && (
+            {offerServiceText && (
               <Button size="sm" variant="outline" onClick={() => void textIt()} disabled={texting}>
                 {texted ? <Check className="h-4 w-4 text-emerald-600" /> : texting ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />}
                 {texted ? "Texted" : texting ? "Sending…" : "Text Receipt"}
@@ -436,6 +445,9 @@ function ReceiptRow({
             )}
           </div>
           {noPhone && <p className="text-xs text-slate-500">No phone number on file for this customer — text it from this phone instead.</p>}
+          {outcome === "paid" && !noPhone && !serviceText && (
+            <p className="text-xs text-slate-500">{TEXTS_NOT_READY_LINE} Until then, text it from this phone.</p>
+          )}
         </>
       )}
       {showQr && outcome === "paid" && qr && <img src={qr} alt="Scan for the receipt" className="mx-auto h-40 w-40 rounded-lg" />}
@@ -483,6 +495,8 @@ export function PayNowButton(props: Mode & {
   cardEnabled: boolean;
   compact?: boolean;
   label?: string;
+  /** smsReadiness(org).ready from the page: the receipt row's Text door reads it. */
+  textReady?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -930,7 +944,7 @@ export function PayNowButton(props: Mode & {
   const retry = tap.kind === "error" && tapStarted && (tap.outcome === "declined" || tap.outcome === "failed") ? () => void tapToPay() : null;
   const declinedReceipt =
     tap.kind === "error" && tap.outcome === "declined" && invoiceId ? (
-      <ReceiptRow outcome="declined" receipt={receipt} invoiceId={invoiceId} amount={balanceRef.current} toast={toast} />
+      <ReceiptRow outcome="declined" receipt={receipt} invoiceId={invoiceId} amount={balanceRef.current} toast={toast} textReady={props.textReady} />
     ) : null;
   const busy = tap.kind === "busy" ? busyLine(tap.label, progress) : null;
 
@@ -1039,7 +1053,7 @@ export function PayNowButton(props: Mode & {
             {/* Apple 5.10: the receipt, sendable from the approved outcome — the paid invoice. */}
             {invoiceId && (
               <div className="mt-2 w-full">
-                <ReceiptRow outcome="paid" receipt={receipt} invoiceId={invoiceId} amount={paid} qr={art?.payQr} toast={toast} />
+                <ReceiptRow outcome="paid" receipt={receipt} invoiceId={invoiceId} amount={paid} qr={art?.payQr} toast={toast} textReady={props.textReady} />
               </div>
             )}
             <Button size="sm" className="mt-2" onClick={close}>Done</Button>
@@ -1384,11 +1398,13 @@ export function SettleUpButton(props: Mode & {
   methods?: string[];
   venmoConfigured?: boolean;
   compact?: boolean;
+  /** smsReadiness(org).ready from the page (lib/sms-readiness). */
+  textReady?: boolean;
 }) {
-  const { cardEnabled = false, methods, venmoConfigured, compact, ...mode } = props;
+  const { cardEnabled = false, methods, venmoConfigured, compact, textReady, ...mode } = props;
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <PayNowButton {...(mode as Mode)} cardEnabled={cardEnabled} compact={compact} />
+      <PayNowButton {...(mode as Mode)} cardEnabled={cardEnabled} compact={compact} textReady={textReady} />
       <RecordPaymentButton {...(mode as Mode)} methods={methods} venmoConfigured={venmoConfigured} compact={compact} />
     </span>
   );

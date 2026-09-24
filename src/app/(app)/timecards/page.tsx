@@ -569,8 +569,8 @@ export default async function TimecardsPage({
    *  A broken shift is hours that are WRONG: a clock still running from a forgotten clock-out, or a
    *  0193 ghost auto-closed at zero and worth nothing. Every row names the verb that fixes it and
    *  opens that entry through the ?entry= door, which is now the clock-out sheet for a running
-   *  clock: the row reads "Clock Out Brian", and the sheet it opens says "Stop Brian's Clock" (every
-   *  running row here is a forgotten one).
+   *  clock: the row reads "Clock Out Brian", and so does the sheet it opens, with its clock-out time
+   *  empty (every running row here is a forgotten one).
    *
    *  THE PLAN-DRIFT HALF IS GONE (2026-09-24). It compared the job calendar to where the hours
    *  landed and listed "moved", "unplanned" and "no-show" days under the broken rows. Erik asked

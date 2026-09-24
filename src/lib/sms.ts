@@ -1,23 +1,16 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
 import { getOrgSettings } from "@/lib/org-settings";
-import { pickSmsSender, smsReadinessFrom, type SmsEnv, type SmsReadiness } from "@/lib/sms-readiness";
+import { pickSmsSender, smsE164, smsReadinessFrom, type SmsEnv, type SmsReadiness } from "@/lib/sms-readiness";
 
 /**
  * Twilio's To/From must be E.164 (org-settings.ts documents sms_from_number that way), but the
- * automation settings form saves whatever was typed after a .trim() and customer phones are
+ * automation settings form saved whatever was typed after a .trim() and customer phones are
  * stored human-formatted — "(530) 555-1234" reached Twilio verbatim and came back as a 21212/21211
- * rejection wearing the "add your Twilio account" message (audit v921). Normalize the US shapes
- * here, at the send boundary. Returns null when it isn't a number we can vouch for.
+ * rejection wearing the "add your Twilio account" message (audit v921). Normalized at the send
+ * boundary by the one reader lib/sms-readiness owns (smsE164), so readiness and the sender agree.
  */
-function e164(raw: string | null | undefined): string | null {
-  const s = (raw ?? "").trim();
-  if (/^\+[1-9]\d{7,14}$/.test(s)) return s;
-  const d = s.replace(/\D/g, "");
-  if (d.length === 10) return `+1${d}`;
-  if (d.length === 11 && d.startsWith("1")) return `+${d}`;
-  return null;
-}
+const e164 = smsE164;
 
 /** Twilio auth: prefer a scoped, revocable API Key (TWILIO_API_KEY_SID +
  *  TWILIO_API_KEY_SECRET) over the full-access account Auth Token. The request URL
@@ -73,21 +66,26 @@ export async function sendSms(
   const auth = twilioAuth();
   const override = fromOverride && fromOverride.trim();
   const msgServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  // The SAME rule smsReadiness answers with (lib/sms-readiness pickSmsSender): a per-org number
-  // wins; otherwise the Messaging Service; a bare from-number only when there is no service.
+  // A business number that doesn't read as a phone number ("530-555", "n/a") is passed over for
+  // the platform's sender (pickSmsSender), never sent as typed for the texting service to refuse
+  // every time. It is flagged, because it is the setup mistake this class of failure comes from
+  // and it must not sit invisible; the Texting card says the same thing to the owner.
+  if (override && !e164(override)) {
+    reportError("sms:from", new Error(`Text-from number "${override}" isn't in +1XXXXXXXXXX form (Settings, Customers, Texting)`), { from: override });
+  }
+  // The SAME rule smsReadiness answers with (lib/sms-readiness pickSmsSender): a usable per-org
+  // number wins; otherwise the Messaging Service; a bare from-number only when there is no service.
   const sender = pickSmsSender(smsEnv(), override);
   if (!auth || !sender) {
     // Every door asks smsReadiness before it gets here, so this is the backstop, not the message.
     return false;
   }
   const from = sender === "org_number" ? override : sender === "platform_number" ? process.env.TWILIO_FROM_NUMBER : null;
-  // The org's own number goes out in E.164; anything we can't read that way (a short code, an
-  // alphanumeric sender id, an international number) is still sent as typed — Twilio is the judge
-  // — but it's flagged, because a "(530) 555-1234" in Settings → Automation is the setup mistake
-  // this whole class of failure comes from and it must not sit invisible.
+  // The platform's bare number is read the same way; one we can't normalize is sent as set (the
+  // texting service is the judge) and flagged.
   const fromE164 = from ? e164(from) : null;
   if (from && !fromE164) {
-    reportError("sms:from", new Error(`Text-from number "${from}" isn't in +1XXXXXXXXXX form (Settings, Customers, Texting)`), { from });
+    reportError("sms:from", new Error(`The platform's text-from number isn't in +1XXXXXXXXXX form`), {});
   }
   const fromParam = fromE164 ?? from;
 

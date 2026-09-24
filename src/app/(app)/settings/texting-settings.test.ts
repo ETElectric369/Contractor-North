@@ -28,12 +28,26 @@ function reminderBox(html: string) {
 }
 
 describe("the timeclock reminder option", () => {
-  it("not ready: shown unticked and not active, with the one line", () => {
+  it("not ready: the saved choice shows as it is, stays changeable, and says it isn't active yet", () => {
     const html = renderToStaticMarkup(createElement(SchedulingSettings, { settings, textReady: false }));
     const { input, after } = reminderBox(html);
-    expect(input).toMatch(/ disabled=""/);
+    // Stored ON reads ON: the box never turns itself on, unseen, the day texting is set up.
+    expect(input).toMatch(/ checked=""/);
+    expect(input).not.toMatch(/ disabled=""/);
+    expect(after).toMatch(/Not active yet\. Texts start once texting is set up\. Ticked, they start then; untick to keep them off\./);
+    expect(after).toMatch(/Settings, Customers, Texting shows what(&#x27;|')s missing\./);
+    // The 12-hour question's text rides this box, so the box says so.
+    expect(after).toContain("12-hour");
+  });
+
+  it("not ready and unticked: says they stay off then too", () => {
+    const html = renderToStaticMarkup(
+      createElement(SchedulingSettings, { settings: { ...settings, remind_timeclock: false }, textReady: false }),
+    );
+    const { input, after } = reminderBox(html);
     expect(input).not.toMatch(/ checked=""/);
-    expect(after).toMatch(/Not active\. Texts start once texting is set up\. Settings, Customers, Texting shows what(&#x27;|')s missing\./);
+    expect(input).not.toMatch(/ disabled=""/);
+    expect(after).toContain("Unticked, they stay off then too.");
   });
 
   it("ready: the stored choice shows, and it can be changed", () => {
@@ -66,6 +80,15 @@ describe("the Texting card", () => {
     );
     expect(html).toContain("Texting is on.");
     expect(html).toContain("your business&#x27;s own number");
+    expect(html).not.toMatch(/isn(&#x27;|')t one the texting service can use/);
+  });
+
+  it("a saved number that isn't a phone number is said to be unusable, with how to write it", () => {
+    const html = renderToStaticMarkup(
+      createElement(TextingCard, { status: { ready: true, sender: "messaging_service" }, number: "530-555" }),
+    );
+    expect(html).toMatch(/The number saved here isn(&#x27;|')t one the texting service can use/);
+    expect(html).toContain("+15305551234");
   });
 });
 

@@ -185,17 +185,17 @@ describe("pickLongShiftSteps: a bell line at ten hours, a question and a buzz at
 
 describe("clockDoorWords: the office's door names whose clock it is", () => {
   it("names the first name, in Title Case words", () => {
-    expect(clockDoorWords("Brian Cole")).toEqual({ clockOut: "Clock Out Brian", stop: "Stop Brian's Clock" });
+    expect(clockDoorWords("Brian Cole")).toEqual({ clockOut: "Clock Out Brian" });
   });
 
   it("has words for a row with no name", () => {
-    expect(clockDoorWords(null)).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
-    expect(clockDoorWords("   ")).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
-    expect(clockDoorWords("—")).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
+    expect(clockDoorWords(null)).toEqual({ clockOut: "Clock Them Out" });
+    expect(clockDoorWords("   ")).toEqual({ clockOut: "Clock Them Out" });
+    expect(clockDoorWords("—")).toEqual({ clockOut: "Clock Them Out" });
   });
 
   it("never names the viewer to himself", () => {
-    expect(clockDoorWords("Erik Taylor", { self: true })).toEqual({ clockOut: "Clock Out", stop: "Stop Your Clock" });
+    expect(clockDoorWords("Erik Taylor", { self: true })).toEqual({ clockOut: "Clock Out" });
   });
 });
 

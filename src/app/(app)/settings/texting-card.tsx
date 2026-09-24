@@ -13,13 +13,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Input, Label } from "@/components/ui/input";
-import type { SmsReadiness } from "@/lib/sms-readiness";
+import { SMS_NUMBER_EXAMPLE, smsE164, type SmsReadiness } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
 
 /** Every door that texts, as the owner knows it. Kept here so the card and the doors agree. */
 const TEXT_DOORS = [
-  "Timeclock reminders to the crew (morning and end of day)",
-  "The 12-hour “still on the clock?” question, as a text as well as a notification",
+  "Timeclock reminders to the crew: the morning nudge, the end-of-day reminder, and the 12-hour “still on the clock?” question (as a text as well as a notification), when ticked under Scheduling",
   "The Text buttons on invoices, estimates and receipts",
 ];
 
@@ -29,13 +28,28 @@ export function TextingCard({ status, number }: { status: SmsReadiness; number: 
   const [, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const storedUnusable = !!(number ?? "").trim() && !smsE164(number);
 
   function save() {
-    if (value.trim() === (number ?? "").trim()) return;
+    const typed = value.trim();
+    // Blank is a choice (use the app's number). Anything else must read as a phone number, or the
+    // card would say "Texting is on" while the texting service refused every send from it. It is
+    // stored in the one form the service takes, so "(530) 555-1234" saves as +15305551234.
+    const normalized = typed ? smsE164(typed) : "";
+    if (normalized === null) {
+      setErr(`That isn't a phone number the texting service can use. Write it like ${SMS_NUMBER_EXAMPLE}. Nothing was saved.`);
+      return;
+    }
+    if (normalized === (number ?? "").trim()) {
+      setErr(null);
+      if (normalized !== typed) setValue(normalized);
+      return;
+    }
     setErr(null);
     start(async () => {
-      const res = await updateOrgSettings({ sms_from_number: value.trim() });
+      const res = await updateOrgSettings({ sms_from_number: normalized });
       if (!res.ok) return setErr(res.error ?? "Couldn't save your number.");
+      setValue(normalized);
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
       // The number is one of the pieces: read the answer again.
@@ -88,14 +102,22 @@ export function TextingCard({ status, number }: { status: SmsReadiness; number: 
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onBlur={save}
-          placeholder="+15305551234"
+          placeholder={SMS_NUMBER_EXAMPLE}
           className="max-w-[220px]"
           inputMode="tel"
         />
         <p className="mt-1 text-xs text-slate-400">
-          A number registered for texting under your business, written like +15305551234. Your customer and crew texts
+          A number registered for texting under your business, written like {SMS_NUMBER_EXAMPLE}. Your customer and crew texts
           go out from it, under your own name. Leave it blank to use the app&apos;s texting number once there is one.
         </p>
+        {/* A number saved before this card checked it (or typed by another door) and not usable:
+            said here, since texts go out from the app's number instead, or not at all. */}
+        {!err && storedUnusable && (
+          <p className="mt-1 text-sm text-amber-700">
+            The number saved here isn&apos;t one the texting service can use, so texts don&apos;t go out from it. Write it
+            like {SMS_NUMBER_EXAMPLE}.
+          </p>
+        )}
         {err && <p className="mt-1 text-sm text-red-600">{err}</p>}
         {saved && <p className="mt-1 text-sm font-medium text-green-600">Saved</p>}
       </div>

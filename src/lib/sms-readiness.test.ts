@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-import { pickSmsSender, smsReadinessFrom, TEXT_NOT_READY_REFUSAL, TEXTS_NOT_READY_LINE } from "./sms-readiness";
+import { pickSmsSender, smsE164, smsReadinessFrom, TEXT_NOT_READY_REFUSAL, TEXTS_NOT_READY_LINE } from "./sms-readiness";
 import { sendSms, smsEnv, smsReadiness } from "./sms";
 
 const NONE = { account: false, messagingService: false, platformNumber: false };
@@ -49,6 +49,30 @@ describe("smsReadinessFrom", () => {
     });
     expect(smsReadinessFrom({ env: { ...ACCOUNT_ONLY, platformNumber: true } })).toEqual({ ready: true, sender: "platform_number" });
     expect(pickSmsSender({ ...ACCOUNT_ONLY, messagingService: true }, "+15305551234")).toBe("org_number");
+  });
+
+  it("counts the business's number only when it reads as a phone number", () => {
+    for (const bad of ["530-555", "n/a", "call me", "5551234"]) {
+      // Nothing else to send from: the owner is told the number isn't usable, and how to write it.
+      expect(smsReadinessFrom({ env: ACCOUNT_ONLY, orgNumber: bad, orgName: "ET Electric" })).toEqual({
+        ready: false,
+        missing: ["A valid texting number for ET Electric, written like +15305551234"],
+      });
+      // The platform's sender is there: it carries the texts instead of a number the service refuses.
+      expect(pickSmsSender({ ...ACCOUNT_ONLY, messagingService: true }, bad)).toBe("messaging_service");
+    }
+    // A US number written the everyday way is a phone number.
+    expect(pickSmsSender(ACCOUNT_ONLY, "(530) 555-1234")).toBe("org_number");
+  });
+
+  it("smsE164 reads the US shapes and refuses the rest", () => {
+    expect(smsE164("(530) 555-1234")).toBe("+15305551234");
+    expect(smsE164("1-530-555-1234")).toBe("+15305551234");
+    expect(smsE164("+15305551234")).toBe("+15305551234");
+    expect(smsE164("+442071234567")).toBe("+442071234567");
+    expect(smsE164("530-555")).toBeNull();
+    expect(smsE164("")).toBeNull();
+    expect(smsE164(null)).toBeNull();
   });
 
   it("never names a key, a variable or a vendor in what the owner reads", () => {

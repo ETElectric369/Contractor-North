@@ -1316,7 +1316,7 @@ export async function createManualEntry(input: {
  * by hand a day later, and the invoice waited on it.
  *
  * This is the one door that stops a clock at a STATED time, for every caller: the office's sheet
- * (Clock Out Brian on an ordinary shift, Stop Brian's Clock on a forgotten one; 2026-09-24 Erik
+ * (Clock Out Brian, on an ordinary shift or a forgotten one; 2026-09-24 Erik
  * asked for "an option to [end] an employees time clock and clock out for them" at any time),
  * updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
  * land here and get the same bounds, the same card crumb and the same message to the crew member.

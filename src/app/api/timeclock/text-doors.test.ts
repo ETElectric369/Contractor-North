@@ -198,8 +198,8 @@ describe("the 12-hour question, as a text too", () => {
     job: { job_number: "J-011", name: "Herringbone" },
     profiles: { full_name: "Brian Taylor", role: "tech", active: true, phone },
   });
-  const routes = (phone: string | null) => (q: Q): Reply => {
-    if (q.table === "organizations") return { data: [ORG] };
+  const routes = (phone: string | null, org: typeof ORG = ORG) => (q: Q): Reply => {
+    if (q.table === "organizations") return { data: [org] };
     if (q.table === "time_entries" && q.verb === "select") return { data: [row(phone)] };
     if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: "entry-1" }] }; // the claim
     return undefined;
@@ -237,6 +237,25 @@ describe("the 12-hour question, as a text too", () => {
     const body = await (await longShift(req())).json();
     expect(body).toMatchObject({ asked: 1, texted: 0, text_not_ready: 0, failed: 0 });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rides the owner's Text timeclock reminders box: unticked, the push still asks and no text goes", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes("(530) 555-0100", { ...ORG, settings: { ...TZ, remind_timeclock: false } as typeof ORG.settings }));
+    const body = await (await longShift(req())).json();
+    expect(body).toMatchObject({ asked: 1, texted: 0, text_off: 1, text_not_ready: 0, office_buzzes: 1, failed: 0 });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(spies.push.map((p) => p[1])).toEqual(["clock_out", "long_shift"]);
+  });
+
+  it("a business number that isn't a phone number is passed over for the app's sender", async () => {
+    textingReady();
+    state.client = fakeSupabase(routes("(530) 555-0100", { ...ORG, settings: { ...TZ, sms_from_number: "n/a" } as typeof ORG.settings }));
+    const body = await (await longShift(req())).json();
+    expect(body).toMatchObject({ texted: 1, failed: 0 });
+    const p = (fetchSpy.mock.calls[0][1] as RequestInit).body as URLSearchParams;
+    expect(p.get("From")).toBeNull();
+    expect(p.get("MessagingServiceSid")).toBe("MG-test");
   });
 
   it("a text the service refuses is counted as failed and never costs the office its buzz", async () => {

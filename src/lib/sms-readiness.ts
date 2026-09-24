@@ -21,7 +21,8 @@
  * number, so it runs in tests and in a client component's props without a secret crossing over.
  *
  * The sender rule, in sendSms's order:
- *   1. the org's own number (Settings, Customers, Texting): each org texts under its own brand;
+ *   1. the org's own number (Settings, Customers, Texting), when it reads as a phone number: each
+ *      org texts under its own brand;
  *   2. the platform's messaging service (the registered US path);
  *   3. the platform's bare number (the pre-registration fallback).
  * Any one of them, plus the texting account itself, is ready.
@@ -62,10 +63,33 @@ export const TEXT_NOT_READY_REFUSAL =
 export const TEXT_REFUSED =
   "The texting service didn't take this one, so nothing was texted. It has been logged. Email it, or text the link from your own phone.";
 
-/** Which sender a text would go out from, or null when there is none. The same rule sendSms uses. */
+/**
+ * A phone number in the form the texting service takes (E.164), or null when it isn't one we can
+ * vouch for. Customer phones are stored human-formatted and the business's own number is typed by
+ * hand, so the US shapes are normalized: "(530) 555-1234" reads as "+15305551234". Pure, so the
+ * readiness answer, the sender and the Settings card all read a number the same way.
+ */
+export function smsE164(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").trim();
+  if (/^\+[1-9]\d{7,14}$/.test(s)) return s;
+  const d = s.replace(/\D/g, "");
+  if (d.length === 10) return `+1${d}`;
+  if (d.length === 11 && d.startsWith("1")) return `+${d}`;
+  return null;
+}
+
+/** How the business's own number should be written, said to the owner. */
+export const SMS_NUMBER_EXAMPLE = "+15305551234";
+
+/**
+ * Which sender a text would go out from, or null when there is none. The same rule sendSms uses.
+ * The business's own number counts only when it reads as a phone number: something typed like
+ * "530-555" or "n/a" would be refused by the texting service on every send, so it is passed over
+ * for the platform's sender (and the Texting card says the number isn't usable).
+ */
 export function pickSmsSender(env: SmsEnv, orgNumber: string | null | undefined): SmsSender | null {
   if (!env.account) return null;
-  if ((orgNumber ?? "").trim()) return "org_number";
+  if (smsE164(orgNumber)) return "org_number";
   if (env.messagingService) return "messaging_service";
   if (env.platformNumber) return "platform_number";
   return null;
@@ -80,7 +104,16 @@ export function smsReadinessFrom(input: { env: SmsEnv; orgNumber?: string | null
   if (sender) return { ready: true, sender };
   const missing: string[] = [];
   if (!input.env.account) missing.push("A texting account for the app");
-  const hasSomeSender = !!(input.orgNumber ?? "").trim() || input.env.messagingService || input.env.platformNumber;
-  if (!hasSomeSender) missing.push(`A texting number for ${(input.orgName ?? "").trim() || "your business"}`);
+  const who = (input.orgName ?? "").trim() || "your business";
+  const typed = !!(input.orgNumber ?? "").trim();
+  const usable = !!smsE164(input.orgNumber);
+  const hasSomeSender = usable || input.env.messagingService || input.env.platformNumber;
+  if (!hasSomeSender) {
+    missing.push(
+      typed
+        ? `A valid texting number for ${who}, written like ${SMS_NUMBER_EXAMPLE}`
+        : `A texting number for ${who}`,
+    );
+  }
   return { ready: false, missing };
 }

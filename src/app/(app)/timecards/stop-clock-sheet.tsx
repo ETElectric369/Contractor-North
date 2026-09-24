@@ -9,13 +9,14 @@
  * time through stopShift (which writes who clocked him out on the card and tells the crew member).
  * What it says after is Erik's own words for the deed: "Brian is Clocked Out" (clockedOutWords).
  *
- * TWO SHEETS IN ONE, and the words say which (clockDoorWords). Erik, the same day: "an option to
- * [end] an employees time clock and clock out for them", at any time, not only a forgotten one.
+ * TWO SHEETS IN ONE, under one name (clockDoorWords: "Clock Out Brian"). Erik, the same day: "an
+ * option to [end] an employees time clock and clock out for them", at any time, not only a
+ * forgotten one; and then "'Brian is Clocked Out'", so the deed is never called stopping a clock.
  *
- *   An ordinary shift: "Clock Out Brian". The stop time is filled with now and follows the minute
- *     hand until somebody touches it, so it is two taps: the door, then the button.
- *   A forgotten one (LONG_SHIFT_HOURS, or begun on an earlier day): "Stop Brian's Clock". The stop
- *     fields start EMPTY, because the office never gets a silent default on a forgotten punch; "Now"
+ *   An ordinary shift: the clock-out time is filled with now and follows the minute hand until
+ *     somebody touches it, so it is two taps: the door, then the button.
+ *   A forgotten one (LONG_SHIFT_HOURS, or begun on an earlier day): the clock-out fields start
+ *     EMPTY, and one line says why, because the office never gets a silent default on a forgotten punch; "Now"
  *     and "End Of Work Day" are chips that fill the fields and never save.
  *
  * Every time here is the ORG's wall clock, whatever the laptop says.
@@ -107,7 +108,7 @@ export function StopClockSheet({
   const self = !!viewerId && entry.profile_id === viewerId;
   const words = clockDoorWords(entry.profiles?.full_name, { self });
   const said = clockedOutWords(entry.profiles?.full_name, self);
-  const verb = forgotten ? words.stop : words.clockOut;
+  const verb = words.clockOut;
 
   // The seeded start, kept to tell "the office moved the start" from "left alone". The inputs hold
   // whole minutes, so an unmoved start is sent as the STORED clock-in to the second: rebuilding it
@@ -244,7 +245,7 @@ export function StopClockSheet({
             </div>
           )}
           <Button type="button" className="h-11 w-full" onClick={stopIt} disabled={busy || !valid}>
-            {pending ? (forgotten ? "Stopping…" : "Clocking Out…") : verb}
+            {pending ? "Clocking Out…" : verb}
           </Button>
           <div className="flex gap-2">
             <Button type="button" variant="outline" className="h-11 flex-1" onClick={saveWithoutStopping} disabled={busy || !sideChanged}>
@@ -265,6 +266,11 @@ export function StopClockSheet({
           Clocked in {dayLabel(clockInMs, tz)}, {splitClock(entry.clock_in, tz)}
           {label ? ` at ${label}` : " with no job"}, {agoLabel(now - clockInMs)} ago.
         </p>
+        {forgotten && (
+          <p className="text-sm text-amber-800">
+            This clock has been running a long time, so the clock-out time starts empty: set when the work really ended.
+          </p>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>
