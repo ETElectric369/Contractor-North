@@ -408,7 +408,16 @@ export async function switchJob(input: {
     p_gps: fix,
   });
   if (error) return { ok: false, error: dbError(error) };
-  const r = (res ?? {}) as { mode?: "cut" | "repointed"; entry_id?: string; closed_id?: string | null; closed_hours?: number; rate_left_behind?: boolean };
+  const r = (res ?? {}) as {
+    mode?: "cut" | "repointed";
+    entry_id?: string;
+    closed_id?: string | null;
+    closed_hours?: number;
+    rate_left_behind?: boolean;
+    /** Minutes of a lunch already on the running row that did not fit the part closing now, so it
+     *  moved whole to the new part (0288). */
+    lunch_moved?: number;
+  };
   if (!r.entry_id) return { ok: false, error: "The switch did not save. Try again." };
 
   const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
@@ -431,9 +440,13 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
   // PAY DOES NOT MOVE SILENTLY. A tech's own insert may not carry a pay rate (0154), so a special
   // rate the office set on this shift stays on the part before the switch. Said to the tech, and
   // put on the office's bell, which is where it gets fixed.
-  let warning: string | undefined;
+  const warnings: string[] = [];
+  const lunchMoved = Math.max(0, Number(r.lunch_moved) || 0);
+  if (lunchMoved > 0) {
+    warnings.push(`The ${lunchMoved}-minute lunch on this shift didn't fit the part before the switch, so it moved to this part.`);
+  }
   if (r.rate_left_behind) {
-    warning = "Your special pay rate stays on the part before the switch. The office will set it on this part.";
+    warnings.push("Your special pay rate stays on the part before the switch. The office will set it on this part.");
     try {
       const staff = (await orgStaffIds(String(entry.org_id))).filter((id) => id !== user.id);
       const { data: who } = await supabase.from("profiles").select("full_name").eq("id", entry.profile_id).maybeSingle();
@@ -464,7 +477,7 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
     mode: r.mode ?? "cut",
     notes,
     closed_hours: Number(r.closed_hours) || 0,
-    ...(warning ? { warning } : {}),
+    ...(warnings.length ? { warning: warnings.join(" ") } : {}),
   };
 }
 
@@ -556,6 +569,40 @@ export async function clockOut(input: {
     } else {
       lunchMinutes = Math.max(lunchMinutes, priorLunch);
       lunchWarning = "The lunch didn't fit on the part before the switch, so it went on this part of your shift.";
+    }
+  }
+
+  // THE LUNCH HAS TO FIT THE PART IT LANDS ON. After a Switch Job the running entry is only the part
+  // since the switch (0288), and a 30-minute lunch on a 20-minute part deducts 20: hoursBetween
+  // clamps the part at 0, so the day is paid 10 minutes more than the lunch anyone stated, and the
+  // timecard reads "lunch 30m" on a 0.00 h part. Before the switch the lunch sat on the whole shift
+  // and always fit. So: a lunch that does not fit here goes on the touching part before the switch
+  // when it fits there (and the answer says so); if it fits neither, nothing is written and the
+  // sentence says why. The geofence close has nobody to ask, so it keeps the old behaviour.
+  if (!lunchOnPrior && lunchMinutes > 0 && entClockIn) {
+    const spanMs = Date.parse(clockOutIso) - Date.parse(entClockIn);
+    if (Number.isFinite(spanMs) && spanMs - lunchMinutes * 60_000 < 60_000) {
+      const { data: prior } = await supabase
+        .from("time_entries")
+        .select("id, clock_in, clock_out, lunch_minutes")
+        .eq("profile_id", user.id)
+        .eq("status", "closed")
+        .eq("clock_out", entClockIn)
+        .maybeSingle();
+      const p = prior as { id: string; clock_in: string; clock_out: string | null; lunch_minutes: number | null } | null;
+      const next = Math.max(Number(p?.lunch_minutes) || 0, lunchMinutes);
+      const fitsPrior = !!p?.clock_out && Date.parse(p.clock_out) - Date.parse(p.clock_in) - next * 60_000 >= 60_000;
+      if (p && fitsPrior) {
+        lunchOnPrior = { id: p.id, lunch: next };
+        lunchWarning = `The ${lunchMinutes}-minute lunch is longer than this part of your shift, so it went on the part before the switch.`;
+        lunchMinutes = 0;
+      } else if (!input.auto) {
+        const workedMin = Math.max(0, Math.floor(spanMs / 60_000));
+        return {
+          ok: false,
+          error: `A ${lunchMinutes}-minute lunch is longer than the ${workedMin} ${workedMin === 1 ? "minute" : "minutes"} on ${p ? "this part of your shift" : "this shift"}. Untick the lunch, or ask the office to fix it on Timecards. You're still clocked in.`,
+        };
+      }
     }
   }
 
@@ -1398,9 +1445,12 @@ export async function splitTimeEntry(input: {
   revalidateTime([...(await jobIdsOf(supabase, [input.entry_id])), jobId]);
   // NOTHING SILENT: a billed shift split on its own job hands its claim to the new part (it carries
   // hours that invoice already bills), and the office is told which invoice.
+  // A void invoice bills nothing; it carries the id only so an un-void can never bill it twice, and
+  // naming it here as "already bills" would be false.
   const carried = r.carried ?? [];
-  const warning = carried.length
-    ? `${carried.map((c) => c.invoice_number ?? "An invoice").join(", ")} already ${carried.length === 1 ? "bills" : "bill"} this shift, so the new part carries that claim and will not be billed again.`
+  const billing = carried.filter((c) => c.status !== "void");
+  const warning = billing.length
+    ? `${billing.map((c) => c.invoice_number ?? "An invoice").join(", ")} already ${billing.length === 1 ? "bills" : "bill"} this shift, so the new part carries that claim and will not be billed again.`
     : undefined;
   return {
     ok: true,
@@ -1411,6 +1461,20 @@ export async function splitTimeEntry(input: {
     carried,
     ...(warning ? { warning } : {}),
   };
+}
+
+/**
+ * THE CLAIM ON A SHIFT, BEFORE ANYONE SPLITS IT. The split sheet says up front which invoice bills
+ * this shift (a part on the same job carries that claim; a part on another job is refused), instead
+ * of the office learning it from a toast after the sheet has closed. Office only; read-only.
+ */
+export async function shiftClaim(entryId: string): Promise<{ ok: true; holder: ClaimHolder | null } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: String(ctx.error ?? "This action is staff-only.") };
+  const claims = await claimsOnSources(ctx.supabase, [entryId]);
+  if ("error" in claims) return { ok: false, error: claims.error };
+  const h = claims.get(entryId);
+  return { ok: true, holder: h ? { id: h.id, invoice_number: h.invoice_number } : null };
 }
 
 /**
@@ -1433,14 +1497,16 @@ export async function joinTimeEntries(input: { left_id: string; right_id: string
 
 /**
  * Move The Split: slide the time where one part ends and the next begins. Never reorders. Allowed
- * on billed parts (a typo is a typo: 0261's C7 rule), and the answer names every invoice whose part
- * changed length, because that invoice keeps the figure it went out with. Office only.
+ * on billed parts when both parts are billed by the same lines (a typo is a typo: 0261's C7 rule),
+ * and the answer names every invoice whose part changed length, because that invoice keeps the
+ * figure it went out with. Between parts billed differently the database refuses it (0288): the
+ * moved hours would become billable a second time. Office only.
  */
 export async function moveTimeEntryCut(input: {
   left_id: string;
   right_id: string;
   at: string;
-}): Promise<ClockResult & { left_hours?: number; right_hours?: number }> {
+}): Promise<ClockResult & { left_hours?: number; right_hours?: number; invoiceHref?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -1451,7 +1517,10 @@ export async function moveTimeEntryCut(input: {
     p_right: input.right_id,
     p_at: new Date(atMs).toISOString(),
   });
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    const href = invoiceHrefFrom(error);
+    return { ok: false, error: dbError(error), ...(href ? { invoiceHref: href } : {}) };
+  }
   const r = (data ?? {}) as {
     moved?: boolean;
     left_hours?: number;

@@ -11,7 +11,7 @@ import { lunchMinutesFor, LUNCH_MIN } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { atFromClockTime, clockInputValue, defaultSplitAt, splitClock, splitPreview } from "@/lib/split-preview";
 import type { JobCode } from "@/lib/types";
-import { completeAutoClockOut } from "./actions";
+import { completeAutoClockOut, joinTimeEntries } from "./actions";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
 import { useToast } from "@/components/toast";
 
@@ -92,7 +92,7 @@ export function AutoClockoutPrompt({
   function save() {
     setError(null);
     start(async () => {
-      let res: { ok: boolean; error?: string; warning?: string };
+      let res: { ok: boolean; error?: string; warning?: string; split?: { left_id?: string; right_id?: string } };
       try {
         res = await completeAutoClockOut({
           entry_id: entry.id,
@@ -106,9 +106,29 @@ export function AutoClockoutPrompt({
         return setError("No connection — nothing was saved. Try again when you have a bar or two.");
       }
       if (!res.ok) return setError(res.error ?? "Could not save.");
-      // The card leaves once it is answered, so what it has to say rides the toast, not the card.
-      toast(switched ? "Saved. The shift is split into 2 entries." : "Saved your hours.", "success");
-      if (res.warning) toast(res.warning, "info");
+      // The card leaves once it is answered, so what it has to say rides the toast, not the card: the
+      // split with its Undo (the same join the Timecards sheet offers), and any money sentence kept on
+      // screen until it has been read.
+      const left = res.split?.left_id;
+      const right = res.split?.right_id;
+      toast(
+        switched ? "Saved. The shift is split into 2 entries." : "Saved your hours.",
+        "success",
+        switched && left && right
+          ? {
+              label: "Undo",
+              onClick: () => {
+                void joinTimeEntries({ left_id: left, right_id: right })
+                  .then((j) => {
+                    toast(j.ok ? "Joined back into one shift. Your lunch stays saved." : (j.error ?? "Couldn't join them back."), j.ok ? "success" : "error");
+                    router.refresh();
+                  })
+                  .catch(() => toast("No connection — the split is still there. Join it back on Timecards.", "error"));
+              },
+            }
+          : undefined,
+      );
+      if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       router.refresh();
     });
   }
@@ -167,7 +187,7 @@ export function AutoClockoutPrompt({
                       </option>
                     ))}
                   </optgroup>
-                  {jobCodes.length > 0 && (
+                  {jobCodesEnabled && jobCodes.length > 0 && (
                     <optgroup label="Time Codes — Paid, Not Billed">
                       {jobCodes.map((c) => (
                         <option key={c.id} value={`code:${c.code}`}>

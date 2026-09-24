@@ -12,6 +12,7 @@ import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 import type { GeoPoint } from "@/lib/types";
+import { useToast } from "@/components/toast";
 
 /** The viewer's open time entry, fetched server-side by the job page (one cheap
  *  query in its Promise.all). A Switch Job closes the running entry and opens the next piece
@@ -20,6 +21,8 @@ export interface OpenEntry {
   id: string;
   clock_in: string;
   job_id: string | null;
+  /** A time code with no job (Drive, Shop) is still a part of the day: switch_job cuts it. */
+  job_code?: string | null;
   jobLabel: string | null;
 }
 
@@ -72,6 +75,7 @@ export function JobTimeButton({
   defaultProfileId: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -107,7 +111,7 @@ export function JobTimeButton({
     setOpen(true);
   }
 
-  function run(fn: () => Promise<{ ok: boolean; error?: string }>, after?: () => void) {
+  function run(fn: () => Promise<{ ok: boolean; error?: string; warning?: string }>, after?: () => void) {
     setErr(null);
     start(async () => {
       // THE 60MPH LAW (v800 audit). A server action that REJECTS — no signal in a dead zone, a
@@ -115,7 +119,7 @@ export function JobTimeButton({
       // the whole job page down to the error boundary. A tech standing in a Chilcoot canyon
       // taps "Clock in", the page vanishes, and the start of his day is gone. The failure has
       // to land in this little red line instead, with the punch still there to retry.
-      let res: { ok: boolean; error?: string };
+      let res: { ok: boolean; error?: string; warning?: string };
       try {
         res = await fn();
       } catch {
@@ -127,6 +131,9 @@ export function JobTimeButton({
         return;
       }
       setOpen(false);
+      // A pay rate left on the part before a switch, or a lunch that moved: money, so it is said and
+      // kept on screen until read (the Timeclock panel says the same thing the same way).
+      if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       if (after) after();
       else router.refresh();
     });
@@ -288,10 +295,19 @@ export function JobTimeButton({
           )}
 
           {state === "switch" && openEntry && (
-            <p className="text-sm text-slate-600">
-              You&apos;re on the clock at <span className="font-medium">{openEntry.jobLabel ?? "another job"}</span> since {fmtTime(openEntry.clock_in)}.
-              Switching closes that entry at <span className="font-medium">{segmentHours}h</span> and starts a new one on {jobNumber} right now. A job-less start just moves over to {jobNumber} whole.
-            </p>
+            // The same fork switch_job makes (0288): a punch with no job and no code is moved over
+            // whole; anything else is cut here and a new entry starts on this job.
+            !openEntry.job_id && !openEntry.job_code ? (
+              <p className="text-sm text-slate-600">
+                You&apos;re on the clock with no job yet, since {fmtTime(openEntry.clock_in)}. Switching puts this whole shift on{" "}
+                <span className="font-medium">{jobNumber}</span>, from the start.
+              </p>
+            ) : (
+              <p className="text-sm text-slate-600">
+                You&apos;re on the clock at <span className="font-medium">{openEntry.jobLabel ?? openEntry.job_code ?? "another job"}</span> since {fmtTime(openEntry.clock_in)}.
+                Switching closes that entry at <span className="font-medium">{segmentHours}h</span> and starts a new one on {jobNumber} right now.
+              </p>
+            )
           )}
 
           {state === "here" && openEntry && (

@@ -159,6 +159,23 @@ export default async function TimeclockPage() {
     }
   }
   const week = (weekRes.data ?? []) as TimeEntry[];
+  // THE SHIFT SO FAR. After one or more Switch Jobs the running entry is only the latest part; walk
+  // back through the caller's own touching closed entries (each ended when the next began) and add
+  // them up, so the panel can say the whole shift beside the running part's timer.
+  let earlierShiftHours = 0;
+  if (openEntry) {
+    let cursor = Date.parse(openEntry.clock_in);
+    const seen = new Set<string>();
+    for (let hop = 0; hop < 12; hop++) {
+      const prev = week.find(
+        (e) => e.status === "closed" && e.clock_out && !seen.has(e.id) && Math.abs(Date.parse(e.clock_out) - cursor) < 1000,
+      );
+      if (!prev?.clock_out) break;
+      seen.add(prev.id);
+      earlierShiftHours += hoursBetween(prev.clock_in, prev.clock_out, prev.lunch_minutes);
+      cursor = Date.parse(prev.clock_in);
+    }
+  }
 
   // Geofence auto-clock-out completion: the caller's most recent auto-closed entry that nobody has
   // answered for yet — the lunch it could not ask about (and, for the office, a switch time).
@@ -353,6 +370,7 @@ export default async function TimeclockPage() {
         <TimeclockPanel
           openEntry={openEntry}
           previousPiece={previousPiece}
+          earlierShiftHours={earlierShiftHours}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
           jobs={jobOptions}
           lang={lang}

@@ -19,7 +19,7 @@ import { hoursBetween, formatDuration, formatFullAddress } from "@/lib/utils";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
-import { translator } from "@/lib/i18n";
+import { fillText, translator } from "@/lib/i18n";
 import { useDictation } from "@/lib/use-dictation";
 import { drivingDistanceMiles } from "@/lib/google-maps";
 import { getPosition } from "@/lib/geo";
@@ -78,6 +78,7 @@ const OFFLINE_MSG = "No connection — your entry is kept, try again when you ha
 export function TimeclockPanel({
   openEntry,
   previousPiece = null,
+  earlierShiftHours = 0,
   jobCodes,
   jobs,
   lang,
@@ -90,6 +91,9 @@ export function TimeclockPanel({
   /** The part of today's shift that ended exactly when this one began (a Switch Job cut, 0288):
    *  where the lunch can go instead, when it was taken before the switch. */
   previousPiece?: { id: string; jobLabel: string; clock_in: string; clock_out: string; lunch_minutes: number | null } | null;
+  /** Worked hours on the earlier parts of this same shift (the touching entries a Switch Job closed).
+   *  The running timer counts only the part since the switch, so the shift's total is said beside it. */
+  earlierShiftHours?: number;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
@@ -303,11 +307,12 @@ export function TimeclockPanel({
         const name = j ? optionLabel(j) : "the new job";
         toast(
           res.mode === "repointed"
-            ? `Now on ${name}. This whole shift moved over.`
-            : `Switched to ${name}. The first part is its own entry (${formatDuration(res.closed_hours ?? 0)}).`,
+            ? fillText(t("tc_switchedWhole"), { job: name })
+            : fillText(t("tc_switchedCut"), { job: name, hours: formatDuration(res.closed_hours ?? 0) }),
           "success",
         );
-        if (res.warning) toast(res.warning, "info");
+        // A pay rate or a lunch that landed somewhere else is money: it stays until it is read.
+        if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       } catch {
         setError(OFFLINE_MSG);
       }
@@ -343,7 +348,7 @@ export function TimeclockPanel({
           setClockingOut(false);
           setShowTools(false);
           setSwitching(false);
-          if (res.warning) toast(res.warning, "info");
+          if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           // Crew leads owe the office the end-of-day debrief — Nort asks right here.
           if (crewLead) setDebriefOpen(true);
         }
@@ -369,20 +374,24 @@ export function TimeclockPanel({
     openEntry && tookLunch && previousPiece ? (
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1 text-xs text-slate-600">
         <span>
-          {lunchOnPrevious ? `The lunch goes on ${previousPiece.jobLabel}.` : "The lunch goes on this part of your shift."}
+          {lunchOnPrevious ? fillText(t("tc_lunchOnPrev"), { job: previousPiece.jobLabel }) : t("tc_lunchOnThis")}
         </span>
         <button
           type="button"
           onClick={() => setLunchOnPrevious((v) => !v)}
           className="min-h-[44px] font-semibold text-brand hover:underline"
         >
-          {lunchOnPrevious ? "Put It On This Part Instead" : `Put It On ${previousPiece.jobLabel} Instead`}
+          {lunchOnPrevious ? t("tc_putOnThis") : fillText(t("tc_putOnPrev"), { job: previousPiece.jobLabel })}
         </button>
       </div>
     ) : null;
 
   if (openEntry) {
     const elapsed = hoursBetween(openEntry.clock_in, new Date(now), lunchOnPrevious && previousPiece ? 0 : lunchToUse);
+    // The whole shift, not just the part since the switch: a crew member watching the timer read
+    // 0:00 after a Switch Job was reading his day reset.
+    const earlier = Math.max(0, Number(earlierShiftHours) || 0);
+    const shiftTotal = earlier > 0 ? elapsed + earlier : elapsed;
     // Codes on: name only (not the shared number·name jobLabel helper) — the running
     // banner reads better without the job number; renamed so the helper isn't shadowed.
     // Codes off: the customer · address identity IS the name the crew knows.
@@ -429,6 +438,11 @@ export function TimeclockPanel({
               {t("tc_since")} <span suppressHydrationWarning>{mounted ? new Date(openEntry.clock_in).toLocaleTimeString() : ""}</span>
               {openEntry.gps_in ? " · 📍" : ""}
             </div>
+            {earlier > 0 && (
+              <div className="mt-1 text-sm font-medium text-slate-600" suppressHydrationWarning>
+                {fillText(t("tc_shiftSoFar"), { total: formatDuration(shiftTotal) })}
+              </div>
+            )}
           </div>
 
           {/* Surface the "punch wasn't GPS-stamped" warning HERE — after a punch the panel
@@ -573,8 +587,12 @@ export function TimeclockPanel({
           {clockingOut && (
             <>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-sm font-semibold text-slate-900">Wrapping up your day</p>
-                <p className="mt-0.5 text-xs text-slate-500">You worked {formatDuration(elapsed)} on {currentJobName}. Add miles and a note, then clock out.</p>
+                <p className="text-sm font-semibold text-slate-900">{t("tc_wrapUpTitle")}</p>
+                <p className="mt-0.5 text-xs text-slate-500" suppressHydrationWarning>
+                  {earlier > 0
+                    ? fillText(t("tc_wrapUpBodySplit"), { total: formatDuration(shiftTotal), part: formatDuration(elapsed), job: currentJobName })
+                    : fillText(t("tc_wrapUpBody"), { total: formatDuration(elapsed), job: currentJobName })}
+                </p>
               </div>
 
           {/* The one lunch question, off by default (Erik 2026-09-08). Ticking it nets the

@@ -35,6 +35,7 @@ import {
   geoClockOut,
   joinTimeEntries,
   moveTimeEntryCut,
+  shiftClaim,
   splitTimeEntry,
   switchJob,
 } from "./actions";
@@ -205,6 +206,56 @@ describe("joinTimeEntries and moveTimeEntryCut", () => {
   });
 });
 
+describe("the claim the split sheet states before the tap, and a move across two claims", () => {
+  it("shiftClaim names the live invoice billing the shift, or none", async () => {
+    state.client = fakeSupabase((q) => {
+      if (q.table === "invoice_items")
+        return { data: [{ source_ids: [ENTRY], invoices: { id: INV48, invoice_number: "INV-048", status: "paid", created_at: "2001-07-20T00:00:00Z" } }] };
+    }, calls);
+    expect(await shiftClaim(ENTRY)).toEqual({ ok: true, holder: { id: INV48, invoice_number: "INV-048" } });
+    state.client = fakeSupabase((q) => (q.table === "invoice_items" ? { data: [] } : undefined), calls);
+    expect(await shiftClaim(RIGHT)).toEqual({ ok: true, holder: null });
+    state.staff = false;
+    expect((await shiftClaim(ENTRY)).ok).toBe(false);
+  });
+
+  it("a move the database refuses across two claims carries the way to the invoice", async () => {
+    state.client = fakeSupabase((q) => {
+      if (q.table === "rpc:move_time_entry_cut")
+        return {
+          error: {
+            message: "INV-048 (paid) bills the first part and not the second, so moving the split would hand billed hours to a part that could be billed again.",
+            details: `invoice:${INV48}`,
+          },
+        };
+    }, calls);
+    const r = await moveTimeEntryCut({ left_id: ENTRY, right_id: RIGHT, at: "2001-07-14T22:30:00.000Z" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/^INV-048 \(paid\) bills the first part and not the second/);
+    expect(r.invoiceHref).toBe(`/billing/${INV48}`);
+  });
+
+  it("a split's warning names only invoices that bill; a void one carries the id silently", async () => {
+    state.client = fakeSupabase((q) => {
+      if (q.table === "jobs") return { data: { id: RHODESIA } };
+      if (q.table === "rpc:split_time_entry")
+        return {
+          data: {
+            left_id: ENTRY,
+            right_id: RIGHT,
+            carried: [
+              { invoice_id: "v", invoice_number: "INV-040", status: "void" },
+              { invoice_id: INV48, invoice_number: "INV-048", status: "sent" },
+            ],
+          },
+        };
+      if (q.table === "time_entries") return { data: [{ job_id: RHODESIA }] };
+    }, calls);
+    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: RHODESIA });
+    expect(r.warning).toBe("INV-048 already bills this shift, so the new part carries that claim and will not be billed again.");
+  });
+});
+
 describe("switchJob goes through switch_job", () => {
   const openRow = { id: ENTRY, org_id: "org-1", profile_id: "user-1", job_id: RHODESIA, job_code: null, notes: "pulled wire", rate_override: null };
 
@@ -258,6 +309,19 @@ describe("switchJob goes through switch_job", () => {
     expect(spies.notify[0][2].title).toBe("Brian Taylor switched jobs mid-shift");
   });
 
+  it("a lunch that moved to the new part is said", async () => {
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.verb === "select") return { data: openRow };
+      if (q.table === "time_entries" && q.verb === "update") return { data: null };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: HERRINGBONE } };
+      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Herringbone", org_id: "org-1" } };
+      if (q.table === "rpc:switch_job")
+        return { data: { mode: "cut", entry_id: RIGHT, closed_id: ENTRY, closed_hours: 0.17, lunch_moved: 45, rate_left_behind: false } };
+    }, calls);
+    const r = await switchJob({ entry_id: ENTRY, job_id: HERRINGBONE, gps: null });
+    expect(r.warning).toBe("The 45-minute lunch on this shift didn't fit the part before the switch, so it moved to this part.");
+  });
+
   it("refuses a job the caller cannot see before anything is written", async () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries") return { data: openRow };
@@ -305,6 +369,38 @@ describe("clock-out without the breakdown", () => {
     expect(r.warning).toMatch(/went on this part of your shift/);
     expect(calls.filter((c) => c.verb === "update")).toHaveLength(1);
     expect(calls.find((c) => c.verb === "update")!.payload).toMatchObject({ lunch_minutes: 30 });
+  });
+
+  it("a lunch longer than the part since the switch goes on the part before, when it fits there", async () => {
+    const PRIOR = "b0000000-0000-4000-8000-0000000000bb";
+    const switchedAt = new Date(Date.now() - 20 * 60_000).toISOString(); // a 20-minute part
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: switchedAt, lunch_minutes: 0, status: "open" } };
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in"))
+        return { data: { id: PRIOR, clock_in: new Date(Date.parse(switchedAt) - 4 * 3_600_000).toISOString(), clock_out: switchedAt, lunch_minutes: 0 } };
+      if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: "x" }] };
+    }, calls);
+    const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 30, notes: "", gps: null });
+    expect(r).toEqual({ ok: true, warning: "The 30-minute lunch is longer than this part of your shift, so it went on the part before the switch." });
+    const [close, prior] = calls.filter((c) => c.verb === "update");
+    expect(close.payload).toMatchObject({ lunch_minutes: 0, status: "closed" });
+    expect(prior.payload).toEqual({ lunch_minutes: 30 });
+    expect(prior.filters).toContainEqual(["eq", "id", PRIOR]);
+    const lookup = calls.find((c) => c.verb === "select" && c.cols.startsWith("id, clock_in"))!;
+    expect(lookup.filters).toContainEqual(["eq", "clock_out", switchedAt]);
+  });
+
+  it("a lunch that fits no part is refused in words, and the shift keeps running", async () => {
+    const started = new Date(Date.now() - 20 * 60_000).toISOString();
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: started, lunch_minutes: 0, status: "open" } };
+      if (q.table === "time_entries" && q.verb === "select") return { data: null }; // no part before
+    }, calls);
+    const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 30, notes: "", gps: null });
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/^A 30-minute lunch is longer than the (19|20) minutes on this shift\. Untick the lunch/);
+    expect(r.error).toMatch(/You're still clocked in\.$/);
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
   it("the geofence never closes a shift the monitor was not watching", async () => {
