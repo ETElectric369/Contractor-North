@@ -9,6 +9,7 @@ import { revalidateMoney } from "@/lib/revalidate-money";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
 import { reportError } from "@/lib/observe";
+import { captureProcessorFee } from "@/lib/processor-fee-capture";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -353,6 +354,16 @@ export async function POST(req: Request) {
           body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
           url: `/billing/${invoiceId}`,
         });
+
+    // WHAT STRIPE TOOK, LAST (migration 0284). Card fees are a business cost that comes off the
+    // owner's draw, so the real fee is read off the charge on the contractor's own account and
+    // kept on the row. It runs only after the money is recorded, settled and announced, and it
+    // never throws: a fee Stripe cannot hand over yet stays NULL, the ops log hears about a
+    // failure, and the daily cron reads it tomorrow. One writer for every door that lands here
+    // (Checkout card, Checkout bank debit, Tap to Pay).
+    if (paymentIntent) {
+      await captureProcessorFee(supabase, { orgId, paymentIntent, account: connectedAccount });
+    }
   }
 
   async function syncSubscription(sub: Stripe.Subscription) {

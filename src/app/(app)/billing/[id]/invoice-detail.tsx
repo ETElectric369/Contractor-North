@@ -12,6 +12,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { invoiceBalance, invoiceOverpayment, isDrawKind } from "@/lib/invoice-math";
+import { processorFeeLabel } from "@/lib/processor-fee";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -1261,6 +1262,13 @@ export function InvoiceDetail({
                         {p.method}
                         {p.note ? ` · ${p.note}` : ""}
                       </div>
+                      {/* What Stripe took for an online payment (0284), once it is known. Staff
+                          only: this screen is the office's, and no customer page reads the column. */}
+                      {p.stripe_payment_intent && p.processor_fee != null && (
+                        <div className="text-xs text-slate-400">
+                          {processorFeeLabel(p.method)} {formatCurrency(Number(p.processor_fee))}
+                        </div>
+                      )}
                     </div>
                     <span className="text-xs text-slate-400">
                       {formatDateTime(p.paid_at)}

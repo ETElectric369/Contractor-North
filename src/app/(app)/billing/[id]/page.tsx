@@ -66,6 +66,8 @@ export default async function InvoicePage({
         .select("*")
         .eq("invoice_id", id)
         .order("sort_order"),
+      // `*` carries stripe_payment_intent and 0284's processor_fee, which the payment rows' card
+      // fee line reads; a field list here has to name both or that line goes quiet.
       supabase.from("payments").select("*").eq("invoice_id", id).order("paid_at", { ascending: false }),
       supabase
         .from("price_list_items")
