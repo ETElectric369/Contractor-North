@@ -7,6 +7,7 @@ import {
   OWNER_MONEY_WINDOWS,
   costFigure,
   countedNotPaidLine,
+  isOwnerMoneySegmentKey,
   notCountedLine,
   windowLabel,
   type OwnerMoney,
@@ -16,12 +17,13 @@ import type { OwnerRegister } from "@/lib/owner-draw";
 import { OfficeCanSeeSwitch } from "./office-switch";
 
 /**
- * LEFT FOR YOU (0286): the first card on /analytics, read like a receipt.
+ * LEFT FOR YOU (0286): the card right under Money by Month on /analytics, read like a receipt.
  *
  * Received, then every real cost on its own line, then what is left for the owner as the row that
  * stands out, with "Before income tax. Ask your accountant how much to set aside." directly under
- * it, because the figure is never spendable as it stands. No chart yet: the next build charts
- * computeOwnerMoney's per-month rows, which is why the months live on the data and not in here.
+ * it, because the figure is never spendable as it stands. The chart above it draws the same
+ * computeOwnerMoney per-month rows, and a month tapped there shows here (windowKey "YYYY-MM"): the
+ * subtitle names the month and no segment is selected until one is chosen.
  */
 export function LeftForCard({
   money,
@@ -58,7 +60,7 @@ export function LeftForCard({
         </div>
         <SegmentedControl
           items={OWNER_MONEY_WINDOWS.map((w) => ({ id: w.key, label: w.label, href: `/analytics?w=${w.key}` }))}
-          activeId={windowKey}
+          activeId={isOwnerMoneySegmentKey(windowKey) ? windowKey : undefined}
         />
       </div>
 

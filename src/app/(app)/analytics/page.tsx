@@ -10,27 +10,23 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency } from "@/lib/utils";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
-import { computeArAging, computeRevenueTrend, computeQuoteStats, trailing12Months } from "@/lib/analytics/money-metrics";
+import { computeArAging, computeQuoteStats } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
-import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
-import { getOwnerMoney, isOwnerMoneyWindowKey, type OwnerMoneyWindowKey } from "@/lib/analytics/owner-money";
+import { todayStrInTz } from "@/lib/tz";
+import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwnerMoneySelection } from "@/lib/analytics/owner-money";
+import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analytics/money-chart";
 import { ownerRegister } from "@/lib/owner-draw";
 import { LeftForCard } from "./left-for-card";
+import { MoneyChartCard } from "./money-chart-card";
 
 export const dynamic = "force-dynamic";
-
-const monthLabel = (k: string) =>
-  // k is "YYYY-MM" — a wall month; render in UTC so it never slips to the prior month.
-  new Date(`${k}-15T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short" });
 
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ w?: string }>;
+  searchParams: Promise<{ w?: string; from?: string }>;
 }) {
-  const { w } = await searchParams;
-  // This Year unless the owner picked another window (0286's Left For You card).
-  const windowKey: OwnerMoneyWindowKey = isOwnerMoneyWindowKey(w) ? w : "this_year";
+  const { w, from } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -51,13 +47,26 @@ export default async function AnalyticsPage({
   // reach this page (the redirect above).
   const viewerIsOwner = me.role === "owner";
   const showOwnerMoney = viewerIsOwner || orgSettings.office_sees_owner_money;
-  const ownerMoneyP = showOwnerMoney ? getOwnerMoney(supabase, windowKey, tz) : Promise.resolve(null);
   const todayYmd = todayStrInTz(tz);
-  const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
-  const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
+  // MONEY BY MONTH + LEFT FOR YOU, ONE READ. The card shows This Year unless a segment or a month
+  // tapped on the chart says otherwise (?w=, validated here against the chart's 12 months). The
+  // chart's 12 months and the card's window are computed from the SAME rows, read once over the span
+  // covering both, so the chart's August and the card's August are one computation. An office viewer
+  // the owner has not allowed still gets the chart, cut to Collected on this server before it is
+  // handed to the page (buildMoneyChartData), and no card.
+  //
+  // A month in ?w= is shown only if the chart DRAWS it (drawnMonth, below): a month before the
+  // chart's trimmed start would select nothing on the chart and print a month of $0s from before the
+  // books began. So the segment's window is computed too (same rows, no extra read) as the fallback.
+  const selection = resolveOwnerMoneySelection(w, from, todayYmd);
+  const cardWindows = showOwnerMoney
+    ? [ownerMoneyWindow(selection.segment, todayYmd), ...(selection.month ? [ownerMoneyWindow(selection.month, todayYmd)] : [])]
+    : [];
+  const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
+
+  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
     await Promise.all([
-      supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", windowStart).order("paid_at", { ascending: false }).limit(50000),
       // A/R aging reads the WHOLE book or it isn't aging (audit 9) — unbounded meant the 1000
       // newest, so the oldest unpaid invoices, which are exactly what aging is FOR, fell out.
       supabase.from("invoices").select("id, invoice_number, job_id, status, total, amount_paid, due_date, created_at, customers(name)").order("created_at", { ascending: false }).limit(50000),
@@ -94,10 +103,6 @@ export default async function AnalyticsPage({
       // arrives and supersedes it, which is the case that has not happened yet and would otherwise have
       // counted one purchase twice on the same job.
       supabase.from("bills").select("job_id, amount, category, po_id").is("superseded_by_bill_id", null).limit(50000),
-      // Cap BOTH sides of the trend (audit 9): bounding the payments that ADD money while leaving
-      // the refunds that SUBTRACT it unbounded would overstate collected at exactly the volume
-      // where the cap starts to bite.
-      supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", windowStart).order("created_at", { ascending: false }).limit(50000),
       // Per-job refunds (all-time, with the invoice they reversed) so job profitability
       // nets refunds the SAME way the job hub does — keyed to a job via its invoice.
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
@@ -115,7 +120,6 @@ export default async function AnalyticsPage({
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
   // tools call, so the dashboard and what Nort says can never diverge.
-  const trend = computeRevenueTrend(payments ?? [], refunds ?? [], todayYmd, tz);
   const ar = computeArAging((invoices ?? []) as any[], todayYmd);
   const qs = computeQuoteStats((quotes ?? []) as any[]);
 
@@ -131,9 +135,18 @@ export default async function AnalyticsPage({
   attachRates((entries ?? []) as any[], rates, (e: any) => ({ id: e.profiles?.id, holder: e }));
 
   const ownerMoney = await ownerMoneyP;
-  // Who "you" is on the card: the owners by name (from the same names profile_pay carries) and the
-  // viewer, in the register payroll-view started (lib/owner-draw).
-  const voice = ownerRegister(ownerMoney?.money?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
+  const chartMoney = ownerMoney.views?.[0] ?? null;
+  // Who "you" is on the card and the chart: the owners by name (from the same names profile_pay
+  // carries) and the viewer, in the register payroll-view started (lib/owner-draw).
+  const voice = ownerRegister(chartMoney?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
+  const chartData = chartMoney ? buildMoneyChartData(chartMoney, { ownerFigures: showOwnerMoney, leftLabel: voice.leftFor }) : null;
+  const selectedMonth = drawnMonth(selection.month, chartData);
+  const windowKey = selectedMonth ?? selection.segment;
+  const cardMoney = showOwnerMoney ? (ownerMoney.views?.[selectedMonth ? 2 : 1] ?? null) : null;
+  // "Collected (12 mo)" is the chart's own 12 months (received, net of refunds and voided invoices:
+  // the computeCollected rule), not a second read of the same payments that could drift from it.
+  const collected12 = chartMoney ? chartMoney.totals.received : null;
+  const emptyLine = emptyChartSentence(ownerMoney.firstPaymentDay, ownerMoneyChartWindow(todayYmd).start);
 
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
@@ -167,10 +180,19 @@ export default async function AnalyticsPage({
     <div className="mx-auto max-w-5xl">
       <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit." />
 
+      <MoneyChartCard
+        data={chartData}
+        problem={ownerMoney.problem}
+        selectedMonth={selectedMonth}
+        segment={selection.segment}
+        linkMonths={showOwnerMoney}
+        emptyLine={emptyLine}
+      />
+
       {showOwnerMoney && (
         <LeftForCard
-          money={ownerMoney?.money ?? null}
-          problem={ownerMoney?.problem ?? null}
+          money={cardMoney}
+          problem={ownerMoney.problem}
           voice={voice}
           windowKey={windowKey}
           viewerIsOwner={viewerIsOwner}
@@ -179,30 +201,10 @@ export default async function AnalyticsPage({
       )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {stat("Collected (12 mo)", formatCurrency(trend.collected12), TrendingUp, "bg-green-50 text-green-600")}
+        {stat("Collected (12 mo)", collected12 == null ? "—" : formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}
         {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
         {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
       </div>
-
-      <Card className="mb-6">
-        <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          Money collected by month
-        </div>
-        <CardContent className="py-5">
-          <div className="flex h-40 items-end gap-1.5">
-            {trend.series.map(({ month, collected: v }) => (
-              <div key={month} className="flex flex-1 flex-col items-center gap-1" title={`${monthLabel(month)}: ${formatCurrency(v)}`}>
-                <div className="text-[10px] text-slate-500">{v > 0 ? `$${Math.round(v / 1000)}k` : ""}</div>
-                <div
-                  className="w-full rounded-t bg-brand/80"
-                  style={{ height: `${Math.max(2, (v / trend.maxRev) * 100)}%` }}
-                />
-                <div className="text-[10px] text-slate-400">{monthLabel(month)}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <Card>

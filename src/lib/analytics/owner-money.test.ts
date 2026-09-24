@@ -1,12 +1,20 @@
 import { describe, it, expect } from "vitest";
 import {
+  OWNER_MONEY_WINDOWS,
   allocateCents,
+  chartMonthKeys,
   computeOwnerMoney,
   costFigure,
   countedNotPaidLine,
   getOwnerMoney,
+  getOwnerMoneyViews,
   notCountedLine,
+  ownerMoneyChartWindow,
+  ownerMoneyReadSpan,
   ownerMoneyWindow,
+  parseOwnerMoneyMonthKey,
+  resolveOwnerMoneySelection,
+  windowInsideSpan,
   windowLabel,
   windowMonths,
   type OwnerMoney,
@@ -417,7 +425,7 @@ describe("costFigure: a cost line on the receipt", () => {
 
 // ── THE FETCH HALF ─────────────────────────────────────────────────────────────
 
-type FakeCall = { table: string; select: string; filters: string[] };
+type FakeCall = { table: string; select: string; filters: string[]; bounds?: Record<string, string> };
 
 /** A small PostgREST-builder fake that APPLIES the filters it is given (is/eq/gte/lt/in, order,
  *  range, limit) to canned rows per table, so the test pins what getOwnerMoney asks for as well as
@@ -434,8 +442,8 @@ function fakeClient(tables: Record<string, any[]>, calls: FakeCall[], failing: s
         select(cols: string) { call.select = cols; return b; },
         is(col: string, v: unknown) { call.filters.push(`is:${col}:${v}`); rows = rows.filter((r) => (r[col] ?? null) === v); return b; },
         eq(col: string, v: unknown) { call.filters.push(`eq:${col}:${v}`); rows = rows.filter((r) => r[col] === v); return b; },
-        gte(col: string, v: string) { call.filters.push(`gte:${col}`); rows = rows.filter((r) => String(r[col]) >= v); return b; },
-        lt(col: string, v: string) { call.filters.push(`lt:${col}`); rows = rows.filter((r) => String(r[col]) < v); return b; },
+        gte(col: string, v: string) { call.filters.push(`gte:${col}`); (call.bounds ??= {})[`gte:${col}`] = v; rows = rows.filter((r) => String(r[col]) >= v); return b; },
+        lt(col: string, v: string) { call.filters.push(`lt:${col}`); (call.bounds ??= {})[`lt:${col}`] = v; rows = rows.filter((r) => String(r[col]) < v); return b; },
         in(col: string, vs: unknown[]) { call.filters.push(`in:${col}`); rows = rows.filter((r) => vs.includes(r[col])); return b; },
         order(col: string, opts?: { ascending?: boolean }) {
           const dir = opts?.ascending === false ? -1 : 1;
@@ -522,6 +530,96 @@ describe("getOwnerMoney: the fetch half", () => {
     const rates = await getOwnerMoney(fakeClient(tables(), [], ["profile_pay"]), "this_year", TZ, NOW);
     expect(rates.money).toBeNull();
     expect(rates.problem).toBe("the pay rates could not be read");
+  });
+
+  it("ONE READ: the chart's 12 months and the card's window come from one read over the span of both", async () => {
+    const single: FakeCall[] = [];
+    await getOwnerMoney(fakeClient(tables(), single), "this_year", TZ, NOW);
+    const both: FakeCall[] = [];
+    const chart = ownerMoneyChartWindow(TODAY);
+    const aug = ownerMoneyWindow("2026-08", TODAY);
+    const { views, problem, firstPaymentDay } = await getOwnerMoneyViews(fakeClient(tables(), both), [chart, aug], TZ, TODAY);
+    expect(problem).toBeNull();
+    // The first payment ever, from the same read: the chart's empty state tells "nothing yet" from "nothing lately".
+    expect(firstPaymentDay).toBe("2026-06-11");
+    // Exactly as many requests as ONE window's read, table for table: nothing is fetched twice.
+    const count = (calls: FakeCall[]) => calls.reduce<Record<string, number>>((o, c) => ({ ...o, [c.table]: (o[c.table] ?? 0) + 1 }), {});
+    expect(count(both)).toEqual(count(single));
+    // The payments read covers the chart's whole span (Oct 1 2025 to Oct 1 2026, Pacific).
+    const pay = both.find((c) => c.table === "payments" && c.bounds?.["gte:paid_at"])!;
+    expect(pay.bounds).toEqual({ "gte:paid_at": "2025-10-01T07:00:00.000Z", "lt:paid_at": "2026-10-01T07:00:00.000Z" });
+    // And the card's August IS the chart's August.
+    const [c, a] = views!;
+    expect(a.totals).toEqual(stripMonth(c.months.find((x) => x.month === "2026-08")!));
+    expect(c.months.map((x) => x.month)).toEqual(chartMonthKeys(TODAY));
+    expect(c.totals.received).toBe(1450);
+  });
+});
+
+const stripMonth = ({ month: _month, ...rest }: { month: string } & OwnerMoneyFigures) => rest;
+
+describe("month windows (a month tapped on the chart)", () => {
+  it("accepts a real month inside the chart's 12, and nothing else", () => {
+    expect(parseOwnerMoneyMonthKey("2026-08", TODAY)).toBe("2026-08");
+    expect(parseOwnerMoneyMonthKey("2026-09", TODAY)).toBe("2026-09");
+    expect(parseOwnerMoneyMonthKey("2025-10", TODAY)).toBe("2025-10"); // the oldest of the 12
+    expect(parseOwnerMoneyMonthKey("2025-09", TODAY)).toBeNull(); // 13 months back: never read
+    expect(parseOwnerMoneyMonthKey("2026-10", TODAY)).toBeNull(); // the future
+    for (const junk of ["2026-13", "2026-00", "2026-8", "Aug", "2026-08-01", "", null, undefined, 202608, ["2026-08"]]) {
+      expect(parseOwnerMoneyMonthKey(junk, TODAY)).toBeNull();
+    }
+  });
+
+  it("the selection: a segment, a month remembering its segment, or This Year", () => {
+    expect(resolveOwnerMoneySelection("this_month", undefined, TODAY)).toEqual({ windowKey: "this_month", segment: "this_month", month: null });
+    expect(resolveOwnerMoneySelection("2026-08", "last_month", TODAY)).toEqual({ windowKey: "2026-08", segment: "last_month", month: "2026-08" });
+    expect(resolveOwnerMoneySelection("2026-08", "bogus", TODAY)).toEqual({ windowKey: "2026-08", segment: "this_year", month: "2026-08" });
+    expect(resolveOwnerMoneySelection("2019-03", "this_month", TODAY)).toEqual({ windowKey: "this_month", segment: "this_month", month: null });
+    expect(resolveOwnerMoneySelection("<script>", undefined, TODAY)).toEqual({ windowKey: "this_year", segment: "this_year", month: null });
+    expect(resolveOwnerMoneySelection(undefined, undefined, TODAY).windowKey).toBe("this_year");
+  });
+
+  it("a month window is that calendar month, named in full", () => {
+    expect(ownerMoneyWindow("2026-08", TODAY)).toEqual({ key: "2026-08", label: "August 2026", start: "2026-08-01", end: "2026-09-01" });
+    expect(ownerMoneyWindow("2025-12", TODAY)).toMatchObject({ label: "December 2025", start: "2025-12-01", end: "2026-01-01" });
+    const m = computeOwnerMoney(yearInputs(), ownerMoneyWindow("2026-08", TODAY), TZ, TODAY);
+    expect(windowLabel(m)).toBe("August 2026");
+  });
+
+  it("the card's month equals the chart's month, field for field, for the same inputs", () => {
+    const chart = computeOwnerMoney(yearInputs(), ownerMoneyChartWindow(TODAY), TZ, TODAY);
+    for (const row of chart.months) {
+      const card = computeOwnerMoney(yearInputs(), ownerMoneyWindow(row.month as `${number}-${number}`, TODAY), TZ, TODAY);
+      expect(card.totals).toEqual(stripMonth(row));
+    }
+  });
+
+  it("every window the card can show lies inside the chart's span, every month of the year (January too)", () => {
+    for (let mo = 1; mo <= 12; mo++) {
+      for (const day of ["01", "15", "28"]) {
+        const today = `2027-${String(mo).padStart(2, "0")}-${day}`;
+        const chart = ownerMoneyChartWindow(today);
+        const keys = [...OWNER_MONEY_WINDOWS.map((w) => w.key), ...chartMonthKeys(today)];
+        for (const k of keys) {
+          const win = ownerMoneyWindow(k, today);
+          const span = ownerMoneyReadSpan([chart, win]);
+          expect(windowInsideSpan(win, span)).toBe(true);
+          expect(windowInsideSpan(chart, span)).toBe(true);
+          // Never further back than the chart's 12 months: the card never makes the page read older
+          // rows. (This Year's end is next Jan 1, past today; months past today are never counted.)
+          expect(span.start).toBe(chart.start);
+        }
+      }
+    }
+    // January: last month is December of the year before, still inside the 12.
+    const jan = "2027-01-10";
+    expect(windowInsideSpan(ownerMoneyWindow("last_month", jan), ownerMoneyChartWindow(jan))).toBe(true);
+    expect(ownerMoneyChartWindow(jan)).toMatchObject({ start: "2026-02-01", end: "2027-02-01" });
+  });
+
+  it("a window outside the span is refused, never computed from partial rows", () => {
+    expect(windowInsideSpan({ start: "2025-01-01", end: "2025-02-01" }, ownerMoneyChartWindow(TODAY))).toBe(false);
+    expect(() => ownerMoneyReadSpan([])).toThrow();
   });
 });
 

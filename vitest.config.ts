@@ -5,6 +5,9 @@ import { defineConfig } from "vitest/config";
  *  plain Node — no DB, no Next runtime — so they're fast and deterministic. The
  *  "@/..." alias mirrors tsconfig so tests import the same way the app does. */
 export default defineConfig({
+  // tsconfig says jsx "preserve" (Next compiles JSX itself); a test that renders a component with
+  // react-dom/server needs it compiled here, with the same automatic runtime Next uses.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
