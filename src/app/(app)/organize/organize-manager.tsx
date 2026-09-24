@@ -187,14 +187,23 @@ export function OrganizeManager({
         const it = res.item!;
         // NOTHING IS FILED BY THE READ (Erik, 2026-09-24). The line says what was read and where
         // it is waiting; a person presses File It in Needs Attention.
+        // WHERE IT GOES, said the way the row will say it (Erik, 2026-09-24): a job the paper names
+        // is picked and says why; anything else is a question, with a model's idea only a guess.
         const total = it.amount != null ? formatCurrency(it.amount) : "no total read";
+        const s = it.suggestion;
+        const where =
+          s?.picked && s.jobLabel
+            ? `${s.because ?? "Job picked from the paper"}: ${s.jobLabel}. Waiting in Needs Attention for File It.`
+            : `Waiting in Needs Attention: where does this go?${
+                s?.jobLabel ? ` (a guess: ${s.jobLabel})` : s?.bucket ? ` (a guess: Business Cost, ${bucketOf(s.bucket)})` : ""
+              }`;
         setState(
           "done",
           it.destination === "note"
             ? "Kept as a note"
-            : `Read: ${it.vendor ?? it.title}, ${total}. Waiting in Needs Attention for File It${
-                it.suggestion?.jobLabel ? ` (suggested: ${it.suggestion.jobLabel})` : it.suggestion?.bucket ? ` (suggested: Business Cost, ${bucketOf(it.suggestion.bucket)})` : ""
-              }.`,
+            : it.picture
+              ? `Read: a picture (${it.title}). Waiting in Needs Attention: what is this?`
+              : `Read: ${it.vendor ?? it.title}, ${total}. ${where}`,
         );
       } catch (err: any) {
         setState("error", err?.message ?? "Failed.");

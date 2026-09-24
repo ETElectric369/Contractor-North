@@ -4,12 +4,18 @@ import {
   describePaper,
   fileRefusal,
   findSameNumber,
+  guessOf,
+  isPicture,
+  jobFromPaperMarks,
   normalizeDocNumber,
   NOT_FILED_YET,
   parseDestination,
+  pickedBecause,
   readinessOf,
   shownDestination,
+  streetKey,
   suggestedDestination,
+  type MarkJob,
   type PaperItem,
 } from "./paperwork";
 import { indexSupplierAliases } from "./supplier-identity";
@@ -99,23 +105,57 @@ describe("the bill carries what the paper IS, never a hard-coded Receipt", () =>
   });
 });
 
-describe("suggestions are picked, never pressed", () => {
-  it("the job the paper names, if it is on the list", () => {
-    expect(suggestedDestination(receipt({ proposal: { jobId: "job-1" } }), ["job-1"])).toBe("job:job-1");
-    expect(suggestedDestination(receipt({ proposal: { jobId: "job-9" } }), ["job-1"])).toBe("");
+describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
+  it("a MARKED bill comes in with its job picked, and says why in a few words", () => {
+    const marked = receipt({ proposal: { jobId: "job-1", jobFrom: "address", jobHint: "518 CRATER LAKE RD" } });
+    expect(suggestedDestination(marked, ["job-1"])).toBe("job:job-1");
+    expect(pickedBecause(marked)).toBe("Job picked from the address on the receipt");
+    expect(pickedBecause(receipt({ doc_type: "bill", category: "Invoice", proposal: { jobId: "job-1", jobFrom: "po" } }))).toBe(
+      "Job picked from the PO number on the invoice",
+    );
+    // A job no longer on the list is not picked.
+    expect(suggestedDestination(marked, ["job-2"])).toBe("");
   });
-  it("never suggests Fees", () => {
-    expect(suggestedDestination(receipt({ proposal: { bucket: "Fees" } }), [])).toBe("");
-    expect(suggestedDestination(receipt({ proposal: { bucket: "Gas & Truck" } }), [])).toBe("cost:Gas & Truck");
+  it("an UNMARKED bill picks nothing, not even the bucket a model liked, and has no reason line", () => {
+    const unmarked = receipt({ proposal: { bucket: "Gas & Truck" } });
+    expect(suggestedDestination(unmarked, ["job-1"])).toBe("");
+    expect(shownDestination(null, unmarked, ["job-1"])).toBe("");
+    expect(pickedBecause(unmarked)).toBeNull();
+    // Both choices stay open: a job and a business cost can each be picked, and nothing files
+    // until one is.
+    expect(fileRefusal(unmarked, null)).toMatch(/Pick where it goes first: a job, or a business cost bucket/);
+    expect(fileRefusal(unmarked, parseDestination("job:job-1"))).toBeNull();
+    expect(fileRefusal(unmarked, parseDestination("cost:Gas & Truck"))).toBeNull();
   });
-  it("the picker FOLLOWS the suggestion until a person touches it (a row renders before it is read)", () => {
+  it("a MODEL'S GUESS never pre-selects: it is a one-tap chip", () => {
+    // The reader's own job_id, AI Suggest's pick, and a job a model wrote before marks existed.
+    for (const proposal of [{ guessJobId: "job-1" }, { jobId: "job-1" }, { jobId: "job-1", jobFrom: null }]) {
+      const guessed = receipt({ proposal });
+      expect(suggestedDestination(guessed, ["job-1"])).toBe("");
+      expect(shownDestination(null, guessed, ["job-1"])).toBe("");
+      expect(guessOf(guessed, ["job-1"])).toBe("job:job-1");
+    }
+    // A bucket guess is a chip too, and Fees is never offered.
+    expect(guessOf(receipt({ proposal: { bucket: "Gas & Truck" } }), [])).toBe("cost:Gas & Truck");
+    expect(guessOf(receipt({ proposal: { bucket: "Fees" } }), [])).toBeNull();
+    // A guess that is the job the paper already picked is not offered twice.
+    expect(guessOf(receipt({ proposal: { jobId: "job-1", jobFrom: "address", guessJobId: "job-1" } }), ["job-1"])).toBeNull();
+    // A guess that disagrees with the paper is offered beside it, and the paper's job stays picked.
+    const both = receipt({ proposal: { jobId: "job-1", jobFrom: "job_number", guessJobId: "job-2" } });
+    expect(suggestedDestination(both, ["job-1", "job-2"])).toBe("job:job-1");
+    expect(guessOf(both, ["job-1", "job-2"])).toBe("job:job-2");
+  });
+  it("a paper that names two jobs picks neither", () => {
+    const torn = receipt({ proposal: { jobId: "job-1", jobFrom: "address", jobConflict: "The paper points to more than one job." } });
+    expect(suggestedDestination(torn, ["job-1"])).toBe("");
+    expect(pickedBecause(torn)).toBeNull();
+  });
+  it("the picker FOLLOWS the paper until a person touches it (a row renders before it is read)", () => {
     const unread = receipt({ proposal: null });
-    const read = receipt({ proposal: { jobId: "job-1" } });
-    // Untouched: nothing suggested yet, then the reader's job the moment it lands.
+    const read = receipt({ proposal: { jobId: "job-1", jobFrom: "job_number" } });
+    // Untouched: nothing yet, then the paper's job the moment the read lands.
     expect(shownDestination(null, unread, ["job-1"])).toBe("");
     expect(shownDestination(null, read, ["job-1"])).toBe("job:job-1");
-    // AI Suggest changes its mind after the row is on screen: the picker goes with it.
-    expect(shownDestination(null, receipt({ proposal: { bucket: "Gas & Truck" } }), ["job-1"])).toBe("cost:Gas & Truck");
     // Touched: the person's pick wins, including picking nothing.
     expect(shownDestination("cost:Other", read, ["job-1"])).toBe("cost:Other");
     expect(shownDestination("", read, ["job-1"])).toBe("");
@@ -125,7 +165,105 @@ describe("suggestions are picked, never pressed", () => {
     expect(parseDestination("cost:Phone & Office")).toEqual({ type: "overhead", category: "Phone & Office" });
     expect(parseDestination("cost:Snacks")).toBeNull();
     expect(parseDestination("keep")).toEqual({ type: "keep" });
+    expect(parseDestination("photo:abc")).toEqual({ type: "photo", jobId: "abc" });
     expect(parseDestination("")).toBeNull();
+  });
+});
+
+describe("jobFromPaperMarks: exact, never fuzzy", () => {
+  const JOBS: MarkJob[] = [
+    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Waldow", null] },
+    { id: "j50", job_number: "J-050", name: "Tao Zhu", address: "235 Timber Creek Rd, Truckee CA 96161", customerNames: ["Tao Zhu"] },
+    { id: "j51", job_number: "J-051", name: "Tao Zhu Shop", address: "13631 Northwoods Blvd Truckee CA 96161", customerNames: ["Tao Zhu"] },
+    { id: "j09", job_number: "J-009", name: "TTP #11", address: "300 W Lake Blvd, Tahoe City", customerNames: ["Tahoe Tavern Properties"] },
+    { id: "j13", job_number: "J-013", name: "TTP #56", address: "300 West Lake Boulevard", customerNames: ["Tahoe Tavern Properties"] },
+  ];
+
+  it("an address on the paper finds its job, spelled any of the ways a street is spelled", () => {
+    for (const address of ["518 Crater Lake Rd", "518 CRATER LAKE ROAD", "518 crater lake rd., Chilcoot CA"])
+      expect(jobFromPaperMarks({ address }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "address" });
+    expect(jobFromPaperMarks({ address: "235 TIMBER CREEK ROAD" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50" });
+    expect(streetKey("300 West Lake Boulevard")).toBe(streetKey("300 W Lake Blvd #11"));
+  });
+  it("the street type is part of the street: Dr is not Rd, St is not Ave, and no type is not a type", () => {
+    expect(streetKey("518 Crater Lake Dr")).not.toBe(streetKey("518 Crater Lake Rd"));
+    expect(streetKey("100 Oak St")).not.toBe(streetKey("100 Oak Ave"));
+    expect(streetKey("100 Oak Street")).toBe(streetKey("100 Oak St"));
+    expect(streetKey("518 Crater Lake Road")).toBe(streetKey("518 Crater Lake Rd"));
+    expect(jobFromPaperMarks({ address: "518 Crater Lake Dr" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Crater Lake Ct" }, JOBS)).toEqual({ kind: "none" });
+    // A street written with no type names no typed street.
+    expect(jobFromPaperMarks({ address: "518 Crater Lake" }, JOBS)).toEqual({ kind: "none" });
+  });
+  it("a near address is NOT a match: a different house number, a different word, no house number", () => {
+    expect(jobFromPaperMarks({ address: "13466 Northwoods Blvd" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Crater Lakeview Rd" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "Crater Lake Rd" }, JOBS)).toEqual({ kind: "none" });
+    expect(streetKey("Crater Lake Rd")).toBeNull();
+  });
+  it("a street shared by several jobs picks none of them", () => {
+    expect(jobFromPaperMarks({ address: "300 W Lake Blvd #11" }, JOBS)).toEqual({ kind: "none" });
+  });
+  it("a job number or a PO number, however it is punctuated", () => {
+    expect(jobFromPaperMarks({ jobNumber: "j046" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "job_number" });
+    expect(jobFromPaperMarks({ po: "J 050" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50", from: "po" });
+    // A PO this org wrote names its job.
+    expect(jobFromPaperMarks({ po: "PO-0012" }, JOBS, [{ po_number: "PO-0012", job_id: "j51" }])).toMatchObject({ kind: "one", jobId: "j51", from: "po" });
+    // A PO on a job that isn't open picks nothing.
+    expect(jobFromPaperMarks({ po: "PO-0013" }, JOBS, [{ po_number: "PO-0013", job_id: "closed" }])).toEqual({ kind: "none" });
+    // "46" is not J-046.
+    expect(jobFromPaperMarks({ jobNumber: "46" }, JOBS)).toEqual({ kind: "none" });
+  });
+  it("a job name or a customer, exactly; a customer with two open jobs picks neither", () => {
+    expect(jobFromPaperMarks({ jobName: "JASON WALDOW" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "job_name" });
+    expect(jobFromPaperMarks({ jobName: "Jason Waldo" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ customer: "jason waldow" }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "customer" });
+    expect(jobFromPaperMarks({ customer: "Tao Zhu" }, JOBS)).toEqual({ kind: "none" });
+    // ...unless another mark on the same paper settles which.
+    expect(jobFromPaperMarks({ customer: "Tao Zhu", address: "13631 Northwoods Blvd" }, JOBS)).toMatchObject({ kind: "one", jobId: "j51", from: "address" });
+  });
+  it("two marks naming two different jobs pick nothing, and say so", () => {
+    const r = jobFromPaperMarks({ jobNumber: "J-046", address: "235 Timber Creek Rd" }, JOBS);
+    expect(r.kind).toBe("conflict");
+    expect(r.kind === "conflict" && r.sentence).toContain("more than one job");
+  });
+  it("no marks, no pick", () => {
+    expect(jobFromPaperMarks({}, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks(null, JOBS)).toEqual({ kind: "none" });
+  });
+});
+
+describe("a plain picture asks what it is first", () => {
+  const picture = (over: Partial<PaperItem> = {}): PaperItem => ({
+    id: "p2",
+    kind: "job_document",
+    status: "needs_review",
+    doc_type: "not_a_cost",
+    title: "Panel, 200A main",
+    category: "Photo",
+    proposal: { picture: true },
+    ...over,
+  });
+  it("a picture's row asks \"What is this?\", not where it goes", () => {
+    expect(isPicture(picture())).toBe(true);
+    expect(readinessOf(picture())).toEqual({ state: "picture", sentence: "What is this?" });
+    expect(describePaper(picture())).toBe("Picture, Panel, 200A main");
+    // A row read before the reader said "photo" is known by its category.
+    expect(readinessOf(picture({ proposal: null }))).toMatchObject({ state: "picture" });
+    // A permit is not a picture, and a receipt never is.
+    expect(isPicture(picture({ category: "Permit", proposal: null }))).toBe(false);
+    expect(isPicture(receipt({ category: "Photo" }))).toBe(false);
+  });
+  it("Job Photo files a picture on a job, and never a bill or receipt", () => {
+    expect(fileRefusal(picture(), parseDestination("photo:job-1"))).toBeNull();
+    expect(fileRefusal(picture(), parseDestination("cost:Other"))).toMatch(/Only a receipt or a bill can be a business cost/);
+    expect(fileRefusal(receipt(), parseDestination("photo:job-1"))).toMatch(/not a picture/);
+    expect(fileRefusal(picture({ status: "filed" }), parseDestination("photo:job-1"))).toMatch(/already filed/);
+    expect(fileRefusal(picture(), null)).toMatch(/Pick where it goes first/);
+  });
+  it("Something Else keeps the picture on a job or in files, as any paper that isn't a cost", () => {
+    expect(fileRefusal(picture(), parseDestination("keep"))).toBeNull();
+    expect(fileRefusal(picture(), parseDestination("job:job-1"))).toBeNull();
   });
 });
 

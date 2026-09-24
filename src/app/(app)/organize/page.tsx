@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
-import { loadBooks, matchesOnBooks } from "./paperwork-core";
+import { loadBooks, matchesOnBooks, OPEN_JOBS_FOR_PAPER } from "./paperwork-core";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +25,8 @@ export default async function OrganizePage() {
       .select("id, job_number, name")
       .in("status", ACTIVE_JOB_STATUSES)
       .order("created_at", { ascending: false })
-      .limit(100),
+      // The same open jobs the reader matches the paper against, so a job it picked is in the list.
+      .limit(OPEN_JOBS_FOR_PAPER),
     // Every printed number already on the books, for "Same Purchase: Tie Them" (0295).
     Promise.resolve(orgRead).then((r) => loadBooks(supabase, (r.data as { id?: string } | null)?.id ?? null)),
   ]);

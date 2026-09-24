@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BookOpen, Check, FileText, Link2, Loader2, Pencil, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { Archive, BookOpen, Camera, Check, FileText, Link2, Loader2, Pencil, Receipt, Sparkles, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -15,8 +15,10 @@ import {
   PAPER_BUCKETS,
   describePaper,
   fileRefusal,
+  guessOf,
   paperTypeOfItem,
   parseDestination,
+  pickedBecause,
   proposalOf,
   readinessOf,
   shownDestination,
@@ -29,6 +31,7 @@ import {
   archiveItem,
   deleteOrganizedItem,
   fileItem,
+  readAsCost,
   readPaperworkItem,
   tiePaperwork,
   undoPaperwork,
@@ -39,10 +42,16 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
  * ONE ROW FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295).
  *
  * The Organize tray and Drop Paperwork on /bills render THIS, so a receipt is filed the same way
- * whichever door it came in by: one line saying what was read, where it could go (the reader's
- * suggestion picked, never pressed), and File It. The button asks the same fileRefusal the server
- * asks, so a door that looks open is open, and a closed one says why in the words the server
- * would refuse with.
+ * whichever door it came in by: one line saying what was read, where it could go, and File It.
+ * The button asks the same fileRefusal the server asks, so a door that looks open is open, and a
+ * closed one says why in the words the server would refuse with.
+ *
+ * WHERE IT GOES (Erik, 2026-09-24: "if it's a picture not a bill or a bill with no address or job
+ * markings then it should ask where to file it"):
+ *   · a bill or receipt whose paper NAMES a job starts with that job picked, and says why;
+ *   · one that names nothing starts with nothing picked and asks "Where does this go?", a job and
+ *     the business-cost buckets side by side; a model's guess is a chip, never the pick;
+ *   · a plain picture asks "What is this?" first: Job Photo, Bill Or Receipt, Something Else.
  *
  * Nothing on this row files anything on its own. Choosing in the picker only picks.
  */
@@ -95,6 +104,8 @@ function badgeFor(item: PaperItem) {
       return <Badge tone="slate">Not Filed</Badge>;
     case "keep":
       return <Badge tone="blue">Not A Cost</Badge>;
+    case "picture":
+      return <Badge tone="blue">Picture</Badge>;
     default:
       return <Badge tone="slate">Filed</Badge>;
   }
@@ -223,10 +234,15 @@ export function PaperworkRow({
   const [fixing, setFixing] = useState(false);
   const [said, setSaid] = useState<{ text: string; tone: "error" | "info" } | null>(null);
   const jobIds = jobs.map((j) => j.id);
-  // null until a person picks: until then the picker FOLLOWS the suggestion, which may arrive after
-  // this row is on screen (Drop Paperwork adds the row, then reads it; AI Suggest writes later).
+  // null until a person picks: until then the picker FOLLOWS what the paper names, which may arrive
+  // after this row is on screen (Drop Paperwork adds the row, then reads it).
   const [picked, setDest] = useState<string | null>(null);
   const dest = shownDestination(picked, item, jobIds);
+  // A PICTURE is asked what it is first (Erik, 2026-09-24). Job Photo and Something Else are
+  // answered here and change nothing until a button files it; Bill Or Receipt is answered on the
+  // server (readAsCost), because it changes what the row IS.
+  const [answer, setAnswer] = useState<"photo" | "else" | null>(null);
+  const [photoPicked, setPhotoJob] = useState<string | null>(null);
 
   const r = readinessOf(item);
   const p = proposalOf(item);
@@ -236,19 +252,46 @@ export function PaperworkRow({
   const onBooks = matches.filter((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill");
   const toLink = matches.filter((m): m is Extract<NumberMatch, { kind: "supplier_invoice" }> => m.kind === "supplier_invoice");
   const papers = matches.filter((m) => m.kind === "paper");
-  const parsedDest = parseDestination(dest);
+  // What the paper itself picked (a printed mark, matched exactly), and why; a model's guess is
+  // only ever a chip beside the question.
+  const prePick = suggestedDestination(item, jobIds);
+  const because = pickedBecause(item);
+  const guess = guessOf(item, jobIds);
+
+  type Mode = "cost" | "keep" | "ask" | "photo" | "none";
+  const mode: Mode =
+    r.state === "ready" || r.state === "needs_total"
+      ? "cost"
+      : r.state === "keep"
+        ? "keep"
+        : r.state === "picture"
+          ? answer === "photo"
+            ? "photo"
+            : answer === "else"
+              ? "keep"
+              : "ask"
+          : "none";
+  const photoJob = photoPicked ?? (prePick.startsWith("job:") ? prePick.slice(4) : "");
+  const activeDest = mode === "photo" ? (photoJob ? `photo:${photoJob}` : "") : dest;
+  const parsedDest = parseDestination(activeDest);
   const blocked = fileRefusal(item, parsedDest);
-  const suggestion = suggestedDestination(item, jobIds);
-  const suggestedJob = p.jobId ? jobs.find((j) => j.id === p.jobId) : null;
   const working = pending || busy !== null;
+
+  function destLabel(value: string): string {
+    const d = parseDestination(value);
+    if (!d) return "";
+    if (d.type === "job" || d.type === "photo") {
+      const j = jobs.find((x) => x.id === d.jobId);
+      return j ? jobLabel(j) : "a job";
+    }
+    if (d.type === "overhead") return `Business Cost, ${d.category}`;
+    return "Keep It In Files";
+  }
 
   function whereSaid(value: string): string {
     const d = parseDestination(value);
     if (!d) return "";
-    if (d.type === "job") {
-      const j = jobs.find((x) => x.id === d.jobId);
-      return j ? `on ${jobLabel(j)}` : "on the job";
-    }
+    if (d.type === "job" || d.type === "photo") return `on ${destLabel(value)}`;
     if (d.type === "overhead") return `as a business cost, ${d.category}`;
     return "in files";
   }
@@ -283,9 +326,11 @@ export function PaperworkRow({
   }
 
   function fileIt(differentPurchase = false) {
-    const d = parseDestination(dest);
-    if (!d) return setSaid({ text: "Pick where it goes first: a job, or a business cost bucket.", tone: "error" });
+    const d = parseDestination(activeDest);
+    if (!d) return setSaid({ text: mode === "photo" ? "Pick which job this photo is for first." : "Pick where it goes first: a job, or a business cost bucket.", tone: "error" });
     if (d.type === "keep") return run("keep", () => keepPaperwork(item.id), "Kept in files.");
+    if (d.type === "photo")
+      return run("photo", () => fileItem(item.id, { type: "photo", jobId: d.jobId }), `Filed as a job photo ${whereSaid(activeDest)}.`);
     const where = whereSaid(dest);
     const said = isCost ? `Filed ${where}.` : `Kept ${where}.`;
     run(
@@ -299,9 +344,90 @@ export function PaperworkRow({
     );
   }
 
-  const picker = (
+  const jobOptions = jobs.map((j) => (
+    <option key={j.id} value={j.id}>
+      {jobLabel(j)}
+      {prePick === `job:${j.id}` ? " (On The Paper)" : ""}
+    </option>
+  ));
+
+  /** What the paper picked, and why; or the question, when it picked nothing. Never silent. */
+  const pickedLine = (showing: string, question: string) =>
+    because && prePick && showing === prePick.replace(/^job:/, "") ? (
+      <p className="flex items-start gap-1.5 text-sm text-emerald-800">
+        <Check className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{because}. Change it if it&apos;s wrong; nothing is filed until you press the button.</span>
+      </p>
+    ) : !showing ? (
+      <p className="text-sm font-medium text-slate-900">{question}</p>
+    ) : null;
+
+  /** A model's guess: one tap picks it, and it is never picked for anyone. */
+  const guessValue = mode === "photo" ? (guess?.startsWith("job:") ? guess : null) : guess;
+  const guessShown = guessValue && (mode === "photo" ? `job:${photoJob}` !== guessValue : dest !== guessValue);
+  const guessChip = guessShown ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={() => (mode === "photo" ? setPhotoJob(guessValue.slice(4)) : setDest(guessValue))}
+        disabled={working}
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
+      >
+        <Sparkles className="h-4 w-4 shrink-0 text-brand" />
+        <span>
+          A Guess: {destLabel(guessValue)} <span className="text-xs text-slate-500">(Tap To Pick)</span>
+        </span>
+      </button>
+      <span className="text-xs text-slate-500">Not read off the paper{p.why ? `: ${p.why}` : "."}</span>
+    </div>
+  ) : null;
+
+  const conflict = p.jobConflict ? (
+    <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+      {p.jobConflict}
+    </p>
+  ) : null;
+
+  // RULE 1-2: A COST ASKS WHERE IT GOES, with a job and the business-cost buckets side by side.
+  // Only a job the paper names starts picked; otherwise both start empty.
+  const costChooser = (
+    <div className="space-y-2" role="group" aria-label="Where does this go?">
+      {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+      {conflict}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Select
+          value={dest.startsWith("job:") ? dest.slice(4) : ""}
+          onChange={(e) => setDest(e.target.value ? `job:${e.target.value}` : "")}
+          disabled={working}
+          className="h-11"
+          aria-label="A Job"
+        >
+          <option value="">A Job…</option>
+          {jobOptions}
+        </Select>
+        <Select
+          value={dest.startsWith("cost:") ? dest : ""}
+          onChange={(e) => setDest(e.target.value)}
+          disabled={working}
+          className="h-11"
+          aria-label="Or A Business Cost"
+        >
+          <option value="">Or A Business Cost…</option>
+          {PAPER_BUCKETS.map((b) => (
+            <option key={b} value={`cost:${b}`}>
+              {b}
+            </option>
+          ))}
+        </Select>
+      </div>
+      {guessChip}
+    </div>
+  );
+
+  // Not a cost: a job, or kept in files.
+  const keepPicker = (
     <Select
-      value={dest}
+      value={dest.startsWith("job:") || dest === "keep" ? dest : ""}
       onChange={(e) => setDest(e.target.value)}
       disabled={working}
       className="h-11 min-w-0 flex-1 sm:w-64 sm:flex-none"
@@ -312,23 +438,61 @@ export function PaperworkRow({
         {jobs.map((j) => (
           <option key={j.id} value={`job:${j.id}`}>
             {jobLabel(j)}
-            {suggestion === `job:${j.id}` ? " (Suggested)" : ""}
+            {prePick === `job:${j.id}` ? " (On The Paper)" : ""}
           </option>
         ))}
       </optgroup>
-      {isCost ? (
-        <optgroup label="Business Cost (No Job)">
-          {PAPER_BUCKETS.map((b) => (
-            <option key={b} value={`cost:${b}`}>
-              {b}
-              {suggestion === `cost:${b}` ? " (Suggested)" : ""}
-            </option>
-          ))}
-        </optgroup>
-      ) : (
-        <option value="keep">Keep It In Files</option>
-      )}
+      <option value="keep">Keep It In Files</option>
     </Select>
+  );
+
+  const changeAnswer = (
+    <Button variant="outline" onClick={() => setAnswer(null)} disabled={working}>
+      <Undo2 /> Change Answer
+    </Button>
+  );
+
+  // RULE 3: A PICTURE ASKS WHAT IT IS FIRST.
+  const askWhat = (
+    <div className="space-y-2" role="group" aria-label="What is this?">
+      <p className="text-sm font-medium text-slate-900">What is this?</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Button variant="outline" onClick={() => setAnswer("photo")} disabled={working}>
+          <Camera /> Job Photo
+        </Button>
+        <Button variant="outline" onClick={() => run("cost", () => readAsCost(item.id))} disabled={working}>
+          {busy === "cost" ? <Loader2 className="animate-spin" /> : <Receipt />} {busy === "cost" ? "Reading…" : "Bill Or Receipt"}
+        </Button>
+        <Button variant="outline" onClick={() => setAnswer("else")} disabled={working}>
+          <FileText /> Something Else
+        </Button>
+      </div>
+    </div>
+  );
+
+  // Job Photo: which job, then File As Job Photo. A photo on a job, never a cost.
+  const photoChooser = (
+    <div className="space-y-2" role="group" aria-label="Which job is this photo for?">
+      {pickedLine(photoJob, "Which job is this photo for?")}
+      {conflict}
+      <div className="flex flex-wrap items-center gap-2">
+        <Select
+          value={photoJob}
+          onChange={(e) => setPhotoJob(e.target.value)}
+          disabled={working}
+          className="h-11 min-w-0 flex-1 sm:w-64 sm:flex-none"
+          aria-label="Which Job"
+        >
+          <option value="">Which Job?</option>
+          {jobOptions}
+        </Select>
+        <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
+          {busy === "photo" ? <Loader2 className="animate-spin" /> : <Camera />} File As Job Photo
+        </Button>
+        {changeAnswer}
+      </div>
+      {guessChip}
+    </div>
   );
 
   return (
@@ -351,18 +515,8 @@ export function PaperworkRow({
               The prices on this paper look like a counter preview, not your account&apos;s own. The bill will say so.
             </p>
           )}
-          {r.state !== "ready" && r.state !== "supplier_documents" && (
+          {r.state !== "ready" && r.state !== "supplier_documents" && r.state !== "picture" && (
             <p className="mt-1 text-sm text-slate-600">{r.sentence}</p>
-          )}
-          {(suggestedJob || (p.bucket && isCost)) && r.state !== "later" && (
-            <p className="mt-1 text-xs text-slate-600">
-              <Sparkles className="mr-1 inline h-3 w-3 text-brand" />
-              Suggested:{" "}
-              {suggestedJob ? jobLabel(suggestedJob) : `Business Cost, ${p.bucket}`}
-              {p.jobHint && suggestedJob ? ` (the paper says “${p.jobHint}”)` : ""}
-              {p.why ? `. ${p.why}` : ""}.{" "}
-              {dest === suggestion ? "It is picked below; nothing" : "Nothing"} is filed until you press File It.
-            </p>
           )}
 
           {onBooks.length > 0 && (r.state === "ready" || r.state === "supplier_documents") && (
@@ -412,18 +566,37 @@ export function PaperworkRow({
             </p>
           )}
 
+          {mode === "cost" && <div className="mt-2.5">{costChooser}</div>}
+          {mode === "ask" && <div className="mt-2.5">{askWhat}</div>}
+          {mode === "photo" && <div className="mt-2.5">{photoChooser}</div>}
+          {mode === "keep" && (
+            <div className="mt-2.5 space-y-2 empty:hidden">
+              {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+              {conflict}
+              {guessChip}
+            </div>
+          )}
+
           <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {(r.state === "ready" || r.state === "needs_total" || r.state === "keep") && (
+            {mode === "keep" && (
               <>
-                {picker}
+                {keepPicker}
+                <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
+                  {busy === "file" || busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />} Keep It
+                </Button>
+                {answer === "else" && changeAnswer}
+              </>
+            )}
+            {mode === "cost" && (
+              <>
                 {onBooks.length > 0 && r.state === "ready" ? (
                   <Button onClick={() => fileIt(true)} disabled={working || !!blocked} title={blocked ?? undefined}>
                     {busy === "anyway" ? <Loader2 className="animate-spin" /> : <Check />} Different Purchase: File It Anyway
                   </Button>
                 ) : (
                   <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
-                    {busy === "file" || busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />}{" "}
-                    {isCost ? (toLink.length && r.state === "ready" ? `File It And Link To CED ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It") : "Keep It"}
+                    {busy === "file" ? <Loader2 className="animate-spin" /> : <Check />}{" "}
+                    {toLink.length && r.state === "ready" ? `File It And Link To CED ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It"}
                   </Button>
                 )}
               </>
@@ -443,7 +616,7 @@ export function PaperworkRow({
                 <Archive /> Keep It In Files
               </Button>
             )}
-            {showAiSuggest && (r.state === "ready" || r.state === "needs_total" || r.state === "keep") && (
+            {showAiSuggest && mode !== "none" && (
               <Button
                 variant="outline"
                 onClick={() => run("ai", async () => { const a = await aiReviewItem(item.id); return { ok: a.ok, error: a.message, message: a.message }; })}
@@ -474,7 +647,7 @@ export function PaperworkRow({
               </Button>
             )}
           </div>
-          {blocked && parsedDest && (r.state === "ready" || r.state === "needs_total" || r.state === "keep") && (
+          {blocked && parsedDest && (mode === "cost" || mode === "keep" || mode === "photo") && (
             <p className="mt-1 text-xs text-slate-500">{blocked}</p>
           )}
         </div>
