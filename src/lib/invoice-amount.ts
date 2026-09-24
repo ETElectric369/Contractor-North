@@ -24,6 +24,9 @@ export function invoiceAmount(total: number | null | undefined, amountPaid: numb
   const p = Number(amountPaid);
   const tot = Number.isFinite(t) ? t : 0;
   const paid = Number.isFinite(p) ? p : 0;
+  // A CREDIT MEMO (a negative total, which recalcTotals and paidStatus allow) is money going
+  // back, not a $0.00 balance: invoiceBalance floors at 0, so it would print as nothing owed.
+  if (tot <= -0.005) return { due: formatCurrency(tot), detail: "credit" };
   const balance = invoiceBalance(tot, paid);
   const due = formatCurrency(balance);
   if (paid < 0.005) return { due, detail: null };

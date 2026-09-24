@@ -12,6 +12,7 @@ import { RowList } from "@/components/ui/row-list";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/tabs";
 import { formatCurrency, formatCityStateZip, formatFullAddress } from "@/lib/utils";
+import { invoiceAmount } from "@/lib/invoice-amount";
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
@@ -76,7 +77,7 @@ export default async function CustomerDetailPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("invoices")
-      .select("id, invoice_number, status, total")
+      .select("id, invoice_number, status, total, amount_paid")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     supabase.from("pricing_levels").select("id, name, markup_pct").order("created_at"),
@@ -234,13 +235,20 @@ export default async function CustomerDetailPage({
       content: (
         <Card className="overflow-hidden">
           <RowList
-            items={(invoices ?? []).map((iv: any) => ({
-              key: iv.id,
-              label: iv.invoice_number,
-              value: formatCurrency(iv.total),
-              badge: { tone: statusTone(iv.status), text: iv.status },
-              href: `/billing/${iv.id}`,
-            }))}
+            items={(invoices ?? []).map((iv: any) => {
+              // The billing board's amount language (invoiceAmount): the figure is what is DUE,
+              // and what it is due against sits under the invoice number. A bare total here read
+              // as a different bill from the same invoice on the board.
+              const a = invoiceAmount(iv.total, iv.amount_paid);
+              return {
+                key: iv.id,
+                label: iv.invoice_number,
+                sub: a.detail ?? undefined,
+                value: a.due,
+                badge: { tone: statusTone(iv.status), text: iv.status },
+                href: `/billing/${iv.id}`,
+              };
+            })}
             empty={empty("invoices")}
           />
         </Card>

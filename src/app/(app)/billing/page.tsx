@@ -153,10 +153,11 @@ export default async function BillingPage() {
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{inv.customer ?? "—"}</div>
                   <div className="truncate text-xs text-slate-500">{inv.job ?? inv.invoice_number}</div>
+                  <AmountDetail total={inv.total} paid={inv.paid} />
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <Amount total={inv.total} paid={inv.paid} />
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <Verb>Review &amp; Send</Verb>
                 </div>
               </Link>
             </li>
@@ -189,13 +190,14 @@ export default async function BillingPage() {
                         {u?.due_date ? ` · due ${formatDate(u.due_date)}` : ""}
                       </span>
                     </div>
+                    <AmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     {/* The same amount language as every row: what is due, and what it is due
                         against. A paid revised bill still belongs here and reads "$0.00" over
                         "of $T · paid in full", so the figure on the corrected copy is on screen. */}
                     <Amount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} overdue={!!u?.overdue} />
-                    <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
+                    <Verb>Review &amp; Send</Verb>
                   </div>
                 </Link>
               </li>
@@ -222,10 +224,11 @@ export default async function BillingPage() {
                     {inv.overdue && <span className="inline-flex items-center gap-0.5 font-semibold text-red-600"><AlertTriangle className="h-3 w-3" /> Overdue</span>}
                     <span className="truncate">{inv.invoice_number}{inv.due_date ? ` · due ${formatDate(inv.due_date)}` : ""}</span>
                   </div>
+                  <AmountDetail total={inv.total} paid={inv.paid} />
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <Amount total={inv.total} paid={inv.paid} overdue={inv.overdue} />
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Record Payment <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <Verb>Record Payment</Verb>
                 </div>
               </Link>
             </li>
@@ -250,8 +253,11 @@ export default async function BillingPage() {
                 <li key={inv.id}>
                   <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">
                     <div className="min-w-0">
-                      <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
-                      <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
+                      <div className="truncate">
+                        <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
+                        <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
+                      </div>
+                      <AmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
                     </div>
                     <div className="flex shrink-0 items-center gap-4">
                       <Amount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
@@ -269,13 +275,34 @@ export default async function BillingPage() {
 }
 
 /** THE AMOUNT ON EVERY ROW: what is due, and (when anything is paid) what it is due against.
- *  One language for all four lists (invoiceAmount), so a bold figure always means the balance. */
+ *  One language for all four lists (invoiceAmount), so a bold figure always means the balance.
+ *
+ *  THE PHONE RULE: the right-hand column is shrink-0, so anything wide in it squeezes the
+ *  min-w-0 left column (the customer, the invoice number, the Overdue flag) down to nothing. At
+ *  393px a partly paid row left the customer 0-16px wide. So below `sm` the detail line moves
+ *  under the left-hand text (AmountDetail) and the verb shows only its chevron (Verb); the right
+ *  column is just the figure. */
 function Amount({ total, paid, overdue = false }: { total: number; paid: number; overdue?: boolean }) {
   const a = invoiceAmount(total, paid);
   return (
     <span className="flex flex-col items-end text-right">
-      <span className={`text-sm font-medium ${overdue ? "text-red-700" : "text-slate-900"}`}>{a.due}</span>
-      {a.detail && <span className="text-[11px] text-slate-500">{a.detail}</span>}
+      <span className={`whitespace-nowrap text-sm font-medium ${overdue ? "text-red-700" : "text-slate-900"}`}>{a.due}</span>
+      {a.detail && <span className="hidden whitespace-nowrap text-[11px] text-slate-500 sm:block">{a.detail}</span>}
+    </span>
+  );
+}
+
+/** The same detail, on a phone, under the row's left-hand text where it can truncate. */
+function AmountDetail({ total, paid }: { total: number; paid: number }) {
+  const { detail } = invoiceAmount(total, paid);
+  return detail ? <div className="truncate text-[11px] text-slate-500 sm:hidden">{detail}</div> : null;
+}
+
+/** A row's verb: the words from `sm` up, the chevron always (the whole row is the link). */
+function Verb({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center text-xs font-semibold text-brand">
+      <span className="hidden sm:inline">{children}&nbsp;</span><ChevronRight className="h-3.5 w-3.5" />
     </span>
   );
 }

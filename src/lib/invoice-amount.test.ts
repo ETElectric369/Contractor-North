@@ -26,6 +26,11 @@ describe("invoiceAmount — what is due, and what it is due against", () => {
     });
   });
 
+  it("prints a credit memo's negative total and calls it a credit, never $0.00", () => {
+    expect(invoiceAmount(-250, 0)).toEqual({ due: "-$250.00", detail: "credit" });
+    expect(invoiceAmount(-250, null)).toEqual({ due: "-$250.00", detail: "credit" });
+  });
+
   it("never prints NaN", () => {
     expect(invoiceAmount(Number.NaN, Number.NaN)).toEqual({ due: "$0.00", detail: null });
     expect(invoiceAmount(undefined, 50).due).toBe("$0.00");

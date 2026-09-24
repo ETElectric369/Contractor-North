@@ -174,4 +174,14 @@ describe("the board speaks one language", () => {
     expect([...code.matchAll(/<Amount /g)].length).toBe(4);
     expect(src).toContain('from "@/lib/invoice-amount"');
   });
+
+  it("keeps the wide detail out of the shrink-0 column on a phone", () => {
+    // At 393px "of $T · $P paid" beside the verb squeezed the customer to 0-16px. Below sm the
+    // detail sits under the left-hand text and the verb is its chevron.
+    expect([...code.matchAll(/<AmountDetail /g)].length).toBe(4);
+    expect(code).toContain('<span className="hidden whitespace-nowrap text-[11px] text-slate-500 sm:block">{a.detail}</span>');
+    expect(code).toContain('<span className="hidden sm:inline">{children}&nbsp;</span>');
+    expect(code).not.toMatch(/>Review &amp; Send <ChevronRight/);
+    expect(code).not.toMatch(/>Record Payment <ChevronRight/);
+  });
 });
