@@ -1,0 +1,2 @@
+# Session worktrees and local tool state live here; they are never part of a deploy.
+.claude
