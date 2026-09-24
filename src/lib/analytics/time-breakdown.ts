@@ -2,8 +2,8 @@ import { hoursBetween } from "@/lib/utils";
 
 /**
  * Where the crew's time actually went — closed hours grouped by JOB and by COST CODE over a recent
- * window. Allocation-aware like laborCostForJob: a split shift's hours land on each allocation's own
- * job + code; an un-split closed entry contributes its gross hours to its own job + code. This is the
+ * window. A split shift is ordinary entries (0288), so every closed entry contributes its hours to its
+ * own job + code, exactly as laborCostForJob counts it. This is the
  * pivot hours_summary (per-employee, dollarless) doesn't do.
  */
 export type HoursBucket = { label: string; hours: number };
@@ -25,17 +25,6 @@ export function computeHoursBreakdown(
 
   for (const e of entries ?? []) {
     if (e.clock_in && new Date(e.clock_in).getTime() < sinceMs) continue; // outside the window
-    const allocs = e.time_allocations ?? [];
-    if (allocs.length) {
-      for (const a of allocs) {
-        const h = Number(a.hours ?? 0);
-        if (h <= 0) continue;
-        add(byJob, jobLabel(a.job_id ?? e.job_id), h);
-        add(byCode, a.job_code || e.job_code || "Uncoded", h);
-        total += h;
-      }
-      continue;
-    }
     if (e.status === "closed" && e.clock_out) {
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
       if (h <= 0) continue;
@@ -57,7 +46,7 @@ export async function getHoursBreakdown(supabase: any, sinceDays = 30): Promise<
   const [{ data: entries }, { data: jobs }] = await Promise.all([
     supabase
       .from("time_entries")
-      .select("job_id, job_code, clock_in, clock_out, lunch_minutes, status, time_allocations(job_id, job_code, hours)")
+      .select("job_id, job_code, clock_in, clock_out, lunch_minutes, status")
       .eq("status", "closed")
       .gte("clock_in", since.toISOString())
       // Crew hours and job labels truncated at 1000 rows (audit 9) — the same unbounded read

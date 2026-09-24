@@ -4,20 +4,12 @@ import { computeHoursBreakdown } from "@/lib/analytics/time-breakdown";
 describe("computeHoursBreakdown — hours by job + cost code", () => {
   const labels = new Map([["JA", "J-1 — Panel"], ["JB", "J-2 — Service"]]);
 
-  it("attributes split-shift hours to each allocation's job + code; un-split to its own", () => {
+  it("a split shift is two entries: each piece lands on its own job + code (0288)", () => {
     const entries = [
-      // split shift clocked into JB but allocated: 3h to JA/rough-in, 5h to JB/service
-      {
-        job_id: "JB",
-        job_code: "service",
-        status: "closed",
-        clock_in: "2026-07-01T08:00:00Z",
-        time_allocations: [
-          { job_id: "JA", job_code: "rough-in", hours: 3 },
-          { job_id: "JB", job_code: "service", hours: 5 },
-        ],
-      },
-      // un-split 8h closed entry on JA, code finish
+      // one 8h day cut at 11:00: 3h on JA/rough-in, then 5h on JB/service
+      { job_id: "JA", job_code: "rough-in", status: "closed", clock_in: "2026-07-01T08:00:00Z", clock_out: "2026-07-01T11:00:00Z", lunch_minutes: 0 },
+      { job_id: "JB", job_code: "service", status: "closed", clock_in: "2026-07-01T11:00:00Z", clock_out: "2026-07-01T16:00:00Z", lunch_minutes: 0 },
+      // an ordinary 8h closed entry on JA, code finish
       { job_id: "JA", job_code: "finish", status: "closed", clock_in: "2026-07-02T08:00:00Z", clock_out: "2026-07-02T16:00:00Z", lunch_minutes: 0 },
     ];
     const out = computeHoursBreakdown(entries, 0, 30, labels);

@@ -171,7 +171,6 @@ export default async function JobDetailPage({
     { data: insuranceClaim },
     { data: pos },
     { data: ownEntries },
-    { data: inboundAllocRows },
     { data: docRows },
     { data: staff },
     { data: bills },
@@ -192,17 +191,9 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, split_from, split_how, profiles(full_name), job:job_id(job_number, name)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
-    // Time allocated INTO this job from shifts clocked on OTHER jobs (or no job). Without this
-    // second direction, an hour split onto this job from another job's shift was invisible here —
-    // while billing (fetchJobLaborRows) already billed it. Same two-way read billing uses; the
-    // parent entry comes embedded with ALL its allocations so the per-job share math works.
-    supabase
-      .from("time_allocations")
-      .select("id, time_entries!inner(id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, profiles(full_name), job:job_id(job_number, name), time_allocations(id, job_id, hours, job_code, description))")
-      .eq("job_id", id),
     supabase
       .from("documents")
       .select("id, name, category, file_url, size_bytes, created_at")
@@ -250,15 +241,8 @@ export default async function JobDetailPage({
   // RATES MERGED FROM THE STAFF-SCOPED VIEW (0215/0216 revoked them from the authenticated
   // role, so these embeds cannot carry them). Without this the job hub's Labor line and every
   // profit figure on the page read ZERO — the exact bug the pay-boundary work was meant to
-  // avoid, reintroduced by narrowing the embeds without merging. Both shapes: the entry rows,
-  // and the allocation rows whose entry is nested one level down.
-  {
-    attachRates((ownEntries ?? []) as any[], rates, (e: any) => ({ id: e.profile_id, holder: e }));
-    attachRates((inboundAllocRows ?? []) as any[], rates, (a: any) => ({
-      id: a.time_entries?.profile_id,
-      holder: a.time_entries,
-    }));
-  }
+  // avoid, reintroduced by narrowing the embeds without merging.
+  attachRates((ownEntries ?? []) as any[], rates, (e: any) => ({ id: e.profile_id, holder: e }));
 
   /**
    * ONE WAVE, NOT SIX (audit v800 wave B). These six reads are independent of each other and of
@@ -320,21 +304,10 @@ export default async function JobDetailPage({
   // renders the editor; the first added item lazily creates it server-side
   // (ensureJobMaterialList), so viewing a job never writes data.
   const canonicalList = ((jobLists ?? [])[0] ?? null) as { id: string; name: string } | null;
-  // Merge the two directions into ONE entries list: shifts clocked on this job, plus shifts
-  // clocked elsewhere that allocated hours here (deduped; the row math shows only this job's
-  // share). laborCostForJob already attributes per-allocation, so totals stay exact.
-  const ownIds = new Set(((ownEntries ?? []) as any[]).map((e: any) => e.id));
-  const foreignEntries = Array.from(
-    new Map(
-      ((inboundAllocRows ?? []) as any[])
-        .map((r: any) => r.time_entries)
-        .filter((e: any) => e && !ownIds.has(e.id))
-        .map((e: any) => [e.id, e]),
-    ).values(),
-  );
-  const entries = [...((ownEntries ?? []) as any[]), ...foreignEntries].sort((a: any, b: any) =>
-    a.clock_in < b.clock_in ? 1 : -1,
-  );
+  // The shifts on this job. A split shift is ordinary entries now (0288), each on its own job, so
+  // the part of a shift that went to another job lives on that job's page, and this list is simply
+  // this job's rows.
+  const entries = ((ownEntries ?? []) as any[]).slice().sort((a: any, b: any) => (a.clock_in < b.clock_in ? 1 : -1));
 
   // FOUR MORE THAT WERE WAITING THEIR TURN FOR NOTHING (audit v921). storyForJob, the billing
   // labor rows, the customer's labor rate and this job's refunds each need only the job id (and
@@ -406,12 +379,12 @@ export default async function JobDetailPage({
       : Promise.resolve({ data: [] as any[] }),
     supabase.from("jobs").select("id, job_number, name").order("created_at", { ascending: false }).limit(100),
     supabase.from("job_code_templates").select("id, name").order("name"),
-    // The viewer's OPEN time entry (drives the action dock's 3-state TIME button).
-    // Summed time_allocations = hours already recorded by mid-shift switches, so a
-    // "Switch here" confirm can honestly name the outgoing segment's hours.
+    // The viewer's OPEN time entry (drives the action dock's 3-state TIME button). A Switch Job
+    // closes it and opens the next piece (0288 switch_job), so its clock_in IS where the running
+    // part started, and the "Switch here" confirm names now - clock_in as the outgoing hours.
     supabase
       .from("time_entries")
-      .select("id, clock_in, job_id, job:job_id(job_number, name), time_allocations(hours)")
+      .select("id, clock_in, job_id, job:job_id(job_number, name)")
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
@@ -464,7 +437,6 @@ export default async function JobDetailPage({
         clock_in: oe.clock_in as string,
         job_id: (oe.job_id ?? null) as string | null,
         jobLabel: oe.job ? jobLabel(oe.job) : null,
-        allocatedHours: (oe.time_allocations ?? []).reduce((s: number, a: any) => s + (Number(a.hours) || 0), 0),
       }
     : null;
   const jobContacts = (jobContactsRaw ?? []).map((r: any) => ({
@@ -523,7 +495,7 @@ export default async function JobDetailPage({
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
   // (bill rate) — the latter feeds the estimate-vs-actual draw tracking.
-  // laborCost (what we PAY) via the shared allocation-aware helper — identical math to /analytics.
+  // laborCost (what we PAY) via the shared helper — identical math to /analytics.
   //
   // THE OWNER'S HOURS ARE NOT A COST (0286). Erik is paid by owner's draw, so laborCostForJob adds
   // $0 for his hours and hands them back as ownerHours. `laborCost` is therefore CREW labor, and
@@ -561,13 +533,13 @@ export default async function JobDetailPage({
   // SSOT (the exact rollup the draw modal / print report use: estimate = accepted contract
   // via contractTotalFromQuotes, invoiced = non-void non-draft, collected = non-void
   // amount_paid, materials marked up per row like importCosts). One rule change there
-  // reaches this hub automatically. fetchJobLaborRows also captures cross-job allocations.
+  // reaches this hub automatically.
   const materialMarkup = getOrgSettings((org as any)?.settings).material_markup_percent;
   const defaultLaborRate = getOrgSettings((org as any)?.settings).default_labor_rate;
   // timeclock_job_codes=false must hide EVERY code picker (cn-v517) — including the
   // Time tab's add/edit modals here, not just the /timecards mounts.
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
-  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, laborRows.jobAllocs, defaultLaborRate, jobLevelRate, laborRows.nonBillableCodes).total;
+  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate, laborRows.nonBillableCodes).total;
   const progress = computeJobProgress({
     billingTypeRaw: (j as any).billing_type,
     quotes: (quotes ?? []) as any,
@@ -610,8 +582,8 @@ export default async function JobDetailPage({
   const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const revenue = Math.max(0, collected - jobRefunds);
   // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
-  // for the same job: mileage is a per-entry value that isn't allocation-aware (a split
-  // shift can't apportion its miles across jobs), and /analytics doesn't carry it. Mileage
+  // for the same job: mileage is a per-entry value (a split shift keeps its miles whole on one
+  // piece, never apportioned across jobs), and /analytics doesn't carry it. Mileage
   // is surfaced below as MILES ONLY — no app-computed dollars (mileage pay is a human-typed
   // settlement on /payroll, never rate×miles). If mileage dollars are ever folded back in,
   // they must be added to BOTH surfaces.
@@ -661,7 +633,9 @@ export default async function JobDetailPage({
     notes: string | null;
     profiles: { full_name: string | null } | null;
     job: { job_number: string; name: string } | null;
-    time_allocations: { id: string; job_id: string | null; hours: number | null; job_code: string | null; description: string | null }[];
+    /** 0288: the first entry of the shift this piece was cut from, and how it was cut. */
+    split_from?: string | null;
+    split_how?: string | null;
     rate_override?: number | null;
     // The payroll locks aren't pay data — they drive the edit modal's
     // "paid period" banner, which every role should see before a blocked save.
@@ -682,7 +656,8 @@ export default async function JobDetailPage({
         notes: e.notes,
         profiles: e.profiles ? { full_name: e.profiles.full_name ?? null } : null,
         job: e.job ?? null,
-        time_allocations: e.time_allocations ?? [],
+        split_from: e.split_from ?? null,
+        split_how: e.split_how ?? null,
         paid_at: e.paid_at ?? null,
         mileage_paid_at: e.mileage_paid_at ?? null,
       }));
@@ -992,28 +967,22 @@ export default async function JobDetailPage({
             {timeTabEntries.map((e) => {
               const h = e.status === "closed" && e.clock_out
                 ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : null;
-              // THIS job's share of the shift: allocation rows naming this job (unlabeled rows
-              // belong to the entry's own job), else the whole shift. The row shows the share —
-              // the number that actually bills here — with the full-shift context alongside.
-              const allocs = e.time_allocations ?? [];
-              const share = allocs.length
-                ? allocs.reduce((sum: number, a: any) => sum + (((a.job_id ?? e.job_id) === j.id) ? Number(a.hours ?? 0) : 0), 0)
-                : h;
-              const isSplit = allocs.length > 0 && h != null && Math.abs((share ?? 0) - h) > 0.01;
-              const fromOtherJob = e.job_id !== j.id;
               return (
                 <li key={e.id} className="flex items-center justify-between px-5 py-3 text-sm">
                   <div>
                     <span className="text-slate-700">{formatDateTz(e.clock_in, tz)}</span>
                     <span className="ml-2 text-slate-500">{e.profiles?.full_name ?? "—"}</span>
                     {e.job_code && <Badge tone="slate" className="ml-2">{e.job_code}</Badge>}
-                    {fromOtherJob && e.job && (
-                      <Badge tone="blue" className="ml-2">via {e.job.job_number}</Badge>
-                    )}
+                    {/* A piece of a split shift says so: the rest of that shift is on another job's
+                        page, and a row that looks like a short day with no reason is a question. */}
+                    {e.split_how === "converted" ? (
+                      <Badge tone="blue" className="ml-2">Rebuilt From An Old Split</Badge>
+                    ) : e.split_from ? (
+                      <Badge tone="blue" className="ml-2">part of a split shift</Badge>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {isSplit && <span className="text-xs text-slate-400">of {formatDuration(h!)} shift</span>}
-                    <span className="font-medium text-slate-800">{share != null ? formatDuration(share) : "open"}</span>
+                    <span className="font-medium text-slate-800">{h != null ? formatDuration(h) : "open"}</span>
                     <EditEntryButton
                       entry={e}
                       jobCodes={(jobCodes ?? []) as any}

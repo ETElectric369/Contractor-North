@@ -6,10 +6,10 @@ import { livePurchaseOrders } from "@/lib/job-progress-math";
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Job profitability — the ONE allocation-aware computation shared by /analytics and Nort's
+ * Job profitability — the ONE computation shared by /analytics and Nort's
  * get_job_financials / list_job_profitability tools, so a job can never show two different
  * profits across them. Revenue = cash COLLECTED net of refunds; cost = labor (laborCostForJob,
- * at pay rate, split-aware) + materials (live POs + bills, via the shared livePurchaseOrders rule).
+ * at pay rate; a split shift is ordinary entries, 0288) + materials (live POs + bills, via the shared livePurchaseOrders rule).
  *
  * "Collected" is THE cash definition (computeCollected in money-metrics): the PAYMENTS ledger net
  * of voided invoices — NOT invoices.amount_paid. amount_paid folds non-cash account credits in
@@ -122,8 +122,8 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
     .sort((a, b) => b.profit - a.profit);
 }
 
-/** Fetch the inputs for profitability. Entries are ALL closed (labor is split-aware — an allocation
- *  tagged to a job can live on another job's entry), so this is not job-scopeable; money is. */
+/** Fetch the inputs for profitability. Entries are ALL closed (laborCostForJob picks each job's own
+ *  rows), so the entry read is not job-scoped; money is. */
 async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitInputs> {
   const jobsQ = jobId
     ? supabase.from("jobs").select("id, job_number, name, status").eq("id", jobId)
@@ -166,17 +166,13 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
       supabase.from("customer_credits").select("amount, invoices(job_id)").eq("disposition", "refund").limit(50000),
       supabase
         .from("time_entries")
-        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
+        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id)")
         .eq("status", "closed")
         // Explicit high limit + a stable order (audit 8): no .limit() means PostgREST's silent
         // 1000-row default, which truncated LABOR while revenue came back whole — every job
         // read more profitable than it is, and unstably so with no ORDER BY.
         .order("clock_in", { ascending: false })
         .limit(50000),
-        // NB: no `.not("job_id","is",null)` — a job-less clock-in whose hours were split
-        // ONTO jobs via allocations was dropped here while the job hub costed it, so the
-        // same job showed two different labor numbers. laborCostForJob already ignores
-        // entries that don't touch the job.
     ]);
   // Labor rates: merged from the staff-scoped `profile_pay` view onto the embedded profile by
   // its id. 0215/0216 revoke those columns from the `authenticated` role — RLS cannot restrict
@@ -319,13 +315,13 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
   const [{ data: bills }, { data: pos }, { data: entries }, { data: petty }] = await Promise.all([
     supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
-    // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same split-aware, pay-rate
-    // helper computeJobProfitRows uses.
+    // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same pay-rate helper
+    // computeJobProfitRows uses.
     //
     // THE PROJECTION LAW, AND I BROKE IT SHIPPING THE FIX FOR IT (audit v824). cn-v821 wrote
     // `.select("*")` here. In PostgREST `*` means THIS TABLE'S COLUMNS — it does not expand
-    // embeds. So the rows reached laborCostForJob with no `profiles` (no pay rate) and no
-    // `time_allocations` (no split), and every hour priced at $0. The Labor row I had just added
+    // embeds. So the rows reached laborCostForJob with no `profiles` (no pay rate), and every hour
+    // priced at $0. The Labor row I had just added
     // to both sides read `actual: 0` on every job, and the commit's claim that the two readers
     // "can never report two different labour numbers" was false in the same breath that made it.
     // The helper was shared; the INPUT was not, and laborCostForJob is entirely input-driven.
@@ -334,7 +330,7 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
     // embeds, same explicit limit — because that is the only thing that makes the two agree.
     supabase
       .from("time_entries")
-      .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
+      .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id)")
       .eq("status", "closed")
       .eq("job_id", jobId)
       .order("clock_in", { ascending: false })

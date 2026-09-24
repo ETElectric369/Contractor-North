@@ -14,14 +14,13 @@ import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 import type { GeoPoint } from "@/lib/types";
 
 /** The viewer's open time entry, fetched server-side by the job page (one cheap
- *  query in its Promise.all). allocatedHours = the sum of the entry's recorded
- *  switch segments, so State B can honestly name the OUTGOING segment's hours. */
+ *  query in its Promise.all). A Switch Job closes the running entry and opens the next piece
+ *  (0288), so clock_in is where the running part started and State B names now - clock_in. */
 export interface OpenEntry {
   id: string;
   clock_in: string;
   job_id: string | null;
   jobLabel: string | null;
-  allocatedHours: number;
 }
 
 /** Best-effort on-gesture GPS: the tap that clocks in IS the user gesture (the
@@ -51,7 +50,7 @@ const fmtHm = (ms: number) => {
  * crew member — crew time goes through the staff-only "log hours" section):
  *   A  not on the clock            → "Clock in"  → confirm modal, stays ON the job
  *   B  on the clock at ANOTHER job → "Switch"    → explicit confirm naming the
- *      outgoing job AND its hours (switchJob records that segment first)
+ *      outgoing job AND its hours (switch_job closes that entry and opens the next one)
  *   C  on the clock at THIS job    → green, ticking → staff one-tap clock-out;
  *      field crew route to /timeclock (the codes+hours rule, same as My Day)
  */
@@ -94,15 +93,12 @@ export function JobTimeButton({
     return () => clearInterval(t);
   }, [state, openEntry?.id]);
 
-  // C: total shift from raw clock_in. B: the OUTGOING segment = clock_in + the
-  // hours already recorded by earlier switches → now (switchJob's own math), so
-  // the confirm can honestly say what a switch will record.
+  // C: the running entry from its clock_in. B: the same figure, because a switch closes the running
+  // entry right now and opens a new one here (0288 switch_job), so the confirm can honestly say what
+  // the closed part will read.
   const elapsedMs = openEntry ? Math.max(0, now - new Date(openEntry.clock_in).getTime()) : 0;
   const segmentHours = openEntry
-    ? Math.max(
-        0,
-        Math.round(((Date.now() - (new Date(openEntry.clock_in).getTime() + openEntry.allocatedHours * 3_600_000)) / 3_600_000) * 100) / 100,
-      )
+    ? Math.max(0, Math.round(((Date.now() - new Date(openEntry.clock_in).getTime()) / 3_600_000) * 100) / 100)
     : 0;
 
   function openModal() {
@@ -294,7 +290,7 @@ export function JobTimeButton({
           {state === "switch" && openEntry && (
             <p className="text-sm text-slate-600">
               You&apos;re on the clock at <span className="font-medium">{openEntry.jobLabel ?? "another job"}</span> since {fmtTime(openEntry.clock_in)}.
-              Switching records the <span className="font-medium">{segmentHours}h</span> worked there so far, then puts the rest of your shift on {jobNumber}.
+              Switching closes that entry at <span className="font-medium">{segmentHours}h</span> and starts a new one on {jobNumber} right now. A job-less start just moves over to {jobNumber} whole.
             </p>
           )}
 

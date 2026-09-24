@@ -4,7 +4,7 @@
  * Erik, 2026-09-11, on 85 Whitney: "i couldnt even make an invoice… kept referring to the old
  * invoice even though i have new time and new bills… we should have a running total of open time
  * and materials on the overview". Both sentences are this module. "Unbilled" means: closed time
- * entries / allocations NOT claimed by a labor line on any non-void invoice (invoice_items.
+ * entries NOT claimed by a labor line on any non-void invoice (invoice_items.
  * source_ids, 0255), plus bills and live purchase orders NOT claimed by any non-void invoice —
  * priced EXACTLY the way the importers and Nort's job numbers price them (computeJobLaborBilling
  * at the person's bill rate under the customer's level ceiling; materials per row at the
@@ -56,7 +56,7 @@ export type UnbilledWork = {
   /** Bills skipped because the PO they name is already billed — the delivery was charged via the
    *  PO, so billing the bill too would charge it twice; a difference is the office's call. */
   poCoveredBills: number;
-  /** Source rows (entries/allocations/bills/POs) another invoice already holds, and which ones. */
+  /** Source rows (entries/bills/POs) another invoice already holds, and which ones. */
   claimedCount: number;
   claimedOn: string[];
   /** false until migration 0255 has landed — labor claims are unknowable before it. */
@@ -115,26 +115,11 @@ export function claimedIdsOfLines(items: ClaimLine[] | null | undefined): string
   return [...out];
 }
 
-/** Every entry / allocation id in a fetchJobLaborRows result — the candidates a claim read looks
- *  up BY ID (an entry billed on one job and moved to another is claimed wherever it now sits).
- *
- *  A STANDALONE ALLOCATION'S PARENT ENTRY IS A CANDIDATE TOO (review of cn-v966). 90 of the 98
- *  labor claims in Erik's books are ENTRY ids - an un-split shift is billed whole, by its own id
- *  (0256's backfill). Split that shift afterwards and the new allocation rows have brand-new ids
- *  that no invoice has ever seen; file them onto a DIFFERENT job and this job's claim read never
- *  asks about the entry that INV-061 still holds, so the same two hours read as free and bill a
- *  second time. Asking for the parent id costs one uuid in a query string and is what makes
- *  withoutClaimedLabor's parent test able to answer. */
-export function laborRowIds(labor: { jobEntries: any[]; jobAllocs: any[] }): string[] {
+/** Every entry id in a fetchJobLaborRows result: the candidates a claim read looks up BY ID (an
+ *  entry billed on one job and moved to another is claimed wherever it now sits). */
+export function laborRowIds(labor: { jobEntries: any[] }): string[] {
   const ids = new Set<string>();
-  for (const e of labor.jobEntries ?? []) {
-    if (e?.id) ids.add(String(e.id));
-    for (const a of e?.time_allocations ?? []) if (a?.id) ids.add(String(a.id));
-  }
-  for (const a of labor.jobAllocs ?? []) {
-    if (a?.id) ids.add(String(a.id));
-    if (a?.time_entries?.id) ids.add(String(a.time_entries.id));
-  }
+  for (const e of labor.jobEntries ?? []) if (e?.id) ids.add(String(e.id));
   return [...ids];
 }
 
@@ -186,7 +171,7 @@ function isMissingSourceIds(err: unknown): boolean {
  * TWO READS, folded together:
  *   per job    every non-void invoice on the job with its lines — the cost KEYS (po:/bill:/co:)
  *              live only here, and this is the list "last invoice" comes from;
- *   by id      `candidateIds` (the entries, allocations, bills and orders the caller is about to
+ *   by id      `candidateIds` (the entries, bills and orders the caller is about to
  *              bill) looked up ORG-WIDE in invoice_items.source_ids. A claim is per row, not per
  *              job: an entry billed on J1 and moved to J2 afterwards is still billed, and a J2
  *              invoice that only asked "what does J2 hold" would bill it again. Chunked so a
@@ -286,7 +271,6 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 export type UnbilledInput = {
   claims: ClaimedSources;
   jobEntries: any[];
-  jobAllocs: any[];
   nonBillableCodes: ReadonlySet<string>;
   defaultRate: number;
   levelRate: number | null;
@@ -303,11 +287,8 @@ export type UnbilledInput = {
  */
 export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   const claimed = new Set(input.claims.owner.keys());
-  // The owner map rides along, not just its keys: a shift billed WHOLE by its entry id must not
-  // come back as free hours the moment somebody re-splits it, and only the claiming invoice's date
-  // tells that apart from an old split the invoice deliberately left off (see withoutClaimedLabor).
-  const free = withoutClaimedLabor(input.jobEntries, input.jobAllocs, claimed, input.claims.owner);
-  const { lines, total: laborAmount } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, input.defaultRate, input.levelRate, input.nonBillableCodes);
+  const free = withoutClaimedLabor(input.jobEntries, claimed);
+  const { lines, total: laborAmount } = computeJobLaborBilling(free.jobEntries, input.defaultRate, input.levelRate, input.nonBillableCodes);
   const laborByPerson = lines.map((l) => ({ name: l.name, hours: l.quantity, amount: l.amount }));
   const hours = cents(lines.reduce((s, l) => s + l.quantity, 0));
 
@@ -462,7 +443,6 @@ export async function unbilledWorkForJob(supabase: SupabaseClient, jobId: string
   return computeUnbilledWork({
     claims,
     jobEntries: labor.jobEntries,
-    jobAllocs: labor.jobAllocs,
     nonBillableCodes: labor.nonBillableCodes,
     defaultRate: settings.default_labor_rate,
     levelRate,

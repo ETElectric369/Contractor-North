@@ -262,7 +262,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("time_entries")
-          .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+          .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
           .eq("status", "open")
           .order("clock_in", { ascending: true })
           .limit(50)
@@ -272,7 +272,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("time_entries")
-          .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+          .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
           .gte("clock_in", daysAgoStr(todayStr, NEEDS_RETURN_DAYS))
           .order("clock_in", { ascending: false })
           .limit(200)

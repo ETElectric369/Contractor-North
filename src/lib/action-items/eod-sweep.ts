@@ -44,13 +44,13 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     const [openR, recentR] = await Promise.all([
       supabase
         .from("time_entries")
-        .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+        .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
         .eq("org_id", org.id)
         .eq("status", "open")
         .limit(50),
       supabase
         .from("time_entries")
-        .select("id, status, job_id, clock_in, clock_out, profiles(full_name), time_allocations(job_id)")
+        .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
         .eq("org_id", org.id)
         .gte("clock_in", daysAgoStr(today, NEEDS_RETURN_DAYS))
         .limit(200),

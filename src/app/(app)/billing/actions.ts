@@ -507,7 +507,7 @@ export type ImportStats = {
   updated: number;
   kept_edited: number;
   removed: number;
-  /** Source rows this run pulled in — time entries/allocations, bills + orders, change orders,
+  /** Source rows this run pulled in — time entries, bills + orders, change orders,
    *  estimate lines — that were NOT on the invoice before it: a refresh that re-wrote a line's
    *  claims unchanged, or an id an edited line already held, is not "pulled in". */
   pulled_in: number;
@@ -1011,7 +1011,7 @@ export async function addInvoiceItem(
  *  to the atomic, advisory-locked RPC (0156) so two overlapping imports can't both land.
  *  Hand-entered rows (import_source null) and other sources are never touched. */
 /** An imported line, carrying the stable identity of the thing it represents — and, since 0255,
- *  its CLAIM: the source row ids it bills (time entry / allocation / bill / PO / change order /
+ *  its CLAIM: the source row ids it bills (time entry / bill / PO / change order /
  *  estimate line). Another invoice on the job never imports a claimed row. */
 type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number; source_ids?: string[] };
 
@@ -1316,8 +1316,8 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   if (block) return block;
 
   // Bill the EXACT time on this job via the shared labor-billing helper (so the billed lines
-  // reconcile to the penny with the "work to date" every panel shows) — MINUS every entry and
-  // allocation another non-void invoice on the job already CLAIMS (0255). Re-importing into THIS
+  // reconcile to the penny with the "work to date" every panel shows) — MINUS every entry
+  // another non-void invoice on the job already CLAIMS (0255). Re-importing into THIS
   // draft excludes only OTHER invoices' claims, so a refresh still works exactly as 0175 promised.
   const [labor, { data: org }, levelRate] = await Promise.all([
     fetchJobLaborRows(supabase, inv.job_id),
@@ -1331,16 +1331,10 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
   // old rule has to hold — never bill a second invoice's labor blind (one sentence with costs).
   if (!claims.schemaReady && claims.invoices.length) return midUpgradeRefusal(claims);
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
-  // THE DATE MAP, WHICH THIS CALLER WAS THE ONLY ONE NOT PASSING (review of the fix wave,
-  // 2026-09-20). withoutClaimedLabor's parent-claim rule needs to know WHEN the invoice was
-  // raised: a split made after the bill went out is hours that were billed whole and must not be
-  // billed again, while a split that predates it is a shape the invoice never covered. Without
-  // the map it reads every claimed parent as billed, so Import Labor refused work the Unbilled
-  // card on the same job was still offering - $587.50 on J-013 today - and told him it was
-  // "already on INV-00032", which was not true. computeUnbilledWork has always passed it; this is
-  // the read that writes the rows, and the two have to agree or the screen lies about his books.
-  const free = withoutClaimedLabor(labor.jobEntries, labor.jobAllocs, new Set(claims.owner.keys()), claims.owner);
-  const { lines } = computeJobLaborBilling(free.jobEntries, free.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
+  // A split is a cut into ordinary entries (0288), and a piece that carries billed hours carries
+  // the claim by its own id, so the free rows are simply the entries no other invoice holds.
+  const free = withoutClaimedLabor(labor.jobEntries, new Set(claims.owner.keys()));
+  const { lines } = computeJobLaborBilling(free.jobEntries, defaultRate, levelRate, labor.nonBillableCodes);
   if (lines.length === 0) {
     // Nothing free to bill — and the reason is the difference between "no hours yet" and "every
     // hour is already on INV-061". Only the second one should send the office looking elsewhere.
@@ -1374,7 +1368,7 @@ export async function importLaborIntoInvoice(invoiceId: string): Promise<ImportR
     quantity: l.quantity,
     unit: "hr",
     unit_price: l.rate,
-    // THE CLAIM: the entry/allocation ids behind this line ride with it and die with it. An
+    // THE CLAIM: the entry ids behind this line ride with it and die with it. An
     // `edited` line keeps the claims it already holds and takes no new ones — its hours were
     // negotiated, and hours that arrive later are not on it, so they stay free for the next bill.
     source_ids: l.sourceIds,
