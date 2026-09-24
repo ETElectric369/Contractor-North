@@ -66,6 +66,7 @@ export function StopClockSheet({
   onClose,
   onDelete,
   deleting,
+  externalError,
 }: {
   entry: StopClockEntry;
   jobs: { id: string; job_number: string; name: string }[];
@@ -78,6 +79,9 @@ export function StopClockSheet({
   onClose: () => void;
   onDelete: () => void;
   deleting: boolean;
+  /** A failure from the parent's own action (Delete), shown in this sheet's error line: the parent's
+   *  edit form, which used to show it, is never mounted for a running clock. */
+  externalError?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -97,8 +101,14 @@ export function StopClockSheet({
   const [openedAt] = useState(() => Date.now());
   const forgotten = isLongOpenShift(clockInMs, openedAt) || startedEarlierDay(clockInMs, openedAt, tz);
 
-  const [startDate, setStartDate] = useState(() => todayStrInTz(tz, new Date(clockInMs)));
-  const [startTime, setStartTime] = useState(() => clockInputValue(entry.clock_in, tz));
+  // The seeded start, kept to tell "the office moved the start" from "left alone". The inputs hold
+  // whole minutes, so an unmoved start is sent as the STORED clock-in to the second: rebuilding it
+  // from the fields moved every start back by up to 59 s with no crumb, and on the live piece of a
+  // Switch Job (which begins at the second the last piece ended) that is an overlap payroll pays twice.
+  const [seedStartDate] = useState(() => todayStrInTz(tz, new Date(clockInMs)));
+  const [seedStartTime] = useState(() => clockInputValue(entry.clock_in, tz));
+  const [startDate, setStartDate] = useState(seedStartDate);
+  const [startTime, setStartTime] = useState(seedStartTime);
   const [stopDate, setStopDate] = useState(() => (forgotten ? "" : todayStrInTz(tz, new Date(openedAt))));
   const [stopTime, setStopTime] = useState(() => (forgotten ? "" : clockInputValue(new Date(openedAt).toISOString(), tz)));
   const [lunchMin, setLunchMin] = useState(entry.lunch_minutes ?? 0);
@@ -110,12 +120,14 @@ export function StopClockSheet({
   const first = name.split(/\s+/)[0] || name;
   const label = entry.job ? jobLabel(entry.job) : null;
 
-  const startIso = tzDateTimeUtc(startDate, startTime, tz);
+  const startMoved = startDate !== seedStartDate || startTime !== seedStartTime;
+  const startIso = startMoved ? (startDate && startTime ? tzDateTimeUtc(startDate, startTime, tz) : null) : entry.clock_in;
   const stopIso = stopDate && stopTime ? tzDateTimeUtc(stopDate, stopTime, tz) : null;
   const startMs = startIso ? Date.parse(startIso) : NaN;
   const stopMs = stopIso ? Date.parse(stopIso) : NaN;
   const problem =
     stopIso && startIso ? stopProblem({ startMs, stopMs, nowMs: now, lunchMin, who: "he", tz }) : null;
+  const shownError = error ?? externalError ?? null;
   const valid = !!startIso && !!stopIso && !problem;
 
   // Chips fill the fields; they never save.
@@ -146,7 +158,7 @@ export function StopClockSheet({
       try {
         res = await stopShift({
           entry_id: entry.id,
-          clock_in: startIso,
+          ...(startMoved ? { clock_in: startIso } : {}),
           clock_out: stopIso,
           lunch_minutes: lunchMin,
           job_id: jobId || null,
@@ -193,26 +205,33 @@ export function StopClockSheet({
       title={`${name} Is Still On The Clock`}
       portal
       footer={
-        <>
-          <div className="mr-auto">
-            <Button variant="ghost" onClick={onDelete} disabled={busy} className="h-11 text-red-600 hover:bg-red-50">
-              <Trash2 className="h-4 w-4" /> Delete
-            </Button>
-          </div>
-          <Button type="button" variant="outline" className="h-11" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button type="button" variant="outline" className="h-11" onClick={saveWithoutStopping} disabled={busy || !sideChanged}>
-            Save Without Stopping
-          </Button>
-          <Button type="button" className="h-11" onClick={stopIt} disabled={busy || !valid}>
+        // STACKED, like the split sheet: four nowrap buttons in one row clipped their own labels at
+        // 375px ("op The Clo"). The error sits here, pinned with the button that caused it, so a
+        // refusal never lands above the fold of a scrolled body (NOTHING SILENT).
+        <div className="w-full space-y-2">
+          {shownError && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-center text-sm text-red-700" role="alert" aria-live="assertive">
+              {shownError}
+            </div>
+          )}
+          <Button type="button" className="h-11 w-full" onClick={stopIt} disabled={busy || !valid}>
             {pending ? "Stopping…" : "Stop The Clock"}
           </Button>
-        </>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" className="h-11 flex-1" onClick={saveWithoutStopping} disabled={busy || !sideChanged}>
+              Save Without Stopping
+            </Button>
+            <Button type="button" variant="outline" className="h-11 flex-1" onClick={onClose} disabled={busy}>
+              Cancel
+            </Button>
+          </div>
+          <Button variant="ghost" onClick={onDelete} disabled={busy} className="h-11 w-full text-red-600 hover:bg-red-50">
+            <Trash2 className="h-4 w-4" /> Delete
+          </Button>
+        </div>
       }
     >
       <div className="space-y-4">
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
         <p className="text-sm text-slate-700">
           Clocked in {dayLabel(clockInMs, tz)}, {splitClock(entry.clock_in, tz)}
           {label ? ` at ${label}` : " with no job"}, {agoLabel(now - clockInMs)} ago.
@@ -263,7 +282,9 @@ export function StopClockSheet({
         </div>
 
         <div aria-live="polite" className="text-sm">
-          {!stopIso ? (
+          {!startIso ? (
+            <p className="text-slate-500">Pick when {first} started.</p>
+          ) : !stopIso ? (
             <p className="text-slate-500">Pick when {first} stopped.</p>
           ) : problem ? (
             <p className="font-medium text-red-700">{problem}</p>

@@ -380,11 +380,37 @@ export async function switchJob(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override")
+    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in")
     .eq("id", input.entry_id)
     .eq("status", "open")
     .maybeSingle();
   if (!entry) return { ok: false, error: "No open entry to switch." };
+
+  /**
+   * A SWITCH ON A FORGOTTEN CLOCK IS A CLOSE AT NOW (review of 0291, 2026-09-24). In cut mode
+   * switch_job (0288) writes clock_out = now() on the running entry, which is the very one-tap
+   * mistake clockOut refuses past LONG_SHIFT_HOURS: Brian forgets on job A Tuesday, opens job B's
+   * page Wednesday morning, taps Switch, and job A gets a 17-hour shift that payroll pays and the
+   * labor import bills. So the switch asks the same question the clock-out does. A re-point (no job
+   * and no code yet) closes nothing and moves the whole running shift, so it is left alone.
+   */
+  const ciMs = entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
+  const wouldCut = !!entry.job_id || !!entry.job_code;
+  if (wouldCut && isLongOpenShift(ciMs, Date.now())) {
+    const tz = await orgTz(supabase);
+    const since = dayClock(String(entry.clock_in), tz);
+    if (entry.profile_id === user.id) {
+      return {
+        ok: false,
+        needsTime: true,
+        error: `You've been on the clock since ${since}, more than 10 hours. Pick when you stopped on Timeclock, then clock in on this job.`,
+      };
+    }
+    return {
+      ok: false,
+      error: `That clock has been running since ${since}, more than 10 hours. Stop it at the time the shift really ended (Timecards, Stop The Clock), then clock in on this job.`,
+    };
+  }
 
   // The new job must be visible to the caller (RLS-scoped): never point an entry at a foreign job.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
@@ -568,7 +594,8 @@ export async function clockOut(input: {
   let lateStop: { tz: string; name: string } | null = null;
   if (ent?.status === "open" && Number.isFinite(ciMsForStop)) {
     const picked = !!input.picked;
-    if (needsStatedStop({ clockInMs: ciMsForStop, closeMs, nowMs, picked, unattended: !!input.autoClosedReason })) {
+    const unattended = !!input.autoClosedReason;
+    if (needsStatedStop({ clockInMs: ciMsForStop, closeMs, nowMs, picked, unattended })) {
       const tz = await orgTz(supabase);
       return {
         ok: false,
@@ -576,15 +603,18 @@ export async function clockOut(input: {
         error: `You've been on the clock since ${dayClock(entClockIn as string, tz)}, more than 10 hours. Pick when you stopped on Timeclock.`,
       };
     }
-    if (picked && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
+    if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
       return {
         ok: false,
         error:
           "That's more than 18 hours after you clocked in. Pick when you really stopped. If the shift truly ran that long, the office has to enter it.",
       };
     }
-    // A stop time picked after a long run says so on the card, and the office hears about it.
-    if (picked && isLongOpenShift(ciMsForStop, nowMs)) {
+    // A stop time stated after a long run says so on the card, and the office hears about it. Not
+    // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
+    // a 10-to-18-hour close by a person, however it arrived, must never land without a trace. Only
+    // the unattended geofence close is exempt, and auto_closed_reason already flags that one.
+    if (!unattended && isLongOpenShift(ciMsForStop, nowMs)) {
       const tz = await orgTz(supabase);
       const { data: me } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
       lateStop = { tz, name: ((me as { full_name?: string | null } | null)?.full_name ?? "").trim() };

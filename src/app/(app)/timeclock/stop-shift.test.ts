@@ -31,7 +31,7 @@ vi.mock("@/lib/push", () => ({
 }));
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
 
-import { clockOut, stopShift, updateOpenEntry, updateTimeEntry } from "./actions";
+import { clockOut, stopShift, switchJob, updateOpenEntry, updateTimeEntry } from "./actions";
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete" | "rpc"; cols: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -285,10 +285,70 @@ describe("clockOut past ten hours", () => {
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
+  it("an unpicked `at` well before now on a long clock still leaves the crumb and tells the office", async () => {
+    // needsStatedStop lets an observed past time through; a 10-to-18-hour close by a person must
+    // still never land without a trace.
+    const clockIn = new Date(Date.now() - 11 * H).toISOString();
+    const at = new Date(Date.now() - 3 * H).toISOString();
+    state.client = fakeSupabase(routes(clockIn), calls);
+    expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null, at })).toMatchObject({ ok: true });
+    const upd = calls.find((c) => c.verb === "update")!;
+    expect(upd.payload.notes).toMatch(/\[stop time picked by Brian Taylor on .+, after the shift\]$/);
+    expect(spies.notify).toHaveLength(1);
+  });
+
+  it("an unattended geofence close is flagged by its reason, not by the crumb", async () => {
+    const clockIn = new Date(Date.now() - 11 * H).toISOString();
+    const at = new Date(Date.now() - 3 * H).toISOString();
+    state.client = fakeSupabase(routes(clockIn), calls);
+    const r = await clockOut({ entry_id: ENTRY, lunch_minutes: null, notes: "", gps: null, at, auto: true, autoClosedReason: "nobody answered" });
+    expect(r).toMatchObject({ ok: true });
+    const upd = calls.find((c) => c.verb === "update")!;
+    expect(upd.payload.notes).toBeUndefined();
+    expect(spies.notify).toEqual([]);
+  });
+
   it("an ordinary 8-hour clock-out is one tap, as before", async () => {
     state.client = fakeSupabase(routes(new Date(Date.now() - 8 * H).toISOString()), calls);
     expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
     expect(spies.notify).toEqual([]);
+  });
+});
+
+describe("switchJob on a clock past ten hours", () => {
+  const routes = (row: any) => (q: Q): Reply => {
+    if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
+    if (q.table === "time_entries" && q.verb === "select") return { data: row };
+    return undefined; // nothing else may be touched: no job read, no RPC, no write
+  };
+  const running = (hoursAgo: number, extra: any = {}) => ({
+    id: ENTRY,
+    org_id: "org-1",
+    profile_id: "user-1",
+    job_id: HERRINGBONE,
+    job_code: null,
+    notes: null,
+    rate_override: null,
+    clock_in: new Date(Date.now() - hoursAgo * H).toISOString(),
+    ...extra,
+  });
+  const OTHER = "a0000000-0000-4000-8000-00000000022c";
+
+  it("refuses his own cut with needsTime and never calls switch_job", async () => {
+    state.client = fakeSupabase(routes(running(17)), calls);
+    const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
+    expect(r).toMatchObject({ ok: false, needsTime: true });
+    expect(r.error).toMatch(/^You've been on the clock since .+, more than 10 hours\. Pick when you stopped on Timeclock, then clock in on this job\.$/);
+    expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
+  });
+
+  it("refuses the office switching somebody else's forgotten clock, pointing at Stop The Clock", async () => {
+    state.client = fakeSupabase(routes(running(17, { profile_id: "brian-1" })), calls);
+    const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
+    expect(r.ok).toBe(false);
+    expect(r.needsTime).toBeUndefined();
+    expect(r.error).toMatch(/Stop The Clock/);
+    expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
   });
 });
 

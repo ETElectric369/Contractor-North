@@ -126,6 +126,13 @@ describe("stopCrumb: the card says who set the stop time", () => {
     ).not.toMatch(/start moved/);
   });
 
+  it("names both days when the start moved to another day", () => {
+    const dayBefore = "2000-12-31T07:00:00Z"; // Dec 30, 11:00 PM Pacific
+    expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: dayBefore, tz, how: "office" })).toMatch(
+      /; start moved from Jan 1, 1:37 PM to Dec 30, 11:00 PM\]$/,
+    );
+  });
+
   it("self wording", () => {
     expect(
       stopCrumb({ byName: "Brian Taylor", atIso: "2001-01-02T15:02:00Z", runningSinceIso: since, newStartIso: null, tz, how: "self" }),

@@ -707,10 +707,15 @@ export default async function TimecardsPage({
                   const body = (
                     <>
                       <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate">
-                        <span className="font-medium text-slate-900">{c.name}</span>
-                        {c.jobLabel && <span className="text-slate-500"> · {c.jobLabel}</span>}
-                        {since && <span className="text-slate-500"> · since {since}</span>}
+                      {/* "since" gets its own line: it is the fact that shows a forgotten clock, and
+                          sharing one truncated line with the name, the job and the verb cut it off
+                          at 375px. */}
+                      <span className="flex min-w-0 flex-1 flex-col py-1">
+                        <span className="truncate">
+                          <span className="font-medium text-slate-900">{c.name}</span>
+                          {c.jobLabel && <span className="text-slate-500"> · {c.jobLabel}</span>}
+                        </span>
+                        {since && <span className={`truncate text-sm ${long ? "text-amber-800" : "text-slate-500"}`}>since {since}</span>}
                       </span>
                     </>
                   );

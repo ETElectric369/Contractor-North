@@ -29,6 +29,7 @@ export function ClockStartPicker({
   startExpanded = false,
   caption,
   initialIso,
+  fieldLabel = "Start",
 }: {
   onChange: (iso: string | null) => void;
   className?: string;
@@ -44,6 +45,9 @@ export function ClockStartPicker({
   /** Seed the date + time from this instant instead of now (device-local, like now). The long-shift
    *  stop picker opens on the CLOCK-IN, so a man who forgot yesterday starts from the right day. */
   initialIso?: string;
+  /** What the two inputs set, for screen readers: "Start" on a clock-in, "Stop" when the picker is
+   *  the stop time of a forgotten punch (the Timeclock long-shift block, the geofence sheet). */
+  fieldLabel?: string;
 }) {
   const [custom, setCustom] = useState(startExpanded);
   const [rounded, setRounded] = useState(false);
@@ -109,8 +113,10 @@ export function ClockStartPicker({
             setDate(e.target.value);
             emit(e.target.value, time);
           }}
-          className="h-9 w-[9.5rem]"
-          aria-label="Start date"
+          // 44px when the picker IS the control (a stop time picked on a phone), 36px as the quiet
+          // clock-in extra.
+          className={startExpanded ? "h-11 w-[9.5rem]" : "h-9 w-[9.5rem]"}
+          aria-label={`${fieldLabel} date`}
         />
         <Input
           type="time"
@@ -119,8 +125,8 @@ export function ClockStartPicker({
             setTime(e.target.value);
             emit(date, e.target.value);
           }}
-          className="h-9 w-28"
-          aria-label="Start time"
+          className={startExpanded ? "h-11 w-28" : "h-9 w-28"}
+          aria-label={`${fieldLabel} time`}
         />
         {/* In startExpanded mode the HOST owns escape/"now" (its buttons), and
             collapsing here would show the clock-IN "Starting now" label in the

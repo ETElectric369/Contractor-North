@@ -651,6 +651,7 @@ export function GeofenceMonitor({
                     hours, and the server clamps it to [clock-in, now]. */}
                 <ClockStartPicker
                   startExpanded
+                  fieldLabel="Stop"
                   /* A long shift starts the picker on the clock-in's day and time, so a man who
                      forgot yesterday is not handed today as the answer. */
                   initialIso={longShift ? clockInIso : undefined}

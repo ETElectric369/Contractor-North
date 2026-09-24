@@ -269,6 +269,7 @@ export function EditEntryButton({
 
   function remove() {
     if (!confirm("Delete this time entry? This can't be undone.")) return;
+    setError(null);
     start(async () => {
       let res: { ok: boolean; error?: string; warning?: string };
       try {
@@ -428,9 +429,21 @@ export function EditEntryButton({
     return (
       <>
         {!hideTrigger && (
-          <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => setOpen(true)}>
-            Stop The Clock
-          </Button>
+          // Wrapped: the week list's controls row sizes every DIRECT child button to a 44px square
+          // for the pencil (timecard-stack), which clipped this label to "The C".
+          <span className="inline-flex shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 shrink-0 px-3"
+              onClick={() => {
+                setError(null);
+                setOpen(true);
+              }}
+            >
+              Stop The Clock
+            </Button>
+          </span>
         )}
         {open && (
           <StopClockSheet
@@ -444,6 +457,7 @@ export function EditEntryButton({
             onClose={close}
             onDelete={remove}
             deleting={pending}
+            externalError={error}
           />
         )}
       </>

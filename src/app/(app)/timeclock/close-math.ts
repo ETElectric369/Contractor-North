@@ -103,7 +103,8 @@ function whenLabel(iso: string, tz: string): string {
  * a live punch.
  *
  *   office: "[clock stopped by Erik Taylor on Sep 23, 11:56 PM; it had been running since Sep 22, 1:37 PM]"
- *           plus "; start moved from 1:37 PM to 12:00 PM" inside the brackets when the start moved.
+ *           plus "; start moved from 1:37 PM to 12:00 PM" inside the brackets when the start moved
+ *           (with the dates, "from Sep 22, 1:37 PM to Sep 21, 11:00 PM", when it moved to another day).
  *   self:   "[stop time picked by Brian Taylor on Sep 23, 7:02 AM, after the shift]"
  */
 export function stopCrumb(input: {
@@ -120,7 +121,11 @@ export function stopCrumb(input: {
   }
   let body = `clock stopped by ${who} on ${whenLabel(input.atIso, input.tz)}; it had been running since ${whenLabel(input.runningSinceIso, input.tz)}`;
   if (input.newStartIso && Math.abs(Date.parse(input.newStartIso) - Date.parse(input.runningSinceIso)) >= 60_000) {
-    body += `; start moved from ${clockLabel(input.runningSinceIso, input.tz)} to ${clockLabel(input.newStartIso, input.tz)}`;
+    // A start moved to another day names both days, so the card never reads a day's move as an
+    // hour's.
+    const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-US", { timeZone: input.tz });
+    const label = dayOf(input.newStartIso) === dayOf(input.runningSinceIso) ? clockLabel : whenLabel;
+    body += `; start moved from ${label(input.runningSinceIso, input.tz)} to ${label(input.newStartIso, input.tz)}`;
   }
   return `[${body}]`;
 }

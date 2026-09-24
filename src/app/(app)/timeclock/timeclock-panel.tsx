@@ -173,9 +173,11 @@ export function TimeclockPanel({
 
   // THE LONG-SHIFT BLOCK (2026-09-24). A clock running LONG_SHIFT_HOURS or more was probably
   // forgotten, so the card asks when he stopped instead of offering a one-tap close at now (which
-  // wrote a 17-hour shift nobody worked). `forceLong` is the server's word for it: a stale tab
+  // wrote a 17-hour shift nobody worked). `forceLongFor` is the server's word for it: a stale tab
   // whose clock crossed the line while it sat open gets needsTime back and switches here.
-  const [forceLong, setForceLong] = useState(false);
+  // Keyed to the ENTRY the server answered about: a bare boolean outlived that shift, so after the
+  // office stopped it the next clock-in on this mounted panel opened straight into this block.
+  const [forceLongFor, setForceLongFor] = useState<string | null>(null);
   const [stopIso, setStopIso] = useState<string | null>(null);
   /** Remounts the picker on the Now chip, so its fields show what the chip picked. */
   const [pickerSeed, setPickerSeed] = useState<string | null>(null);
@@ -305,6 +307,14 @@ export function TimeclockPanel({
           gps,
         });
         if (!res.ok) {
+          // A switch on a clock running 10 hours would close it at now (0288's cut); the server
+          // asks for the stop time instead, and this card is where it is picked.
+          if (res.needsTime) {
+            setForceLongFor(openEntry.id);
+            setSwitching(false);
+            setShowTools(false);
+            return;
+          }
           setError(res.error ?? "Could not switch jobs.");
           return;
         }
@@ -361,7 +371,7 @@ export function TimeclockPanel({
           // The clock crossed the long-shift line while this tab sat open: ask for the stop time
           // here instead of showing a sentence that points at the screen he is already on.
           if (res.needsTime) {
-            setForceLong(true);
+            setForceLongFor(openEntry.id);
             setClockingOut(false);
             setShowTools(false);
             setSwitching(false);
@@ -369,7 +379,7 @@ export function TimeclockPanel({
           }
           setError(res.error ?? "Could not clock out.");
         } else {
-          setForceLong(false);
+          setForceLongFor(null);
           setStopIso(null);
           setPickerSeed(null);
           // Reset the view flags so the NEXT punch starts on the simple flow (leaving
@@ -433,7 +443,7 @@ export function TimeclockPanel({
 
     // THE LONG SHIFT. One rule (lib/long-shift) decides it, and the server answers the same way.
     const ciMs = Date.parse(openEntry.clock_in);
-    const longShift = forceLong || isLongOpenShift(ciMs, now);
+    const longShift = forceLongFor === openEntry.id || isLongOpenShift(ciMs, now);
     const earlierDay = mounted && startedEarlierDay(ciMs, now, tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
     const zone = tz ? { timeZone: tz } : {};
     const sinceText = mounted
@@ -460,6 +470,7 @@ export function TimeclockPanel({
           key={pickerSeed ?? "clock-in"}
           staff
           startExpanded
+          fieldLabel="Stop"
           initialIso={pickerSeed ?? openEntry.clock_in}
           caption={t("tc_whenStopped")}
           onChange={(iso) => setStopIso(iso)}
