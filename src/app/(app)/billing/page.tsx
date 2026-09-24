@@ -54,7 +54,9 @@ export default async function BillingPage() {
       // to re-send. `revised_at is not null` alone is not the answer — a re-send moves sent_at
       // forward and leaves revised_at standing (that fact is worth keeping), so the rule below
       // decides, not this filter.
-      supabase.from("invoices").select("id, invoice_number, total, status, sent_at, revised_at, customers(name)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
+      // amount_paid and each payment's date ride along for the one case that settles a revision
+      // without a re-send: the customer paid the corrected bill in full after it changed (INV-071).
+      supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, customers(name), payments(paid_at)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
     ]);
 
   const list = (allInv ?? []) as any[];
@@ -65,7 +67,13 @@ export default async function BillingPage() {
   // total leaves its status 'paid' and its balance at zero — and that is the exact case Erik's
   // client wrote in about (a settled bill reissued in the property owner's name). Filtering this
   // lane by money owed would miss the one it was built for.
-  const needsResend = ((revisedInv ?? []) as any[]).filter((i) => customerHoldsOlderCopy(i.sent_at, i.revised_at));
+  const needsResend = ((revisedInv ?? []) as any[]).filter((i) =>
+    customerHoldsOlderCopy(i.sent_at, i.revised_at, {
+      total: i.total,
+      amountPaid: i.amount_paid,
+      paidAt: ((i.payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
+    }),
+  );
   // "All caught up" may not be printed over a customer holding the wrong bill.
   const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0 && needsResend.length === 0;
 

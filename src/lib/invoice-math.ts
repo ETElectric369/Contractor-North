@@ -282,6 +282,52 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
   return g;
 }
 
+/** The one label the customer's copy prints for every receipt's "Supplies & tax" row. */
+export const SUPPLIES_AND_TAX_LABEL = "Supplies & Tax";
+
+/** A materials import's per-receipt remainder row: "Supplies & tax — <supplier>" (bill-itemisation). */
+export function isSuppliesAndTaxLine(it: InvoiceLine): boolean {
+  return it.import_source === "costs" && /^supplies\s*&\s*tax\b/i.test(String(it.description ?? "").trim());
+}
+
+/**
+ * ONE "SUPPLIES & TAX" LINE ON THE CUSTOMER'S COPY (Erik, INV-074: "automatically consolidate all
+ * supplies and tax lines into one line with no vendor label").
+ *
+ * The materials import writes one remainder row per receipt, so each receipt's rows add up to its
+ * marked-up total to the cent, and the office can trace every tax amount back to its paper. The
+ * customer has no use for that: three small lines naming Erik's suppliers. So the DOCUMENT prints
+ * them as one line with their summed amount, placed where the last of them was, and nothing else
+ * moves: the stored rows, the office editor, claims and QuickBooks stay per receipt.
+ *
+ * Money: the merged amount is the sum of the rows it replaces, in whole cents, so the lines on the
+ * page still add up to the stored subtotal exactly. It keeps import_source "costs", so the cost
+ * breakdown files it under Materials as before.
+ *
+ * Matched on the words and the source, not the import key: the public invoice RPC does not carry
+ * the key, and the print page and the customer's link have to print the same lines. A row the
+ * office renamed to something else entirely is theirs and prints as they wrote it.
+ */
+export function mergeSuppliesAndTax<T extends InvoiceLine & { quantity?: number | null; unit_price?: number | null }>(
+  items: readonly T[],
+): T[] {
+  let last = -1;
+  let totalCents = 0;
+  items.forEach((it, i) => {
+    if (!isSuppliesAndTaxLine(it)) return;
+    last = i;
+    totalCents += Math.round(fin(it.line_total) * 100);
+  });
+  if (last < 0) return [...items];
+  const amount = totalCents / 100;
+  const out: T[] = [];
+  items.forEach((it, i) => {
+    if (i === last) out.push({ ...it, description: SUPPLIES_AND_TAX_LABEL, quantity: 1, unit: "ea", unit_price: amount, line_total: amount });
+    else if (!isSuppliesAndTaxLine(it)) out.push(it);
+  });
+  return out;
+}
+
 /**
  * A clear, customer-facing statement of WHAT this invoice is: Time & Material vs
  * Fixed-Price, plus the draw stage if any. Returns null when the billing model is

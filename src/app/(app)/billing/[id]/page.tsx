@@ -247,6 +247,8 @@ export default async function InvoicePage({
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,
           (inv as { revised_at?: string | null }).revised_at,
+          // Paid in full after the change = the customer has the current bill (the board's rule).
+          { total: inv.total, amountPaid: inv.amount_paid, paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at) },
         )}
       />
     </div>

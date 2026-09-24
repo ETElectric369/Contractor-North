@@ -269,11 +269,17 @@ export function InvoiceDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
+  /** Enter was pressed on a line with no description. Add is greyed out for that reason, and a
+   *  greyed-out button cannot say why on its own (INV-073, Erik 2026-09-22). */
+  const [descAsked, setDescAsked] = useState(false);
+  const needsDesc = !desc.trim() && (price !== 0 || qty !== 1 || descAsked);
 
   // payment state
 
   // import state
   const [importMsg, setImportMsg] = useState<string | null>(null);
+  /** Money the last import left for a person to decide (an edited tax row behind its parts). */
+  const [importWarn, setImportWarn] = useState<string | null>(null);
   /** An import that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
    *  Naming the source arms the "start over" button beside the message (0204). */
   const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | "change_orders" | null>(null);
@@ -327,6 +333,7 @@ export function InvoiceDetail({
       if (!ok) return;
     }
     setImportMsg(null);
+    setImportWarn(null);
     setStuckSource(null);
     start(async () => {
       const res = await fn(invoice.id);
@@ -365,7 +372,12 @@ export function InvoiceDetail({
       const stuck = !!st && !st.inserted && !st.updated && !st.removed && (st.pulled_in == null || st.pulled_in > 0);
       setStuckSource(stuck ? sourceKey : null);
       setImportMsg(said ? `${label}: ${said}.` : `${label} imported.`);
-      toast(said ? `${label} — ${said}` : `${label} imported`, "success");
+      // "3 of your edits kept" was the whole story on INV-074 while its edited tax rows sat at the
+      // old markup. The warning rides in the toast, and stays under the import row until the next
+      // import, because a toast is gone before a sentence with two dollar figures can be read.
+      const warn = (st?.warnings ?? []).join(". ");
+      setImportWarn(warn || null);
+      toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, "success");
       setTimeout(() => setImportMsg(null), 5000);
       refresh();
     });
@@ -434,7 +446,11 @@ export function InvoiceDetail({
 
 
   function addItem() {
-    if (!desc.trim()) return;
+    if (!desc.trim()) {
+      setDescAsked(true);
+      return;
+    }
+    setDescAsked(false);
     start(async () => {
       const res = await addInvoiceItem(invoice.id, {
         description: desc,
@@ -821,6 +837,7 @@ export function InvoiceDetail({
               </>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
+            {importWarn && <span className="text-xs text-amber-700">{importWarn}.</span>}
             {/* START IT OVER IS STILL DRAFT-ONLY, AND THAT ONE IS NOT OURS TO OPEN. Its refusal
                 lives inside the SECURITY DEFINER function reset_import_source (migrations
                 0204/0212/0223), which still raises on a non-draft invoice in a Postgres voice no
@@ -1031,7 +1048,11 @@ export function InvoiceDetail({
               ),
             )}
             {items.length === 0 && (
-              <li className="px-4 py-6 text-center text-slate-400">No line items yet.</li>
+              <li className="px-4 py-6 text-center text-slate-400">
+                {/* A blank invoice has no amount box of its own: the amount is a line. Say where
+                    that line is typed, since on a phone it sits below the price list. */}
+                {linesLocked ? "No line items yet." : "No line items yet. Type one in the row below, with its price, then tap Add."}
+              </li>
             )}
           </ul>
           {/* Reordering is a line control like the chevrons beside it, so it follows the same
@@ -1101,6 +1122,9 @@ export function InvoiceDetail({
                 <Plus className="h-4 w-4" /> Add
               </Button>
             </div>
+            {needsDesc && (
+              <p className="text-xs text-amber-700">Type what this charge is for in the box above, then tap Add.</p>
+            )}
           </div>
           )}
         </div>

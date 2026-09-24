@@ -60,6 +60,9 @@ export function NewInvoiceButton({
   const [taxSeeded, setTaxSeeded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  /** The invoice exists and its page is loading. The window stays up, with Create shut so it
+   *  cannot make a second one, until the new page replaces it (see onCreate). */
+  const [opening, setOpening] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -129,13 +132,16 @@ export function NewInvoiceButton({
   }, [searchParams, pathname, router]);
 
   // Confirmed close (the Modal's two-tap guard has already asked when dirty) —
-  // an explicit discard, so the stored draft goes too.
+  // an explicit discard, so the stored draft goes too. Closing while a new invoice's page is
+  // still loading (a back swipe, the X) gives up on opening it, which is what a close asks for:
+  // it is already in Drafts, and the window must never be left spinning with Cancel greyed out.
   function discard() {
     draft.clear();
     setQuoteId("");
     setCustomerId("");
     setJobId("");
     setTitle("");
+    setOpening(false);
     setOpen(false);
   }
 
@@ -156,8 +162,26 @@ export function NewInvoiceButton({
         return;
       }
       draft.clear();
-      setOpen(false);
-      if (res.id) router.push(`/billing/${res.id}`);
+      if (!res.id) {
+        setOpen(false);
+        return;
+      }
+      /**
+       * OPEN THE NEW INVOICE WITHOUT CLOSING THE WINDOW FIRST (Erik, 2026-09-11 and 09-22: "it
+       * closed the invoice and hid it somewhere rather than opening it for me to work on").
+       *
+       * This used to be setOpen(false) and then router.push. Closing the Modal runs its cleanup,
+       * which calls history.back() to take its own history marker off the stack, and it does so
+       * while that marker is still on top, because the push is still waiting on the server for a
+       * page that did not exist a second ago. Next treats the back as a navigation of its own and
+       * throws the pending push away, so he was left on /billing with a $0 draft.
+       *
+       * So the window stays up and the new page REPLACES the Modal's history entry. When the
+       * page lands, the marker is no longer the current state, the Modal's cleanup leaves history
+       * alone, and Back from the invoice returns to /billing in one step.
+       */
+      setOpening(true);
+      router.replace(`/billing/${res.id}`);
     });
   }
 
@@ -176,7 +200,7 @@ export function NewInvoiceButton({
           <ModalActions
             onCancel={discard}
             onSave={onCreate}
-            saving={pending}
+            saving={pending || opening}
             disabled={mode === "quote" && !quoteId}
             saveLabel="Create Invoice"
           />
