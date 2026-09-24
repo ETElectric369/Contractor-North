@@ -74,6 +74,7 @@ import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, lab
 import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { NavLink } from "@/components/nav-link";
+import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
@@ -1296,9 +1297,16 @@ export default async function JobDetailPage({
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (
               <li key={iv.id}>
-                <Link href={`/billing/${iv.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                  <span className="font-medium text-slate-900">{iv.invoice_number}</span>
-                  <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(iv.total)}</span><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
+                {/* The billing board's amount (components/invoice-amount): "$D due of $T" with what
+                    is paid beneath. This row used to print the bare TOTAL, so a bill with $6,000
+                    paid on it looked the same here as one with nothing paid, and a different size
+                    than the same invoice on /billing. */}
+                <Link href={`/billing/${iv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 text-sm hover:bg-slate-50">
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-slate-900">{iv.invoice_number}</span>
+                    <InvoiceAmountDetail total={iv.total} paid={iv.amount_paid} />
+                  </span>
+                  <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
                 </Link>
               </li>
             ))}
