@@ -4,6 +4,7 @@
 const FIRST_CLAIM_WINDOW_MS = 10_000;
 
 import { useEffect } from "react";
+import { isPlatformApexHost } from "@/lib/platform-site";
 
 /**
  * Registers the service worker (installable + offline) and — crucially — reloads
@@ -15,6 +16,9 @@ import { useEffect } from "react";
 export function PwaRegister() {
   useEffect(() => {
     if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    // contractornorth.com / www serve only the platform's three public pages (lib/platform-site);
+    // the apex has no /sw.js and must never become an installable, offline "North".
+    if (isPlatformApexHost(location.hostname)) return;
 
     const hadController = !!navigator.serviceWorker.controller;
     let sawFirstClaim = false;

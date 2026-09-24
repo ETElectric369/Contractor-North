@@ -38,7 +38,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>North uses your location to stamp where you clocked in, verify you're at the job site, get local weather for scheduling, and to take Tap to Pay on iPhone payments — Apple requires a location fix to accept a card.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>North uses the microphone for voice notes and hands-free dictation on the job.</string>
+	<string>North uses the microphone when you talk to Nort, the in-app assistant, or dictate notes. The recording is sent to a speech service to turn it into text.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>North can save documents and photos it generates back to your library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
