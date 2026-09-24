@@ -71,6 +71,15 @@ export async function payRateMap(supabase: any): Promise<Map<string, PayRates>> 
   return (await payRateMapRead(supabase)).rates;
 }
 
+const PAY_RATE_COLS = "id, hourly_rate, bill_rate, commute_baseline_miles";
+
+/** 42703 = undefined_column: the shape a select naming a not-yet-migrated column fails with. */
+function isUndefinedColumn(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "");
+  const message = String((error as { message?: string })?.message ?? "");
+  return code === "42703" || /column .*paid_by_draw.* does not exist/i.test(message);
+}
+
 /**
  * THE SAME READ, WITH ITS FAILURE STILL ATTACHED (2026-09-17).
  *
@@ -89,7 +98,15 @@ export async function payRateMapRead(
 }> {
   // paid_by_draw rides the same read (0286), so every surface that prices hours also knows whose
   // hours are the owner's, with no second query that could fail on its own.
-  const { data, error } = await supabase.from("profile_pay").select("id, hourly_rate, bill_rate, commute_baseline_miles, paid_by_draw");
+  let { data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw`);
+  // MIGRATION WINDOW (inspection/schema.ts tolerateMissingColumns): a push to main deploys before
+  // 0286 is applied, and a select naming paid_by_draw fails WHOLE on the old view. payRateMap drops
+  // `problem`, so without this every caller (job hub, analytics, Nort, tax report) would price all
+  // crew labor at $0 with no error. On the old view the owner is still costed at his hourly_rate,
+  // the pre-0286 behaviour; nothing drops silently to zero. Only undefined_column is tolerated.
+  if (error && isUndefinedColumn(error)) {
+    ({ data, error } = await supabase.from("profile_pay").select(PAY_RATE_COLS));
+  }
   const m = new Map<string, PayRates>();
   if (error || !Array.isArray(data)) return { rates: m, problem: "the pay rates could not be read" };
   for (const r of data as ProfilePayRow[]) {
