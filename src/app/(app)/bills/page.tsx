@@ -22,6 +22,13 @@ import type {
   SupplierInvoiceRow as SupplierDocumentRow,
 } from "./supplier-reconcile";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
+import { CedPdfPicker } from "./ced-pdf-picker";
+import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
+import type { PaperRowItem } from "@/components/paperwork-row";
+import type { NumberMatch } from "@/lib/paperwork";
+import { loadBooks, matchesOnBooks } from "@/app/(app)/organize/paperwork-core";
+import { signDocumentUrls } from "@/lib/signed-docs";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import {
   candidateMoving,
   isOnAccountBill,
@@ -150,6 +157,8 @@ export default async function BillsPage({
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
     { data: billLinkRows },
+    { data: paperRows },
+    books,
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -218,6 +227,18 @@ export default async function BillsPage({
     // those ids (superseded, on a job, on this account) could ever have been written. The failure
     // is always a select list - and `?? ""` cannot defend a column that was never asked for.
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").limit(5000),
+    // ── PAPER WAITING FOR FILE IT (0295) ────────────────────────────────────────────────────
+    // One inbox with Organize: every receipt or bill that has been read and not filed, whichever
+    // door it came in by. `*` so a database without 0295 still answers (the new columns simply
+    // are not there), and filtered in code for the same reason.
+    supabase
+      .from("organized_items")
+      .select("*, jobs(job_number, name)")
+      .eq("status", "needs_review")
+      .order("created_at", { ascending: false })
+      .limit(200),
+    // Every printed number already on the books, for "Same Purchase: Tie Them".
+    loadBooks(supabase, orgId),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
@@ -301,7 +322,20 @@ export default async function BillsPage({
   // The claim read and the signing both depend on the first wave's rows and on nothing else, so
   // they ride together. Adding a second serial hop to this page was the phone-lag class all over
   // again (audit v921) and it is not worth one sentence on a card.
-  await Promise.all([signPaths(), readClaims()]);
+  const papers = ((paperRows ?? []) as any[]).filter(
+    (i) => i.kind === "receipt" || i.source === "bills_drop" || (i.doc_type && i.doc_type !== "not_a_cost"),
+  );
+  let paperUrls = new Map<string, string>();
+  const signPapers = async () => {
+    paperUrls = await signDocumentUrls(supabase, papers.map((i) => i.file_url));
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers()]);
+  const paperItems: PaperRowItem[] = papers.map((i) => ({ ...i, signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null }));
+  const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
+  const activeStatuses = ACTIVE_JOB_STATUSES as readonly string[];
+  const paperJobs = ((jobs ?? []) as { id: string; job_number: string; name: string; status?: string | null }[]).filter(
+    (j) => !j.status || activeStatuses.includes(j.status),
+  );
   const docs = (docRows ?? []).map((d: any) => ({ ...d, signedUrl: (d.file_url && signed.get(d.file_url)) || null }));
 
   const receiptsForBilling: ReceiptForBilling[] = receiptBills.map((b: any) => ({
@@ -872,15 +906,23 @@ export default async function BillsPage({
     : [];
 
   return (
-    <div>
+    // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
+    // anywhere onto it, or press Drop Paperwork. Nothing is filed on drop; each paper waits in
+    // Sort These until a person presses File It.
+    <PaperworkDropZone orgId={orgId}>
       <PageHeader
         title="Bills & purchasing"
         description="Purchase orders, supplier bills, and receipts across every job."
       >
-        {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
-            without opening a tab. It saves through the same createBill as Add Bill below. */}
-        <AddBusinessCostButton today={today} />
+        <div className="flex flex-wrap items-center gap-2">
+          <DropPaperworkButton />
+          {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
+              without opening a tab. It saves through the same createBill as Add Bill below. */}
+          <AddBusinessCostButton today={today} />
+        </div>
       </PageHeader>
+
+      <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} />
 
       {/* WHO HE OWES COMES FIRST. It is the question this screen opens on - $13,040.07 unpaid, and
           every dollar of it one CED account wearing five spellings. A card that answers it below
@@ -938,10 +980,9 @@ export default async function BillsPage({
           month, and a permanently open box of instructions above the balance would be in the way
           eleven times out of twelve. It opens itself when there is a result to read.
 
-          IT SAYS WHAT IT READS AND WHAT IT DOES NOT. There is no server-side PDF text extractor
-          wired up in this app, so this takes TEXT, and the copy says so plainly instead of
-          offering a file picker that would refuse every PDF he owns. No button here promises
-          anything that is not behind it. */}
+          IT TAKES THE PDFs THEMSELVES NOW (dropbox plan, Phase 0). Their text is read in the
+          browser (lib/pdf-text) and posted to the same importer the paste box uses; the paste is
+          kept, folded, for a document he only has open in a viewer. */}
       <Card className="mb-6 p-5" id="ced-import">
         {importSaid && (
           <div
@@ -959,31 +1000,34 @@ export default async function BillsPage({
           </summary>
           <div className="mt-3 space-y-3">
             <p className="text-sm text-slate-600">
-              Open a document in the CED payment portal, select all of its text, and paste it below. One paste can
-              hold every invoice in the file. Each one is checked against its own arithmetic before it is saved: the
-              line extensions have to add up to merchandise, and merchandise plus tax plus shipping has to equal the
-              total. Anything that does not is named and left out rather than half read.
+              Pick the PDFs you downloaded from the CED payment portal, as many as you like. Their text is read right
+              here and each document is checked against its own arithmetic before it is saved: the line extensions have
+              to add up to merchandise, and merchandise plus tax plus shipping has to equal the total. Anything that does
+              not is named and left out rather than half read. The documents land as soon as you pick them.
             </p>
             <p className="text-sm text-slate-600">
-              Pasting the same download twice changes nothing. A document already here keeps what it has, and the job
+              Loading the same download twice changes nothing. A document already here keeps what it has, and the job
               you filed it on is never touched.
             </p>
-            <form action={importCedInvoicesFromForm} className="space-y-3">
-              <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
-                Invoice text
-              </label>
-              <textarea
-                id="ced-import-text"
-                name="text"
-                rows={8}
-                placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
-                className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-              />
-              <FormSubmit>Import Documents</FormSubmit>
-            </form>
-            <p className="text-xs text-slate-500">
-              This reads text, not PDF files. Selecting the text inside the PDF and pasting it is the way in for now.
-            </p>
+            <CedPdfPicker />
+            <details>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-brand">
+                Paste Text Instead
+              </summary>
+              <form action={importCedInvoicesFromForm} className="mt-2 space-y-3">
+                <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
+                  Invoice text
+                </label>
+                <textarea
+                  id="ced-import-text"
+                  name="text"
+                  rows={8}
+                  placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
+                  className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                />
+                <FormSubmit>Import Documents</FormSubmit>
+              </form>
+            </details>
           </div>
         </details>
       </Card>
@@ -998,6 +1042,6 @@ export default async function BillsPage({
         bills={billsWithLines as any}
         docs={docs as any}
       />
-    </div>
+    </PaperworkDropZone>
   );
 }

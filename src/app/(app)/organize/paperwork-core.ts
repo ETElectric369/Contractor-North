@@ -1,0 +1,457 @@
+import "server-only";
+
+import { reportError } from "@/lib/observe";
+import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
+import { getOrgSettings } from "@/lib/org-settings";
+import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import {
+  findSameNumber,
+  paperTypeOf,
+  type BookedBill,
+  type BookedPaper,
+  type BookedSupplierInvoice,
+  type NumberMatch,
+  type PaperItem,
+  type PaperProposal,
+  type PaperType,
+} from "@/lib/paperwork";
+import {
+  FOOD_AND_DRINK_PROMPT_RULE,
+  MASKED_PRICE_PROMPT_RULE,
+  looksProvisionallyPriced,
+  RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
+  decideReceiptLine,
+} from "@/app/(app)/bills/receipt-billing";
+
+/**
+ * THE PARTS OF FILING PAPER THAT MORE THAN ONE DOOR NEEDS (0295).
+ *
+ * Organize's tray, Drop Paperwork on /bills and a receipt read on a job page all write the same
+ * bill from the same row, so the row-to-bill writer, the line cleaner and the reader's prompt live
+ * here once. This is NOT a "use server" module: nothing in it can be called from a browser. The
+ * doors that can are in actions.ts and paperwork-actions.ts, and each of them checks who is asking
+ * before it gets here.
+ */
+
+export interface BillLine {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  amount: number;
+  category: string | null;
+  /** false = the company eats this line; it never reaches the customer's invoice (0268). */
+  billable: boolean;
+}
+
+/** Normalize the AI's line_items into clean BillLine rows. */
+export function cleanLines(raw: any): BillLine[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((l: any) => {
+      const quantity = Number(l?.quantity) || 1;
+      const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
+      const amount =
+        l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
+      const description = String(l?.description ?? "").slice(0, 300).trim();
+      const stated = l?.category ? String(l.category).slice(0, 60) : null;
+      // WHOSE LINE IS IT (0268). Food and drink arrives switched OFF the customer's bill and
+      // everything else arrives on it; an explicit flag already stored on the row (a tray item's
+      // lines are jsonb, re-read verbatim when it is filed) wins over the default, so re-filing
+      // never re-bills the snacks. decideReceiptLine is the deterministic net under the model's
+      // category: it fills a shrug when the words are plainly food, and never overrules a person.
+      const { category, billable } = decideReceiptLine(description, stated, l?.billable);
+      return { description, quantity, unit_price, amount, category, billable };
+    })
+    .filter((l: BillLine) => l.description.length > 0)
+    .slice(0, 100);
+}
+
+/** A store receipt is already paid; a supplier bill/invoice is still owed. */
+function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
+  return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
+}
+
+/** Paid/unpaid for a bill created from an ALREADY-READ row: what the paper said about tender
+ *  (0153) wins; unknown is UNPAID, because a debt you already settled is harmless and one you
+ *  forget is not. */
+export function billStatusFromItem(item: { payment?: string | null; category?: string | null }): "paid" | "unpaid" {
+  const p = String(item.payment ?? "");
+  if (p === "paid_at_purchase") return "paid";
+  if (p === "on_account" || p === "unknown") return "unpaid";
+  return billStatusFor(item.category);
+}
+
+/** Insert a bill plus its line items (an itemized receipt → billable cost). */
+export async function insertItemizedBill(
+  supabase: any,
+  bill: {
+    job_id: string | null;
+    supplier: string;
+    amount: number | null;
+    bill_date: string | null;
+    category: string;
+    scope_category?: string | null; // the JOB SCOPE (Framing, Decking…) for budget-vs-actual
+    notes: string;
+    created_by: string;
+    /** 0271: the prices on this paper are a counter preview, not this account's own. */
+    pricing_provisional?: boolean;
+    /** The number printed on the paper (0017's column; the '#' on every bill label). */
+    bill_number?: string | null;
+    /** 0270: ONLY from an exact alias a person already made. Never a guess. */
+    supplier_account_id?: string | null;
+  },
+  lines: BillLine[],
+  status: "paid" | "unpaid" = "unpaid",
+): Promise<string | null> {
+  // Undefined keys are dropped so a bill that has no number or account writes exactly what it
+  // wrote before these existed.
+  const row: Record<string, unknown> = { ...bill, status };
+  for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
+  const { data, error } = await supabase.from("bills").insert(row).select("id").single();
+  if (error || !data) {
+    // A RECEIPT THAT DID NOT BECOME A BILL USED TO SAY NOTHING AT ALL (review, 2026-09-19): the
+    // caller is told (null), and the ops log hears it, because a deploy that lands before its
+    // migration makes PostgREST refuse the whole insert for one unknown column.
+    reportError("organize:insertItemizedBill", error ?? new Error("bill insert returned no row"), {
+      supplier: bill.supplier,
+      jobId: bill.job_id,
+      amount: bill.amount,
+    });
+    return null;
+  }
+  if (lines.length) {
+    const { error: lineErr } = await supabase
+      .from("bill_line_items")
+      .insert(
+        lines.map((l, i) => ({
+          bill_id: data.id,
+          description: l.description,
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          amount: l.amount,
+          category: l.category,
+          billable: l.billable,
+          sort_order: i,
+        })),
+      )
+      .select("id");
+    // A BILL WITH NO LINES IS STILL A NUMBER (silent-write law, same pass as 0278): the cost is
+    // kept, and the missing itemisation goes to the ops log instead of passing quietly.
+    if (lineErr) {
+      reportError("organize:insertItemizedBill.lines", lineErr, {
+        billId: data.id,
+        supplier: bill.supplier,
+        lineCount: lines.length,
+      });
+    }
+  }
+  return data.id;
+}
+
+/**
+ * THE TRADE THE PROMPT SPEAKS IN. Every reader here opened "You file paperwork for an electrical
+ * contractor", in an app that also runs a deck builder and a general builder: Justin's lumber
+ * receipts were read by an electrician. The org's own trade label, or "contractor". A failed read
+ * costs nothing but the adjective.
+ */
+export async function tradeOf(supabase: any, orgId: string | null | undefined): Promise<string> {
+  if (!orgId) return "contractor";
+  try {
+    const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+    return getOrgSettings((data as { settings?: unknown } | null)?.settings).trade_label?.trim() || "contractor";
+  } catch {
+    return "contractor";
+  }
+}
+
+/**
+ * The supplier ACCOUNT for a spelling, by exact alias only (0270: the alias exists because a person
+ * pressed something to make it). A miss, or a read that fails, is "not on an account", which is
+ * exactly what every bill was before this: never a guess and never a refusal.
+ */
+export async function exactAccountFor(supabase: any, orgId: string | null | undefined, supplier: string | null | undefined): Promise<string | null> {
+  if (!orgId || !String(supplier ?? "").trim()) return null;
+  try {
+    const { data, error } = await supabase
+      .from("supplier_aliases")
+      .select("alias, supplier_account_id")
+      .eq("org_id", orgId)
+      .limit(5000);
+    if (error) return null;
+    return resolveSupplierAccount(supplier, data as { alias: string; supplier_account_id: string }[]);
+  } catch {
+    return null;
+  }
+}
+
+/** The printed number, cleaned for storage: no longer than a bill label can carry. */
+export function cleanDocNumber(raw: unknown): string | null {
+  const s = String(raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s || /^(null|none|n\/a|unknown)$/i.test(s)) return null;
+  return s.slice(0, 60);
+}
+
+// ── THE READER ──────────────────────────────────────────────────────────────────────────────
+
+export type ReaderJob = { id: string; label: string };
+
+/**
+ * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Drop Paperwork). It reads and classifies; it does
+ * not decide where anything goes. "job_id" is only the job the PAPER names, and it is shown to a
+ * person as a suggestion.
+ */
+export function paperReaderSystem(trade: string, jobs: ReaderJob[]): string {
+  return `You read paperwork for a ${trade}. Look at the upload, say what kind of paper it is, and transcribe it.
+
+Respond with ONLY a JSON object (no prose):
+{
+  "paper_type": "receipt" | "bill" | "not_a_cost" | "statement" | "credit_memo" | "purchase_order" | "other" — "receipt" = a purchase already paid (store receipt, counter ticket paid by card or cash); "bill" = something still OWED (a supplier invoice on account, a subcontractor's bill); "statement" = an account summary listing several invoices and a balance; "credit_memo" = a credit or return; "purchase_order" = an order the company sent; "not_a_cost" = a plan, permit, quote, photo, letter or note; "other" if you cannot tell,
+  "kind": "receipt" | "note" | "job_document" — "receipt" for receipts and bills, "note" for handwriting, otherwise "job_document",
+  "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
+  "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
+  "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
+  "po_number": a PO or customer order number printed on it, or null,
+  "line_items": receipts and bills ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] otherwise,
+  "vendor": store/supplier name or null,
+  "amount": total in dollars as a number, or null,
+  "date": "YYYY-MM-DD" date printed on it, or null,
+  "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
+  "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
+  "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due; "unknown" when you cannot tell,
+  "destination": "job" | "overhead" | "unsure" — "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (gas station, truck, shop supplies, small tools, phone, office, insurance, licenses); "unsure" otherwise,
+  "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
+  "job_id": the id of the matching job ONLY if the content clearly points to one (job number, customer name, or address visible), else null,
+  "job_hint": the words on the paper that point to that job (a job name, address or customer), or null,
+  "confidence": "low" | "medium" | "high"
+}
+
+Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+
+${FOOD_AND_DRINK_PROMPT_RULE}
+
+${MASKED_PRICE_PROMPT_RULE}
+
+Jobs you may match against (id — label):
+${jobs.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`;
+}
+
+export type ReadFields = {
+  kind: "receipt" | "note" | "job_document";
+  doc_type: PaperType;
+  title: string;
+  summary: string | null;
+  vendor: string | null;
+  amount: number | null;
+  item_date: string | null;
+  category: string;
+  confidence: "low" | "medium" | "high";
+  payment: "paid_at_purchase" | "on_account" | "unknown" | null;
+  line_items: BillLine[] | null;
+  doc_number: string | null;
+  pricing_provisional: boolean;
+  /** Suggestions only. */
+  proposal: PaperProposal;
+};
+
+const KIND_TO_CATEGORY: Record<string, string> = { receipt: "Receipt", note: "Other", job_document: "Plan" };
+
+/** What the reader said, cleaned into the row's columns. Nothing here files anything. */
+export function readerFields(parsed: any, jobs: ReaderJob[], fallbackTitle: string): ReadFields {
+  const typeRead = paperTypeOf(parsed?.paper_type);
+  const kindRead = ["receipt", "note", "job_document"].includes(parsed?.kind) ? parsed.kind : null;
+  // The type decides the kind, so a "bill" can never sit in the tray as a job document with no
+  // cost controls on it.
+  const doc_type: PaperType = typeRead ?? (kindRead === "receipt" ? "receipt" : "other");
+  const kind: ReadFields["kind"] =
+    doc_type === "receipt" || doc_type === "bill" ? "receipt" : kindRead === "note" ? "note" : "job_document";
+  const category = String(parsed?.category || (doc_type === "bill" ? "Bill" : KIND_TO_CATEGORY[kind]) || "Other").slice(0, 60);
+  const title = String(parsed?.title || fallbackTitle).slice(0, 200);
+  const confidence = ["low", "medium", "high"].includes(parsed?.confidence) ? parsed.confidence : "medium";
+  const amount = parsed?.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  const item_date = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.date ?? "")) ? String(parsed.date) : null;
+  const vendor = parsed?.vendor ? String(parsed.vendor).slice(0, 200) : null;
+  const summary = parsed?.summary ? String(parsed.summary).slice(0, 4000) : null;
+  const isCost = kind === "receipt";
+  const lines = isCost ? cleanLines(parsed?.line_items) : [];
+  const payment = isCost
+    ? ((["paid_at_purchase", "on_account", "unknown"].includes(String(parsed?.payment ?? "")) ? String(parsed.payment) : "unknown") as ReadFields["payment"])
+    : null;
+  // Two chances at the counter-preview fact (0271): what the model answered, or the mask still
+  // visible in what it transcribed.
+  const pricing_provisional =
+    parsed?.pricing_provisional === true ||
+    looksProvisionallyPriced(String(parsed?.summary ?? "")) ||
+    lines.some((l) => looksProvisionallyPriced(l?.description));
+  // SUGGESTIONS. A job only if it is one of the jobs offered AND the paper named it; a bucket only
+  // for a cost the reader called overhead, never Fees, never anything fee-shaped.
+  const jobId = jobs.some((j) => j.id === parsed?.job_id) ? String(parsed.job_id) : null;
+  const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
+  const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
+  const proposal: PaperProposal = {
+    jobId,
+    jobHint: parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null,
+    bucket: isCost && bucketRead && !feeShaped ? bucketRead : null,
+    po: cleanDocNumber(parsed?.po_number),
+  };
+  return {
+    kind,
+    doc_type,
+    title,
+    summary,
+    vendor,
+    amount,
+    item_date,
+    category,
+    confidence,
+    payment,
+    line_items: lines.length ? lines : null,
+    doc_number: cleanDocNumber(parsed?.document_number),
+    pricing_provisional,
+    proposal,
+  };
+}
+
+/** The columns 0295 adds. A write that fails on one of them (the code deployed ahead of the
+ *  migration) is retried without them, so a read is never lost to a missing column. */
+export const PAPERWORK_COLUMNS = [
+  "doc_type",
+  "doc_number",
+  "content_sha256",
+  "source",
+  "proposal",
+  "pricing_provisional",
+  "tied_bill_id",
+  "tied_supplier_invoice_id",
+] as const;
+
+export function isMissingColumnError(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const message = String((err as { message?: string })?.message ?? "");
+  return code === "42703" || code === "PGRST204" || /column .* does not exist|Could not find the .* column/i.test(message);
+}
+
+/** Update an organized_items row; on a missing-column error, once more without 0295's columns. */
+export async function updateItemTolerant(supabase: any, id: string, orgId: string | null | undefined, patch: Record<string, unknown>) {
+  const write = (p: Record<string, unknown>) => {
+    let q = supabase.from("organized_items").update(p).eq("id", id);
+    if (orgId) q = q.eq("org_id", orgId);
+    return q.select("id");
+  };
+  const first = await write(patch);
+  if (!first.error || !isMissingColumnError(first.error)) return first;
+  const older = { ...patch };
+  for (const c of PAPERWORK_COLUMNS) delete older[c];
+  return write(older);
+}
+
+// ── WHAT IS ALREADY ON THE BOOKS ────────────────────────────────────────────────────────────
+
+export type Books = {
+  bills: BookedBill[];
+  papers: BookedPaper[];
+  supplierInvoices: BookedSupplierInvoice[];
+  aliases: SupplierAliasIndex;
+};
+
+/**
+ * Every printed number this org already holds: bills with a number, the supplier's own documents,
+ * and papers read here. One read of each, filtered in code, because "8802-1108330" and
+ * "#8802 1108330" are the same number and SQL equality would call them two. A read that fails is
+ * an empty list: the offer to tie is a convenience, and File It stays open either way.
+ */
+export async function loadBooks(supabase: any, orgId: string | null | undefined): Promise<Books> {
+  const empty: Books = { bills: [], papers: [], supplierInvoices: [], aliases: new Map() };
+  if (!orgId) return empty;
+  const safe = async <T,>(p: PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => {
+    try {
+      const { data, error } = await p;
+      return error ? [] : ((data ?? []) as T[]);
+    } catch {
+      return [];
+    }
+  };
+  const [bills, papers, supplierInvoices, aliasRows] = await Promise.all([
+    safe<BookedBill>(
+      supabase
+        .from("bills")
+        .select("id, supplier, bill_number, supplier_account_id, amount, bill_date, job_id, jobs(job_number, name)")
+        .eq("org_id", orgId)
+        .not("bill_number", "is", null)
+        .limit(5000),
+    ),
+    safe<BookedPaper>(
+      supabase
+        .from("organized_items")
+        .select("id, vendor, doc_number, status, bill_id, title")
+        .eq("org_id", orgId)
+        .not("doc_number", "is", null)
+        .limit(5000),
+    ),
+    safe<BookedSupplierInvoice>(
+      supabase.from("supplier_invoices").select("id, invoice_number, supplier_account_id, total, invoice_date").eq("org_id", orgId).limit(5000),
+    ),
+    safe<{ alias: string; supplier_account_id: string }>(
+      supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
+    ),
+  ]);
+  return { bills, papers, supplierInvoices, aliases: indexSupplierAliases(aliasRows) };
+}
+
+export function matchesOnBooks(item: PaperItem, books: Books): NumberMatch[] {
+  return findSameNumber(item, books, books.aliases);
+}
+
+/**
+ * The needs_review row a piece of paper becomes the moment its file is safely in storage, BEFORE
+ * anything reads it: a failed read or a phone that suspends mid-read can never lose the paper.
+ * On code that deployed ahead of 0295, the fingerprint and source are dropped rather than the
+ * row. A second copy of the same file is the unique index's refusal, handed back as `duplicate`.
+ */
+export async function insertPaperRow(
+  supabase: any,
+  row: {
+    title: string;
+    file_url: string;
+    created_by: string;
+    content_sha256?: string | null;
+    source?: "organize" | "bills_drop" | "job";
+    doc_type?: PaperType | null;
+    doc_number?: string | null;
+    vendor?: string | null;
+    amount?: number | null;
+    item_date?: string | null;
+    kind?: string;
+    proposal?: PaperProposal | null;
+    confidence?: string;
+  },
+): Promise<{ id: string } | { duplicate: true } | { error: unknown }> {
+  const full: Record<string, unknown> = {
+    kind: row.kind ?? "job_document", // best guess until something has read it
+    title: row.title.slice(0, 200),
+    confidence: row.confidence ?? "low",
+    status: "needs_review",
+    file_url: row.file_url,
+    created_by: row.created_by,
+    content_sha256: row.content_sha256 ?? null,
+    source: row.source ?? "organize",
+    doc_type: row.doc_type ?? null,
+    doc_number: row.doc_number ?? null,
+    vendor: row.vendor ?? null,
+    amount: row.amount ?? null,
+    item_date: row.item_date ?? null,
+    proposal: row.proposal ?? null,
+  };
+  const insert = (r: Record<string, unknown>) => supabase.from("organized_items").insert(r).select("id").single();
+  let res = await insert(full);
+  if (res.error && isMissingColumnError(res.error)) {
+    const older = { ...full };
+    for (const c of PAPERWORK_COLUMNS) delete older[c];
+    res = await insert(older);
+  }
+  if (res.error) {
+    if (String((res.error as { code?: string }).code ?? "") === "23505") return { duplicate: true };
+    return { error: res.error };
+  }
+  if (!res.data?.id) return { error: new Error("The paper's row came back empty.") };
+  return { id: String(res.data.id) };
+}

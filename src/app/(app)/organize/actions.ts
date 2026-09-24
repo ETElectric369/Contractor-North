@@ -12,18 +12,40 @@ import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
 import { AUTO_FILE_BUCKETS, bucketOf, isBusinessCostBucket, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
-// TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the Organize
-// My classifier (any upload) and the job-receipt reader (a receipt already filed to a job). They
-// were two hand-maintained copies of one list, which is how "Food & Drink" would have shipped to
-// one door and not the other. One exported string, interpolated into both, is the only version of
-// "identical" that stays true. The rule sentence beneath each schema is shared for the same reason.
+import { isSha256 } from "@/lib/content-hash";
+import {
+  billCategoryFor,
+  fileRefusal,
+  paperTypeOfItem,
+  proposalOf,
+  type NumberMatch,
+  type PaperProposal,
+} from "@/lib/paperwork";
+// TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
+// reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
+// job). One exported string, interpolated into both, is the only version of "identical" that
+// stays true. The rule sentence beneath each schema is shared for the same reason.
 import {
   FOOD_AND_DRINK_PROMPT_RULE,
   MASKED_PRICE_PROMPT_RULE,
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
-  decideReceiptLine,
 } from "@/app/(app)/bills/receipt-billing";
+import {
+  billStatusFromItem,
+  cleanDocNumber,
+  cleanLines,
+  exactAccountFor,
+  insertItemizedBill,
+  insertPaperRow,
+  loadBooks,
+  matchesOnBooks,
+  paperReaderSystem,
+  readerFields,
+  tradeOf,
+  updateItemTolerant,
+  type ReaderJob,
+} from "./paperwork-core";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -41,163 +63,162 @@ export interface OrganizedResult {
     job_id: string | null;
     job_label: string | null;
     confidence: string;
-    status: string; // filed | needs_review
-    destination: string; // job | overhead | note | none
-    /** The business-cost bucket it was filed in, when destination is overhead. */
-    bucket?: string | null;
+    status: string; // needs_review (every read waits for a person) | filed (a note keeps itself)
+    destination: string; // none | note — nothing a reader decides is ever a job or a cost
+    /** What the reader SUGGESTS, shown beside File It. Never acted on by itself. */
+    suggestion?: { jobLabel: string | null; bucket: string | null } | null;
+    /** A one-line account of what was read. */
+    line?: string;
   };
 }
 
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const KIND_TO_CATEGORY: Record<string, string> = {
-  receipt: "Receipt",
-  note: "Other",
-  job_document: "Plan",
-};
+const READ_LIMIT = 8 * 1024 * 1024;
 
-export interface BillLine {
-  description: string;
-  quantity: number;
-  unit_price: number;
-  amount: number;
-  category: string | null;
-  /** false = the company eats this line; it never reaches the customer's invoice (0268). */
-  billable: boolean;
+/** The jobs a reader may say the paper names. */
+async function readerJobs(supabase: any): Promise<ReaderJob[]> {
+  const { data: jobs } = await supabase
+    .from("jobs")
+    .select("id, job_number, name, address, city, customers(name)")
+    .in("status", ACTIVE_JOB_STATUSES)
+    .order("created_at", { ascending: false })
+    .limit(40);
+  return (jobs ?? []).map((j: any) => ({
+    id: j.id,
+    label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}${j.city ? `, ${j.city}` : ""}`,
+  }));
 }
 
-/** Normalize the AI's line_items into clean BillLine rows. */
-function cleanLines(raw: any): BillLine[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((l: any) => {
-      const quantity = Number(l?.quantity) || 1;
-      const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
-      const amount =
-        l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
-      const description = String(l?.description ?? "").slice(0, 300).trim();
-      const stated = l?.category ? String(l.category).slice(0, 60) : null;
-      // WHOSE LINE IS IT (0268). Erik's INV-069 billed a homeowner for a Smartwater, a
-      // BodyArmor and a ten cent bottle deposit, and his answer was to stop scanning receipts
-      // at all — "i have another receipt that i didnt scan specifically because it was mostly
-      // snacks and a $3 part" — which cost him the $3 job cost too. Food and drink now arrives
-      // switched OFF the customer's bill and everything else arrives on it, tools included,
-      // because he was asked and that is exactly what he chose. This is also the one place a
-      // decision he already made survives: a tray item's lines are stored as jsonb and re-read
-      // verbatim when it is filed (or moved to another job) later, so an explicit flag in the
-      // stored row wins over the default and re-filing never re-bills the snacks.
-      //
-      // AND THE NET UNDER IT. Twelve minutes after that shipped, with the Food & Drink rule in
-      // front of it, the reader filed two bags of kettle chips and an ice cream bar as "Other" —
-      // billable — on the Waldow job. A prompt is a request, not a mechanism. decideReceiptLine
-      // fills in a shrug ("Other", blank) when the words are plainly food, never touches a
-      // category the model actually chose, and never overrules a flag a person already set.
-      // This is the only door all three receipt paths pass through — the Organize My classifier,
-      // the job-receipt reader, and re-filing a tray item — so it is the only place it belongs.
-      const { category, billable } = decideReceiptLine(description, stated, l?.billable);
-      return { description, quantity, unit_price, amount, category, billable };
-    })
-    .filter((l: BillLine) => l.description.length > 0)
-    .slice(0, 100);
-}
-
-/** A store receipt is already paid; a supplier bill/invoice is still owed. New
- *  uploads default to UNPAID so an owed bill is never silently marked paid. */
-function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
-  return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
-}
-
-/** Paid/unpaid for a bill created from an ALREADY-ANALYZED tray item. Prefers what the AI
- *  actually read off the paper (organized_items.payment, migration 0153) and only falls back
- *  to the category-name heuristic for legacy rows analyzed before that column existed.
- *  A classified-but-not-tendered receipt (ON ACCT, net terms) stays UNPAID so the debt shows
- *  up in payables instead of surfacing on next month's supply-house statement. */
-function billStatusFromItem(item: { payment?: string | null; category?: string | null }): "paid" | "unpaid" {
-  const p = String(item.payment ?? "");
-  if (p === "paid_at_purchase") return "paid";
-  if (p === "on_account" || p === "unknown") return "unpaid";
-  return billStatusFor(item.category);
-}
-
-/** Insert a bill plus its line items (an itemized receipt → billable cost). */
-async function insertItemizedBill(
-  supabase: any,
-  bill: {
-    job_id: string | null;
-    supplier: string;
-    amount: number | null;
-    bill_date: string | null;
-    category: string;
-    scope_category?: string | null; // the JOB SCOPE (Framing, Decking…) for budget-vs-actual
-    notes: string;
-    created_by: string;
-    /** 0271: the prices on this paper are a counter preview, not this account's own. */
-    pricing_provisional?: boolean;
-  },
-  lines: BillLine[],
-  status: "paid" | "unpaid" = "unpaid",
-): Promise<string | null> {
-  const { data, error } = await supabase.from("bills").insert({ ...bill, status }).select("id").single();
-  if (error || !data) {
-    // A RECEIPT THAT DID NOT BECOME A BILL USED TO SAY NOTHING AT ALL (review, 2026-09-19).
-    //
-    // This returned a bare null, so the caller filed the document, told Erik it was filed, and the
-    // cost simply never existed - the silent-write law broken at the one place a whole receipt can
-    // vanish. It is also the exact shape a deploy-before-migration takes here: PostgREST rejects
-    // the WHOLE insert for one unknown column, so a push that lands before its migration would
-    // have quietly stopped recording every scanned receipt until somebody noticed the money was
-    // missing. It cannot be a thrown error (the document IS filed by this point and that is worth
-    // keeping), so it goes to the ops log, where the daily sweep reads it.
-    reportError("organize:insertItemizedBill", error ?? new Error("bill insert returned no row"), {
-      supplier: bill.supplier,
-      jobId: bill.job_id,
-      amount: bill.amount,
-    });
-    return null;
-  }
-  if (lines.length) {
-    const { error: lineErr } = await supabase
-      .from("bill_line_items")
-      .insert(
-        lines.map((l, i) => ({
-          bill_id: data.id,
-          description: l.description,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          amount: l.amount,
-          category: l.category,
-          billable: l.billable,
-          sort_order: i,
-        })),
-      )
-      .select("id");
-    // A BILL WITH NO LINES IS STILL A NUMBER (silent-write law, same pass as 0278). The bill row
-    // is already in and carries the total, so throwing it away would lose the whole cost - but
-    // the itemisation is what 0268 bills off and what the Receipt Line editor shows, so a receipt
-    // that lands as a bare total must not do it quietly. Same reason it is the ops log and not a
-    // thrown error: the cost IS recorded, and that is worth keeping.
-    if (lineErr) {
-      reportError("organize:insertItemizedBill.lines", lineErr, {
-        billId: data.id,
-        supplier: bill.supplier,
-        lineCount: lines.length,
-      });
-    }
-  }
-  return data.id;
-}
-
-/** Pull a JSON object out of a Claude reply (tolerates ```json fences and a
- *  trailing comma before a closing bracket — a common model slip). */
 /**
- * The heart of "Organize My": given an already-uploaded storage file, have
- * Claude read the image, classify it (receipt / note / job document), extract
- * the details, match it to a job, and file it.
+ * READ ONE PAPER INTO ITS ROW, AND STOP THERE (Erik, 2026-09-24: "Organize photos wait for File
+ * It").
+ *
+ * This used to be the second half of analyzeAndFile, and it FILED: a job the model matched with
+ * medium confidence got a documents row and an itemized bill, and a receipt it called overhead
+ * became a business cost, with no person looking at either. That is a model read writing money,
+ * and a model read is a proposal. So this writes only the row: what the paper says, what KIND of
+ * paper it is, the number printed on it, and what the reader SUGGESTS (the job the paper names, a
+ * bucket). The row stays needs_review, "Ready To File", until a person picks where it goes and
+ * presses File It, which is fileItem below and nothing else.
+ *
+ * The one exception is a handwritten note with no money on it: it is kept as a note, as before.
+ * A note is not a cost, and making every grocery list wait for a button would be the annoying
+ * kind of careful.
+ */
+async function readInto(
+  ctx: { supabase: any; orgId: string | null; userId: string },
+  itemId: string,
+  file: { path: string; name: string; mime: string },
+): Promise<OrganizedResult> {
+  const supabase = ctx.supabase;
+  const jobList = await readerJobs(supabase);
+
+  const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
+  if (dlErr || !blob) {
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the file couldn't be opened" } });
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    return { ok: false, error: `${dlErr?.message ?? "Could not read the upload."} It is saved and waiting; press Read Now to try again.` };
+  }
+  const bytes = await blob.arrayBuffer();
+  // TOO BIG TO READ IS NOT TOO BIG TO KEEP. The file is in; the row says so and keeps every
+  // control, and a person types the total in.
+  if (bytes.byteLength > READ_LIMIT) {
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { tooBig: true } });
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    return { ok: false, error: "Too big to read: fill it in yourself. It is saved and waiting." };
+  }
+  const base64 = Buffer.from(bytes).toString("base64");
+  const isImage = IMAGE_TYPES.includes(file.mime);
+  const mediaBlock: any = isImage
+    ? { type: "image", source: { type: "base64", media_type: file.mime, data: base64 } }
+    : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
+
+  let parsed: any;
+  try {
+    const client = getAnthropic();
+    const trade = await tradeOf(supabase, ctx.orgId);
+    const msg = await client.messages.create({
+      model: DEFAULT_MODEL,
+      max_tokens: 4096,
+      system: paperReaderSystem(trade, jobList),
+      messages: [
+        {
+          role: "user",
+          content: [mediaBlock, { type: "text", text: `Filename: ${file.name}. Classify and extract.` }],
+        },
+      ],
+    });
+    // METER (0162): receipt/document reads are a real cost centre, not just chat.
+    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
+    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
+    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
+  } catch (e: any) {
+    // The paper is NOT lost: the row stays in the tray, saying it was not read.
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader didn't answer" } });
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    return { ok: false, error: `${e?.message ?? "AI could not read this file."} It is saved and waiting; press Read Now to try again.` };
+  }
+
+  const f = readerFields(parsed, jobList, file.name);
+  const keepsItself = f.kind === "note" && f.amount === null;
+  const { error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
+    kind: f.kind,
+    title: f.title,
+    summary: f.summary,
+    vendor: f.vendor,
+    amount: f.amount,
+    item_date: f.item_date,
+    category: f.category,
+    confidence: f.confidence,
+    status: keepsItself ? "filed" : "needs_review",
+    line_items: f.line_items,
+    // HOW it was paid, so File It honours the paper instead of re-guessing from the category (0153).
+    payment: f.payment,
+    doc_type: keepsItself ? null : f.doc_type,
+    doc_number: f.doc_number,
+    pricing_provisional: f.pricing_provisional,
+    proposal: f.proposal,
+  });
+  if (error) return { ok: false, error: dbError(error) };
+
+  revalidatePath("/organize");
+  revalidatePath("/bills");
+  const suggestedJob = f.proposal.jobId ? jobList.find((j) => j.id === f.proposal.jobId)?.label ?? null : null;
+  return {
+    ok: true,
+    item: {
+      id: itemId,
+      kind: f.kind,
+      title: f.title,
+      summary: f.summary,
+      vendor: f.vendor,
+      amount: f.amount,
+      item_date: f.item_date,
+      job_id: null,
+      job_label: null,
+      confidence: f.confidence,
+      status: keepsItself ? "filed" : "needs_review",
+      destination: keepsItself ? "note" : "none",
+      suggestion: suggestedJob || f.proposal.bucket ? { jobLabel: suggestedJob, bucket: f.proposal.bucket ?? null } : null,
+    },
+  };
+}
+
+/**
+ * "Organize My": an already-uploaded file becomes a row in the tray, and is READ. It is not filed.
+ * The name stays because Nort's registry and the tray both call it; what it does changed on
+ * 2026-09-24 (see readInto).
  */
 export async function analyzeAndFile(input: {
   path: string; // storage path in the 'documents' bucket
   name: string;
   mime: string;
   size: number;
+  /** The file's fingerprint (0295). The same file twice is one row. */
+  sha256?: string | null;
 }): Promise<OrganizedResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -209,261 +230,40 @@ export async function analyzeAndFile(input: {
   if (!isImage && !isPdf) {
     return { ok: false, error: "Use a photo (JPG/PNG) or PDF — other file types can't be read yet." };
   }
-  if (input.size > 8 * 1024 * 1024) return { ok: false, error: "File is over 8 MB — try a smaller photo." };
 
-  // Save the capture BEFORE the AI ever runs: a needs_review placeholder row goes
-  // in the moment the upload is confirmed, so a failed AI read (or the PWA getting
-  // suspended mid-analyze) can never silently lose a photographed receipt — worst
-  // case the raw capture waits in the tray for a manual file or an AI retry.
-  const { data: placeholder, error: phErr } = await supabase
-    .from("organized_items")
-    .insert({
-      kind: "job_document", // best guess until the AI has looked
-      title: String(input.name).slice(0, 200),
-      confidence: "low",
-      status: "needs_review",
-      file_url: input.path,
-      created_by: ctx.userId,
-    })
-    .select("id")
-    .single();
-  if (phErr || !placeholder) return { ok: false, error: phErr?.message ?? "Could not save the upload." };
-  const itemId: string = placeholder.id;
-
-  // Candidate jobs for matching (recent, active-ish).
-  const { data: jobs } = await supabase
-    .from("jobs")
-    .select("id, job_number, name, address, city, customers(name)")
-    .in("status", ACTIVE_JOB_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(40);
-  const jobList = (jobs ?? []).map((j: any) => ({
-    id: j.id,
-    label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}${j.city ? `, ${j.city}` : ""}`,
-  }));
-
-  // Pull the uploaded file back out of storage for Claude to look at.
-  const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(input.path);
-  if (dlErr || !blob) {
-    revalidatePath("/organize"); // the placeholder stays in the tray
-    return { ok: false, error: `${dlErr?.message ?? "Could not read the upload."} Saved to the review tray.` };
+  // Save the capture BEFORE the AI ever runs, so a failed read can never lose a photographed
+  // receipt: worst case it waits in the tray for Read Now or a person's own numbers.
+  const placed = await insertPaperRow(supabase, {
+    title: String(input.name),
+    file_url: input.path,
+    created_by: ctx.userId,
+    content_sha256: isSha256(input.sha256) ? input.sha256 : null,
+    source: "organize",
+  });
+  if ("duplicate" in placed) {
+    return { ok: false, error: `${input.name} is already in: the same file was added before, so it wasn't added twice.` };
   }
-  const base64 = Buffer.from(await blob.arrayBuffer()).toString("base64");
+  if ("error" in placed) return { ok: false, error: dbError(placed.error) };
 
-  const mediaBlock: any = isImage
-    ? { type: "image", source: { type: "base64", media_type: input.mime, data: base64 } }
-    : { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } };
-
-  let parsed: any;
-  try {
-    const client = getAnthropic();
-    const msg = await client.messages.create({
-      model: DEFAULT_MODEL,
-      max_tokens: 4096,
-      system: `You file paperwork for an electrical contractor. Look at the upload and classify it.
-
-Respond with ONLY a JSON object (no prose):
-{
-  "kind": "receipt" | "note" | "job_document",
-  "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
-  "summary": receipt → brief list of what was bought; note → full clean transcription of the handwriting; job_document → what the document is,
-  "line_items": receipts ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] for notes/documents or an unreadable receipt,
-  "vendor": store/supplier name or null,
-  "amount": total in dollars as a number, or null,
-  "date": "YYYY-MM-DD" date printed on it, or null,
-  "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
-  "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
-  "payment": "paid_at_purchase" | "on_account" | "unknown" — receipts only. "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases); "unknown" when you cannot tell,
-  "destination": "job" | "overhead" | "unsure" — receipts only. "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (gas station, truck, shop supplies, small tools, phone, office, insurance, licenses); "unsure" otherwise,
-  "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
-  "job_id": the id of the matching job ONLY if the content clearly points to one (job number, customer name, or address visible), else null,
-  "confidence": "low" | "medium" | "high"
+  return readInto(ctx, placed.id, input);
 }
 
-Rules: never guess a job_id — only match when something on the paper points to it. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead: those come in with the supplier's own paperwork and must not be filed twice. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
-
-${FOOD_AND_DRINK_PROMPT_RULE}
-
-${MASKED_PRICE_PROMPT_RULE}
-
-Jobs you may match against (id — label):
-${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
-      messages: [
-        {
-          role: "user",
-          content: [mediaBlock, { type: "text", text: `Filename: ${input.name}. Classify and extract.` }],
-        },
-      ],
-    });
-    // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: ctx.orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
-    const text = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
-  } catch (e: any) {
-    // The capture is NOT lost — the placeholder row stays needs_review in the tray.
-    revalidatePath("/organize");
-    return { ok: false, error: `${e?.message ?? "AI could not read this file."} Saved to the review tray.` };
-  }
-
-  const kind = ["receipt", "note", "job_document"].includes(parsed.kind) ? parsed.kind : "job_document";
-  const jobId = jobList.some((j) => j.id === parsed.job_id) ? parsed.job_id : null;
-  const category = String(parsed.category || KIND_TO_CATEGORY[kind] || "Other");
-  const title = String(parsed.title || input.name).slice(0, 200);
-  const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
-  const amount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
-  const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
-  // THE READER'S BUCKET IS CHECKED BEFORE IT IS WRITTEN. It used to be saved exactly as the model
-  // spelled it, so a model slip ("Fuel", "gas") became a seventh category no other door knew.
-  // bucketOf always answers with one of the six. Fees is the one the reader may not pick: a
-  // supplier's late or service charge is already on the supplier's own paperwork, so a fee-shaped
-  // paper, by the model's word or by its own words, waits in Needs Review for a person.
-  const overheadCategory = bucketOf(parsed.overhead_category);
-  const feeShaped =
-    overheadCategory === "Fees" ||
-    looksLikeSupplierFee(title, parsed.vendor ? String(parsed.vendor) : null, parsed.summary ? String(parsed.summary) : null);
-  // What the paper says about PAYMENT decides paid/unpaid — not the category heuristic.
-  // billStatusFor() calls anything not named "bill/invoice" paid, so an ON-ACCT supply-house
-  // ticket filed here vanished from payables until the monthly statement arrived. Unknown
-  // defaults to UNPAID: a debt you already settled is harmless, one you forget is not.
-  const paymentRead = ["paid_at_purchase", "on_account", "unknown"].includes(String(parsed.payment ?? ""))
-    ? String(parsed.payment)
-    : "unknown";
-  const billStatus: "paid" | "unpaid" = paymentRead === "paid_at_purchase" ? "paid" : "unpaid";
-  const lines = kind === "receipt" ? cleanLines(parsed.line_items) : [];
-
-  // Decide where it goes — auto-file only when confident, else the tray.
-  // - job matched → file to that job (any kind)
-  // - clear overhead receipt with an amount → business-cost bill (no job), never a fee
-  // - notes stand alone fine → filed
-  // - everything else → needs_review
-  const isOverhead =
-    kind === "receipt" && parsed.destination === "overhead" && amount != null && confidence !== "low" && !feeShaped;
-  let destination: "job" | "overhead" | "note" | "none" = "none";
-  let status = "needs_review";
-  if (jobId && confidence !== "low") {
-    destination = "job";
-    status = "filed";
-  } else if (isOverhead) {
-    destination = "overhead";
-    status = "filed";
-  } else if (kind === "note") {
-    destination = "note";
-    status = "filed";
-  }
-
-  const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : title;
-
-  // File on the job (documents row) so the image shows on the job page.
-  let documentId: string | null = null;
-  if (destination === "job" && jobId) {
-    const { data: doc } = await supabase
-      .from("documents")
-      .insert({
-        job_id: jobId,
-        name: title,
-        category,
-        kind: "other",
-        file_url: input.path,
-        size_bytes: input.size || null,
-        uploaded_by: ctx.userId,
-      })
-      .select("id")
-      .single();
-    documentId = doc?.id ?? null;
-  }
-
-  /**
-   * IS THIS PAPER PRICED FOR HIM, OR JUST PRICED? (Erik, 2026-09-18; 0271.)
-   *
-   * His CED account is priced by Truckee. Buy at another branch and the ticket shows that branch's
-   * retail counter price with asterisks where his contract price will go - "thats why the invoice
-   * has all the *****" - and the real one follows by email days later. Left unmarked, the retail
-   * figure becomes a learned price he is never charged, and the priced invoice lands as a SECOND
-   * bill for the same purchase.
-   *
-   * Two chances at the same fact, because one of them is a language model: what the reader
-   * answered, OR the mask still visible in the text it transcribed. Either is enough - under-
-   * flagging teaches the price book a wrong number, while over-flagging only means a card asks
-   * him to confirm a cost he was going to look at anyway.
-   */
-  const provisional =
-    parsed?.pricing_provisional === true ||
-    looksProvisionallyPriced(String(parsed?.summary ?? "")) ||
-    (lines ?? []).some((l: { description?: string | null }) => looksProvisionallyPriced(l?.description));
-
-  // A receipt becomes a billable cost: an itemized bill on the job (job receipt)
-  // or a company expense bill (overhead). Notes/job-documents make no bill.
-  let billId: string | null = null;
-  if (kind === "receipt" && amount != null && destination === "job" && jobId) {
-    billId = await insertItemizedBill(
-      supabase,
-      { job_id: jobId, supplier: vendor, amount, bill_date: itemDate, category, notes: `Receipt filed by Organize My: ${title}`, created_by: ctx.userId, pricing_provisional: provisional },
-      lines,
-      billStatus,
-    );
-  } else if (destination === "overhead") {
-    billId = await insertItemizedBill(
-      supabase,
-      { job_id: null, supplier: vendor, amount, bill_date: itemDate, category: overheadCategory, notes: `Filed by Organize My: ${title}`, created_by: ctx.userId, pricing_provisional: provisional },
-      lines,
-      billStatus,
-    );
-    // A business cost IS its bill: there is no copy on a job to fall back on. If the bill did not
-    // land, the receipt stays in Needs Review, so the screen never reads "Filed as a Business
-    // Cost" over a cost that does not exist.
-    if (!billId) {
-      destination = "none";
-      status = "needs_review";
-    }
-  }
-
-  // Upgrade the placeholder row with the AI's read (UPDATE, not a second insert,
-  // so a retry or crash never leaves duplicates).
-  const { error } = await supabase
+/** Read Now: run the reader on a row already in the tray (a read that failed, or never ran). */
+export async function readPaperworkItem(id: string): Promise<OrganizedResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: item } = await ctx.supabase
     .from("organized_items")
-    .update({
-      kind,
-      title,
-      summary: parsed.summary ? String(parsed.summary).slice(0, 4000) : null,
-      vendor: parsed.vendor ? String(parsed.vendor).slice(0, 200) : null,
-      amount,
-      item_date: itemDate,
-      category: destination === "overhead" ? overheadCategory : category,
-      confidence,
-      status,
-      job_id: destination === "job" ? jobId : null,
-      document_id: documentId,
-      bill_id: billId,
-      line_items: lines.length ? lines : null,
-      // Persist HOW it was paid so a later manual file (fileItem) honors the paper
-      // instead of re-guessing from the category name (0153).
-      payment: kind === "receipt" ? paymentRead : null,
-    })
-    .eq("id", itemId);
-  if (error) return { ok: false, error: dbError(error) };
-
-  revalidatePath("/organize");
-  revalidatePath("/bills");
-  if (jobId) revalidatePath(`/jobs/${jobId}`);
-
-  return {
-    ok: true,
-    item: {
-      id: itemId,
-      kind,
-      title,
-      summary: parsed.summary ?? null,
-      vendor: parsed.vendor ?? null,
-      amount,
-      item_date: itemDate,
-      job_id: destination === "job" ? jobId : null,
-      job_label: destination === "job" ? jobList.find((j) => j.id === jobId)?.label ?? null : null,
-      confidence,
-      status,
-      destination,
-      bucket: destination === "overhead" ? overheadCategory : null,
-    },
-  };
+    .select("id, title, file_url, status")
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (!item) return { ok: false, error: "That paper isn't here any more." };
+  if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first to read it again." };
+  if (!item.file_url) return { ok: false, error: "There is no file on this one to read." };
+  const mime = mimeFromName(item.file_url);
+  if (!mime) return { ok: false, error: "This file isn't a photo or a PDF, so it can't be read. Fix Details and fill it in." };
+  return readInto(ctx, String(item.id), { path: String(item.file_url), name: String(item.title ?? "Paper"), mime });
 }
 
 /** Infer a media type from a stored filename / path. */
@@ -560,16 +360,18 @@ export async function billJobReceipt(
   let parsed: any;
   try {
     const client = getAnthropic();
+    const trade = await tradeOf(supabase, ctx.orgId);
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
-      system: `You read a purchase receipt for an electrical contractor and itemize it as a job cost.
+      system: `You read a purchase receipt for a ${trade} and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
 {
   "vendor": store/supplier name or null,
   "amount": grand total in dollars as a number (the amount actually paid), or null only if you truly cannot read it,
   "date": "YYYY-MM-DD" printed on the receipt, or null,
+  "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
   "line_items": [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}],${scopeSchemaLine}
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
   "payment": "paid_at_purchase" | "on_account" | "unknown" — "paid_at_purchase" ONLY when the document shows tender (cash tendered/change, a card number/••••, or an explicit PAID stamp); "on_account" when it shows a charge account, ON ACCT, net terms, "invoice", or a balance due (supply-house account purchases),
@@ -625,6 +427,16 @@ ${MASKED_PRICE_PROMPT_RULE}`,
   // why this flags rather than corrects.
   const check = reconcileReceipt(amount, lines);
 
+  // IS THIS PAPER PRICED FOR HIM, OR JUST PRICED? (0271.) The Organize reader always carried this
+  // flag onto its bill and this reader, the one behind Snap the Bill and Record as Cost, dropped
+  // it: a masked counter preview read here became an ordinary bill whose retail prices the price
+  // book then learned. Two chances at the same fact, as there: what the reader answered, or the
+  // mask still visible in what it transcribed.
+  const provisional =
+    parsed?.pricing_provisional === true || lines.some((l) => looksProvisionallyPriced(l?.description));
+  const docNumber = cleanDocNumber(parsed?.document_number);
+  const accountId = await exactAccountFor(supabase, ctx.orgId, vendor);
+
   const billId = await insertItemizedBill(
     supabase,
     {
@@ -638,6 +450,9 @@ ${MASKED_PRICE_PROMPT_RULE}`,
         ? `Receipt recorded as cost: ${doc.name}\n\n${check.note}`
         : `Receipt recorded as cost: ${doc.name}`,
       created_by: ctx.userId,
+      pricing_provisional: provisional,
+      bill_number: docNumber ?? undefined,
+      supplier_account_id: accountId ?? undefined,
     },
     lines,
     // Paid ONLY when the receipt itself shows tender. Supply-house account purchases
@@ -744,22 +559,21 @@ export type FileDestination =
   | { type: "overhead"; category: string }
   | { type: "unfiled" };
 
+export type FileOptions = {
+  /** A person looked at "already on the books" and said it is a different purchase. */
+  differentPurchase?: boolean;
+};
+
+/** A number match, said as the sentence File It refuses with. */
+function sameNumberRefusal(matches: NumberMatch[]): string {
+  return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: File It Anyway. Nothing was filed.`;
+}
+
 /**
- * File (or re-file) an item to any destination. Tears down whatever rows the
- * previous destination created, then creates the new ones, so moving things
- * around can never double-count.
+ * Tear down whatever the previous filing made, bill FIRST and only if the database lets it (0278).
+ * Returns the refusal sentence, or null when everything came down. The tail names the door.
  */
-export async function fileItem(id: string, dest: FileDestination): Promise<Result> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
-  if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
-    return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
-
-  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
-  if (!item) return { ok: false, error: "Item not found." };
-
+async function tearDownFiling(supabase: any, item: any, tail: string): Promise<string | null> {
   // THE BILL COMES DOWN FIRST, AND ONLY IF THE DATABASE LETS IT (0278; audit of cn-v951..v966).
   //
   // Re-filing tears the old filing down and builds a new one, and this line tore down a bill a
@@ -769,42 +583,82 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   // amount and its margin jumped. Re-filing is the worse half: the replacement bill comes back
   // with a NEW id that no claim covers, so importCostsIntoInvoice will bill the same purchase to
   // a second customer. Bill c0535cdb, $467.87 of CED on J-046, is claimed by eight lines of
-  // INV-069 that Jason has already part paid; 26 of the 30 receipts in the Organize archive are
-  // in that state today.
-  //
-  // Throwing the result away is what made it silent: with the guard in place the teardown now
-  // FAILS, and the old code walked straight past that into inserting the second bill.
+  // INV-069 that Jason has already part paid.
   //
   // FIRST, ahead of the document and petty-cash rows, so a refusal leaves the item exactly as it
-  // was and "Nothing was moved" is a fact rather than a hope. No zero-row refusal here, unlike
-  // the trash door: bills_write and the organized_items read are the same org+staff gate, so
-  // zero rows means the bill is simply already gone (bill_id is ON DELETE SET NULL, and a retry
-  // after a half-finished move lands here), and re-filing has to keep working.
+  // was. No zero-row refusal here, unlike the trash door: bills_write and the organized_items read
+  // are the same org+staff gate, so zero rows means the bill is simply already gone (bill_id is
+  // ON DELETE SET NULL, and a retry after a half-finished move lands here).
+  //
+  // A TIED bill (0295) is never here: tied_bill_id is its own column precisely so that this
+  // teardown, which deletes bill_id, can never delete a bill this row did not make.
   if (item.bill_id) {
     const { error: billErr } = await supabase.from("bills").delete().eq("id", item.bill_id).select("id");
-    if (billErr)
-      return {
-        ok: false,
-        error:
-          billClaimRefusal(
-            billErr,
-            "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
-          ) ?? dbError(billErr),
-      };
+    if (billErr) return billClaimRefusal(billErr, tail) ?? dbError(billErr);
   }
   // Then the rest of the previous filing. The petty-cash row is torn down HERE too (audit 9,
-  // 0202): without a back-link, re-filing a receipt left the first petty_cash row standing and
-  // the same disbursement was counted twice in the drawer. Both are checked for the bill's own
-  // reason - a teardown that fails and says nothing becomes a SECOND row a moment later.
+  // 0202). Both are checked for the bill's own reason - a teardown that fails and says nothing
+  // becomes a SECOND row a moment later.
   if (item.document_id) {
     const { error: docErr } = await supabase.from("documents").delete().eq("id", item.document_id).select("id");
-    if (docErr) return { ok: false, error: `${dbError(docErr)} The old copy is still on the job, so this was not re-filed.` };
+    if (docErr) return `${dbError(docErr)} The old copy is still on the job, so nothing was changed.`;
   }
   if (item.petty_cash_id) {
     const { error: pcErr } = await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id).select("id");
-    if (pcErr)
-      return { ok: false, error: `${dbError(pcErr)} The old petty cash entry is still in the drawer, so this was not re-filed.` };
+    if (pcErr) return `${dbError(pcErr)} The old petty cash entry is still in the drawer, so nothing was changed.`;
   }
+  return null;
+}
+
+/**
+ * FILE IT: THE ONE DOOR A PIECE OF PAPER BECOMES MONEY THROUGH (0295).
+ *
+ * A person picked where it goes and pressed the button. Every surface that files paper calls this:
+ * the Organize tray, Drop Paperwork on /bills, and nothing else. There used to be a second, weaker
+ * way in on /organize (a job dropdown that filed the moment it changed, with the category hard-
+ * coded to "Receipt", no counter-preview flag and no look at what was already on the books), and a
+ * third that let the model file on its own (AI Review & File). Both are gone; this is the only
+ * path, and it asks the same question the button does (fileRefusal) before it writes anything.
+ *
+ * Re-filing tears down whatever the previous filing made, then creates the new rows, so moving
+ * things around can never double-count.
+ */
+export async function fileItem(id: string, dest: FileDestination, opts: FileOptions = {}): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
+  if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
+    return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
+
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  if (!item) return { ok: false, error: "Item not found." };
+
+  const type = paperTypeOfItem(item);
+  const isCost = type === "receipt" || type === "bill";
+
+  // THE GATE: the same function the File It button asks. A paper not read, with no total, of a kind
+  // this update cannot file, or already filed, is refused here in the sentence the row shows.
+  if (dest.type !== "unfiled") {
+    const refusal = fileRefusal(item, dest.type === "job" ? { type: "job", jobId: dest.jobId } : { type: "overhead", category: dest.category as never });
+    if (refusal) return { ok: false, error: refusal };
+  }
+
+  // IS THIS PURCHASE ALREADY ON THE BOOKS? Same printed number, same supplier. Asked here, on the
+  // server, every time, so no screen that forgot to show the offer can make a second bill. A
+  // person who has looked and says it is a different purchase passes differentPurchase.
+  if (dest.type !== "unfiled" && isCost && item.doc_number && !opts.differentPurchase) {
+    const books = await loadBooks(supabase, ctx.orgId);
+    const matches = matchesOnBooks(item, books).filter((m) => m.kind !== "paper");
+    if (matches.length) return { ok: false, error: sameNumberRefusal(matches) };
+  }
+
+  const refused = await tearDownFiling(
+    supabase,
+    item,
+    "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
+  );
+  if (refused) return { ok: false, error: refused.replace("so nothing was changed", "so this was not re-filed") };
   const prevJob = item.job_id;
   const lines = cleanLines(item.line_items);
 
@@ -812,10 +666,38 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   let billId: string | null = null;
   let jobId: string | null = null;
   let category: string | null = item.category;
+  const paperCategory = billCategoryFor(item);
+  const vendor = item.vendor ?? item.title;
+  // What a person said at the "already on the books" question rides on the bill, so the next
+  // person who sees two bills with one number knows it was decided, not missed.
+  const decided = opts.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : "";
+  const billFacts = isCost
+    ? {
+        pricing_provisional: item.pricing_provisional === true,
+        bill_number: item.doc_number ? String(item.doc_number) : undefined,
+        supplier_account_id: (await exactAccountFor(supabase, ctx.orgId, vendor)) ?? undefined,
+      }
+    : {};
+
+  // A cost that did not land puts the paper back in the tray holding nothing, and says so, instead
+  // of reading "Filed" over a cost that does not exist.
+  const backToTray = async (message: string): Promise<Result> => {
+    if (documentId) await supabase.from("documents").delete().eq("id", documentId).select("id");
+    await supabase
+      .from("organized_items")
+      .update({ job_id: null, document_id: null, bill_id: null, petty_cash_id: null, status: "needs_review" })
+      .eq("id", id);
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    if (prevJob) revalidatePath(`/jobs/${prevJob}`);
+    return { ok: false, error: message };
+  };
 
   if (dest.type === "job") {
     jobId = dest.jobId;
-    const docCategory = item.kind === "receipt" ? "Receipt" : item.category && item.kind === "job_document" ? item.category : "Other";
+    // The copy on the job carries what the paper IS (a Bill stays a Bill), never a hard-coded
+    // "Receipt".
+    const docCategory = isCost ? paperCategory : item.category && item.kind === "job_document" ? item.category : "Other";
     category = docCategory;
     const { data: doc } = await supabase
       .from("documents")
@@ -830,43 +712,59 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
       .select("id")
       .single();
     documentId = doc?.id ?? null;
-    // A receipt filed to a job becomes an itemized billable cost on that job.
-    if (item.kind === "receipt" && item.amount != null) {
+    // A receipt or bill filed to a job becomes an itemized billable cost on that job.
+    if (isCost && item.amount != null) {
       billId = await insertItemizedBill(
         supabase,
-        { job_id: dest.jobId, supplier: item.vendor ?? item.title, amount: item.amount, bill_date: item.item_date, category: "Receipt", notes: `Receipt filed by Organize My: ${item.title}`, created_by: ctx.userId },
+        {
+          job_id: dest.jobId,
+          supplier: vendor,
+          amount: item.amount,
+          bill_date: item.item_date,
+          category: paperCategory,
+          notes: `${paperCategory} filed by a person from the tray: ${item.title}${decided}`,
+          created_by: ctx.userId,
+          ...billFacts,
+        },
         lines,
         billStatusFromItem(item),
       );
+      if (!billId) return backToTray("The cost didn't save, so this paper is back in the tray. Try File It again.");
     }
   } else if (dest.type === "overhead") {
     category = dest.category;
     billId = await insertItemizedBill(
       supabase,
-      { job_id: null, supplier: item.vendor ?? item.title, amount: item.amount ?? 0, bill_date: item.item_date, category: dest.category, notes: `Filed by Organize My: ${item.title}`, created_by: ctx.userId },
+      {
+        job_id: null,
+        supplier: vendor,
+        amount: item.amount ?? 0,
+        bill_date: item.item_date,
+        category: dest.category,
+        notes: `Business cost filed by a person from the tray: ${item.title}${decided}`,
+        created_by: ctx.userId,
+        ...billFacts,
+      },
       lines,
       billStatusFromItem(item),
     );
-    // A business cost IS its bill; there is no copy on a job to show for it. If the bill did not
-    // land, the old filing is already gone, so the item goes back to Needs Review holding nothing
-    // and the tap says so, instead of reading "Filed" over a cost that does not exist.
-    if (!billId) {
-      await supabase
-        .from("organized_items")
-        .update({ job_id: null, document_id: null, bill_id: null, petty_cash_id: null, status: "needs_review" })
-        .eq("id", id);
-      revalidatePath("/organize");
-      if (prevJob) revalidatePath(`/jobs/${prevJob}`);
-      return { ok: false, error: "The business cost didn't save, so this receipt is back in Needs Review. Try again." };
-    }
+    // A business cost IS its bill; there is no copy on a job to show for it.
+    if (!billId) return backToTray("The business cost didn't save, so this receipt is back in Needs Review. Try again.");
   }
 
-  const { error } = await supabase
-    .from("organized_items")
+  const patch: Record<string, unknown> = {
+    job_id: jobId,
+    document_id: documentId,
+    bill_id: billId,
     // petty_cash_id is cleared in the SAME write as the others, so a receipt filed to petty cash
     // before that door closed leaves no stale link once it is re-filed (audit 9).
-    .update({ job_id: jobId, document_id: documentId, bill_id: billId, petty_cash_id: null, category, status: "filed" })
-    .eq("id", id);
+    petty_cash_id: null,
+    category,
+    status: dest.type === "unfiled" ? "needs_review" : "filed",
+  };
+  // How it was filed rides on the proposal, so Undo takes down exactly this and nothing else.
+  if ("proposal" in item) patch.proposal = { ...proposalOf(item), filed: dest.type === "unfiled" ? null : { how: "bill" } };
+  const { error } = await supabase.from("organized_items").update(patch).eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
 
   revalidatePath("/organize");
@@ -875,6 +773,126 @@ export async function fileItem(id: string, dest: FileDestination): Promise<Resul
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   return { ok: true };
+}
+
+/**
+ * UNDO A FILING (0295). The paper goes back to the tray exactly as it was read, and whatever the
+ * filing made comes down under the same 0278 ceiling as every other teardown: a bill a live
+ * invoice already bills cannot be un-filed, and the sentence says which invoice and what to do.
+ *
+ *   · a TIE made nothing, so undoing one removes nothing but the link.
+ *   · CED documents added from a PDF: the ones this paper ADDED come off the list, unless
+ *     something already points at them (a bill covering it, or a job a person set), which are
+ *     named and kept.
+ */
+export async function undoPaperwork(id: string): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  if (!item) return { ok: false, error: "That paper isn't here any more." };
+  const p = proposalOf(item);
+  const tied = !!(item.tied_bill_id || item.tied_supplier_invoice_id);
+  if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
+    return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
+
+  const kept: string[] = [];
+  if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
+    const { data: docs } = await supabase
+      .from("supplier_invoices")
+      .select("id, invoice_number, job_id")
+      .eq("org_id", ctx.orgId)
+      .in("invoice_number", p.filed.landed);
+    const ids = (docs ?? []).map((d: any) => String(d.id));
+    const { data: links } = ids.length
+      ? await supabase.from("bill_supplier_invoices").select("supplier_invoice_id").in("supplier_invoice_id", ids)
+      : { data: [] };
+    const linked = new Set((links ?? []).map((l: any) => String(l.supplier_invoice_id)));
+    const removable = (docs ?? []).filter((d: any) => !linked.has(String(d.id)) && !d.job_id);
+    for (const d of docs ?? []) if (!removable.includes(d)) kept.push(String(d.invoice_number));
+    if (removable.length) {
+      const { error: delErr } = await supabase
+        .from("supplier_invoices")
+        .delete()
+        .eq("org_id", ctx.orgId)
+        .in("id", removable.map((d: any) => String(d.id)))
+        .select("id");
+      if (delErr) return { ok: false, error: `${dbError(delErr)} Nothing was undone.` };
+    }
+  } else if (!tied) {
+    const refused = await tearDownFiling(
+      supabase,
+      item,
+      "Void that invoice, or take its materials lines off, then press Undo again. Nothing was undone.",
+    );
+    if (refused) return { ok: false, error: refused.replace("so nothing was changed", "so nothing was undone") };
+  }
+
+  const type = paperTypeOfItem(item);
+  const patch: Record<string, unknown> = {
+    job_id: null,
+    document_id: null,
+    bill_id: null,
+    petty_cash_id: null,
+    status: "needs_review",
+    // A business-cost filing replaced the category with its bucket; the paper gets its own back.
+    category: type === "receipt" || type === "bill" ? billCategoryFor({ doc_type: item.doc_type, category: null }) : item.category,
+  };
+  if ("tied_bill_id" in item) {
+    patch.tied_bill_id = null;
+    patch.tied_supplier_invoice_id = null;
+  }
+  if ("proposal" in item) patch.proposal = { ...p, filed: null };
+  const { data: back, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!back?.length) return { ok: false, error: "Nothing was undone. That paper isn't here any more, or this login can't change it." };
+
+  revalidatePath("/organize");
+  revalidatePath("/bills");
+  if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+  return {
+    ok: true,
+    message: `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.${kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill or a job already points at ${kept.length === 1 ? "it" : "them"}.` : ""}`,
+  };
+}
+
+/**
+ * SAME PURCHASE: TIE THEM (0295). The paper's number is already on the books; a person says it is
+ * the same purchase. Nothing new is written and no money moves: the paper is filed AGAINST the
+ * existing record (its own column, never bill_id, so no teardown can ever delete what it points
+ * at). Only a record the number check actually found can be tied to.
+ */
+export async function tiePaperwork(
+  id: string,
+  target: { billId: string } | { supplierInvoiceId: string },
+): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  if (!item) return { ok: false, error: "That paper isn't here any more." };
+  if (item.status !== "needs_review" || item.bill_id) return { ok: false, error: "This is already filed. Undo it first." };
+  const books = await loadBooks(supabase, ctx.orgId);
+  const matches = matchesOnBooks(item, books);
+  const hit =
+    "billId" in target
+      ? matches.find((m) => m.kind === "bill" && m.billId === target.billId)
+      : matches.find((m) => m.kind === "supplier_invoice" && m.supplierInvoiceId === target.supplierInvoiceId);
+  if (!hit) return { ok: false, error: "That record doesn't carry this paper's number and supplier, so they weren't tied. Nothing changed." };
+  const bill = "billId" in target ? books.bills.find((b) => b.id === target.billId) : null;
+  const patch: Record<string, unknown> = {
+    status: "filed",
+    tied_bill_id: "billId" in target ? target.billId : null,
+    tied_supplier_invoice_id: "supplierInvoiceId" in target ? target.supplierInvoiceId : null,
+    job_id: bill?.job_id ?? null,
+    proposal: { ...proposalOf(item), filed: { how: "tie" } } satisfies PaperProposal,
+  };
+  const { data: back, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!back?.length) return { ok: false, error: "Nothing was tied. That paper isn't here any more, or this login can't change it." };
+  revalidatePath("/organize");
+  revalidatePath("/bills");
+  return { ok: true, message: `Tied. ${hit.sentence.replace(/^Already on the (books|CED documents list): /, "Filed against ")} Nothing new was added.` };
 }
 
 /** Delete an organized item, everything it filed (doc row, overhead bill), and the stored file. */
@@ -1023,18 +1041,23 @@ export async function archiveItem(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Bring an archived/filed item back to the needs-review tray. */
+/** Bring an archived/filed item back to the needs-review tray. A FILED item comes back through
+ *  Undo (0295), so its bill comes down with it: a row sitting in the tray over a bill that is
+ *  still live would be one File It away from a second bill. */
 export async function unarchiveItem(id: string): Promise<Result> {
   const supabase = await createClient();
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
+  if (item && (item.bill_id || item.document_id || item.petty_cash_id || item.tied_bill_id || item.tied_supplier_invoice_id))
+    return undoPaperwork(id);
   const { error } = await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id);
   if (error) return { ok: false, error: dbError(error) };
   revalidatePath("/organize");
   return { ok: true };
 }
 
-/** Let Claude review a needs-attention item and file it appropriately:
- *  match it to a job, file it as overhead, turn a to-do note into a task, or
- *  keep it as a reference note. Returns what it did. */
+/** Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
+ *  bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
+ *  or keep a reference note. Returns what it did. */
 export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: string }> {
   const supabase = await createClient();
   const {
@@ -1097,29 +1120,39 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
   const action = String(parsed?.action ?? "unsure");
   const reason = typeof parsed?.reason === "string" ? parsed.reason : "";
   try {
-    // CHECK WHAT fileItem SAID (audit 9). It refuses for a non-staff caller — bills and petty
-    // cash are staff-gated — and this reported "Filed to <job>" regardless, so a tech watched
-    // the AI confidently file a receipt that stayed exactly where it was. The task and note
-    // branches below are genuinely open to techs and keep working.
+    // AI SUGGEST PROPOSES; IT DOES NOT FILE (Erik, 2026-09-24). This button was "AI Review &
+    // File" and it called fileItem itself, so a model read could put a bill on a job with no person
+    // looking: the same thing the reader was stopped from doing, through a side door. Now a job or
+    // a bucket it likes is written onto the row as the SUGGESTION, the tray pre-picks it beside
+    // File It, and a person presses the button. The task and note branches below are not money
+    // and keep working as before.
     if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
-      const r = await fileItem(id, { type: "job", jobId: parsed.job_id });
-      if (!r.ok) return { ok: false, message: r.error ?? "Couldn't file that one — ask the office." };
-      return { ok: true, message: `Filed to ${jobList.find((j) => j.id === parsed.job_id)?.label}. ${reason}`.trim() };
+      const label = jobList.find((j) => j.id === parsed.job_id)?.label;
+      const { error: sErr } = await updateItemTolerant(supabase, id, null, {
+        proposal: { ...proposalOf(item), jobId: String(parsed.job_id), bucket: null, why: reason || null },
+      });
+      if (sErr) return { ok: false, message: dbError(sErr) };
+      revalidatePath("/organize");
+      revalidatePath("/bills");
+      return { ok: true, message: `Suggested: ${label}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
     }
     if (action === "overhead") {
-      // Same two checks as the auto-file path: the bucket is one of the six, and Fees is never
-      // the AI's call, because a supplier's late or service charge is already on that supplier's
-      // own paperwork. Refusing here files nothing and names the door a person can use.
+      // The bucket is one of the six, and Fees is never the AI's suggestion, because a supplier's
+      // late or service charge is already on that supplier's own paperwork.
       const cat = bucketOf(parsed.overhead_category);
       if (cat === "Fees" || looksLikeSupplierFee(item.title, item.vendor, item.summary))
         return {
           ok: false,
           message:
-            "This looks like a fee or a supplier's late charge, so it was not filed. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost and then Fees.",
+            "This looks like a fee or a supplier's late charge, so nothing was suggested. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost: Fees yourself.",
         };
-      const r = await fileItem(id, { type: "overhead", category: cat });
-      if (!r.ok) return { ok: false, message: r.error ?? "Couldn't file that one — ask the office." };
-      return { ok: true, message: `Filed as a Business Cost: ${cat}. ${reason}`.trim() };
+      const { error: sErr } = await updateItemTolerant(supabase, id, null, {
+        proposal: { ...proposalOf(item), jobId: null, bucket: cat, why: reason || null },
+      });
+      if (sErr) return { ok: false, message: dbError(sErr) };
+      revalidatePath("/organize");
+      revalidatePath("/bills");
+      return { ok: true, message: `Suggested: Business Cost, ${cat}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
     }
     if (action === "task") {
       const title = String(parsed.task_title || item.title).slice(0, 200);
