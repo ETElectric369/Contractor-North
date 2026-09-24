@@ -36,7 +36,6 @@ const en: Dict = {
   // and the evening sweep flags anything still running.
   tc_locationNote: "Location is stamped at clock in/out when it's available. Drive off with the app closed? You'll get a clock-out prompt the next time you open it.",
   tc_since: "Since",
-  tc_thisWeek: "This week",
   // After a Switch Job the running entry is only the part since the switch (0288); these say the
   // whole shift, where the lunch lands, and what the switch did. {x} fills from the panel.
   tc_shiftSoFar: "This shift so far: {total}",
@@ -81,7 +80,6 @@ const es: Dict = {
   tc_summarize: "Resume el trabajo realizado…",
   tc_locationNote: "La ubicación se registra al marcar entrada/salida cuando está disponible. ¿Te fuiste con la app cerrada? Se te pedirá marcar salida al volver a abrirla.",
   tc_since: "Desde",
-  tc_thisWeek: "Esta semana",
   tc_shiftSoFar: "Este turno hasta ahora: {total}",
   tc_wrapUpTitle: "Terminando tu día",
   tc_wrapUpBody: "Trabajaste {total} en {job}. Agrega millas y una nota, y marca salida.",

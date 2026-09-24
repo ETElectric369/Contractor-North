@@ -12,7 +12,7 @@ import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
-import { addDaySegment, shiftSegmentCovering } from "@/lib/schedule-math";
+import { addDaySegment, keepWorkedDays, moveKeepingWorkedDays, workedDaysFrom } from "@/lib/schedule-math";
 import { rescheduleAppointment } from "../appointments/actions";
 import {
   fitIntoDay,
@@ -330,8 +330,22 @@ export async function setJobScheduleRanges(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
+  return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime);
+}
 
+/** The body of setJobScheduleRanges, for callers that already passed requireStaff. `mirror`
+ *  (optional) sets the jobs.scheduled_start/end span on its own instead of the segments' overall
+ *  span: the reschedule verbs pass the PLAN, so a kept worked day stays on the calendar as history
+ *  without dragging the job's listed start back onto it (moveJobDay, scheduleJobWindow). Not exported: a
+ *  "use server" export is callable from the client, and the mirror should never be set apart from
+ *  the segments by anyone but this file. */
+async function writeScheduleRanges(
+  supabase: SupabaseClient,
+  jobId: string,
+  ranges: DateRange[],
+  startTime?: string | null,
+  mirror?: DateRange | null,
+): Promise<Result> {
   // Keep only well-formed ranges; default a missing end to the start.
   const clean = ranges
     .map((r) => ({ start: r.start, end: r.end || r.start }))
@@ -346,8 +360,9 @@ export async function setJobScheduleRanges(
   // UTC = ~midnight Pacific and disagree with the client-side writers — the
   // root of the "wrong time" bug).
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
-  const minStart = clean.length ? clean[0].start : null;
-  const maxEnd = clean.length ? clean.reduce((m, r) => (r.end > m ? r.end : m), clean[0].end) : null;
+  const span = mirror && clean.length ? [mirror] : clean;
+  const minStart = span.length ? span[0].start : null;
+  const maxEnd = span.length ? span.reduce((m, r) => (r.end > m ? r.end : m), span[0].end) : null;
 
   // Decide the primary start's time-of-day, with THREE distinct intents:
   //  • startTime === undefined (movers, undo, registry verb): PRESERVE whatever
@@ -446,10 +461,13 @@ async function loadJobDaySegments(
   return { segments };
 }
 
-/** MOVE one of a job's scheduled ranges to start on a new day, preserving its
- *  length and every OTHER range. Read-modify-write by construction: it loads ALL
- *  segments, shifts only the one covering fromDate (null = the earliest/only),
- *  and writes the FULL set back through setJobScheduleRanges — never just the
+/** MOVE one of a job's scheduled ranges to start on a new day, preserving every
+ *  OTHER range. Read-modify-write by construction: it loads ALL segments, shifts
+ *  only the one covering fromDate (null = the earliest one with a day not yet
+ *  worked). The range's WORKED days stay where they happened and only its
+ *  unworked remainder moves (moveKeepingWorkedDays), so a 3-day range with 2
+ *  days worked lands as 1 day, and the note says which days stayed. It
+ *  writes the FULL set back through writeScheduleRanges — never just the
  *  tapped day, which would silently erase multi-range schedules. A pending
  *  customer date-pick link blocks the move (needsProposalConfirm) until the
  *  caller confirms withdrawing it, so a later customer tap on an OLD option
@@ -459,7 +477,7 @@ export async function moveJobDay(
   fromDate: string | null,
   toDate: string,
   opts?: { cancelProposals?: boolean },
-): Promise<Result & { needsProposalConfirm?: boolean }> {
+): Promise<Result & { needsProposalConfirm?: boolean; note?: string; kept?: string[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -486,8 +504,90 @@ export async function moveJobDay(
 
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
-  return setJobScheduleRanges(jobId, shiftSegmentCovering(segments, from, toDate));
+  // The range's worked days stay where they happened; only its unworked remainder moves.
+  const tz = await orgTimezone(supabase);
+  const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
+  if ("error" in w) return { ok: false, error: w.error };
+  const plan = moveKeepingWorkedDays(segments, from, toDate, w.days, todayStrInTz(tz));
+  const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, plan.mirror);
+  if (!res.ok || !plan.kept.length) return res;
+  const span = plan.moved.start === plan.moved.end ? dayList([plan.moved.start]) : `${dayList([plan.moved.start])} to ${dayList([plan.moved.end])}`;
+  const rest =
+    plan.workedInRange >= plan.rangeDays
+      ? `Every day of that range was worked, so ${span} is added as a new day.`
+      : `The ${plan.rangeDays - plan.workedInRange === 1 ? "day not yet worked" : `${plan.rangeDays - plan.workedInRange} days not yet worked`} moved to ${span}.`;
+  return { ...res, kept: plan.kept, note: `${keptLine(plan.kept)} ${rest}` };
+}
+
+/** The days this job's work actually happened, up to now (workedDaysFrom says what counts). A
+ *  read that fails is an error, never "no days worked": that would erase the history this guard
+ *  exists to keep. */
+async function workedDaysForJob(
+  supabase: SupabaseClient,
+  jobId: string,
+  tz: string,
+): Promise<{ days: string[] } | { error: string }> {
+  const nowIso = new Date().toISOString();
+  const [entriesRes, visitsRes] = await Promise.all([
+    supabase.from("time_entries").select("clock_in").eq("job_id", jobId).lte("clock_in", nowIso),
+    supabase.from("appointments").select("starts_at, status").eq("job_id", jobId).lte("starts_at", nowIso),
+  ]);
+  if (entriesRes.error) return { error: dbError(entriesRes.error) };
+  if (visitsRes.error) return { error: dbError(visitsRes.error) };
+  return {
+    days: workedDaysFrom(
+      (entriesRes.data ?? []) as { clock_in: string | null }[],
+      (visitsRes.data ?? []) as { starts_at: string | null; status: string | null }[],
+      tz,
+    ),
+  };
+}
+
+/** "Sep 22", "Sep 22 and Sep 23", "Sep 18, Sep 22 and Sep 23". */
+function dayList(days: string[]): string {
+  const f = days.map((d) =>
+    new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+  );
+  return f.length <= 1 ? (f[0] ?? "") : `${f.slice(0, -1).join(", ")} and ${f[f.length - 1]}`;
+}
+
+/** The first half of the note both reschedule verbs return when they kept a worked day. */
+function keptLine(kept: string[]): string {
+  return `Kept ${dayList(kept)} on the calendar: work was done ${kept.length > 1 ? "on those days" : "that day"}.`;
+}
+
+/** Schedule a job's work window (Nort's job.scheduleDay). Used to be a bare
+ *  setJobScheduleRanges([window]), which replaced the whole schedule and so erased the days
+ *  already worked (Herringbone, 2026-09-24).
+ *
+ *  A RESCHEDULE MOVES THE PLAN, NOT THE HISTORY. The window still replaces the plan, but every
+ *  day that was on the old schedule and was WORKED stays on the calendar, and the result says
+ *  which, so nobody wonders why the job still shows on the 22nd. The job's listed start
+ *  (jobs.scheduled_start, read by the Jobs list, Nort's schedule overview and the Google event)
+ *  follows the new window, not the kept day. The range editor on the job page stays a raw
+ *  whole-set edit: a person deleting a range there is choosing to, and the calendar undo must
+ *  restore exactly what it saved. */
+export async function scheduleJobWindow(
+  jobId: string,
+  start: string,
+  end?: string | null,
+): Promise<Result & { note?: string; kept?: string[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start ?? "")) return { ok: false, error: "Pick a day to schedule it on." };
+  const win = { start, end: end && /^\d{4}-\d{2}-\d{2}$/.test(end) && end >= start ? end : start };
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  const tz = await orgTimezone(supabase);
+  const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
+  if ("error" in w) return { ok: false, error: w.error };
+  const plan = keepWorkedDays(segments, [win], w.days, todayStrInTz(tz));
+  // writeScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
+  const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, plan.mirror);
+  if (!res.ok || !plan.kept.length) return res;
+  const span = win.start === win.end ? dayList([win.start]) : `${dayList([win.start])} to ${dayList([win.end])}`;
+  return { ...res, kept: plan.kept, note: `${keptLine(plan.kept)} The job is now scheduled ${span}.` };
 }
 
 /** PLACE a job on a day without touching anything already scheduled — the tray

@@ -726,6 +726,13 @@ export async function clockOut(input: {
       ...(notesOut ? { notes: notesOut } : {}),
       gps_out: input.gps,
       status: "closed",
+      // 'auto_gps' even when the person PICKED the stop time in the geofence sheet (checked
+      // 2026-09-24). Nothing a person reads shows it: the timecard badge names only manual and
+      // offline, Nort never reads source. Its one reader is /timeclock's catch-up prompt, which
+      // asks the lunch question every geofence close skipped, picked time or not; stamping
+      // 'app' would lose that question. And 0248's guard lets a tech's own session move a punch
+      // to 'auto_gps' and nothing else. A picked stop past the long-shift line says so in the
+      // notes crumb above.
       source: input.auto ? "auto_gps" : undefined,
       // A shift the system closed by itself has to SAY so on the card — a back-dated clock-out
       // that nobody agreed to is exactly the row an office needs to see (audit 6).

@@ -5,6 +5,8 @@
  *  are that computation. All arithmetic runs at UTC midnight (a bare yyyy-mm-dd
  *  parses as UTC), so DST can never grow or shrink a day. */
 
+import { todayStrInTz } from "./tz";
+
 export type DaySegment = { start: string; end: string }; // yyyy-mm-dd each, inclusive
 
 const DAY_MS = 86_400_000;
@@ -46,14 +48,8 @@ export function shiftSegmentCovering(
   fromDate: string | null,
   toDate: string,
 ): DaySegment[] {
-  const sorted = normalize(segments);
-  if (!sorted.length) return [{ start: toDate, end: toDate }];
-  let idx = isYmd(fromDate) ? sorted.findIndex((s) => s.start <= fromDate && fromDate <= s.end) : 0;
-  if (idx < 0) idx = 0; // fromDate covered by nothing (stale mirror day) — move the earliest
-  const seg = sorted[idx];
-  const durationDays = (toMs(seg.end) - toMs(seg.start)) / DAY_MS;
-  const moved = { start: toDate, end: addDays(toDate, durationDays) };
-  return mergeSegments([...sorted.filter((_, i) => i !== idx), moved]);
+  // No worked days: the whole range moves at full length (the move verbs pass the worked days).
+  return moveKeepingWorkedDays(segments, fromDate, toDate, [], "").segments;
 }
 
 /** PLACE: union a single day into the existing segments — never drops anything
@@ -78,4 +74,99 @@ export function applyRangeEdit(current: DaySegment, patch: Partial<DaySegment>):
     return { start: next.end, end: next.end }; // end pulled back → start follows
   }
   return { start: next.start, end: next.start }; // start pushed forward (or both set inverted) → end follows
+}
+
+/** KEEP THE DAYS THAT HAPPENED. A reschedule writes the job's whole segment set, so a move
+ *  computed only from the new window erases every past day the job sat on. Herringbone,
+ *  2026-09-24: Nort moved it to the 24th and the 22nd vanished from the calendar though time had
+ *  been logged there that day. The calendar is also the job's history, so a day that was
+ *  scheduled AND worked (time logged, a visit closed out as done) stays; only the rest moves.
+ *
+ *  `worked` is the days work happened; only those on or before `today` count (a later visit is a
+ *  plan, not history). A worked day is kept only when it was ON the old schedule and the new one
+ *  no longer covers it. A day that was never scheduled is not added (the move shouldn't invent a
+ *  range), and a past day that was scheduled but NOT worked moves like any other: nobody went.
+ *
+ *  `mirror` is the span of the PLAN alone (`after`), for the jobs.scheduled_start/end mirror. A
+ *  kept day is history, not where the job is headed: with it in the mirror, the job's listed
+ *  start (the Jobs list, Nort's "what's on the 24th", the Google event) would read as the old
+ *  day. Null when the plan is empty. */
+export function keepWorkedDays(
+  before: DaySegment[],
+  after: DaySegment[],
+  worked: string[],
+  today: string,
+): { segments: DaySegment[]; kept: string[]; mirror: DaySegment | null } {
+  const prior = normalize(before);
+  const next = normalize(after);
+  const covers = (segs: DaySegment[], d: string) => segs.some((s) => s.start <= d && d <= s.end);
+  const kept = [...new Set((worked ?? []).filter(isYmd))]
+    .filter((d) => d <= today && covers(prior, d) && !covers(next, d))
+    .sort();
+  const mirror = next.length
+    ? { start: next[0].start, end: next.reduce((m, s) => (s.end > m ? s.end : m), next[0].end) }
+    : null;
+  return { segments: mergeSegments([...next, ...kept.map((d) => ({ start: d, end: d }))]), kept, mirror };
+}
+
+/** MOVE, KEEPING THE PAST. The move verbs' version of shiftSegmentCovering: the range covering
+ *  fromDate moves to start on toDate, but its WORKED days (on or before `today`) stay where they
+ *  happened, and only the unworked remainder travels. A 3-day range with 2 days worked moves as 1
+ *  day, so the job never ends up with more days than it had. A range that was worked in full
+ *  still moves as one day: moving it says the work goes on, and that day is new.
+ *
+ *  With no fromDate (or one covering nothing) the range picked is the earliest one that still
+ *  has an unworked day, not simply the earliest: after a kept day, the earliest range is history,
+ *  and "push the job to Friday" means the plan. */
+export function moveKeepingWorkedDays(
+  segments: DaySegment[],
+  fromDate: string | null,
+  toDate: string,
+  worked: string[],
+  today: string,
+): {
+  segments: DaySegment[];
+  kept: string[];
+  mirror: DaySegment | null;
+  moved: DaySegment;
+  /** How many days the moved range had before, and how many of them were worked. */
+  rangeDays: number;
+  workedInRange: number;
+} {
+  const sorted = normalize(segments);
+  if (!sorted.length) {
+    const moved = { start: toDate, end: toDate };
+    return { segments: [moved], kept: [], mirror: moved, moved, rangeDays: 0, workedInRange: 0 };
+  }
+  const workedSet = new Set((worked ?? []).filter(isYmd).filter((d) => d <= today));
+  const daysOf = (s: DaySegment) => (toMs(s.end) - toMs(s.start)) / DAY_MS + 1;
+  const workedIn = (s: DaySegment) => [...workedSet].filter((d) => s.start <= d && d <= s.end).length;
+  let idx = isYmd(fromDate) ? sorted.findIndex((s) => s.start <= fromDate && fromDate <= s.end) : -1;
+  if (idx < 0) idx = sorted.findIndex((s) => workedIn(s) < daysOf(s));
+  if (idx < 0) idx = 0;
+  const seg = sorted[idx];
+  const rangeDays = daysOf(seg);
+  const workedInRange = workedIn(seg);
+  const remaining = Math.max(1, rangeDays - workedInRange);
+  const moved = { start: toDate, end: addDays(toDate, remaining - 1) };
+  const after = mergeSegments([...sorted.filter((_, i) => i !== idx), moved]);
+  return { ...keepWorkedDays(sorted, after, [...workedSet], today), moved, rangeDays, workedInRange };
+}
+
+/** WHAT COUNTS AS WORKED, as org-timezone dates: a time entry clocked in that day, or a visit
+ *  closed out as done ("completed"). A past visit still marked "scheduled" is NOT proof: nobody
+ *  closed it out, which is as likely to mean nobody went (the My Day inbox feeds on exactly
+ *  those), and the visit keeps its own place on the calendar either way. Calling it worked would
+ *  also word it as "work was done that day" and pin the day so no move could ever take it off. */
+export function workedDaysFrom(
+  entries: { clock_in: string | null }[],
+  visits: { starts_at: string | null; status: string | null }[],
+  tz: string,
+): string[] {
+  const days = new Set<string>();
+  for (const e of entries ?? []) if (e?.clock_in) days.add(todayStrInTz(tz, new Date(e.clock_in)));
+  for (const v of visits ?? []) {
+    if (v?.starts_at && v.status === "completed") days.add(todayStrInTz(tz, new Date(v.starts_at)));
+  }
+  return [...days].sort();
 }

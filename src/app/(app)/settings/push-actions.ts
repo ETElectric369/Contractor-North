@@ -99,9 +99,28 @@ export async function saveDeviceToken(
   // An UPDATE keyed on the token does the whole job in one statement and never opens that window:
   // the row for this install is handed to whoever is signed in now. Only a token we have never
   // seen falls through to an INSERT, where there is no row to lose.
+  // THE ORG, BY HAND (2026-09-24). The web row gets its org_id from the set_org_id() insert
+  // trigger, which reads auth_org_id() — and on the SERVICE client there is no auth.uid(), so
+  // every phone row landed with org_id NULL (Erik's two iOS rows were the only NULL-org rows in
+  // the table). The fan-out keys on profile_id, so nobody went unbuzzed, but a row with no org
+  // is invisible to anything that prunes or counts by org. The org is the signed-in person's own
+  // (read through RLS, their own row), and it rides on the re-point too: a phone handed to a
+  // person in another org has to move orgs with them.
+  // An org we couldn't read is left OFF the claim, never written as null: a re-point would
+  // otherwise blank a row whose org is already right (0294 fixed them). The sender keys on
+  // profile_id, so a missing org here costs housekeeping, not an alert.
+  const { data: me, error: meErr } = await supabase
+    .from("profiles")
+    .select("org_id")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (meErr) reportError("saveDeviceToken.org", meErr, { background: !!opts?.background });
+  const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
+
   const svc = createServiceClient();
   const claim = {
     profile_id: user.id,
+    ...(orgId ? { org_id: orgId } : {}),
     platform: "ios",
     user_agent: userAgent ?? null,
     // Null: the sender probes production, then sandbox, and writes back whichever answered.
