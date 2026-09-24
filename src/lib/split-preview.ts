@@ -9,7 +9,7 @@
  *
  * Pure: no clock, no network. The sheet, Nort's fill and the tests all call it.
  */
-import { todayStrInTz, tzOffsetMs } from "./tz";
+import { todayStrInTz, tzDateTimeUtc, tzOffsetMs } from "./tz";
 import { hoursBetween } from "./utils";
 
 export type SplitSide = "left" | "right";
@@ -64,6 +64,42 @@ const clockTime = (t: number, tz: string) =>
 
 const dayLabel = (t: number, tz: string) =>
   new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "short", day: "numeric" }).format(new Date(t));
+
+/** "2:30pm" in the org's wall clock: the words the sheet, the toast and Nort all use for a cut. */
+export function splitClock(isoOrMs: string | number, tz = "America/Los_Angeles"): string {
+  const t = typeof isoOrMs === "number" ? isoOrMs : ms(isoOrMs);
+  return Number.isFinite(t) ? clockTime(t, tz) : "";
+}
+
+/** "14:30": the value an <input type="time"> holds for an instant, in the org's wall clock. */
+export function clockInputValue(iso: string, tz = "America/Los_Angeles"): string {
+  const t = ms(iso);
+  if (!Number.isFinite(t)) return "";
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(t));
+  const h = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const m = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${h === "24" ? "00" : h}:${m}`;
+}
+
+/**
+ * The instant a wall-clock "HH:MM" names inside this shift. The shift's own clock-in day first; a
+ * shift that runs past midnight also tries the day it ended, so "01:30" on a 10pm-3am shift is the
+ * next morning. Null when the time is unreadable or falls outside the shift (the preview then says
+ * which times are allowed).
+ */
+export function atFromClockTime(entry: Pick<SplitEntry, "clock_in" | "clock_out">, hm: string, tz = "America/Los_Angeles"): string | null {
+  if (!/^\d{1,2}:\d{2}$/.test(String(hm ?? "").trim()) || !entry.clock_out) return null;
+  const a = ms(entry.clock_in);
+  const b = ms(entry.clock_out);
+  const days = [...new Set([todayStrInTz(tz, new Date(a)), todayStrInTz(tz, new Date(b))])];
+  for (const d of days) {
+    const iso = tzDateTimeUtc(d, hm.trim().padStart(5, "0"), tz);
+    if (!iso) continue;
+    const t = ms(iso);
+    if (t > a && t < b) return new Date(t).toISOString();
+  }
+  return null;
+}
 
 /** True when a base-pay or mileage lock is on the shift: it was settled on its day. */
 export function isPaidEntry(e: Pick<SplitEntry, "paid_at" | "mileage_paid_at">): boolean {

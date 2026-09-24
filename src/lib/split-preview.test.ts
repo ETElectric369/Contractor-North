@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultSplitAt, isPaidEntry, nudgeSplitAt, splitPreview, workedSeconds } from "./split-preview";
+import { atFromClockTime, clockInputValue, defaultSplitAt, isPaidEntry, nudgeSplitAt, splitClock, splitPreview, workedSeconds } from "./split-preview";
 
 // Jul 14's shape, on a date nobody worked: 11:30-17:30 Pacific (PDT, UTC-7) with a 30-minute lunch.
 const shift = {
@@ -117,5 +117,31 @@ describe("workedSeconds / isPaidEntry", () => {
     expect(isPaidEntry({ paid_at: null, mileage_paid_at: null })).toBe(false);
     expect(isPaidEntry({ paid_at: "2001-01-01", mileage_paid_at: null })).toBe(true);
     expect(isPaidEntry({ paid_at: null, mileage_paid_at: "2001-01-01" })).toBe(true);
+  });
+});
+
+describe("the clock words the sheet and Nort use", () => {
+  it("splitClock says a cut the way the timecard does", () => {
+    expect(splitClock("2001-07-14T23:30:00.000Z")).toBe("4:30pm");
+    expect(splitClock(Date.parse("2001-07-14T18:30:00.000Z"))).toBe("11:30am");
+  });
+
+  it("clockInputValue is 24-hour for an <input type=time>", () => {
+    expect(clockInputValue("2001-07-14T23:30:00.000Z")).toBe("16:30");
+    expect(clockInputValue("2001-07-15T07:05:00.000Z")).toBe("00:05");
+  });
+
+  it("atFromClockTime finds the instant inside the shift", () => {
+    expect(atFromClockTime(shift, "16:30")).toBe("2001-07-14T23:30:00.000Z");
+    expect(atFromClockTime(shift, "4:30")).toBeNull(); // 4:30 AM is before the shift started
+    expect(atFromClockTime(shift, "nonsense")).toBeNull();
+    expect(atFromClockTime({ clock_in: shift.clock_in, clock_out: null }, "16:30")).toBeNull();
+  });
+
+  it("an overnight shift reads an after-midnight time as the next morning", () => {
+    // 10pm Jan 1 to 3am Jan 2, 2001 (PST, UTC-8)
+    const night = { clock_in: "2001-01-02T06:00:00.000Z", clock_out: "2001-01-02T11:00:00.000Z" };
+    expect(atFromClockTime(night, "01:30")).toBe("2001-01-02T09:30:00.000Z");
+    expect(atFromClockTime(night, "23:00")).toBe("2001-01-02T07:00:00.000Z");
   });
 });
