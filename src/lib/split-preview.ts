@@ -107,9 +107,58 @@ export function isPaidEntry(e: Pick<SplitEntry, "paid_at" | "mileage_paid_at">):
 }
 
 /**
+ * THE PAID-HOURS ROUNDING CHECK, on its own. Payroll rounds each ENTRY to 0.01 h (hoursBetween), so
+ * two pieces of a paid shift can round to a cent of an hour more or less than the shift was paid
+ * for. Returns that difference in hours (0 when the cut keeps the paid total, or the shift is not
+ * base-paid). split_time_entry refuses a non-zero one; the sheet's default and its chips skip it.
+ */
+export function paidRoundingDiff(entry: SplitEntry, at: string, lunchOn?: SplitSide | null): number {
+  if (!entry.paid_at || !entry.clock_out) return 0;
+  const a = ms(entry.clock_in);
+  const b = ms(entry.clock_out);
+  const t = ms(at);
+  if (!Number.isFinite(t) || t <= a || t >= b) return 0;
+  const lunch = Math.max(0, Number(entry.lunch_minutes) || 0);
+  const side: SplitSide = lunchOn ?? (t - a >= b - t ? "left" : "right");
+  const l = hoursBetween(entry.clock_in, at, side === "left" ? lunch : 0);
+  const r = hoursBetween(at, entry.clock_out, side === "right" ? lunch : 0);
+  const whole = hoursBetween(entry.clock_in, entry.clock_out, lunch);
+  return Math.round((l + r - whole) * 100) / 100;
+}
+
+/**
+ * On a paid shift, the nearest whole minute to `at` (within `reach` minutes, `prefer` direction
+ * first) whose cut keeps the paid hours; `at` itself when it already does, or when nothing near does.
+ * So the sheet never OPENS on a cut it would refuse, and a chip never lands on one.
+ */
+export function paidSafeSplitAt(
+  entry: SplitEntry,
+  at: string,
+  opts: { lunchOn?: SplitSide | null; prefer?: 1 | -1; reach?: number } = {},
+): string {
+  if (!entry.paid_at || !entry.clock_out || paidRoundingDiff(entry, at, opts.lunchOn) === 0) return at;
+  const a = ms(entry.clock_in) + MIN_PIECE_MS;
+  const b = ms(entry.clock_out) - MIN_PIECE_MS;
+  // Whole minutes: the sheet holds the cut as an HH:MM, so a candidate with seconds would be
+  // re-read a few seconds away and could round the other way.
+  const t = Math.floor(ms(at) / 60_000) * 60_000;
+  const dir = opts.prefer ?? 1;
+  if (t >= a && t <= b && paidRoundingDiff(entry, iso(t), opts.lunchOn) === 0) return iso(t);
+  for (let k = 1; k <= (opts.reach ?? 7); k++) {
+    for (const sign of [dir, -dir]) {
+      const c = t + sign * k * 60_000;
+      if (c < a || c > b) continue;
+      if (paidRoundingDiff(entry, iso(c), opts.lunchOn) === 0) return iso(c);
+    }
+  }
+  return at;
+}
+
+/**
  * The time the "Split At" picker opens on: the middle of the shift, rounded to the nearest 15 minutes
  * of the org's wall clock. Falls back to the exact middle (to the minute) when rounding would leave a
- * piece under a minute, which only happens on a very short shift.
+ * piece under a minute, which only happens on a very short shift. On a paid shift, a middle that would
+ * move the paid hours by a rounding cent steps to the nearest minute that does not.
  */
 export function defaultSplitAt(entry: SplitEntry, tz = "America/Los_Angeles", stepMinutes = 15): string | null {
   if (!entry.clock_out) return null;
@@ -118,20 +167,29 @@ export function defaultSplitAt(entry: SplitEntry, tz = "America/Los_Angeles", st
   if (!(b - a >= 2 * MIN_PIECE_MS)) return null;
   const mid = a + (b - a) / 2;
   const step = stepMinutes * 60_000;
-  const off = tzOffsetMs(tz, new Date(mid));
+  // The zone's offset in whole minutes: the wall-clock read behind tzOffsetMs drops milliseconds, and
+  // a middle on a half second otherwise came back as a cut at hh:mm:00.500.
+  const off = Math.round(tzOffsetMs(tz, new Date(mid)) / 60_000) * 60_000;
   const rounded = Math.round((mid + off) / step) * step - off;
-  if (rounded - a >= MIN_PIECE_MS && b - rounded >= MIN_PIECE_MS) return iso(rounded);
+  if (rounded - a >= MIN_PIECE_MS && b - rounded >= MIN_PIECE_MS) return paidSafeSplitAt(entry, iso(rounded));
   const toMinute = Math.floor(mid / 60_000) * 60_000;
-  return iso(toMinute - a >= MIN_PIECE_MS && b - toMinute >= MIN_PIECE_MS ? toMinute : mid);
+  return paidSafeSplitAt(entry, iso(toMinute - a >= MIN_PIECE_MS && b - toMinute >= MIN_PIECE_MS ? toMinute : mid));
 }
 
-/** The -15 / +15 chips: move the cut, never past a minute from either end of the shift. */
-export function nudgeSplitAt(entry: SplitEntry, at: string, deltaMinutes: number): string {
+/** The -15 / +15 chips: move the cut, never past a minute from either end of the shift, and (on a
+ *  paid shift) never onto a minute that would move the paid hours: it steps on in the same direction. */
+export function nudgeSplitAt(
+  entry: SplitEntry,
+  at: string,
+  deltaMinutes: number,
+  opts: { lunchOn?: SplitSide | null } = {},
+): string {
   if (!entry.clock_out) return at;
   const lo = ms(entry.clock_in) + MIN_PIECE_MS;
   const hi = ms(entry.clock_out) - MIN_PIECE_MS;
   if (hi < lo) return at;
-  return iso(Math.min(hi, Math.max(lo, ms(at) + deltaMinutes * 60_000)));
+  const moved = iso(Math.min(hi, Math.max(lo, ms(at) + deltaMinutes * 60_000)));
+  return paidSafeSplitAt(entry, moved, { lunchOn: opts.lunchOn, prefer: deltaMinutes < 0 ? -1 : 1 });
 }
 
 /** Seconds a piece works: its span minus its lunch. The number the database asserts is unchanged. */
@@ -199,9 +257,11 @@ export function splitPreview(
       return `That shift is already paid, so both parts have to stay on ${dayLabel(a, tz)}.`;
     }
     // Payroll rounds each ENTRY to 0.01 h, so two pieces can round to a cent more or less than the
-    // shift did. On a paid shift that would move pay; the database refuses it, and so does this.
-    if (entry.paid_at && Math.round((left.hours + right.hours) * 100) !== Math.round(shiftHours * 100)) {
-      return "That split would change the paid hours on this shift by a rounding cent. Move the split time by a minute.";
+    // shift did. On a paid shift that would move pay; the database refuses it, and so does this, in
+    // the same sentence (time, then the hours it would move).
+    const diff = paidRoundingDiff(entry, at, side);
+    if (diff !== 0) {
+      return `Cutting at ${clockTime(t, tz)} would change the paid hours on this shift by ${Math.abs(diff)} h. Move the split a minute earlier or later.`;
     }
     return null;
   })();

@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { atFromClockTime, clockInputValue, defaultSplitAt, isPaidEntry, nudgeSplitAt, splitClock, splitPreview, workedSeconds } from "./split-preview";
+import {
+  atFromClockTime,
+  clockInputValue,
+  defaultSplitAt,
+  isPaidEntry,
+  nudgeSplitAt,
+  paidRoundingDiff,
+  paidSafeSplitAt,
+  splitClock,
+  splitPreview,
+  workedSeconds,
+} from "./split-preview";
 
 // Jul 14's shape, on a date nobody worked: 11:30-17:30 Pacific (PDT, UTC-7) with a 30-minute lunch.
 const shift = {
@@ -72,7 +83,12 @@ describe("splitPreview", () => {
   it("refuses a cut on a paid shift that would round the paid hours by a cent", () => {
     // 3.5083 h paid as 3.51; cut 1 h in plus 15 s: 1.0042 -> 1.00 and 2.5042 -> 2.50 = 3.50.
     const paid = { clock_in: "2001-07-16T16:00:00.000Z", clock_out: "2001-07-16T19:30:30.000Z", status: "closed", paid_at: "2001-07-20T00:00:00Z" };
-    expect(splitPreview(paid, "2001-07-16T17:00:15.000Z").problem).toMatch(/rounding cent/);
+    expect(splitPreview(paid, "2001-07-16T17:00:15.000Z").problem).toBe(
+      "Cutting at 10:00am would change the paid hours on this shift by 0.01 h. Move the split a minute earlier or later.",
+    );
+    expect(paidRoundingDiff(paid, "2001-07-16T17:00:15.000Z")).toBe(-0.01);
+    expect(paidRoundingDiff(paid, "2001-07-16T17:00:00.000Z")).toBe(0);
+    expect(paidRoundingDiff({ ...paid, paid_at: null }, "2001-07-16T17:00:15.000Z")).toBe(0);
     // On the minute it adds back: 1.00 + 2.51.
     const onMinute = splitPreview(paid, "2001-07-16T17:00:00.000Z");
     expect(onMinute.ok).toBe(true);
@@ -97,6 +113,32 @@ describe("defaultSplitAt / nudgeSplitAt", () => {
     expect(defaultSplitAt(short)).toBe("2001-07-14T18:33:00.000Z");
     expect(defaultSplitAt({ clock_in: "2001-07-14T18:31:00.000Z", clock_out: "2001-07-14T18:31:30.000Z" })).toBeNull();
     expect(defaultSplitAt({ clock_in: "2001-07-14T18:31:00.000Z", clock_out: null })).toBeNull();
+  });
+
+  it("never opens on, or nudges onto, a cut that would move a paid shift's hours by a rounding cent", () => {
+    // 09:00:05-12:02:06 Pacific, paid: 3.0336 h paid as 3.03. The 15-minute middle, 10:30, cuts it
+    // into 1.4986 -> 1.50 and 1.535 -> 1.54 = 3.04, a cent of pay the shift was never paid.
+    const paid = { clock_in: "2001-07-16T16:00:05.000Z", clock_out: "2001-07-16T19:02:06.000Z", status: "closed", paid_at: "2001-07-20T00:00:00Z" };
+    expect(paidRoundingDiff(paid, "2001-07-16T17:30:00.000Z")).not.toBe(0);
+    const opened = defaultSplitAt(paid)!;
+    expect(new Date(opened).getUTCSeconds()).toBe(0); // a whole minute: the sheet holds HH:MM
+    expect(Math.abs(Date.parse(opened) - Date.parse("2001-07-16T17:30:00.000Z"))).toBeLessThanOrEqual(7 * 60_000);
+    expect(splitPreview(paid, opened).ok).toBe(true);
+    // The chips step on in their own direction past a bad minute.
+    const up = nudgeSplitAt(paid, "2001-07-16T17:15:00.000Z", 15);
+    expect(Date.parse(up)).toBeGreaterThan(Date.parse("2001-07-16T17:15:00.000Z"));
+    expect(paidRoundingDiff(paid, up)).toBe(0);
+    const down = nudgeSplitAt(paid, "2001-07-16T17:45:00.000Z", -15);
+    expect(Date.parse(down)).toBeLessThan(Date.parse("2001-07-16T17:45:00.000Z"));
+    expect(paidRoundingDiff(paid, down)).toBe(0);
+    // Unpaid, nothing is skipped; a cut that is already fine stays exactly where it is.
+    expect(paidSafeSplitAt({ ...paid, paid_at: null }, "2001-07-16T17:30:00.000Z")).toBe("2001-07-16T17:30:00.000Z");
+    expect(paidSafeSplitAt(paid, opened)).toBe(opened);
+  });
+
+  it("opens on a whole minute even when the shift's middle falls on a half second", () => {
+    const odd = { clock_in: "2001-07-16T16:00:05.000Z", clock_out: "2001-07-16T19:02:06.000Z", status: "closed" };
+    expect(defaultSplitAt(odd)).toBe("2001-07-16T17:30:00.000Z");
   });
 
   it("nudges by 15 minutes, never closer than a minute to either end", () => {
