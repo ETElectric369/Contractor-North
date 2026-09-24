@@ -79,3 +79,28 @@ export function applyRangeEdit(current: DaySegment, patch: Partial<DaySegment>):
   }
   return { start: next.start, end: next.start }; // start pushed forward (or both set inverted) → end follows
 }
+
+/** KEEP THE DAYS THAT HAPPENED. A reschedule writes the job's whole segment set, so a move
+ *  computed only from the new window erases every past day the job sat on. Herringbone,
+ *  2026-09-24: Nort moved it to the 24th and the 22nd vanished from the calendar though time had
+ *  been logged there that day. The calendar is also the job's history, so a day that was
+ *  scheduled AND worked (time logged, a visit held) stays; only the rest moves.
+ *
+ *  `worked` is the days work happened; only those on or before `today` count (a later visit is a
+ *  plan, not history). A worked day is kept only when it was ON the old schedule and the new one
+ *  no longer covers it. A day that was never scheduled is not added (the move shouldn't invent a
+ *  range), and a past day that was scheduled but NOT worked moves like any other: nobody went. */
+export function keepWorkedDays(
+  before: DaySegment[],
+  after: DaySegment[],
+  worked: string[],
+  today: string,
+): { segments: DaySegment[]; kept: string[] } {
+  const prior = normalize(before);
+  const next = normalize(after);
+  const covers = (segs: DaySegment[], d: string) => segs.some((s) => s.start <= d && d <= s.end);
+  const kept = [...new Set((worked ?? []).filter(isYmd))]
+    .filter((d) => d <= today && covers(prior, d) && !covers(next, d))
+    .sort();
+  return { segments: mergeSegments([...next, ...kept.map((d) => ({ start: d, end: d }))]), kept };
+}
