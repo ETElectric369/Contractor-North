@@ -9,6 +9,7 @@ import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
 // sayMoney lives in payroll-math because payroll needed it first. Pure string formatting with no
 // payroll in it, and a second copy here would drift the moment one of them learned about cents.
 import { sayMoney } from "@/lib/payroll-math";
+import { isPdfText } from "@/lib/pdf-text";
 
 /**
  * LOADING THE SUPPLIER'S OWN INVOICES, SO NEXT MONTH HE DOES NOT NEED ME (Erik, 2026-09-19; 0273).
@@ -63,11 +64,9 @@ import { sayMoney } from "@/lib/payroll-math";
  * language model instead. A language model is exactly the wrong instrument for an invoice total:
  * the whole point of ced-invoice-parse.ts is arithmetic that either reconciles or refuses.
  *
- * So this takes text. A PDF handed to it is refused BY NAME with the sentence that says what to do
- * instead, and the fix - extracting the text in the BROWSER with the pdfjs-dist already installed,
- * the way the print preview already does - is a change to the card, which is not this file. See
- * the handoff note. `files` takes `{ name, text }` precisely so that the day the card extracts, it
- * has somewhere to send what it read with no change here.
+ * So this takes text. The CED card now extracts it in the BROWSER (lib/pdf-text, the pdfjs-dist
+ * the print preview already loads) and posts `{ name, text }`. Raw PDF bytes that reach here anyway
+ * are refused by their CONTENT (the %PDF- signature), never by the file's name.
  */
 
 /** Cents, so a fraction of a penny can never ride into a balance. */
@@ -125,10 +124,13 @@ function sayList(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
-/** A PDF, whatever its name says. The magic number is checked as well as the extension because he
- *  renames files ("85 Whit.pdf") and because a file picker will hand over whatever he picked. */
-const looksLikePdf = (name: string, text: string): boolean =>
-  /\.pdf$/i.test(String(name ?? "").trim()) || String(text ?? "").slice(0, 8).includes("%PDF-");
+/** A PDF BY WHAT IS IN IT, NEVER BY ITS NAME (dropbox plan, Phase 0). This used to refuse any
+ *  file NAMED .pdf, which is exactly wrong in both directions: the CED card now reads a PDF's text
+ *  in the browser and posts `{ name: "invoice_8802-1108330.pdf", text }`, and that text is what
+ *  this reads. What must be refused is raw PDF bytes, whatever they are called, because feeding
+ *  them to the parser comes back "no invoice number found": true of the bytes, a lie about the
+ *  document. */
+const looksLikePdf = (text: string): boolean => isPdfText(text);
 
 /**
  * The org this staffer belongs to, or the sentence to refuse with. A profile with no org_id cannot
@@ -173,13 +175,11 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   for (const file of input?.files ?? []) {
     const name = String(file?.name ?? "").trim() || "a file with no name";
     const text = String(file?.text ?? "");
-    if (looksLikePdf(name, text)) {
-      // NOT A DEAD END: it names the file and it names the way forward. Feeding a PDF's bytes to
-      // the parser would come back "no CED invoice number found", which is true of the bytes and
-      // a lie about the document.
+    if (looksLikePdf(text)) {
+      // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} is a PDF, and this reads text. Open it, select all, and paste it into the box instead.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose CED PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
       });
       continue;
     }
@@ -580,18 +580,13 @@ const SUMMARY_LIMIT = 900;
 export async function importCedInvoicesFromForm(formData: FormData): Promise<void> {
   const text = String(formData.get("text") ?? "");
 
-  // A file input posts File objects. Their TEXT is read here; a PDF is refused by name rather than
-  // having its bytes fed to a parser that would then report "no invoice number found", which is
-  // true of the bytes and a lie about the document.
+  // A file input posts File objects. Their TEXT is read here, whatever they are named; a real PDF
+  // arrives as its "%PDF-" bytes and looksLikePdf refuses it by its CONTENT, with the way forward.
   const files: { name: string; text: string }[] = [];
   for (const entry of formData.getAll("files")) {
     if (typeof entry === "string") continue;
     const file = entry as File;
     if (!file || !file.size) continue;
-    if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") {
-      files.push({ name: file.name, text: "" }); // looksLikePdf refuses it, by name
-      continue;
-    }
     try {
       files.push({ name: file.name, text: await file.text() });
     } catch {
