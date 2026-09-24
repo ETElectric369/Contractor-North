@@ -44,6 +44,15 @@ const CLIENT_SOURCES = new Set([
   "app-boundary",
   "assistant-boundary",
   "weather-widget",
+  // Nort's voice loop and the Tap to Pay bridge fail on the phone, where nobody sees a console.
+  // Both went dark silently in September 2026 (the daily sweep, 09-23): Nort's mic path never
+  // reached the server for a week, and a lost reader listener doomed every card tap until the
+  // app was restarted. Each reports its terminal branches here, named, so the next one is a row.
+  "nort-voice",
+  "tap-to-pay",
+  // A hard navigation that fails inside the iOS shell leaves the old page running with every
+  // native listener wiped. Reported so a dead-listener session is visible, not inferred.
+  "shell-navigation",
 ]);
 
 /** Well above a real crash loop on a bad deploy, well below "the log is now useless". */
