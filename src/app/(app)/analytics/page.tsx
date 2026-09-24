@@ -51,7 +51,7 @@ export default async function AnalyticsPage({
   // reach this page (the redirect above).
   const viewerIsOwner = me.role === "owner";
   const showOwnerMoney = viewerIsOwner || orgSettings.office_sees_owner_money;
-  const ownerMoneyP = showOwnerMoney ? getOwnerMoney(supabase, windowKey) : Promise.resolve(null);
+  const ownerMoneyP = showOwnerMoney ? getOwnerMoney(supabase, windowKey, tz) : Promise.resolve(null);
   const todayYmd = todayStrInTz(tz);
   const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 

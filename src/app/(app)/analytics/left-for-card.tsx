@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import {
   OWNER_MONEY_WINDOWS,
+  costFigure,
   countedNotPaidLine,
   notCountedLine,
   windowLabel,
@@ -38,7 +39,7 @@ export function LeftForCard({
   officeSees: boolean;
 }) {
   const t = money?.totals;
-  const cost = (n: number) => (Math.abs(n) < 0.005 ? formatCurrency(0) : `−${formatCurrency(n)}`);
+  const cost = costFigure;
   const row = (label: string, value: string, key?: string) => (
     <div key={key ?? label} className="flex items-baseline justify-between gap-4 py-1.5">
       <span className="text-sm text-slate-600">{label}</span>
@@ -65,10 +66,20 @@ export function LeftForCard({
         {!money || !t ? (
           // NOTHING SILENT, AND NEVER A FIGURE THAT MIGHT BE WRONG: every line here is subtraction,
           // so a read that came back short would print a confident wrong number.
-          <p className="text-sm text-slate-600">
-            No figure is shown right now because {problem ?? "the records could not be read"}. Nothing changed. Reload the page to
-            try again.
-          </p>
+          // The shell has no browser reload, so the way back is a real control (the Pay board's own
+          // refusal does the same), never a sentence that points at a button that is not there.
+          <div>
+            <p className="text-sm text-slate-600">
+              No figure is shown right now because {problem ?? "the records could not be read"}. Nothing changed. Tap Reload to try
+              again.
+            </p>
+            <a
+              href={`/analytics?w=${windowKey}`}
+              className="mt-2 inline-flex min-h-[44px] items-center text-sm font-medium text-brand-600"
+            >
+              Reload
+            </a>
+          </div>
         ) : (
           <>
             <div className="divide-y divide-slate-100">

@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   allocateCents,
   computeOwnerMoney,
+  costFigure,
   countedNotPaidLine,
+  getOwnerMoney,
   notCountedLine,
   ownerMoneyWindow,
   windowLabel,
@@ -338,6 +340,188 @@ describe("caveats: each only when it applies", () => {
     );
     expect(m.caveats).toContainEqual({ kind: "crew_owed", total: 250 });
     expect(m.totals.crewPay).toBe(400); // counted in full either way
+  });
+});
+
+describe("crew owed names only THIS window's unpaid crew pay", () => {
+  // Brian at $40: 10 unpaid hours in August, 50 in September, nothing handed over yet.
+  const sept = ["2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14"].map((d, i) => shift(`s${i}`, BRIAN, d, 10));
+  const hours = (): OwnerMoneyInputs => ({ ...base(), entries: [shift("a1", BRIAN, "2026-08-12", 10), ...sept] });
+  const owed = (m: OwnerMoney) => (m.caveats.find((c) => c.kind === "crew_owed") as { total: number } | undefined)?.total ?? null;
+  const run = (inp: OwnerMoneyInputs, key: "this_month" | "last_month" | "this_year", today = TODAY) =>
+    computeOwnerMoney(inp, ownerMoneyWindow(key, today), TZ, today);
+
+  it("each window names exactly the crew pay it counted", () => {
+    const last = run(hours(), "last_month");
+    expect([last.totals.crewPay, owed(last)]).toEqual([400, 400]);
+    const month = run(hours(), "this_month");
+    expect([month.totals.crewPay, owed(month)]).toEqual([2000, 2000]);
+    const year = run(hours(), "this_year");
+    expect([year.totals.crewPay, owed(year)]).toEqual([2400, 2400]);
+    expect(countedNotPaidLine(last)).toBe("Counted, though not paid yet: $400.00 of crew pay.");
+  });
+
+  it("a This Year read in January names none of last year's unpaid pay", () => {
+    const m = run(hours(), "this_year", "2027-01-15");
+    expect(m.totals.crewPay).toBe(0);
+    expect(owed(m)).toBeNull();
+    expect(countedNotPaidLine(m)).toBeNull();
+  });
+
+  it("a payment pays the OLDEST earnings first, so the newest window keeps the unpaid dollars", () => {
+    // $2,400 earned, $500 paid: August's $400 is paid in full and $100 of September's, so $1,900 of
+    // September is still owed and none of August. Oldest-first is the Pay board's own order: a
+    // payment locks the oldest periods first, and "going back to" names the oldest unpaid day.
+    const paid = { ...hours(), payPayments: [{ id: "p1", profile_id: BRIAN, amount: 500, paid_on: "2026-09-20", method: "cash" }] };
+    expect(owed(run(paid, "this_month"))).toBe(1900);
+    expect(owed(run(paid, "last_month"))).toBeNull();
+    expect(owed(run(paid, "this_year"))).toBe(1900);
+  });
+});
+
+describe("the windows agree with each other", () => {
+  it("This Year's totals are the field-by-field sum of each month run on its own", () => {
+    const year = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
+    const monthly = year.months.map((x) => computeOwnerMoney(yearInputs(), ownerMoneyWindow("this_month", `${x.month}-15`), TZ, TODAY));
+    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "businessCostsTotal", "processorFees", "left"] as const;
+    for (const f of fields) expect(monthly.reduce((s, m) => s + cents(m.totals[f]), 0)).toBe(cents(year.totals[f]));
+    for (const b of BUSINESS_COST_BUCKETS) {
+      expect(monthly.reduce((s, m) => s + cents(m.totals.businessCosts[b]), 0)).toBe(cents(year.totals.businessCosts[b]));
+    }
+    expect(monthly.reduce((s, m) => s + Math.round(m.totals.ownerHours * 100), 0)).toBe(Math.round(year.totals.ownerHours * 100));
+    // And each month's own run matches that month's row in the year.
+    monthly.forEach((m, i) => expect(m.totals.left).toBe(year.months[i].left));
+  });
+});
+
+describe("costFigure: a cost line on the receipt", () => {
+  it("money out reads with a minus; a net credit is money back, never a double sign", () => {
+    expect(costFigure(1200)).toBe("\u2212$1,200.00");
+    expect(costFigure(0)).toBe("$0.00");
+    expect(costFigure(0.001)).toBe("$0.00");
+    expect(costFigure(-51.58)).toBe("+$51.58");
+  });
+
+  it("a window whose only bill is a credit reads as money back", () => {
+    const m = computeOwnerMoney(
+      { ...base(), bills: [{ id: "cr", job_id: "J-011", amount: -51.58, bill_date: "2026-09-10", created_at: "2026-09-10T18:00:00Z", category: "Receipt", status: "paid" }] },
+      ownerMoneyWindow("this_month", TODAY),
+      TZ,
+      TODAY,
+    );
+    expect(m.totals.materialsAndBills).toBe(-51.58);
+    expect(costFigure(m.totals.materialsAndBills)).toBe("+$51.58");
+    expect(m.totals.left).toBe(51.58);
+  });
+});
+
+// ── THE FETCH HALF ─────────────────────────────────────────────────────────────
+
+type FakeCall = { table: string; select: string; filters: string[] };
+
+/** A small PostgREST-builder fake that APPLIES the filters it is given (is/eq/gte/lt/in, order,
+ *  range, limit) to canned rows per table, so the test pins what getOwnerMoney asks for as well as
+ *  what it does with the answer. A table listed in `failing` answers with an error. */
+function fakeClient(tables: Record<string, any[]>, calls: FakeCall[], failing: string[] = []) {
+  return {
+    from(table: string) {
+      const call: FakeCall = { table, select: "", filters: [] };
+      calls.push(call);
+      let rows = [...(tables[table] ?? [])];
+      let slice: [number, number] | null = null;
+      let limit: number | null = null;
+      const b: any = {
+        select(cols: string) { call.select = cols; return b; },
+        is(col: string, v: unknown) { call.filters.push(`is:${col}:${v}`); rows = rows.filter((r) => (r[col] ?? null) === v); return b; },
+        eq(col: string, v: unknown) { call.filters.push(`eq:${col}:${v}`); rows = rows.filter((r) => r[col] === v); return b; },
+        gte(col: string, v: string) { call.filters.push(`gte:${col}`); rows = rows.filter((r) => String(r[col]) >= v); return b; },
+        lt(col: string, v: string) { call.filters.push(`lt:${col}`); rows = rows.filter((r) => String(r[col]) < v); return b; },
+        in(col: string, vs: unknown[]) { call.filters.push(`in:${col}`); rows = rows.filter((r) => vs.includes(r[col])); return b; },
+        order(col: string, opts?: { ascending?: boolean }) {
+          const dir = opts?.ascending === false ? -1 : 1;
+          rows.sort((x, y) => (String(x[col]) < String(y[col]) ? -dir : String(x[col]) > String(y[col]) ? dir : 0));
+          return b;
+        },
+        range(f: number, t: number) { slice = [f, t]; return b; },
+        limit(n: number) { limit = n; return b; },
+        then(ok: (v: any) => any, err?: (e: any) => any) {
+          if (failing.includes(table)) return Promise.resolve({ data: null, error: { message: "boom" } }).then(ok, err);
+          let out = rows;
+          if (slice) out = out.slice(slice[0], slice[1] + 1);
+          if (limit != null) out = out.slice(0, limit);
+          return Promise.resolve({ data: out, error: null }).then(ok, err);
+        },
+      };
+      return b;
+    },
+  };
+}
+
+describe("getOwnerMoney: the fetch half", () => {
+  const NOW = new Date("2026-09-24T19:00:00Z");
+  const tables = () => ({
+    payments: [
+      { id: "p1", amount: 1000, paid_at: "2026-06-11T18:00:00Z", processor_fee: null, stripe_payment_intent: null, invoices: { status: "paid" } },
+      { id: "p2", amount: 450, paid_at: "2026-09-04T20:00:00Z", processor_fee: 13.35, stripe_payment_intent: "pi_x", invoices: { status: "paid" } },
+    ],
+    customer_credits: [],
+    bills: [
+      { id: "b1", job_id: "J1", amount: 200, bill_date: "2026-08-03", created_at: "2026-08-05T00:00:00Z", category: "Receipt", status: "paid", po_id: null, superseded_by_bill_id: null },
+      { id: "b2", job_id: "J1", amount: 999, bill_date: "2026-08-03", created_at: "2026-08-05T00:00:00Z", category: "Receipt", status: "paid", po_id: null, superseded_by_bill_id: "b1" },
+      // Entered after the fact with an old date: counts in April, never moves where records start.
+      { id: "b3", job_id: null, amount: 30, bill_date: "2026-04-20", created_at: "2026-06-10T00:00:00Z", category: "Fuel", status: "paid", po_id: null, superseded_by_bill_id: null },
+    ],
+    purchase_orders: [],
+    petty_cash: [],
+    time_entries: [
+      { id: "t1", profile_id: BRIAN, status: "closed", clock_in: "2026-06-15T15:00:00.000Z", clock_out: "2026-06-15T23:00:00.000Z", lunch_minutes: 0, rate_override: null, paid_at: null, profiles: { full_name: "Brian Taylor" } },
+      { id: "t2", profile_id: ERIK, status: "closed", clock_in: "2026-06-12T15:00:00.000Z", clock_out: "2026-06-12T20:00:00.000Z", lunch_minutes: 0, rate_override: null, paid_at: null, profiles: { full_name: "Erik Taylor" } },
+    ],
+    payroll_runs: [],
+    pay_payments: [],
+    supplier_invoices: [],
+    profile_pay: [
+      { id: ERIK, full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125, commute_baseline_miles: null, paid_by_draw: true },
+      { id: BRIAN, full_name: "Brian Taylor", hourly_rate: 40, bill_rate: 85, commute_baseline_miles: null, paid_by_draw: false },
+    ],
+  });
+
+  it("asks only for live bills, attaches rates to each shift, and computes", async () => {
+    const calls: FakeCall[] = [];
+    const t = tables();
+    const { money, problem } = await getOwnerMoney(fakeClient(t, calls), "this_year", TZ, NOW);
+    expect(problem).toBeNull();
+    expect(calls.find((c) => c.table === "bills")!.filters).toContain("is:superseded_by_bill_id:null");
+    expect(calls.some((c) => c.table === "organizations")).toBe(false); // tz comes from the caller
+    // The rates were merged onto the shift the way the Pay board merges them.
+    expect(t.time_entries[0].profiles).toMatchObject({ full_name: "Brian Taylor", hourly_rate: 40, paid_by_draw: false });
+    expect(t.time_entries[1].profiles).toMatchObject({ paid_by_draw: true });
+    expect(money!.totals.received).toBe(1450);
+    expect(money!.totals.materialsAndBills).toBe(200); // b2 is superseded: never requested, never counted
+    expect(money!.totals.crewPay).toBe(320);
+    expect(money!.totals.ownerHours).toBe(5);
+    expect(money!.totals.businessCosts.Fees).toBe(13.35);
+    expect(money!.totals.businessCosts["Gas & Truck"]).toBe(30);
+    expect(money!.owners).toEqual([{ id: ERIK, name: "Erik Taylor" }]);
+  });
+
+  it("records start at the earlier of the first payment and the first shift", async () => {
+    const { money } = await getOwnerMoney(fakeClient(tables(), []), "this_year", TZ, NOW);
+    expect(windowLabel(money!)).toBe("This Year (records start Jun 11)");
+    const t = tables();
+    t.time_entries[1].clock_in = "2026-06-09T15:00:00.000Z";
+    t.time_entries[1].clock_out = "2026-06-09T20:00:00.000Z";
+    const earlier = await getOwnerMoney(fakeClient(t, []), "this_year", TZ, NOW);
+    expect(windowLabel(earlier.money!)).toBe("This Year (records start Jun 9)");
+  });
+
+  it("a read that fails returns no figure and says which read", async () => {
+    const out = await getOwnerMoney(fakeClient(tables(), [], ["petty_cash"]), "this_year", TZ, NOW);
+    expect(out.money).toBeNull();
+    expect(out.problem).toBe("the petty cash could not be read");
+    const rates = await getOwnerMoney(fakeClient(tables(), [], ["profile_pay"]), "this_year", TZ, NOW);
+    expect(rates.money).toBeNull();
+    expect(rates.problem).toBe("the pay rates could not be read");
   });
 });
 

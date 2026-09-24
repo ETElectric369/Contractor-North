@@ -2,9 +2,8 @@ import { BUSINESS_COST_BUCKETS, bucketOf, type BusinessCostBucket } from "@/lib/
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { balanceForPerson, payRateForEntry, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { attachRates, payRateMapRead, type PayRates } from "@/lib/profile-columns";
-import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
-import { hoursBetween } from "@/lib/utils";
+import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { computeCollected, monthKeyInTz } from "@/lib/analytics/money-metrics";
 
 /**
@@ -345,6 +344,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const at = (month: string | null | undefined): Acc | null => (month && inWindow.has(month) ? acc.get(month)! : null);
   const monthOfDay = (day: string | null) => (day ? day.slice(0, 7) : null);
   const inDays = (day: string | null) => !!day && day >= win.start && day < win.end;
+  const winStartMonth = win.start.slice(0, 7);
+  const winEndMonth = win.end.slice(0, 7);
 
   // RECEIVED: computeCollected per month, over exactly that month's rows. The same function
   // /billing and /payments headline with, the same void rule computeRevenueTrend applies.
@@ -496,8 +497,14 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
 
   if (openShifts > 0) caveats.push({ kind: "open_shifts", count: openShifts });
 
-  // Crew pay earned but not recorded as paid: the Pay board's You Owe, computed by the SAME
-  // balanceForPerson over the same rows. It IS counted above; this only says it is still owed.
+  // Crew pay earned but not recorded as paid, FOR THIS WINDOW. The card prints it as "Counted, though
+  // not paid yet: $X of crew pay", so it may only name pay that is inside the Crew Pay line above.
+  // Each person's all-time unpaid balance is the Pay board's You Owe (the SAME balanceForPerson over
+  // the same rows). Payments are unallocated amounts, so they pay the OLDEST earnings first and the
+  // unpaid dollars are the NEWEST ones: of a balance B, the months after the window absorb theirs
+  // first (E_after), and what remains, up to what the window earned (E_window), is this window's:
+  //   unpaid in window = clamp(B - E_after, 0, E_window)
+  // So Last Month never names September's pay, and a This Year read in January names none of 2026's.
   {
     const byPerson = new Map<string, { entries: any[]; runs: any[]; payments: PayPaymentRow[] }>();
     const slot = (pid: string) => {
@@ -524,7 +531,14 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
         tz,
         fallbackRate: Number(person?.hourlyRate ?? 0) || 0,
       });
-      if (b.owed > 0.005) owedCents += toCents(b.owed);
+      if (!(b.owed > 0.005)) continue;
+      let eWindow = 0;
+      let eAfter = 0;
+      for (const [m, c] of crew.get(pid) ?? []) {
+        if (m >= winEndMonth) eAfter += c;
+        else if (m >= winStartMonth) eWindow += c;
+      }
+      owedCents += Math.min(Math.max(toCents(b.owed) - eAfter, 0), eWindow);
     }
     if (owedCents > 0) caveats.push({ kind: "crew_owed", total: fromCents(owedCents) });
   }
@@ -561,6 +575,14 @@ const shortDay = (ymdStr: string) =>
 
 const money = (n: number) =>
   `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** A cost line's figure on the receipt: "−$1,200.00" for money out. A line that nets NEGATIVE (a
+ *  supplier credit filed as a negative bill, J-011's -$51.58) is money back and reads "+$51.58",
+ *  never "−-$51.58". Zero is plain "$0.00". */
+export function costFigure(n: number): string {
+  if (Math.abs(n) < 0.005) return formatCurrency(0);
+  return n > 0 ? `\u2212${formatCurrency(n)}` : `+${formatCurrency(Math.abs(n))}`;
+}
 
 /** "This Year (records start Jun 11)": the window, with the honest start when records begin late. */
 export function windowLabel(m: OwnerMoney): string {
@@ -625,10 +647,12 @@ const BALANCE_MONTHS = 18;
 export async function getOwnerMoney(
   supabase: any,
   key: OwnerMoneyWindowKey,
+  /** The org's timezone. The caller already read the org's settings (/analytics does, for its own
+   *  month buckets), so this takes it rather than spending a round trip on a second settings read
+   *  before every other read could start. */
+  tz: string,
   now: Date = new Date(),
 ): Promise<{ money: OwnerMoney | null; problem: string | null }> {
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
   const todayYmd = todayStrInTz(tz, now);
   const win = ownerMoneyWindow(key, todayYmd);
   const startIso = tzDayStartUtc(win.start, tz).toISOString();
