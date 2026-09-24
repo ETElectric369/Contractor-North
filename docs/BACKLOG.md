@@ -29,11 +29,13 @@ Size: XS (<1h) · S (≈half day) · M (≈1–2 days) · L (multi-day).
   (Adds `last_contacted_at` / `next_follow_up_at` columns.)
 
 ## 3. Timecard depth (employee end-of-day)
-- 🟡 **M — Multiple jobs per day on one timecard.** Today a clock entry has a
-  single job/code. The note wants an end-of-day breakdown: Job 1 (hrs+min, job
-  code, description), Job 2 (…), etc. Design: a `time_allocations` table
-  (entry_id or day, job_id, job_code, hours, description) the tech fills at
-  clock-out, summing to the day's hours.
+- ✅ **M — Multiple jobs per day.** Built as ordinary time entries, one job (or
+  time code) each: the live **Switch Job** button closes the running entry and
+  opens the next, and the office **splits** a finished shift at a clock time on
+  Timecards (0288 `split_time_entry` / `join_time_entries` /
+  `move_time_entry_cut`). The pieces partition the shift, so they can't add up
+  to more than was clocked. The old `time_allocations` table (a free-standing
+  list of hours beside the entry) was converted by 0289 and dropped in 0290.
 - 🟡 **M — End-of-day report form** ("fill out form"): the per-job breakdown
   above + "what did you do today" (already captured). One screen at clock-out.
 - ✅ Clock IN / LUNCH / OUT, GPS, job codes — built & verified.
