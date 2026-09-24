@@ -12,6 +12,7 @@ import {
   ownerMoneyChartWindow,
   ownerMoneyReadSpan,
   ownerMoneyWindow,
+  supplierDocsNoBillCovers,
   parseOwnerMoneyMonthKey,
   resolveOwnerMoneySelection,
   windowInsideSpan,
@@ -318,6 +319,35 @@ describe("caveats: each only when it applies", () => {
     expect(withMemo.caveats).toContainEqual({ kind: "credit_memos", count: 2, total: 197.43 });
     expect(withMemo.totals.left).toBe(without.totals.left);
     expect(notCountedLine(withMemo)).toContain("$197.43 of supplier credit memos (2)");
+  });
+
+  it("a credit memo a bill covers is counted in materials once, never also named as not counted", () => {
+    // The 518 Crater Lake shape: each CED memo is a negative bill on J-046, tied to its memo.
+    const docs = supplierDocsNoBillCovers([
+      { id: "m1", kind: "credit_memo", total: -115.33, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t1" }] },
+      { id: "m2", kind: "credit_memo", total: -82.1, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t2" }] },
+      { id: "m3", kind: "credit_memo", total: -10, invoice_date: "2026-09-22", bill_supplier_invoices: [] },
+      { id: "s1", kind: "service_charge", total: 20.14, invoice_date: "2026-08-10", bill_supplier_invoices: [{ id: "t3" }] },
+      { id: "s2", kind: "service_charge", total: 5, invoice_date: "2026-08-10" },
+    ]);
+    expect(docs.creditMemos.map((d) => d.id)).toEqual(["m3"]);
+    expect(docs.unbilledServiceCharges.map((d) => d.id)).toEqual(["s2"]);
+
+    const memoBills = [
+      { id: "cm1", job_id: "J-046", amount: -115.33, bill_date: "2026-09-22", created_at: "2026-09-22T18:00:00Z", category: "Invoice", status: "unpaid" },
+      { id: "cm2", job_id: "J-046", amount: -82.1, bill_date: "2026-09-22", created_at: "2026-09-22T18:00:00Z", category: "Invoice", status: "unpaid" },
+    ];
+    const without = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
+    const covered = computeOwnerMoney(
+      { ...yearInputs(), bills: [...yearInputs().bills, ...memoBills], creditMemos: supplierDocsNoBillCovers([
+        { id: "m1", kind: "credit_memo", total: -115.33, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t1" }] },
+        { id: "m2", kind: "credit_memo", total: -82.1, invoice_date: "2026-09-22", bill_supplier_invoices: [{ id: "t2" }] },
+      ]).creditMemos },
+      YEAR, TZ, TODAY,
+    );
+    expect(covered.totals.materialsAndBills).toBe(Math.round((without.totals.materialsAndBills - 197.43) * 100) / 100);
+    expect(covered.caveats.find((c) => c.kind === "credit_memos")).toBeUndefined();
+    expect(notCountedLine(covered) ?? "").not.toContain("credit memo");
   });
 
   it("a supplier late charge no bill covers is named, never guessed into a bucket", () => {

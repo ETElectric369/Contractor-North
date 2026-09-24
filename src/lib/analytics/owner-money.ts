@@ -243,7 +243,9 @@ export type OwnerMoneyInputs = {
   runs: any[];
   /** pay_payments rows (raw), for the "earned but not recorded as paid" caveat. */
   payPayments: any[];
-  /** supplier_invoices whose kind is 'credit_memo': total, invoice_date, created_at. */
+  /** supplier_invoices whose kind is 'credit_memo' and that NO bill covers: total, invoice_date,
+   *  created_at. A memo a bill covers is already inside Materials & Bills as that negative bill, so
+   *  naming it as "not counted" too would contradict the card (see supplierDocsNoBillCovers). */
   creditMemos: any[];
   /** Everyone the rates read returned, by profile id. */
   people: Map<string, OwnerMoneyPerson>;
@@ -723,6 +725,21 @@ async function readEvery<T>(
   return { rows: [], problem: `there are too many ${what} to read at once` };
 }
 
+/**
+ * Supplier credit memos and service charges that NO bill covers (rows carry bill_supplier_invoices).
+ * Once a bill covers a document it is already in Materials & Bills as that bill (a credit memo as a
+ * negative bill, the 518 Crater Lake correction), so it must not also be named as "not counted".
+ */
+export function supplierDocsNoBillCovers(rows: any[]): { creditMemos: any[]; unbilledServiceCharges: any[] } {
+  const uncovered = (rows ?? []).filter(
+    (s: any) => s && !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length),
+  );
+  return {
+    creditMemos: uncovered.filter((s: any) => s.kind === "credit_memo"),
+    unbilledServiceCharges: uncovered.filter((s: any) => s.kind === "service_charge"),
+  };
+}
+
 /** How far back hours are read: the Pay board's own bound (payroll/page.tsx BALANCE_MONTHS), so the
  *  crew-owed caveat and crew pay are built from the rows that board reads. */
 const BALANCE_MONTHS = 18;
@@ -843,8 +860,8 @@ export async function readOwnerMoneyInputs(
         .order("id")
         .range(f, t),
     ),
-    // Credit memos (named, not subtracted: a later build decides where a credit lands) and service
-    // charges, each with the bills that cover it, so a late charge already filed is not named twice.
+    // Credit memos (named, not subtracted, until a bill covers one) and service charges, each with
+    // the bills that cover it, so a memo or late charge already filed is not named twice.
     readEvery<any>("supplier credit memos", (f, t) =>
       supabase
         .from("supplier_invoices")
@@ -900,10 +917,7 @@ export async function readOwnerMoneyInputs(
       entries: entries.rows,
       runs: runs.rows,
       payPayments: payPayments.rows,
-      creditMemos: memos.rows.filter((s: any) => s.kind === "credit_memo"),
-      unbilledServiceCharges: memos.rows.filter(
-        (s: any) => s.kind === "service_charge" && !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length),
-      ),
+      ...supplierDocsNoBillCovers(memos.rows),
       people,
       recordsStart,
       firstPaymentDay,
