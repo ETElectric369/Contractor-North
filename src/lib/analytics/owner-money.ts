@@ -4,7 +4,7 @@ import { balanceForPerson, payRateForEntry, toPayPaymentRow, type PayPaymentRow 
 import { attachRates, payRateMapRead, type PayRates } from "@/lib/profile-columns";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
-import { computeCollected, monthKeyInTz } from "@/lib/analytics/money-metrics";
+import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytics/money-metrics";
 
 /**
  * LEFT FOR YOU: what the business kept for its owner (migration 0286's other half).
@@ -46,33 +46,120 @@ import { computeCollected, monthKeyInTz } from "@/lib/analytics/money-metrics";
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
-export type OwnerMoneyWindowKey = "this_month" | "last_month" | "this_year";
+/** The three segments of the card's control. */
+export type OwnerMoneySegmentKey = "this_month" | "last_month" | "this_year";
+/** One calendar month, "YYYY-MM": the window a tap on the Money by Month chart selects. */
+export type OwnerMoneyMonthKey = `${number}-${number}`;
+/** What the card can be showing: a segment, or one month the chart selected. */
+export type OwnerMoneyWindowKey = OwnerMoneySegmentKey | OwnerMoneyMonthKey;
 
-export const OWNER_MONEY_WINDOWS: { key: OwnerMoneyWindowKey; label: string }[] = [
+export const OWNER_MONEY_WINDOWS: { key: OwnerMoneySegmentKey; label: string }[] = [
   { key: "this_month", label: "This Month" },
   { key: "last_month", label: "Last Month" },
   { key: "this_year", label: "This Year" },
 ];
 
-export function isOwnerMoneyWindowKey(v: unknown): v is OwnerMoneyWindowKey {
+export function isOwnerMoneySegmentKey(v: unknown): v is OwnerMoneySegmentKey {
   return v === "this_month" || v === "last_month" || v === "this_year";
 }
 
-/** A window of ORG-LOCAL days: `start` inclusive, `end` exclusive, both "YYYY-MM-DD". */
-export type OwnerMoneyWindow = { key: OwnerMoneyWindowKey; label: string; start: string; end: string };
+/** TEMP (removed in the next commit, when /analytics reads ?w= through resolveOwnerMoneySelection). */
+export const isOwnerMoneyWindowKey = isOwnerMoneySegmentKey;
+
+const MONTH_KEY_RE =/^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** Shape only ("YYYY-MM" with a real month). Whether the page READ that month is
+ *  parseOwnerMoneyMonthKey's question. */
+export function isOwnerMoneyMonthKey(v: unknown): v is OwnerMoneyMonthKey {
+  return typeof v === "string" && MONTH_KEY_RE.test(v);
+}
 
 const ymd = (y: number, m: number) => {
   const d = new Date(Date.UTC(y, m - 1, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-01`;
 };
 
-/** The window for a key, relative to the org's today. Month arithmetic is day-1-pinned. */
+/** The months the chart covers: the last 12, ending with the org's current month, oldest first
+ *  (the same trailing12Months the Collected tile reads). */
+export function chartMonthKeys(todayYmd: string): OwnerMoneyMonthKey[] {
+  return trailing12Months(todayYmd) as OwnerMoneyMonthKey[];
+}
+
+/**
+ * A "?w=" value as a month the card may show, or null. VALIDATED ON THE SERVER: only a real
+ * "YYYY-MM" inside the chart's 12 months passes, so a hand-typed ?w=2019-03 (rows the page never
+ * reads) or ?w=2026-13 can never make the card print a month it did not fetch.
+ */
+export function parseOwnerMoneyMonthKey(v: unknown, todayYmd: string): OwnerMoneyMonthKey | null {
+  if (!isOwnerMoneyMonthKey(v)) return null;
+  return chartMonthKeys(todayYmd).includes(v) ? v : null;
+}
+
+/**
+ * What the card shows, from the page's search params. `w` is a segment or a month; `from` remembers
+ * the segment a month was tapped from, so tapping that month again goes back to it. Anything invalid
+ * falls back to This Year (the card's default), never to an error.
+ */
+export function resolveOwnerMoneySelection(
+  w: unknown,
+  from: unknown,
+  todayYmd: string,
+): { windowKey: OwnerMoneyWindowKey; segment: OwnerMoneySegmentKey; month: OwnerMoneyMonthKey | null } {
+  if (isOwnerMoneySegmentKey(w)) return { windowKey: w, segment: w, month: null };
+  const segment: OwnerMoneySegmentKey = isOwnerMoneySegmentKey(from) ? from : "this_year";
+  const month = parseOwnerMoneyMonthKey(w, todayYmd);
+  return { windowKey: month ?? segment, segment, month };
+}
+
+/** "August 2026" for "2026-08". */
+export function monthLongLabel(month: string): string {
+  return new Date(`${month}-15T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+/** A window of ORG-LOCAL days: `start` inclusive, `end` exclusive, both "YYYY-MM-DD". The chart's
+ *  own window is "last_12_months". */
+export type OwnerMoneyWindow = { key: OwnerMoneyWindowKey | "last_12_months"; label: string; start: string; end: string };
+
+/** The window for a key, relative to the org's today. Month arithmetic is day-1-pinned. A month key
+ *  is that calendar month (the page validated it with parseOwnerMoneyMonthKey). */
 export function ownerMoneyWindow(key: OwnerMoneyWindowKey, todayYmd: string): OwnerMoneyWindow {
   const [y, m] = todayYmd.split("-").map(Number);
+  if (isOwnerMoneyMonthKey(key)) {
+    const [ky, km] = key.split("-").map(Number);
+    return { key, label: monthLongLabel(key), start: ymd(ky, km), end: ymd(ky, km + 1) };
+  }
   const label = OWNER_MONEY_WINDOWS.find((w) => w.key === key)?.label ?? "This Year";
   if (key === "this_month") return { key, label, start: ymd(y, m), end: ymd(y, m + 1) };
   if (key === "last_month") return { key, label, start: ymd(y, m - 1), end: ymd(y, m) };
   return { key, label, start: `${y}-01-01`, end: `${y + 1}-01-01` };
+}
+
+/** The chart's window: the last 12 months, ending with the org's current month. */
+export function ownerMoneyChartWindow(todayYmd: string): OwnerMoneyWindow {
+  const [y, m] = todayYmd.split("-").map(Number);
+  return { key: "last_12_months", label: "Last 12 Months", start: ymd(y, m - 11), end: ymd(y, m + 1) };
+}
+
+/**
+ * ONE READ FOR EVERY WINDOW ON THE PAGE: the span covering all of them, earliest start to latest
+ * end. computeOwnerMoney buckets every row into its own month and ignores months outside the window
+ * it is asked for, so a window computed from rows read over a WIDER span is exactly that window
+ * computed from its own read. That is what lets the chart and the card below it share one read and
+ * never disagree.
+ */
+export function ownerMoneyReadSpan(windows: { start: string; end: string }[]): { start: string; end: string } {
+  if (!windows.length) throw new Error("ownerMoneyReadSpan needs at least one window");
+  let { start, end } = windows[0];
+  for (const w of windows) {
+    if (w.start < start) start = w.start;
+    if (w.end > end) end = w.end;
+  }
+  return { start, end };
+}
+
+/** True when every day of `win` is inside what a read over `span` fetched. */
+export function windowInsideSpan(win: { start: string; end: string }, span: { start: string; end: string }): boolean {
+  return win.start >= span.start && win.end <= span.end;
 }
 
 /** The "YYYY-MM" months a window covers, oldest first, never past the org's current month. */
@@ -654,14 +741,45 @@ export async function getOwnerMoney(
   now: Date = new Date(),
 ): Promise<{ money: OwnerMoney | null; problem: string | null }> {
   const todayYmd = todayStrInTz(tz, now);
-  const win = ownerMoneyWindow(key, todayYmd);
-  const startIso = tzDayStartUtc(win.start, tz).toISOString();
-  const endIso = tzDayStartUtc(win.end, tz).toISOString();
+  const { views, problem } = await getOwnerMoneyViews(supabase, [ownerMoneyWindow(key, todayYmd)], tz, todayYmd);
+  return { money: views?.[0] ?? null, problem };
+}
+
+/**
+ * SEVERAL WINDOWS, ONE READ (/analytics: the Money by Month chart's 12 months and the card's window).
+ * The rows are read ONCE over the span covering every window, then each window is computed from
+ * those same rows with the pure computeOwnerMoney, so the chart's August and the card's August are
+ * the same arithmetic over the same rows. A window outside the span it was read over would be
+ * computed from partial rows and print a confident wrong number; the span is built from the windows
+ * so that cannot happen, and it is checked anyway: the check refuses rather than computes.
+ */
+export async function getOwnerMoneyViews(
+  supabase: any,
+  windows: OwnerMoneyWindow[],
+  tz: string,
+  todayYmd: string,
+): Promise<{ views: OwnerMoney[] | null; problem: string | null }> {
+  const span = ownerMoneyReadSpan(windows);
+  if (!windows.every((w) => windowInsideSpan(w, span))) return { views: null, problem: "the months asked for were not all read" };
+  const { inputs, problem } = await readOwnerMoneyInputs(supabase, span, tz, todayYmd);
+  if (!inputs) return { views: null, problem };
+  return { views: windows.map((w) => computeOwnerMoney(inputs, w, tz, todayYmd)), problem: null };
+}
+
+/** The rows computeOwnerMoney needs for any window inside `span`, read once. */
+export async function readOwnerMoneyInputs(
+  supabase: any,
+  span: { start: string; end: string },
+  tz: string,
+  todayYmd: string,
+): Promise<{ inputs: OwnerMoneyInputs | null; problem: string | null }> {
+  const startIso = tzDayStartUtc(span.start, tz).toISOString();
+  const endIso = tzDayStartUtc(span.end, tz).toISOString();
   const balanceStart = (() => {
     const d = new Date(`${todayYmd}T00:00:00Z`);
     d.setUTCMonth(d.getUTCMonth() - BALANCE_MONTHS);
     const ymdStr = d.toISOString().slice(0, 10);
-    return (ymdStr < win.start ? ymdStr : win.start);
+    return (ymdStr < span.start ? ymdStr : span.start);
   })();
   // A locked period can start up to a month before the window and still spread pay into it.
   const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
@@ -751,7 +869,7 @@ export async function getOwnerMoney(
     [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos].map((r) => r.problem).find(Boolean) ??
     ratesRead.problem ??
     ((names as any)?.error ? "the names could not be read" : null);
-  if (problem) return { money: null, problem };
+  if (problem) return { inputs: null, problem };
 
   const people = new Map<string, OwnerMoneyPerson>();
   const nameOf = new Map<string, string>();
@@ -771,27 +889,22 @@ export async function getOwnerMoney(
   const recordsStart = starts.length ? starts.sort()[0] : null;
 
   return {
-    money: computeOwnerMoney(
-      {
-        payments: payments.rows,
-        refunds: refunds.rows,
-        bills: bills.rows,
-        pos: pos.rows,
-        pettyCash: petty.rows,
-        entries: entries.rows,
-        runs: runs.rows,
-        payPayments: payPayments.rows,
-        creditMemos: memos.rows.filter((s: any) => s.kind === "credit_memo"),
-        unbilledServiceCharges: memos.rows.filter(
-          (s: any) => s.kind === "service_charge" && !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length),
-        ),
-        people,
-        recordsStart,
-      },
-      win,
-      tz,
-      todayYmd,
-    ),
+    inputs: {
+      payments: payments.rows,
+      refunds: refunds.rows,
+      bills: bills.rows,
+      pos: pos.rows,
+      pettyCash: petty.rows,
+      entries: entries.rows,
+      runs: runs.rows,
+      payPayments: payPayments.rows,
+      creditMemos: memos.rows.filter((s: any) => s.kind === "credit_memo"),
+      unbilledServiceCharges: memos.rows.filter(
+        (s: any) => s.kind === "service_charge" && !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length),
+      ),
+      people,
+      recordsStart,
+    },
     problem: null,
   };
 }
