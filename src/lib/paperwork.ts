@@ -401,19 +401,25 @@ function wordsKey(raw: string | null | undefined): string {
   return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
 }
 
-const STREET_TYPE = new Set([
-  "STREET", "ST", "ROAD", "RD", "AVENUE", "AVE", "AV", "DRIVE", "DR", "LANE", "LN", "COURT", "CT", "PLACE", "PL",
-  "BOULEVARD", "BLVD", "WAY", "TRAIL", "TRL", "CIRCLE", "CIR", "TERRACE", "TER", "HIGHWAY", "HWY", "PARKWAY", "PKWY", "LOOP",
-]);
+/** Every spelling of a street type, and the one spelling the key keeps: "Road" and "Rd" are one
+ *  street type, "Rd" and "Dr" are two streets. */
+const STREET_TYPE: Record<string, string> = {
+  STREET: "ST", ST: "ST", ROAD: "RD", RD: "RD", AVENUE: "AVE", AVE: "AVE", AV: "AVE", DRIVE: "DR", DR: "DR",
+  LANE: "LN", LN: "LN", COURT: "CT", CT: "CT", PLACE: "PL", PL: "PL", BOULEVARD: "BLVD", BLVD: "BLVD", WAY: "WAY",
+  TRAIL: "TRL", TRL: "TRL", CIRCLE: "CIR", CIR: "CIR", TERRACE: "TER", TER: "TER", HIGHWAY: "HWY", HWY: "HWY",
+  PARKWAY: "PKWY", PKWY: "PKWY", LOOP: "LOOP",
+};
 const DIRECTION: Record<string, string> = { NORTH: "N", SOUTH: "S", EAST: "E", WEST: "W" };
 
 /**
- * THE STREET, SPELLED ONE WAY: the house number and the street's own words, up to the street type.
- * "518 Crater Lake Rd, Chilcoot CA", "518 CRATER LAKE ROAD" and a job whose address is just "518
- * Crater Lake" are all "518 CRATER LAKE". This is spelling, not likeness: the same words in the
- * same order and the same house number. "13631 Northwoods" is never "13466 Northwoods", and a unit
- * on a shared street (300 W Lake Blvd #11) is cut off with the street type, so four jobs there are
- * four matches and nothing is picked. No house number, no key: a street alone places nothing.
+ * THE STREET, SPELLED ONE WAY: the house number, the street's own words and its street type, in
+ * one spelling. "518 Crater Lake Rd, Chilcoot CA" and "518 CRATER LAKE ROAD" are both "518 CRATER
+ * LAKE RD". This is spelling, not likeness: the same house number, the same words in the same
+ * order and the same street type. "13631 Northwoods" is never "13466 Northwoods", "518 Crater Lake
+ * Dr" is never "518 Crater Lake Rd", and a street written with no type is only ever the same as
+ * another written with no type. A unit on a shared street (300 W Lake Blvd #11) is cut off after
+ * the street type, so four jobs there are four matches and nothing is picked. No house number, no
+ * key: a street alone places nothing.
  */
 export function streetKey(raw: string | null | undefined): string | null {
   const first = String(raw ?? "").split(",")[0];
@@ -427,8 +433,13 @@ export function streetKey(raw: string | null | undefined): string | null {
   if (tokens.length < 2 || !/^\d+[A-Z]?$/.test(tokens[0])) return null;
   const out: string[] = [tokens[0]];
   for (let i = 1; i < tokens.length; i += 1) {
-    // A street type after at least one word of the street's own name ends the street.
-    if (STREET_TYPE.has(tokens[i]) && out.length >= 2) break;
+    // A street type after at least one word of the street's own name ends the street, and is kept
+    // in its one spelling.
+    const type = STREET_TYPE[tokens[i]];
+    if (type && out.length >= 2) {
+      out.push(type);
+      break;
+    }
     out.push(tokens[i]);
   }
   return out.length >= 2 ? out.join(" ") : null;

@@ -48,7 +48,7 @@ import {
   readerFields,
   tradeOf,
   updateItemTolerant,
-  type ReaderJob,
+  OPEN_JOBS_FOR_PAPER,
 } from "./paperwork-core";
 
 export type Result = { ok: boolean; error?: string };
@@ -86,15 +86,16 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const READ_LIMIT = 8 * 1024 * 1024;
 
 /**
- * The open jobs, twice over: the newest forty as the list the model may GUESS from, and every open
- * job (with its number, name, street and customer) for the exact match of what is printed on the
- * paper (jobFromPaperMarks). One read of jobs; the purchase orders ride beside it, and a PO read
- * that fails is no PO match, never a failed read.
+ * The open jobs (with their number, name, street and customer) for the exact match of what is
+ * printed on the paper (jobFromPaperMarks). The model never sees them (paperReaderSystem). The same
+ * open jobs, and as many, as the Organize row's picker offers (OPEN_JOBS_FOR_PAPER). One read of
+ * jobs; the purchase orders ride beside it, and a PO read that fails is no PO match, never a
+ * failed read.
  */
-async function readerJobs(supabase: any, orgId: string | null): Promise<{ offered: ReaderJob[]; markJobs: MarkJob[]; pos: MarkPo[] }> {
-  let jq = supabase.from("jobs").select("id, job_number, name, address, city, customers(name, company_name)");
+async function readerJobs(supabase: any, orgId: string | null): Promise<{ markJobs: MarkJob[]; pos: MarkPo[] }> {
+  let jq = supabase.from("jobs").select("id, job_number, name, address, customers(name, company_name)");
   if (orgId) jq = jq.eq("org_id", orgId);
-  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(500);
+  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
   const rows = (jobs ?? []) as any[];
   let pos: MarkPo[] = [];
   try {
@@ -106,10 +107,6 @@ async function readerJobs(supabase: any, orgId: string | null): Promise<{ offere
     pos = [];
   }
   return {
-    offered: rows.slice(0, 40).map((j) => ({
-      id: j.id,
-      label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}${j.city ? `, ${j.city}` : ""}`,
-    })),
     markJobs: rows.map((j) => ({
       id: String(j.id),
       job_number: j.job_number ?? null,
@@ -144,7 +141,7 @@ async function readInto(
   opts: { personSaysCost?: boolean } = {},
 ): Promise<OrganizedResult> {
   const supabase = ctx.supabase;
-  const { offered: jobList, markJobs, pos } = await readerJobs(supabase, ctx.orgId);
+  const { markJobs, pos } = await readerJobs(supabase, ctx.orgId);
 
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
   if (dlErr || !blob) {
@@ -175,7 +172,7 @@ async function readInto(
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
-      system: paperReaderSystem(trade, jobList),
+      system: paperReaderSystem(trade),
       messages: [
         {
           role: "user",
@@ -201,8 +198,9 @@ async function readInto(
     return { ok: false, error: `${e?.message ?? "AI could not read this file."} It is saved and waiting; press Read Now to try again.` };
   }
 
-  const f = readerFields(parsed, jobList, file.name, { markJobs, pos, personSaysCost: opts.personSaysCost });
-  const keepsItself = f.kind === "note" && f.amount === null && !opts.personSaysCost;
+  const f = readerFields(parsed, file.name, { markJobs, pos, personSaysCost: opts.personSaysCost });
+  // A picture never keeps itself as a note: it waits for a person to say what it is.
+  const keepsItself = f.kind === "note" && f.amount === null && !opts.personSaysCost && !f.proposal.picture;
   const { error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
     kind: f.kind,
     title: f.title,
@@ -333,12 +331,17 @@ export async function readAsCost(id: string): Promise<{ ok: boolean; error?: str
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data: item } = await ctx.supabase
     .from("organized_items")
-    .select("id, title, file_url, status, proposal")
+    .select("id, kind, title, file_url, status, proposal, doc_type, category, summary, amount")
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .maybeSingle();
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first, then change what it is." };
+  // THE SAME GATE THE BUTTON SHOWS: Bill Or Receipt is the answer to "What is this?", which only a
+  // picture asks. A CED PDF, a statement or a credit memo turned into a receipt here would lose
+  // what it is and become a cost File It could write.
+  if (readinessOf(item).state !== "picture")
+    return { ok: false, error: "Only a picture is asked what it is. To change what this paper is, use Fix Details." };
   const { picture: _wasPicture, ...rest } = proposalOf(item);
   const { data: back, error } = await updateItemTolerant(ctx.supabase, id, ctx.orgId, {
     doc_type: "receipt",
@@ -1324,6 +1327,11 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
 
   const action = String(parsed?.action ?? "unsure");
   const reason = typeof parsed?.reason === "string" ? parsed.reason : "";
+  const state = readinessOf(item).state;
+  // WHERE THE GUESS SHOWS (no dead doors): a job guess is a chip on a cost's picker, on a kept
+  // paper's picker, and on a picture once Job Photo is pressed; a bucket guess only on a bill or
+  // receipt. The reply says where to tap, or says nothing is there to tap.
+  const isCost = state === "ready" || state === "needs_total";
   try {
     // AI SUGGEST PROPOSES; IT DOES NOT FILE (Erik, 2026-09-24). This button was "AI Review &
     // File" and it called fileItem itself, so a model read could put a bill on a job with no person
@@ -1344,12 +1352,27 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
       revalidatePath("/organize");
       revalidatePath("/bills");
+      if (state === "picture")
+        return {
+          ok: true,
+          message: `A guess: ${label}. If it's a job photo, press Job Photo on the row and the guess is there to tap. If it's a bill or receipt, press Bill Or Receipt. ${reason}`.trim(),
+        };
       return { ok: true, message: `A guess: ${label}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
     if (action === "overhead") {
       // The bucket is one of the six, and Fees is never the AI's suggestion, because a supplier's
       // late or service charge is already on that supplier's own paperwork.
       const cat = bucketOf(parsed.overhead_category);
+      // Only a bill or a receipt can be a business cost, and only its row has a bucket to tap.
+      if (!isCost)
+        return {
+          ok: true,
+          message: `Suggested: Business Cost, ${cat}. Nothing was picked: ${
+            state === "picture"
+              ? "if it's a bill or receipt, press Bill Or Receipt on the row first."
+              : "this wasn't read as a bill or receipt. If it is one, Fix Details and change its type."
+          } ${reason}`.trim(),
+        };
       if (cat === "Fees" || looksLikeSupplierFee(item.title, item.vendor, item.summary))
         return {
           ok: false,
@@ -1373,9 +1396,9 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       const said = action === "task" ? `make a task ("${String(parsed.task_title || item.title).slice(0, 200)}")` : "keep it as a note";
       // A picture is asked what it is by a person first (Erik, 2026-09-24); a model does not answer
       // that question for them by moving it.
-      if (readinessOf(item).state === "picture")
+      if (state === "picture")
         return { ok: true, message: `Suggested: ${said}. Nothing was moved: answer What Is This? on the row. ${reason}`.trim() };
-      if (readinessOf(item).state !== "keep")
+      if (state !== "keep")
         return {
           ok: true,
           message: `Suggested: ${said}. This paper can be money, so it stays here until a person files it or sets it aside. ${reason}`.trim(),

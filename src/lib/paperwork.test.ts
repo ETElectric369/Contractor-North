@@ -172,7 +172,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
 
 describe("jobFromPaperMarks: exact, never fuzzy", () => {
   const JOBS: MarkJob[] = [
-    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake", customerNames: ["Jason Waldow", null] },
+    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd, Chilcoot CA 96105", customerNames: ["Jason Waldow", null] },
     { id: "j50", job_number: "J-050", name: "Tao Zhu", address: "235 Timber Creek Rd, Truckee CA 96161", customerNames: ["Tao Zhu"] },
     { id: "j51", job_number: "J-051", name: "Tao Zhu Shop", address: "13631 Northwoods Blvd Truckee CA 96161", customerNames: ["Tao Zhu"] },
     { id: "j09", job_number: "J-009", name: "TTP #11", address: "300 W Lake Blvd, Tahoe City", customerNames: ["Tahoe Tavern Properties"] },
@@ -180,9 +180,20 @@ describe("jobFromPaperMarks: exact, never fuzzy", () => {
   ];
 
   it("an address on the paper finds its job, spelled any of the ways a street is spelled", () => {
-    for (const address of ["518 Crater Lake Rd", "518 CRATER LAKE ROAD", "518 crater lake, Chilcoot CA"])
+    for (const address of ["518 Crater Lake Rd", "518 CRATER LAKE ROAD", "518 crater lake rd., Chilcoot CA"])
       expect(jobFromPaperMarks({ address }, JOBS)).toMatchObject({ kind: "one", jobId: "j46", from: "address" });
-    expect(jobFromPaperMarks({ address: "235 TIMBER CREEK" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50" });
+    expect(jobFromPaperMarks({ address: "235 TIMBER CREEK ROAD" }, JOBS)).toMatchObject({ kind: "one", jobId: "j50" });
+    expect(streetKey("300 West Lake Boulevard")).toBe(streetKey("300 W Lake Blvd #11"));
+  });
+  it("the street type is part of the street: Dr is not Rd, St is not Ave, and no type is not a type", () => {
+    expect(streetKey("518 Crater Lake Dr")).not.toBe(streetKey("518 Crater Lake Rd"));
+    expect(streetKey("100 Oak St")).not.toBe(streetKey("100 Oak Ave"));
+    expect(streetKey("100 Oak Street")).toBe(streetKey("100 Oak St"));
+    expect(streetKey("518 Crater Lake Road")).toBe(streetKey("518 Crater Lake Rd"));
+    expect(jobFromPaperMarks({ address: "518 Crater Lake Dr" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Crater Lake Ct" }, JOBS)).toEqual({ kind: "none" });
+    // A street written with no type names no typed street.
+    expect(jobFromPaperMarks({ address: "518 Crater Lake" }, JOBS)).toEqual({ kind: "none" });
   });
   it("a near address is NOT a match: a different house number, a different word, no house number", () => {
     expect(jobFromPaperMarks({ address: "13466 Northwoods Blvd" }, JOBS)).toEqual({ kind: "none" });

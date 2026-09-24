@@ -105,7 +105,7 @@ const did = (table: string, verb: string) => calls.find((c) => c.table === table
 const lastDid = (table: string, verb: string) => [...calls].reverse().find((c) => c.table === table && c.verb === verb);
 const all = (table: string, verb: string) => calls.filter((c) => c.table === table && c.verb === verb);
 
-const JOBS = { data: [{ id: "job-046", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake", city: null, customers: { name: "Jason" } }], error: null };
+const JOBS = { data: [{ id: "job-046", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", city: null, customers: { name: "Jason" } }], error: null };
 
 describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
   it("a bill whose PAPER names the job (its address) comes in with that job picked, says why, and still waits: no bill, no document", async () => {
@@ -155,7 +155,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     expect(did("organized_items", "insert")!.payload).toMatchObject({ content_sha256: "a".repeat(64), source: "organize", status: "needs_review" });
   });
 
-  it("a bill with NO job markings picks nothing: the model's own job_id is only a guess", async () => {
+  it("a bill with NO job markings picks nothing, and a job_id the model makes up is never picked", async () => {
     ai.parsed = {
       paper_type: "bill",
       kind: "receipt",
@@ -178,10 +178,53 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     );
     const res = await analyzeAndFile({ path: "org-1/organize/5.jpg", name: "5.jpg", mime: "image/jpeg", size: 1000 });
     expect(res.ok).toBe(true);
-    expect(res.item?.suggestion).toMatchObject({ picked: false, because: null });
+    expect(res.item?.suggestion ?? null).toBeNull();
     const proposal = did("organized_items", "update")!.payload.proposal;
-    expect(proposal).toMatchObject({ jobId: null, jobFrom: null, guessJobId: "job-046" });
+    expect(proposal).toMatchObject({ jobId: null, jobFrom: null, guessJobId: null });
     expect(did("bills", "insert")).toBeUndefined();
+  });
+
+  it("the reader is never shown the jobs, so what it copies into job_marks can only come off the paper", async () => {
+    ai.parsed = { paper_type: "receipt", kind: "receipt", vendor: "Home Depot", amount: 12, confidence: "high" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.insert": [{ data: { id: "oi-8" }, error: null }],
+        "jobs.select": [JOBS],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-8" }], error: null }],
+      },
+      calls,
+    );
+    await analyzeAndFile({ path: "org-1/organize/8.jpg", name: "8.jpg", mime: "image/jpeg", size: 1000 });
+    expect(ai.systems[0]).not.toContain("job-046");
+    expect(ai.systems[0]).not.toContain("Jason");
+    expect(ai.systems[0]).not.toContain("Crater Lake");
+    expect(ai.systems[0]).not.toContain('"job_id"');
+  });
+
+  it("a picture of handwriting is still a picture: it is not kept as a note, it waits and asks what it is", async () => {
+    for (const amount of [null, 40]) {
+      calls.length = 0;
+      ai.parsed = { paper_type: "photo", kind: "note", title: "Panel schedule", category: "Photo", amount, confidence: "high" };
+      state.client = fakeSupabase(
+        {
+          "organized_items.insert": [{ data: { id: "oi-9" }, error: null }],
+          "jobs.select": [JOBS],
+          "organizations.select": [{ data: { settings: {} }, error: null }],
+          "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+        },
+        calls,
+      );
+      const res = await analyzeAndFile({ path: "org-1/organize/9.jpg", name: "9.jpg", mime: "image/jpeg", size: 1000 });
+      expect(res.item).toMatchObject({ status: "needs_review", destination: "none", picture: true, kind: "job_document" });
+      expect(did("organized_items", "update")!.payload).toMatchObject({
+        kind: "job_document",
+        status: "needs_review",
+        doc_type: "not_a_cost",
+        category: "Photo",
+        proposal: expect.objectContaining({ picture: true }),
+      });
+    }
   });
 
   it("a PO number printed on the paper finds the job through this org's own purchase order", async () => {
@@ -835,7 +878,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     ai.parsed = { paper_type: "photo", kind: "job_document", title: "Home Depot", vendor: "Home Depot", amount: 23.4, category: "Photo", confidence: "medium" };
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { id: "oi-p", title: "IMG_2231.jpg", file_url: "org-1/organize/panel.jpg", status: "needs_review", proposal: { picture: true } }, error: null }],
+        "organized_items.select": [{ data: { ...PICTURE, title: "IMG_2231.jpg", file_url: "org-1/organize/panel.jpg" }, error: null }],
         "organized_items.update": [
           { data: [{ id: "oi-p" }], error: null }, // the answer
           { data: [{ id: "oi-p" }], error: null }, // the read
@@ -864,6 +907,51 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     );
     const res = await readAsCost("oi-p");
     expect(res.ok).toBe(false);
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  it("Bill Or Receipt is only the answer to What Is This?: a statement or a CED PDF is refused, and nothing is written", async () => {
+    for (const row of [
+      { ...PICTURE, doc_type: "statement", category: "Other", proposal: null },
+      { ...PICTURE, doc_type: null, category: "Other", proposal: { ced: { name: "ced.pdf", text: "x" } } },
+    ]) {
+      calls.length = 0;
+      state.client = fakeSupabase({ "organized_items.select": [{ data: row, error: null }] }, calls);
+      const res = await readAsCost("oi-p");
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("Only a picture is asked what it is");
+      expect(did("organized_items", "update")).toBeUndefined();
+    }
+  });
+
+  it("AI Suggest on a picture points to a control that is there: Job Photo for a job guess, nothing to tap for a bucket", async () => {
+    ai.parsed = { action: "file_job", job_id: "job-046", reason: "The panel label." };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...PICTURE, org_id: "org-1" }, error: null }],
+        "jobs.select": [JOBS],
+        "organized_items.update": [{ data: [{ id: "oi-p" }], error: null }],
+      },
+      calls,
+    );
+    const job = await aiReviewItem("oi-p");
+    expect(job.message).toContain("press Job Photo on the row");
+    expect(job.message).not.toContain("Tap it on the row");
+
+    calls.length = 0;
+    ai.parsed = { action: "overhead", overhead_category: "Tools & Supplies", reason: "Looks like a tool." };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...PICTURE, org_id: "org-1" }, error: null }],
+        "jobs.select": [JOBS],
+      },
+      calls,
+    );
+    const bucket = await aiReviewItem("oi-p");
+    expect(bucket.ok).toBe(true);
+    expect(bucket.message).toContain("Nothing was picked");
+    expect(bucket.message).toContain("press Bill Or Receipt");
+    expect(bucket.message).not.toContain("Tap it");
     expect(did("organized_items", "update")).toBeUndefined();
   });
 

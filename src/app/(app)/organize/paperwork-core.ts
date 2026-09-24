@@ -197,14 +197,26 @@ export function cleanDocNumber(raw: unknown): string | null {
 
 // ── THE READER ──────────────────────────────────────────────────────────────────────────────
 
-export type ReaderJob = { id: string; label: string };
+/**
+ * HOW MANY OPEN JOBS THE PAPER IS MATCHED AGAINST, AND HOW MANY THE ROW'S PICKER OFFERS: one
+ * number for both. A reader that matched a job the row's picker didn't carry said "Job picked from
+ * the address" on the upload line while the row asked where it goes, with that job not even in the
+ * list.
+ */
+export const OPEN_JOBS_FOR_PAPER = 500;
 
 /**
  * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Drop Paperwork). It reads and classifies; it does
- * not decide where anything goes. "job_id" is only the job the PAPER names, and it is shown to a
- * person as a suggestion.
+ * not decide where anything goes.
+ *
+ * IT NEVER SEES THE JOB LIST (Erik, 2026-09-24: a model's guess alone never picks a job). The
+ * job_marks it transcribes are matched to a job in code (jobFromPaperMarks), and that match is
+ * PICKED on the row. A reader that was also shown every open job's customer and street, and asked
+ * for its best guess in the same breath, could copy a name or a street off that list into
+ * job_marks, and its guess would come back as "read off the paper". Without the list, what it
+ * transcribes can only come from the paper. A guess at the job is AI Suggest's, a separate look.
  */
-export function paperReaderSystem(trade: string, jobs: ReaderJob[]): string {
+export function paperReaderSystem(trade: string): string {
   return `You read paperwork for a ${trade}. Look at the upload, say what kind of paper it is, and transcribe it.
 
 Respond with ONLY a JSON object (no prose):
@@ -225,19 +237,15 @@ Respond with ONLY a JSON object (no prose):
   "destination": "job" | "overhead" | "unsure" — "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (gas station, truck, shop supplies, small tools, phone, office, insurance, licenses); "unsure" otherwise,
   "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
   "job_marks": what is PRINTED OR WRITTEN on it that names a job, copied exactly as it appears, each null when it is not there: {"address": the job, ship-to or delivery street address (house number and street only; never the store's or supplier's own address, never the address of the company this is billed or sold to), "job_name": a job name or job reference, "job_number": a job number, "customer": the customer or homeowner the work is for (never the store, never the company this is billed or sold to)},
-  "job_id": your best guess at the matching job from the list below, or null. It is shown to a person as a guess and is never picked for them,
-  "job_hint": the words on the paper that point to that job (a job name, address or customer), or null,
+  "job_hint": the words on the paper that point to a job (a job name, address or customer), or null,
   "confidence": "low" | "medium" | "high"
 }
 
-Rules: copy job_marks only from what is on the paper; never fill one in from the job list. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+Rules: copy job_marks only from what is on the paper; never fill one in from anything else. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 
-${MASKED_PRICE_PROMPT_RULE}
-
-Jobs you may match against (id — label):
-${jobs.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`;
+${MASKED_PRICE_PROMPT_RULE}`;
 }
 
 export type ReadFields = {
@@ -286,7 +294,7 @@ export type ReaderOptions = {
 };
 
 /** What the reader said, cleaned into the row's columns. Nothing here files anything. */
-export function readerFields(parsed: any, jobs: ReaderJob[], fallbackTitle: string, opts: ReaderOptions = {}): ReadFields {
+export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOptions = {}): ReadFields {
   const rawType = String(parsed?.paper_type ?? "").trim().toLowerCase();
   const saidPicture = rawType === "photo" || rawType === "picture";
   let typeRead = saidPicture ? "not_a_cost" : paperTypeOf(parsed?.paper_type);
@@ -297,9 +305,11 @@ export function readerFields(parsed: any, jobs: ReaderJob[], fallbackTitle: stri
   // The type decides the kind, so a "bill" can never sit in the tray as a job document with no
   // cost controls on it.
   const doc_type: PaperType = (typeRead as PaperType | null) ?? (kindRead === "receipt" ? "receipt" : "other");
-  const kind: ReadFields["kind"] =
-    doc_type === "receipt" || doc_type === "bill" ? "receipt" : kindRead === "note" ? "note" : "job_document";
   const picture = !opts.personSaysCost && (saidPicture || ((doc_type === "not_a_cost" || doc_type === "other") && parsed?.category === "Photo"));
+  // A PICTURE IS NEVER A NOTE, even a picture of handwriting (a panel schedule, a label): a note
+  // keeps itself, and a picture asks a person "What is this?" first.
+  const kind: ReadFields["kind"] =
+    doc_type === "receipt" || doc_type === "bill" ? "receipt" : kindRead === "note" && !picture ? "note" : "job_document";
   let category = String(parsed?.category || (doc_type === "bill" ? "Bill" : KIND_TO_CATEGORY[kind]) || "Other").slice(0, 60);
   if (picture) category = "Photo";
   else if (opts.personSaysCost && !/^(Receipt|Bill|Invoice)$/.test(category)) category = doc_type === "bill" ? "Bill" : "Receipt";
@@ -322,11 +332,11 @@ export function readerFields(parsed: any, jobs: ReaderJob[], fallbackTitle: stri
     lines.some((l) => looksProvisionallyPriced(l?.description));
   // WHERE IT GOES (Erik, 2026-09-24). The job is PICKED only when what is printed on the paper
   // names exactly one open job, matched in code (jobFromPaperMarks), never by the model. The
-  // model's own job_id and its bucket are GUESSES: offered on the row as a chip, never picked. A
-  // bucket only for a cost the reader called overhead, never Fees, never anything fee-shaped.
+  // reader is never shown the jobs, so it has no job to guess; its bucket is a GUESS, offered on
+  // the row as a chip, never picked. A bucket only for a cost the reader called overhead, never
+  // Fees, never anything fee-shaped.
   const marks = marksOf(parsed);
   const byMarks = jobFromPaperMarks(marks, opts.markJobs ?? [], opts.pos ?? []);
-  const guessJobId = jobs.some((j) => j.id === parsed?.job_id) ? String(parsed.job_id) : null;
   const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
   const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;
@@ -335,7 +345,7 @@ export function readerFields(parsed: any, jobs: ReaderJob[], fallbackTitle: stri
     jobFrom: byMarks.kind === "one" ? byMarks.from : null,
     jobHint: byMarks.kind === "one" ? byMarks.words || hint : hint,
     jobConflict: byMarks.kind === "conflict" ? byMarks.sentence : null,
-    guessJobId: guessJobId && !(byMarks.kind === "one" && byMarks.jobId === guessJobId) ? guessJobId : null,
+    guessJobId: null,
     bucket: isCost && bucketRead && !feeShaped ? bucketRead : null,
     po: cleanDocNumber(parsed?.po_number),
     ...(picture ? { picture: true } : {}),
