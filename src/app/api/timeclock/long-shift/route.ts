@@ -3,7 +3,7 @@ import { requireCron } from "@/lib/cron-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { reportError } from "@/lib/observe";
 import { createNotifications } from "@/lib/notifications";
-import { orgStaffIds, sendPushToProfiles } from "@/lib/push";
+import { orgStaffIdsOrThrow, sendPushToProfiles } from "@/lib/push";
 import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
@@ -30,7 +30,9 @@ import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps
  * CLAIM FIRST, PER STEP. Each step has its own column (0291): long_shift_warned_at for the bell
  * line, long_shift_nudged_at for the question and the buzz. It is set with a guarded UPDATE before
  * anything is sent, and a zero-row claim is skipped, so two overlapping runs never tell anybody
- * twice, and the 10-hour line can never stand in for the 12-hour question.
+ * twice, and the 10-hour line can never stand in for the 12-hour question. The office's list is
+ * read BEFORE a claim (a failed lookup throws and spends nothing), and a bell line the database
+ * refused gives its claim back, so the next hour tries again instead of the office never hearing.
  *
  * WHO HEARS. The office is its staff who may see the timecards (owner, admin, office: orgStaffIds,
  * active only), about a crew member's clock; a staff member's own clock is his own business, as it
@@ -88,14 +90,16 @@ export async function GET(request: Request) {
       counts.nudges_due += nudge.length;
       if (!bell.length && !nudge.length) continue;
 
+      // Throws on a failed lookup (never "nobody"), and is asked before any claim is spent.
       let staffIds: string[] | null = null;
-      const office = async () => (staffIds ??= await orgStaffIds(org.id));
+      const office = async () => (staffIds ??= await orgStaffIdsOrThrow(org.id));
+      const stamp = new Date(nowMs).toISOString();
 
       /** The guarded claim: true only when THIS run set the column. */
       const claim = async (id: string, column: "long_shift_warned_at" | "long_shift_nudged_at") => {
         const { data: claimed, error: claimErr } = await supabase
           .from("time_entries")
-          .update({ [column]: new Date(nowMs).toISOString() })
+          .update({ [column]: stamp })
           .eq("id", id)
           .eq("org_id", org.id)
           .eq("status", "open")
@@ -103,6 +107,17 @@ export async function GET(request: Request) {
           .select("id");
         if (claimErr) throw claimErr;
         return !!claimed?.length; // zero rows: another run took it, or the clock stopped meanwhile
+      };
+      /** Give back a claim THIS run took and could not deliver on, so the next run retries it. */
+      const release = async (id: string, column: "long_shift_warned_at" | "long_shift_nudged_at") => {
+        const { error: relErr } = await supabase
+          .from("time_entries")
+          .update({ [column]: null })
+          .eq("id", id)
+          .eq("org_id", org.id)
+          .eq(column, stamp)
+          .select("id");
+        if (relErr) reportError("cron-long-shift", relErr, { orgId: org.id, entryId: id, release: column });
       };
 
       /** The facts every sentence names, in the org's clock. */
@@ -127,35 +142,59 @@ export async function GET(request: Request) {
 
       // ── STEP ONE: the office's bell line at OFFICE_BELL_HOURS. Silent, so never held. ──
       for (const r of bell) {
-        if (!(await claim(r.id, "long_shift_warned_at"))) continue;
         const f = facts(r);
-        if (!f.crew) continue;
-        await createNotifications(org.id, await office(), {
+        const to = f.crew ? await office() : [];
+        if (!(await claim(r.id, "long_shift_warned_at"))) continue;
+        if (!f.crew || !to.length) continue;
+        // The tail promises the question only while it is still ahead, and says when it will
+        // really come: at 12 hours, or in the morning when 12 hours falls in the night's hold. A
+        // row already at 12 (the job was down, or it is 0291's first run) is asked in step two of
+        // this same run or the 6 AM one, so its bell line promises nothing.
+        const askAtMs = Date.parse(r.clock_in) + LONG_SHIFT_HOURS * 3_600_000;
+        const tail =
+          f.person?.active === false || !(askAtMs > nowMs)
+            ? ""
+            : quietHold(askAtMs, tz)
+              ? ` ${f.first} is asked in the morning.`
+              : ` At ${LONG_SHIFT_HOURS} hours ${f.first} is asked.`;
+        const ok = await createNotifications(org.id, to, {
           type: "long_shift",
           title: `${f.first} Is Still On The Clock`,
           body:
             `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago. ` +
-            `If the shift is over, ${f.door} on Timecards. At ${LONG_SHIFT_HOURS} hours ${f.first} is asked.`,
+            `If the shift is over, ${f.door} on Timecards.${tail}`,
           url: `/timecards?entry=${r.id}`,
         });
+        if (!ok) {
+          // Its only output is that line: nothing was told, so nothing is counted and the claim
+          // goes back for the next hour (createNotifications has already reported why).
+          await release(r.id, "long_shift_warned_at");
+          counts.failed++;
+          continue;
+        }
         counts.office_bells++;
       }
 
       // ── STEP TWO: at LONG_SHIFT_HOURS the person is asked and the office buzzes (never at night). ──
       for (const r of nudge) {
-        if (!(await claim(r.id, "long_shift_nudged_at"))) continue;
         const f = facts(r);
+        const to = f.crew ? await office() : [];
+        if (!(await claim(r.id, "long_shift_nudged_at"))) continue;
 
         if (f.person?.active !== false) {
           const title = "Still On The Clock?";
           const body = `You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}. Tap to set when you stopped.`;
           await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
-          await createNotifications(org.id, [r.profile_id], { type: "long_shift", title, body, url: "/timeclock" });
+          // The push has gone, so the claim stays spent (giving it back would push twice); a bell
+          // line the database refused is reported by createNotifications and counted here.
+          if (!(await createNotifications(org.id, [r.profile_id], { type: "long_shift", title, body, url: "/timeclock" }))) {
+            counts.failed++;
+          }
           counts.asked++;
         }
 
-        if (f.crew) {
-          await sendPushToProfiles(await office(), "long_shift", {
+        if (f.crew && to.length) {
+          await sendPushToProfiles(to, "long_shift", {
             title: `${f.first} Is Still On The Clock`,
             body:
               `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago` +

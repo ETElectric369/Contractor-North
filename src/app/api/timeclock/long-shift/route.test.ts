@@ -12,14 +12,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
-const spies = vi.hoisted(() => ({ notify: [] as any[], push: [] as any[] }));
+const spies = vi.hoisted(() => ({ notify: [] as any[], push: [] as any[], notifyOk: true, staffFails: false }));
 
 vi.mock("@/lib/cron-guard", () => ({ requireCron: vi.fn(() => ({ supabase: state.client })) }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
-vi.mock("@/lib/notifications", () => ({ createNotifications: vi.fn(async (...a: any[]) => void spies.notify.push(a)) }));
+vi.mock("@/lib/notifications", () => ({
+  createNotifications: vi.fn(async (...a: any[]) => {
+    spies.notify.push(a);
+    return spies.notifyOk;
+  }),
+}));
 vi.mock("@/lib/push", () => ({
   sendPushToProfiles: vi.fn(async (...a: any[]) => void spies.push.push(a)),
-  orgStaffIds: vi.fn(async () => ["erik-1", "alexa-1"]),
+  orgStaffIdsOrThrow: vi.fn(async () => {
+    if (spies.staffFails) throw new Error("profiles lookup failed");
+    return ["erik-1", "alexa-1"];
+  }),
 }));
 
 import { GET } from "./route";
@@ -96,6 +104,8 @@ beforeEach(() => {
   calls = [];
   spies.notify.length = 0;
   spies.push.length = 0;
+  spies.notifyOk = true;
+  spies.staffFails = false;
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());
@@ -167,7 +177,45 @@ describe("GET /api/timeclock/long-shift", () => {
     expect(calls.filter((c) => c.verb === "update").map((c) => Object.keys(c.payload)[0])).toEqual(["long_shift_warned_at"]);
     expect(spies.push).toEqual([]);
     expect(spies.notify).toHaveLength(1);
+    // Already past 12: the line promises nothing about a question that is not ahead of it.
+    expect(spies.notify[0][2].body).toMatch(/12 hours ago\. If the shift is over, Clock Out Brian on Timecards\.$/);
     expect(res).toMatchObject({ held: 1, office_bells: 1, asked: 0, office_buzzes: 0 });
+  });
+
+  it("a bell line whose 12-hour mark falls in the night says he is asked in the morning", async () => {
+    // Brian's 1:37 PM clock-in: the line goes up at 11:37 PM; twelve hours is 1:37 AM, held till 6.
+    const now = pacific("23:37");
+    vi.setSystemTime(now);
+    state.client = fakeSupabase([brian(10, now)], { "entry-b": ["long_shift_warned_at"] }, calls);
+    await GET(req());
+    expect(spies.notify[0][2].body).toMatch(/Clock Out Brian on Timecards\. Brian is asked in the morning\.$/);
+  });
+
+  it("a bell line the database refused gives its claim back and is not counted as sent", async () => {
+    const now = pacific("18:00");
+    vi.setSystemTime(now);
+    spies.notifyOk = false;
+    state.client = fakeSupabase([brian(10, now)], { "entry-b": ["long_shift_warned_at"] }, calls);
+    const res = await (await GET(req())).json();
+    const updates = calls.filter((c) => c.verb === "update");
+    expect(updates).toHaveLength(2);
+    const [claim, release] = updates;
+    expect(release.payload).toEqual({ long_shift_warned_at: null });
+    // Only the stamp THIS run wrote is given back, never another run's claim.
+    expect(release.filters).toContainEqual(["eq", "long_shift_warned_at", claim.payload.long_shift_warned_at]);
+    expect(res).toMatchObject({ office_bells: 0, failed: 1 });
+  });
+
+  it("an office lookup that fails spends no claim and is reported", async () => {
+    const now = pacific("20:00");
+    vi.setSystemTime(now);
+    spies.staffFails = true;
+    state.client = fakeSupabase([brian(12, now)], { "entry-b": ["long_shift_warned_at", "long_shift_nudged_at"] }, calls);
+    const res = await (await GET(req())).json();
+    expect(calls.filter((c) => c.verb === "update")).toEqual([]);
+    expect(spies.notify).toEqual([]);
+    expect(spies.push).toEqual([]);
+    expect(res).toMatchObject({ failed: 1, office_bells: 0, office_buzzes: 0 });
   });
 
   it("the office does not hear about a staff member's own clock; he is still asked", async () => {

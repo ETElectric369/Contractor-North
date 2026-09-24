@@ -28,21 +28,31 @@ function ensureVapid() {
 }
 
 /** Profile ids of an org's office staff (owner/admin/office) — for staff-facing
- *  alerts like new inquiries, accepted quotes, and paid invoices. */
+ *  alerts like new inquiries, accepted quotes, and paid invoices. Never throws: a failed lookup
+ *  is reported and reads as nobody. */
 export async function orgStaffIds(orgId: string | null | undefined): Promise<string[]> {
-  if (!orgId) return [];
   try {
-    const sb = createServiceClient();
-    const { data } = await sb
-      .from("profiles")
-      .select("id")
-      .eq("org_id", orgId)
-      .in("role", STAFF_ROLES)
-      .eq("active", true); // a removed person's phone must stop buzzing with customer data
-    return (data ?? []).map((p: any) => p.id);
-  } catch {
+    return await orgStaffIdsOrThrow(orgId);
+  } catch (e) {
+    reportError("orgStaffIds", e, { orgId });
     return [];
   }
+}
+
+/** The same list, but a failed lookup THROWS instead of reading as "nobody". For a caller that
+ *  spends a once-only claim on the answer (the long-shift job): an empty office from a DB error must
+ *  not be mistaken for an office that was told. */
+export async function orgStaffIdsOrThrow(orgId: string | null | undefined): Promise<string[]> {
+  if (!orgId) return [];
+  const sb = createServiceClient();
+  const { data, error } = await sb
+    .from("profiles")
+    .select("id")
+    .eq("org_id", orgId)
+    .in("role", STAFF_ROLES)
+    .eq("active", true); // a removed person's phone must stop buzzing with customer data
+  if (error) throw error;
+  return (data ?? []).map((p: any) => p.id);
 }
 
 export type PushKind =

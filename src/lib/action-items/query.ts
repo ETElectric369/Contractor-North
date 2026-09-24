@@ -797,9 +797,11 @@ async function buildActionItems(ctx: {
       // An open shift counts ZERO hours until somebody stops it (payroll never pays on a guess),
       // so the old line saying its hours were piling up was false. What is true: it is still
       // running, and the tap is the door that names whose clock it is (Erik, 2026-09-24: "clock
-      // out for them"). Every open finding here is a forgotten one, so the sheet asks when.
+      // out for them"). Every open finding here is a forgotten one, so the sheet asks when. The door
+      // words LEAD: the row's second line truncates at phone width, and a trailing "Tap to Clock
+      // Out Brian." was the part the ellipsis ate.
       subtitle: f.openStill
-        ? `Still on the clock since ${formatTime(f.when, tz || undefined)}. Tap to ${door}.`
+        ? `${door} · on since ${formatTime(f.when, tz || undefined)}`
         : "Closed hours nobody can bill",
       who: f.name,
       when: f.when,
