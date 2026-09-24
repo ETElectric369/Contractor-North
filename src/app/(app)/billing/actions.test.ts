@@ -114,9 +114,19 @@ const WALDOW_LINES = [
 ];
 
 /** The reads importCostsIntoInvoice makes that aren't about the bills themselves. */
-function costsImportRoute(opts: { bills: any[]; lines: any[]; landedAfter: string[]; rpcError?: any; onInvoice?: any[] }) {
+function costsImportRoute(opts: {
+  bills: any[];
+  lines: any[];
+  landedAfter: string[];
+  rpcError?: any;
+  onInvoice?: any[];
+  /** What the invoice holds BEFORE the import (the room a return has), and what landed before it. */
+  existing?: any[];
+  landedBefore?: string[];
+}) {
   return (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select") {
+      if (q.cols === "dismissed_import_keys") return { data: { dismissed_import_keys: [] } };   // returnsThatFit's room
       if (q.cols.includes("invoice_kind") && q.cols.includes("job_id") && q.single) return { data: { id: INV, job_id: JOB, invoice_kind: "standard" } };
       if (q.cols.includes("invoice_number")) return { data: [] };            // activeDrawOnJob
       if (q.cols === "status") return { data: { status: "draft" } };          // requireLiveInvoice
@@ -133,8 +143,10 @@ function costsImportRoute(opts: { bills: any[]; lines: any[]; landedAfter: strin
       if (q.cols.includes("import_key, edited")) {
         // BEFORE the RPC nothing has landed; AFTER it, the rows the RPC wrote.
         const seen = landedCalls++;
-        return { data: seen === 0 ? [] : opts.landedAfter.map((id) => ({ import_key: `bill:${id}`, edited: false, source_ids: [id] })) };
+        const ids = seen === 0 ? opts.landedBefore ?? [] : opts.landedAfter;
+        return { data: ids.map((id) => ({ import_key: `bill:${id}`, edited: false, source_ids: [id] })) };
       }
+      if (q.cols === "import_source, import_key, line_total, edited") return { data: opts.existing ?? [] }; // returnsThatFit's room
       if (q.cols === "line_total") return { data: [] };                       // recalcInvoice
       if (q.cols === "import_key, line_total, edited") return { data: opts.onInvoice ?? [] }; // edited tax rows
     }
@@ -273,6 +285,158 @@ describe("importCostsIntoInvoice — an edited tax row left behind is said out l
   });
 });
 
+describe("importCostsIntoInvoice — a supplier return reaches the invoice (INV-078)", () => {
+  /** The return as filed: four LED housings back to CED, -$51.58, every figure negative. */
+  const RET = { id: "2f328286-b134-428f-a8b5-ad7702c15453", supplier: "Consolidated Electrical Dist.", bill_number: null, amount: "-51.58", po_id: null, pricing_provisional: false };
+  const RET_LINES = (billable: boolean) => [
+    { id: "8a5a091c", bill_id: RET.id, description: "H245ICAT 4 in LED Shallow IC HSG", quantity: "-4.00", unit_price: "-11.83", amount: "-47.32", category: "Electrical", sort_order: 0, billable, billed_amount: null },
+    { id: "5f575ae5", bill_id: RET.id, description: "Sales Tax", quantity: "1.00", unit_price: "-4.26", amount: "-4.26", category: "Tax", sort_order: 1, billable, billed_amount: null },
+  ];
+  /** An ordinary receipt on the same job, so the import has something else to carry. */
+  const BUY = { id: "c9daf1b8-03fb-4435-a518-24a000d31c3a", supplier: "Consolidated Electrical Dist.", bill_number: null, amount: "103.99", po_id: null, pricing_provisional: false };
+  const BUY_LINES = [
+    { id: "d26f3d69", bill_id: BUY.id, description: "4 in RL 600/900LM 5CCT D2W", quantity: "4.00", unit_price: "23.85", amount: "95.40", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
+    { id: "5f226fd0", bill_id: BUY.id, description: "Tax @ 9.00000%", quantity: "1.00", unit_price: "8.59", amount: "8.59", category: "Tax", sort_order: 1, billable: true, billed_amount: null },
+  ];
+  const offered = () => (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+
+  it("imports a billable return as credit rows at the job's markup, claimed by the return's id, and says so", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [BUY, RET], lines: [...BUY_LINES, ...RET_LINES(true)], landedAfter: [BUY.id, RET.id] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    const credit = offered().filter((r) => (r.source_ids ?? []).includes(RET.id));
+    expect(credit.map((r) => [r.description, r.quantity, r.unit_price])).toEqual([
+      ["Returned: H245ICAT 4 in LED Shallow IC HSG", 4, -13.61],
+      ["Returned: tax", 1, -4.88],
+    ]);
+    // Claimed exactly like a purchase: every row carries the bill's id and nothing else.
+    for (const r of credit) expect(r.source_ids).toEqual([RET.id]);
+    expect(Math.round(credit.reduce((s, r) => s + r.quantity * r.unit_price, 0) * 100) / 100).toBe(-59.32);
+    expect(res.stats.summary).toContain("a supplier return credited back to the customer: -$59.32");
+  });
+
+  it("never credits a return twice: one another invoice holds is skipped, and named", async () => {
+    const base = costsImportRoute({ bills: [RET], lines: RET_LINES(true), landedAfter: [] });
+    state.client = fakeSupabase((q) => {
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("invoices!inner")) {
+        return {
+          data: [
+            {
+              import_key: `bill:${RET.id}:remainder`,
+              source_ids: [RET.id],
+              invoices: { id: "inv-077", invoice_number: "INV-077", status: "sent", created_at: "2026-09-20T00:00:00Z", job_id: JOB, jobs: { job_number: "J-050" } },
+            },
+          ],
+        };
+      }
+      return base(q);
+    }, calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.empty).toBe(true);
+    expect(res.error).toContain("already on INV-077");
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("credits nothing for the INV-078 return as Erik left it (every line switched off), and says why", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [BUY, RET], lines: [...BUY_LINES, ...RET_LINES(false)], landedAfter: [BUY.id] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    // Nothing new appears for the return: the rows offered are exactly the purchase's.
+    expect(offered().every((r) => (r.source_ids ?? []).includes(BUY.id))).toBe(true);
+    expect(offered().some((r) => r.unit_price < 0)).toBe(false);
+    expect(res.stats.summary).toContain(
+      "the Consolidated Electrical Dist. return of $51.58 not credited — none of what went back was billed to the customer",
+    );
+    expect(res.stats.summary).not.toContain("credited back");
+  });
+
+  it("a non-billable return alone is a sentence with the reason, not \"no bills yet\"", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [RET], lines: RET_LINES(false), landedAfter: [] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.empty).toBe(true);
+    expect(res.error).toContain("return of $51.58 not credited");
+    expect(res.error).not.toContain("No purchase orders or bills");
+  });
+
+  it("does not say \"credited back\" again on a re-import of a draft that already holds the credit", async () => {
+    state.client = fakeSupabase(
+      costsImportRoute({ bills: [BUY, RET], lines: [...BUY_LINES, ...RET_LINES(true)], landedBefore: [BUY.id, RET.id], landedAfter: [BUY.id, RET.id] }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    expect(offered().some((r) => (r.source_ids ?? []).includes(RET.id))).toBe(true); // still refreshed
+    expect(res.stats.summary).not.toContain("credited back");
+  });
+
+  it("holds a return bigger than the invoice: no credit rows, no claim, and the summary says why", async () => {
+    // The return alone, on an empty draft: crediting it would put the invoice at -$59.32, which
+    // settles as paid the moment it is sent and loses the credit.
+    state.client = fakeSupabase(costsImportRoute({ bills: [RET], lines: RET_LINES(true), landedAfter: [] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.empty).toBe(true);
+    expect(res.error).toContain("return ($59.32 back to the customer) held");
+    expect(res.error).toContain("next invoice on this job that bills more than it");
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("lands the return when the invoice's own lines already bill more than it", async () => {
+    // $95 of labor already on the draft: room for the $59.32 credit.
+    state.client = fakeSupabase(
+      costsImportRoute({
+        bills: [RET],
+        lines: RET_LINES(true),
+        landedAfter: [RET.id],
+        existing: [{ import_source: "labor", import_key: "labor:p-1", line_total: 95, edited: false }],
+      }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    expect(offered().every((r) => (r.source_ids ?? []).includes(RET.id))).toBe(true);
+    expect(res.stats.summary).toContain("credited back to the customer: -$59.32");
+  });
+
+  it("credits only what the customer was billed for the purchase: a box billed in part, then returned", async () => {
+    // A $108.36 Twister box, billed to this job at $13.00 (0272), then the box goes back. The
+    // return line carries no split of its own - the app cannot set one there - so the cap comes
+    // from the purchase: $13.00 + its tax share, marked up, never the whole box.
+    const BOX = { id: "11111111-0000-4000-8000-000000000001", supplier: "CED", bill_number: null, amount: "118.11", po_id: null, pricing_provisional: false };
+    const BOX_LINES = [
+      { id: "b1", bill_id: BOX.id, description: "IDEAL 30641 Twister 341-Tan 500", quantity: "1", unit_price: "108.36", amount: "108.36", category: "Electrical", sort_order: 0, billable: true, billed_amount: "13.00" },
+      { id: "b2", bill_id: BOX.id, description: "Tax", quantity: "1", unit_price: "9.75", amount: "9.75", category: "Tax", sort_order: 1, billable: true, billed_amount: null },
+    ];
+    const BACK = { id: "22222222-0000-4000-8000-000000000002", supplier: "CED", bill_number: null, amount: "-118.11", po_id: null, pricing_provisional: false };
+    const BACK_LINES = [
+      { id: "r1", bill_id: BACK.id, description: "IDEAL 30641 Twister 341-Tan 500", quantity: "-1", unit_price: "-108.36", amount: "-108.36", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
+      { id: "r2", bill_id: BACK.id, description: "Tax", quantity: "1", unit_price: "-9.75", amount: "-9.75", category: "Tax", sort_order: 1, billable: true, billed_amount: null },
+    ];
+    state.client = fakeSupabase(
+      costsImportRoute({ bills: [BOX, BACK], lines: [...BOX_LINES, ...BACK_LINES], landedAfter: [BOX.id, BACK.id] }),
+      calls,
+    );
+    const res: any = await importCostsIntoInvoice(INV, 25);
+    expect(res.ok).toBe(true);
+    const sumOf = (id: string) => Math.round(offered().filter((r) => (r.source_ids ?? []).includes(id)).reduce((t, r) => t + r.quantity * r.unit_price, 0) * 100) / 100;
+    // The purchase bills $13.00 + $1.17 tax share = $14.17 × 1.25 = $17.71; the return credits
+    // exactly that back, and not the $147.64 the whole box would be.
+    expect(sumOf(BOX.id)).toBe(17.71);
+    expect(sumOf(BACK.id)).toBe(-17.71);
+    expect(offered().find((r) => r.import_key === "bli:r1")?.description).toBe("Returned: IDEAL 30641 Twister 341-Tan 500 (the part this job was billed)");
+  });
+
+  it("still skips a zero bill: it is neither a cost nor a credit", async () => {
+    const zero = { ...RET, id: "57118d9f-c69e-4d32-9747-dca98d162771", amount: "0.00" };
+    state.client = fakeSupabase(costsImportRoute({ bills: [zero], lines: [], landedAfter: [] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("No purchase orders or bills on this job yet.");
+  });
+});
+
 // ── Finding 2: the draw must not swallow a real import failure ────────────────────────────────
 
 const NEW_DRAW = "0dda0000-0000-4000-8000-00000000000d";
@@ -294,6 +458,7 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols.includes("invoice_number")) return { data: [] };                   // activeDrawOnJob
       if (q.cols === "status") return { data: { status: "draft" } };
       if (q.cols === "subtotal") return { data: { subtotal: 665 } }; // the 7 hr the labor import landed
+      if (q.cols === "dismissed_import_keys") return { data: { dismissed_import_keys: [] } };
       if (q.cols.includes("sent_at")) return { data: { sent_at: null } };
       if (q.cols.includes("tax_rate")) return { data: { tax_rate: 0, status: "draft" } };
     }
@@ -312,6 +477,8 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols === "invoice_id") return { data: [] };
       if (q.cols === "line_total") return { data: [] };
       if (q.cols === "import_key, line_total, edited") return { data: [] };
+      // The draw's labor, already landed when the costs import measures a return's room.
+      if (q.cols === "import_source, import_key, line_total, edited") return { data: [{ import_source: "labor", import_key: "labor:p-1", line_total: 665, edited: false }] };
     }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
@@ -359,6 +526,23 @@ describe("createProgressReportInvoice — a lost import is never a quiet one (02
     expect(res.ok).toBe(false);
     expect(String(res.error)).toContain("INV-070");
     expect(calls.some((c) => c.table === "invoices" && c.verb === "delete")).toBe(true);
+  });
+
+  it("bills the new labor when a pending supplier return outweighs it, and holds the return", async () => {
+    spies.reportError = () => {};
+    // 7 hr ($665) of unclaimed labor and a $1,000 return ($1,200 at 20%): the net is below zero,
+    // but the labor is real and unbilled. The gate reads the WORK, not the net; the return is held
+    // by the costs import because it would take the draw below zero.
+    state.client = fakeSupabase(
+      drawRoute({ bills: [{ id: "b-ret", supplier: "CED", bill_number: null, amount: "-1000.00", po_id: null, pricing_provisional: false }] }),
+      calls,
+    );
+    const res: any = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe(NEW_DRAW);
+    const costs = calls.filter((c) => c.table === "rpc:upsert_imported_invoice_items" && c.payload?.p_source === "costs");
+    expect(costs.length).toBe(0); // the return was held, so nothing negative was written
+    expect(calls.some((c) => c.table === "invoices" && c.verb === "delete")).toBe(false);
   });
 
   it("still passes quietly when a side is merely EMPTY — a labor-only job is not a failure", async () => {

@@ -214,7 +214,7 @@ export default async function JobDetailPage({
       // that opens from it disagreed by $12.22 on the Waldow job while both claimed to be the
       // same number. The projection law, on the one figure the two screens share.
       .select(
-        "id, supplier, bill_number, amount, status, bill_date, po_id, bill_line_items(id, quantity, unit_price, amount, category, billable, billed_amount)",
+        "id, supplier, bill_number, amount, status, bill_date, po_id, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
       )
       .eq("job_id", id)
       // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without

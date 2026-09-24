@@ -279,6 +279,58 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.claimedOn).toEqual([]);
   });
 
+  /** The INV-078 return: four LED housings back to CED, -$51.58, every figure negative. */
+  const ledReturn = (billable: boolean) => ({
+    id: "bill-ret",
+    amount: -51.58,
+    po_id: null,
+    bill_line_items: [
+      { id: "r1", quantity: -4, unit_price: -11.83, amount: -47.32, category: "Electrical", billable },
+      { id: "r2", quantity: 1, unit_price: -4.26, amount: -4.26, category: "Tax", billable },
+    ],
+  });
+
+  it("a pending supplier return is a credit owed to the customer, at the same markup — what the importer writes", () => {
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [osh, ledReturn(true)], markupPct: 15 });
+    expect(w.returnsCount).toBe(1);
+    expect(w.returnsAmount).toBe(51.58);
+    expect(w.returnsCredit).toBe(59.32); // the sum of the importer's credit rows, sign flipped
+    expect(w.billsCount).toBe(1); // the return is not a bill the customer pays for
+    expect(w.billsBilled).toBe(7.48);
+    expect(w.total).toBe(-51.84); // 7.48 − 59.32: the customer is owed money
+    expect(w.excluded).toBe(9.78); // only the OSH snacks; a return is not "your own cost"
+  });
+
+  it("the INV-078 return as Erik left it (every line switched off) owes the customer nothing — nothing new appears", () => {
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [ledReturn(false)], markupPct: 15 });
+    expect(w.returnsCount).toBe(0);
+    expect(w.returnsCredit).toBe(0);
+    expect(w.total).toBe(0);
+  });
+
+  it("a return credits no more than the purchase it reverses billed — the card reads the importer's cap", () => {
+    // The purchase line was switched off, so sending it back owes the customer nothing, even with
+    // the return's own lines left on. The words match with CED's catalogue number in front.
+    const buy = {
+      id: "bill-buy",
+      amount: 47.32,
+      po_id: null,
+      bill_line_items: [{ id: "p1", description: "4 in LED SHALLOW IC HSG", quantity: 4, unit_price: 11.83, amount: 47.32, category: "Electrical", billable: false }],
+    };
+    const back = ledReturn(true);
+    back.bill_line_items[0] = { ...back.bill_line_items[0], description: "H245ICAT 4 in LED Shallow IC HSG" } as (typeof back.bill_line_items)[0];
+    const w = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [buy, back], markupPct: 15 });
+    expect(w.returnsCount).toBe(0);
+    expect(w.returnsCredit).toBe(0);
+  });
+
+  it("a return another invoice already credited is claimed there, never counted again", () => {
+    const w = computeUnbilledWork({ ...base, claims: claimsHolding(["bill-ret"]), jobEntries: [], bills: [ledReturn(true)], markupPct: 15 });
+    expect(w.returnsCount).toBe(0);
+    expect(w.total).toBe(0);
+    expect(w.claimedOn).toEqual(["INV-061"]);
+  });
+
   it("carries schemaReady:false through when 0255 hasn't landed, so callers can refuse rather than double-bill", () => {
     const w = computeUnbilledWork({ ...base, claims: foldClaims([], false) });
     expect(w.schemaReady).toBe(false);

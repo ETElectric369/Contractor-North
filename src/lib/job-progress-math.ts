@@ -3,6 +3,7 @@
  *  without a DB. The server fn does the fetching, then calls this. */
 
 import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
+import { returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 
 export type JobProgressFinancials = {
@@ -46,7 +47,7 @@ export type MaterialPo = { id?: string | null; total: number | null; status?: st
  *  into: it decides how much of `amount` reaches the customer (0268/0272), and a row that carries
  *  none - a hand-entered bill, or a caller whose select list has not been widened - bills its
  *  whole amount exactly as it always did. */
-export type MaterialBill = { amount: number | null; po_id?: string | null; bill_line_items?: BillLine[] | null };
+export type MaterialBill = { id?: string | null; amount: number | null; po_id?: string | null; bill_line_items?: BillLine[] | null };
 
 /**
  * THE material-cost rule, shared by every summer (progress financials, profitability,
@@ -118,6 +119,8 @@ export function computeJobProgress(input: {
 
   const markup = num(input.markupPercent);
   const mk = (cost: number) => cents(cost * (1 + markup / 100));
+  // A return credits at most what the purchase it reverses billed - the importer's own reading.
+  const returnLines = returnLinesAgainstPurchases(input.bills ?? [], (b) => b.bill_line_items);
   // Live POs only: a draft/cancelled order is not a cost, and a PO already paid by a
   // supplier bill is superseded by that bill (never charge one delivery twice).
   const billableMaterials =
@@ -138,6 +141,14 @@ export function computeJobProgress(input: {
     (input.bills ?? []).reduce((s, b) => {
       const billable = billableBillCost(b.amount, b.bill_line_items);
       return billable > 0 ? s + mk(billable) : s;
+    }, 0) -
+    // A SUPPLIER RETURN COMES OFF (INV-078). The importer now credits a return filed as a negative
+    // bill, marked up like the purchase it reverses and net of the lines that were never the
+    // customer's; the reference figure has to move with it or the panel stops reconciling to the
+    // lines it promises to equal. Same shared reading as the importer and the Unbilled card.
+    (input.bills ?? []).reduce((s, b) => {
+      const back = returnCreditCost(b.amount, returnLines.get(b) ?? b.bill_line_items);
+      return back > 0 ? s + mk(back) : s;
     }, 0);
 
   const workToDate = cents(num(input.billableLabor) + billableMaterials);

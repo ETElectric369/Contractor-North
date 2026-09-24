@@ -206,7 +206,9 @@ function stillBills(l: BillLine): boolean {
  * Returns the rows for ONE bill, in order. An empty array means this bill has nothing to charge
  * the customer for — every line on it was the company's own cost.
  */
-const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
+/** A receipt's tax line, by its category. Exported so a supplier return names its tax share with
+ *  the same test the purchase side uses to keep tax out of the itemisation. */
+export const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
 const sumBy = (ls: BillLine[], f: (l: BillLine) => number) =>
   ls.reduce((sum, l) => Math.round((sum + f(l)) * 100) / 100, 0);
 /** What a line does NOT bill: the whole thing when it is switched off, the shelf's share of a
@@ -287,6 +289,11 @@ export function billableBillCost(amount: unknown, lines: BillLine[] | null | und
   return net > 0 ? net : 0;
 }
 
+/** The words on a row that bills only part of a line (0272). Exported so a supplier RETURN of
+ *  that same container can say the credit is only the part this job was billed, in its own words,
+ *  without a second copy of the phrase to drift from this one. */
+export const PART_USED_SUFFIX = " (what this job used)";
+
 export function billItemisation(
   bill: BillForItemisation,
   allLines: BillLine[],
@@ -351,7 +358,7 @@ export function billItemisation(
      * not print. So the row says what is true: this is the part of that container the job used.
      */
     if (part != null) {
-      billRows.push({ import_key: `bli:${l.id}`, description: `${desc} (what this job used)`, quantity: 1, unit: "ea", unit_price: sell });
+      billRows.push({ import_key: `bli:${l.id}`, description: `${desc}${PART_USED_SUFFIX}`, quantity: 1, unit: "ea", unit_price: sell });
       emitted = Math.round((emitted + sell) * 100) / 100;
       continue;
     }
@@ -429,6 +436,10 @@ export type EditedRemainderDrift = {
   kept: number;
   /** What billItemisation says the row is at this markup ($0 when it no longer makes one). */
   computed: number;
+  /** The bill is a supplier RETURN, so the row is its credit row ("Returned: tax"), not a
+   *  "Supplies & tax" row - the warning has to name the row the office can actually see. This is
+   *  that row's name as the importer writes it. */
+  returnRow?: string;
 };
 
 /**
@@ -449,8 +460,8 @@ export type EditedRemainderDrift = {
  * numbers they typed, and nagging about it would be noise.
  */
 export function editedRemainderDrift(
-  bills: readonly { id: string | number; supplier?: string | null }[],
-  offered: readonly { import_key: string; quantity: number; unit_price: number; source_ids?: string[] }[],
+  bills: readonly { id: string | number; supplier?: string | null; amount?: unknown }[],
+  offered: readonly { import_key: string; description?: string; quantity: number; unit_price: number; source_ids?: string[] }[],
   onInvoice: readonly { import_key?: string | null; line_total?: unknown; edited?: boolean | null }[],
 ): EditedRemainderDrift[] {
   const out: EditedRemainderDrift[] = [];
@@ -465,13 +476,22 @@ export function editedRemainderDrift(
     const computed = row ? Math.round(row.quantity * row.unit_price * 100) / 100 : 0;
     const keptAmt = Math.round((Number(kept.line_total) || 0) * 100) / 100;
     if (Math.round(keptAmt * 100) === Math.round(computed * 100)) continue;
-    out.push({ billId: id, supplier: String(b.supplier ?? "").trim() || "A receipt", kept: keptAmt, computed });
+    const isReturn = Math.round((Number(b.amount) || 0) * 100) < 0;
+    out.push({
+      billId: id,
+      supplier: String(b.supplier ?? "").trim() || "A receipt",
+      kept: keptAmt,
+      computed,
+      ...(isReturn ? { returnRow: row?.description || "Returned: tax" } : {}),
+    });
   }
   return out;
 }
 
-/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" */
+/** "Swigard's: your edited Supplies & tax row stayed at $1.45; at 30% it would be $1.51" - or, on a
+ *  supplier return, "CED: your edited Returned: tax row stayed at -$4.88; ...". */
 export function editedRemainderSentence(d: EditedRemainderDrift, markupPct: unknown): string {
   const pct = +(Number(markupPct) || 0).toFixed(2);
-  return `${d.supplier}: your edited Supplies & tax row stayed at ${formatCurrency(d.kept)}; at ${pct}% it would be ${formatCurrency(d.computed)}`;
+  const row = d.returnRow ?? "Supplies & tax";
+  return `${d.supplier}: your edited ${row} row stayed at ${formatCurrency(d.kept)}; at ${pct}% it would be ${formatCurrency(d.computed)}`;
 }
