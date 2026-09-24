@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Send, Sparkles, Loader2, Mic, Check, Square, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
+import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -610,10 +611,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   useEffect(() => {
     if (!autoStart) return;
     setVoiceMode(true);
-    // The mic was started in-gesture by the topbar tap. If it took, mirror "listening"; if it didn't
-    // (no mic, or iOS rejected even the in-gesture start), nudge to tap Talk rather than sit silent.
+    // The mic was started in-gesture by the topbar tap. If it took, mirror "listening". The stream
+    // backend narrates its own start ("Connecting to the mic…", then ready, blocked, or not
+    // answering), and onStatus replays the line it is on, so writing over it here is what left
+    // "Tap the mic to answer" on screen in a panel that has no mic button. Only the fallback
+    // backend, which says nothing, gets a line from here.
     if (speech.isListening()) setListening(true);
-    else setStatus("Tap the mic to answer");
+    else if (!speech.usingStreamBackend()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStart]);
 
@@ -1088,7 +1092,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // silently.
   function startMic() {
     speech.setResultHandler((t) => sendRef.current?.(t, true)); // normal mode (confirmListen may have changed it)
-    if (!speech.startListening()) setStatus("Tap the mic to answer");
+    if (!speech.startListening()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
   }
 
   // Enter voice mode from the text composer's Talk button. (Leaving is the Stop button →
@@ -1129,7 +1133,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         say("Say yes or no.", () => { if (voiceModeRef.current && confirmRef.current) confirmListen(); });
       }
     });
-    if (!speech.startListening()) setStatus("Tap the mic to answer");
+    if (!speech.startListening()) setStatus(speech.speechSupported() ? TRY_AGAIN_LINE : NO_VOICE_LINE);
   }
 
   // Resolve a pending confirm: run it (yes) or drop it (no). Nothing wrote until here.
@@ -1191,8 +1195,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         </div>
       ) : null}
       {/* GLASS: a clean command box — the ESTIMATOR summary + its line items, the live status line,
-          then one line per conversation turn expanding down. No header/footer chrome; the topbar
-          waveform button is the only control (voice + stop), the panel handle moves/collapses it. */}
+          a one-line text box, then one line per conversation turn expanding down. No header/footer
+          chrome; the topbar waveform button is the only VOICE control (voice + stop), the panel
+          handle moves/collapses it. */}
       {glass && (
         <div className="flex min-h-0 flex-1 flex-col">
           {draft && (
@@ -1256,6 +1261,37 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                 />
               </div>
             </div>
+          )}
+          {/* THE TEXT BOX. Voice was this panel's only input, so a mic that failed made Nort
+              unreachable from it (Erik's phone, 09-16 to 09-23, with nothing on screen saying
+              why). Typed questions go through the same send() as spoken ones. It sits right
+              under the status line, which is what "or type below" points at, and high in a
+              panel docked under the topbar, where the keyboard cannot cover it. Hidden while a
+              proposal waits on Yes or Cancel, the same as the full-page composer. */}
+          {!pendingConfirm && (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!input.trim() || streaming) return;
+                stopVoice(); // typing leaves voice mode: a half-heard spoken turn must not land after this one
+                setStatus(null); // a leftover mic line ("Mic blocked…") is not this turn's status
+                void send(input);
+              }}
+              className="flex shrink-0 items-center gap-2 px-3 pb-2"
+            >
+              <Input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type a question"
+                aria-label="Type a question for Nort"
+                enterKeyHint="send"
+                autoComplete="off"
+                className="h-11 min-w-0 flex-1 bg-white/80"
+              />
+              <Button type="submit" disabled={streaming || !input.trim()} className="shrink-0">
+                Send
+              </Button>
+            </form>
           )}
           {messages.length > 0 && (
             // overscroll-contain: on iOS, scrolling past the end of this list used to carry on
