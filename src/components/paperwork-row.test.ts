@@ -15,6 +15,7 @@ vi.mock("@/app/(app)/organize/actions", () => ({
   archiveItem: vi.fn(),
   deleteOrganizedItem: vi.fn(),
   fileItem: vi.fn(),
+  readAsCost: vi.fn(),
   readPaperworkItem: vi.fn(),
   tiePaperwork: vi.fn(),
   undoPaperwork: vi.fn(),
@@ -44,21 +45,51 @@ const render = (item: Partial<PaperRowItem>, matches: any[] = []) =>
   renderToStaticMarkup(createElement(PaperworkRow, { item: { ...base, ...item }, jobs: JOBS, matches, onFiled: () => {} }));
 
 describe("PaperworkRow", () => {
-  it("a read receipt: one line, Ready To File, a picker with nothing picked, and File It shut until a place is picked", () => {
+  it("a read receipt with NO job markings: nothing picked, it asks where it goes, a job and the buckets side by side, File It shut", () => {
     const html = render({});
     expect(html).toContain("Receipt, Home Depot, $84.12, paid at the counter");
     expect(html).toContain("Ready To File");
-    expect(html).toContain("Where Does It Go?");
+    expect(html).toMatch(/>Where does this go\?<\/p>/);
+    // Both choices, side by side, neither picked.
+    expect(html).toMatch(/<select[^>]*aria-label="A Job"/);
+    expect(html).toMatch(/<select[^>]*aria-label="Or A Business Cost"/);
+    expect(html).toContain("A Job…");
+    expect(html).toContain("Or A Business Cost…");
+    expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
+    expect(html).not.toContain("Job picked from");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Pick where it goes first/);
     // The six buckets are offered for a cost.
     for (const b of ["Gas &amp; Truck", "Tools &amp; Supplies", "Phone &amp; Office", "Insurance &amp; Licenses", "Fees", "Other"]) expect(html).toContain(b);
   });
 
-  it("the reader's job is PICKED and marked Suggested, and the row says nothing is filed until File It", () => {
-    const html = render({ proposal: { jobId: "job-046", jobHint: "518 CRATER LAKE" } });
-    expect(html).toMatch(/<option value="job:job-046" selected="">Jason Waldow \(Suggested\)<\/option>/);
-    expect(html).toContain("nothing is filed until you press File It");
+  it("a bill whose PAPER names the job comes in with it picked, and says why in a few words; File It is open", () => {
+    const html = render({ proposal: { jobId: "job-046", jobFrom: "address", jobHint: "518 CRATER LAKE RD" } });
+    expect(html).toMatch(/<option value="job-046" selected="">Jason Waldow \(On The Paper\)<\/option>/);
+    expect(html).toContain("Job picked from the address on the receipt");
+    expect(html).toContain("nothing is filed until you press the button");
+    expect(html).not.toMatch(/>Where does this go\?<\/p>/);
     expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>[^<]*<svg[^>]*>.*?File It<\/button>/);
+  });
+
+  it("a MODEL'S GUESS at the job never pre-selects: it is a chip labelled a guess, and the row still asks", () => {
+    for (const proposal of [{ guessJobId: "job-046", why: "The store is near the job." }, { jobId: "job-046", jobHint: "518 CRATER LAKE" }]) {
+      const html = render({ proposal });
+      expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
+      expect(html).toMatch(/>Where does this go\?<\/p>/);
+      expect(html).toMatch(/A Guess: (<!-- -->)?Jason Waldow/);
+      expect(html).toContain("(Tap To Pick)");
+      expect(html).toContain("Not read off the paper");
+      expect(html).not.toContain("Job picked from");
+      expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Pick where it goes first/);
+    }
+  });
+
+  it("a paper that names two jobs says so and picks neither", () => {
+    const html = render({
+      proposal: { jobId: "job-046", jobFrom: "address", jobConflict: "The paper points to more than one job (the address and the PO number), so no job was picked." },
+    });
+    expect(html).toContain("The paper points to more than one job");
+    expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
   });
 
   it("a statement is named honestly, with no File It at all", () => {
@@ -100,10 +131,32 @@ describe("PaperworkRow", () => {
     expect(html).toContain("On the CED documents list with no bill yet");
   });
 
-  it("a suggestion that arrives with the row is the picked value (the picker follows it until touched)", () => {
+  it("a bucket a model liked is a guess too: offered, never picked", () => {
     const html = render({ proposal: { bucket: "Gas & Truck" } });
-    expect(html).toMatch(/<option value="cost:Gas &amp; Truck" selected="">Gas &amp; Truck \(Suggested\)<\/option>/);
-    expect(html).toContain("It is picked below; nothing is filed until you press File It.");
+    expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
+    expect(html).toMatch(/A Guess: (<!-- -->)?Business Cost, Gas &amp; Truck/);
+    expect(html).toMatch(/>Where does this go\?<\/p>/);
+  });
+
+  it("a plain PICTURE asks What is this? first: Job Photo, Bill Or Receipt, Something Else, and no cost controls", () => {
+    const html = render({
+      kind: "job_document",
+      doc_type: "not_a_cost",
+      category: "Photo",
+      vendor: null,
+      amount: null,
+      payment: null,
+      title: "Panel, 200A main",
+      proposal: { picture: true },
+    });
+    expect(html).toContain("Picture, Panel, 200A main");
+    expect(html).toContain("What is this?");
+    expect(html).toContain("Job Photo");
+    expect(html).toContain("Bill Or Receipt");
+    expect(html).toContain("Something Else");
+    expect(html).not.toContain("File It");
+    expect(html).not.toContain("Or A Business Cost");
+    expect(html).not.toContain("Keep It In Files");
   });
 
   it("a CED document in the same PDF that didn't add up is said on the row", () => {
@@ -135,7 +188,7 @@ describe("PaperworkRow", () => {
   });
 
   it("every control is a 44px target", () => {
-    const html = render({});
+    const html = render({ proposal: { guessJobId: "job-046" } });
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toMatch(/h-11/);
     expect(html).toMatch(/<select[^>]*class="[^"]*h-11/);
   });

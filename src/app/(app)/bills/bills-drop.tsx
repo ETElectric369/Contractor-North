@@ -142,7 +142,12 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
     if (!read.ok) return say(id, name, `Saved, not read: ${read.error ?? "the reader didn't answer"} It is waiting below.`, "warn");
     const it = read.item;
     const total = it?.amount != null ? `$${it.amount.toFixed(2)}` : "no total read";
-    say(id, name, `Read: ${it?.vendor ?? it?.title ?? "paper"}, ${total}. Waiting below for File It.`, "ok");
+    // The same answer the row gives (Erik, 2026-09-24): a picture is asked what it is; a job the
+    // paper names is picked and says why; anything else asks where it goes.
+    if (it?.picture) return say(id, name, `Read: a picture (${it.title}). Waiting below: what is this?`, "ok");
+    const s = it?.suggestion;
+    const where = s?.picked && s.jobLabel ? `${s.because ?? "Job picked from the paper"}: ${s.jobLabel}. Waiting below for File It.` : "Waiting below: where does this go?";
+    say(id, name, `Read: ${it?.vendor ?? it?.title ?? "paper"}, ${total}. ${where}`, "ok");
   }
 
   async function drain() {

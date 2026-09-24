@@ -9,7 +9,10 @@
  * the books. The server's File It and the button on screen ask the same function, so a door that
  * looks open is open and a refusal on the server is the sentence the screen already showed.
  *
- * The app suggests, a person decides. Nothing in here writes, and nothing here picks a job.
+ * The app suggests, a person decides. Nothing in here writes. A job is pre-picked only when the
+ * PAPER names it (a printed job number, PO, address, job name or customer matching exactly one
+ * open job, jobFromPaperMarks); a model's guess is offered as a guess and never picked, and a
+ * picture is asked what it is before it is asked where it goes (Erik, 2026-09-24).
  */
 
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
@@ -101,12 +104,25 @@ export function billCategoryFor(item: { doc_type?: string | null; category?: str
 // ── THE ROW ─────────────────────────────────────────────────────────────────────────────────
 
 export type PaperProposal = {
-  /** The job the PAPER names (a job number, a customer, an address on it). Never a guess. */
+  /**
+   * The job the PAPER names, found by exact matching in code (jobFromPaperMarks): a job number, a
+   * PO number, a job address, a job name or a customer printed on it that points to exactly one
+   * open job. Only a row that also carries `jobFrom` is pre-picked; a `jobId` with no `jobFrom` is
+   * what a model said before 2026-09-24 and is offered as a guess, never picked.
+   */
   jobId?: string | null;
+  /** WHICH printed mark found that job. Its presence is what makes `jobId` a pick, not a guess. */
+  jobFrom?: JobMarkKind | null;
   /** Why that job: the words on the paper that point to it. */
   jobHint?: string | null;
-  /** A business-cost bucket the reader suggests. Never Fees: a supplier's fee is its own paper. */
+  /** The paper names more than one job (two marks disagree). Said on the row; nothing is picked. */
+  jobConflict?: string | null;
+  /** A model's guess at the job (the reader's job_id, or AI Suggest). Offered as a chip, never picked. */
+  guessJobId?: string | null;
+  /** A business-cost bucket a model guesses. Offered as a chip, never picked. Never Fees. */
   bucket?: string | null;
+  /** The reader says this is a plain picture (a job site, a panel, a label), not paperwork. */
+  picture?: boolean;
   po?: string | null;
   /** Over the reader's size limit: a person fills it in. */
   tooBig?: boolean;
@@ -125,7 +141,7 @@ export type PaperProposal = {
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
   /** How the row was last filed, so Undo takes down exactly that and nothing else. */
-  filed?: { how: "bill" | "tie" | "supplier_documents" | "kept"; landed?: string[] } | null;
+  filed?: { how: "bill" | "tie" | "supplier_documents" | "kept" | "photo"; landed?: string[] } | null;
 };
 
 export type PaperItem = {
@@ -139,6 +155,8 @@ export type PaperItem = {
   payment?: string | null;
   doc_type?: string | null;
   doc_number?: string | null;
+  /** What the reader or a person called it ("Receipt", "Bill", "Invoice", "Photo", …). */
+  category?: string | null;
   proposal?: unknown;
   summary?: string | null;
   bill_id?: string | null;
@@ -175,8 +193,22 @@ export function isRead(item: PaperItem): boolean {
 export function paperTypeOfItem(item: PaperItem): PaperType | null {
   const t = paperTypeOf(item.doc_type);
   if (t) return t;
-  if (item.kind === "receipt") return /bill|invoice/i.test(String((item as { category?: string }).category ?? "")) ? "bill" : "receipt";
+  if (item.kind === "receipt") return /bill|invoice/i.test(String(item.category ?? "")) ? "bill" : "receipt";
   return null;
+}
+
+/**
+ * A PLAIN PICTURE, NOT PAPER (Erik, 2026-09-24: "if it's a picture not a bill ... it should ask
+ * where to file it"). A photo of a job site, a panel or a label was read as "not a cost" and
+ * offered Keep It In Files, as if it were a permit. It is asked "What is this?" first. The reader
+ * says so on the proposal; a row read before that says it with the category "Photo".
+ */
+export function isPicture(item: PaperItem): boolean {
+  const t = paperTypeOfItem(item);
+  if (t !== "not_a_cost" && t !== "other") return false;
+  const p = proposalOf(item);
+  if (p.ced) return false;
+  return p.picture === true || String(item.category ?? "") === "Photo";
 }
 
 /**
@@ -185,6 +217,10 @@ export function paperTypeOfItem(item: PaperItem): PaperType | null {
  */
 export function describePaper(item: PaperItem): string {
   const p = proposalOf(item);
+  if (isPicture(item)) {
+    const title = String(item.title ?? "").trim();
+    return title ? `Picture, ${title}` : "Picture";
+  }
   if (p.ced) {
     const n = p.ced.numbers.length;
     return `CED ${n === 1 ? "document" : `${n} documents`}, ${p.ced.numbers.slice(0, 3).join(", ")}${n > 3 ? "…" : ""}, ${money(p.ced.total)}`;
@@ -207,6 +243,7 @@ export type Readiness =
   | { state: "supplier_documents"; sentence: string }
   | { state: "later"; sentence: string }
   | { state: "keep"; sentence: string }
+  | { state: "picture"; sentence: string }
   | { state: "filed"; sentence: string };
 
 export function readinessOf(item: PaperItem): Readiness {
@@ -225,6 +262,7 @@ export function readinessOf(item: PaperItem): Readiness {
     if (amountOf(item) === null) return { state: "needs_total", sentence: "No total was read. Fix Details and put the total in, then File It." };
     return { state: "ready", sentence: "Ready To File." };
   }
+  if (isPicture(item)) return { state: "picture", sentence: "What is this?" };
   return { state: "keep", sentence: t === "not_a_cost" ? "Not a cost. Keep it on a job or in files." : "Keep it on a job or in files." };
 }
 
@@ -233,13 +271,16 @@ export function readinessOf(item: PaperItem): Readiness {
 export type PaperDestination =
   | { type: "job"; jobId: string }
   | { type: "overhead"; category: BusinessCostBucket }
+  /** A picture filed on a job as a job photo (the job page's Photos), never as a cost. */
+  | { type: "photo"; jobId: string }
   | { type: "keep" };
 
-/** The picker's value: "job:<id>", "cost:<bucket>", "keep". */
+/** The picker's value: "job:<id>", "cost:<bucket>", "photo:<id>", "keep". */
 export function destinationValue(d: PaperDestination | null): string {
   if (!d) return "";
   if (d.type === "job") return `job:${d.jobId}`;
   if (d.type === "overhead") return `cost:${d.category}`;
+  if (d.type === "photo") return `photo:${d.jobId}`;
   return "keep";
 }
 
@@ -247,6 +288,7 @@ export function parseDestination(value: string | null | undefined): PaperDestina
   const v = String(value ?? "");
   if (v === "keep") return { type: "keep" };
   if (v.startsWith("job:") && v.length > 4) return { type: "job", jobId: v.slice(4) };
+  if (v.startsWith("photo:") && v.length > 6) return { type: "photo", jobId: v.slice(6) };
   if (v.startsWith("cost:")) {
     const bucket = v.slice(5);
     return isBusinessCostBucket(bucket) ? { type: "overhead", category: bucket } : null;
@@ -254,24 +296,213 @@ export function parseDestination(value: string | null | undefined): PaperDestina
   return null;
 }
 
+/** Was this job found on the PAPER (a printed mark matched exactly), rather than guessed? */
+function markedJob(p: PaperProposal): string | null {
+  return p.jobId && p.jobFrom && (JOB_MARK_KINDS as readonly string[]).includes(p.jobFrom) && !p.jobConflict ? p.jobId : null;
+}
+
 /**
- * The reader's suggestion, as the picker's starting value, or "" (nothing picked) when the paper
- * does not point anywhere. A suggested job is only kept if it is still on the job list.
+ * WHAT THE PICKER STARTS ON (Erik, 2026-09-24: "if it's ... a bill with no address or job
+ * markings then it should ask where to file it").
+ *
+ * Only the job the PAPER names: a printed mark that code matched to exactly one open job. Nothing
+ * else is ever picked for a person: not a model's guess at the job, not a model's bucket. A paper
+ * with no marks starts on nothing, and the row asks "Where does this go?". A guess is offered
+ * beside the question as a chip (guessOf), labelled a guess, and a person taps it or doesn't.
  */
 export function suggestedDestination(item: PaperItem, jobIds: readonly string[]): string {
+  const job = markedJob(proposalOf(item));
+  return job && jobIds.includes(job) ? `job:${job}` : "";
+}
+
+/**
+ * THE ONE-TAP GUESS: a model's idea of where this goes, never picked. A job a model guessed (the
+ * reader's job_id, AI Suggest, or a job a model wrote before marks existed), else a bucket for a
+ * cost. Null when there is no guess, or it is what the paper already picked.
+ */
+export function guessOf(item: PaperItem, jobIds: readonly string[]): string | null {
   const p = proposalOf(item);
-  if (p.jobId && jobIds.includes(p.jobId)) return `job:${p.jobId}`;
+  const picked = suggestedDestination(item, jobIds);
+  const marked = markedJob(p);
+  const jobGuess = p.guessJobId ?? (p.jobId && p.jobId !== marked ? p.jobId : null);
+  if (jobGuess && jobIds.includes(jobGuess) && `job:${jobGuess}` !== picked) return `job:${jobGuess}`;
   const t = paperTypeOfItem(item);
   if ((t === "receipt" || t === "bill") && p.bucket && isBusinessCostBucket(p.bucket) && p.bucket !== "Fees") return `cost:${p.bucket}`;
-  return "";
+  return null;
+}
+
+/** The word for the paper in a sentence: the receipt, the bill, the invoice, the photo. */
+function paperWord(item: PaperItem): string {
+  if (isPicture(item)) return "photo";
+  const t = paperTypeOfItem(item);
+  if (t === "bill") return String(item.category ?? "") === "Invoice" ? "invoice" : "bill";
+  if (t === "receipt") return "receipt";
+  return "paper";
+}
+
+/**
+ * WHY THE JOB IS ALREADY PICKED, in a few words: "Job picked from the address on the receipt".
+ * Null when the paper picked nothing.
+ */
+export function pickedBecause(item: PaperItem): string | null {
+  const p = proposalOf(item);
+  if (!markedJob(p) || !p.jobFrom) return null;
+  return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}`;
+}
+
+// ── WHICH JOB THE PAPER NAMES (exact, never fuzzy) ─────────────────────────────────────────
+
+/** The printed marks, in the order they are trusted: a number, then a street, then a name. */
+export const JOB_MARK_KINDS = ["job_number", "po", "address", "job_name", "customer"] as const;
+export type JobMarkKind = (typeof JOB_MARK_KINDS)[number];
+
+const JOB_MARK_WORDS: Record<JobMarkKind, string> = {
+  job_number: "job number",
+  po: "PO number",
+  address: "address",
+  job_name: "job name",
+  customer: "customer name",
+};
+
+/** What the reader transcribed off the paper. The words only: code decides what they point to. */
+export type PaperMarks = {
+  address?: string | null;
+  jobName?: string | null;
+  jobNumber?: string | null;
+  po?: string | null;
+  customer?: string | null;
+};
+
+/** An open job, as the matcher sees it. */
+export type MarkJob = {
+  id: string;
+  job_number?: string | null;
+  name?: string | null;
+  address?: string | null;
+  /** The customer's name and company name. */
+  customerNames?: (string | null | undefined)[];
+};
+
+/** A purchase order this org wrote (purchase_orders), which names its job. */
+export type MarkPo = { po_number: string | null; job_id: string | null };
+
+export type JobFromMarks =
+  | { kind: "one"; jobId: string; from: JobMarkKind; words: string }
+  | { kind: "conflict"; sentence: string }
+  | { kind: "none" };
+
+/** "J-046", "j 046" and "J046" are one printed number. */
+function compactKey(raw: string | null | undefined): string {
+  return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+/** "Jason  Waldow", "JASON WALDOW" and "Jason Waldow." are one name. */
+function wordsKey(raw: string | null | undefined): string {
+  return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+}
+
+const STREET_TYPE = new Set([
+  "STREET", "ST", "ROAD", "RD", "AVENUE", "AVE", "AV", "DRIVE", "DR", "LANE", "LN", "COURT", "CT", "PLACE", "PL",
+  "BOULEVARD", "BLVD", "WAY", "TRAIL", "TRL", "CIRCLE", "CIR", "TERRACE", "TER", "HIGHWAY", "HWY", "PARKWAY", "PKWY", "LOOP",
+]);
+const DIRECTION: Record<string, string> = { NORTH: "N", SOUTH: "S", EAST: "E", WEST: "W" };
+
+/**
+ * THE STREET, SPELLED ONE WAY: the house number and the street's own words, up to the street type.
+ * "518 Crater Lake Rd, Chilcoot CA", "518 CRATER LAKE ROAD" and a job whose address is just "518
+ * Crater Lake" are all "518 CRATER LAKE". This is spelling, not likeness: the same words in the
+ * same order and the same house number. "13631 Northwoods" is never "13466 Northwoods", and a unit
+ * on a shared street (300 W Lake Blvd #11) is cut off with the street type, so four jobs there are
+ * four matches and nothing is picked. No house number, no key: a street alone places nothing.
+ */
+export function streetKey(raw: string | null | undefined): string | null {
+  const first = String(raw ?? "").split(",")[0];
+  const tokens = first
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((t) => DIRECTION[t] ?? t);
+  if (tokens.length < 2 || !/^\d+[A-Z]?$/.test(tokens[0])) return null;
+  const out: string[] = [tokens[0]];
+  for (let i = 1; i < tokens.length; i += 1) {
+    // A street type after at least one word of the street's own name ends the street.
+    if (STREET_TYPE.has(tokens[i]) && out.length >= 2) break;
+    out.push(tokens[i]);
+  }
+  return out.length >= 2 ? out.join(" ") : null;
+}
+
+/**
+ * WHICH OPEN JOB DOES THE PAPER NAME? Exact matching only, the way the app already resolves a job
+ * by its number or its name (resolveJobId: exactly one match decides, several ask). No likeness,
+ * no nearest, no score.
+ *
+ *   · each mark finds the open jobs it names exactly: a job number, or a PO against job numbers
+ *     and this org's own purchase orders; an address by its street; a job name; a customer;
+ *   · a mark that names exactly one job is decisive, and every mark that names anything must
+ *     include that job. Otherwise the paper names two jobs, and NOTHING is picked (said, not
+ *     hidden);
+ *   · no decisive mark, nothing picked, and the row asks.
+ */
+export function jobFromPaperMarks(
+  marks: PaperMarks | null | undefined,
+  jobs: readonly MarkJob[],
+  pos: readonly MarkPo[] = [],
+): JobFromMarks {
+  if (!marks) return { kind: "none" };
+  const openIds = new Set(jobs.map((j) => j.id));
+  const found: { kind: JobMarkKind; words: string; ids: Set<string> }[] = [];
+  const add = (kind: JobMarkKind, words: string | null | undefined, ids: string[]) => {
+    const set = new Set(ids.filter((id) => openIds.has(id)));
+    if (set.size) found.push({ kind, words: String(words ?? "").trim(), ids: set });
+  };
+
+  const jobNumber = compactKey(marks.jobNumber);
+  if (jobNumber.length >= 2 && /\d/.test(jobNumber))
+    add("job_number", marks.jobNumber, jobs.filter((j) => compactKey(j.job_number) === jobNumber).map((j) => j.id));
+
+  const po = compactKey(marks.po);
+  if (po.length >= 3 && /\d/.test(po))
+    add("po", marks.po, [
+      ...jobs.filter((j) => compactKey(j.job_number) === po).map((j) => j.id),
+      ...pos.filter((x) => x.job_id && compactKey(x.po_number) === po).map((x) => String(x.job_id)),
+    ]);
+
+  const street = streetKey(marks.address);
+  if (street) add("address", marks.address, jobs.filter((j) => streetKey(j.address) === street).map((j) => j.id));
+
+  const name = wordsKey(marks.jobName);
+  if (name.length >= 3) add("job_name", marks.jobName, jobs.filter((j) => wordsKey(j.name) === name).map((j) => j.id));
+
+  const customer = wordsKey(marks.customer);
+  if (customer.length >= 3)
+    add(
+      "customer",
+      marks.customer,
+      jobs.filter((j) => (j.customerNames ?? []).some((c) => wordsKey(c) === customer)).map((j) => j.id),
+    );
+
+  const decisive = found.filter((f) => f.ids.size === 1);
+  if (!decisive.length) return { kind: "none" };
+  const pick = [...decisive[0].ids][0];
+  const disagree = found.find((f) => !f.ids.has(pick));
+  if (disagree) {
+    const said = (f: (typeof found)[number]) => `the ${JOB_MARK_WORDS[f.kind]}${f.words ? ` "${f.words}"` : ""}`;
+    return {
+      kind: "conflict",
+      sentence: `The paper points to more than one job (${said(decisive[0])} and ${said(disagree)}), so no job was picked.`,
+    };
+  }
+  return { kind: "one", jobId: pick, from: decisive[0].kind, words: decisive[0].words };
 }
 
 /**
  * THE PICKER FOLLOWS THE SUGGESTION UNTIL A PERSON TOUCHES IT. A row renders before its paper is
- * read (Drop Paperwork adds the row, then reads it), and AI Suggest writes a suggestion after the
- * row is on screen; a picker seeded once at mount would say "It is picked below" over a picker
- * still reading "Where Does It Go?". `picked` is null until a person chooses; after that, theirs
- * wins, including choosing nothing.
+ * read (Drop Paperwork adds the row, then reads it); a picker seeded once at mount would miss the
+ * job the paper names when the read lands. `picked` is null until a person chooses; after that,
+ * theirs wins, including choosing nothing.
  */
 export function shownDestination(picked: string | null, item: PaperItem, jobIds: readonly string[]): string {
   return picked ?? suggestedDestination(item, jobIds);
@@ -284,6 +515,13 @@ export function shownDestination(picked: string | null, item: PaperItem, jobIds:
 export function fileRefusal(item: PaperItem, dest: PaperDestination | null): string | null {
   if (!dest) return "Pick where it goes first: a job, or a business cost bucket.";
   const r = readinessOf(item);
+  if (dest.type === "photo") {
+    // A JOB PHOTO IS NEVER A COST: only paper that is not one can go on a job's Photos.
+    if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
+    if (r.state === "not_read") return "This hasn't been read yet. Press Read Now first.";
+    if (r.state === "picture" || r.state === "keep") return null;
+    return "This was read as paper, not a picture. File it as it is, or change its type in Fix Details.";
+  }
   if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
   if (r.state === "not_read") return "This hasn't been read yet. Press Read Now, or Fix Details and fill it in.";
   if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";

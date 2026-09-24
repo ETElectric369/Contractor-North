@@ -17,8 +17,11 @@ import {
   billCategoryFor,
   fileRefusal,
   paperTypeOfItem,
+  pickedBecause,
   proposalOf,
   readinessOf,
+  type MarkJob,
+  type MarkPo,
   type NumberMatch,
   type PaperProposal,
 } from "@/lib/paperwork";
@@ -66,8 +69,14 @@ export interface OrganizedResult {
     confidence: string;
     status: string; // needs_review (every read waits for a person) | filed (a note keeps itself)
     destination: string; // none | note — nothing a reader decides is ever a job or a cost
-    /** What the reader SUGGESTS, shown beside File It. Never acted on by itself. */
-    suggestion?: { jobLabel: string | null; bucket: string | null } | null;
+    /**
+     * Where it might go. `picked` = the PAPER names this job (a printed mark matched exactly), so
+     * it is pre-picked beside File It, and `because` says why in a few words. Otherwise it is a
+     * model's guess, offered and never picked. Nothing is ever filed by itself.
+     */
+    suggestion?: { jobLabel: string | null; bucket: string | null; picked?: boolean; because?: string | null } | null;
+    /** The reader says this is a plain picture: the row asks "What is this?" first. */
+    picture?: boolean;
     /** A one-line account of what was read. */
     line?: string;
   };
@@ -76,18 +85,40 @@ export interface OrganizedResult {
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const READ_LIMIT = 8 * 1024 * 1024;
 
-/** The jobs a reader may say the paper names. */
-async function readerJobs(supabase: any): Promise<ReaderJob[]> {
-  const { data: jobs } = await supabase
-    .from("jobs")
-    .select("id, job_number, name, address, city, customers(name)")
-    .in("status", ACTIVE_JOB_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(40);
-  return (jobs ?? []).map((j: any) => ({
-    id: j.id,
-    label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}${j.city ? `, ${j.city}` : ""}`,
-  }));
+/**
+ * The open jobs, twice over: the newest forty as the list the model may GUESS from, and every open
+ * job (with its number, name, street and customer) for the exact match of what is printed on the
+ * paper (jobFromPaperMarks). One read of jobs; the purchase orders ride beside it, and a PO read
+ * that fails is no PO match, never a failed read.
+ */
+async function readerJobs(supabase: any, orgId: string | null): Promise<{ offered: ReaderJob[]; markJobs: MarkJob[]; pos: MarkPo[] }> {
+  let jq = supabase.from("jobs").select("id, job_number, name, address, city, customers(name, company_name)");
+  if (orgId) jq = jq.eq("org_id", orgId);
+  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(500);
+  const rows = (jobs ?? []) as any[];
+  let pos: MarkPo[] = [];
+  try {
+    let pq = supabase.from("purchase_orders").select("po_number, job_id");
+    if (orgId) pq = pq.eq("org_id", orgId);
+    const { data, error } = await pq.not("job_id", "is", null).limit(2000);
+    if (!error) pos = ((data ?? []) as MarkPo[]).filter((p) => p?.po_number && p?.job_id);
+  } catch {
+    pos = [];
+  }
+  return {
+    offered: rows.slice(0, 40).map((j) => ({
+      id: j.id,
+      label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}${j.city ? `, ${j.city}` : ""}`,
+    })),
+    markJobs: rows.map((j) => ({
+      id: String(j.id),
+      job_number: j.job_number ?? null,
+      name: j.name ?? null,
+      address: j.address ?? null,
+      customerNames: [j.customers?.name, j.customers?.company_name],
+    })),
+    pos,
+  };
 }
 
 /**
@@ -110,9 +141,10 @@ async function readInto(
   ctx: { supabase: any; orgId: string | null; userId: string },
   itemId: string,
   file: { path: string; name: string; mime: string },
+  opts: { personSaysCost?: boolean } = {},
 ): Promise<OrganizedResult> {
   const supabase = ctx.supabase;
-  const jobList = await readerJobs(supabase);
+  const { offered: jobList, markJobs, pos } = await readerJobs(supabase, ctx.orgId);
 
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
   if (dlErr || !blob) {
@@ -147,7 +179,13 @@ async function readInto(
       messages: [
         {
           role: "user",
-          content: [mediaBlock, { type: "text", text: `Filename: ${file.name}. Classify and extract.` }],
+          content: [
+            mediaBlock,
+            {
+              type: "text",
+              text: `Filename: ${file.name}. ${opts.personSaysCost ? "The person who uploaded it says it is a bill or a receipt. " : ""}Classify and extract.`,
+            },
+          ],
         },
       ],
     });
@@ -163,8 +201,8 @@ async function readInto(
     return { ok: false, error: `${e?.message ?? "AI could not read this file."} It is saved and waiting; press Read Now to try again.` };
   }
 
-  const f = readerFields(parsed, jobList, file.name);
-  const keepsItself = f.kind === "note" && f.amount === null;
+  const f = readerFields(parsed, jobList, file.name, { markJobs, pos, personSaysCost: opts.personSaysCost });
+  const keepsItself = f.kind === "note" && f.amount === null && !opts.personSaysCost;
   const { error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
     kind: f.kind,
     title: f.title,
@@ -187,7 +225,14 @@ async function readInto(
 
   revalidatePath("/organize");
   revalidatePath("/bills");
-  const suggestedJob = f.proposal.jobId ? jobList.find((j) => j.id === f.proposal.jobId)?.label ?? null : null;
+  const labelOf = (id: string | null | undefined) => {
+    if (!id) return null;
+    const j = markJobs.find((x) => x.id === id);
+    return j ? `${j.job_number ?? ""}${j.name ? ` ${j.name}` : ""}`.trim() || null : null;
+  };
+  const pickedJob = labelOf(f.proposal.jobId);
+  const guessedJob = labelOf(f.proposal.guessJobId);
+  const because = pickedBecause({ id: itemId, doc_type: f.doc_type, category: f.category, proposal: f.proposal });
   return {
     ok: true,
     item: {
@@ -203,7 +248,16 @@ async function readInto(
       confidence: f.confidence,
       status: keepsItself ? "filed" : "needs_review",
       destination: keepsItself ? "note" : "none",
-      suggestion: suggestedJob || f.proposal.bucket ? { jobLabel: suggestedJob, bucket: f.proposal.bucket ?? null } : null,
+      picture: f.proposal.picture === true,
+      suggestion:
+        pickedJob || guessedJob || f.proposal.bucket
+          ? {
+              jobLabel: pickedJob ?? guessedJob,
+              bucket: f.proposal.bucket ?? null,
+              picked: !!pickedJob,
+              because: pickedJob ? because : null,
+            }
+          : null,
     },
   };
 }
@@ -265,6 +319,53 @@ export async function readPaperworkItem(id: string): Promise<OrganizedResult> {
   const mime = mimeFromName(item.file_url);
   if (!mime) return { ok: false, error: "This file isn't a photo or a PDF, so it can't be read. Fix Details and fill it in." };
   return readInto(ctx, String(item.id), { path: String(item.file_url), name: String(item.title ?? "Paper"), mime });
+}
+
+/**
+ * "BILL OR RECEIPT": a person's answer to "What is this?" on a picture (Erik, 2026-09-24). The
+ * row becomes a receipt FIRST, in its own write, so whatever the read does next the question is
+ * answered and the row shows the cost controls. Then it is read again, told what the person said,
+ * for the total, the lines and anything printed on it that names a job. The job is picked only if
+ * the paper names one; otherwise the row asks where it goes. Nothing is filed.
+ */
+export async function readAsCost(id: string): Promise<{ ok: boolean; error?: string; message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: item } = await ctx.supabase
+    .from("organized_items")
+    .select("id, title, file_url, status, proposal")
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (!item) return { ok: false, error: "That paper isn't here any more." };
+  if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first, then change what it is." };
+  const { picture: _wasPicture, ...rest } = proposalOf(item);
+  const { data: back, error } = await updateItemTolerant(ctx.supabase, id, ctx.orgId, {
+    doc_type: "receipt",
+    kind: "receipt",
+    category: "Receipt",
+    payment: "unknown",
+    proposal: rest,
+  });
+  if (error) return { ok: false, error: dbError(error) };
+  if (!back?.length) return { ok: false, error: "Nothing changed. That paper isn't here any more, or this login can't change it." };
+  revalidatePath("/organize");
+  revalidatePath("/bills");
+
+  const mime = mimeFromName(item.file_url);
+  if (!item.file_url || !mime)
+    return { ok: true, message: "Marked as a bill or receipt. Fix Details and put the total in, then pick where it goes." };
+  const read = await readInto(ctx, String(item.id), { path: String(item.file_url), name: String(item.title ?? "Paper"), mime }, { personSaysCost: true });
+  if (!read.ok)
+    return { ok: true, message: `Marked as a bill or receipt, but it wasn't read: ${read.error ?? "the reader didn't answer."} Fix Details and put the total in.` };
+  const s = read.item?.suggestion;
+  return {
+    ok: true,
+    message:
+      s?.picked && s.because
+        ? `Read as a bill or receipt. ${s.because}: ${s.jobLabel}. Press File It if that's right.`
+        : "Read as a bill or receipt. Pick where it goes, then press File It.",
+  };
 }
 
 /** Infer a media type from a stored filename / path. */
@@ -557,6 +658,8 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 // down below exactly as before.
 export type FileDestination =
   | { type: "job"; jobId: string }
+  /** A picture on a job's Photos (Erik, 2026-09-24): a documents row, never a bill. */
+  | { type: "photo"; jobId: string }
   | { type: "overhead"; category: string }
   | { type: "unfiled" };
 
@@ -641,7 +744,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // THE GATE: the same function the File It button asks. A paper not read, with no total, of a kind
   // this update cannot file, or already filed, is refused here in the sentence the row shows.
   if (dest.type !== "unfiled") {
-    const refusal = fileRefusal(item, dest.type === "job" ? { type: "job", jobId: dest.jobId } : { type: "overhead", category: dest.category as never });
+    const refusal = fileRefusal(
+      item,
+      dest.type === "job" || dest.type === "photo" ? { type: dest.type, jobId: dest.jobId } : { type: "overhead", category: dest.category as never },
+    );
     if (refusal) return { ok: false, error: refusal };
   }
 
@@ -656,7 +762,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // sheet 8802-1108330, photographed after the CED PDF went on the list). That document is LINKED
   // to the bill this makes, in the same press, and the button said so before it was pressed.
   let linkTo: { id: string; number: string }[] = [];
-  if (dest.type !== "unfiled" && isCost && item.doc_number && !opts.differentPurchase) {
+  if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && item.doc_number && !opts.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
     const found = matchesOnBooks(item, books);
     const onBooks = found.filter((m) => m.kind === "bill");
@@ -734,11 +840,22 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     return { ok: false, error: message };
   };
 
-  if (dest.type === "job") {
+  if (dest.type === "job" || dest.type === "photo") {
     jobId = dest.jobId;
     // The copy on the job carries what the paper IS (a Bill stays a Bill), never a hard-coded
-    // "Receipt".
-    const docCategory = isCost ? paperCategory : item.category && item.kind === "job_document" ? item.category : "Other";
+    // "Receipt". A JOB PHOTO is a "Photo" on the job, the same row the job page's own camera makes
+    // (uploadJobPhotos → addDocument), so it shows in that job's Photos. It is never a cost: the
+    // gate above refused a bill or receipt, and the bill below is for "job" only.
+    // A picture a person called "Something Else" and put on a job is kept there as "Other", not
+    // as a photo they said it wasn't.
+    const docCategory =
+      dest.type === "photo"
+        ? "Photo"
+        : isCost
+          ? paperCategory
+          : item.category && item.kind === "job_document" && item.category !== "Photo"
+            ? item.category
+            : "Other";
     category = docCategory;
     const { data: doc } = await supabase
       .from("documents")
@@ -753,8 +870,11 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
       .select("id")
       .single();
     documentId = doc?.id ?? null;
+    // For a photo the copy on the job IS the filing: a photo that did not land is not "Filed".
+    if (dest.type === "photo" && !documentId)
+      return backToTray("The photo didn't save on the job, so it is back in the tray. Try again.");
     // A receipt or bill filed to a job becomes an itemized billable cost on that job.
-    if (isCost && item.amount != null) {
+    if (dest.type === "job" && isCost && item.amount != null) {
       billId = await insertItemizedBill(
         supabase,
         {
@@ -824,7 +944,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     status: dest.type === "unfiled" ? "needs_review" : "filed",
   };
   // How it was filed rides on the proposal, so Undo takes down exactly this and nothing else.
-  if ("proposal" in item) patch.proposal = { ...proposalOf(item), filed: dest.type === "unfiled" ? null : { how: "bill" } };
+  if ("proposal" in item)
+    patch.proposal = { ...proposalOf(item), filed: dest.type === "unfiled" ? null : { how: dest.type === "photo" ? "photo" : "bill" } };
   const { data: wrote, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
   if (error || !wrote?.length) {
     // The row that says where the bill is did not save: a bill nothing points at is one Undo can
@@ -1210,16 +1331,20 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // a bucket it likes is written onto the row as the SUGGESTION, the tray pre-picks it beside
     // File It, and a person presses the button. The task and note branches below are not money
     // and keep working as before.
+    //
+    // A GUESS, NOT A PICK (Erik, 2026-09-24). A job it likes is written as guessJobId: a chip on
+    // the row a person can tap, never the picker's value. Only what is printed on the paper picks
+    // a job (jobId + jobFrom, from the reader), and a model's second look never overwrites that.
     if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
       const label = jobList.find((j) => j.id === parsed.job_id)?.label;
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
-        proposal: { ...proposalOf(item), jobId: String(parsed.job_id), bucket: null, why: reason || null },
+        proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
       if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
       revalidatePath("/organize");
       revalidatePath("/bills");
-      return { ok: true, message: `Suggested: ${label}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
+      return { ok: true, message: `A guess: ${label}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
     if (action === "overhead") {
       // The bucket is one of the six, and Fees is never the AI's suggestion, because a supplier's
@@ -1232,13 +1357,13 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
             "This looks like a fee or a supplier's late charge, so nothing was suggested. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost: Fees yourself.",
         };
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
-        proposal: { ...proposalOf(item), jobId: null, bucket: cat, why: reason || null },
+        proposal: { ...proposalOf(item), guessJobId: null, bucket: cat, why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
       if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
       revalidatePath("/organize");
       revalidatePath("/bills");
-      return { ok: true, message: `Suggested: Business Cost, ${cat}. It is picked beside File It; press File It if that's right. ${reason}`.trim() };
+      return { ok: true, message: `A guess: Business Cost, ${cat}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
     // A TASK OR A NOTE TAKES THE PAPER OUT OF THE TRAY, so it is only ever done to paper that is
     // not money. A receipt or bill with a total, a statement, a CED PDF, anything unread: the model
@@ -1246,6 +1371,10 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // its cost was never recorded. For those it is said as a suggestion and the row stays waiting.
     if (action === "task" || action === "keep_note") {
       const said = action === "task" ? `make a task ("${String(parsed.task_title || item.title).slice(0, 200)}")` : "keep it as a note";
+      // A picture is asked what it is by a person first (Erik, 2026-09-24); a model does not answer
+      // that question for them by moving it.
+      if (readinessOf(item).state === "picture")
+        return { ok: true, message: `Suggested: ${said}. Nothing was moved: answer What Is This? on the row. ${reason}`.trim() };
       if (readinessOf(item).state !== "keep")
         return {
           ok: true,
