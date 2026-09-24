@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
+import { clockDoorWords } from "@/lib/long-shift";
 import { InvoiceDetail } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
 import { ShareIconButton } from "@/components/share-icon-button";
@@ -105,24 +106,33 @@ export default async function InvoicePage({
   /* A CLOCK STILL RUNNING ON THIS JOB IS HOURS THIS INVOICE DOES NOT HAVE (2026-09-24). Erik: "I
      had no way to stop it to set the time for the invoice". An open shift bills nothing (the labor
      import reads closed rows only, and that stays), so the invoice looked short with no reason
-     given. The note names who and since when, with the way to stop it one tap away. */
+     given. The note names who and since when, with "Clock Out Brian" one tap away: the office may
+     clock anybody out at any time, and the sheet asks when it really stopped if it was forgotten. */
   const invJobId = ((inv as { job_id?: string | null }).job_id ?? null) as string | null;
-  const runningClocks =
+  const runningRows =
     invJobId && inv.status !== "void"
       ? (((
           await supabase
             .from("time_entries")
-            .select("id, clock_in, profiles:profile_id(full_name)")
+            .select("id, profile_id, clock_in, profiles:profile_id(full_name)")
             .eq("job_id", invJobId)
             .eq("status", "open")
-        ).data ?? []) as unknown as { id: string; clock_in: string; profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null }[]).map(
-          (r) => ({
-            id: r.id,
-            clockIn: r.clock_in,
-            name: ((Array.isArray(r.profiles) ? r.profiles[0] : r.profiles)?.full_name ?? "").trim() || "Someone",
-          }),
-        )
+        ).data ?? []) as unknown as {
+          id: string;
+          profile_id: string | null;
+          clock_in: string;
+          profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
+        }[]).map((r) => {
+          const full = ((Array.isArray(r.profiles) ? r.profiles[0] : r.profiles)?.full_name ?? "").trim();
+          return { id: r.id, profileId: r.profile_id, clockIn: r.clock_in, fullName: full, name: full || "Someone" };
+        })
       : [];
+  // Only asked when there is a clock to name: the viewer's own reads "You" and "Clock Out".
+  const viewerId = runningRows.length ? ((await supabase.auth.getUser()).data.user?.id ?? null) : null;
+  const runningClocks = runningRows.map((r) => {
+    const self = !!viewerId && r.profileId === viewerId;
+    return { id: r.id, clockIn: r.clockIn, name: self ? "You" : r.name, self, door: clockDoorWords(r.fullName, { self }).clockOut };
+  });
 
   return (
     <div className="mx-auto max-w-4xl">

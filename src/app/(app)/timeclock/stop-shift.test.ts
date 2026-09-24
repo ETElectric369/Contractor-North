@@ -238,7 +238,7 @@ describe("updateTimeEntry on a running clock", () => {
   });
 });
 
-describe("clockOut past ten hours", () => {
+describe("clockOut past twelve hours", () => {
   const routes = (clockIn: string) => (q: Q): Reply => {
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
     if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
@@ -248,19 +248,19 @@ describe("clockOut past ten hours", () => {
     return undefined;
   };
 
-  it("a plain tap on an 11-hour clock asks when he stopped and writes nothing", async () => {
-    const clockIn = new Date(Date.now() - 11 * H).toISOString();
+  it("a plain tap on a 13-hour clock asks when he stopped and writes nothing", async () => {
+    const clockIn = new Date(Date.now() - 13 * H).toISOString();
     state.client = fakeSupabase(routes(clockIn), calls);
     const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null });
     expect(r.ok).toBe(false);
     expect(r.needsTime).toBe(true);
-    expect(r.error).toMatch(/^You've been on the clock since .+, more than 10 hours\. Pick when you stopped on Timeclock\.$/);
+    expect(r.error).toMatch(/^You've been on the clock since .+, more than 12 hours\. Pick when you stopped on Timeclock\.$/);
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
   it("a picked stop time closes it, says so on the card, and puts it on the office's bell", async () => {
-    const clockIn = new Date(Date.now() - 11 * H).toISOString();
-    const at = new Date(Date.now() - 7 * H).toISOString();
+    const clockIn = new Date(Date.now() - 13 * H).toISOString();
+    const at = new Date(Date.now() - 9 * H).toISOString();
     state.client = fakeSupabase(routes(clockIn), calls);
     const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null, at, picked: true });
     expect(r).toMatchObject({ ok: true });
@@ -286,9 +286,9 @@ describe("clockOut past ten hours", () => {
   });
 
   it("an unpicked `at` well before now on a long clock still leaves the crumb and tells the office", async () => {
-    // needsStatedStop lets an observed past time through; a 10-to-18-hour close by a person must
+    // needsStatedStop lets an observed past time through; a 12-to-18-hour close by a person must
     // still never land without a trace.
-    const clockIn = new Date(Date.now() - 11 * H).toISOString();
+    const clockIn = new Date(Date.now() - 13 * H).toISOString();
     const at = new Date(Date.now() - 3 * H).toISOString();
     state.client = fakeSupabase(routes(clockIn), calls);
     expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null, at })).toMatchObject({ ok: true });
@@ -298,7 +298,7 @@ describe("clockOut past ten hours", () => {
   });
 
   it("an unattended geofence close is flagged by its reason, not by the crumb", async () => {
-    const clockIn = new Date(Date.now() - 11 * H).toISOString();
+    const clockIn = new Date(Date.now() - 13 * H).toISOString();
     const at = new Date(Date.now() - 3 * H).toISOString();
     state.client = fakeSupabase(routes(clockIn), calls);
     const r = await clockOut({ entry_id: ENTRY, lunch_minutes: null, notes: "", gps: null, at, auto: true, autoClosedReason: "nobody answered" });
@@ -313,9 +313,15 @@ describe("clockOut past ten hours", () => {
     expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
     expect(spies.notify).toEqual([]);
   });
+
+  it("an 11-hour clock-out is one tap too: the line is twelve hours now", async () => {
+    state.client = fakeSupabase(routes(new Date(Date.now() - 11 * H).toISOString()), calls);
+    expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
+    expect(spies.notify).toEqual([]);
+  });
 });
 
-describe("switchJob on a clock past ten hours", () => {
+describe("switchJob on a clock past twelve hours", () => {
   const routes = (row: any) => (q: Q): Reply => {
     if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
     if (q.table === "time_entries" && q.verb === "select") return { data: row };
@@ -338,17 +344,23 @@ describe("switchJob on a clock past ten hours", () => {
     state.client = fakeSupabase(routes(running(17)), calls);
     const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
     expect(r).toMatchObject({ ok: false, needsTime: true });
-    expect(r.error).toMatch(/^You've been on the clock since .+, more than 10 hours\. Pick when you stopped on Timeclock, then clock in on this job\.$/);
+    expect(r.error).toMatch(/^You've been on the clock since .+, more than 12 hours\. Pick when you stopped on Timeclock, then clock in on this job\.$/);
     expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
   });
 
-  it("refuses the office switching somebody else's forgotten clock, pointing at Stop The Clock", async () => {
-    state.client = fakeSupabase(routes(running(17, { profile_id: "brian-1" })), calls);
+  it("refuses the office switching somebody else's forgotten clock, naming the door that stops it", async () => {
+    state.client = fakeSupabase(routes(running(17, { profile_id: "brian-1", profiles: { full_name: "Brian Taylor" } })), calls);
     const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
     expect(r.ok).toBe(false);
     expect(r.needsTime).toBeUndefined();
-    expect(r.error).toMatch(/Stop The Clock/);
+    expect(r.error).toMatch(/^That clock has been running since .+, more than 12 hours\. Stop it at the time the shift really ended \(Timecards, Clock Out Brian\), then clock in on this job\.$/);
     expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
+  });
+
+  it("a nameless row still names a door", async () => {
+    state.client = fakeSupabase(routes(running(17, { profile_id: "brian-1", profiles: null })), calls);
+    const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
+    expect(r.error).toMatch(/\(Timecards, Clock Them Out\)/);
   });
 });
 

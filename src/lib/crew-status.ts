@@ -12,7 +12,7 @@ export type CrewMember = {
   name: string;
   clockedIn: boolean;
   jobLabel: string | null;
-  /** The running entry, so the office can open it straight onto Stop The Clock. Null off the clock. */
+  /** The running entry, so the office can open it straight onto its clock-out sheet (Clock Out Brian). Null off the clock. */
   entryId: string | null;
   /** When that entry clocked in (ISO). Null off the clock. */
   clockIn: string | null;

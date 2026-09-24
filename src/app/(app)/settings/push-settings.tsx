@@ -13,6 +13,7 @@ import {
 import { isNativeShell } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
+import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -25,8 +26,9 @@ const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
  * changed nothing. A control a role cannot use must not render — so each trigger now names its
  * audience and the list is filtered by the viewer's role.
  *
- * "tech" is not an oversight either: notifyGeofenceExit refuses staff outright (Erik: "push at
- * geofence for clock out only for techs"), so that switch is just as dead in an owner's hands.
+ * "tech" is kept for an alert only crew can receive. clock_out was one (notifyGeofenceExit refuses
+ * staff outright, Erik: "push at geofence for clock out only for techs") until the hourly long-shift
+ * job began asking anybody whose own clock ran LONG_SHIFT_HOURS (2026-09-24); now it is "all".
  *
  * KEEP THIS HONEST — when a sender's audience changes, change the audience here in the same
  * breath, or the switch starts lying again.
@@ -41,9 +43,23 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
   // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
   // was still marked "soon" after the backend shipped. It digests to orgStaffIds.
   { key: "day_ahead", label: "My day ahead (morning summary)", audience: "staff" },
-  // clock_out's sender is LIVE too (notifyGeofenceExit — fires for techs who leave the
-  // job site while clocked in), so the toggle is real now. Techs only, by construction.
-  { key: "clock_out", label: "Clock-out reminder (left the job site)", audience: "tech" },
+  // clock_out has TWO senders: notifyGeofenceExit (techs who leave the job site while clocked in,
+  // refused for staff) and the hourly long-shift job, which asks ANYONE whose own clock has run
+  // LONG_SHIFT_HOURS. So everybody can receive it, and everybody gets the switch.
+  {
+    key: "clock_out",
+    label: "Clock-out reminders",
+    help: `When you leave the job site still clocked in (crew only), and when your own clock has run ${LONG_SHIFT_HOURS} hours.`,
+    audience: "all",
+  },
+  // The office's buzz about a crew member's clock still running at LONG_SHIFT_HOURS; the bell line
+  // at OFFICE_BELL_HOURS is not a push and has no switch.
+  {
+    key: "long_shift",
+    label: `A crew clock running ${LONG_SHIFT_HOURS} hours`,
+    help: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
+    audience: "staff",
+  },
   { key: "daily_report", label: "Daily reports from crew leads", audience: "staff" },
   // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
   // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
@@ -65,6 +81,7 @@ const DEFAULTS: Record<string, boolean> = {
   clock_out: true,
   daily_report: true,
   tap_to_pay: true,
+  long_shift: true,
 };
 
 function urlB64ToUint8(base64String: string) {

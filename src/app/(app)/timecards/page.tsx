@@ -30,7 +30,7 @@ import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-f
 import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
-import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
 
 export const dynamic = "force-dynamic";
 
@@ -328,6 +328,7 @@ export default async function TimecardsPage({
             neighbors={neighborsOf(weekRows, String(e.id))}
             rebuiltFromOldSplit={rebuiltOf(weekRows, String(e.id))}
             workDayEnd={workWin.end}
+            viewerId={user?.id}
           />
         </>
       ),
@@ -567,8 +568,9 @@ export default async function TimecardsPage({
    *
    *  A broken shift is hours that are WRONG: a clock still running from a forgotten clock-out, or a
    *  0193 ghost auto-closed at zero and worth nothing. Every row names the verb that fixes it and
-   *  opens that entry through the ?entry= door, which is now the Stop The Clock sheet for a
-   *  running clock.
+   *  opens that entry through the ?entry= door, which is now the clock-out sheet for a running
+   *  clock: the row reads "Clock Out Brian", and the sheet it opens says "Stop Brian's Clock" (every
+   *  running row here is a forgotten one).
    *
    *  THE PLAN-DRIFT HALF IS GONE (2026-09-24). It compared the job calendar to where the hours
    *  landed and listed "moved", "unplanned" and "no-show" days under the broken rows. Erik asked
@@ -596,7 +598,9 @@ export default async function TimecardsPage({
           ? `open ${openHrs} · past day`
           : `open ${openHrs}`,
       // The row names what tapping it does.
-      verb: e.auto_closed_reason ? "Set The Hours" : "Stop The Clock",
+      verb: e.auto_closed_reason
+        ? "Set The Hours"
+        : clockDoorWords(e.profiles?.full_name, { self: !!user?.id && e.profile_id === user.id }).clockOut,
       // The deep link names the ENTRY'S OWN WEEK, not the page's (same reason as the grid pills).
       href: hrefFor(weekOf(day), `entry=${e.id}`),
     };
@@ -691,10 +695,12 @@ export default async function TimecardsPage({
               <p className="mt-1 text-base text-slate-400">Nobody right now</p>
             ) : (
               <ul className="mt-0.5">
-                {/* EACH ROW IS THE WAY TO STOP THAT CLOCK (2026-09-24). Erik could see Brian's
-                    clock running here and had nothing to tap. The row opens the entry through the
-                    ?entry= door, which is the Stop The Clock sheet for a running clock. A clock
-                    running LONG_SHIFT_HOURS or more is tinted, because it was probably forgotten. */}
+                {/* EACH ROW IS THE WAY TO CLOCK THAT PERSON OUT (2026-09-24). Erik could see
+                    Brian's clock running here and had nothing to tap; then: "an option to [end] an
+                    employees time clock and clock out for them". The row reads "Clock Out Brian"
+                    and opens the entry through the ?entry= door, the clock-out sheet. A clock
+                    running LONG_SHIFT_HOURS or more is tinted, because it was probably forgotten,
+                    and its sheet asks when it really stopped. */}
                 {onClock.map((c) => {
                   const inMs = c.clockIn ? Date.parse(c.clockIn) : NaN;
                   const long = Number.isFinite(inMs) && isLongOpenShift(inMs, Date.now());
@@ -731,7 +737,7 @@ export default async function TimecardsPage({
                         >
                           {body}
                           <span className={`flex shrink-0 items-center gap-0.5 text-sm font-medium ${long ? "text-amber-800" : "text-slate-600"}`}>
-                            Stop The Clock
+                            {clockDoorWords(c.name, { self: !!user?.id && c.id === user.id }).clockOut}
                             <ChevronRight className="h-4 w-4" aria-hidden />
                           </span>
                         </Link>
@@ -814,6 +820,7 @@ export default async function TimecardsPage({
           neighbors={neighborsOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
           rebuiltFromOldSplit={rebuiltOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
           workDayEnd={workWin.end}
+          viewerId={user?.id}
           /* Nort's fill (time.splitEntry): the sheet opens with its cut in it; a person taps Split Shift. */
           initialSplit={splitParam === "1" ? { at: splitAtParam ?? null, jobId: splitJobParam ?? null, code: splitCodeParam ?? null } : null}
         />

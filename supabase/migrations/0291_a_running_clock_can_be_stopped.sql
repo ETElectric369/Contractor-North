@@ -6,11 +6,15 @@
 --
 -- A crew member forgot to clock out. The office could SEE the clock running and had no door that
 -- stopped it at the time the work really ended: the editor refused an open row, and every other
--- door closed it at "now". The app side of the fix is a Stop The Clock sheet (stopShift) that closes
--- an open row at a STATED time and writes who did it. This file is the part underneath it:
+-- door closed it at "now". The app side of the fix is the office's clock-out sheet (stopShift,
+-- "Clock Out Brian"; "Stop Brian's Clock" on a forgotten one) that closes an open row at a STATED
+-- time and writes who did it. This file is the part underneath it:
 --
---   a) time_entries.long_shift_nudged_at: the hourly long-shift job claims a row by setting it
---      before it sends anything, so two overlapping runs never ask the same man twice.
+--   a) time_entries.long_shift_warned_at and long_shift_nudged_at: the hourly long-shift job's two
+--      steps, each claimed by setting its column before anything is sent, so two overlapping runs
+--      never tell anybody twice. Erik, 2026-09-24: "Put a line on the Bell at 10 hours and buzz at
+--      12". warned_at is the office's bell line at 10 hours; nudged_at is the 12-hour step (the
+--      crew member is asked, and the office's phones buzz).
 --   b) guard_time_entry_close_in_time: NOBODY closes a shift in the future. 0248's "A shift cannot
 --      end in the future" lives in guard_paid_time_entry, which skips staff, so the office editor or
 --      Nort's time.fixEntry ("close Brian's open entry at 5") could close a live shift at 5 PM while
@@ -20,8 +24,8 @@
 --      auto_closed_reason, and updateTimeEntry nulls that column on every save.
 --   d) a self-check that raises "Nothing was changed." if any of it did not land.
 --
--- ORDER: after 0290. Safe before or after the code that uses it: the code reads the new column
--- only in the cron (which tolerates its absence by failing that one run loudly) and the triggers
+-- ORDER: after 0290. Safe before or after the code that uses it: the code reads the new columns
+-- only in the cron (which tolerates their absence by failing that one run loudly) and the triggers
 -- only refuse writes no honest door makes.
 --
 -- ONE TRANSACTION, AND ONLY IF THE RUNNER MAKES IT ONE (0290's note applies): scripts/
@@ -31,11 +35,17 @@
 -- guard traps nothing already stored, and it only fires when clock_out MOVES (the 0217 lesson: a
 -- notes or job fix on an old row must always save).
 
--- ── a) THE NUDGE'S CLAIM ────────────────────────────────────────────────────────────────────────
+-- ── a) THE TWO STEPS' CLAIMS ────────────────────────────────────────────────────────────────────
+-- One column per step, because the steps happen hours apart and each must happen once: a single
+-- column could only say "something was sent", and the 12-hour run would read the 10-hour bell as
+-- the whole job done.
+alter table public.time_entries add column if not exists long_shift_warned_at timestamptz;
 alter table public.time_entries add column if not exists long_shift_nudged_at timestamptz;
 
+comment on column public.time_entries.long_shift_warned_at is
+  'When the hourly long-shift job (/api/timeclock/long-shift) put a line on the office''s bell that this clock had run 10 hours. A bell line only, no push, so it is not held for the night. Set once, claimed before the line is written, so the office is told at most once per shift. Never read by pay math. 0291.';
 comment on column public.time_entries.long_shift_nudged_at is
-  'When the hourly long-shift job (/api/timeclock/long-shift) asked this person whether they forgot to clock out. Set once, claimed before the push is sent, so a shift is asked about at most once. Never read by pay math. 0291.';
+  'When the hourly long-shift job (/api/timeclock/long-shift) asked this person, at 12 hours, whether they forgot to clock out, and buzzed the office''s phones. Pushes wait out 9 PM to 6 AM org-local. Set once, claimed before the push is sent, so a shift is asked about at most once. Never read by pay math. 0291.';
 
 -- ── b) NOBODY CLOSES A SHIFT IN THE FUTURE ──────────────────────────────────────────────────────
 -- Five minutes of slack: a phone clock a little ahead of the server is not an invented half hour.
@@ -143,13 +153,17 @@ do $$
 declare
   v_names text;
 begin
-  if not exists (
-    select 1 from pg_attribute
-     where attrelid = 'public.time_entries'::regclass
-       and attname = 'long_shift_nudged_at'
-       and not attisdropped
-  ) then
-    raise exception '0291: time_entries.long_shift_nudged_at is missing. Nothing was changed.';
+  -- Both claims, as timestamptz: a column of the wrong type would take the claim and lose the time.
+  select string_agg(w.col, ', ') into v_names
+    from (values ('long_shift_warned_at'), ('long_shift_nudged_at')) as w(col)
+   where not exists (
+     select 1 from pg_attribute
+      where attrelid = 'public.time_entries'::regclass
+        and attname = w.col
+        and atttypid = 'timestamptz'::regtype
+        and not attisdropped);
+  if v_names is not null then
+    raise exception '0291: time_entries is missing these long-shift claims: %. Nothing was changed.', v_names;
   end if;
 
   -- Both guards this file touches, bound to time_entries, calling the right function, enabled.

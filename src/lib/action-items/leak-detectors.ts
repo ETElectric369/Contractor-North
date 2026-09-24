@@ -13,8 +13,8 @@ import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
 
 /** An open entry past this many hours is flagged even when the UTC date-cut (below)
  *  misses an evening start. THE SHARED LONG-SHIFT RULE (lib/long-shift, 2026-09-24):
- *  the inbox, the office's Stop The Clock sheet, the crew's Timeclock and the hourly
- *  nudge all call a clock forgotten at the same hour, instead of 12 here, 14 there. */
+ *  the inbox, the office's clock-out sheet, the crew's Timeclock and the hourly job
+ *  all call a clock forgotten at the same hour, instead of 12 here, 14 there. */
 export const OPEN_ENTRY_STALE_HOURS = LONG_SHIFT_HOURS;
 /** How far back to look for closed-with-no-job entries (covers Fri → Mon). */
 export const STRAY_CLOSED_LOOKBACK_DAYS = 3;

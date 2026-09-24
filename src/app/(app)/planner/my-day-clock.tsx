@@ -239,7 +239,7 @@ export function MyDayClock({
           )}
         </div>
         {open && isLongOpenShift(new Date(open.clock_in).getTime(), now) ? (
-          /* A clock running 10 hours or more was probably forgotten: the one-tap close at now would
+          /* A clock running LONG_SHIFT_HOURS (twelve) or more was probably forgotten: the one-tap close at now would
              write the night onto payroll. Timeclock asks when he stopped (lib/long-shift); the
              server refuses a now-close past the line anyway, so this is the door, not the guard. */
           <Link

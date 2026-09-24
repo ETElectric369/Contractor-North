@@ -8,7 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
-import { isLongOpenShift } from "@/lib/long-shift";
+import { LONG_SHIFT_PHRASE, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
@@ -319,7 +319,7 @@ export function JobTimeButton({
             ) : longShift ? (
               <p className="text-sm text-amber-800">
                 You&apos;re still on the clock at <span className="font-medium">{openEntry.jobLabel ?? openEntry.job_code ?? "another job"}</span> since{" "}
-                {new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}, more than 10 hours. Set when you stopped on the Timeclock first, then clock in here.
+                {new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}, {LONG_SHIFT_PHRASE}. Set when you stopped on the Timeclock first, then clock in here.
               </p>
             ) : (
               <p className="text-sm text-slate-600">

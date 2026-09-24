@@ -333,8 +333,8 @@ describe("switchJob goes through switch_job", () => {
 });
 
 describe("clock-out without the breakdown", () => {
-  // These close at NOW, so the running part starts a few hours ago: a clock running ten hours or
-  // more needs a stated stop time (needsStatedStop), and a one-tap close of it is refused.
+  // These close at NOW, so the running part starts a few hours ago: a clock running LONG_SHIFT_HOURS
+  // (twelve) or more needs a stated stop time (needsStatedStop), and a one-tap close of it is refused.
   const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
   it("a one-tap close writes only the entry, and never reads the old table", async () => {

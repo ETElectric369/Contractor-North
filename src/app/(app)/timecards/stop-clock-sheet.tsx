@@ -1,18 +1,25 @@
 "use client";
 
 /**
- * STOP THE CLOCK: the office's sheet for somebody's RUNNING shift.
+ * CLOCK OUT FOR THEM: the office's sheet for somebody's RUNNING shift.
  *
  * Erik, 2026-09-24: "Brian did it the other day too and I had no way to stop it to set the time for
  * the invoice". The editor refused an open row and every other door closed it at "now". This sheet
  * asks the one question that matters, when did the work really stop, and closes the clock at that
  * time through stopShift (which writes who stopped it on the card and tells the crew member).
  *
- * THE OFFICE NEVER GETS A SILENT DEFAULT ON A FORGOTTEN PUNCH. The stop fields start EMPTY when the
- * clock has run 10 hours or started on an earlier day; "Now" and "End Of Work Day" are chips that
- * fill the fields and never save. Every time here is the ORG's wall clock, whatever the laptop says.
+ * TWO SHEETS IN ONE, and the words say which (clockDoorWords). Erik, the same day: "an option to
+ * [end] an employees time clock and clock out for them", at any time, not only a forgotten one.
+ *
+ *   An ordinary shift: "Clock Out Brian". The stop time is filled with now and follows the minute
+ *     hand until somebody touches it, so it is two taps: the door, then the button.
+ *   A forgotten one (LONG_SHIFT_HOURS, or begun on an earlier day): "Stop Brian's Clock". The stop
+ *     fields start EMPTY, because the office never gets a silent default on a forgotten punch; "Now"
+ *     and "End Of Work Day" are chips that fill the fields and never save.
+ *
+ * Every time here is the ORG's wall clock, whatever the laptop says.
  */
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,7 +31,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { clockInputValue, splitClock } from "@/lib/split-preview";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
-import { MAX_SHIFT_HOURS, isLongOpenShift, startedEarlierDay, stopProblem } from "@/lib/long-shift";
+import { MAX_SHIFT_HOURS, clockDoorWords, isForgottenShift, stopProblem } from "@/lib/long-shift";
 import type { JobCode } from "@/lib/types";
 import { stopShift, updateOpenEntry } from "../timeclock/actions";
 
@@ -32,6 +39,7 @@ const H = 3_600_000;
 
 export interface StopClockEntry {
   id: string;
+  profile_id?: string | null;
   clock_in: string;
   lunch_minutes: number;
   job_id?: string | null;
@@ -67,6 +75,7 @@ export function StopClockSheet({
   onDelete,
   deleting,
   externalError,
+  viewerId,
 }: {
   entry: StopClockEntry;
   jobs: { id: string; job_number: string; name: string }[];
@@ -82,24 +91,20 @@ export function StopClockSheet({
   /** A failure from the parent's own action (Delete), shown in this sheet's error line: the parent's
    *  edit form, which used to show it, is never mounted for a running clock. */
   externalError?: string | null;
+  /** The person looking. His own running clock reads "Clock Out", never his own name. */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  // The minute hand: the "ago" line and the Now chip read it, and it moves while the sheet is open.
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!open) return;
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, [open]);
-
   const clockInMs = Date.parse(entry.clock_in);
-  // Frozen at mount: the seed must not jump under somebody typing.
+  // Frozen at mount: which sheet this is must not change under somebody typing.
   const [openedAt] = useState(() => Date.now());
-  const forgotten = isLongOpenShift(clockInMs, openedAt) || startedEarlierDay(clockInMs, openedAt, tz);
+  const forgotten = isForgottenShift(clockInMs, openedAt, tz);
+  const words = clockDoorWords(entry.profiles?.full_name, { self: !!viewerId && entry.profile_id === viewerId });
+  const verb = forgotten ? words.stop : words.clockOut;
 
   // The seeded start, kept to tell "the office moved the start" from "left alone". The inputs hold
   // whole minutes, so an unmoved start is sent as the STORED clock-in to the second: rebuilding it
@@ -115,6 +120,26 @@ export function StopClockSheet({
   const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   const [notes, setNotes] = useState(entry.notes ?? "");
+
+  // An ordinary clock-out's stop time is "now" until a person touches it: it follows the minute hand,
+  // so a sheet left open while the phone rang still clocks him out at the moment of the tap's
+  // minute, not at the moment the sheet opened. Any edit or chip ends that for good.
+  const followNow = useRef(!forgotten);
+
+  // The minute hand: the "ago" line and the Now chip read it, and it moves while the sheet is open.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!open) return;
+    const t = setInterval(() => {
+      const n = Date.now();
+      setNow(n);
+      if (followNow.current) {
+        setStopDate(todayStrInTz(tz, new Date(n)));
+        setStopTime(clockInputValue(new Date(n).toISOString(), tz));
+      }
+    }, 30_000);
+    return () => clearInterval(t);
+  }, [open, tz]);
 
   const name = entry.profiles?.full_name?.trim() || "This person";
   const first = name.split(/\s+/)[0] || name;
@@ -137,6 +162,7 @@ export function StopClockSheet({
   const workEndMs = workEndIso ? Date.parse(workEndIso) : NaN;
   const showWorkEnd = Number.isFinite(workEndMs) && workEndMs > clockInMs && workEndMs <= now;
   const fill = (ms: number) => {
+    followNow.current = false;
     setStopDate(todayStrInTz(tz, new Date(ms)));
     setStopTime(clockInputValue(new Date(ms).toISOString(), tz));
     setError(null);
@@ -202,7 +228,7 @@ export function StopClockSheet({
     <Modal
       open={open}
       onClose={onClose}
-      title={`${name} Is Still On The Clock`}
+      title={verb}
       portal
       footer={
         // STACKED, like the split sheet: four nowrap buttons in one row clipped their own labels at
@@ -215,7 +241,7 @@ export function StopClockSheet({
             </div>
           )}
           <Button type="button" className="h-11 w-full" onClick={stopIt} disabled={busy || !valid}>
-            {pending ? "Stopping…" : "Stop The Clock"}
+            {pending ? (forgotten ? "Stopping…" : "Clocking Out…") : verb}
           </Button>
           <div className="flex gap-2">
             <Button type="button" variant="outline" className="h-11 flex-1" onClick={saveWithoutStopping} disabled={busy || !sideChanged}>
@@ -248,11 +274,30 @@ export function StopClockSheet({
           </div>
           <div>
             <Label htmlFor="s-stop-date">Stopped</Label>
-            <Input id="s-stop-date" type="date" className="h-11" value={stopDate} onChange={(e) => setStopDate(e.target.value)} />
+            <Input
+              id="s-stop-date"
+              type="date"
+              className="h-11"
+              value={stopDate}
+              onChange={(e) => {
+                followNow.current = false;
+                setStopDate(e.target.value);
+              }}
+            />
           </div>
           <div>
             <Label htmlFor="s-stop-time" className="invisible">Stop time</Label>
-            <Input id="s-stop-time" type="time" className="h-11" aria-label="Stop time" value={stopTime} onChange={(e) => setStopTime(e.target.value)} />
+            <Input
+              id="s-stop-time"
+              type="time"
+              className="h-11"
+              aria-label="Stop time"
+              value={stopTime}
+              onChange={(e) => {
+                followNow.current = false;
+                setStopTime(e.target.value);
+              }}
+            />
           </div>
         </div>
 

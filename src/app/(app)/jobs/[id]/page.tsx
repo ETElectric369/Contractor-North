@@ -1007,7 +1007,7 @@ export default async function JobDetailPage({
                         ? formatDuration(h)
                         : !e.clock_out
                           ? /* A running clock says since when, with the day when it began on an
-                               earlier one; the office's Stop The Clock sits right beside it. */
+                               earlier one; the office's Clock Out <Name> sits right beside it. */
                             `On The Clock Since ${
                               todayStrInTz(tz, new Date(e.clock_in)) === todayStrInTz(tz)
                                 ? formatTime(e.clock_in, tz)
@@ -1025,6 +1025,7 @@ export default async function JobDetailPage({
                       tz={tz}
                       rebuiltFromOldSplit={!!splitParents.get(e.id)?.converted}
                       workDayEnd={workDay.end}
+                      viewerId={user?.id}
                     />
                   </div>
                 </li>
