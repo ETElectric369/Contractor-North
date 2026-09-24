@@ -787,7 +787,8 @@ async function buildActionItems(ctx: {
         ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
       // An open shift counts ZERO hours until somebody stops it (payroll never pays on a guess),
-      // so "hours accruing" was false. What is true: it is still running, and one tap stops it.
+      // so the old line saying its hours were piling up was false. What is true: it is still
+      // running, and one tap stops it.
       subtitle: f.openStill
         ? `Still on the clock since ${formatTime(f.when, tz || undefined)}. Tap to stop it.`
         : "Closed hours nobody can bill",
