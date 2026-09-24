@@ -2,6 +2,7 @@
 
 import { isNativeShell } from "@/lib/native-shell";
 import { ensureTerminalLocation, tapToPayContext, type TapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { reportClientError } from "@/app/report-client-error";
 
 /**
  * TAP TO PAY ON IPHONE, from the web app running inside the native shell (2026-09-10).
@@ -119,8 +120,10 @@ export function tapToPayPluginPresent(): boolean {
 // ── module state ────────────────────────────────────────────────────────────────────────────
 // One page load, one SDK. The plugin guards Terminal.initWithTokenProvider behind its own
 // `isInitialize`, and re-reads `isTest` on every initialize() — so initialize is cheap to repeat,
-// but the token LISTENER must be registered exactly once or every request gets answered twice.
-let tokenListenerArmed = false;
+// but the token LISTENER must have exactly one native registration at a time or every request
+// gets answered twice. armListeners() keeps that to one while re-registering on every SDK turn.
+type ListenerHandle = { remove: () => Promise<void> };
+let tokenHandle: ListenerHandle | null = null;
 /**
  * Why the last connection-token fetch failed, and what the person can do about it. The SDK's own
  * sentence for a failed token is generic ("Connecting to the reader failed because the app
@@ -132,6 +135,17 @@ type TokenFailure = { reason: string; advice: string; kind: "signed-out" | "netw
 let lastTokenFailure: TokenFailure | null = null;
 let inFlight = false;
 let cancelRequested = false;
+/**
+ * The payment in flight has reached Apple's card sheet (collectPaymentMethod was called) — from
+ * here only the collect's own answer may say how it ended. Before this, nothing native is taking
+ * a card: the attempt is still finding or connecting the reader, which the plugin cannot cancel.
+ */
+let readerArmed = false;
+/**
+ * Answers the Pay Now sheet's Cancel at once while the attempt in flight has not armed the
+ * reader yet (collectTapPayment races its attempt against this). null once the reader is armed.
+ */
+let cancelBeforeReader: (() => void) | null = null;
 /**
  * This phone CAN tap — a reader was offered or connected once on this page load. The model and
  * the iOS don't change under a page, so a "yes" is never re-asked; a "no" always is, because its
@@ -387,7 +401,7 @@ let reconnectingAt = 0;
  */
 const RECONNECT_BELIEF_MS = 90_000;
 const statusWaiters = new Set<(s: ConnStatus) => void>();
-let sdkListenersArmed = false;
+let sdkHandles: ListenerHandle[] = [];
 
 /** The SDK's own reconnect is running, as far as this page knows. */
 function reconnecting(): boolean {
@@ -422,34 +436,39 @@ function statusOf(d: unknown): ConnStatus {
 }
 
 /**
- * Registered once, before the first initialize, like the token listener. The update trio IS
- * Apple's configuration progress (Stripe: "you'll see the configuration steps as a software
- * update so you can display progress"). The status stream is how a foreground reconnect — which
- * the SDK runs on its own, autoReconnectOnUnexpectedDisconnect — becomes visible here at all.
+ * Registered before initialize on every SDK turn, like the token listener (armListeners). The
+ * update trio IS Apple's configuration progress (Stripe: "you'll see the configuration steps as
+ * a software update so you can display progress"). The status stream is how a foreground
+ * reconnect — which the SDK runs on its own, autoReconnectOnUnexpectedDisconnect — becomes
+ * visible here at all.
  */
 async function armSdkListeners(p: TerminalPlugin): Promise<void> {
-  if (sdkListenersArmed) return;
-  sdkListenersArmed = true;
-  await p.addListener("terminalStartInstallingUpdate", () => publish(STAGE.configuring, 0));
-  await p.addListener("terminalReaderSoftwareUpdateProgress", (d) => publish(STAGE.configuring, percentOf(d)));
-  await p.addListener("terminalFinishInstallingUpdate", (d) => {
+  const old = sdkHandles;
+  sdkHandles = [];
+  for (const h of old) await h.remove().catch(() => {});
+  const add = async (event: string, cb: (d: unknown) => void) => {
+    sdkHandles.push(await p.addListener(event, cb));
+  };
+  await add("terminalStartInstallingUpdate", () => publish(STAGE.configuring, 0));
+  await add("terminalReaderSoftwareUpdateProgress", (d) => publish(STAGE.configuring, percentOf(d)));
+  await add("terminalFinishInstallingUpdate", (d) => {
     // A finish WITH an error is followed by the connect's own rejection, which carries the sentence.
     const failed = typeof (d as { error?: unknown } | null)?.error === "string";
     if (!failed) publish(STAGE.configuring, 100);
   });
-  await p.addListener("terminalConnectionStatusChange", (d) => settle(statusOf(d)));
+  await add("terminalConnectionStatusChange", (d) => settle(statusOf(d)));
   // The reconnect trio (plugin 6.2+): the SDK's own foreground reconnect, start to verdict. The
   // status stream says RECONNECTING too, but the verdict events are the ones that can't be
   // missed — a reconnect that fails ends in NOT_CONNECTED, one that succeeds in CONNECTED, and
   // either way the "busy under it" flag comes down. A build whose bridge lacks an event simply
   // never fires it; the status stream still carries the turn.
-  await p.addListener("terminalReaderReconnectStarted", () => {
+  await add("terminalReaderReconnectStarted", () => {
     reconnectingAt = Date.now();
     settle("RECONNECTING");
   });
-  await p.addListener("terminalReaderReconnectSucceeded", () => settle("CONNECTED"));
-  await p.addListener("terminalReaderReconnectFailed", () => settle("NOT_CONNECTED"));
-  await p.addListener("terminalUnexpectedReaderDisconnect", () => {
+  await add("terminalReaderReconnectSucceeded", () => settle("CONNECTED"));
+  await add("terminalReaderReconnectFailed", () => settle("NOT_CONNECTED"));
+  await add("terminalUnexpectedReaderDisconnect", () => {
     // The SDK reconnects on its own (autoReconnectOnUnexpectedDisconnect); until it says so,
     // the reader is not there for a tap.
     if (!reconnecting()) settle("NOT_CONNECTED");
@@ -480,7 +499,7 @@ function nextSettledStatus(ms: number): Promise<ConnStatus> {
  * by emitting `terminalRequestedConnectionToken`; we answer with setConnectionToken. The plugin's
  * alternative — a `tokenProviderEndpoint` it POSTs to natively — sends no cookies, so it could
  * never pass requireStaff. This listener is registered BEFORE initialize(), as the plugin's
- * README insists, and kept for the life of the page.
+ * README insists, and registered again at the start of every SDK turn (armListeners says why).
  *
  * THE PLUGIN'S ONLY ERROR CHANNEL IS AN EMPTY TOKEN. setConnectionToken({ token: "" }) is, in
  * the plugin's Swift (APIClient.setConnectionToken), the one way to hand the SDK's pending
@@ -577,29 +596,45 @@ async function feedToken(p: TerminalPlugin): Promise<void> {
 }
 
 async function armTokenProvider(p: TerminalPlugin): Promise<void> {
-  if (tokenListenerArmed) return;
-  // Set before the await so two callers racing here don't both register.
-  tokenListenerArmed = true;
-  try {
-    await p.addListener("terminalRequestedConnectionToken", () => {
-      void feedToken(p);
-    });
-  } catch (e) {
-    tokenListenerArmed = false;
-    throw e;
-  }
+  const old = tokenHandle;
+  tokenHandle = null;
+  if (old) await old.remove().catch(() => {});
+  tokenHandle = await p.addListener("terminalRequestedConnectionToken", () => {
+    void feedToken(p);
+  });
 }
 
 /**
- * Listener first, THEN initialize — the SDK may ask for a token as part of initializing. The
+ * THE LISTENERS ARE REGISTERED AGAIN ON EVERY SDK TURN (2026-09-23, Erik's evening of 9052s).
+ * Capacitor empties every native plugin listener the moment ANY main-frame navigation STARTS
+ * (didStartProvisionalNavigation → bridge.reset()), and a navigation that then fails leaves the
+ * old page running: Next's fallback to a full load on a failed RSC fetch, a foreground refresh on
+ * bad signal. The page lives on, sure it is listening, while the SDK's token requests go to
+ * nobody and every connect dies at Stripe's 60 s. Nothing tells JS the listeners went, so each
+ * turn removes what it registered last and registers again. Remove BEFORE add: the native side
+ * keeps exactly one registration, because two would answer each token request twice and hand the
+ * spare answer to whatever request comes next. Re-arms take turns among themselves too, so a turn
+ * a timeout abandoned can never interleave its swap with the next turn's.
+ */
+let arming: Promise<void> = Promise.resolve();
+function armListeners(p: TerminalPlugin): Promise<void> {
+  const run = arming.then(async () => {
+    await armTokenProvider(p);
+    await armSdkListeners(p).catch(() => {});
+  });
+  arming = run.catch(() => {});
+  return run;
+}
+
+/**
+ * Listeners first, THEN initialize — the SDK may ask for a token as part of initializing. The
  * progress/status listeners ride along; they are a courtesy layer, so their (theoretical)
  * registration failure must never cost a payment. EVERY other SDK call comes after this: the
  * singleton asserts its token provider on first touch, and getConnectedReader() before
  * initialize() is that first touch.
  */
 async function initialise(p: TerminalPlugin, isTest: boolean): Promise<void> {
-  await armTokenProvider(p);
-  await armSdkListeners(p).catch(() => {});
+  await armListeners(p);
   await p.initialize({ isTest });
 }
 
@@ -625,6 +660,14 @@ function codeOf(e: unknown): string | null {
 
 const NOT_IN_BUILD = "Tap to Pay on iPhone isn't available in this app build — it works in the North iPhone app.";
 const PAYMENT_BUSY = "A card payment is already in progress on this phone.";
+/** A Cancel answered before the reader was armed: the connect it interrupted is still settling natively. */
+const ATTEMPT_FINISHING = "The last Tap to Pay on iPhone attempt on this phone is still finishing. Give it a few seconds, then try again.";
+const CANCELLED: TapCollectResult = { ok: false, cancelled: true, error: "Cancelled. Nothing was charged." };
+
+/** Why this phone can't start another Tap to Pay on iPhone step right now, in true words. */
+function busySentence(): string {
+  return readerArmed ? PAYMENT_BUSY : ATTEMPT_FINISHING;
+}
 
 /**
  * The plugin hands JS the SDK's localizedDescription and nothing else — no error code — so the
@@ -648,7 +691,8 @@ export type TapFailKind =
   | "network"
   | "busy"
   | "signed-out"
-  | "setup";
+  | "setup"
+  | "listener-lost";
 
 const OS_SENTENCE =
   "This iPhone's iOS is too old for Tap to Pay on iPhone — update it in Settings › General › Software Update, then try again. Until then, send the customer the pay link.";
@@ -669,9 +713,16 @@ const BUSY_SENTENCE =
 /** [1110] after connectIfNeeded already waited and tried once more: the earlier connection is still going. */
 const STILL_CONNECTING_SENTENCE =
   "This iPhone is still finishing an earlier Tap to Pay on iPhone connection. Wait a moment, then press Tap to Pay again.";
-/** [9052] the SDK gave up waiting for this phone's session answer (60 s). */
-const TOKEN_LATE_SENTENCE =
-  "Stripe didn't get this phone's session in time. Check the internet connection and try again; if it keeps happening, fully close the North app and reopen it.";
+/**
+ * [9052] the SDK gave up waiting 60 s for this phone's session answer, and this page never
+ * fetched one for it: the request went to no listener (armListeners). It used to be worded as a
+ * network problem, which sent Erik to his signal bars. The next SDK turn registers the listener
+ * again, so a retry usually works; the restart is the fix that always does. Most likely, not
+ * proof: lastTokenFailure is also empty after any earlier classified failure or a change of who
+ * is signed in, and the sentence is true either way.
+ */
+const TOKEN_UNHEARD_SENTENCE =
+  "This phone lost track of the card reader. Try again, and if the same thing happens, close the North app fully, reopen it, and try once more.";
 
 /** The sentence for a token fetch that failed: the reason, then the fix. */
 function tokenSentence(f: TokenFailure): string {
@@ -816,7 +867,9 @@ function classify(e: unknown): { kind: TapFailKind; sentence: string } | null {
   if (/fetchConnectionToken|ConnectionTokenProvider|connection token|Missing `token`/i.test(m)) {
     const f = lastTokenFailure;
     if (f) return { kind: f.kind, sentence: tokenSentence(f) };
-    if (/within 60 seconds/i.test(m)) return { kind: "network", sentence: TOKEN_LATE_SENTENCE };
+    // Every fetch this page makes ends in an answer inside ~32 s (feedToken), and a failed one is
+    // remembered above. A 60-second wait with nothing remembered means no fetch ever ran.
+    if (/within 60 seconds/i.test(m)) return { kind: "listener-lost", sentence: TOKEN_UNHEARD_SENTENCE };
     return { kind: "network", sentence: NETWORK_SENTENCE };
   }
   if (/network|offline|internet/i.test(m)) return { kind: "network", sentence: NETWORK_SENTENCE };
@@ -1103,7 +1156,7 @@ export async function tapToPayDeviceStatus(): Promise<TapDeviceStatus> {
   const p = plugin();
   if (!p) return { ok: true, supported: false, reason: NOT_IN_BUILD, osTooOld: false };
   if (supportedOnce) return supportedNow();
-  if (inFlight) return { ok: false, error: PAYMENT_BUSY };
+  if (inFlight) return { ok: false, error: busySentence() };
   // A warm-up or an enable that connects has answered this already — a reader on the line IS
   // support; share it instead of queueing a probe behind a connect that may take minutes.
   for (const run of [enabling, preparing]) {
@@ -1275,6 +1328,7 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
         const r = await raced(20_000, () => ensureTerminalLocation());
         if (!r.ok) {
           publish(STAGE.notReady);
+          reportWarmupFailure("location refused", r.error, { stage });
           return { ok: false, error: r.error };
         }
         noteTapIdentity(r.identity);
@@ -1306,10 +1360,19 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
         return { ok: false, notEnabled: true, error: e.message };
       }
       ctxCache = null;
-      const result: TapPrepareResult =
-        e === TIMED_OUT
-          ? { ok: false, error: `Tap to Pay on iPhone didn't get ready (stuck at: ${stage}).` }
-          : { ok: false, error: describeFailure(stage, e) };
+      let result: TapPrepareResult;
+      if (e === TIMED_OUT) {
+        result = { ok: false, error: `Tap to Pay on iPhone didn't get ready (stuck at: ${stage}).` };
+        reportWarmupFailure(`timed out at ${stage}`, result.error, { stage });
+      } else {
+        // The SDK's own words go to ops as they came; failure() reads lastTokenFailure before it
+        // clears it, which is what tells a lost listener apart from a failed fetch.
+        const sdkSaid = said(e);
+        const f = failure(stage, e);
+        result = { ok: false, error: f.error };
+        const kind = f.kind === "listener-lost" ? "token listener lost" : (f.kind ?? `unclassified at ${stage}`);
+        reportWarmupFailure(kind, f.error, { stage, sdk_said: sdkSaid });
+      }
       lastPrepareFailure = { at: Date.now(), result };
       return result;
     }
@@ -1319,6 +1382,24 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
   } finally {
     preparing = null;
   }
+}
+
+/**
+ * THE WARM-UP HAS NO SCREEN, SO ITS FAILURES GO TO OPS (2026-09-23). It used to drop every one:
+ * the evening Tap to Pay on iPhone could not get a Stripe session for three hours, the phone
+ * looked ready and error_events held nothing, and the only witness was a Debug console pasted
+ * into a bug report about something else. A failure here is the one the next press will meet at
+ * the counter, so it is reported once per page load per kind (an unanswered report is allowed
+ * another go, since a warm-up most often fails when the signal is gone). Apple's "not enabled"
+ * and a backgrounded app are skips, not failures, and never come through here.
+ */
+const warmupReported = new Set<string>();
+function reportWarmupFailure(kind: string, sentence: string, extra: Record<string, string>): void {
+  if (warmupReported.has(kind)) return;
+  warmupReported.add(kind);
+  reportClientError("tap-to-pay", `warm-up failed: ${kind}`, { ...extra, sentence }).catch(() => {
+    warmupReported.delete(kind);
+  });
 }
 
 export type TapEnableResult = { ok: true } | { ok: false; error: string; kind?: TapFailKind };
@@ -1339,7 +1420,10 @@ export async function enableTapToPay(): Promise<TapEnableResult> {
   const p = plugin();
   if (!p) return { ok: false, error: NOT_IN_BUILD };
   if (inFlight) {
-    return { ok: false, error: "A card payment is in progress on this phone — finish or cancel it, then enable Tap to Pay on iPhone." };
+    return {
+      ok: false,
+      error: readerArmed ? "A card payment is in progress on this phone. Finish or cancel it, then enable Tap to Pay on iPhone." : ATTEMPT_FINISHING,
+    };
   }
   if (enabling) return enabling;
   enabling = (async (): Promise<TapEnableResult> => {
@@ -1407,7 +1491,7 @@ export async function showHowToTap(): Promise<{ ok: true } | { ok: false; error:
   const show = edu?.showHowToTap;
   if (!edu || typeof show !== "function") return { ok: false, error: NOT_HERE };
   // Apple owns the screen during a tap; a second sheet on top of it is nowhere anyone should be.
-  if (inFlight) return { ok: false, error: PAYMENT_BUSY };
+  if (inFlight) return { ok: false, error: busySentence() };
   // The same for Apple's terms sheet (an enable) and Apple's configuration (a warm-up): the guide
   // never stacks on either. The Settings door opens the guide itself the moment the terms are
   // done (4.2), so the enable case is told to finish rather than told to wait.
@@ -1469,10 +1553,31 @@ export async function collectTapPayment(input: {
   const p = plugin();
   if (!p) return { ok: false, error: NOT_IN_BUILD };
   if (!input.clientSecret) return { ok: false, error: "This payment wasn't started properly — go back and try again." };
-  if (inFlight) return { ok: false, error: PAYMENT_BUSY };
+  if (inFlight) return { ok: false, error: busySentence() };
   // Claimed BEFORE the first await, so two taps during a warm-up can't both pass the line above.
   inFlight = true;
   cancelRequested = false;
+  readerArmed = false;
+  // CANCEL IS ANSWERED AT ONCE UNTIL THE READER IS ARMED (2026-09-23). Finding and connecting the
+  // reader can take a minute or more, and the plugin cannot stop a connect: Cancel used to sit
+  // under a spinner until the SDK answered, and a connect that succeeded after it went straight
+  // on to Apple's card sheet. So the sheet gets its answer the moment Cancel is pressed, while
+  // the attempt runs on in the background to its own end (the SDK queue keeps the next turn off
+  // the connect still settling) and never arms the reader: it asks cancelRequested right before.
+  // The claim is held until it ends, and a press meanwhile is told the last attempt is finishing.
+  const cancelled = new Promise<TapCollectResult>((resolve) => {
+    cancelBeforeReader = () => resolve(CANCELLED);
+  });
+  const attempt = collectAttempt(p, input).finally(() => {
+    inFlight = false;
+    readerArmed = false;
+    cancelBeforeReader = null;
+  });
+  return Promise.race([attempt, cancelled]);
+}
+
+/** One attempt at the tap, location to Stripe's confirm. collectTapPayment holds the claim on it. */
+async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }): Promise<TapCollectResult> {
   // WHERE it got stuck, so a hang names itself instead of spinning forever.
   let stage: string = STAGE.location;
   try {
@@ -1480,6 +1585,8 @@ export async function collectTapPayment(input: {
     // collide with it. (Neither rejects — each returns its own { ok } — so a plain await is enough.)
     if (preparing) await preparing;
     if (enabling) await enabling;
+    // Cancelled while it waited: nothing has been touched for this attempt yet.
+    if (cancelRequested) return CANCELLED;
     // Apple 5.6: the Tap to Pay on iPhone screen within a second. A tap on a warm reader must
     // not wait on a cold server function, so the context is the page's cached one (exactly as the
     // warm-up reads it) and the server is asked only for what nobody on this page has asked yet:
@@ -1518,7 +1625,7 @@ export async function collectTapPayment(input: {
     const c: Ctx = got;
     // The server's word, read fresh on THIS page load — never a flag anyone could set here.
     const canEnable = canEnableCache === true;
-    await withSdk(async () => {
+    const outcome = await withSdk(async () => {
       stage = STAGE.starting;
       publish(stage);
       await raced(10_000, () => initialise(p, !c.livemode));
@@ -1530,6 +1637,9 @@ export async function collectTapPayment(input: {
         },
         { terms: "refuse", canEnable, connectMs: 180_000 },
       );
+      // NEVER ARM THE READER AFTER A CANCEL. The sheet was answered when it was pressed; the
+      // reader stays connected (connectIfNeeded has said "ready") for the next press.
+      if (cancelRequested) return "cancelled" as const;
       // Apple takes the screen from here until the card is read (or the customer walks off).
       stage = STAGE.tapping;
       publish(stage);
@@ -1537,6 +1647,13 @@ export async function collectTapPayment(input: {
       // busy" (code 20); `inFlight` is this page's flag, not the reader's. Clearing it first
       // costs nothing — the native side no-ops when there is nothing to cancel.
       await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
+      // The one await between the question above and Apple's card sheet: ask it again.
+      if (cancelRequested) {
+        publish(STAGE.ready);
+        return "cancelled" as const;
+      }
+      readerArmed = true;
+      cancelBeforeReader = null;
       const collect = () => raced(120_000, () => p.collectPaymentMethod({ paymentIntent: input.clientSecret }));
       try {
         await collect();
@@ -1554,7 +1671,9 @@ export async function collectTapPayment(input: {
       stage = STAGE.confirming;
       publish(stage);
       await raced(45_000, () => p.confirmPaymentIntent());
+      return "confirmed" as const;
     });
+    if (outcome === "cancelled") return CANCELLED;
     publish(STAGE.ready);
     return { ok: true };
   } catch (e) {
@@ -1574,9 +1693,7 @@ export async function collectTapPayment(input: {
           : " If this app was just updated, fully close it and reopen, then try again.";
       return { ok: false, error: `Tap to Pay on iPhone didn't finish (stuck at: ${stage}).${hint}` };
     }
-    if (cancelRequested || /cancel/i.test(said(e))) {
-      return { ok: false, cancelled: true, error: "Cancelled — nothing was charged." };
-    }
+    if (cancelRequested || /cancel/i.test(said(e))) return CANCELLED;
     const decline = declineOf(e);
     if (decline) {
       return {
@@ -1588,19 +1705,19 @@ export async function collectTapPayment(input: {
       ctxCache = null;
     }
     return { ok: false, error: describeFailure(stage, e) };
-  } finally {
-    inFlight = false;
   }
 }
 
 /**
- * The customer changed their mind while the reader was waiting. The collect promise is the one
- * that answers (with cancelled: true); this just tells the reader to stop listening.
+ * The customer changed their mind. While the reader is waiting for a card, the collect promise
+ * is the one that answers (with cancelled: true) and this tells the reader to stop listening.
+ * Before the reader is armed there is nothing native to stop, so the payment answers now.
  */
 export async function cancelTapPayment(): Promise<void> {
   const p = plugin();
   if (!p) return;
   cancelRequested = true;
+  cancelBeforeReader?.();
   try {
     await raced(5_000, () => p.cancelCollectPaymentMethod());
   } catch {

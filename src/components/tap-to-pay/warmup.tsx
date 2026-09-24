@@ -90,6 +90,8 @@ export function TapToPayWarmup() {
         if (ctx.locationId === null) return;
         // The cheap no-op when the reader is already there; refuses (never presents) unless Apple
         // confirms the terms; memoises its own failures so a bad morning isn't retried in a loop.
+        // Its answer is not shown here (nobody asked for this round trip): a real failure is
+        // reported to the ops log by the bridge itself, once per kind, and "not enabled" is a skip.
         await prepareTapToPay();
       } catch {
         /* a server action that threw is not the reader's problem — the next foreground tries again */
