@@ -32,13 +32,18 @@ describe("detectStrayTime — the forgotten clock and the job-less hours", () =>
     const out = detectStrayTime([{ id: "e3", status: "open", clock_in: "2026-07-01T14:00:00Z" }], TODAY, NOW);
     expect(out).toEqual([]);
   });
-  it("flags a past-day close with no job, but not a job-less piece that carries a time code (Drive/Shop)", () => {
+  it("flags a past-day close with no job, but not a job-less piece on a NON-BILLABLE code (Shop/PTO)", () => {
     const rows = [
       { id: "e4", status: "closed", job_id: null, clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T21:00:00Z", profiles: { full_name: "Brian" } },
-      { id: "e5", status: "closed", job_id: null, job_code: "DRIVE", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
+      { id: "e5", status: "closed", job_id: null, job_code: " SHOP ", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
       { id: "e7", status: "closed", job_id: null, job_code: "  ", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
+      // A BILLABLE code split off to no job is hours nobody bills: still stray.
+      { id: "e8", status: "closed", job_id: null, job_code: "ROUGH", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
     ];
-    expect(detectStrayTime(rows, TODAY, NOW).map((f) => f.entryId)).toEqual(["e4", "e7"]);
+    const nonBillable = new Set(["SHOP", "PTO"]);
+    expect(detectStrayTime(rows, TODAY, NOW, nonBillable).map((f) => f.entryId)).toEqual(["e4", "e7", "e8"]);
+    // Without the org's codes to hand, every job-less close is stray (the safe default).
+    expect(detectStrayTime(rows, TODAY, NOW).map((f) => f.entryId)).toEqual(["e4", "e5", "e7", "e8"]);
   });
   it("leaves TODAY's no-job closes alone (the EOD form may still attach them) and dedupes overlapping feeds", () => {
     const today = { id: "e6", status: "closed", job_id: null, clock_out: "2026-07-01T01:00:00Z" };

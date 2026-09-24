@@ -56,13 +56,23 @@ const firstName = (full: string | null | undefined) => (full ?? "").trim().split
  *  (a) still OPEN from a past day (started before today, or running
  *      OPEN_ENTRY_STALE_HOURS+ — the hour rule catches evening starts the
  *      UTC date-cut misses), i.e. a clock silently accruing payroll; or
- *  (b) CLOSED on a past day with job_id NULL and no time code —
- *      real hours nobody can bill or cost to a job. A job-less piece that carries a code
- *      (Drive, Shop) is time the office filed on purpose, so it is not stray.
+ *  (b) CLOSED on a past day with job_id NULL — real hours nobody can bill or cost to a job —
+ *      unless its time code is one the org marked NON-BILLABLE (job_codes.billable = false:
+ *      Shop, PTO, Drive where the org says so). That time was filed job-less on purpose.
+ *      A BILLABLE code with no job (ROUGH, SVC split off to "no job") is still stray: it is
+ *      exactly the hours nobody bills, and the split sheet can make one.
  * Today's no-job closes are left alone: the EOD form may still attach them.
  * Accepts overlapping row sets (open feeder + recent feeder) — dedupes by id.
+ *
+ * `nonBillableCodes` is the same predicate labor billing uses (labor-billing.ts). Empty = every
+ * job-less close is stray, the safe default for a caller without the org's codes.
  */
-export function detectStrayTime(rows: TimeEntryRow[], todayStr: string, nowMs: number = Date.now()): StrayTimeFinding[] {
+export function detectStrayTime(
+  rows: TimeEntryRow[],
+  todayStr: string,
+  nowMs: number = Date.now(),
+  nonBillableCodes: ReadonlySet<string> = new Set(),
+): StrayTimeFinding[] {
   const out: StrayTimeFinding[] = [];
   const seen = new Set<string>();
   for (const e of rows ?? []) {
@@ -75,8 +85,9 @@ export function detectStrayTime(rows: TimeEntryRow[], todayStr: string, nowMs: n
       if (!startedPastDay && !(Number.isFinite(staleMs) && staleMs >= OPEN_ENTRY_STALE_HOURS * 3_600_000)) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: true, when: e.clock_in });
     } else if (e.status === "closed" && !e.job_id) {
-      // Drive / Shop time is job-less on purpose: its code says where the hours went.
-      if (e.job_code && e.job_code.trim()) continue;
+      // Non-billable time (Shop, PTO) is job-less on purpose: its code says where the hours went.
+      const code = (e.job_code ?? "").trim();
+      if (code && nonBillableCodes.has(code)) continue;
       if (!e.clock_out || e.clock_out.slice(0, 10) >= todayStr) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: false, when: e.clock_in ?? e.clock_out });
     }

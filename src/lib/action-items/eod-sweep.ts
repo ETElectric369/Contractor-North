@@ -41,7 +41,7 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
     const today = todayStrInTz(tz);
 
-    const [openR, recentR] = await Promise.all([
+    const [openR, recentR, codesR] = await Promise.all([
       supabase
         .from("time_entries")
         .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
@@ -54,9 +54,12 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
         .eq("org_id", org.id)
         .gte("clock_in", daysAgoStr(today, NEEDS_RETURN_DAYS))
         .limit(200),
+      // The codes a job-less entry may carry on purpose (billable = false), the labor-billing predicate.
+      supabase.from("job_codes").select("code").eq("org_id", org.id).eq("billable", false),
     ]);
+    const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
 
-    const stray = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today);
+    const stray = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable);
     const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
 
     // Detection only — name the gap, never fill in hours/dollars for the user.

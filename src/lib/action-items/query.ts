@@ -119,7 +119,7 @@ async function buildActionItems(ctx: {
 
   const empty = Promise.resolve({ data: [] as any[] });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -277,6 +277,9 @@ async function buildActionItems(ctx: {
           .order("clock_in", { ascending: false })
           .limit(200)
       : empty,
+    // The time codes the org marked non-billable (Shop, PTO): a job-less entry on one of them was
+    // filed that way on purpose. Labor billing's own predicate, so the two never disagree.
+    isStaff ? supabase.from("job_codes").select("code").eq("billable", false) : empty,
     // ── Materials-routing candidates (staff only) — jobs the crew is about to
     // stand on: scheduled today/tomorrow, plus multi-day segments covering the
     // same window. (Worked-in-the-last-2-days jobs join via the rollup below.)
@@ -773,6 +776,8 @@ async function buildActionItems(ctx: {
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
+    Date.now(),
+    new Set(((nonBillableR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean)),
   );
   for (const f of strayFindings) {
     items.push({
