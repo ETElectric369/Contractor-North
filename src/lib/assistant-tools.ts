@@ -1982,6 +1982,9 @@ export async function runDataTool(
                 hours: unbilled.hours,
                 labor_amount: unbilled.laborAmount,
                 bills_billed: unbilled.billsBilled,
+                // A supplier return no invoice has credited yet (INV-078): what comes OFF the
+                // customer's next bill, marked up like the parts were. `total` is already net of it.
+                ...(unbilled.returnsCount ? { returns_credit: unbilled.returnsCredit, returns_count: unbilled.returnsCount } : {}),
                 total: unbilled.total,
                 last_invoice_number: unbilled.lastInvoiceNumber,
                 by_person: unbilled.laborByPerson,

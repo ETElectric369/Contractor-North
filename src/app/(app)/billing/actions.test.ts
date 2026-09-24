@@ -273,6 +273,90 @@ describe("importCostsIntoInvoice — an edited tax row left behind is said out l
   });
 });
 
+describe("importCostsIntoInvoice — a supplier return reaches the invoice (INV-078)", () => {
+  /** The return as filed: four LED housings back to CED, -$51.58, every figure negative. */
+  const RET = { id: "2f328286-b134-428f-a8b5-ad7702c15453", supplier: "Consolidated Electrical Dist.", bill_number: null, amount: "-51.58", po_id: null, pricing_provisional: false };
+  const RET_LINES = (billable: boolean) => [
+    { id: "8a5a091c", bill_id: RET.id, description: "H245ICAT 4 in LED Shallow IC HSG", quantity: "-4.00", unit_price: "-11.83", amount: "-47.32", category: "Electrical", sort_order: 0, billable, billed_amount: null },
+    { id: "5f575ae5", bill_id: RET.id, description: "Sales Tax", quantity: "1.00", unit_price: "-4.26", amount: "-4.26", category: "Tax", sort_order: 1, billable, billed_amount: null },
+  ];
+  /** An ordinary receipt on the same job, so the import has something else to carry. */
+  const BUY = { id: "c9daf1b8-03fb-4435-a518-24a000d31c3a", supplier: "Consolidated Electrical Dist.", bill_number: null, amount: "103.99", po_id: null, pricing_provisional: false };
+  const BUY_LINES = [
+    { id: "d26f3d69", bill_id: BUY.id, description: "4 in RL 600/900LM 5CCT D2W", quantity: "4.00", unit_price: "23.85", amount: "95.40", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
+    { id: "5f226fd0", bill_id: BUY.id, description: "Tax @ 9.00000%", quantity: "1.00", unit_price: "8.59", amount: "8.59", category: "Tax", sort_order: 1, billable: true, billed_amount: null },
+  ];
+  const offered = () => (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+
+  it("imports a billable return as credit rows at the job's markup, claimed by the return's id, and says so", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [BUY, RET], lines: [...BUY_LINES, ...RET_LINES(true)], landedAfter: [BUY.id, RET.id] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    const credit = offered().filter((r) => (r.source_ids ?? []).includes(RET.id));
+    expect(credit.map((r) => [r.description, r.quantity, r.unit_price])).toEqual([
+      ["Returned: H245ICAT 4 in LED Shallow IC HSG", 4, -13.61],
+      ["Returned: tax", 1, -4.88],
+    ]);
+    // Claimed exactly like a purchase: every row carries the bill's id and nothing else.
+    for (const r of credit) expect(r.source_ids).toEqual([RET.id]);
+    expect(Math.round(credit.reduce((s, r) => s + r.quantity * r.unit_price, 0) * 100) / 100).toBe(-59.32);
+    expect(res.stats.summary).toContain("a supplier return credited back to the customer: -$59.32");
+  });
+
+  it("never credits a return twice: one another invoice holds is skipped, and named", async () => {
+    const base = costsImportRoute({ bills: [RET], lines: RET_LINES(true), landedAfter: [] });
+    state.client = fakeSupabase((q) => {
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("invoices!inner")) {
+        return {
+          data: [
+            {
+              import_key: `bill:${RET.id}:remainder`,
+              source_ids: [RET.id],
+              invoices: { id: "inv-077", invoice_number: "INV-077", status: "sent", created_at: "2026-09-20T00:00:00Z", job_id: JOB, jobs: { job_number: "J-050" } },
+            },
+          ],
+        };
+      }
+      return base(q);
+    }, calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.empty).toBe(true);
+    expect(res.error).toContain("already on INV-077");
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("credits nothing for the INV-078 return as Erik left it (every line switched off), and says why", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [BUY, RET], lines: [...BUY_LINES, ...RET_LINES(false)], landedAfter: [BUY.id] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    // Nothing new appears for the return: the rows offered are exactly the purchase's.
+    expect(offered().every((r) => (r.source_ids ?? []).includes(BUY.id))).toBe(true);
+    expect(offered().some((r) => r.unit_price < 0)).toBe(false);
+    expect(res.stats.summary).toContain(
+      "the Consolidated Electrical Dist. return of $51.58 not credited — every line on it is marked as your own cost, so none of it was the customer's",
+    );
+    expect(res.stats.summary).not.toContain("credited back");
+  });
+
+  it("a non-billable return alone is a sentence with the reason, not \"no bills yet\"", async () => {
+    state.client = fakeSupabase(costsImportRoute({ bills: [RET], lines: RET_LINES(false), landedAfter: [] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.empty).toBe(true);
+    expect(res.error).toContain("return of $51.58 not credited");
+    expect(res.error).not.toContain("No purchase orders or bills");
+  });
+
+  it("still skips a zero bill: it is neither a cost nor a credit", async () => {
+    const zero = { ...RET, id: "57118d9f-c69e-4d32-9747-dca98d162771", amount: "0.00" };
+    state.client = fakeSupabase(costsImportRoute({ bills: [zero], lines: [], landedAfter: [] }), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("No purchase orders or bills on this job yet.");
+  });
+});
+
 // ── Finding 2: the draw must not swallow a real import failure ────────────────────────────────
 
 const NEW_DRAW = "0dda0000-0000-4000-8000-00000000000d";

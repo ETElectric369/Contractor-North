@@ -18,6 +18,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { billableBillCost } from "@/lib/bill-itemisation";
+import { isReturnBill, returnCreditCost } from "@/lib/supplier-returns";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -46,7 +47,18 @@ export type UnbilledWork = {
   markupPct: number;
   /** bills $ with markup — what the customer would be charged for them. */
   billsBilled: number;
-  /** laborAmount + billsBilled. */
+  /** Supplier returns (a bill below zero) no invoice has credited yet, and only the part of them
+   *  that was ever the customer's: a line switched off is not credited, a container billed in part
+   *  credits only that part, tax rides along in proportion. AT COST, as a positive figure - what
+   *  the supplier gave back that reaches the customer. A return with nothing on it that was the
+   *  customer's is not counted at all, exactly as the importer credits nothing for it. */
+  returnsAmount: number;
+  /** How many returns that is. */
+  returnsCount: number;
+  /** returnsAmount with markup, positive: what comes OFF the customer's next bill. */
+  returnsCredit: number;
+  /** laborAmount + billsBilled − returnsCredit. Can be below zero when a return is all that is
+   *  pending: the customer is owed money, and the card says so. */
   total: number;
   /** The job's most recent non-void invoice (any status, drafts included), or null when there is none. */
   lastInvoiceNumber: string | null;
@@ -311,9 +323,13 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
   }
+  let returnsAmount = 0;
+  let returnsCredit = 0;
+  let returnsCount = 0;
   for (const b of input.bills ?? []) {
     const paid = Number(b.amount) || 0;
-    if (!(paid > 0)) continue;
+    const isReturn = isReturnBill(b.amount);
+    if (!(paid > 0) && !isReturn) continue;
     if (claimed.has(b.id)) {
       skippedIds.push(b.id);
       continue;
@@ -321,6 +337,21 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     // The delivery was already billed through its PO on another invoice — see UnbilledWork.poCoveredBills.
     if (typeof b.po_id === "string" && b.po_id && claimed.has(b.po_id)) {
       poCoveredBills += 1;
+      continue;
+    }
+    /**
+     * A RETURN IS A CREDIT OWED TO THE CUSTOMER (INV-078). This loop used to skip anything not
+     * above zero, so the -$51.58 of LED housings that went back to CED was invisible here while
+     * the customer was billed for them. returnCreditCost is the importer's own reading of the
+     * return (billItemisation, run backwards), shared rather than copied, so the credit this card
+     * promises is the credit the button writes.
+     */
+    if (isReturn) {
+      const back = returnCreditCost(b.amount, b.bill_line_items);
+      if (!(back > 0)) continue;
+      returnsAmount = cents(returnsAmount + back);
+      returnsCredit = cents(returnsCredit + mk(back));
+      returnsCount += 1;
       continue;
     }
     /**
@@ -356,7 +387,10 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsCount,
     markupPct,
     billsBilled,
-    total: cents(laborAmount + billsBilled),
+    returnsAmount,
+    returnsCount,
+    returnsCredit,
+    total: cents(laborAmount + billsBilled - returnsCredit),
     lastInvoiceNumber: last?.invoice_number ?? null,
     lastInvoiceAt: last?.created_at ?? null,
     lastInvoiceStatus: last?.status ?? null,

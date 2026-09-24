@@ -209,6 +209,22 @@ describe("computeJobProgress — work to date is what the customer will be bille
     });
     expect(r.workToDate).toBe(8.13);
   });
+
+  it("a supplier return comes off, marked up like the parts it reverses (INV-078)", () => {
+    const ret = (billable: boolean) => ({
+      amount: -51.58,
+      po_id: null,
+      bill_line_items: [
+        { id: "r1", quantity: -4, unit_price: -11.83, amount: -47.32, category: "Electrical", billable },
+        { id: "r2", quantity: 1, unit_price: -4.26, amount: -4.26, category: "Tax", billable },
+      ],
+    });
+    const on = computeJobProgress({ ...base, billableLabor: 100, pos: [], bills: [ret(true)], markupPercent: 15 });
+    expect(on.workToDate).toBe(40.68); // 100 − 59.32, the credit the importer writes
+    // Switched off (the purchase was taken off by hand instead): nothing comes off twice.
+    const off = computeJobProgress({ ...base, billableLabor: 100, pos: [], bills: [ret(false)], markupPercent: 15 });
+    expect(off.workToDate).toBe(100);
+  });
 });
 
 describe("livePurchaseOrders", () => {

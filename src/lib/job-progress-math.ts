@@ -3,6 +3,7 @@
  *  without a DB. The server fn does the fetching, then calls this. */
 
 import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
+import { returnCreditCost } from "@/lib/supplier-returns";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 
 export type JobProgressFinancials = {
@@ -138,6 +139,14 @@ export function computeJobProgress(input: {
     (input.bills ?? []).reduce((s, b) => {
       const billable = billableBillCost(b.amount, b.bill_line_items);
       return billable > 0 ? s + mk(billable) : s;
+    }, 0) -
+    // A SUPPLIER RETURN COMES OFF (INV-078). The importer now credits a return filed as a negative
+    // bill, marked up like the purchase it reverses and net of the lines that were never the
+    // customer's; the reference figure has to move with it or the panel stops reconciling to the
+    // lines it promises to equal. Same shared reading as the importer and the Unbilled card.
+    (input.bills ?? []).reduce((s, b) => {
+      const back = returnCreditCost(b.amount, b.bill_line_items);
+      return back > 0 ? s + mk(back) : s;
     }, 0);
 
   const workToDate = cents(num(input.billableLabor) + billableMaterials);

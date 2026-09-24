@@ -206,7 +206,9 @@ function stillBills(l: BillLine): boolean {
  * Returns the rows for ONE bill, in order. An empty array means this bill has nothing to charge
  * the customer for — every line on it was the company's own cost.
  */
-const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
+/** A receipt's tax line, by its category. Exported so a supplier return names its tax share with
+ *  the same test the purchase side uses to keep tax out of the itemisation. */
+export const isTaxLine = (l: BillLine) => /tax/i.test(String(l.category ?? ""));
 const sumBy = (ls: BillLine[], f: (l: BillLine) => number) =>
   ls.reduce((sum, l) => Math.round((sum + f(l)) * 100) / 100, 0);
 /** What a line does NOT bill: the whole thing when it is switched off, the shelf's share of a
@@ -287,6 +289,11 @@ export function billableBillCost(amount: unknown, lines: BillLine[] | null | und
   return net > 0 ? net : 0;
 }
 
+/** The words on a row that bills only part of a line (0272). Exported so a supplier RETURN of
+ *  that same container can say the credit is only the part this job was billed, in its own words,
+ *  without a second copy of the phrase to drift from this one. */
+export const PART_USED_SUFFIX = " (what this job used)";
+
 export function billItemisation(
   bill: BillForItemisation,
   allLines: BillLine[],
@@ -351,7 +358,7 @@ export function billItemisation(
      * not print. So the row says what is true: this is the part of that container the job used.
      */
     if (part != null) {
-      billRows.push({ import_key: `bli:${l.id}`, description: `${desc} (what this job used)`, quantity: 1, unit: "ea", unit_price: sell });
+      billRows.push({ import_key: `bli:${l.id}`, description: `${desc}${PART_USED_SUFFIX}`, quantity: 1, unit: "ea", unit_price: sell });
       emitted = Math.round((emitted + sell) * 100) / 100;
       continue;
     }

@@ -15,6 +15,7 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
 import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "@/lib/bill-itemisation";
+import { isReturnBill, returnCreditRows, returnsSummaryParts, type ReturnOutcome } from "@/lib/supplier-returns";
 import { sendSms } from "@/lib/sms";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
@@ -1564,6 +1565,10 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
    * rides out on the same toast the office already reads before it sends.
    */
   const provisional: string[] = [];
+  /** Supplier returns (a bill below zero) this run credits, and the ones with nothing on them that
+   *  was ever the customer's - both said in the summary. */
+  const returnsCredited: (ReturnOutcome & { billId: string })[] = [];
+  const returnsNotCredited: (ReturnOutcome & { billId: string })[] = [];
   const linesByBill = new Map<string, any[]>();
   for (const l of blis.lines) {
     if (!linesByBill.has(l.bill_id)) linesByBill.set(l.bill_id, []);
@@ -1605,7 +1610,11 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
   //    whose lines are junk still bills its full amount (never $0), and a corrected
   //    bill.amount always wins over stale lines.
   for (const b of (bills ?? []) as any[]) {
-    if (!(Number(b.amount) > 0)) continue;
+    // A RETURN IS A CREDIT, NOT A BLANK (INV-078). This gate used to be "above zero or skip", so a
+    // supplier return filed as a negative bill never reached the customer - INV-078 still billed
+    // four housings that had gone back to CED. Zero is still neither a cost nor a credit.
+    const isReturn = isReturnBill(b.amount);
+    if (!(Number(b.amount) > 0) && !isReturn) continue;
     if (claims.owner.has(String(b.id))) {
       skippedIds.push(String(b.id));
       continue;
@@ -1615,6 +1624,21 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
     // difference is the office's call, by hand — never invented here. Counted and said below.
     if (typeof b.po_id === "string" && b.po_id && claims.owner.has(b.po_id)) {
       poCovered.push({ billId: String(b.id), poId: b.po_id });
+      continue;
+    }
+    if (isReturn) {
+      // The return, read backwards through billItemisation: same markup, same line states, tax in
+      // proportion, claimed by the bill's id like any purchase - see supplier-returns.ts.
+      const creditRows = returnCreditRows(b, linesByBill.get(b.id) ?? [], markup);
+      const outcome = { billId: String(b.id), supplier: String(b.supplier ?? "").trim() || "supplier", amount: Number(b.amount) };
+      if (!creditRows.length) {
+        returnsNotCredited.push({ ...outcome, credit: 0 });
+        continue;
+      }
+      const credit = Math.round(-creditRows.reduce((s, r) => s + r.quantity * r.unit_price, 0) * 100) / 100;
+      returnsCredited.push({ ...outcome, credit });
+      if (b.pricing_provisional === true) provisional.push(String(b.id));
+      rows.push(...creditRows.map((r) => ({ ...r, source_ids: [String(b.id)] })));
       continue;
     }
     const billRows = billItemisation(b, linesByBill.get(b.id) ?? [], markup);
@@ -1644,6 +1668,14 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
         ok: false,
         empty: true,
         error: `Nothing here to bill: on ${nothingBillable.length === 1 ? "that receipt" : "those receipts"}, every line is marked as your own cost rather than the customer's. Open the bill to change what the customer pays for.`,
+      };
+    // The same sentence for a return: it is on the job, and the reason nothing came off is his own
+    // switch - never "no bills yet" about a piece of paper he can see.
+    if (returnsNotCredited.length)
+      return {
+        ok: false,
+        empty: true,
+        error: `Nothing here to bill or credit: ${returnsSummaryParts([], returnsNotCredited).join("; ")}. Open the bill to change what the customer pays for.`,
       };
     return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
   }
@@ -1677,6 +1709,12 @@ export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: 
     const n = flagged.length;
     stats.summary += ` · ${n === 1 ? "one receipt's prices are" : `${n} receipts' prices are`} a counter preview, not your account's pricing - check ${n === 1 ? "it" : "them"} before you send`;
   }
+  // Returns, said: the credit that landed (read back, like the preview flag above - a return whose
+  // rows sit behind an edited line is not claimed as credited), and any return with nothing on it
+  // that was ever the customer's, with the reason.
+  const creditedLanded = after ? returnsCredited.filter((r) => after.has(r.billId)) : returnsCredited;
+  const returnParts = returnsSummaryParts(creditedLanded, returnsNotCredited);
+  if (returnParts.length) stats.summary += ` · ${returnParts.join(" · ")}`;
   const drift = await editedRemainderWarnings(supabase, invoiceId, (bills ?? []) as { id: string; supplier?: string | null }[], rows, markup);
   if (drift.length) stats.warnings = drift;
   return { ok: true, stats };
@@ -1784,9 +1822,16 @@ export async function createProgressReportInvoice(
   }
   if (unbilled.total <= 0.005) {
     const on = unbilled.claimedOn.length ? joinNumbers(unbilled.claimedOn) : unbilled.lastInvoiceNumber;
+    // A draw never goes negative (resolveDrawCredit), so a supplier return worth more than the new
+    // work cannot ride on one - but it is money the customer is owed, and a refusal that talks only
+    // about hours would hide it. Said, with where it goes.
+    const owed =
+      unbilled.returnsCount > 0
+        ? ` A supplier return of ${formatCurrency(unbilled.returnsCredit)} is owed back to the customer; a progress payment can't go below zero, so it comes off the next one with more new work than that.`
+        : "";
     return {
       ok: false,
-      error: on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.",
+      error: (on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.") + owed,
     };
   }
   const settings = getOrgSettings((org as any)?.settings);

@@ -14,7 +14,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
-import { escapeLike } from "@/lib/utils";
+import { escapeLike, formatCurrency } from "@/lib/utils";
 import { shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
@@ -85,6 +85,8 @@ type UnbilledPicture = {
   billsCount: number;
   /** Approved change orders no non-void invoice holds — read only for a quoted job. */
   changeOrders: number;
+  /** A supplier return no invoice has credited yet, marked up (positive = owed to the customer). */
+  returnsCredit: number;
 };
 async function unbilledPicture(supabase: SupabaseClient, jobId: string, want: { changeOrders: boolean }): Promise<UnbilledPicture | null> {
   try {
@@ -98,6 +100,7 @@ async function unbilledPicture(supabase: SupabaseClient, jobId: string, want: { 
       costs: unbilled.billsCount > 0,
       billsCount: unbilled.billsCount,
       changeOrders: cos,
+      returnsCredit: unbilled.returnsCount > 0 ? unbilled.returnsCredit : 0,
     };
   } catch (e) {
     reportError("createInvoiceForJob.unbilledPicture", e, { jobId });
@@ -327,7 +330,15 @@ export async function createInvoiceForJob(
   if (prior && picture) {
     const laborNew = picture.labor && (!quote || wantLabor);
     const costsNew = picture.costs && (!quote || wantCosts);
-    if (!laborNew && !costsNew && picture.changeOrders === 0) return nothingNewRefusal(prior, priorLabel, !!quote);
+    if (!laborNew && !costsNew && picture.changeOrders === 0) {
+      const refusal = nothingNewRefusal(prior, priorLabel, !!quote);
+      // A pending supplier return alone never mints an invoice (a document for a credit and
+      // nothing else), but "nothing new" must not hide money the customer is owed (INV-078).
+      if (picture.returnsCredit > 0.005 && (!quote || wantCosts)) {
+        refusal.error += ` A supplier return of ${formatCurrency(picture.returnsCredit)} is still owed back to the customer; it comes off the next invoice on this job.`;
+      }
+      return refusal;
+    }
   }
   // Work the caller deliberately left off (Finish Job's toggles) is NOT "nothing new": the draft
   // is still minted — blank, or with the rest — and the note names what stayed unbilled and the
