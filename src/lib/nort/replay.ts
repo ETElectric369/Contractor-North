@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 
 /**
  * REPLAYING AN ASSISTANT TURN — what Nort's tool loop sends back to the API after each round.
@@ -127,4 +127,109 @@ export function stripThinkingBlocks(msgs: Anthropic.MessageParam[]): number {
     else msgs.splice(i, 1);
   }
   return removed;
+}
+
+/**
+ * True only for the failure the one retry exists for: the API refused a replayed thinking block
+ * (a 400 whose message names thinking). Any other 400 — a prompt too long after web results, a
+ * tool_use/tool_result mismatch — would fail the same way again, so it is not retried and the
+ * valid thinking blocks are not thrown away over it.
+ */
+export function isThinkingRefusal(e: unknown): boolean {
+  if (!(e instanceof Anthropic.BadRequestError)) return false;
+  const body = e.error as { error?: { message?: unknown }; message?: unknown } | undefined;
+  const apiMessage = body?.error?.message ?? body?.message;
+  const text = typeof apiMessage === "string" ? apiMessage : e.message;
+  return /thinking/i.test(text ?? "");
+}
+
+/**
+ * The prompt-cache tail marker: strip every old marker (the API allows 4 breakpoints) and put
+ * one on the last block of the last message. Never on a thinking block (the API refuses
+ * cache_control there): the marker goes on the last block that can carry it. The tail is almost
+ * always a user turn, but a pause_turn round leaves an assistant turn last. Mutates in place and
+ * returns the same array.
+ */
+export function markCacheTail(msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  for (const m of msgs) {
+    if (Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
+  }
+  const last = msgs[msgs.length - 1];
+  if (last) {
+    if (typeof last.content === "string") {
+      last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
+    } else if (Array.isArray(last.content) && last.content.length) {
+      const idx = last.content.findLastIndex((b) => !isThinkingBlock(b));
+      if (idx >= 0) (last.content[idx] as { cache_control?: unknown }).cache_control = { type: "ephemeral" };
+    }
+  }
+  return msgs;
+}
+
+export type ReplayRoundOptions = {
+  client: Anthropic;
+  /** The request minus `messages`, which always come from `convo` (through `prepare`). */
+  params: Omit<Anthropic.MessageStreamParams, "messages">;
+  /** The conversation. Mutated: the replay-valid assistant turn is pushed onto it. */
+  convo: Anthropic.MessageParam[];
+  /** Runs on `convo` before every attempt (the route's cache-tail marker). */
+  prepare?: (convo: Anthropic.MessageParam[]) => Anthropic.MessageParam[];
+  /** Every text delta, as the SDK's `text` event gives it. */
+  onText: (text: string) => void;
+  /** False once there is no one left to answer (the request aborted, the phone hung up). */
+  mayRetry?: () => boolean;
+  /** Called once per retry, AFTER the retry settles, so `recovered` is the truth. */
+  report?: (e: unknown, info: { stripped: number; recovered: boolean; retryError?: unknown }) => void;
+};
+
+/**
+ * ONE ROUND OF NORT'S TOOL LOOP, with its replay made safe: stream the request, record the raw
+ * events, push the assistant turn back onto `convo` exactly as the wire carried it (see
+ * createReplayCapture), and return the final message.
+ *
+ * The one retry is for one failure: the API refused a replayed thinking block, which it does
+ * before a single token streams. Then every thinking block is stripped from `convo` and the
+ * round is asked again — the alternative is Nort answering nothing (the 2026-09-23 incident,
+ * where the lookup succeeded and Erik got only "Something went wrong"). No retry when text
+ * already reached the screen (it would say it twice), when no one is left to answer, or when
+ * there was nothing to strip.
+ */
+export async function runReplayRound(opts: ReplayRoundOptions): Promise<Anthropic.Message> {
+  const { client, params, convo, onText } = opts;
+  const prepare = opts.prepare ?? ((m: Anthropic.MessageParam[]) => m);
+  let emitted = false;
+  const attempt = async () => {
+    const capture = createReplayCapture();
+    const turn = client.messages.stream({ ...params, messages: prepare(convo) });
+    turn.on("text", (text) => {
+      if (text) emitted = true;
+      onText(text);
+    });
+    turn.on("streamEvent", capture.onEvent);
+    const final = await turn.finalMessage();
+    return { final, capture };
+  };
+
+  let result: Awaited<ReturnType<typeof attempt>>;
+  try {
+    result = await attempt();
+  } catch (e) {
+    if (!isThinkingRefusal(e) || emitted || (opts.mayRetry && !opts.mayRetry())) throw e;
+    const stripped = stripThinkingBlocks(convo);
+    if (!stripped) throw e;
+    try {
+      result = await attempt();
+    } catch (retryError) {
+      opts.report?.(e, { stripped, recovered: false, retryError });
+      throw retryError;
+    }
+    opts.report?.(e, { stripped, recovered: true });
+  }
+
+  // Replay-valid content only: thinking blocks exactly as the wire carried them (text AND
+  // signature), or left out when that can't be proven. An assistant turn with nothing left to
+  // replay is not pushed (an empty content array is its own 400).
+  const replay = result.capture.replayContent(result.final.content);
+  if (replay.length) convo.push({ role: "assistant", content: replay });
+  return result.final;
 }

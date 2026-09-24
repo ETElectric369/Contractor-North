@@ -1,12 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
-import { createReplayCapture, stripThinkingBlocks } from "./replay";
+import { createReplayCapture, markCacheTail, runReplayRound, stripThinkingBlocks } from "./replay";
 
 /**
  * The 2026-09-23 Nort 400 ("each thinking block must contain thinking"), rebuilt against the REAL
  * SDK stream accumulator: a fake fetch serves round one as server-sent events (a thinking block,
- * a sentence, a tool call), the chat route's capture reassembles the assistant turn, and round
- * two's request body is read back off the wire and checked the way the API checks it.
+ * a sentence, a tool call), runReplayRound — the same function the chat route calls for every
+ * round — reassembles the assistant turn, and round two's request body is read back off the wire
+ * and checked the way the API checks it.
  */
 
 type Ev = Record<string, unknown>;
@@ -65,14 +66,22 @@ const ROUND_TWO = message(
   "end_turn",
 );
 
+/** An API error response, as the API sends one. */
+type Refusal = { status: number; message: string };
+const refusal = (status: number, message: string): Refusal => ({ status, message });
+
 /** A client whose fetch serves the scripted rounds in order and records every request body. */
-function scriptedClient(rounds: Ev[][]) {
+function scriptedClient(rounds: Array<Ev[] | Refusal>) {
   const bodies: Array<{ messages: Array<{ role: string; content: unknown }> }> = [];
   let n = 0;
   const fetch = async (_url: unknown, init?: { body?: unknown }) => {
     bodies.push(JSON.parse(String(init?.body)));
-    const events = rounds[Math.min(n++, rounds.length - 1)];
-    return new Response(sse(events), { status: 200, headers: { "content-type": "text/event-stream" } });
+    const next = rounds[Math.min(n++, rounds.length - 1)];
+    if (!Array.isArray(next)) {
+      const body = { type: "error", error: { type: "invalid_request_error", message: next.message } };
+      return new Response(JSON.stringify(body), { status: next.status, headers: { "content-type": "application/json" } });
+    }
+    return new Response(sse(next), { status: 200, headers: { "content-type": "text/event-stream" } });
   };
   const client = new Anthropic({ apiKey: "test-key", fetch: fetch as never, maxRetries: 0 });
   return { client, bodies };
@@ -92,15 +101,22 @@ function assertReplayValid(content: unknown) {
   }
 }
 
-/** One round of the chat route's loop: stream, capture, push the replay-valid turn. */
-async function runRound(client: Anthropic, convo: Anthropic.MessageParam[]) {
-  const capture = createReplayCapture();
-  const turn = client.messages.stream({ model: "claude-opus-4-8", max_tokens: 2048, messages: convo });
-  turn.on("streamEvent", capture.onEvent);
-  const final = await turn.finalMessage();
-  const replay = capture.replayContent(final.content);
-  if (replay.length) convo.push({ role: "assistant", content: replay });
-  return final;
+/** One round exactly as the chat route runs it: runReplayRound with the route's cache marker. */
+async function runRound(
+  client: Anthropic,
+  convo: Anthropic.MessageParam[],
+  extra: Partial<Parameters<typeof runReplayRound>[0]> = {},
+) {
+  const texts: string[] = [];
+  const final = await runReplayRound({
+    client,
+    convo,
+    prepare: markCacheTail,
+    params: { model: "claude-opus-4-8", max_tokens: 2048 },
+    onText: (t) => texts.push(t),
+    ...extra,
+  });
+  return { final, texts };
 }
 
 describe("Nort replays an assistant turn that thought", () => {
@@ -110,7 +126,7 @@ describe("Nort replays an assistant turn that thought", () => {
       { role: "user", content: "The 10244 Schaefer job got moved to the week of October 12th" },
     ];
 
-    const first = await runRound(client, convo);
+    const { final: first } = await runRound(client, convo);
     expect(first.stop_reason).toBe("tool_use");
     convo.push({ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "J-012 Schaefer" }] });
     await runRound(client, convo);
@@ -124,6 +140,10 @@ describe("Nort replays an assistant turn that thought", () => {
       { type: "text", text: "Let me find that job." },
       { type: "tool_use", id: "toolu_1", name: "list_jobs", input: { search: "Schaefer" } },
     ]);
+    // The cache marker rode the tail (the tool_result), never a thinking block.
+    const tail = bodies[1].messages[2].content as Ev[];
+    expect(tail[tail.length - 1].cache_control).toEqual({ type: "ephemeral" });
+    expect((replayed.content as unknown as Ev[]).some((b) => "cache_control" in b)).toBe(false);
   });
 
   it("keeps a signed block whose text is empty (display: omitted) exactly as received", async () => {
@@ -215,5 +235,100 @@ describe("stripThinkingBlocks (the one retry after a refused replay)", () => {
     expect(convo).toHaveLength(3);
     expect(convo[1].content).toEqual([{ type: "tool_use", id: "t1", name: "list_jobs", input: {} }]);
     expect(stripThinkingBlocks(convo)).toBe(0);
+  });
+});
+
+const REFUSED = "messages.1.content.0.thinking: each thinking block must contain thinking";
+
+/** A conversation whose last assistant turn holds a thinking block the API is about to refuse. */
+function convoWithThinking(): Anthropic.MessageParam[] {
+  return [
+    { role: "user", content: "Move the Schaefer job" },
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "", signature: SIGNATURE },
+        { type: "tool_use", id: "toolu_9", name: "list_jobs", input: {} },
+      ],
+    } as unknown as Anthropic.MessageParam,
+    { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_9", content: "J-012" }] },
+  ];
+}
+
+describe("runReplayRound's one retry", () => {
+  it("strips thinking and asks again when the API refuses a replayed thinking block, then reports it recovered", async () => {
+    const { client, bodies } = scriptedClient([refusal(400, REFUSED), ROUND_TWO]);
+    const convo = convoWithThinking();
+    const reports: Array<{ recovered: boolean; stripped: number }> = [];
+    const { final, texts } = await runRound(client, convo, { report: (_e, info) => reports.push(info) });
+
+    expect(final.stop_reason).toBe("end_turn");
+    expect(bodies).toHaveLength(2);
+    // The retry's request carries no thinking block at all.
+    const retried = bodies[1].messages.flatMap((m) => (Array.isArray(m.content) ? (m.content as unknown as Ev[]) : []));
+    expect(retried.some((b) => b.type === "thinking" || b.type === "redacted_thinking")).toBe(false);
+    expect(retried.some((b) => b.type === "tool_use")).toBe(true);
+    // Nothing was said twice, and the report says what actually happened.
+    expect(texts.join("")).toBe("Moved.");
+    expect(reports).toEqual([{ stripped: 1, recovered: true }]);
+    expect(convo[convo.length - 1]).toEqual({ role: "assistant", content: [{ type: "text", text: "Moved." }] });
+  });
+
+  it("does not retry a 400 that is not about thinking, and keeps the valid thinking blocks", async () => {
+    const { client, bodies } = scriptedClient([refusal(400, "prompt is too long: 210000 tokens > 200000 maximum"), ROUND_TWO]);
+    const convo = convoWithThinking();
+    const reports: unknown[] = [];
+    await expect(runRound(client, convo, { report: (_e, info) => reports.push(info) })).rejects.toBeInstanceOf(
+      Anthropic.BadRequestError,
+    );
+    expect(bodies).toHaveLength(1);
+    expect(reports).toEqual([]);
+    expect((convo[1].content as unknown as Ev[])[0].type).toBe("thinking");
+  });
+
+  it("reports a retry that fails as NOT recovered and throws the retry's error", async () => {
+    const { client, bodies } = scriptedClient([refusal(400, REFUSED), refusal(400, "messages: tool_use ids must be unique")]);
+    const reports: Array<{ recovered: boolean; stripped: number; retryError?: unknown }> = [];
+    const err = await runRound(client, convoWithThinking(), { report: (_e, info) => reports.push(info) }).catch((e) => e);
+
+    expect(bodies).toHaveLength(2);
+    expect(err).toBeInstanceOf(Anthropic.BadRequestError);
+    expect(String(err.message)).toContain("tool_use ids must be unique");
+    expect(reports).toHaveLength(1);
+    expect(reports[0].recovered).toBe(false);
+    expect(reports[0].retryError).toBe(err);
+  });
+
+  it("does not retry when no one is left to answer", async () => {
+    const { client, bodies } = scriptedClient([refusal(400, REFUSED), ROUND_TWO]);
+    await expect(runRound(client, convoWithThinking(), { mayRetry: () => false })).rejects.toBeInstanceOf(
+      Anthropic.BadRequestError,
+    );
+    expect(bodies).toHaveLength(1);
+  });
+});
+
+describe("markCacheTail", () => {
+  it("never puts the marker on a thinking block, and keeps exactly one", () => {
+    const convo = [
+      { role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Searching." },
+          { type: "thinking", thinking: "x", signature: SIGNATURE },
+        ],
+      },
+    ] as unknown as Anthropic.MessageParam[];
+    markCacheTail(convo);
+    expect((convo[0].content as unknown as Ev[])[0].cache_control).toBeUndefined();
+    expect((convo[1].content as unknown as Ev[])[0].cache_control).toEqual({ type: "ephemeral" });
+    expect("cache_control" in (convo[1].content as unknown as Ev[])[1]).toBe(false);
+
+    const onlyThinking = [
+      { role: "assistant", content: [{ type: "redacted_thinking", data: "z" }] },
+    ] as unknown as Anthropic.MessageParam[];
+    markCacheTail(onlyThinking);
+    expect("cache_control" in (onlyThinking[0].content as unknown as Ev[])[0]).toBe(false);
   });
 });
