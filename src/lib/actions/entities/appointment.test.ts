@@ -70,7 +70,7 @@ describe("appointment.create — a spoken local time is stored as that local tim
     expect(r.ok).toBe(true);
     const fd = createAppointment.mock.calls[0][0] as FormData;
     expect(fd.get("starts_at_iso")).toBe("2026-09-25T17:00:00.000Z");
-    expect(r.recorded).toBe("Booked: Inspection — Tom Goodman, Fri Sep 25 at 10:00 AM PDT, no customer linked.");
+    expect(r.recorded).toBe('Booked: "Inspection — Tom Goodman", Fri Sep 25 at 10:00 AM PDT, no customer linked.');
   });
 
   it("10 AM Pacific in December (standard time) is stored 18:00Z", async () => {
@@ -125,6 +125,6 @@ describe("appointment.linkCustomer — the yes has a verb now", () => {
     const cid = "0a8dfe84-f1a4-4a8b-b8bd-df250eeb23b2";
     const r = await def.handler(def.input.parse({ id: "a1", customer_id: cid }), ctx);
     expect(linkAppointmentTo).toHaveBeenCalledWith("a1", "customer", cid);
-    expect(r.recorded).toBe("Linked: Inspection — Tom Goodman, Fri Sep 25 at 10:00 AM PDT, customer Tom Goodman.");
+    expect(r.recorded).toBe('Linked: "Inspection — Tom Goodman", Fri Sep 25 at 10:00 AM PDT, customer "Tom Goodman".');
   });
 });

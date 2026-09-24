@@ -1315,7 +1315,7 @@ export async function importJobs(
           .insert({
             name: cname,
             email: r.email?.trim() || null,
-            phone: r.phone?.trim() || null,
+            phone: formatPhone(r.phone ?? "") || null, // the one formatter
             address: r.address?.trim() || null,
             city: r.city?.trim() || null,
             state: r.state?.trim() || null,

@@ -8,7 +8,7 @@ import {
   rescheduleAppointment,
 } from "@/app/(app)/appointments/actions";
 import { createClient } from "@/lib/supabase/server";
-import { localToInstant, orgTimezone, spokenWhen } from "@/lib/org-local-time";
+import { localToInstant, orgTimezone, quotedData, spokenWhen } from "@/lib/org-local-time";
 import { resolveCustomerId, resolveJobId } from "../resolve-id";
 import type { ActionDef, ActionResult } from "../types";
 
@@ -44,8 +44,9 @@ export function appointmentRecorded(
   tz: string,
 ): string {
   const end = row.ends_at ? `, until ${spokenWhen(row.ends_at, tz).replace(/^.* at /, "")}` : "";
-  const who = row.customers?.name ? `, customer ${row.customers.name}` : ", no customer linked";
-  return `${verb}: ${row.title ?? "appointment"}, ${spokenWhen(row.starts_at, tz)}${end}${who}.`;
+  const who = row.customers?.name ? `, customer ${quotedData(row.customers.name)}` : ", no customer linked";
+  // Title and name are database free text (a lead's name can reach the title): quoted, as data.
+  return `${verb}: ${quotedData(row.title ?? "appointment")}, ${spokenWhen(row.starts_at, tz)}${end}${who}.`;
 }
 
 /** Convert the model's start (and optional end) in the org timezone, or say why not. */

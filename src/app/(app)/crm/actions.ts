@@ -9,7 +9,7 @@ import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { requireStaff } from "@/lib/staff-guard";
 import { sendEmail, renderReminderEmail, ownerBcc } from "@/lib/email";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
-import { findDuplicateGroups, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
+import { findDuplicateGroups, normPhone, type DupCustomer, type DupGroup } from "@/lib/crm/duplicates";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 
 export type ActionResult = { ok: boolean; error?: string; id?: string };
@@ -225,8 +225,11 @@ export async function bulkImportCustomers(rows: CustomerImportRow[]): Promise<Ac
 
   // Skip exact duplicates already in the book.
   const { data: existing } = await supabase.from("customers").select("name, phone");
-  const seen = new Set((existing ?? []).map((c: any) => `${(c.name ?? "").toLowerCase()}|${c.phone ?? ""}`));
-  const fresh = clean.filter((r) => !seen.has(`${r.name.toLowerCase()}|${r.phone ?? ""}`));
+  // Key on the phone's DIGITS, not its formatted string: rows stored as "1 (916) ..." before the
+  // one formatter dropped the leading 1 must still match today's "(916) ..." (review 2026-09-24).
+  const dupKey = (name: string | null | undefined, phone: string | null | undefined) => `${(name ?? "").toLowerCase()}|${normPhone(phone)}`;
+  const seen = new Set((existing ?? []).map((c: any) => dupKey(c.name, c.phone)));
+  const fresh = clean.filter((r) => !seen.has(dupKey(r.name, r.phone)));
   const skipped = clean.length - fresh.length;
 
   if (fresh.length) {

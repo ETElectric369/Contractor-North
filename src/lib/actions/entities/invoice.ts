@@ -15,7 +15,7 @@ import {
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
 import { paymentMethodLabel } from "@/lib/payment-method";
-import { localDay, orgTimezone } from "@/lib/org-local-time";
+import { localDay, spokenDay } from "@/lib/org-local-time";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -248,15 +248,19 @@ export const invoiceActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     confirm: "financial",
-    describe: (i) => `Record a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount} against this invoice — say yes to confirm.`,
+    // The DAY rides on the card and in the read-back, so a wrong day is caught before the yes.
+    describe: (i) => {
+      const day = i.paid_at ? localDay(i.paid_at) : null;
+      return `Record a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount} against this invoice, received ${day ? spokenDay(day) : "today"} — say yes to confirm.`;
+    },
     handler: async (i) => {
       // recordPayment reads paid_at as a bare YYYY-MM-DD and quietly stamps NOW on anything else,
-      // so "they paid last Tuesday" sent as "2026-09-15T00:00:00Z" was recorded as today. Bring a
-      // date-time down to its company-local day first; a string with no date in it is an error.
+      // so "they paid last Tuesday" sent as "2026-09-15T00:00:00Z" was recorded as today. paid_at
+      // is a CALENDAR DAY: take the date exactly as written (never an instant conversion, which
+      // moved that Tuesday to Monday in Pacific); a string with no real date in it is an error.
       let paidAt: string | null = null;
       if (i.paid_at) {
-        const needsTz = String(i.paid_at).trim().length > 10;
-        paidAt = localDay(i.paid_at, needsTz ? await orgTimezone(await createClient()) : "UTC");
+        paidAt = localDay(i.paid_at);
         if (!paidAt) return { ok: false, error: `I couldn't read "${i.paid_at}" as a date. Pass YYYY-MM-DD.` };
       }
       const r = await recordPayment({
@@ -267,7 +271,12 @@ export const invoiceActions: Record<string, ActionDef> = {
         paid_at: paidAt,
       });
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, speak: `Recorded a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount}.` };
+      const when = paidAt ? spokenDay(paidAt) : "today";
+      return {
+        ok: true,
+        speak: `Recorded a ${paymentMethodLabel(i.method || "check")} payment of $${i.amount}, received ${when}.`,
+        recorded: `Recorded: $${i.amount} ${paymentMethodLabel(i.method || "check")}, received ${when}.`,
+      };
     },
   },
   "payment.setSchedule": {

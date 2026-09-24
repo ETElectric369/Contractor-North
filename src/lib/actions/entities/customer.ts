@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createCustomer, patchCustomer } from "@/app/(app)/crm/actions";
 import { createClient } from "@/lib/supabase/server";
-import { orgTimezone } from "@/lib/org-local-time";
+import { orgTimezone, quotedData } from "@/lib/org-local-time";
 import { LINK_OFFER_WINDOW_MS, linkOfferNextStep, matchLinkOffers, type LinkCandidateRow } from "../link-offer";
 import type { ActionDef, ActionResult } from "../types";
 
@@ -13,7 +13,7 @@ async function customerRecorded(supabase: Db, id: string, verb: string): Promise
   const { data } = await supabase.from("customers").select("name, phone, email").eq("id", id).maybeSingle();
   if (!data) return null;
   const c = data as { name?: string | null; phone?: string | null; email?: string | null };
-  return `${verb}: ${[c.name, c.phone, c.email].filter(Boolean).join(" · ")}.`;
+  return `${verb}: ${[c.name ? quotedData(c.name) : null, c.phone, c.email].filter(Boolean).join(" · ")}.`;
 }
 
 export const customerActions: Record<string, ActionDef> = {
@@ -71,7 +71,7 @@ export const customerActions: Record<string, ActionDef> = {
             .order("created_at", { ascending: false })
             .limit(10);
           const offers = matchLinkOffers((rows ?? []) as LinkCandidateRow[], { name: i.name, address: i.address }, await orgTimezone(supabase));
-          if (offers.length) data = { ...data, link_offer: offers, next_step: linkOfferNextStep(i.name, offers) };
+          if (offers.length) data = { ...data, link_offer: offers, next_step: linkOfferNextStep(offers) };
         } catch {
           /* the offer is a courtesy; the customer is saved either way */
         }
