@@ -10,8 +10,8 @@ import type { PriceItem } from "./price-list-math";
 import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
-import { ItemOptionsManager } from "./item-options-manager";
-import type { ItemOption } from "./item-options-math";
+import { VendorsManager } from "./vendors-manager";
+import { knownVendorNames, summarizeVendors, type ItemOption, type VendorCard } from "./item-options-math";
 
 export const dynamic = "force-dynamic";
 
@@ -31,10 +31,12 @@ type KitRow = { id: string; name: string; category: string | null; kit_items: (K
  *  option row, the modal and the sell-price resolution read has to be named right here, or it is
  *  undefined at runtime with nothing to show for it. */
 const OPTION_SELECT = "id, item_id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, archived, sort_order";
+/** 0296's vendor cards: how to reach each vendor (the brand), once per name. */
+const CARD_SELECT = "id, name, contact_name, phone, email, website, address, notes, archived";
 
 export default async function PriceListPage() {
   const supabase = await createClient();
-  const [itemsRes, kitsRes, { data: org }, optionsRes] = await Promise.all([
+  const [itemsRes, kitsRes, { data: org }, optionsRes, cardsRes] = await Promise.all([
     (async () => {
       // Active rows first so the cap trims archived ones, never live ones.
       const withV2 = await supabase
@@ -64,6 +66,9 @@ export default async function PriceListPage() {
     // means "no options yet as far as this deploy can tell", and the tab stays away rather than
     // offering a door that opens onto a database error.
     supabase.from("price_list_item_options").select(OPTION_SELECT).order("item_id").order("sort_order").limit(2000),
+    // 0296 is a new table too: absent = no contact cards yet, and the Vendors tab still lists every
+    // vendor from the items, with the contact boxes switched off and saying why.
+    supabase.from("price_list_vendors").select(CARD_SELECT).order("name").limit(2000),
   ]);
   // 0241: what THIS company can count an item by — every form's playbook, measured number needs.
   // Best-effort: no forms (or a pre-playbook org) just means the two built-in dimensions.
@@ -114,9 +119,24 @@ export default async function PriceListPage() {
   }));
   const optionsByItem: Record<string, ItemOption[]> = {};
   for (const o of options) (optionsByItem[o.item_id] ??= []).push(o);
-  // The tab's count is the WORKING SET: codes that actually carry a live option. Archived ones
-  // still ride in optionsByItem so they stay findable under their item, but they are not news.
-  const itemsWithOptions = activeItems.filter((i) => (optionsByItem[i.id] ?? []).some((o) => !o.archived)).length;
+  // Archived options still ride in optionsByItem so they stay findable (and restorable) on their
+  // item's sheet.
+  // VENDORS ARE BRANDS (Erik for Justin, 2026-09-24: "vendor means what brand with its own cost and
+  // sell price"). One per name across every item, with its card when it has one.
+  const cardsAvailable = !cardsRes.error;
+  const cards: VendorCard[] = ((cardsRes.data ?? []) as Record<string, unknown>[]).map((c) => ({
+    id: String(c.id),
+    name: String(c.name ?? ""),
+    contact_name: (c.contact_name as string | null) ?? null,
+    phone: (c.phone as string | null) ?? null,
+    email: (c.email as string | null) ?? null,
+    website: (c.website as string | null) ?? null,
+    address: (c.address as string | null) ?? null,
+    notes: (c.notes as string | null) ?? null,
+    archived: Boolean(c.archived),
+  }));
+  const vendors = summarizeVendors(options, allItems, cards, defaultMarkupPct);
+  const knownVendors = knownVendorNames(options, cards);
 
   return (
     <div>
@@ -125,7 +145,7 @@ export default async function PriceListPage() {
         description={
           "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier list (e.g. CED) via CSV." +
           // Only said when the tab is actually there — copy never names a control that doesn't exist.
-          (optionsAvailable ? " One code can carry several makers: see Vendor Options." : "")
+          (optionsAvailable ? " Click any item to give it vendors (the brand, e.g. Andersen), each with its own cost and sell." : "")
         }
       />
       {/* ONE unit vocabulary, one list: every unit input on the page points at this datalist. */}
@@ -148,20 +168,28 @@ export default async function PriceListPage() {
                 kits={kits.map((k) => ({ id: k.id, name: k.name }))}
                 measurements={measurements}
                 sizingAvailable={itemsRes.sizingAvailable}
+                optionsByItem={optionsAvailable ? optionsByItem : null}
+                knownVendors={knownVendors}
               />
             ),
           },
-          // ONE CODE, SEVERAL MAKERS (0282) — next to the book it belongs to, not off in Settings.
-          // Andrew, for Justin: "windows - mfg Andersen - mfg Milgard - mfg Marvin". The Price List
-          // tab beside it is untouched: an item with no options looks and prices exactly as it did.
+          // VENDORS (0282 + 0296), next to the book they belong to. The tab id stays "options" so a
+          // link to the old "Vendor Options" tab still lands here.
           ...(optionsAvailable
             ? [
                 {
                   id: "options",
-                  label: "Vendor Options",
-                  count: itemsWithOptions,
+                  label: "Vendors",
+                  count: vendors.length,
                   content: (
-                    <ItemOptionsManager items={activeItems} optionsByItem={optionsByItem} defaultMarkupPct={defaultMarkupPct} />
+                    <VendorsManager
+                      vendors={vendors}
+                      items={activeItems}
+                      optionsByItem={optionsByItem}
+                      knownVendors={knownVendors}
+                      defaultMarkupPct={defaultMarkupPct}
+                      cardsAvailable={cardsAvailable}
+                    />
                   ),
                 },
               ]

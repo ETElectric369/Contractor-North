@@ -8,7 +8,9 @@ import { searchPaidPrices, type LearnedPrice } from "@/lib/pricing/learned-price
 import { normalizeUnit } from "@/lib/pricing/units";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { lineDisplayName } from "@/lib/kit-line";
-import { cleanOptionFields, optionName, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
+import { formatCurrency } from "@/lib/utils";
+import { canonicalVendorName, cleanOptionFields, optionName, optionSellPatch, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
+import { knownVendorNamesFor } from "./vendor-db";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
 
@@ -659,7 +661,7 @@ const NO_ORG = "Your account isn't attached to a company yet, so there's no pric
  *  list" is an ANSWER and a bare policy refusal is not. Also org-scopes the id explicitly, so a
  *  guessed uuid can never reach a write (defense in depth — RLS stays the boundary). */
 async function ownItem(supabase: StaffDb, orgId: string, itemId: string): Promise<{ id: string } | string> {
-  if (!itemId) return "No item was named, so there is nothing to add an option to.";
+  if (!itemId) return "No item was named, so there is nothing to add a vendor to.";
   const { data, error } = await supabase.from("price_list_items").select("id").eq("id", itemId).eq("org_id", orgId).maybeSingle();
   if (error) return dbError(error);
   if (!data) return "That item isn't in your price list any more. Reload the page.";
@@ -694,7 +696,13 @@ async function nextSortOrder(supabase: StaffDb, orgId: string, itemId: string): 
 }
 
 export async function addItemOption(
-  input: { itemId: string; isDefault?: boolean } & OptionFieldsInput,
+  input: {
+    itemId: string;
+    isDefault?: boolean;
+    /** A typed Sell. When given it SETS the markup (through optionSellPatch, the same door the
+     *  row's Sell cell uses) and `markupPct` is ignored; blank/absent = the markup as passed. */
+    sell?: string | number | null;
+  } & OptionFieldsInput,
 ): Promise<OptionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -703,8 +711,18 @@ export async function addItemOption(
 
   const cleaned = cleanOptionFields(input, "create");
   if ("error" in cleaned) return { ok: false, error: cleaned.error };
+  const typedSell = input.sell === null || input.sell === undefined || String(input.sell).trim() === "" ? null : input.sell;
+  let wantSell: number | null = null;
+  if (typedSell !== null) {
+    const r = optionSellPatch({ buy_price: Number(cleaned.clean.buy_price) || 0 }, typedSell);
+    if ("error" in r) return { ok: false, error: r.error };
+    cleaned.clean.markup_pct = r.patch.markup_pct;
+    wantSell = r.sell;
+  }
   const owned = await ownItem(supabase, orgId, input.itemId);
   if (typeof owned === "string") return { ok: false, error: owned };
+  // ONE BRAND, ONE SPELLING: "andersen" typed on a new item joins the Andersen already listed.
+  cleaned.clean.vendor = canonicalVendorName(String(cleaned.clean.vendor), await knownVendorNamesFor(supabase, orgId));
 
   // 0282's one-default index is partial (is_default AND NOT archived), so the sitting default has
   // to step down BEFORE the new row lands — the other order is a guaranteed unique violation.
@@ -723,14 +741,42 @@ export async function addItemOption(
       created_by: userId,
       // org_id is left to the set_org_id trigger, exactly like every other table in 0270+.
     })
-    .select("id");
-  if (error) return { ok: false, error: optionWriteRefusal(error, { vendor: input.vendor, label: input.label }) };
+    .select("id, markup_pct, buy_price");
+  if (error) {
+    const named = { vendor: String(cleaned.clean.vendor), label: (cleaned.clean.label as string | null | undefined) ?? null };
+    // 0282's one-per-maker index counts ARCHIVED rows too, so "already a vendor on this item" can
+    // point at one nobody can see. Say where it is instead of leaving a dead end.
+    if (String(error.message ?? "").includes("price_list_item_options_one_per_maker")) {
+      const { data: same } = await supabase
+        .from("price_list_item_options")
+        .select("vendor, label, archived")
+        .eq("item_id", input.itemId)
+        .eq("org_id", orgId)
+        .eq("archived", true);
+      const hidden = ((same ?? []) as { vendor: string; label: string | null }[]).find(
+        (o) => o.vendor.trim().toLowerCase() === named.vendor.trim().toLowerCase() && (o.label ?? "").trim().toLowerCase() === (named.label ?? "").trim().toLowerCase(),
+      );
+      if (hidden) {
+        return { ok: false, error: `${optionName(named)} is archived on this item. Restore it (under Show Archived) and change its price there.` };
+      }
+    }
+    return { ok: false, error: optionWriteRefusal(error, named) };
+  }
   // THE SILENT-WRITE LAW: an insert RLS refused comes back as zero rows, not an error.
   if (!data?.length) return { ok: false, error: "Nothing was saved. Reload the page and try again." };
   revalidatePath("/price-list");
+  // READ BACK A TYPED SELL, as setItemOptionSell does: before 0296 widens the column, a markup with
+  // more than two decimals is rounded on the way in and the sell moves a few cents. Say so.
+  const notes: string[] = [];
+  if (wantSell !== null) {
+    const stored = data[0] as { markup_pct: number | string | null; buy_price: number | string };
+    const landed = sellPrice(Number(stored.buy_price) || 0, Number(stored.markup_pct) || 0);
+    if (landed !== wantSell) notes.push(`The closest it can hold is ${formatCurrency(landed)}, a cent or so off what you typed.`);
+  }
   // The toast already names what was added, so this note says the CONSEQUENCE rather than the name
   // again: the item's own number just stopped being the one that prices it.
-  return { ok: true, note: input.isDefault ? "This item prices at it now, instead of its own number." : undefined };
+  if (input.isDefault) notes.push("This item prices at it now, instead of its own number.");
+  return { ok: true, note: notes.length ? notes.join(" ") : undefined };
 }
 
 /** Patch one option. Writes ONLY what the caller passed, so a change to the part number can never
@@ -754,12 +800,18 @@ export async function updateItemOption(
     .maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
   const row = rowData as { id: string; item_id: string; vendor: string; label: string | null; is_default: boolean; archived: boolean } | null;
-  if (!row) return { ok: false, error: "That option isn't there any more. Reload the page." };
+  if (!row) return { ok: false, error: "That vendor isn't on this item any more. Reload the page." };
   if (input.isDefault && row.archived) {
-    return { ok: false, error: "Restore this option first. An archived one can't be what the item prices at." };
+    return { ok: false, error: "Restore this vendor first. An archived one can't be what the item prices at." };
   }
 
   const patch: Record<string, unknown> = { ...cleaned.clean };
+  if (typeof patch.vendor === "string") {
+    // Same spelling rule as a new one, except the row's own old spelling doesn't count as "known":
+    // retyping "ANDERSEN" as "Andersen" on the only Andersen row must be allowed to stick.
+    const known = (await knownVendorNamesFor(supabase, orgId)).filter((n) => n !== row.vendor.trim());
+    patch.vendor = canonicalVendorName(patch.vendor, known);
+  }
   if (input.isDefault !== undefined) patch.is_default = Boolean(input.isDefault);
   if (Object.keys(patch).length === 0) return { ok: true };
 
@@ -781,7 +833,7 @@ export async function updateItemOption(
     .eq("org_id", orgId)
     .select("id");
   if (error) return { ok: false, error: optionWriteRefusal(error, named) };
-  if (!data?.length) return { ok: false, error: "Nothing was saved. That option may have been removed, so reload the page." };
+  if (!data?.length) return { ok: false, error: "Nothing was saved. That vendor may have been removed, so reload the page." };
   revalidatePath("/price-list");
   // What PRICES this item is the one thing on this form that moves money, so it is said out loud
   // when it MOVES — both directions, and never when the box was simply left where it was.
@@ -815,7 +867,7 @@ export async function archiveItemOption(optionId: string, archived = true): Prom
     .maybeSingle();
   if (readErr) return { ok: false, error: dbError(readErr) };
   const row = rowData as { id: string; item_id: string; vendor: string; label: string | null; is_default: boolean } | null;
-  if (!row) return { ok: false, error: "That option isn't there any more. Reload the page." };
+  if (!row) return { ok: false, error: "That vendor isn't on this item any more. Reload the page." };
 
   const patch: Record<string, unknown> = { archived };
   let note: string | undefined;
@@ -851,7 +903,7 @@ export async function archiveItemOption(optionId: string, archived = true): Prom
     .eq("org_id", orgId)
     .select("id");
   if (error) return { ok: false, error: optionWriteRefusal(error, row) };
-  if (!data?.length) return { ok: false, error: "Nothing changed. That option may have been removed, so reload the page." };
+  if (!data?.length) return { ok: false, error: "Nothing changed. That vendor may have been removed, so reload the page." };
   revalidatePath("/price-list");
   return { ok: true, note };
 }
@@ -892,9 +944,64 @@ export async function setDefaultItemOption(input: { itemId: string; optionId: st
     .select("id, vendor, label");
   if (error) return { ok: false, error: optionWriteRefusal(error) };
   if (!data?.length) {
-    return { ok: false, error: "That option isn't there any more, or it's archived. Reload the page and pick again." };
+    return { ok: false, error: "That vendor isn't on this item any more, or it's archived. Reload the page and pick again." };
   }
   revalidatePath("/price-list");
   const picked = (data as { vendor: string; label: string | null }[])[0];
   return { ok: true, note: `${optionName(picked)} is now what this item prices at.` };
+}
+
+/**
+ * TYPE A SELL PRICE ON ONE VENDOR, AND THE MARKUP FOLLOWS. The book never stores a sell: it
+ * stores cost + markup, and sell is derived by the same sellPrice the estimate uses. So a typed
+ * sell becomes this vendor's OWN markup (optionSellPatch picks the fewest decimals that land on
+ * the typed cents), and the row reads it back and says so if the column could not hold it (a
+ * database without 0296 rounds to two decimals, and a sell that moved by a cent is not silent).
+ *
+ * Returns the markup it replaced (null = it was falling through to the item's) for the Undo.
+ */
+export async function setItemOptionSell(input: {
+  optionId: string;
+  sell: string | number;
+}): Promise<OptionResult & { previousMarkupPct?: number | null }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  const { data: rowData, error: readErr } = await supabase
+    .from("price_list_item_options")
+    .select("id, vendor, label, buy_price, markup_pct, archived")
+    .eq("id", input.optionId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const row = rowData as { id: string; vendor: string; label: string | null; buy_price: number | string; markup_pct: number | string | null; archived: boolean } | null;
+  if (!row) return { ok: false, error: "That vendor isn't on this item any more. Reload the page." };
+  if (row.archived) return { ok: false, error: "Restore this vendor first, then change its price." };
+
+  const r = optionSellPatch({ buy_price: Number(row.buy_price) || 0 }, input.sell);
+  if ("error" in r) return { ok: false, error: r.error };
+
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .update(r.patch)
+    .eq("id", row.id)
+    .eq("org_id", orgId)
+    .select("markup_pct, buy_price");
+  if (error) return { ok: false, error: optionWriteRefusal(error, row) };
+  if (!data?.length) return { ok: false, error: "Nothing was saved. That vendor may have been removed, so reload the page." };
+  revalidatePath("/price-list");
+
+  const stored = data[0] as { markup_pct: number | string | null; buy_price: number | string };
+  const landed = sellPrice(Number(stored.buy_price) || 0, Number(stored.markup_pct) || 0);
+  const previous = row.markup_pct === null || row.markup_pct === undefined ? null : Number(row.markup_pct);
+  return {
+    ok: true,
+    previousMarkupPct: previous,
+    note:
+      landed === r.sell
+        ? undefined
+        : `The closest it can hold is ${formatCurrency(landed)}, a cent or so off what you typed.`,
+  };
 }

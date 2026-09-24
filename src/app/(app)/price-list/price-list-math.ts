@@ -42,7 +42,25 @@ export function rowView(item: Pick<PriceItem, "buy_price" | "markup_pct">, orgDe
   };
 }
 
-export type InlineField = "unit" | "cost" | "markup" | "margin" | "sell";
+/**
+ * THE COST IS THE ITEM NUMBER. Vivian Builders' book came in with 129 of its 131 costs equal to
+ * the code: 830 "Windows (Materials) (Allowance)" at $830.00, 005 "Engineering" at $5.00. The
+ * import put the code in the cost column. Nothing here fixes it (the real number is Justin's to
+ * give, and a guessed price on an estimate is worse than a flagged one); it only makes the rows
+ * visible so they are not quoted as if they were real.
+ *
+ * True when the code is a plain number (leading zeros allowed: "005" is 5) and the cost equals it
+ * to the cent. A code with letters or dashes is a part number, never compared.
+ */
+export function costLooksLikeCode(item: Pick<PriceItem, "code" | "buy_price">): boolean {
+  const code = String(item.code ?? "").trim();
+  if (!/^\d+(\.\d+)?$/.test(code)) return false;
+  const cost = Number(item.buy_price);
+  if (!Number.isFinite(cost) || cost <= 0) return false;
+  return Math.round(Number(code) * 100) === Math.round(cost * 100);
+}
+
+export type InlineField ="unit" | "cost" | "markup" | "margin" | "sell";
 
 export type InlinePatch = { unit?: string; buy_price?: number; markup_pct?: number };
 

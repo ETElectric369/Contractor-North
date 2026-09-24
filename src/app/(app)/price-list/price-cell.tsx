@@ -94,7 +94,9 @@ export function PriceCell({
 
   function onKey(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") { e.preventDefault(); commit(); }
-    else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+    // stopPropagation: inside an item's sheet, Escape cancels THIS edit and must not also close
+    // the sheet (the Modal listens on window).
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
     else if (e.key === "ArrowUp") { e.preventDefault(); nudge(1, e.shiftKey); }
     else if (e.key === "ArrowDown") { e.preventDefault(); nudge(-1, e.shiftKey); }
     else if (e.key === "Tab") { commit(); }
@@ -118,7 +120,7 @@ export function PriceCell({
           if (e.target.value !== value.trim()) void onCommit(e.target.value);
         }}
         onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); cancel(); } }}
+        onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); } }}
         className={`h-8 w-full min-w-[4.5rem] rounded-md border border-brand bg-white px-1 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-brand ${className}`}
       >
         {opts.map((u) => (

@@ -19,7 +19,9 @@ import { addItemsToKit } from "./kit-actions";
 import { EditPriceItemButton } from "./edit-price-item-button";
 import { ImportCsvModal } from "./import-preview";
 import { PriceCell } from "./price-cell";
-import { addItemHasDraft, patchForEdit, rowView, undoPatch, type InlineField, type InlinePatch, type PriceItem } from "./price-list-math";
+import { addItemHasDraft, costLooksLikeCode, patchForEdit, rowView, undoPatch, type InlineField, type InlinePatch, type PriceItem } from "./price-list-math";
+import { ItemSheet } from "./item-sheet";
+import { optionName, type ItemOption } from "./item-options-math";
 
 /** A table row: the item plus what the table computes from it. A type alias (not an interface)
  *  so it satisfies sortRows' Record<string, unknown> — the sort key is looked up by name. */
@@ -82,6 +84,8 @@ export function PriceListManager({
   kits = [],
   measurements = [],
   sizingAvailable = false,
+  optionsByItem = null,
+  knownVendors = [],
 }: {
   items: PriceItem[];
   /** Settings → default_markup_pct: the last rung of THE markup rule. */
@@ -94,6 +98,11 @@ export function PriceListManager({
   measurements?: MeasurementOption[];
   /** True when the 0240 sizing columns came back from the DB — gates the sizing fields. */
   sizingAvailable?: boolean;
+  /** itemId → its vendors (0282), archived included. Null = the table isn't there on this deploy,
+   *  so an item doesn't open to a vendor list it can't save. */
+  optionsByItem?: Record<string, ItemOption[]> | null;
+  /** Every vendor name the org already spells one way, for the Add Vendor box. */
+  knownVendors?: string[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -128,6 +137,10 @@ export function PriceListManager({
   const [kitTarget, setKitTarget] = useState("");
   const [newKitName, setNewKitName] = useState("");
   const [addingToKit, setAddingToKit] = useState(false);
+  // CLICK AN ITEM, SEE ITS VENDORS (Justin, via Erik 2026-09-24). By id, so the sheet reads the
+  // fresh item and options after every router.refresh instead of a copy taken when it opened.
+  const [sheetId, setSheetId] = useState<string | null>(null);
+  const sheetItem = sheetId ? (local.find((i) => i.id === sheetId) ?? null) : null;
 
   const rows: Row[] = useMemo(
     () =>
@@ -154,6 +167,9 @@ export function PriceListManager({
   // ROWS AN OLD IMPORT SHIFTED — see lib/pricing/import-damage.ts. Same predicate the Settings
   // count uses, so the number he was told and the rows he is shown can never disagree.
   const shifted = useMemo(() => active.filter((r) => unitLooksShifted(r.unit)), [active]);
+  // COST = ITEM NUMBER (price-list-math.ts costLooksLikeCode): Vivian's import put 129 codes in the
+  // cost column. Flagged, never repaired: the real number is the owner's to type.
+  const costIsCode = useMemo(() => active.filter((r) => costLooksLikeCode(r)), [active]);
 
   const chips: FilterChip<Row>[] = useMemo(
     () => [
@@ -162,6 +178,7 @@ export function PriceListManager({
       { key: "nomarkup", label: "No Markup", test: (r) => r.pct <= 0 },
       { key: "nocategory", label: "No Category", test: (r) => !r.category },
       { key: "shifted", label: "Shifted", test: (r) => unitLooksShifted(r.unit) },
+      { key: "costiscode", label: "Cost = Item #", test: (r) => costLooksLikeCode(r) },
       { key: "archived", label: "Archived", test: (r) => r.archived },
     ],
     [],
@@ -413,6 +430,34 @@ export function PriceListManager({
         </div>
       )}
 
+      {/* THE COST IS THE ITEM NUMBER. 830 Windows at $830.00 is a code in the cost column, not a
+          price. Said out loud so nobody quotes it; the fix is his real numbers, typed in the Cost
+          cell or re-imported. */}
+      {costIsCode.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-start gap-2 text-sm text-amber-900">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <span className="font-medium">
+                {costIsCode.length === 1 ? "1 item costs exactly its item number" : `${costIsCode.length} items cost exactly their item number`}
+              </span>{" "}
+              (for example {costIsCode[0].code} {costIsCode[0].description} at {formatCurrency(costIsCode[0].cost)}). That usually means the
+              import put the code in the cost column, so {costIsCode.length === 1 ? "it isn't a real price" : "they aren't real prices"} yet. Click a
+              cost to type the real one, or re-import with the right column.
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => update({ chips: activeChips.has("costiscode") ? prefs.chips.filter((c) => c !== "costiscode") : [...prefs.chips, "costiscode"] })}
+                >
+                  {activeChips.has("costiscode") ? "Show the Whole List" : `Show Just These ${costIsCode.length}`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Search + the one sort/filter control */}
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <div className="relative lg:w-80">
@@ -524,7 +569,13 @@ export function PriceListManager({
                           <input type="checkbox" aria-label={`Select ${r.description}`} checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} disabled={r.archived} className="h-4 w-4 accent-[var(--color-brand)]" />
                         </td>
                         <td className={`${td} font-mono text-xs text-slate-500`}>{r.code ?? "—"}</td>
-                        <td className={`${td} font-medium text-slate-900`}>{r.description}</td>
+                        <td className={`${td} font-medium text-slate-900`}>
+                          {optionsByItem && !r.archived ? (
+                            <ItemOpenButton row={r} options={optionsByItem[r.id] ?? []} onOpen={() => setSheetId(r.id)} />
+                          ) : (
+                            r.description
+                          )}
+                        </td>
                         <td className={`${td} text-slate-500`}>{r.category ?? "—"}</td>
                         <td className={td}>
                           <PriceCell
@@ -542,7 +593,16 @@ export function PriceListManager({
                           <PriceCell
                             kind="money"
                             value={r.cost.toFixed(2)}
-                            display={<span className={isShifted ? "text-red-700" : "text-slate-700"}>{formatCurrency(r.cost)}</span>}
+                            display={
+                              <span className={isShifted ? "text-red-700" : costLooksLikeCode(r) ? "text-amber-700" : "text-slate-700"}>
+                                {formatCurrency(r.cost)}
+                                {!isShifted && costLooksLikeCode(r) && (
+                                  <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-amber-600" title="This cost is the same as the item number, so it probably isn't a real price yet">
+                                    = item #
+                                  </span>
+                                )}
+                              </span>
+                            }
                             onCommit={(raw) => saveInline(r, "cost", raw)}
                             saving={busy}
                             disabled={r.archived}
@@ -653,6 +713,38 @@ export function PriceListManager({
       </Card>
 
       <ImportCsvModal open={importOpen} onClose={() => setImportOpen(false)} />
+      {sheetItem && optionsByItem && (
+        <ItemSheet
+          item={sheetItem}
+          options={optionsByItem[sheetItem.id] ?? []}
+          defaultMarkupPct={defaultMarkupPct}
+          knownVendors={knownVendors}
+          onClose={() => setSheetId(null)}
+        />
+      )}
     </div>
+  );
+}
+
+/** The description as the door into the item: its name, and under it who the vendors are and
+ *  which one estimates use. A plain button so it works by keyboard and by thumb. */
+function ItemOpenButton({ row, options, onOpen }: { row: { description: string }; options: ItemOption[]; onOpen: () => void }) {
+  const live = options.filter((o) => !o.archived);
+  const def = live.find((o) => o.is_default) ?? null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="-mx-1 block w-full rounded-md px-1 py-0.5 text-left hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+      title="Open this item: its vendors, each with its own cost and sell"
+    >
+      <span className="block">{row.description}</span>
+      {live.length > 0 && (
+        <span className="block text-[11px] font-normal text-brand">
+          {live.length} Vendor{live.length === 1 ? "" : "s"}
+          {def ? ` · default ${optionName(def)}` : ""}
+        </span>
+      )}
+    </button>
   );
 }

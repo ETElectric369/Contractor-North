@@ -29,7 +29,7 @@ describe("the maker rows AddLineItems renders", () => {
   it("offers the allowance first, then every maker in the org's order", () => {
     const rows = itemOptionChoices(item830 as never, { orgDefaultPct: 20 });
     expect(rows.map((r) => r.makerLabel)).toEqual([
-      "No Maker Picked",
+      "No Vendor Picked",
       "Andersen 400 Series",
       "Milgard Tuscany",
       "Marvin",
