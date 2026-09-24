@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getMoneyPipeline } from "@/lib/billing-pipeline";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceAmount } from "@/lib/invoice-amount";
 /* THE rule, imported, never re-derived. `revised_at > sent_at` is one sentence and it already has
    one home (lib/invoice-revision.ts) — the same function the server stamps by and the invoice page
    banners by. A second copy of it on this board is exactly the shape of the draft gate this wave
@@ -74,6 +74,14 @@ export default async function BillingPage() {
       paidAt: ((i.payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at),
     }),
   );
+  // ONE INVOICE, ONE ROW. A revised bill with money owed used to sit in Revised AND in Sent, so
+  // the board listed it twice. It lives in Revised now (the verb it needs first is "send the
+  // corrected copy"), and Sent shows the rest. The tiles still read `unpaid`, so the Outstanding
+  // count is every open invoice exactly once.
+  const resendIds = new Set(needsResend.map((i) => String(i.id)));
+  const awaiting = unpaid.filter((i) => !resendIds.has(String(i.id)));
+  const heldAbove = unpaid.length - awaiting.length;
+  const unpaidById = new Map(unpaid.map((i) => [String(i.id), i]));
   // "All caught up" may not be printed over a customer holding the wrong bill.
   const caughtUp = doneNotInvoiced.length === 0 && drafts.length === 0 && unpaid.length === 0 && needsResend.length === 0;
 
@@ -88,7 +96,7 @@ export default async function BillingPage() {
         <Card className="border-rose-200">
           <CardContent className="py-3">
             <div className="text-xl font-bold text-slate-900">{money(pipeline.toInvoiceTotal)}</div>
-            <div className="text-xs text-slate-500">To invoice · {doneNotInvoiced.length}</div>
+            <div className="text-xs text-slate-500">To Invoice · {doneNotInvoiced.length}</div>
           </CardContent>
         </Card>
         <Card>
@@ -115,7 +123,7 @@ export default async function BillingPage() {
 
       {/* STAGE 1 — done, not invoiced (the silent gap) */}
       {doneNotInvoiced.length > 0 && (
-        <Stage tone="rose" icon={<Receipt className="h-4 w-4" />} title="Done — not invoiced" count={doneNotInvoiced.length} sub="Finished jobs with no invoice — or a payment schedule not fully drawn. Bill them before they slip.">
+        <Stage tone="rose" icon={<Receipt className="h-4 w-4" />} title="Done - Not Invoiced" count={doneNotInvoiced.length} sub="Finished jobs with no invoice — or a payment schedule not fully drawn. Bill them before they slip.">
           {doneNotInvoiced.map((j) => (
             <li key={j.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
               <Link href={`/jobs/${j.id}`} className="min-w-0 hover:underline">
@@ -138,17 +146,18 @@ export default async function BillingPage() {
 
       {/* STAGE 2 — drafts not sent */}
       {drafts.length > 0 && (
-        <Stage tone="amber" icon={<FileText className="h-4 w-4" />} title="Draft — not sent" count={drafts.length} sub="Invoices written up but not sent to the customer yet.">
+        <Stage tone="amber" icon={<FileText className="h-4 w-4" />} title="Draft - Not Sent" count={drafts.length} sub="Invoices written up but not sent to the customer yet.">
           {drafts.map((inv) => (
             <li key={inv.id}>
               <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium text-slate-900">{inv.customer ?? "—"}</div>
                   <div className="truncate text-xs text-slate-500">{inv.job ?? inv.invoice_number}</div>
+                  <AmountDetail total={inv.total} paid={inv.paid} />
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className="text-sm font-medium text-slate-900">{money(inv.total)}</span>
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <Amount total={inv.total} paid={inv.paid} />
+                  <Verb>Review &amp; Send</Verb>
                 </div>
               </Link>
             </li>
@@ -157,43 +166,56 @@ export default async function BillingPage() {
       )}
 
       {/* STAGE 2B — sent, then changed: the copy in their inbox is not this one.
-          THE ONE LANE THAT DELIBERATELY OVERLAPS ANOTHER. Every other stage on this board is
-          exclusive, because a thing that needs one money action should be in one place. This one
-          asks for a different verb than "record payment" — the bill is wrong in the customer's
-          hands, which is true whether they owe money or paid months ago — so an invoice can sit
-          here and in "Sent — awaiting payment" at the same time. It carries no total of its own
-          and is folded into none of the three tiles above, so nothing is double counted.
+          Exclusive now, like every other stage: a revised bill with money owed sits only in
+          Revised, which carries its due date and overdue flag, and the Sent lane below leaves it
+          out and says how many it left out. The tiles above still count it once, from `unpaid`.
           Amber on purpose: the same colour as the banner on the invoice's own page, so the board
           and the page can never look like they are talking about two different problems. */}
       {needsResend.length > 0 && (
         <Stage tone="amber" icon={<Send className="h-4 w-4" />} title="Revised - Send Again" count={needsResend.length} sub="You changed these after they went out, so the customer is holding an older bill. Open one to send the corrected copy.">
-          {needsResend.map((inv: any) => (
-            <li key={inv.id}>
-              {/* A DOOR TO SOMETHING THAT EXISTS. This row does not send anything — it opens the
-                  invoice, where the amber notice and the one Send Invoice button already live. A
-                  second send path written here is how two doors drift apart. */}
-              <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-amber-50">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
-                  <div className="truncate text-xs text-slate-500">{inv.invoice_number} · changed {formatDate(inv.revised_at)}</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-3">
-                  {/* The bill's own total, which is what the corrected copy will say. Not a
-                      balance: this lane is about which piece of paper they are holding, and a
-                      revised PAID invoice belongs here reading its real figure, not $0.00. */}
-                  <span className="text-sm font-medium text-slate-900">{money(Number(inv.total) || 0)}</span>
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Review &amp; Send <ChevronRight className="h-3.5 w-3.5" /></span>
-                </div>
-              </Link>
-            </li>
-          ))}
+          {needsResend.map((inv: any) => {
+            const u = unpaidById.get(String(inv.id));
+            return (
+              <li key={inv.id}>
+                {/* A DOOR TO SOMETHING THAT EXISTS. This row does not send anything — it opens the
+                    invoice, where the amber notice and the one Send Invoice button already live. A
+                    second send path written here is how two doors drift apart. */}
+                <Link href={`/billing/${inv.id}`} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${u?.overdue ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-amber-50"}`}>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-slate-900">{inv.customers?.name ?? "—"}</div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      {u?.overdue && <span className="inline-flex items-center gap-0.5 font-semibold text-red-600"><AlertTriangle className="h-3 w-3" /> Overdue</span>}
+                      <span className="truncate">
+                        {inv.invoice_number} · changed {formatDate(inv.revised_at)}
+                        {u?.due_date ? ` · due ${formatDate(u.due_date)}` : ""}
+                      </span>
+                    </div>
+                    <AmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {/* The same amount language as every row: what is due, and what it is due
+                        against. A paid revised bill still belongs here and reads "$0.00" over
+                        "of $T · paid in full", so the figure on the corrected copy is on screen. */}
+                    <Amount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} overdue={!!u?.overdue} />
+                    <Verb>Review &amp; Send</Verb>
+                  </div>
+                </Link>
+              </li>
+            );
+          })}
         </Stage>
       )}
 
-      {/* STAGE 3 — sent, not paid (overdue first) */}
-      {unpaid.length > 0 && (
-        <Stage tone="sky" icon={<Send className="h-4 w-4" />} title="Sent — awaiting payment" count={unpaid.length} sub="Out the door, money not in yet. Overdue ones are flagged.">
-          {unpaid.map((inv) => (
+      {/* STAGE 3 — sent, not paid (overdue first), less the ones Revised already holds */}
+      {awaiting.length > 0 && (
+        <Stage
+          tone="sky"
+          icon={<Send className="h-4 w-4" />}
+          title="Sent - Awaiting Payment"
+          count={awaiting.length}
+          sub={`Out the door, money not in yet. Overdue ones are flagged.${heldAbove > 0 ? ` ${heldAbove} more ${heldAbove === 1 ? "is" : "are"} in Revised - Send Again above.` : ""}`}
+        >
+          {awaiting.map((inv) => (
             <li key={inv.id}>
               <Link href={`/billing/${inv.id}`} className={`flex items-center justify-between gap-3 px-4 py-2.5 ${inv.overdue ? "bg-red-50/60 hover:bg-red-50" : "hover:bg-sky-50"}`}>
                 <div className="min-w-0">
@@ -202,10 +224,11 @@ export default async function BillingPage() {
                     {inv.overdue && <span className="inline-flex items-center gap-0.5 font-semibold text-red-600"><AlertTriangle className="h-3 w-3" /> Overdue</span>}
                     <span className="truncate">{inv.invoice_number}{inv.due_date ? ` · due ${formatDate(inv.due_date)}` : ""}</span>
                   </div>
+                  <AmountDetail total={inv.total} paid={inv.paid} />
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className={`text-sm font-medium ${inv.overdue ? "text-red-700" : "text-slate-900"}`}>{money(inv.balance)}</span>
-                  <span className="inline-flex items-center text-xs font-semibold text-brand">Record Payment <ChevronRight className="h-3.5 w-3.5" /></span>
+                  <Amount total={inv.total} paid={inv.paid} overdue={inv.overdue} />
+                  <Verb>Record Payment</Verb>
                 </div>
               </Link>
             </li>
@@ -216,8 +239,8 @@ export default async function BillingPage() {
       {/* Reference: every invoice + lifetime collected */}
       <div className="mt-6">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-500">All invoices</h3>
-          <Link href="/payments" className="text-xs font-medium text-slate-500 hover:text-brand">Collected {money(collected)} · payments →</Link>
+          <h3 className="text-sm font-semibold text-slate-500">All Invoices</h3>
+          <Link href="/payments" className="text-xs font-medium text-slate-500 hover:text-brand">Collected (All Time) {money(collected)} · Payments →</Link>
         </div>
         {list.length === 0 ? (
           <EmptyState icon={Receipt} title="No invoices yet" description="Turn an accepted quote into an invoice, or start a blank one.">
@@ -226,28 +249,61 @@ export default async function BillingPage() {
         ) : (
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
-              {list.map((inv: any) => {
-                const balance = invoiceBalance(inv.total, inv.amount_paid);
-                return (
-                  <li key={inv.id}>
-                    <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">
-                      <div className="min-w-0">
+              {list.map((inv: any) => (
+                <li key={inv.id}>
+                  <Link href={`/billing/${inv.id}`} className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-slate-50">
+                    <div className="min-w-0">
+                      <div className="truncate">
                         <span className="text-sm font-medium text-slate-900">{inv.invoice_number}</span>
                         <span className="ml-2 text-sm text-slate-500">{inv.customers?.name ?? "—"}</span>
                       </div>
-                      <div className="flex shrink-0 items-center gap-4">
-                        <span className="text-sm font-medium text-slate-900">{money(balance)}</span>
-                        <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
-                      </div>
-                    </Link>
-                  </li>
-                );
-              })}
+                      <AmountDetail total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
+                    </div>
+                    <div className="flex shrink-0 items-center gap-4">
+                      <Amount total={Number(inv.total) || 0} paid={Number(inv.amount_paid) || 0} />
+                      <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
+                    </div>
+                  </Link>
+                </li>
+              ))}
             </ul>
           </Card>
         )}
       </div>
     </div>
+  );
+}
+
+/** THE AMOUNT ON EVERY ROW: what is due, and (when anything is paid) what it is due against.
+ *  One language for all four lists (invoiceAmount), so a bold figure always means the balance.
+ *
+ *  THE PHONE RULE: the right-hand column is shrink-0, so anything wide in it squeezes the
+ *  min-w-0 left column (the customer, the invoice number, the Overdue flag) down to nothing. At
+ *  393px a partly paid row left the customer 0-16px wide. So below `sm` the detail line moves
+ *  under the left-hand text (AmountDetail) and the verb shows only its chevron (Verb); the right
+ *  column is just the figure. */
+function Amount({ total, paid, overdue = false }: { total: number; paid: number; overdue?: boolean }) {
+  const a = invoiceAmount(total, paid);
+  return (
+    <span className="flex flex-col items-end text-right">
+      <span className={`whitespace-nowrap text-sm font-medium ${overdue ? "text-red-700" : "text-slate-900"}`}>{a.due}</span>
+      {a.detail && <span className="hidden whitespace-nowrap text-[11px] text-slate-500 sm:block">{a.detail}</span>}
+    </span>
+  );
+}
+
+/** The same detail, on a phone, under the row's left-hand text where it can truncate. */
+function AmountDetail({ total, paid }: { total: number; paid: number }) {
+  const { detail } = invoiceAmount(total, paid);
+  return detail ? <div className="truncate text-[11px] text-slate-500 sm:hidden">{detail}</div> : null;
+}
+
+/** A row's verb: the words from `sm` up, the chevron always (the whole row is the link). */
+function Verb({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center text-xs font-semibold text-brand">
+      <span className="hidden sm:inline">{children}&nbsp;</span><ChevronRight className="h-3.5 w-3.5" />
+    </span>
   );
 }
 

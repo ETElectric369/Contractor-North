@@ -183,6 +183,41 @@ export function isStandardBillingBlocker(
   return isStandard && status === "draft" && (fin(total) > 0.005 || fin(lineItemCount) > 0);
 }
 
+/**
+ * THE PAYMENT HISTORY ON A STATEMENT, oldest first, with what was left after each payment.
+ *
+ * `reconciles` says whether the payments listed add up to amount_paid. They do not when a
+ * customer credit was applied (credits live in amount_paid, not in payments), and then a running
+ * balance column would end on a figure that is not the Balance Due printed beside it, so the
+ * document hides that column rather than print two different answers.
+ */
+export type LedgerPayment = { paid_at: string | null; method?: string | null; amount: number | null };
+export type LedgerRow = { paid_at: string | null; method: string | null; amount: number; balanceAfter: number };
+export function paymentLedger(
+  total: number | null | undefined,
+  amountPaid: number | null | undefined,
+  payments: readonly LedgerPayment[],
+): { rows: LedgerRow[]; reconciles: boolean } {
+  const t = fin(total);
+  // Ties keep the order given (index tiebreak); an undated payment sorts last.
+  const sorted = payments
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      const ta = a.p.paid_at ? Date.parse(a.p.paid_at) : Number.POSITIVE_INFINITY;
+      const tb = b.p.paid_at ? Date.parse(b.p.paid_at) : Number.POSITIVE_INFINITY;
+      const da = Number.isFinite(ta) ? ta : Number.POSITIVE_INFINITY;
+      const db = Number.isFinite(tb) ? tb : Number.POSITIVE_INFINITY;
+      return da === db ? a.i - b.i : da - db;
+    });
+  let running = 0;
+  const rows = sorted.map(({ p }) => {
+    const amount = fin(p.amount);
+    running += amount;
+    return { paid_at: p.paid_at, method: p.method ?? null, amount, balanceAfter: Math.max(0, cents(t - running)) };
+  });
+  return { rows, reconciles: Math.abs(running - fin(amountPaid)) < 0.01 };
+}
+
 /** Progress-report summary for a draw: % of the estimate completed (0 when there's
  *  no estimate — never divides by zero) and the balance left after this request
  *  (0 without an estimate, so it can't show a misleading negative). All finite. */

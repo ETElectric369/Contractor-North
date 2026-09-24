@@ -1,6 +1,7 @@
 import type { createClient } from "@/lib/supabase/server";
 import { KIND_LABEL, durationLabel, workKind } from "@/lib/schedule/work-shape";
 import { formatCurrency } from "@/lib/utils";
+import { paymentMethodLabel } from "@/lib/payment-method";
 
 /**
  * THE STORY OF ONE PIECE OF WORK — the activity log Erik asked for.
@@ -133,7 +134,7 @@ export async function storyForJob(
   for (const p of (pays ?? []) as { invoice_id: string; amount: number; method: string | null; paid_at: string | null; created_at: string }[]) {
     out.push({
       at: p.paid_at ?? p.created_at,
-      text: `Paid ${formatCurrency(Number(p.amount ?? 0))}${p.method ? ` · ${p.method}` : ""}`,
+      text: `Paid ${formatCurrency(Number(p.amount ?? 0))}${p.method ? ` · ${paymentMethodLabel(p.method)}` : ""}`,
       href: `/billing/${p.invoice_id}`,
     });
   }

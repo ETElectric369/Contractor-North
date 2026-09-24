@@ -5,7 +5,8 @@ import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style"
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
-import { invoiceBalance, mergeSuppliesAndTax, type InvoiceLine } from "@/lib/invoice-math";
+import { invoiceBalance, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
+import { paymentMethodLabel } from "@/lib/payment-method";
 
 /**
  * THE single invoice document body. Every read-only surface — the print/PDF page,
@@ -64,7 +65,9 @@ export function InvoiceDocument({
   tax: number;
   total: number;
   amountPaid: number;
-  payments?: { id?: string; paid_at: string; method?: string | null; note?: string | null; amount: number }[];
+  /** A payment's note is the OFFICE's (a check number, "paid late again"): it is never printed,
+   *  and the public RPC does not return it (0247). Callers need not pass it. */
+  payments?: { id?: string; paid_at: string; method?: string | null; amount: number }[];
   notes?: string | null;
   terms?: string | null;
   documentFooter?: string | null;
@@ -81,6 +84,10 @@ export function InvoiceDocument({
   // Every receipt's "Supplies & tax - <supplier>" row prints as ONE "Supplies & Tax" line on the
   // customer's copy (INV-074). Same cents; the office editor and the stored rows stay per receipt.
   const lines = mergeSuppliesAndTax(items);
+  // Oldest first, with what was left after each. The Balance column only prints when the payments
+  // add up to Amount Paid; a customer credit would make it end on a different figure than the
+  // Balance Due box above it.
+  const ledger = paymentLedger(total, amountPaid, payments ?? []);
 
   return (
     <div className="print-page mx-auto bg-white shadow-sm" style={sheetStyleVars(ds) as React.CSSProperties}>
@@ -184,16 +191,27 @@ export function InvoiceDocument({
         </div>
       )}
 
-      {payments && payments.length > 0 && (
+      {ledger.rows.length > 0 && (
         <div className="mt-8 border-t border-slate-200 pt-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Payments received</div>
           <table className="mt-1 w-full text-sm">
+            {ledger.reconciles && (
+              <thead>
+                <tr className="text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="py-1 text-left font-medium">Date</th>
+                  <th className="py-1 text-left font-medium">Method</th>
+                  <th className="py-1 text-right font-medium">Amount</th>
+                  <th className="py-1 text-right font-medium">Balance</th>
+                </tr>
+              </thead>
+            )}
             <tbody>
-              {payments.map((p, i) => (
-                <tr key={p.id ?? i} className="text-slate-600">
+              {ledger.rows.map((p, i) => (
+                <tr key={i} className="text-slate-600">
                   <td className="py-1">{formatDate(p.paid_at)}</td>
-                  <td className="py-1 capitalize">{p.method}{p.note ? ` · ${p.note}` : ""}</td>
+                  <td className="py-1">{paymentMethodLabel(p.method)}</td>
                   <td className="py-1 text-right">{formatCurrency(p.amount)}</td>
+                  {ledger.reconciles && <td className="py-1 text-right">{formatCurrency(p.balanceAfter)}</td>}
                 </tr>
               ))}
             </tbody>

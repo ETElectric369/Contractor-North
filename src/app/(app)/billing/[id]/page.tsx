@@ -218,7 +218,9 @@ export default async function InvoicePage({
         </div>
       </div>
 
-      {fin && (
+      {/* No estimate, no progress to report: a progress bill on a T&M job with no quote showed
+          "Estimate $0.00" here and on the customer's copy (INV-078). */}
+      {fin && fin.estimate > 0 && (
         <div className="mb-6">
           <ProgressReportCard
             estimate={fin.estimate}

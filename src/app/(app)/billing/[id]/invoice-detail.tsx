@@ -13,6 +13,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { invoiceBalance, invoiceOverpayment, isDrawKind } from "@/lib/invoice-math";
 import { processorFeeLabel } from "@/lib/processor-fee";
+import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -408,6 +409,11 @@ export function InvoiceDetail({
   const [payEditMethod, setPayEditMethod] = useState("check");
   const [payEditNote, setPayEditNote] = useState("");
   const [payEditDate, setPayEditDate] = useState("");
+  // Settings' methods, one per stored key ("Cash" and "cash" in Settings are one option).
+  const editMethods = paymentMethods.filter(
+    (m, i) => paymentMethods.findIndex((o) => paymentMethodKey(o) === paymentMethodKey(m)) === i,
+  );
+  const editMethodKeys = new Set(editMethods.map(paymentMethodKey));
 
   // edit-item state
   const [editId, setEditId] = useState<string | null>(null);
@@ -1217,14 +1223,15 @@ export function InvoiceDetail({
                     <div className="flex items-center gap-2">
                       <NumberInput value={payEditAmount} onValueChange={setPayEditAmount} className="w-28 text-right" />
                       <Select value={payEditMethod} onChange={(e) => setPayEditMethod(e.target.value)} className="flex-1">
-                        {/* Keep the stored method selectable even if it's not in the configured list. */}
-                        {payEditMethod && !paymentMethods.includes(payEditMethod) && (
-                          <option value={payEditMethod}>{payEditMethod}</option>
+                        {/* The value is the stored KEY (0287); the text is what Settings calls it.
+                            Keep the stored method selectable even if no configured one maps to it. */}
+                        {payEditMethod && !editMethodKeys.has(paymentMethodKey(payEditMethod)) && (
+                          <option value={payEditMethod}>{paymentMethodLabel(payEditMethod)}</option>
                         )}
-                        {paymentMethods.length ? (
-                          paymentMethods.map((m) => <option key={m} value={m}>{m}</option>)
+                        {editMethods.length ? (
+                          editMethods.map((m) => <option key={paymentMethodKey(m)} value={paymentMethodKey(m)}>{m}</option>)
                         ) : (
-                          <option value="check">check</option>
+                          <option value="check">Check</option>
                         )}
                       </Select>
                     </div>
@@ -1258,8 +1265,8 @@ export function InvoiceDetail({
                       <div className="font-medium text-slate-900">
                         {formatCurrency(p.amount)}
                       </div>
-                      <div className="text-xs capitalize text-slate-400">
-                        {p.method}
+                      <div className="text-xs text-slate-400">
+                        {paymentMethodLabel(p.method)}
                         {p.note ? ` · ${p.note}` : ""}
                       </div>
                       {/* What Stripe took for an online payment (0284), once it is known. Staff
@@ -1277,7 +1284,7 @@ export function InvoiceDetail({
                       onClick={() => {
                         setPayEditId(p.id);
                         setPayEditAmount(Number(p.amount));
-                        setPayEditMethod(p.method);
+                        setPayEditMethod(paymentMethodKey(p.method));
                         setPayEditNote(p.note ?? "");
                         setPayEditDate(toDateInput(p.paid_at));
                       }}

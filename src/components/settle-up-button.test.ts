@@ -153,3 +153,94 @@ describe("a PaymentIntent nobody can reach is cancelled, not left open on the te
     }
   });
 });
+
+/**
+ * RECORDING A VENMO PAYMENT NEEDS NO QR, AND SHOWING THE QR SENDS NOTHING (2026-09-24, INV-078).
+ *
+ * The Record Payment modal's Venmo chip used to swap "Record It" for "Show Venmo QR" and fetch
+ * the QR through collectArtifacts, the card door, which promotes a draft to sent. So a Venmo
+ * payment made weeks ago could not be written down without first sending the invoice, and a
+ * company with no Venmo handle could not record one at all.
+ */
+describe("Record Payment records Venmo like cash, and its QR writes nothing", () => {
+  const start = SRC.indexOf("export function RecordPaymentButton(");
+  const end = SRC.indexOf("export function SettleUpButton(");
+  const BODY = SRC.slice(start, end);
+
+  it("finds the component", () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it("never goes through the card door, which promotes a draft", () => {
+    expect(BODY).not.toContain("collectArtifacts(");
+    expect(BODY).toContain("venmoQrFor(");
+  });
+
+  it("always offers Record It, whatever chip is picked", () => {
+    expect(BODY).toMatch(/onSave=\{go\}\s+saving=\{pending\}\s+saveLabel="Record It"/);
+    expect(BODY).not.toMatch(/saveLabel=\{key === "venmo"/);
+  });
+
+  it("stores the picked chip, not a hard-coded venmo", () => {
+    expect(BODY).not.toContain('method: "venmo"');
+  });
+
+  it("does not refuse a Venmo payment for want of a handle", () => {
+    const go = BODY.slice(BODY.indexOf("function go()"), BODY.indexOf("function showVenmoQr()"));
+    expect(go).not.toContain("venmoConfigured");
+    expect(go).not.toContain('"later"');
+    expect(go).toContain('ensureInvoice(props, method, "record"');
+  });
+
+  it("reads the QR for an existing invoice without minting or recording", () => {
+    const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
+    expect(qr).toMatch(/if \(props\.source === "invoice"\) \{\s*id = props\.invoiceId;/);
+    expect(qr).not.toContain('"record"');
+  });
+
+  it("drops Card by its key, so a \"Credit Card\" chip can't file a manual payment as a Stripe card", () => {
+    expect(BODY).toContain('source.filter((m) => paymentMethodKey(m) !== "card")');
+    expect(BODY).toContain("const key = paymentMethodKey(method);");
+  });
+
+  it("says the QR sends the bill when it does, and never reads Saving over a read", () => {
+    expect(BODY).toContain('props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"');
+    const qr = BODY.slice(BODY.indexOf("function showVenmoQr()"), BODY.indexOf("function venmoPaid()"));
+    expect(qr).toContain("startQr(");
+    expect(qr).not.toMatch(/\bstart\(/);
+  });
+});
+
+describe("venmoQrFor only reads and draws", () => {
+  const ACTIONS = readFileSync(join(process.cwd(), "src/app/(app)/billing/actions.ts"), "utf8");
+  const at = ACTIONS.indexOf("export async function venmoQrFor(");
+  const next = ACTIONS.indexOf("\nexport ", at + 1);
+  const FN = ACTIONS.slice(at, next === -1 ? undefined : next);
+
+  it("exists", () => {
+    expect(at).toBeGreaterThan(-1);
+    expect(FN).toContain("requireStaff()");
+  });
+
+  it("never sends, recalculates, revalidates or writes", () => {
+    for (const s of ["markInvoiceSent", "recalcInvoice", "revalidateMoney", ".update(", ".insert(", ".upsert(", ".delete("]) {
+      expect(FN).not.toContain(s);
+    }
+  });
+
+  it("refuses a paid-in-full invoice instead of drawing a $0.00 QR", () => {
+    expect(FN).toMatch(/if \(balance < 0\.005\) \{\s*return \{ ok: false/);
+    expect(FN.indexOf("balance < 0.005")).toBeLessThan(FN.indexOf("venmoQrData("));
+  });
+
+  it("builds its QR with the same helper as the card door", () => {
+    expect(FN).toContain("venmoQrData(");
+    const card = ACTIONS.slice(
+      ACTIONS.indexOf("export async function collectArtifacts("),
+      ACTIONS.indexOf("async function venmoQrData("),
+    );
+    expect(card).toContain("venmoQrData(");
+    expect(card).not.toContain("venmo.com/u/");
+  });
+});
