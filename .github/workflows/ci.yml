@@ -28,6 +28,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # A split shift is ordinary time entries (0288/0289), and 0290 drops time_allocations. A
+      # leftover embed of a dropped table fails the whole PostgREST query, so no app code may name
+      # it. DB test harnesses (*.db-suite.ts) build conversion fixtures and are exempt.
+      - name: No time_allocations in src
+        run: |
+          if grep -rn --include='*.ts' --include='*.tsx' --exclude='*.db-suite.ts' time_allocations src; then
+            echo "time_allocations is gone (0289): remove the references above." && exit 1
+          fi
+
       - name: Type check
         run: npm run typecheck
 
