@@ -37,6 +37,9 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // live: etelectricity.com/inspections → 404 while /jobs → 307 to login). "intake" is a real
   // public route (/intake/<handle>) and belongs here for the same reason.
   "inspections", "doc-studio", "site-studio", "intake",
+  // Contractor North's own apex pages (lib/platform-site). An internal namespace that middleware
+  // 404s by name on every host, so a builder page at this slug would save and never be reachable.
+  "north-site",
   // Infra / assets
   "api", "site", "p", "_next", "assets", "images", "static", "offline",
   "sitemap", "sitemap.xml", "robots.txt", "manifest", "manifest.webmanifest", "sw.js",

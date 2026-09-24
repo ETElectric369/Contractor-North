@@ -1,9 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { CONTENT_ROOTS } from "@/lib/site-content-roots";
-import { pageSlugFromPath, isLegacyCmsPath, isReservedSlug, legacyAliasTarget } from "@/lib/site-reserved";
+import { pageSlugFromPath, isLegacyCmsPath, legacyAliasTarget } from "@/lib/site-reserved";
 import { isDeadReservedHost } from "@/lib/public-host";
 import { shellFromUserAgent } from "@/lib/native-shell";
+import { isPlatformApexHost, isPlatformSiteInternalPath, platformSiteRewrite } from "@/lib/platform-site";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -68,12 +69,26 @@ const LEGACY_FILE_EXT = /\.(html?|php|aspx?|jsp|cgi|cfm)$/i;
 export async function middleware(request: NextRequest) {
   const host = (request.headers.get("host") || "").toLowerCase().split(":")[0];
 
-  // LOCKDOWN (cn-v493): contractornorth.com itself is off the public web for now — the app
-  // lives on the vercel.app URL, and each org's public site lives on its own subdomain/custom
-  // domain. The apex/www attachments were detached from the Vercel project, but the
-  // *.contractornorth.com wildcard still catches "www", so refuse it here too.
-  if (host === SITES_DOMAIN || host === `www.${SITES_DOMAIN}`) {
+  // The platform pages' INTERNAL namespace (/north-site/*) is reachable only through the apex
+  // rewrite just below, and a rewrite does not re-enter middleware. Asked for by name it is
+  // nothing, on every host: the app host must not serve Contractor North's privacy page as a
+  // second URL, and a tenant's domain must never serve it at all.
+  if (isPlatformSiteInternalPath(request.nextUrl.pathname)) {
     return new NextResponse("Not found", { status: 404 });
+  }
+
+  // THE APEX (contractornorth.com + www) serves exactly three pages: the platform's own home,
+  // /support and /privacy (lib/platform-site). Everything else there still 404s, as it has since
+  // the invite-only LOCKDOWN (cn-v493): no app, no login, no sitemap on the apex. The apex/www
+  // attachments are DETACHED from the Vercel project, so in production none of this answers until
+  // Erik reattaches them ("get it ready but don't post it yet", 2026-09-24). The
+  // *.contractornorth.com wildcard still catches "www", which is why the host test lives here too.
+  if (isPlatformApexHost(host)) {
+    const target = platformSiteRewrite(request.nextUrl.pathname);
+    if (!target) return new NextResponse("Not found", { status: 404 });
+    const url = request.nextUrl.clone();
+    url.pathname = target;
+    return NextResponse.rewrite(url);
   }
 
   // The lockdown 404s the apex and www — but the *.contractornorth.com wildcard also answers on
