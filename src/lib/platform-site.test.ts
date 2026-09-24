@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
-import { isPlatformApexHost, isPlatformSiteInternalPath, platformSiteRewrite } from "./platform-site";
+import { isPlatformApexHost, isPlatformSiteInternalPath, platformSitePosted, platformSiteRewrite } from "./platform-site";
 
 // Middleware hands every request it doesn't answer itself to updateSession (the Supabase session +
 // auth guard). Stub it with a marker so a test can tell "passed through to the app, as before"
@@ -16,6 +16,7 @@ async function hit(host: string, path: string) {
   const res = await middleware(req);
   return {
     status: res.status,
+    body: res.headers.get("x-middleware-rewrite") ? "" : await res.clone().text(),
     rewrite: res.headers.get("x-middleware-rewrite"),
     passedThrough: res.headers.get("x-test-passed-through") === "1",
   };
@@ -70,7 +71,38 @@ describe("platformSiteRewrite", () => {
   });
 });
 
-describe("middleware host gate for the platform pages", () => {
+describe("the posting switch (Erik: \"don't post it yet\")", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("is off unless PLATFORM_SITE_POSTED is exactly \"1\"", () => {
+    vi.stubEnv("PLATFORM_SITE_POSTED", "");
+    expect(platformSitePosted()).toBe(false);
+    for (const v of ["0", "true", "yes", " 1"]) {
+      vi.stubEnv("PLATFORM_SITE_POSTED", v);
+      expect(platformSitePosted(), v).toBe(false);
+    }
+    vi.stubEnv("PLATFORM_SITE_POSTED", "1");
+    expect(platformSitePosted()).toBe(true);
+  });
+
+  it("OFF: the apex AND www 404 every path, the three pages included (www is live via the wildcard)", async () => {
+    vi.stubEnv("PLATFORM_SITE_POSTED", "");
+    for (const host of ["contractornorth.com", "www.contractornorth.com"]) {
+      for (const path of ["/", "/support", "/privacy", "/robots.txt", "/login", "/sw.js"]) {
+        const r = await hit(host, path);
+        expect(r.status, `${host}${path}`).toBe(404);
+        expect(r.body, `${host}${path}`).toBe("Not found");
+        expect(r.rewrite, `${host}${path}`).toBeNull();
+        expect(r.passedThrough, `${host}${path}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("middleware host gate for the platform pages (switch ON)", () => {
+  beforeEach(() => vi.stubEnv("PLATFORM_SITE_POSTED", "1"));
+  afterEach(() => vi.unstubAllEnvs());
+
   it("rewrites the apex and www into the platform pages", async () => {
     for (const host of ["contractornorth.com", "www.contractornorth.com"]) {
       for (const [path, target] of [["/", "/north-site"], ["/support", "/north-site/support"], ["/privacy", "/north-site/privacy"]]) {
@@ -81,8 +113,15 @@ describe("middleware host gate for the platform pages", () => {
     }
   });
 
+  it("serves a robots.txt on the apex", async () => {
+    const r = await hit("contractornorth.com", "/robots.txt");
+    expect(r.status).toBe(200);
+    expect(r.body).toContain("User-agent: *");
+    expect(r.rewrite).toBeNull();
+  });
+
   it("still 404s everything else on the apex (the lockdown holds)", async () => {
-    for (const path of ["/login", "/planner", "/site/et-electric", "/sw.js", "/sitemap.xml", "/north-site"]) {
+    for (const path of ["/login", "/planner", "/site/et-electric", "/sw.js", "/manifest.webmanifest", "/sitemap.xml", "/north-site"]) {
       const r = await hit("contractornorth.com", path);
       expect(r.status, path).toBe(404);
       expect(r.rewrite, path).toBeNull();

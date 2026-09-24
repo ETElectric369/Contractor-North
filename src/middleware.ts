@@ -4,7 +4,13 @@ import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 import { pageSlugFromPath, isLegacyCmsPath, legacyAliasTarget } from "@/lib/site-reserved";
 import { isDeadReservedHost } from "@/lib/public-host";
 import { shellFromUserAgent } from "@/lib/native-shell";
-import { isPlatformApexHost, isPlatformSiteInternalPath, platformSiteRewrite } from "@/lib/platform-site";
+import {
+  PLATFORM_ROBOTS_TXT,
+  isPlatformApexHost,
+  isPlatformSiteInternalPath,
+  platformSitePosted,
+  platformSiteRewrite,
+} from "@/lib/platform-site";
 
 // The platform's own domain. A subdomain of it is a free org site: <handle>.SITES_DOMAIN.
 // Any OTHER host pointed at us is a custom domain, resolved by hostname in /site/by-domain.
@@ -77,13 +83,18 @@ export async function middleware(request: NextRequest) {
     return new NextResponse("Not found", { status: 404 });
   }
 
-  // THE APEX (contractornorth.com + www) serves exactly three pages: the platform's own home,
-  // /support and /privacy (lib/platform-site). Everything else there still 404s, as it has since
-  // the invite-only LOCKDOWN (cn-v493): no app, no login, no sitemap on the apex. The apex/www
-  // attachments are DETACHED from the Vercel project, so in production none of this answers until
-  // Erik reattaches them ("get it ready but don't post it yet", 2026-09-24). The
-  // *.contractornorth.com wildcard still catches "www", which is why the host test lives here too.
+  // THE APEX (contractornorth.com + www). Until Erik says post ("get it ready but don't post it
+  // yet", 2026-09-24) the posting switch is off and this is the invite-only LOCKDOWN (cn-v493)
+  // exactly as before: 404 for every path. Domain detachment alone does not keep the pages dark:
+  // the apex is detached, but the *.contractornorth.com wildcard still routes "www" here.
+  // Switch on (lib/platform-site: PLATFORM_SITE_POSTED=1): exactly three pages, the platform's own
+  // home, /support and /privacy, plus a robots.txt; everything else still 404s (no app, no login,
+  // no sitemap, no service worker on the apex).
   if (isPlatformApexHost(host)) {
+    if (!platformSitePosted()) return new NextResponse("Not found", { status: 404 });
+    if (request.nextUrl.pathname === "/robots.txt") {
+      return new NextResponse(PLATFORM_ROBOTS_TXT, { headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
     const target = platformSiteRewrite(request.nextUrl.pathname);
     if (!target) return new NextResponse("Not found", { status: 404 });
     const url = request.nextUrl.clone();

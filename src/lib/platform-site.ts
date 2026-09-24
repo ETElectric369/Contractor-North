@@ -11,13 +11,26 @@ import { normalizeHost } from "@/lib/public-host";
  * domain. So the routes live in an INTERNAL namespace (/north-site) that middleware only rewrites
  * into from the apex, and that namespace 404s when asked for by name on any host.
  *
- * "NOT POSTED YET" (Erik, 2026-09-24: "get it ready but don't post it yet"): the apex and www are
- * DETACHED from the Vercel project (the invite-only lockdown, 2026-07-13), so no request for them
- * reaches this code in production. Posting = reattaching those two domains. Nothing in this file
- * needs to change when that happens.
+ * "NOT POSTED YET" (Erik, 2026-09-24: "get it ready but don't post it yet"): the SWITCH below
+ * keeps these pages dark. It is off unless PLATFORM_SITE_POSTED is exactly "1". Detaching domains
+ * is NOT enough on its own: the bare apex is detached from the Vercel project (the invite-only
+ * lockdown, 2026-07-13), but the *.contractornorth.com wildcard still routes www to this
+ * deployment (live 2026-09-24: www answers with this middleware's own "Not found"). So with the
+ * switch off, the apex and www 404 every path exactly as they did before these pages existed.
+ *
+ * Posting = (1) the support mailbox receives mail (north-site/site-facts.ts), (2) set
+ * PLATFORM_SITE_POSTED=1 in the Vercel project and redeploy, (3) attach the bare apex. www starts
+ * answering at step 2, because it is already attached through the wildcard.
+ * Local preview: run the dev server with PLATFORM_SITE_POSTED=1 and send Host: contractornorth.com.
  */
 
 const SITES_DOMAIN = (process.env.SITES_DOMAIN || "contractornorth.com").toLowerCase();
+
+/** THE POSTING SWITCH. Read per call (not at module load) so a test can flip it; in production
+ *  it is fixed per deploy. Off = the apex and www stay the lockdown 404 for every path. */
+export function platformSitePosted(): boolean {
+  return process.env.PLATFORM_SITE_POSTED === "1";
+}
 
 /** The internal route namespace (src/app/north-site). Never a public URL. */
 export const PLATFORM_SITE_ROOT = "/north-site";
@@ -29,7 +42,12 @@ const PAGES: ReadonlyMap<string, string> = new Map([
   ["/privacy", `${PLATFORM_SITE_ROOT}/privacy`],
 ]);
 
-/** Is this the platform's own apex (or its www)? The ONLY hosts that may render the platform pages. */
+/** robots.txt on the apex once posted. The apex has exactly three pages, all public, and no
+ *  sitemap; the app's own robots route is never reached there (every other path 404s). */
+export const PLATFORM_ROBOTS_TXT = "User-agent: *\nAllow: /\n";
+
+/** Is this the platform's own apex (or its www)? The ONLY hosts that may render the platform pages,
+ *  and only once platformSitePosted() is on. */
 export function isPlatformApexHost(rawHost: string | null | undefined): boolean {
   const host = normalizeHost(rawHost);
   return host === SITES_DOMAIN || host === `www.${SITES_DOMAIN}`;

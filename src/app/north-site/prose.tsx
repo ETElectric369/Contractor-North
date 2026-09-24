@@ -8,7 +8,7 @@ export function PageHead({ eyebrow, first, second, children }: {
 }) {
   return (
     <div className="pb-4 pt-12 sm:pt-16">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1b9488]">{eyebrow}</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#137a70]">{eyebrow}</p>
       <h1 className="mt-4 max-w-3xl font-[family-name:var(--font-north-serif)] text-[28px] font-semibold leading-[1.14] tracking-tight sm:text-[40px]">
         {first}
         <span aria-hidden className="block h-[0.5em]" />

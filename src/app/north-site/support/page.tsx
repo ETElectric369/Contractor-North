@@ -43,7 +43,7 @@ export default function NorthSupport() {
         <p>
           Forgot your password? Tap <strong>Forgot Password?</strong> on the sign-in screen. North is invite-only, so a new
           account starts with an invite from your company. If your company doesn&apos;t use North yet,{" "}
-          <a href={mailto("Invite request")}>ask us for an invite</a>.
+          <a href={mailto("Invite request")}>Ask Us For An Invite</a>.
         </p>
       </Section>
 
@@ -56,9 +56,10 @@ export default function NorthSupport() {
         </p>
         <ul>
           <li>
-            <strong>If you use North for work,</strong> we delete your sign-in and your profile. Timecards and pay records
-            are part of your employer&apos;s payroll records, so your employer may keep them; our reply tells you which
-            records those are.
+            <strong>If you use North for work,</strong> we close your sign-in and remove your personal details: the
+            email you sign in with, your phone, photo and home address, and your phone&apos;s notification and passkey
+            keys. The hours you worked and what you were paid are part of your employer&apos;s payroll records, so they
+            stay with your employer, with your name on them. Our reply tells you exactly what stays.
           </li>
           <li>
             <strong>If you own a company account,</strong> we delete the company and its data: customers, jobs, quotes,
@@ -82,7 +83,7 @@ export default function NorthSupport() {
 
       <Section title="Privacy">
         <p>
-          What North collects, why, and who handles it: <a href="/privacy">read the privacy policy</a>.
+          What North collects, why, and who handles it: <a href="/privacy">Read The Privacy Policy</a>.
         </p>
       </Section>
     </>

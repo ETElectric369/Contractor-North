@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 const FEATURES: { name: string; line: string }[] = [
   { name: "Estimates", line: "Price from your own price list. Customers open the quote from a link and accept it online." },
   { name: "Scheduling", line: "Jobs and appointments on one calendar, assigned to the people doing them." },
-  { name: "Timecards", line: "Clock in and out on the phone, on the job you pick, with the location of each punch." },
+  { name: "Timecards", line: "Clock in and out on the phone, on the job you pick." },
   { name: "Invoicing", line: "Send the invoice. Customers pay by card through Stripe, straight to your own account." },
   { name: "Nort", line: "An assistant you can type or talk to about your jobs, hours and money." },
 ];
@@ -22,7 +22,7 @@ const FEATURES: { name: string; line: string }[] = [
 export default function NorthHome() {
   return (
     <div className="grid gap-y-10 pb-4 pt-12 sm:pt-20 lg:min-h-[calc(100dvh-13rem)] lg:grid-cols-12 lg:grid-rows-[auto_1fr_auto] lg:gap-x-10">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#1b9488] lg:col-span-7">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#137a70] lg:col-span-7">
         North · for contractors · invite only
       </p>
 
@@ -43,7 +43,7 @@ export default function NorthHome() {
           >
             Ask For An Invite
           </a>
-          <a href="/support" className="text-[15px] font-medium text-[#1a2b4a] underline decoration-[#1b9488] decoration-2 underline-offset-4">
+          <a href="/support" className="inline-flex min-h-11 items-center text-[15px] font-medium text-[#1a2b4a] underline decoration-[#1b9488] decoration-2 underline-offset-4">
             Get Help
           </a>
         </div>
