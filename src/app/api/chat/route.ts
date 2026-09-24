@@ -690,7 +690,13 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   const settled = new Promise<void>((resolve) => {
     settle = resolve;
   });
+  // The phone hung up on the reply (the shell drops streams often). Set by cancel() below, so the
+  // catch can tell a hang-up from a failure.
+  let clientGone = false;
   const stream = new ReadableStream({
+    cancel() {
+      clientGone = true;
+    },
     async start(controller) {
       const emit = (t: string) => controller.enqueue(encoder.encode(t));
       const toolsUsed = new Set<string>();
@@ -970,15 +976,33 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
         }
         controller.close();
       } catch (e: any) {
-        emit(`\n\n[Error: ${e?.message ?? "stream failed"}]`);
-        controller.close();
+        // A failed turn used to reach the screen only, as a raw "[Error: …]", and never
+        // error_events. But a phone that drops the reply also lands here: the next emit into the
+        // cancelled stream throws. That is a hang-up with no one left to tell, and reporting it
+        // would bury the real failures under the shell's everyday disconnects.
+        if (!clientGone && !req.signal?.aborted) {
+          reportError("chat.stream", e, { userId: user.id, orgId, model });
+          try {
+            emit("\n\n[Something went wrong on my end. Ask me again.]");
+          } catch {
+            /* the stream closed under us after all */
+          }
+        }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       } finally {
         // Egress trail (framework §7/§6): when the assistant pulled org data for the
         // model, record WHICH data categories left for the provider — tool names + the
         // org/user, never the content. Best-effort; never affects the response.
         if (toolsUsed.size > 0) {
           try {
-            await supabase.from("agent_audit_log").insert({
+            // supabase-js hands a refused insert back as {error} rather than throwing, so the
+            // catch below never saw one and a missing audit row was silent. Still best-effort:
+            // reported, never thrown.
+            const { error: auditErr } = await supabase.from("agent_audit_log").insert({
               org_id: orgId,
               user_id: user.id,
               action: "chat.query",
@@ -988,6 +1012,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               input_summary: { tools: [...toolsUsed], cache: { read: cacheRead, write: cacheWrite, uncached: inputUncached }, output: outputTokens },
               source: "agent",
             });
+            if (auditErr) reportError("chat.audit", auditErr, { userId: user.id, orgId });
           } catch {
             /* audit is best-effort */
           }
@@ -1016,12 +1041,20 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               !!recent?.[0] &&
               todayStrInTz(orgS.timezone, new Date(recent[0].created_at)) === todayStrInTz(orgS.timezone);
             if (!convoId || !sameDay) {
-              const { data: created } = await supabase
+              const { data: created, error: convoErr } = await supabase
                 .from("conversations")
                 .insert({ user_id: user.id, title: `Nort · ${new Date().toLocaleDateString("en-US", { timeZone: orgS.timezone })}` })
                 .select("id")
                 .single();
               convoId = created?.id;
+              // No day thread means the turn below is never written and recoverTurn has nothing
+              // to find: the silent-write law, one insert earlier than the messages check.
+              if (!convoId) {
+                reportError("chat.transcript.convo", convoErr ?? new Error("conversation insert returned no row"), {
+                  userId: user.id,
+                  orgId,
+                });
+              }
             }
             if (convoId) {
               // THE PROPOSAL RIDES WITH THE TURN. Same envelope the stream uses — one grammar,

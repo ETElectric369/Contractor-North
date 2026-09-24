@@ -198,3 +198,81 @@ describe("list_bills — a replaced copy is not a second debt", () => {
     expect(out.note).toBeUndefined();
   });
 });
+
+describe("list_inquiries — Nort can read what a lead said", () => {
+  // The shape of the Vivian Builders lead Nort called empty on 2026-09-07 (a fictional customer,
+  // the real form's ten labels): intake writes the answers as "Question: answer" lines into
+  // `message`, and the select list never asked for it.
+  const answers = [
+    "Project Address: 100 Example Way",
+    "City: Truckee",
+    "State: CA",
+    "Zip: 96161",
+    "The project: Residential Remodel",
+    "Residential Remodel: Kitchen",
+    "Timeline: As soon as possible",
+    "Designer / architect: No",
+    "Plans: No",
+    "Photos: No",
+  ].join("\n");
+  const lead = {
+    id: "3f12462b-0000-4000-8000-000000000001",
+    name: "Pat Example",
+    company_name: null,
+    phone: "530-555-0100",
+    status: "new",
+    city: "Truckee",
+    source: "intake",
+    message: answers,
+    work_kind: null,
+    planned_minutes: null,
+    last_contacted_at: null,
+    created_at: "2026-09-04T00:56:43Z",
+  };
+
+  it("selects the message and the source (the missing field was a missing select list)", async () => {
+    const { calls, client } = fakeDb({ data: [lead] });
+    await runDataTool("list_inquiries", {}, client);
+    expect(calls.table).toBe("inquiries");
+    expect(calls.select).toContain("message");
+    expect(calls.select).toContain("source");
+  });
+
+  it("hands Nort the intake answers instead of 'no message'", async () => {
+    const { client } = fakeDb({ data: [lead] });
+    const out = await parse("list_inquiries", {}, client);
+    expect(out.inquiries[0]).toMatchObject({ source: "intake", message: answers });
+    expect(out.inquiries[0].message).toContain("Residential Remodel: Kitchen");
+    expect(out.inquiries[0].message_trimmed).toBeUndefined();
+  });
+
+  it("trims a long message in the list and says so", async () => {
+    const long = "Came back twice. " + "x".repeat(2000);
+    const { client } = fakeDb({ data: [{ ...lead, message: long }] });
+    const out = await parse("list_inquiries", {}, client);
+    expect(out.inquiries[0].message_trimmed).toBe(true);
+    expect(out.inquiries[0].message.length).toBeLessThanOrEqual(401);
+    expect(out.inquiries[0].message.startsWith("Came back twice.")).toBe(true);
+  });
+
+  it("reads one lead whole by id", async () => {
+    const long = "y".repeat(3900);
+    const { calls, client } = fakeDb({ data: [{ ...lead, message: long }] });
+    const out = await parse("list_inquiries", { id: lead.id }, client);
+    expect(calls.filters).toContain(`eq:id:${lead.id}`);
+    expect(out.inquiries[0].message).toBe(long);
+    expect(out.inquiries[0].message_trimmed).toBeUndefined();
+  });
+
+  it("says so when there is no such lead, rather than an empty list that reads as 'no leads'", async () => {
+    const { client } = fakeDb({ data: [] });
+    const out = await parse("list_inquiries", { id: lead.id }, client);
+    expect(out.error).toBe("No lead with that id.");
+  });
+
+  it("gives a lead that wrote nothing a null message, not an empty string", async () => {
+    const { client } = fakeDb({ data: [{ ...lead, message: "   " }] });
+    const out = await parse("list_inquiries", {}, client);
+    expect(out.inquiries[0].message).toBeNull();
+  });
+});

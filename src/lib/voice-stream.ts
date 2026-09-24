@@ -8,6 +8,15 @@
  * (a stretch of silence after the user spoke) → POST the audio to /api/transcribe (Whisper) → deliver the
  * transcript. Exposes the SAME surface as lib/speech.ts, so the assistant swaps backends via the import.
  */
+import { reportClientError } from "@/app/report-client-error";
+import { isNativeShell } from "@/lib/native-shell";
+import {
+  micBlockedLine,
+  oncePerTurn,
+  TRY_AGAIN_LINE,
+  voiceFailureExtra,
+  type VoiceBranch,
+} from "@/lib/voice-failure";
 
 type ResultCb = (text: string) => void;
 type StateCb = (listening: boolean) => void;
@@ -55,10 +64,17 @@ export function analyserRms(): number | null {
     return null;
   }
 }
+// The line the mic is on right now. The Nort button starts the mic inside its tap, BEFORE the
+// panel mounts and subscribes, so the first lines ("Connecting to the mic…", or a fast "Mic
+// blocked") went to no one and the panel guessed instead. A new subscriber is told where things
+// stand; stopListening clears it so a closed session never replays into the next one.
+let lastStatus = "";
 export function onStatus(cb: ((s: string) => void) | null) {
   statusCb = cb;
+  if (cb && lastStatus) status(lastStatus);
 }
 function status(s: string) {
+  lastStatus = s;
   try {
     statusCb?.(s);
   } catch {
@@ -66,20 +82,59 @@ function status(s: string) {
   }
 }
 
+// NOTHING SILENT, for ops too (the 09-23 sweep: a week of Nort failing on the phone left no
+// trace). Each terminal branch reports once per turn under its own name, with the facts that
+// tell the branches apart: the recorder's format, whether the mic track is live or muted, the
+// AudioContext's state, the line on screen, shell or web. No audio and no transcript, ever.
+const reported = oncePerTurn();
+function report(branch: VoiceBranch, shown: string, detail?: string) {
+  if (!reported.first(branch)) return;
+  try {
+    const extra = voiceFailureExtra({
+      mimeType,
+      track: stream?.getAudioTracks?.()[0] ?? null,
+      audioCtxState: audioCtx?.state,
+      status: shown,
+      detail,
+      native: isNativeShell(),
+      retry: silentTurns,
+    });
+    void reportClientError("nort-voice", branch, extra).catch(() => {});
+  } catch {
+    /* reporting must never break the mic */
+  }
+}
+
 // Voice resilience: a silent turn (the 9s no-speech cap, an empty blob, a no-words transcription,
 // a transcribe error) used to end the conversation MUTE — the mic stayed granted but nothing ever
 // re-armed it. Retry a bounded number of CONSECUTIVE silent turns while the stream is still wanted,
-// then hand control back with a clear "tap the mic" status instead of dying silently.
+// then hand control back with a status that names the controls the panel actually has.
 const MAX_SILENT_RETRIES = 2;
 let silentTurns = 0;
-function retryOrGiveUp(detail: string) {
-  if (wantStream && silentTurns < MAX_SILENT_RETRIES) {
+function retryOrGiveUp(detail: string, branch: VoiceBranch, fact?: string) {
+  const retrying = wantStream && silentTurns < MAX_SILENT_RETRIES;
+  const line = retrying || !wantStream ? detail : `${detail} ${TRY_AGAIN_LINE}`;
+  status(line);
+  report(branch, line, fact);
+  if (retrying) {
     silentTurns++;
-    status(detail);
     beginTurn();
-    return;
   }
-  status(wantStream ? `${detail} Tap the mic when you're ready.` : detail);
+}
+
+// A turn that cannot record at all (the recorder will not build or will not start). The stream
+// is dropped so "try again" means what it says: the next tap asks for the mic fresh, inside the
+// gesture, instead of handing the same stream to the same recorder that just refused it.
+function cannotRecord(branch: VoiceBranch, err: unknown) {
+  const line = `The mic came on but can't record here. ${TRY_AGAIN_LINE}`;
+  report(branch, line, errName(err)); // before the teardown: the track and context are the evidence
+  stopListening({ discard: true });
+  status(line);
+}
+
+function errName(err: unknown): string {
+  const e = err as { name?: unknown; message?: unknown } | null;
+  return [e?.name, e?.message].filter((x) => typeof x === "string" && x).join(": ") || String(err ?? "");
 }
 
 export function speechSupported(): boolean {
@@ -130,6 +185,12 @@ function pickMime(): string {
   return "";
 }
 
+// A getUserMedia that never settles leaves the panel on "Connecting to the mic…" forever and
+// reports nothing, so after this long it says so. The request is left running: if the mic does
+// come up late, the turn simply starts.
+const MIC_HANG_MS = 10000;
+let micAttempt = 0;
+
 /**
  * START. The FIRST call must run inside a user gesture (the mic-permission prompt). It kicks off
  * getUserMedia (async) and returns true; once the stream is live, recording turns no longer need a
@@ -139,15 +200,26 @@ export function startListening(_lang?: string): boolean {
   if (!speechSupported()) return false;
   muted = false;
   silentTurns = 0; // a fresh (user-initiated) start resets the silent-retry budget
+  reported.reset(); // …and is a new turn for reporting
   if (stream && audioCtx && analyser) {
     beginTurn(); // stream alive (mid-conversation) → record the next answer, no gesture needed
     return true;
   }
   wantStream = true;
   status("Connecting to the mic…");
+  const attempt = ++micAttempt;
+  let settled = false;
+  const hang = setTimeout(() => {
+    if (settled || !wantStream || attempt !== micAttempt) return;
+    const line = `The mic isn't answering. ${TRY_AGAIN_LINE}`;
+    status(line);
+    report("getusermedia-hung", line, `${MIC_HANG_MS / 1000}s`);
+  }, MIC_HANG_MS);
   navigator.mediaDevices
     .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
     .then((s) => {
+      settled = true;
+      clearTimeout(hang);
       if (!wantStream) {
         s.getTracks().forEach((t) => t.stop());
         return;
@@ -165,10 +237,16 @@ export function startListening(_lang?: string): boolean {
       beginTurn();
     })
     .catch((err) => {
+      settled = true;
+      clearTimeout(hang);
       wantStream = false;
       active = false;
       const msg = String(err?.name || err || "");
-      status(/NotAllowed|Permission|Denied/i.test(msg) ? "Mic blocked — allow it in Settings → Safari" : `Mic unavailable (${msg || "no audio"})`);
+      const line = /NotAllowed|Permission|Denied/i.test(msg)
+        ? micBlockedLine(isNativeShell())
+        : `Mic unavailable (${msg || "no audio"}). ${TRY_AGAIN_LINE}`;
+      status(line);
+      report("getusermedia-rejected", line, errName(err));
       emit();
     });
   return true;
@@ -213,12 +291,15 @@ function beginTurn() {
     /* ignore */
   }
   chunks = [];
+  // These two used to be bare returns: no status, no report, the panel frozen on "Mic ready — go
+  // ahead" over a flat meter while nothing listened.
   try {
     recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
   } catch {
     try {
       recorder = new MediaRecorder(stream);
-    } catch {
+    } catch (err) {
+      cannotRecord("recorder-construct-failed", err);
       return;
     }
   }
@@ -230,7 +311,8 @@ function beginTurn() {
   };
   try {
     recorder.start();
-  } catch {
+  } catch (err) {
+    cannotRecord("recorder-start-failed", err);
     return;
   }
   active = true;
@@ -244,6 +326,7 @@ function beginTurn() {
   const startedAt = Date.now();
   let smooth = 0; // ~50 ms exponential average of the RMS — one loud frame is not a word
   let floor = 0; // the room: seeded in the opening window, then drifts slowly toward the quiet level
+  let peak = 0; // the loudest smoothed level this turn: a no-speech report says if the mic heard anything
   const tick = () => {
     if (!active || !recorder || recorder.state === "inactive" || !analyser) return;
     analyser.getByteTimeDomainData(buf);
@@ -256,6 +339,7 @@ function beginTurn() {
     level = rms; // live meter — proves whether the mic is hearing ANYTHING
     const now = Date.now();
     smooth += (rms - smooth) * 0.3;
+    if (smooth > peak) peak = smooth;
     const elapsed = now - startedAt;
     // Learn the room. Opening window: the loudest quiet moment before anyone speaks (capped so a
     // turn that starts mid-sentence can't seed the floor at speech level). After that the floor
@@ -292,6 +376,8 @@ function beginTurn() {
     // 18s truncated a real dictated scope — 45s holds a whole thought; Whisper is fine with it.
     if (elapsed > TURN_CAP_MS || (!spoke && elapsed > NO_SPEECH_CAP_MS)) {
       if (spoke) status("Sending what I heard — the mic never caught a pause…");
+      // A peak near zero is a mic that captured silence; a peak under the gate is a quiet room.
+      else report("no-speech-cap", lastStatus, `peak ${peak.toFixed(4)} floor ${floor.toFixed(4)} gate ${speakGate.toFixed(4)}`);
       stopTurn();
       return;
     }
@@ -319,7 +405,11 @@ async function finishTurn() {
   if (blob.size < 1200) {
     // Nothing usable was recorded — almost always the silent-PWA mic (stream "on" but capturing
     // nothing) or a permission gap. Say so plainly, and re-arm the mic if the stream is still wanted.
-    retryOrGiveUp(`No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`);
+    retryOrGiveUp(
+      `No audio captured (${blob.size} bytes). If the level meter stayed flat, the mic isn't reaching the app.`,
+      "blob-too-small",
+      `${blob.size} bytes`,
+    );
     return;
   }
   status(`Sending ${(blob.size / 1024) | 0}KB to transcribe…`);
@@ -330,16 +420,23 @@ async function finishTurn() {
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
     if (!r.ok) {
-      retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`);
+      retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`, "transcribe-error", `HTTP ${r.status}, ${blob.size} bytes`);
       return;
     }
     const text = String(j?.text ?? "").trim();
     if (text && handler) {
       silentTurns = 0; // real words made it through — reset the retry budget
       handler(text);
-    } else retryOrGiveUp("Heard sound but no words — try speaking a bit louder.");
+    } else
+      retryOrGiveUp(
+        "Heard sound but no words. Try speaking a bit louder.",
+        // Words with nowhere to go (the panel let go of the handler) is a different bug from
+        // silence; only the LENGTH is reported, never the words.
+        text ? "no-handler" : "empty-transcript",
+        text ? `${text.length} chars, ${blob.size} bytes` : `${blob.size} bytes`,
+      );
   } catch (e: any) {
-    retryOrGiveUp(`Couldn't reach transcription (${e?.message ?? "network"}).`);
+    retryOrGiveUp(`Couldn't reach transcription (${e?.message ?? "network"}).`, "transcribe-unreachable", errName(e));
   }
 }
 
@@ -353,6 +450,7 @@ async function finishTurn() {
 export function stopListening(opts?: { discard?: boolean }) {
   wantStream = false;
   active = false;
+  lastStatus = ""; // this session's line must not replay into the next panel
   cancelAnimationFrame(rafId);
   try {
     if (recorder && opts?.discard) {

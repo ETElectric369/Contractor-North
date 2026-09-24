@@ -312,10 +312,11 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inquiries",
     description:
-      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. Use for 'who are my open leads', 'any new leads', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to Truckee'. Pass the id to contact or convert a lead.",
+      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to Truckee'. Pass the id to contact or convert a lead.",
     input_schema: {
       type: "object",
       properties: {
+        id: { type: "string", description: "Optional: one lead's id, to read that lead with its whole message." },
         status: { type: "string", description: "Optional status filter (e.g. new, contacted)." },
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
       },
@@ -604,6 +605,18 @@ function clampLimit(n: unknown, def: number, max = 40): number {
   const v = Math.floor(Number(n));
   if (!Number.isFinite(v) || v <= 0) return def;
   return Math.min(v, max);
+}
+
+/** A lead's message as list_inquiries hands it to the model. The list trims each one so twenty
+ *  leads stay a short read; asked for by id, a lead comes back whole (intake writes at most 4,000
+ *  characters, and a repeat submission appends, so the cap still has to say when it cut). */
+const LEAD_MESSAGE_LIST = 400;
+const LEAD_MESSAGE_ONE = 6000;
+function leadMessage(raw: unknown, max: number): { message: string | null; message_trimmed?: true } {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return { message: null };
+  if (text.length <= max) return { message: text };
+  return { message: text.slice(0, max).trimEnd() + "…", message_trimmed: true };
 }
 
 /** Normalize a Supabase to-one embed that may arrive as an object or array. */
@@ -1346,16 +1359,26 @@ export async function runDataTool(
       }
 
       case "list_inquiries": {
-        const lim = clampLimit(input.limit, 20);
+        // WHAT THE LEAD SAID. The select stopped at the contact fields, so on 2026-09-07 Nort told
+        // Justin (Vivian Builders) that a fully answered website lead had "no message" and filed a
+        // bug about lost data. All ten answers were on the row. `message` is what the customer
+        // wrote, and for a website intake lead it IS the answers, labelled, in the form's order
+        // (intake/[handle]/actions.ts writes it from the org's intake playbook), so it carries the
+        // intake without a second, unlabelled read of the jsonb. Stranger-authored text: it rides
+        // inside the route's TOOL_DATA fence like every other record's words.
+        const one = typeof input.id === "string" ? input.id.trim() : "";
+        const lim = one ? 1 : clampLimit(input.limit, 20);
         let q = supabase
           .from("inquiries")
-          .select("id, name, company_name, phone, status, city, work_kind, planned_minutes, last_contacted_at, created_at")
+          .select("id, name, company_name, phone, status, city, source, message, work_kind, planned_minutes, last_contacted_at, created_at")
           .order("created_at", { ascending: false })
           .limit(lim);
+        if (one) q = q.eq("id", one);
         const st = sanitize(input.status);
         if (st) q = q.eq("status", st);
         const { data, error } = await q;
         if (error) throw error;
+        if (one && !data?.length) return JSON.stringify({ error: "No lead with that id." });
         return JSON.stringify({
           count: data?.length ?? 0,
           inquiries: (data ?? []).map((i: any) => ({
@@ -1365,6 +1388,8 @@ export async function runDataTool(
             phone: i.phone,
             status: i.status,
             town: i.city,
+            source: i.source,
+            ...leadMessage(i.message, one ? LEAD_MESSAGE_ONE : LEAD_MESSAGE_LIST),
             work_kind: i.work_kind, // null = untagged — the flow's stage-0 blocker
             planned_minutes: i.planned_minutes,
             last_contacted: i.last_contacted_at,
