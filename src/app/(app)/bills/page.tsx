@@ -13,6 +13,8 @@ import {
 import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
+import { AddBusinessCostButton } from "./add-business-cost";
+import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import { ReceiptBillingCard, type ReceiptForBilling } from "./receipt-billing-card";
 import type {
   ReconcileJob,
@@ -627,6 +629,11 @@ export default async function BillsPage({
     // A bill with no supplier name at all is not a spelling to file. It stays in the ledger below
     // exactly as it reads today, rather than becoming a nameless row in a card about names.
     if (!alias) continue;
+    // Nor is a business cost saved with no Where: Add Business Cost puts the bucket's own name in
+    // the supplier field ("Gas & Truck"), and offering to give "Gas & Truck" its own supplier
+    // account would be a door to nothing. Only a settled one, though: anything still owed stays
+    // in the count, so no unpaid dollar drops out of the amber line.
+    if (!b.job_id && isBusinessCostBucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
     const key = spellingKey(alias);
     const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0 };
     const amount = Number(b.amount) || 0;
@@ -869,7 +876,11 @@ export default async function BillsPage({
       <PageHeader
         title="Bills & purchasing"
         description="Purchase orders, supplier bills, and receipts across every job."
-      />
+      >
+        {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
+            without opening a tab. It saves through the same createBill as Add Bill below. */}
+        <AddBusinessCostButton today={today} />
+      </PageHeader>
 
       {/* WHO HE OWES COMES FIRST. It is the question this screen opens on - $13,040.07 unpaid, and
           every dollar of it one CED account wearing five spellings. A card that answers it below

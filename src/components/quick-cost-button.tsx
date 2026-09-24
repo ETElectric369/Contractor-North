@@ -18,7 +18,10 @@ import { createBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { useToast } from "@/components/toast";
+import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 
+// What a cost ON A JOB is. A cost with no job is a business cost and picks from the six buckets
+// instead (lib/business-cost-buckets), the same list every other no-job door uses.
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
 // A PRE-prep sanity ceiling on the raw pick, not the reader's cap: the reader's 8 MB applies to
 // the file AFTER prepareImageForUpload shrinks it (a 12 MB phone shot preps to ~1 MB), so gating
@@ -47,7 +50,8 @@ const DEFAULT_TRIGGER =
 
 /**
  * THE one "add a cost" everywhere — supplier + amount + category + an optional
- * receipt photo (the camera on mobile), scoped to a job or to overhead. Wraps
+ * receipt photo (the camera on mobile), scoped to a job or to the business (a business cost,
+ * in one of the six buckets). Wraps
  * createBill (a cost = a bill) plus THE receipt pipeline (lib/receipt-capture) for the photo, so every surface
  * logs a cost the same way.
  *
@@ -122,6 +126,8 @@ export function QuickCostButton({
   // then refined to the org's timezone once settings load on open.
   const [billDate, setBillDate] = useState(() => todayStrInTz(getOrgSettings(null).timezone));
   const [category, setCategory] = useState("Materials");
+  // The bucket, when the cost has no job. Nothing is picked for the person (see onSave).
+  const [bucket, setBucket] = useState("");
   const [paid, setPaid] = useState(false);
   const [job, setJob] = useState(jobId ?? "");
   const [receipt, setReceipt] = useState<File | null>(null);
@@ -160,6 +166,7 @@ export function QuickCostButton({
     setAmount(0);
     setBillDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
     setCategory("Materials");
+    setBucket("");
     setPaid(false);
     setJob(jobId ?? "");
     setReceipt(null);
@@ -420,6 +427,9 @@ export function QuickCostButton({
     // without typing, so the refusal names it — or, off a job (where Nort can't read), the field.
     if (receipt && !(amount > 0))
       return setError(canRead ? "Type the amount, or switch to Read the Receipt." : "Type the amount — or pick a job and Nort can read it off the receipt.");
+    // No job means a business cost, and a business cost goes in a bucket the person picked. A
+    // preselected bucket would file every cost nobody looked at under the same word.
+    if (!targetJob && !bucket) return setError("Pick the bucket this business cost goes in, or pick a job.");
     const finalSupplier = supplier.trim() || "From receipt — add supplier";
     start(async () => {
       // With a receipt in hand, upload it FIRST so the bill can be created already linked
@@ -436,7 +446,7 @@ export function QuickCostButton({
         status: paid ? "paid" : "unpaid",
         bill_date: billDate || null,
         notes: "",
-        category,
+        category: targetJob ? category : bucket,
         receipt_document_id: docId,
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
@@ -604,21 +614,33 @@ export function QuickCostButton({
             <div>
               <Label htmlFor="qc-job">Job</Label>
               <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved}>
-                <option value="">Overhead (no job)</option>
+                <option value="">Business Cost (No Job)</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
                 ))}
               </Select>
             </div>
           )}
-          <div>
-            <Label htmlFor="qc-cat">Category</Label>
-            <Select id="qc-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </Select>
-          </div>
+          {targetJob ? (
+            <div>
+              <Label htmlFor="qc-cat">Category</Label>
+              <Select id="qc-cat" value={category} onChange={(e) => setCategory(e.target.value)}>
+                {CATEGORIES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </Select>
+            </div>
+          ) : (
+            <div>
+              <Label htmlFor="qc-bucket">Bucket</Label>
+              <Select id="qc-bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} disabled={costSaved}>
+                <option value="">Pick a Bucket</option>
+                {BUSINESS_COST_BUCKETS.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </Select>
+            </div>
+          )}
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} className="h-4 w-4 rounded border-slate-300" disabled={costSaved} />
             Already paid (cash / card) — skip the bill

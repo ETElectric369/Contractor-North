@@ -20,8 +20,7 @@ import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } fr
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
 import { jobLabel } from "@/lib/schedule-options";
-
-const OVERHEAD_CATEGORIES = ["Fuel", "Shop supplies", "Tools", "Office", "Insurance", "Vehicle", "Other"];
+import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 
 interface JobOption {
   id: string;
@@ -102,7 +101,9 @@ export function BillsReceipts({
   const [status, setStatus] = useState("unpaid");
   const [billDate, setBillDate] = useState("");
   const [billJob, setBillJob] = useState("");
-  const [billCategory, setBillCategory] = useState("Shop supplies");
+  // No bucket is picked for him: a guessed "Shop supplies" default is how a gas receipt gets
+  // filed as supplies because nobody changed the box.
+  const [billCategory, setBillCategory] = useState("");
   const [billFilter, setBillFilter] = useState<"all" | "jobs" | "overhead">("all");
   const [billError, setBillError] = useState<string | null>(null);
   const [editBill, setEditBill] = useState<BillRow | null>(null);
@@ -115,9 +116,14 @@ export function BillsReceipts({
   function addBill() {
     setBillError(null);
     if (!supplier.trim()) return setBillError("Supplier is required.");
+    // A BLANK JOB IS NOT A BUSINESS COST. "Pick a job" left alone used to save a bill with no job
+    // and no category, which is how the $47.44 Home Depot row landed nowhere in particular. No job
+    // has to be said out loud, with the bucket it goes in.
+    if (!billJob) return setBillError("Pick a job, or pick Business Cost (No Job) and its bucket.");
+    if (billJob === "__overhead" && !billCategory) return setBillError("Pick the bucket this business cost goes in.");
     start(async () => {
       const res = await createBill({
-        job_id: billJob === "__overhead" ? null : billJob || null,
+        job_id: billJob === "__overhead" ? null : billJob,
         supplier,
         bill_number: billNumber,
         amount,
@@ -235,8 +241,8 @@ export function BillsReceipts({
               <div>
                 <Label htmlFor="b-job">Job</Label>
                 <Select id="b-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
-                  <option value="">— Pick a job —</option>
-                  <option value="__overhead">Overhead (no job)</option>
+                  <option value="">Pick a Job</option>
+                  <option value="__overhead">Business Cost (No Job)</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
@@ -244,9 +250,10 @@ export function BillsReceipts({
               </div>
               {billJob === "__overhead" && (
                 <div>
-                  <Label htmlFor="b-cat">Overhead category</Label>
+                  <Label htmlFor="b-cat">Bucket</Label>
                   <Select id="b-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                    {["Fuel", "Shop supplies", "Tools", "Office", "Insurance", "Vehicle", "Other"].map((c) => (
+                    <option value="">Pick a Bucket</option>
+                    {BUSINESS_COST_BUCKETS.map((c) => (
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </Select>
@@ -288,7 +295,7 @@ export function BillsReceipts({
             {([
               ["all", `All (${bills.length})`],
               ["jobs", `Job Bills (${bills.filter((b) => b.job_id).length})`],
-              ["overhead", `Overhead (${bills.filter((b) => !b.job_id).length})`],
+              ["overhead", `Business Costs (${bills.filter((b) => !b.job_id).length})`],
             ] as const).map(([id, label]) => (
               <button
                 key={id}
@@ -314,7 +321,7 @@ export function BillsReceipts({
                       <div className="text-xs text-slate-400">
                         {b.bill_number ? `#${b.bill_number} · ` : ""}
                         {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : `Overhead${b.category ? ` · ${b.category}` : ""}`}
+                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : b.job_id ? "Job" : `Business Cost · ${bucketOf(b.category)}`}
                         {(b.line_items?.length ?? 0) > 0 ? ` · ${b.line_items!.length} items` : ""}
                       </div>
                     </div>
@@ -461,8 +468,8 @@ export function BillsReceipts({
 
 /** Edit a supplier bill from the central list. Routes through the unified Action
  *  Registry (executeAction → "bill.update") — the same capability the AI agent calls.
- *  Beyond the job-tab editor this also exposes job link + overhead category so an
- *  overhead bill can be corrected to a job (or vice-versa) right from here. */
+ *  Beyond the job-tab editor this also exposes job link + business-cost bucket so a
+ *  business cost can be corrected to a job (or vice-versa) right from here. */
 function BillEditModal({
   bill,
   jobs,
@@ -480,7 +487,10 @@ function BillEditModal({
   const [status, setStatus] = useState(bill.status);
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
   const [billJob, setBillJob] = useState(bill.job_id ?? "__overhead");
-  const [billCategory, setBillCategory] = useState(bill.category ?? "Shop supplies");
+  // A business cost opens on its own bucket (an old word like "Fuel" read as Gas & Truck). A job
+  // bill's category is a paper kind ("Receipt"), not a bucket, so moving one off its job starts
+  // with no bucket and asks for one.
+  const [billCategory, setBillCategory] = useState<string>(bill.job_id ? "" : bucketOf(bill.category));
   const [error, setError] = useState<string | null>(null);
   /** What updateBill said about an invoice that bills this receipt. Holds the modal open. */
   const [billedNote, setBilledNote] = useState<string | null>(null);
@@ -489,6 +499,7 @@ function BillEditModal({
 
   function save() {
     if (!supplier.trim()) return setError("Supplier is required.");
+    if (isOverhead && !billCategory) return setError("Pick the bucket this business cost goes in.");
     setError(null);
     start(async () => {
       const res = await executeAction("bill.update", {
@@ -543,7 +554,7 @@ function BillEditModal({
           <div className="col-span-2">
             <Label htmlFor="be-job">Job</Label>
             <Select id="be-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
-              <option value="__overhead">Overhead (no job)</option>
+              <option value="__overhead">Business Cost (No Job)</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>{jobLabel(j)}</option>
               ))}
@@ -551,9 +562,10 @@ function BillEditModal({
           </div>
           {isOverhead && (
             <div className="col-span-2">
-              <Label htmlFor="be-cat">Overhead category</Label>
+              <Label htmlFor="be-cat">Bucket</Label>
               <Select id="be-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                {OVERHEAD_CATEGORIES.map((c) => (
+                <option value="">Pick a Bucket</option>
+                {BUSINESS_COST_BUCKETS.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </Select>
