@@ -125,6 +125,10 @@ export function QuickCostButton({
   // was dropping a known value. Seeded to the browser's local day immediately,
   // then refined to the org's timezone once settings load on open.
   const [billDate, setBillDate] = useState(() => todayStrInTz(getOrgSettings(null).timezone));
+  // Did a PERSON set the date? Today is only a seed. When Nort reads a receipt, the date printed
+  // on the paper wins unless someone changed this field (an Aug 29 receipt read on Sep 24 was
+  // filed as Sep 24, because the seed was being sent as if it were a fact).
+  const [dateTouched, setDateTouched] = useState(false);
   const [category, setCategory] = useState("Materials");
   // The bucket, when the cost has no job. Nothing is picked for the person (see onSave).
   const [bucket, setBucket] = useState("");
@@ -165,6 +169,7 @@ export function QuickCostButton({
     setSupplier("");
     setAmount(0);
     setBillDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
+    setDateTouched(false);
     setCategory("Materials");
     setBucket("");
     setPaid(false);
@@ -306,6 +311,7 @@ export function QuickCostButton({
 
   function closeModal() {
     clearSnapWatch();
+    setDateTouched(false);
     setOpen(false);
     onClose?.();
   }
@@ -378,7 +384,9 @@ export function QuickCostButton({
         const res = await billJobReceipt(docId, {
           paid,
           category: category || null,
-          billDate: billDate || null,
+          // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
+          // date (organize/actions.ts: `stated?.billDate || itemDate`).
+          billDate: dateTouched ? billDate || null : null,
         });
         if (!res.ok) {
           // Reader failed (unreadable file) — fall back to a bill so the cost isn't lost,
@@ -607,7 +615,7 @@ export function QuickCostButton({
             </div>
             <div>
               <Label htmlFor="qc-date">Date</Label>
-              <Input id="qc-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+              <Input id="qc-date" type="date" value={billDate} onChange={(e) => { setBillDate(e.target.value); setDateTouched(true); }} />
             </div>
           </div>
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
