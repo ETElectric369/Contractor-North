@@ -1,3 +1,4 @@
+import AVFoundation
 import Capacitor
 import WebKit
 
@@ -19,6 +20,26 @@ class NorthBridgeViewController: CAPBridgeViewController {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(TapToPayEducationPlugin())
         installNavigationFailureRelay()
+        shareTheSpeaker()
+        #if DEBUG
+        AudioSessionProbe.shared.start()
+        #endif
+    }
+
+    /// THE CRACKLE (2026-09-24, iOS 27). Nort's spoken replies crackled in the app and played clean in
+    /// Safari on the same phone. The Debug audio probe showed why: the web view's audio runs in
+    /// WebKit's own process, which this app sees as OTHER audio (isOtherAudioPlaying flapping on and
+    /// off), while the app's own session sat in the default SoloAmbient category, the one that refuses
+    /// to mix. The app's session was interrupted mid-conversation and the route was reconfigured a
+    /// dozen times in one short exchange: two owners of the speaker cutting each other off. Safari
+    /// owns both sides and never fights itself. Declaring the app's session mixable ends the fight;
+    /// .playback keeps anything the app process itself says audible with the silent switch on.
+    private func shareTheSpeaker() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
+        } catch {
+            print("[AudioSession] could not declare the app's audio mixable: \(error)")
+        }
     }
 
     /// Capacitor builds its navigation delegate inside a final loadView and offers no hook to
@@ -81,3 +102,53 @@ final class NavigationFailureRelay: NSObject, WKNavigationDelegate {
         )
     }
 }
+
+#if DEBUG
+/// DIAGNOSTIC, Debug builds only (2026-09-24). Nort's spoken replies crackle in the app and play clean
+/// in Safari on the same phone; the mic, the player and the Tap to Pay reader are ruled out. What is
+/// left is the audio session the app's web view plays through, which the page cannot see. This prints
+/// it to the console (read over the cable with `devicectl … --console`): once at start, on every route
+/// change and interruption, and whenever any of it changes, checked twice a second.
+final class AudioSessionProbe {
+    static let shared = AudioSessionProbe()
+    private var timer: Timer?
+    private var last = ""
+
+    func start() {
+        guard timer == nil else { return }
+        let center = NotificationCenter.default
+        center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+            let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 0
+            self?.log("routeChange reason=\(reason)", force: true)
+        }
+        center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            let kind = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt) ?? 99
+            self?.log("interruption type=\(kind)", force: true)
+        }
+        center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.log("mediaServicesReset", force: true)
+        }
+        log("start", force: true)
+        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            self?.log("changed", force: false)
+        }
+    }
+
+    private func snapshot() -> String {
+        let session = AVAudioSession.sharedInstance()
+        let outputs = session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ",")
+        let inputs = session.currentRoute.inputs.map { $0.portType.rawValue }.joined(separator: ",")
+        return "category=\(session.category.rawValue) mode=\(session.mode.rawValue) options=\(session.categoryOptions.rawValue) "
+            + "rate=\(Int(session.sampleRate)) io=\(String(format: "%.4f", session.ioBufferDuration)) "
+            + "out=[\(outputs)] in=[\(inputs)] outCh=\(session.outputNumberOfChannels) "
+            + "otherAudio=\(session.isOtherAudioPlaying) outLatency=\(String(format: "%.4f", session.outputLatency))"
+    }
+
+    private func log(_ why: String, force: Bool) {
+        let now = snapshot()
+        guard force || now != last else { return }
+        last = now
+        print("[AudioProbe] \(why): \(now)")
+    }
+}
+#endif
