@@ -16,6 +16,7 @@ import { atFromClockTime, clockInputValue, splitClock } from "@/lib/split-previe
 import { hoursBetween } from "@/lib/utils";
 import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
 import { StopClockSheet } from "./stop-clock-sheet";
+import { clockDoorWords } from "@/lib/long-shift";
 
 interface Entry {
   id: string;
@@ -97,6 +98,7 @@ export function EditEntryButton({
   initialSplit = null,
   rebuiltFromOldSplit = false,
   workDayEnd,
+  viewerId,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
@@ -122,14 +124,19 @@ export function EditEntryButton({
   /** Any piece of this entry's shift was rebuilt from an old split by 0289, this entry included
    *  when it is the first piece (which carries no split_how of its own). */
   rebuiltFromOldSplit?: boolean;
-  /** "HH:MM", the org's work-day end (workDayWindowHm(settings).end): the Stop The Clock sheet
+  /** "HH:MM", the org's work-day end (workDayWindowHm(settings).end): the clock-out sheet
    *  offers it as a chip on the clock-in day. */
   workDayEnd?: string;
+  /** The person looking. A running clock that is his own reads "Clock Out", not his own name. */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
-  /** A RUNNING clock is stopped, not edited (2026-09-24): the trigger reads Stop The Clock and the
-   *  modal is the stop sheet. The closed-entry form below is untouched. */
+  /** A RUNNING clock is stopped, not edited (2026-09-24): the trigger names whose clock it is,
+   *  "Clock Out Brian" (Erik: "an option to [end] an employees time clock and clock out for them"),
+   *  and the modal is the clock-out sheet, which becomes "Stop Brian's Clock" on a forgotten one.
+   *  The closed-entry form below is untouched. */
   const isOpen = entry.status === "open" && !entry.clock_out;
+  const clockOutWords = clockDoorWords(entry.profiles?.full_name, { self: !!viewerId && entry.profile_id === viewerId }).clockOut;
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
@@ -441,7 +448,7 @@ export function EditEntryButton({
                 setOpen(true);
               }}
             >
-              Stop The Clock
+              {clockOutWords}
             </Button>
           </span>
         )}
@@ -458,6 +465,7 @@ export function EditEntryButton({
             onDelete={remove}
             deleting={pending}
             externalError={error}
+            viewerId={viewerId}
           />
         )}
       </>

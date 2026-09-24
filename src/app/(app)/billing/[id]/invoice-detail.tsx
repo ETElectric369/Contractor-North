@@ -137,7 +137,8 @@ export function InvoiceDetail({
   customerHoldsOlderCopy?: boolean;
   /** Shifts still running on this invoice's job (page.tsx reads them). Their hours bill nothing
    *  until somebody stops the clock, so the card says so. */
-  runningClocks?: { id: string; clockIn: string; name: string }[];
+  /** `door` is the trigger's words ("Clock Out Brian"; "Clock Out" on the viewer's own clock). */
+  runningClocks?: { id: string; clockIn: string; name: string; self?: boolean; door: string }[];
   /** The org's timezone, for the "since" time on a running clock. */
   tz?: string;
 }) {
@@ -830,14 +831,14 @@ export function InvoiceDetail({
             {runningClocks.map((c) => (
               <div key={c.id} className="flex flex-wrap items-center gap-2">
                 <span className="min-w-0 flex-1">
-                  {c.name} is still on the clock on this job since {clockSince(c.clockIn, tz)}. Those hours are not on
-                  this invoice until the clock is stopped.
+                  {c.self ? "You're" : `${c.name} is`} still on the clock on this job since {clockSince(c.clockIn, tz)}. Those
+                  hours are not on this invoice until the clock is stopped.
                 </span>
                 <Link
                   href={`/timecards?entry=${c.id}`}
                   className="inline-flex h-11 shrink-0 items-center rounded-lg border border-amber-400 bg-white px-4 text-sm font-medium text-amber-900 hover:bg-amber-100"
                 >
-                  Stop The Clock
+                  {c.door}
                 </Link>
               </div>
             ))}

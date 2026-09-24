@@ -10,6 +10,7 @@ import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
+import { clockDoorWords } from "@/lib/long-shift";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -258,11 +259,12 @@ async function buildActionItems(ctx: {
       : empty,
     // ── The end-of-day money-leak sweep feeders (staff only) ──
     // Every open clock, whatever its age — a handful of rows at most; the stray
-    // rule (past-day OR 14h+) is applied per-row in detectStrayTime.
+    // rule (past-day OR LONG_SHIFT_HOURS+) is applied per-row in detectStrayTime.
+    // profile_id: the row's door reads "Clock Out" on the viewer's own clock, his name on anyone else's.
     isStaff
       ? supabase
           .from("time_entries")
-          .select("id, status, job_id, clock_in, clock_out, job_code, profiles(full_name)")
+          .select("id, status, job_id, clock_in, clock_out, job_code, profile_id, profiles(full_name)")
           .eq("status", "open")
           .order("clock_in", { ascending: true })
           .limit(50)
@@ -779,7 +781,13 @@ async function buildActionItems(ctx: {
     Date.now(),
     new Set(((nonBillableR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean)),
   );
+  // Whose clock each open finding is, for the words on its door ("Clock Out Brian").
+  const openOwner = new Map<string, { profile_id?: string | null; full_name?: string | null }>(
+    ((openTimeR.data ?? []) as any[]).map((e) => [String(e.id), { profile_id: e.profile_id, full_name: e.profiles?.full_name }]),
+  );
   for (const f of strayFindings) {
+    const owner = openOwner.get(f.entryId);
+    const door = clockDoorWords(owner?.full_name, { self: !!owner?.profile_id && owner.profile_id === userId }).clockOut;
     items.push({
       id: `stray-${f.entryId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
       kind: "time_stray",
@@ -788,15 +796,16 @@ async function buildActionItems(ctx: {
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
       // An open shift counts ZERO hours until somebody stops it (payroll never pays on a guess),
       // so the old line saying its hours were piling up was false. What is true: it is still
-      // running, and one tap stops it.
+      // running, and the tap is the door that names whose clock it is (Erik, 2026-09-24: "clock
+      // out for them"). Every open finding here is a forgotten one, so the sheet asks when.
       subtitle: f.openStill
-        ? `Still on the clock since ${formatTime(f.when, tz || undefined)}. Tap to stop it.`
+        ? `Still on the clock since ${formatTime(f.when, tz || undefined)}. Tap to ${door}.`
         : "Closed hours nobody can bill",
       who: f.name,
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      // The open one lands on its own Stop The Clock sheet (/timecards finds the entry in any week).
+      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week).
       href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
       affordances: AFFORDANCES.time_stray,
     });

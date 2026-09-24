@@ -21,6 +21,7 @@ import {
   type PersonBalance,
 } from "@/lib/payroll-math";
 import { ownerRegister } from "@/lib/owner-draw";
+import { clockDoorWords } from "@/lib/long-shift";
 import { confirmImportedPayment, recordPayment, settleMileage, unsettleMileage, voidPayment } from "./actions";
 
 // Format a calendar date STRING without a timezone shift — date-only strings
@@ -307,7 +308,9 @@ export function PayrollView({
               href={`/timecards?entry=${o.entryId}`}
               className="flex min-h-[44px] items-center justify-between border-t border-amber-200 px-4 text-sm font-medium text-amber-900 active:bg-amber-100"
             >
-              <span>Fix On Timecards{openShifts.length > 1 ? ` · ${firstName(o.name)}` : ""}</span>
+              {/* The office may clock anybody out, forgotten or not; the sheet on Timecards asks
+                  when a forgotten one really stopped. */}
+              <span>{clockDoorWords(o.name, { self: !!viewerId && o.profileId === viewerId }).clockOut}</span>
               <ChevronRight className="h-4 w-4 shrink-0" />
             </Link>
           ))}
