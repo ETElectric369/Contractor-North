@@ -32,7 +32,19 @@ export type JobProfitRow = {
   rev: number;
   cost: number;
   profit: number;
+  /** Hours the owner worked on this job (0286). He is paid by owner's draw, so they are never in
+   *  `cost`; they are how much of his own time the profit bought. */
+  ownerHours: number;
+  /** profit / ownerHours: what the job left the owner per hour he put in. Null when he put in no
+   *  hours, and null when nothing has been collected yet (a rate on no money is not a rate). */
+  perOwnerHour: number | null;
 };
+
+/** What a job left the owner per hour he worked on it, or null when either half is missing. */
+export function perOwnerHourOf(rev: number, profit: number, ownerHours: number): number | null {
+  if (!(ownerHours > 0) || !(rev > 0)) return null;
+  return round2(profit / ownerHours);
+}
 
 export type ProfitInputs = {
   jobs: any[];
@@ -88,10 +100,25 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   return ((inp.jobs ?? []) as any[])
     .map((j) => {
       const rev = Math.max(0, (revenueByJob.get(j.id) ?? 0) - (refundByJob.get(j.id) ?? 0));
-      const cost = laborCostForJob((inp.entries ?? []) as any[], j.id).cost + (matCost.get(j.id) ?? 0);
-      return { id: j.id, job_number: j.job_number, name: j.name, status: j.status, rev, cost, profit: rev - cost };
+      // Crew labor only: the owner's hours come back as ownerHours and cost $0 (0286).
+      const labor = laborCostForJob((inp.entries ?? []) as any[], j.id);
+      const cost = labor.cost + (matCost.get(j.id) ?? 0);
+      const profit = rev - cost;
+      return {
+        id: j.id,
+        job_number: j.job_number,
+        name: j.name,
+        status: j.status,
+        rev,
+        cost,
+        profit,
+        ownerHours: labor.ownerHours,
+        perOwnerHour: perOwnerHourOf(rev, profit, labor.ownerHours),
+      };
     })
-    .filter((j) => j.rev > 0 || j.cost > 0)
+    // A job the owner has worked but not been paid for yet stays on the board: with his hours no
+    // longer a cost it would otherwise read as zero-and-zero and vanish, hiding unbilled work.
+    .filter((j) => j.rev > 0 || j.cost > 0 || j.ownerHours > 0)
     .sort((a, b) => b.profit - a.profit);
 }
 
@@ -169,6 +196,13 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
   };
 }
 
+/**
+ * BUDGET BURN KEEPS ITS COST MEANING (0286, deliberately NOT redefined). remaining/burnPct/overBudget
+ * are still cost against the estimate, and cost no longer includes the owner's hours. So on a job
+ * the owner works himself, burn can read low while the job is well along: the hours were spent, they
+ * just are not a cost. `ownerHours` (on the row) sits beside burn for exactly that reason, and Nort's
+ * get_job_financials says so, so a $0 labor actual is never read as "barely started".
+ */
 export type JobFinancials = JobProfitRow & {
   estimate: number;
   workToDate: number;
@@ -184,7 +218,7 @@ export async function getJobFinancials(supabase: any, jobId: string): Promise<Jo
   const inp = await fetchProfitInputs(supabase, jobId);
   const row = computeJobProfitRows(inp).find((r) => r.id === jobId)
     // computeJobProfitRows drops jobs with zero rev AND zero cost; synthesize a zero row so a brand-new job still answers.
-    ?? (inp.jobs[0] ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0 } : null);
+    ?? (inp.jobs[0] ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0, ownerHours: 0, perOwnerHour: null } : null);
   if (!row) return null;
 
   const fin = await jobProgressFinancials(supabase, jobId);
@@ -402,18 +436,30 @@ export async function listJobProfitability(
 }
 
 // ── Profit by work type ──────────────────────────────────────────────────────
-export type ProfitByType = { type: string; jobs: number; revenue: number; cost: number; profit: number; marginPct: number | null };
+export type ProfitByType = {
+  type: string;
+  jobs: number;
+  revenue: number;
+  cost: number;
+  profit: number;
+  marginPct: number | null;
+  /** Owner hours across the type's jobs (0286: never a cost). */
+  ownerHours: number;
+  /** profit / ownerHours across the type, or null (no owner hours, or nothing collected). */
+  profitPerOwnerHour: number | null;
+};
 
 /** Pure — roll per-job profit rows up by work type. `typeOf` maps job id → type name. */
 export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, string>): ProfitByType[] {
-  const groups = new Map<string, { revenue: number; cost: number; profit: number; jobs: number }>();
+  const groups = new Map<string, { revenue: number; cost: number; profit: number; jobs: number; ownerHours: number }>();
   for (const r of rows) {
     const type = typeOf.get(r.id) ?? "Uncategorized";
-    const g = groups.get(type) ?? { revenue: 0, cost: 0, profit: 0, jobs: 0 };
+    const g = groups.get(type) ?? { revenue: 0, cost: 0, profit: 0, jobs: 0, ownerHours: 0 };
     g.revenue += r.rev;
     g.cost += r.cost;
     g.profit += r.profit;
     g.jobs += 1;
+    g.ownerHours += Number(r.ownerHours) || 0;
     groups.set(type, g);
   }
   return [...groups.entries()]
@@ -424,6 +470,8 @@ export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, st
       cost: round2(g.cost),
       profit: round2(g.profit),
       marginPct: g.revenue > 0 ? Math.round((g.profit / g.revenue) * 100) : null,
+      ownerHours: round2(g.ownerHours),
+      profitPerOwnerHour: perOwnerHourOf(g.revenue, g.profit, g.ownerHours),
     }))
     .sort((a, b) => b.profit - a.profit);
 }
