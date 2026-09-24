@@ -17,7 +17,7 @@ import type { OwnerRegister } from "@/lib/owner-draw";
 import { OfficeCanSeeSwitch } from "./office-switch";
 
 /**
- * LEFT FOR YOU (0286): the card right under Money by Month on /analytics, read like a receipt.
+ * OWNER'S DRAW (0286; named "Left For You" until Erik renamed it 2026-09-24): the card right under Money by Month on /analytics, read like a receipt.
  *
  * Received, then every real cost on its own line, then what is left for the owner as the row that
  * stands out, with "Before income tax. Ask your accountant how much to set aside." directly under

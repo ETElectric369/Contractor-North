@@ -7,7 +7,7 @@ import { dbError } from "@/lib/db-error";
 type Result = { ok: boolean; error?: string };
 
 /**
- * THE OWNER'S ONE SWITCH: may office staff see "Left For You"? (0286; Erik 2026-09-24: "office
+ * THE OWNER'S ONE SWITCH: may office staff see the Owner's Draw card? (0286; Erik 2026-09-24: "office
  * staff should see mine (optional toggle)").
  *
  * Owner only, and checked here on the server rather than trusted from the page. The general

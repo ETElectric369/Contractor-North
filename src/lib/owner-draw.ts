@@ -32,7 +32,8 @@ export type OwnerRegister = {
   perHourPhrase: string;
   /** "about $X for each hour you worked" uses this: "you" / "Erik" / "the owners". */
   who: string;
-  /** "Left For You" / "Left For Erik" / "Left For the Owners". A heading. */
+  /** "Owner's Draw": the Analytics card's heading and the chart's series, the same words for every
+   *  viewer (Erik, 2026-09-24: "instead of 'Left for you' lets call it 'Owner's Draw'"). */
   leftFor: string;
   /** The Pay board's one quiet sentence about why the owner is not on it. */
   notOnPayBoard: string;
@@ -54,7 +55,7 @@ export function ownerRegister(owners: OwnerRef[], viewerId: string | null | unde
       hoursLabel: "Owners' Hours",
       perHourPhrase: "per hour the owners worked",
       who: "the owners",
-      leftFor: "Left For the Owners",
+      leftFor: "Owner's Draw",
       notOnPayBoard: "The owners are paid by owner's draw, so their hours are not on this board.",
     };
   }
@@ -66,7 +67,7 @@ export function ownerRegister(owners: OwnerRef[], viewerId: string | null | unde
       hoursLabel: "Your Hours",
       perHourPhrase: "per hour you worked",
       who: "you",
-      leftFor: "Left For You",
+      leftFor: "Owner's Draw",
       notOnPayBoard: "You are paid by owner's draw, so your hours are not on this board.",
     };
   }
@@ -78,7 +79,7 @@ export function ownerRegister(owners: OwnerRef[], viewerId: string | null | unde
     hoursLabel: named ? `${first}'s Hours` : "Owner's Hours",
     perHourPhrase: `per hour ${first} worked`,
     who: first,
-    leftFor: named ? `Left For ${first}` : "Left For the Owner",
+    leftFor: "Owner's Draw",
     notOnPayBoard: named
       ? `${first} is paid by owner's draw, so ${first}'s hours are not on this board.`
       : "The owner is paid by owner's draw, so the owner's hours are not on this board.",

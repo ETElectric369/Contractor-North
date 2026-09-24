@@ -32,7 +32,7 @@ export type MoneySeries = {
  *  every bar also carries its figure, so identity is never colour alone. */
 const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label"> & { label: string }> = {
   collected: { label: "Collected", fill: "fill-brand", swatch: "bg-brand", defaultOn: true },
-  left: { label: "Left For You", fill: "fill-green-600", swatch: "bg-green-600", defaultOn: true },
+  left: { label: "Owner's Draw", fill: "fill-green-600", swatch: "bg-green-600", defaultOn: true },
   materials: { label: "Materials & Bills", fill: "fill-indigo-500", swatch: "bg-indigo-500", defaultOn: false },
   crewPay: { label: "Crew Pay", fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
   mileage: { label: "Crew Mileage", fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
