@@ -47,23 +47,30 @@ export function MediaLightbox({
   const reported = useRef(false);
 
   useEffect(() => {
-    if (!inShell || !shown) return;
+    // A PDF starts at once: WebKit in the shell may never fire load for a cross-origin PDF frame,
+    // and waiting on it would send every PDF Download to Safari instead of the share sheet.
+    if (!inShell || (!shown && !isPdf)) return;
     let live = true;
+    // Closing the lightbox (or Back) mid-download stops the transfer instead of letting a
+    // multi-MB file finish on cellular for nobody (review of the 09-23 wave).
+    const ctl = new AbortController();
     // A new url must never share the previous file's bytes.
     setFile(null);
     fetchError.current = null;
-    fetch(url)
+    fetch(url, { signal: ctl.signal, cache: "force-cache" })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const type = blob.type || (isPdf ? "application/pdf" : "application/octet-stream");
-        if (live) setFile(new File([blob], name, { type }));
+        if (live) setFile(new File([blob], withExtension(name, type), { type }));
       })
       .catch((e: unknown) => {
-        if (live) fetchError.current = e instanceof Error ? e.message : String(e);
+        if (!live || (e instanceof DOMException && e.name === "AbortError")) return;
+        fetchError.current = e instanceof Error ? e.message : String(e);
       });
     return () => {
       live = false;
+      ctl.abort();
     };
   }, [inShell, shown, url, name, isPdf]);
 
@@ -102,7 +109,7 @@ export function MediaLightbox({
     <div className="fixed inset-0 z-[60] flex flex-col bg-black/90">
       <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-[max(0.75rem,var(--sat,0px))] text-white">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg p-2 hover:bg-white/10" title="Open in new tab">
+        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" title="Open in new tab" aria-label="Open in new tab">
           <ExternalLink className="h-5 w-5" />
         </a>
         <a
@@ -115,7 +122,7 @@ export function MediaLightbox({
         >
           <Download className="h-5 w-5" />
         </a>
-        <button onClick={onClose} className="rounded-lg p-2 hover:bg-white/10" aria-label="Close">
+        <button onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" aria-label="Close">
           <X className="h-6 w-6" />
         </button>
       </div>
@@ -147,4 +154,20 @@ export function MediaLightbox({
       <p className="pb-3 text-center text-xs text-white/50">Tap outside the image or the ✕ to close</p>
     </div>
   );
+}
+
+/** A renamed document ("Kitchen panel") has no extension, and Save to Files would write it with
+ *  none. Add the one its type says, and leave a name that already has one alone. */
+const EXTENSION_FOR: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/heic": ".heic",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+export function withExtension(name: string, type: string): string {
+  const base = String(name || "file").trim() || "file";
+  if (/\.[a-z0-9]{2,5}$/i.test(base)) return base;
+  return base + (EXTENSION_FOR[type.toLowerCase()] ?? "");
 }

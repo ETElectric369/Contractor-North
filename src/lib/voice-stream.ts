@@ -32,6 +32,10 @@ let wantStream = false; // we intend to hold the mic open across turns
 let muted = false;
 let mimeType = "";
 let handler: ResultCb | null = null;
+/** Bumped by every stopListening. A transcription still in flight when Nort closed comes back to a
+ *  session that has ended: it is discarded, with no status line (the next panel would replay it)
+ *  and no report (it is not a defect; review of the 09-23 wave reproduced a false 'no-handler'). */
+let session = 0;
 const stateSubs = new Set<StateCb>();
 
 // Diagnostics so the user (and we) can SEE what the mic is doing — the only way to debug a device
@@ -220,7 +224,9 @@ export function startListening(_lang?: string): boolean {
     .then((s) => {
       settled = true;
       clearTimeout(hang);
-      if (!wantStream) {
+      // Superseded (a second tap while this one hung) or already holding a stream: stop this one.
+      // Overwriting `stream` and `audioCtx` would leave the first mic and its context running.
+      if (!wantStream || attempt !== micAttempt || stream) {
         s.getTracks().forEach((t) => t.stop());
         return;
       }
@@ -233,7 +239,7 @@ export function startListening(_lang?: string): boolean {
       analyser.fftSize = 2048;
       src.connect(analyser);
       mimeType = pickMime();
-      status("Mic ready — go ahead");
+      status("Mic ready. Go ahead.");
       beginTurn();
     })
     .catch((err) => {
@@ -318,7 +324,7 @@ function beginTurn() {
   active = true;
   emit();
 
-  status("Listening — go ahead");
+  status("Listening. Go ahead.");
   const buf = new Uint8Array(analyser.frequencyBinCount);
   let spoke = false;
   let silenceStart = 0;
@@ -370,12 +376,12 @@ function beginTurn() {
     // A long turn says how it ends, instead of "Hearing you…" for a minute (nothing silent).
     if (spoke && !saidStillListening && elapsed > STILL_LISTENING_MS) {
       saidStillListening = true;
-      status("Still listening — pause for a couple of seconds when you're done");
+      status("Still listening. Pause for a couple of seconds when you're done.");
     }
     // Safety caps: never run a single turn forever; give up a turn with no speech at all.
     // 18s truncated a real dictated scope — 45s holds a whole thought; Whisper is fine with it.
     if (elapsed > TURN_CAP_MS || (!spoke && elapsed > NO_SPEECH_CAP_MS)) {
-      if (spoke) status("Sending what I heard — the mic never caught a pause…");
+      if (spoke) status("Sending what I heard. The mic never caught a pause…");
       // A peak near zero is a mic that captured silence; a peak under the gate is a quiet room.
       else report("no-speech-cap", lastStatus, `peak ${peak.toFixed(4)} floor ${floor.toFixed(4)} gate ${speakGate.toFixed(4)}`);
       stopTurn();
@@ -396,6 +402,7 @@ function stopTurn() {
 }
 
 async function finishTurn() {
+  const mine = session;
   cancelAnimationFrame(rafId);
   level = 0;
   active = false;
@@ -419,6 +426,7 @@ async function finishTurn() {
     fd.append("audio", blob, `turn.${ext}`);
     const r = await fetch("/api/transcribe", { method: "POST", body: fd });
     const j = await r.json().catch(() => null);
+    if (mine !== session) return; // Nort was closed while this was in flight: nobody is listening
     if (!r.ok) {
       retryOrGiveUp(`Transcribe error: ${j?.error ?? r.status}.`, "transcribe-error", `HTTP ${r.status}, ${blob.size} bytes`);
       return;
@@ -436,6 +444,7 @@ async function finishTurn() {
         text ? `${text.length} chars, ${blob.size} bytes` : `${blob.size} bytes`,
       );
   } catch (e: any) {
+    if (mine !== session) return;
     retryOrGiveUp(`Couldn't reach transcription (${e?.message ?? "network"}).`, "transcribe-unreachable", errName(e));
   }
 }
@@ -448,6 +457,7 @@ async function finishTurn() {
  * recorder before stopping it and nothing of that turn goes anywhere.
  */
 export function stopListening(opts?: { discard?: boolean }) {
+  session++;
   wantStream = false;
   active = false;
   lastStatus = ""; // this session's line must not replay into the next panel

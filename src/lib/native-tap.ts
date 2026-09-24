@@ -661,7 +661,9 @@ function codeOf(e: unknown): string | null {
 const NOT_IN_BUILD = "Tap to Pay on iPhone isn't available in this app build — it works in the North iPhone app.";
 const PAYMENT_BUSY = "A card payment is already in progress on this phone.";
 /** A Cancel answered before the reader was armed: the connect it interrupted is still settling natively. */
-const ATTEMPT_FINISHING = "The last Tap to Pay on iPhone attempt on this phone is still finishing. Give it a few seconds, then try again.";
+// "A few seconds" was untrue after an early Cancel: the attempt keeps its turn for the whole
+// connect, which can be a minute, and a first-time Apple setup longer (review of the 09-23 wave).
+const ATTEMPT_FINISHING = "The last Tap to Pay on iPhone attempt on this phone is still finishing. Wait a moment, then try again. The first connect can take a minute.";
 const CANCELLED: TapCollectResult = { ok: false, cancelled: true, error: "Cancelled. Nothing was charged." };
 
 /** Why this phone can't start another Tap to Pay on iPhone step right now, in true words. */
@@ -1371,7 +1373,9 @@ export async function prepareTapToPay(): Promise<TapPrepareResult> {
         const f = failure(stage, e);
         result = { ok: false, error: f.error };
         const kind = f.kind === "listener-lost" ? "token listener lost" : (f.kind ?? `unclassified at ${stage}`);
-        reportWarmupFailure(kind, f.error, { stage, sdk_said: sdkSaid });
+        // The app went to the background mid-warm-up (the camera sheet does it): a skip, the same as
+        // the hidden-page check at the top, not a failure anyone needs to read about.
+        if (f.kind !== "background") reportWarmupFailure(kind, f.error, { stage, sdk_said: sdkSaid });
       }
       lastPrepareFailure = { at: Date.now(), result };
       return result;
@@ -1626,6 +1630,9 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
     // The server's word, read fresh on THIS page load — never a flag anyone could set here.
     const canEnable = canEnableCache === true;
     const outcome = await withSdk(async () => {
+      // Cancelled while the location and role were read: start nothing. A connect nobody wants now
+      // could still raise Apple's terms sheet over a Pay Now sheet that has already said Cancelled.
+      if (cancelRequested) return "cancelled" as const;
       stage = STAGE.starting;
       publish(stage);
       await raced(10_000, () => initialise(p, !c.livemode));

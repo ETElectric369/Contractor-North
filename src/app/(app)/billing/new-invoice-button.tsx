@@ -185,9 +185,18 @@ export function NewInvoiceButton({
        * So the window stays up and the new page REPLACES the Modal's history entry. When the
        * page lands, the marker is no longer the current state, the Modal's cleanup leaves history
        * alone, and Back from the invoice returns to /billing in one step.
+       *
+       * ONLY WHEN THE MARKER IS ACTUALLY ON TOP (review of the fix, 2026-09-24). The ?new=1 doors
+       * (quick-add New Invoice, a job's blank-invoice door, the customer door) open the Modal and
+       * then strip the param with router.replace, which overwrites the marker's entry. Replacing
+       * again there would overwrite /billing itself, so Back from the new invoice landed on
+       * /billing?new=1 and the window opened again. No marker on top means nothing to replace:
+       * push, and the Modal's cleanup still leaves history alone because the entry isn't ours.
        */
+      const markerOnTop = !!(window.history.state as { cnOverlay?: boolean } | null)?.cnOverlay;
       setOpening(true);
-      router.replace(`/billing/${res.id}`);
+      if (markerOnTop) router.replace(`/billing/${res.id}`);
+      else router.push(`/billing/${res.id}`);
     });
   }
 
@@ -201,7 +210,10 @@ export function NewInvoiceButton({
         open={open}
         onClose={discard}
         title="New invoice"
-        dirty={dirty}
+        // While the new invoice's page is loading the draft already exists, so a back swipe is a
+        // plain close, not a discard to confirm: the guard would re-push the marker and leave the
+        // window spinning with Cancel greyed out.
+        dirty={dirty && !opening}
         footer={
           <ModalActions
             onCancel={discard}

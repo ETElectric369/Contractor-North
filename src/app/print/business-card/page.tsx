@@ -73,9 +73,12 @@ export default async function BusinessCardPage() {
   );
 
   return (
-    <div className="mx-auto max-w-4xl p-6">
+    // Outside the app shell, like the PDF viewer: in the full-bleed iOS shell a plain p-6 put Back
+    // under the status bar where a thumb can't reach it (review of the 09-23 wave). --sat is 0 in a
+    // browser, so nothing moves there.
+    <div className="mx-auto max-w-4xl px-6 pb-6 pt-[max(1.5rem,var(--sat,0px))]">
       <div className="no-print mb-6 flex items-center justify-between">
-        <BackLink fallback="/settings" fallbackLabel="Back to settings" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800" />
+        <BackLink fallback="/settings" fallbackLabel="Back to settings" className="-ml-2 inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-lg px-2 text-sm text-slate-500 hover:text-slate-800" />
         <PrintButton />
       </div>
       <p className="no-print mb-4 text-sm text-slate-500">

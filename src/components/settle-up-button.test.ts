@@ -84,7 +84,12 @@ const SRC = readFileSync(join(process.cwd(), "src/components/settle-up-button.ts
  */
 describe("every way to the reader goes through doorFor", () => {
   it("both card reads are handed a door that was just checked", () => {
-    const collects = [...SRC.matchAll(/await collectTapPayment\(/g)].map((m) => m.index ?? 0);
+    // The card reads go through tapToPay's `collect` wrapper (it marks the reader as collecting, so
+    // a Cancel before the read is honoured and one during it is left to the reader's answer). The
+    // bridge itself is called in exactly one place: inside that wrapper.
+    expect([...SRC.matchAll(/await collectTapPayment\(/g)]).toHaveLength(1);
+    expect(SRC).toMatch(/const collect = async \([^)]*\) => \{\s*tapCollecting\.current = true;\s*try \{\s*return await collectTapPayment\(/);
+    const collects = [...SRC.matchAll(/await collect\(/g)].map((m) => m.index ?? 0);
     expect(collects).toHaveLength(2);
     for (const at of collects) {
       const before = SRC.slice(0, at);
@@ -96,6 +101,18 @@ describe("every way to the reader goes through doorFor", () => {
       expect(between).not.toContain("enableTapToPay(");
       expect(between).not.toContain("termsGate(");
     }
+  });
+
+  it("Cancel before the card read retires the press; a finished read is never thrown away", () => {
+    // Review of the 09-23 wave: the busy screen shows Cancel from the press on, but before this the
+    // press waited on the probe, the invoice door and the mint, then armed the reader regardless.
+    expect(SRC).toMatch(/const press = \+\+tapPress\.current;/);
+    // Pre-collect checks honour a retired press; the post-read check (armed) looks only at the
+    // sheet, so a card read a moment before Cancel is still reported as the charge it is.
+    expect(SRC).toMatch(/const retired = !armed && tapPress\.current !== press;/);
+    // The button retires the press, tells the bridge, and only puts the sheet back itself when no
+    // read is running (during one, the reader's cancelled-or-charged answer sets the screen).
+    expect(SRC).toMatch(/tapPress\.current \+= 1;\s*void cancelTapPayment\(\);\s*(?:\/\/[^\n]*\s*)*if \(!tapCollecting\.current\) setTap\(\{ kind: "idle" \}\);/);
   });
 
   it("the prompt's figure is read off the door at the moment it is painted, never captured earlier", () => {

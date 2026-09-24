@@ -532,7 +532,7 @@ export function QuickCostButton({
               {phone ? (
                 <><Paperclip className="h-4 w-4" /> Photo or PDF</>
               ) : (
-                <><Camera className="h-4 w-4" /> Add Receipt — Photo or PDF</>
+                <><Camera className="h-4 w-4" /> Add Receipt: Photo or PDF</>
               )}
             </button>
           </div>

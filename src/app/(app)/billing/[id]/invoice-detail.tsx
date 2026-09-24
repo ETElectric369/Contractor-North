@@ -377,7 +377,8 @@ export function InvoiceDetail({
       // import, because a toast is gone before a sentence with two dollar figures can be read.
       const warn = (st?.warnings ?? []).join(". ");
       setImportWarn(warn || null);
-      toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, "success");
+      // A money warning is not good news: it rides an info toast, never the green one.
+      toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, warn ? "info" : "success");
       setTimeout(() => setImportMsg(null), 5000);
       refresh();
     });

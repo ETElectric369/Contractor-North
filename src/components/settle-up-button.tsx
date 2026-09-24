@@ -600,13 +600,24 @@ export function PayNowButton(props: Mode & {
    *  status is left exactly as it is — a draft is payable across a counter (INV-069). */
   async function tapToPay() {
     const g = gen.current;
-    /** Has the sheet this tap belongs to closed (or reopened)? `armed` = the await we just came
-     *  back from was the reader's — tell it to stand down as well; the bridge's cancel is a no-op
-     *  when nothing is listening, so it never hurts to say it. */
+    const press = ++tapPress.current;
+    /** Has the sheet this tap belongs to closed (or reopened), or was this press cancelled before
+     *  its collect began? `armed` = the await we just came back from was the reader's: only the
+     *  sheet closing counts then (the reader's own answer decides a Cancel), and the reader is
+     *  told to stand down as well; the bridge's cancel is a no-op when nothing is listening. */
     const stale = (armed = false): boolean => {
-      if (gen.current === g) return false;
+      const retired = !armed && tapPress.current !== press;
+      if (gen.current === g && !retired) return false;
       if (armed) void cancelTapPayment();
       return true;
+    };
+    const collect = async (door: Parameters<typeof collectTapPayment>[0]) => {
+      tapCollecting.current = true;
+      try {
+        return await collectTapPayment(door);
+      } finally {
+        tapCollecting.current = false;
+      }
     };
     /**
      * THE DOOR ONTO THIS INVOICE, GOOD FOR THE FIGURE THE INVOICE SAYS RIGHT NOW.
@@ -693,7 +704,7 @@ export function PayNowButton(props: Mode & {
       // confirmed tap sat on "recording it…" forever while the invoice had long read Paid.
       setTapStarted(true);
       setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
-      let c = await collectTapPayment(pi);
+      let c = await collect(pi);
       if (stale(true)) return;
       if (!c.ok && c.notEnabled) {
         const gate = await termsGate(c.error, g);
@@ -730,7 +741,7 @@ export function PayNowButton(props: Mode & {
         }
         pi = again.pi;
         setTap({ kind: "busy", phase: "pay", label: holdCardLine(pi.amount) });
-        c = await collectTapPayment(pi);
+        c = await collect(pi);
         if (stale(true)) return;
       }
       if (c.ok) {
@@ -840,6 +851,18 @@ export function PayNowButton(props: Mode & {
   /** Mirrors `tap.kind === "busy"` for the unmount cleanup below, which is written once and can
    *  never see the state through its own closure. */
   const tapBusy = useRef(false);
+  /**
+   * CANCEL BEFORE THE READER IS ASKED FOR A CARD (review of the 09-23 fix wave). The busy screen
+   * shows Cancel from the moment Tap to Pay is pressed, but the press first waits on the device
+   * probe (which can sit out a warm-up's connect), the invoice door and the open-time mint. That
+   * Cancel only reached the bridge, the bridge reset its flag when the collect began, and the
+   * reader armed anyway: Apple's card sheet came up after the person had said stop. Each press
+   * gets a number; Cancel retires it, and every await BEFORE the collect checks it. Once
+   * collectTapPayment is running the bridge's own cancel decides, because a card read a moment
+   * before Cancel is a real charge and has to be reported as one.
+   */
+  const tapPress = useRef(0);
+  const tapCollecting = useRef(false);
   useEffect(() => {
     tapBusy.current = tap.kind === "busy";
   }, [tap]);
@@ -1027,7 +1050,19 @@ export function PayNowButton(props: Mode & {
             )}
             {busy.detail && <p className="max-w-64 text-xs text-slate-500">{busy.detail}</p>}
             {tap.phase === "pay" ? (
-              <Button size="sm" variant="outline" onClick={() => void cancelTapPayment()}>Cancel</Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  tapPress.current += 1;
+                  void cancelTapPayment();
+                  // Before the collect nothing else will answer this press, so the sheet goes back
+                  // now; during it the reader's own cancelled/charged answer sets the screen.
+                  if (!tapCollecting.current) setTap({ kind: "idle" });
+                }}
+              >
+                Cancel
+              </Button>
             ) : tap.phase === "enable" ? (
               // Apple's terms sheet is a native screen with its own Cancel; a button here that
               // couldn't stop it would be a silent one.

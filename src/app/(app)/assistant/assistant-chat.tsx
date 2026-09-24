@@ -1018,7 +1018,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         const tries = full.length ? RECOVERY_TRIES_FULL : RECOVERY_TRIES_NO_BYTE;
         recoverAbort = new AbortController();
         abortRef.current = recoverAbort; // what the topbar STOP aborts from here on
-        if (!recoveredEarly && !isOffline()) setStatus("The connection dropped — catching up with Nort…");
+        if (!recoveredEarly && !isOffline()) setStatus("The connection dropped. Catching up with Nort…");
         const reply = recoveredEarly ?? (await fetchRecoveredReply(content, sentAt, tries, recoverAbort.signal));
         if (recoverAbort.signal.aborted) {
           // STOP mid-catch-up: no line lands after the user said stop. Same as a stop mid-stream —
@@ -1243,7 +1243,12 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
               {/* The elapsed/token readout belongs to a reply in progress; while the mic is the
                   thing working, "0s · 0 tokens · Hearing you…" (Erik's 2026-09-11 screenshot)
                   reads as a reply that isn't coming. */}
-              <span className="truncate text-sm text-slate-500">{streaming ? `${elapsedStr} · ${tokens} tokens · ${statusText}` : statusText}</span>
+              {/* Wraps when it isn't a live reply (review of the 09-23 wave): at 375px one truncated
+                  line holds about 48 characters, which cut "Tap the Nort button up top to try again,
+                  or type below" off every mic failure line. The streaming readout stays one line. */}
+              <span className={`text-sm text-slate-500 ${streaming ? "truncate" : "line-clamp-3 break-words"}`}>
+                {streaming ? `${elapsedStr} · ${tokens} tokens · ${statusText}` : statusText}
+              </span>
             </div>
           ) : !draft && messages.length === 0 && !voiceMode ? (
             <div className="px-3 py-2.5 text-sm text-slate-400">What can I help you with?</div>
@@ -1281,7 +1286,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
             >
               <Input
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                // Typing leaves voice mode AT ONCE, not only on Send: with the mic still live, a
+                // spoken (or truck-noise) turn could land mid-sentence, wipe the typed text and send
+                // itself instead (review of the 09-23 wave).
+                onChange={(e) => {
+                  if (voiceModeRef.current) stopVoice();
+                  setInput(e.target.value);
+                }}
                 placeholder="Type a question"
                 aria-label="Type a question for Nort"
                 enterKeyHint="send"

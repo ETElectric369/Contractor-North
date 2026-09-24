@@ -258,7 +258,7 @@ describe("Cancel while the reader is still connecting", () => {
     // The connect is still settling natively: a press now is told so, in words that are true.
     const again = await tap.collectTapPayment(PI);
     expect((again as { error: string }).error).toBe(
-      "The last Tap to Pay on iPhone attempt on this phone is still finishing. Give it a few seconds, then try again.",
+      "The last Tap to Pay on iPhone attempt on this phone is still finishing. Wait a moment, then try again. The first connect can take a minute.",
     );
 
     // The connect succeeds after the Cancel: the reader must NOT be armed for a card.
