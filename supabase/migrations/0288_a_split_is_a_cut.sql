@@ -132,6 +132,10 @@ begin
     return new;
   end if;
 
+  -- The claim lock first (0260's key, the one guard_invoice_item_claim takes before ITS read): a
+  -- read alone cannot see a claim an import is committing this instant, so without the lock a job
+  -- move and a labor import could each find the other not there yet.
+  perform pg_advisory_xact_lock(hashtext('cn.invoice_claim:' || coalesce(old.org_id::text, old.id::text)));
   v_holder := public.invoice_holding_claim(array[old.id], old.org_id);
   if v_holder is null then
     return new;
@@ -242,6 +246,13 @@ begin
     raise exception 'That shift was not found.';
   end if;
 
+  -- THE CLAIM LOCK (0260's org key), taken after the row lock and before any claim is read. The
+  -- holder read below and the carry after it are check-then-write: under READ COMMITTED an import
+  -- committing a claim on this shift in between would be invisible to the check, and a cross-job
+  -- cut of a shift that had just been billed would go through. guard_invoice_item_claim takes this
+  -- same key before its own read, so an import and a split now wait for each other.
+  perform pg_advisory_xact_lock(hashtext('cn.invoice_claim:' || v_org::text));
+
   if p.status <> 'closed' or p.clock_out is null then
     raise exception 'That shift is still running. Use Switch Job to start the next part now.';
   end if;
@@ -297,11 +308,14 @@ begin
     end if;
   end if;
   if p.paid_at is not null then
-    if round(greatest(v_span_l - case when v_lunch_left then v_lunch_s else 0 end, 0) / 3600.0, 2)
-       + round(greatest(v_span_r - case when v_lunch_left then 0 else v_lunch_s end, 0) / 3600.0, 2)
-       <> round(greatest(extract(epoch from (p.clock_out - p.clock_in)) - v_lunch_s, 0) / 3600.0, 2) then
-      raise exception 'That split would change the paid hours on this shift by a rounding cent. Move the split time by a minute.';
+    v_after := round(greatest(v_span_l - case when v_lunch_left then v_lunch_s else 0 end, 0) / 3600.0, 2)
+             + round(greatest(v_span_r - case when v_lunch_left then 0 else v_lunch_s end, 0) / 3600.0, 2)
+             - round(greatest(extract(epoch from (p.clock_out - p.clock_in)) - v_lunch_s, 0) / 3600.0, 2);
+    if v_after <> 0 then
+      raise exception 'Cutting at % would change the paid hours on this shift by % h. Move the split a minute earlier or later.',
+        to_char(p_at at time zone v_tz, 'FMHH12:MIam'), public.split_hours_text(abs(v_after));
     end if;
+    v_after := null;
   end if;
 
   -- ONE HOUR, ONE CLAIM. The earliest live invoice holding this shift (0261's rule).
@@ -338,7 +352,9 @@ begin
          lunch_minutes      = case when v_lunch_left then p.lunch_minutes else 0 end,
          miles              = case when v_miles_left then p.miles else 0 end,
          gps_out            = null,
-         auto_closed_reason = null
+         -- The reason why a shift ran past 18 h stays with any piece still over 18 h (0281's
+         -- sanity guard refuses one without it), exactly as the carve in 0289 keeps it.
+         auto_closed_reason = case when p_at - p.clock_in > interval '18 hours' then p.auto_closed_reason end
    where id = p.id;
   get diagnostics v_n = row_count;
   if v_n <> 1 then
@@ -362,6 +378,12 @@ begin
 
   -- The same job: the new piece carries the hours the invoice already bills, so it carries the
   -- claim too. Every line holding the parent, void lines included (an un-void must not re-bill).
+  --
+  -- VOID LINES FIRST, IN THEIR OWN STATEMENT. guard_invoice_item_claim runs per row and sees the
+  -- rows this command already wrote: in one statement, a void line reached after the live line
+  -- would find the live invoice already holding the new id and refuse ("hours already billed"),
+  -- so the split would work or fail on row order. Void first, the live line's check then skips
+  -- the void holders, as it always has.
   if v_same_job then
     with carried as (
       update public.invoice_items it
@@ -369,11 +391,28 @@ begin
         from public.invoices i
        where i.id = it.invoice_id
          and i.org_id = p.org_id
+         and i.status = 'void'
          and it.source_ids && array[p.id]
          and not (v_right_id = any (it.source_ids))
       returning i.id, i.invoice_number, i.status::text as status
     )
     select coalesce(jsonb_agg(distinct jsonb_build_object(
+             'invoice_id', c.id, 'invoice_number', c.invoice_number, 'status', c.status)), '[]'::jsonb)
+      into v_carried
+      from carried c;
+
+    with carried as (
+      update public.invoice_items it
+         set source_ids = it.source_ids || v_right_id
+        from public.invoices i
+       where i.id = it.invoice_id
+         and i.org_id = p.org_id
+         and i.status <> 'void'
+         and it.source_ids && array[p.id]
+         and not (v_right_id = any (it.source_ids))
+      returning i.id, i.invoice_number, i.status::text as status
+    )
+    select v_carried || coalesce(jsonb_agg(distinct jsonb_build_object(
              'invoice_id', c.id, 'invoice_number', c.invoice_number, 'status', c.status)), '[]'::jsonb)
       into v_carried
       from carried c;
@@ -450,6 +489,13 @@ begin
   if l.clock_out is distinct from r.clock_in then
     raise exception 'Those two entries do not touch, so they cannot be joined into one shift.';
   end if;
+  -- ONLY PIECES OF ONE SPLIT SHIFT. A join takes the absorbed id off every line that holds it, which
+  -- is right for an id a split appended and wrong for an ordinary entry a sent or paid line billed
+  -- in its own right: that line would lose an original source id. So two entries that merely
+  -- touch (a clock-out and a clock-in in the same minute) are not joinable; only one family is.
+  if coalesce(l.split_from, l.id) is distinct from coalesce(r.split_from, r.id) then
+    raise exception 'Those two entries were not split from one shift, so they cannot be joined. Edit their times instead.';
+  end if;
 
   if l.paid_at is distinct from r.paid_at or l.mileage_paid_at is distinct from r.mileage_paid_at then
     raise exception 'One of these is in a paid period and the other is not, so joining them would change what was paid.';
@@ -457,6 +503,11 @@ begin
   if l.rate_override is distinct from r.rate_override then
     raise exception 'These two are paid at different rates, so joining them would change the pay.';
   end if;
+
+  -- THE CLAIM LOCK (0260's org key) before the holder read: the comparison below and the release
+  -- after it are check-then-write, and an import committing a claim on one piece in between must
+  -- wait for this join, not slip past it.
+  perform pg_advisory_xact_lock(hashtext('cn.invoice_claim:' || v_org::text));
 
   -- SAME CLAIM HOLDERS, OR NO JOIN. Joining an unbilled piece into a billed one would make hours no
   -- invoice ever billed look billed (and the reverse would hand billed hours back to the importer).
@@ -484,21 +535,36 @@ begin
   v_before := extract(epoch from (l.clock_out - l.clock_in)) - coalesce(l.lunch_minutes, 0) * 60
             + extract(epoch from (r.clock_out - r.clock_in)) - coalesce(r.lunch_minutes, 0) * 60;
 
-  -- The claim leaves with the piece: exactly the absorbed id, from every line (all of which also
-  -- hold the kept id, checked above). Then 0261's delete guard has nothing to refuse.
+  -- The claim leaves with the piece: exactly the absorbed id, and only from lines that also hold
+  -- the kept id (the holder sets were read under the claim lock and are equal, so that is every
+  -- line holding it; the count proves it). Then 0261's delete guard has nothing to refuse.
   with released as (
     update public.invoice_items it
        set source_ids = array_remove(it.source_ids, r.id)
       from public.invoices i
      where i.id = it.invoice_id
        and it.source_ids && array[r.id]
-    returning i.invoice_number
+       and it.source_ids && array[l.id]
+    returning it.id, i.invoice_number
   )
-  select coalesce(jsonb_agg(distinct invoice_number), '[]'::jsonb) into v_released from released;
+  select coalesce(jsonb_agg(distinct invoice_number), '[]'::jsonb), count(*)
+    into v_released, v_n
+    from released;
+  if v_n <> cardinality(v_r_lines) then
+    raise exception 'The invoices billing these parts changed while they were being joined. Nothing was changed; try again.';
+  end if;
 
-  update public.time_entries
-     set split_from = coalesce(l.split_from, l.id)
-   where split_from = r.id;
+  -- The family stays one family. Pieces that pointed at the absorbed one point at the family's
+  -- first entry instead; and when the absorbed one WAS that first entry (a rebuilt split whose
+  -- own-job part came second), the kept piece becomes the first entry and the rest point at it.
+  if l.split_from is not distinct from r.id then
+    update public.time_entries set split_from = l.id where split_from = r.id and id <> l.id;
+    update public.time_entries set split_from = null, split_how = null where id = l.id;
+  else
+    update public.time_entries
+       set split_from = coalesce(l.split_from, l.id)
+     where split_from = r.id;
+  end if;
 
   delete from public.time_entries where id = r.id;
   get diagnostics v_n = row_count;
@@ -542,8 +608,11 @@ comment on function public.join_time_entries(uuid, uuid) is
 
 -- ── 6. move_time_entry_cut: SLIDE THE BOUNDARY ──────────────────────────────────────────────────
 -- Only the shared boundary moves; the order never changes (a swap would pass through an overlap).
--- Claimed pieces may move: 0261 C7, "hours on a claimed row stay editable; the invoice keeps its
--- figure". The answer names every invoice whose piece changed length, so the office is told.
+-- Claimed pieces may move when both sides have the SAME claim holders (a same-job split billed on
+-- one line): 0261 C7, "hours on a claimed row stay editable; the invoice keeps its figure". Between
+-- pieces billed differently (or one billed, one not) the move is refused: it would hand billed hours
+-- to a piece the importer could bill again. The answer names every invoice whose piece changed
+-- length, so the office is told.
 create or replace function public.move_time_entry_cut(p_left uuid, p_right uuid, p_at timestamptz)
 returns jsonb
 language plpgsql
@@ -560,6 +629,10 @@ declare
   v_l_new  numeric;
   v_r_new  numeric;
   v_billed jsonb;
+  v_l_lines uuid[];
+  v_r_lines uuid[];
+  v_odd    record;
+  v_diff   numeric;
 begin
   if v_org is null or not public.is_org_staff() then
     raise exception 'Only the office can move a split.';
@@ -622,13 +695,47 @@ begin
       raise exception 'Those hours are already paid, so the split has to stay on %.',
         to_char(r.clock_in at time zone v_tz, 'Mon FMDD');
     end if;
-    if l.paid_at is not null
-       and round(greatest(v_l_new - coalesce(l.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
-         + round(greatest(v_r_new - coalesce(r.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
-         <> round(greatest(extract(epoch from (l.clock_out - l.clock_in)) - coalesce(l.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
-          + round(greatest(extract(epoch from (r.clock_out - r.clock_in)) - coalesce(r.lunch_minutes, 0) * 60, 0) / 3600.0, 2) then
-      raise exception 'That would change the paid hours by a rounding cent. Move the split time by a minute.';
+    if l.paid_at is not null then
+      v_diff := round(greatest(v_l_new - coalesce(l.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
+              + round(greatest(v_r_new - coalesce(r.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
+              - round(greatest(extract(epoch from (l.clock_out - l.clock_in)) - coalesce(l.lunch_minutes, 0) * 60, 0) / 3600.0, 2)
+              - round(greatest(extract(epoch from (r.clock_out - r.clock_in)) - coalesce(r.lunch_minutes, 0) * 60, 0) / 3600.0, 2);
+      if v_diff <> 0 then
+        raise exception 'Cutting at % would change the paid hours on this shift by % h. Move the split a minute earlier or later.',
+          to_char(p_at at time zone v_tz, 'FMHH12:MIam'), public.split_hours_text(abs(v_diff));
+      end if;
     end if;
+  end if;
+
+  -- ONE HOUR, ONE CLAIM, ACROSS THE BOUNDARY TOO. 0261's C7 lets the hours on a claimed row change
+  -- (the invoice keeps its figure), but a moved boundary also hands those hours to the piece on the
+  -- other side. If that piece is billed by a different invoice, or by none, the importer would bill
+  -- them again: the double bill the cross-job split refusal stops, reached sideways. So the cut
+  -- moves only between pieces with the same claim holders (every line, void included, as join
+  -- compares), which keeps the typo fix on a same-job split or an unbilled pair. Read under the
+  -- claim lock (0260's org key) so an import cannot land a claim between this check and the write.
+  perform pg_advisory_xact_lock(hashtext('cn.invoice_claim:' || v_org::text));
+  select coalesce(array_agg(it.id order by it.id), '{}') into v_l_lines
+    from public.invoice_items it where it.source_ids && array[l.id];
+  select coalesce(array_agg(it.id order by it.id), '{}') into v_r_lines
+    from public.invoice_items it where it.source_ids && array[r.id];
+  if v_l_lines is distinct from v_r_lines then
+    select i.id, i.invoice_number, i.status::text as status, (it.source_ids && array[l.id]) as bills_first
+      into v_odd
+      from public.invoice_items it
+      join public.invoices i on i.id = it.invoice_id
+     where it.id = any (v_l_lines || v_r_lines)
+       and not (it.id = any (v_l_lines) and it.id = any (v_r_lines))
+     order by (i.status = 'void'), i.created_at, i.id
+     limit 1;
+    raise exception '% (%) bills the % part and not the %, so moving the split would hand billed hours to a part that could be billed again.',
+      coalesce(v_odd.invoice_number, 'An invoice'), coalesce(v_odd.status, 'unknown'),
+      case when v_odd.bills_first then 'first' else 'second' end,
+      case when v_odd.bills_first then 'second' else 'first' end
+      using errcode = 'P0001',
+            detail = 'invoice:' || coalesce(v_odd.id::text, ''),
+            hint = 'Leave the split where it is, or take the shift off ' || coalesce(v_odd.invoice_number, 'that invoice')
+                   || ' first. Nothing was changed.';
   end if;
 
   v_before := extract(epoch from (l.clock_out - l.clock_in)) - coalesce(l.lunch_minutes, 0) * 60
@@ -680,7 +787,7 @@ end $$;
 revoke execute on function public.move_time_entry_cut(uuid, uuid, timestamptz) from public, anon;
 grant execute on function public.move_time_entry_cut(uuid, uuid, timestamptz) to authenticated, service_role;
 comment on function public.move_time_entry_cut(uuid, uuid, timestamptz) is
-  'Office only (0288). Slides the boundary between two touching closed pieces of one person to p_at, never reordering them. Refused across a paid/unpaid or rate difference, off a paid day, or when the paid rounded hours would change. Returns every live invoice billing a piece whose length changed (billed[]).';
+  'Office only (0288). Slides the boundary between two touching closed pieces of one person to p_at, never reordering them. Refused across a paid/unpaid or rate difference, off a paid day, when the paid rounded hours would change, or when the two pieces have different claim holders (detail invoice:<id>). Returns every live invoice billing a piece whose length changed (billed[]).';
 
 -- ── 7. switch_job: THE LIVE BUTTON ──────────────────────────────────────────────────────────────
 -- Runs AS THE CALLER (security invoker): RLS and the tech guards judge both writes exactly as they
@@ -707,12 +814,16 @@ declare
   v_owner  boolean;
   v_rate   numeric;
   v_n      integer;
+  v_lunch  integer;
+  v_moved  boolean := false;
+  v_closed numeric;
 begin
   if v_uid is null then
     raise exception 'Not signed in.';
   end if;
 
-  select t.id, t.profile_id, t.org_id, t.job_id, t.job_code, t.clock_in, t.status, t.rate_override, t.split_from
+  select t.id, t.profile_id, t.org_id, t.job_id, t.job_code, t.clock_in, t.status, t.rate_override, t.split_from,
+         greatest(coalesce(t.lunch_minutes, 0), 0) as lunch_minutes
     into e
     from public.time_entries t
    where t.id = p_entry and t.status = 'open'
@@ -751,14 +862,36 @@ begin
   end if;
 
   -- (b) CUT. Close first (one open entry per person), then open the next piece at the same instant.
+  --
+  -- A LUNCH ALREADY ON THE RUNNING ROW (the office's "his lunch was 45", which 0248 keeps on the open
+  -- row) stays on the part it fits. If the part closing now is too short to hold it with a minute to
+  -- spare, it travels whole to the new part instead: left behind, it would push the closed part's
+  -- worked time below zero, hoursBetween would clamp that to 0, and the new part would carry no
+  -- lunch at all, so the switch would ADD paid time. Moved, the new part carries it and the clock-out
+  -- (which preserves the open row's lunch unless one is stated) keeps it.
+  v_lunch := e.lunch_minutes;
+  if v_lunch > 0 and extract(epoch from (v_now - e.clock_in)) - v_lunch * 60 < 60 then
+    v_moved := true;
+  end if;
+
   update public.time_entries
      set status = 'closed',
          clock_out = v_now,
-         gps_out = v_gps
+         gps_out = v_gps,
+         lunch_minutes = case when v_moved then 0 else lunch_minutes end
    where id = e.id and status = 'open';
   get diagnostics v_n = row_count;
   if v_n <> 1 then
     raise exception 'The switch did not save. Try again.';
+  end if;
+
+  -- A split cannot create hours: the closed part never works less than nothing.
+  select extract(epoch from (t.clock_out - t.clock_in)) - coalesce(t.lunch_minutes, 0) * 60
+    into v_closed
+    from public.time_entries t
+   where t.id = e.id;
+  if v_closed < 0 then
+    raise exception 'The part before the switch would be shorter than its lunch. Nothing was changed.';
   end if;
 
   -- The pay rate travels only when the office switches: a tech's own insert may not carry one
@@ -768,23 +901,25 @@ begin
 
   insert into public.time_entries (
     id, profile_id, org_id, job_id, job_code, clock_in, status, source, gps_in, rate_override,
-    split_from, split_how)
+    lunch_minutes, split_from, split_how)
   values (
     v_new, e.profile_id, e.org_id, p_job_id, v_code, v_now, 'open', 'app', v_gps, v_rate,
+    case when v_moved then v_lunch else 0 end,
     coalesce(e.split_from, e.id), 'live');
 
   return jsonb_build_object(
     'mode', 'cut',
     'entry_id', v_new,
     'closed_id', e.id,
-    'closed_hours', round(extract(epoch from (v_now - e.clock_in)) / 3600.0, 2),
+    'closed_hours', round(greatest(v_closed, 0) / 3600.0, 2),
+    'lunch_moved', case when v_moved then v_lunch else 0 end,
     'rate_left_behind', e.rate_override is not null and v_rate is null and not v_owner);
 end $$;
 
 revoke execute on function public.switch_job(uuid, uuid, text, jsonb) from public, anon;
 grant execute on function public.switch_job(uuid, uuid, text, jsonb) to authenticated, service_role;
 comment on function public.switch_job(uuid, uuid, text, jsonb) is
-  'Switch Job (0288), security invoker. A running entry with no job and no code, or under 2 minutes old, is re-pointed to the new job (mode repointed). Otherwise it is closed now with gps_out and a new open entry starts at the same instant with gps_in, source app, split_how live (mode cut, entry_id = the new open entry). The running note stays on the closed piece; miles are never divided.';
+  'Switch Job (0288), security invoker. A running entry with no job and no code, or under 2 minutes old, is re-pointed to the new job (mode repointed). Otherwise it is closed now with gps_out and a new open entry starts at the same instant with gps_in, source app, split_how live (mode cut, entry_id = the new open entry). The running note stays on the closed piece; miles are never divided; a lunch already on the running row stays on the closed piece unless it does not fit there, when it moves whole to the new one (lunch_moved). The closed piece never works less than zero.';
 
 -- ── 8. THE OLD TABLE, UNTIL 0289 EMPTIES IT ────────────────────────────────────────────────────
 -- 0154's guard returned early for staff and server writers, so a staff INSERT could add hours the
