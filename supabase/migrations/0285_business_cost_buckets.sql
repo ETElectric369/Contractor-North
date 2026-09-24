@@ -19,9 +19,10 @@
 -- Materials) and is not a bucket, so every bills row with a job_id is left exactly as it is.
 -- Recurring expense templates are included because each one writes a no-job bill on a schedule.
 --
--- NOTHING IS LOST IN THE MOVE. A bill whose old category does not map to a named bucket lands in
+-- NOTHING IS LOST FROM A BILL. A bill whose old category does not map to a named bucket lands in
 -- Other, and its note says what it was filed as, so the old word is still on the row for anyone
--- who wants to re-bucket it.
+-- who wants to re-bucket it. (Recurring templates keep no such note; an unknown word there becomes
+-- Other outright. There were 0 recurring templates in any company when this was written.)
 --
 -- IDEMPOTENT. Only rows whose category actually changes are written, and a bucket name maps to
 -- itself, so a second run touches nothing and appends no second note.
@@ -36,13 +37,19 @@ begin
            case lower(btrim(coalesce(b.category, '')))
              when 'fuel' then 'Gas & Truck'
              when 'vehicle' then 'Gas & Truck'
+             when 'gas' then 'Gas & Truck'
+             when 'truck' then 'Gas & Truck'
              when 'gas & truck' then 'Gas & Truck'
              when 'shop supplies' then 'Tools & Supplies'
              when 'tools' then 'Tools & Supplies'
+             when 'supplies' then 'Tools & Supplies'
              when 'tools & supplies' then 'Tools & Supplies'
              when 'office' then 'Phone & Office'
+             when 'phone' then 'Phone & Office'
              when 'phone & office' then 'Phone & Office'
              when 'insurance' then 'Insurance & Licenses'
+             when 'license' then 'Insurance & Licenses'
+             when 'licenses' then 'Insurance & Licenses'
              when 'insurance & licenses' then 'Insurance & Licenses'
              when 'fees' then 'Fees'
              else 'Other'
@@ -70,13 +77,19 @@ begin
            case lower(btrim(coalesce(t.category, '')))
              when 'fuel' then 'Gas & Truck'
              when 'vehicle' then 'Gas & Truck'
+             when 'gas' then 'Gas & Truck'
+             when 'truck' then 'Gas & Truck'
              when 'gas & truck' then 'Gas & Truck'
              when 'shop supplies' then 'Tools & Supplies'
              when 'tools' then 'Tools & Supplies'
+             when 'supplies' then 'Tools & Supplies'
              when 'tools & supplies' then 'Tools & Supplies'
              when 'office' then 'Phone & Office'
+             when 'phone' then 'Phone & Office'
              when 'phone & office' then 'Phone & Office'
              when 'insurance' then 'Insurance & Licenses'
+             when 'license' then 'Insurance & Licenses'
+             when 'licenses' then 'Insurance & Licenses'
              when 'insurance & licenses' then 'Insurance & Licenses'
              when 'fees' then 'Fees'
              else 'Other'

@@ -325,9 +325,9 @@ export function OrganizeManager({
                   }
                   disabled={pending}
                   className="h-11 w-48"
-                  aria-label="File To Job"
+                  aria-label="File to Job"
                 >
-                  <option value="">File To Job…</option>
+                  <option value="">File to Job…</option>
                   {jobs.map((j) => (
                     <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                   ))}
@@ -341,7 +341,7 @@ export function OrganizeManager({
                     onChange={(e) => e.target.value && file(item, { type: "overhead", category: e.target.value })}
                     disabled={pending}
                     className="h-11 w-48"
-                    aria-label="File As A Business Cost"
+                    aria-label="File as a Business Cost"
                   >
                     <option value="">Business Cost…</option>
                     {BUSINESS_COST_BUCKETS.map((c) => <option key={c} value={c}>{c}</option>)}

@@ -36,7 +36,10 @@ export async function captureProcessorFee(
     const pi = await getStripe().paymentIntents.retrieve(
       p.paymentIntent,
       { expand: ["latest_charge.balance_transaction"] },
-      p.account ? { stripeAccount: p.account } : undefined,
+      // Tight limits (review): the SDK default is 80 s with 2 retries, which let one stalled lookup eat
+      // the daily cron's time and starve the duties after it. A fee that doesn't come back now is
+      // simply left NULL for tomorrow's run.
+      { ...(p.account ? { stripeAccount: p.account } : {}), timeout: 8000, maxNetworkRetries: 1 },
     );
     const fee = feeFromPaymentIntent(pi);
     // Not known yet is not a failure: NULL stays NULL and the cron asks again tomorrow.

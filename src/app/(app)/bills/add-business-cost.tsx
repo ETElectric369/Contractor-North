@@ -148,7 +148,7 @@ export function AddBusinessCostButton({ today }: { today: string }) {
             </div>
             {bucket === "Fees" && (
               <p className="mt-2 text-xs text-slate-500">
-                Card, bank and permit fees. Don&apos;t add a supplier&apos;s late interest here: it comes in with that
+                Bank and permit fees, or card fees from anything other than Stripe (Stripe&apos;s fee is recorded on each payment on its own, so don&apos;t add it here). Don&apos;t add a supplier&apos;s late interest here either: it comes in with that
                 supplier&apos;s own paperwork on this page.
               </p>
             )}

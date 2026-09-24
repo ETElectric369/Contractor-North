@@ -45,10 +45,18 @@ export function isBusinessCostBucket(value: unknown): value is BusinessCostBucke
 const LEGACY_TO_BUCKET: Record<string, BusinessCostBucket> = {
   fuel: "Gas & Truck",
   vehicle: "Gas & Truck",
+  // The obvious one-word slips a reader makes (review): without them a confident gas receipt read
+  // as "Gas" auto-filed under Other and nothing said so.
+  gas: "Gas & Truck",
+  truck: "Gas & Truck",
   "shop supplies": "Tools & Supplies",
   tools: "Tools & Supplies",
+  supplies: "Tools & Supplies",
   office: "Phone & Office",
+  phone: "Phone & Office",
   insurance: "Insurance & Licenses",
+  license: "Insurance & Licenses",
+  licenses: "Insurance & Licenses",
 };
 
 /**

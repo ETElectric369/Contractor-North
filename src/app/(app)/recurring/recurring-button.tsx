@@ -218,6 +218,7 @@ export function RecurringButton({
                 <Select
                   id="r-cat"
                   name="category"
+                  className="h-11"
                   defaultValue={template?.kind === "expense" && template.category ? bucketOf(template.category) : ""}
                   required
                 >

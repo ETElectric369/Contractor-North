@@ -68,5 +68,8 @@ export function feeFromPaymentIntent(pi: PaymentIntentLike | null | undefined): 
  * today (a Checkout card, Apple Pay inside it, Tap to Pay) is a card.
  */
 export function processorFeeLabel(method: string | null | undefined): "Card fee" | "Bank fee" {
-  return /\b(ach|bank|transfer)\b/i.test(String(method ?? "")) ? "Bank fee" : "Card fee";
+  // Split on anything that isn't a letter: "\b" never fires beside "_", so Stripe's own
+  // "us_bank_account" (and "bank_transfer") would have read as a card fee.
+  const words = String(method ?? "").toLowerCase().split(/[^a-z]+/);
+  return words.some((w) => w === "ach" || w === "bank" || w === "transfer") ? "Bank fee" : "Card fee";
 }

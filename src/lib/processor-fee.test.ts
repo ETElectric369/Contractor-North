@@ -87,6 +87,10 @@ describe("processorFeeLabel: the words on the staff payment row", () => {
     expect(processorFeeLabel("card")).toBe("Card fee");
     expect(processorFeeLabel(null)).toBe("Card fee");
     expect(processorFeeLabel("")).toBe("Card fee");
+    // Stripe's own method words (review): "\b" never fired beside "_".
+    expect(processorFeeLabel("us_bank_account")).toBe("Bank fee");
+    expect(processorFeeLabel("bank_transfer")).toBe("Bank fee");
+    expect(processorFeeLabel("ACH")).toBe("Bank fee");
   });
 
   it("a bank debit is a bank fee", () => {

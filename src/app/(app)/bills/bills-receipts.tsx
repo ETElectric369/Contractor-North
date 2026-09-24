@@ -251,7 +251,7 @@ export function BillsReceipts({
               {billJob === "__overhead" && (
                 <div>
                   <Label htmlFor="b-cat">Bucket</Label>
-                  <Select id="b-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
+                  <Select id="b-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
                     <option value="">Pick a Bucket</option>
                     {BUSINESS_COST_BUCKETS.map((c) => (
                       <option key={c} value={c}>{c}</option>
@@ -563,7 +563,7 @@ function BillEditModal({
           {isOverhead && (
             <div className="col-span-2">
               <Label htmlFor="be-cat">Bucket</Label>
-              <Select id="be-cat" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
+              <Select id="be-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
                 <option value="">Pick a Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((c) => (
                   <option key={c} value={c}>{c}</option>

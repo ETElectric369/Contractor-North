@@ -633,7 +633,7 @@ export function QuickCostButton({
           ) : (
             <div>
               <Label htmlFor="qc-bucket">Bucket</Label>
-              <Select id="qc-bucket" value={bucket} onChange={(e) => setBucket(e.target.value)} disabled={costSaved}>
+              <Select id="qc-bucket" className="h-11" value={bucket} onChange={(e) => setBucket(e.target.value)} disabled={costSaved}>
                 <option value="">Pick a Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((b) => (
                   <option key={b} value={b}>{b}</option>
