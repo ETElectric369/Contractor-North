@@ -12,6 +12,10 @@
       "schedule": "0 1 * * *"
     },
     {
+      "path": "/api/timeclock/long-shift",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/automations/daily",
       "schedule": "0 15 * * *"
     },
