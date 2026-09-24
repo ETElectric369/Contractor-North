@@ -13,24 +13,20 @@ import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
 import { computeArAging, computeRevenueTrend, computeQuoteStats, trailing12Months } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
-import { getOwnerMoney, isOwnerMoneyWindowKey, type OwnerMoneyWindowKey } from "@/lib/analytics/owner-money";
+import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwnerMoneySelection } from "@/lib/analytics/owner-money";
+import { buildMoneyChartData } from "@/lib/analytics/money-chart";
 import { ownerRegister } from "@/lib/owner-draw";
 import { LeftForCard } from "./left-for-card";
+import { MoneyChartCard } from "./money-chart-card";
 
 export const dynamic = "force-dynamic";
-
-const monthLabel = (k: string) =>
-  // k is "YYYY-MM" — a wall month; render in UTC so it never slips to the prior month.
-  new Date(`${k}-15T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short" });
 
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ w?: string }>;
+  searchParams: Promise<{ w?: string; from?: string }>;
 }) {
-  const { w } = await searchParams;
-  // This Year unless the owner picked another window (0286's Left For You card).
-  const windowKey: OwnerMoneyWindowKey = isOwnerMoneyWindowKey(w) ? w : "this_year";
+  const { w, from } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -51,8 +47,22 @@ export default async function AnalyticsPage({
   // reach this page (the redirect above).
   const viewerIsOwner = me.role === "owner";
   const showOwnerMoney = viewerIsOwner || orgSettings.office_sees_owner_money;
-  const ownerMoneyP = showOwnerMoney ? getOwnerMoney(supabase, windowKey, tz) : Promise.resolve(null);
   const todayYmd = todayStrInTz(tz);
+
+  // MONEY BY MONTH + LEFT FOR YOU, ONE READ. The card shows This Year unless a segment or a month
+  // tapped on the chart says otherwise (?w=, validated here against the chart's 12 months). The
+  // chart's 12 months and the card's window are computed from the SAME rows, read once over the span
+  // covering both, so the chart's August and the card's August are one computation. An office viewer
+  // the owner has not allowed still gets the chart, cut to Collected on this server before it is
+  // handed to the page (buildMoneyChartData), and no card.
+  const selection = resolveOwnerMoneySelection(w, from, todayYmd);
+  const windowKey = selection.windowKey;
+  const ownerMoneyP = getOwnerMoneyViews(
+    supabase,
+    showOwnerMoney ? [ownerMoneyChartWindow(todayYmd), ownerMoneyWindow(windowKey, todayYmd)] : [ownerMoneyChartWindow(todayYmd)],
+    tz,
+    todayYmd,
+  );
   const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
   const [{ data: payments }, { data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: refunds }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
@@ -131,9 +141,12 @@ export default async function AnalyticsPage({
   attachRates((entries ?? []) as any[], rates, (e: any) => ({ id: e.profiles?.id, holder: e }));
 
   const ownerMoney = await ownerMoneyP;
-  // Who "you" is on the card: the owners by name (from the same names profile_pay carries) and the
-  // viewer, in the register payroll-view started (lib/owner-draw).
-  const voice = ownerRegister(ownerMoney?.money?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
+  const chartMoney = ownerMoney.views?.[0] ?? null;
+  const cardMoney = showOwnerMoney ? (ownerMoney.views?.[1] ?? null) : null;
+  // Who "you" is on the card and the chart: the owners by name (from the same names profile_pay
+  // carries) and the viewer, in the register payroll-view started (lib/owner-draw).
+  const voice = ownerRegister(chartMoney?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
+  const chartData = chartMoney ? buildMoneyChartData(chartMoney, { ownerFigures: showOwnerMoney, leftLabel: voice.leftFor }) : null;
 
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
@@ -167,10 +180,18 @@ export default async function AnalyticsPage({
     <div className="mx-auto max-w-5xl">
       <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit." />
 
+      <MoneyChartCard
+        data={chartData}
+        problem={ownerMoney.problem}
+        selectedMonth={selection.month}
+        segment={selection.segment}
+        linkMonths={showOwnerMoney}
+      />
+
       {showOwnerMoney && (
         <LeftForCard
-          money={ownerMoney?.money ?? null}
-          problem={ownerMoney?.problem ?? null}
+          money={cardMoney}
+          problem={ownerMoney.problem}
           voice={voice}
           windowKey={windowKey}
           viewerIsOwner={viewerIsOwner}
@@ -183,26 +204,6 @@ export default async function AnalyticsPage({
         {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
         {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
       </div>
-
-      <Card className="mb-6">
-        <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          Money collected by month
-        </div>
-        <CardContent className="py-5">
-          <div className="flex h-40 items-end gap-1.5">
-            {trend.series.map(({ month, collected: v }) => (
-              <div key={month} className="flex flex-1 flex-col items-center gap-1" title={`${monthLabel(month)}: ${formatCurrency(v)}`}>
-                <div className="text-[10px] text-slate-500">{v > 0 ? `$${Math.round(v / 1000)}k` : ""}</div>
-                <div
-                  className="w-full rounded-t bg-brand/80"
-                  style={{ height: `${Math.max(2, (v / trend.maxRev) * 100)}%` }}
-                />
-                <div className="text-[10px] text-slate-400">{monthLabel(month)}</div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <Card>

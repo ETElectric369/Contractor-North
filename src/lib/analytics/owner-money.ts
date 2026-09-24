@@ -63,9 +63,6 @@ export function isOwnerMoneySegmentKey(v: unknown): v is OwnerMoneySegmentKey {
   return v === "this_month" || v === "last_month" || v === "this_year";
 }
 
-/** TEMP (removed in the next commit, when /analytics reads ?w= through resolveOwnerMoneySelection). */
-export const isOwnerMoneyWindowKey = isOwnerMoneySegmentKey;
-
 const MONTH_KEY_RE =/^\d{4}-(0[1-9]|1[0-2])$/;
 
 /** Shape only ("YYYY-MM" with a real month). Whether the page READ that month is
