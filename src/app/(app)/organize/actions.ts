@@ -498,8 +498,10 @@ function mimeFromName(name: string | null | undefined): string | null {
 export async function billJobReceipt(
   documentId: string,
   /** What the PERSON stated in the capture form. User attestation beats AI inference:
-   *  they were standing at the counter. The AI fills only what was left blank. */
-  stated?: { paid?: boolean; category?: string | null; billDate?: string | null },
+   *  they were standing at the counter. The AI fills only what was left blank.
+   *  billDate is a date the person SET and beats the paper; fallbackBillDate is only the form's
+   *  seeded day, used when the paper has no legible date either (so the bill is never dateless). */
+  stated?: { paid?: boolean; category?: string | null; billDate?: string | null; fallbackBillDate?: string | null },
 ): Promise<{
   ok: boolean;
   error?: string;
@@ -629,7 +631,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       job_id: doc.job_id,
       supplier: vendor,
       amount,
-      bill_date: stated?.billDate || itemDate,
+      bill_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
       category: stated?.category || "Receipt",
       scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
       notes: check.mismatch
@@ -654,7 +656,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     summary: null,
     vendor,
     amount,
-    item_date: stated?.billDate || itemDate,
+    item_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
     category: stated?.category || "Receipt",
     confidence,
     payment: stated?.paid ? "paid_at_purchase" : (parsed.payment ?? "unknown"),

@@ -348,6 +348,42 @@ describe("billJobReceipt — the link row IS the idempotency", () => {
   });
 });
 
+describe("billJobReceipt — whose date the bill carries", () => {
+  // Made-up document; the date rule is what is under test (the Aug 29 receipt that landed as
+  // the day it was photographed, because the form's seeded "today" outranked the paper).
+  const DOC = { id: "doc-7", name: "hardware.jpg", file_url: "org-1/receipts/hardware.jpg", size_bytes: 90_000, job_id: "job-1" };
+  const script = () => ({
+    "documents.select": [{ data: DOC, error: null }],
+    "organized_items.select": [{ data: null, error: null }],
+    "bills.insert": [{ data: { id: "bill-new" }, error: null }],
+    "bill_line_items.insert": [{ data: [{ id: "bli-1" }], error: null }],
+    "organized_items.insert": [{ data: [{ id: "oi-new" }], error: null }],
+  });
+  const dates = () => ({
+    bill: did("bills", "insert")?.payload?.bill_date,
+    item: did("organized_items", "insert")?.payload?.item_date,
+  });
+
+  it("the paper's date beats the form's seeded day", async () => {
+    state.client = fakeSupabase(script(), calls);
+    await billJobReceipt(DOC.id, { billDate: null, fallbackBillDate: "2026-09-24" });
+    expect(dates()).toEqual({ bill: "2026-09-15", item: "2026-09-15" });
+  });
+
+  it("a date the person set beats the paper", async () => {
+    state.client = fakeSupabase(script(), calls);
+    await billJobReceipt(DOC.id, { billDate: "2026-09-01", fallbackBillDate: "2026-09-24" });
+    expect(dates()).toEqual({ bill: "2026-09-01", item: "2026-09-01" });
+  });
+
+  it("no legible date on the paper still lands the seeded day, never a dateless bill", async () => {
+    ai.parsed = { ...ai.parsed, date: "smudged" };
+    state.client = fakeSupabase(script(), calls);
+    await billJobReceipt(DOC.id, { billDate: null, fallbackBillDate: "2026-09-24" });
+    expect(dates()).toEqual({ bill: "2026-09-24", item: "2026-09-24" });
+  });
+});
+
 describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () => {
   it("refuses, and the trash door's own sentence is the trigger's own sentence", async () => {
     state.client = fakeSupabase(

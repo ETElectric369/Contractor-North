@@ -385,8 +385,10 @@ export function QuickCostButton({
           paid,
           category: category || null,
           // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
-          // date (organize/actions.ts: `stated?.billDate || itemDate`).
+          // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
+          // lands when the paper has no legible date, so the bill is never dateless.
           billDate: dateTouched ? billDate || null : null,
+          fallbackBillDate: billDate || null,
         });
         if (!res.ok) {
           // Reader failed (unreadable file) — fall back to a bill so the cost isn't lost,
@@ -573,7 +575,7 @@ export function QuickCostButton({
           />
           <p className="text-xs text-slate-500">
             {useReader
-              ? "Nort reads the supplier, total and every line off the paper. Date, category and Already Paid are yours."
+              ? "Nort reads the supplier, total, lines and date off the paper; change the date to override it. Category and Already Paid are yours."
               : "Saves the amount you type, with the receipt attached. Nort won't read it."}
           </p>
         </div>
