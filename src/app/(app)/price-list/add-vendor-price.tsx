@@ -64,6 +64,10 @@ export function AddVendorPrice({
     if (costN === null) return setError("Type what this vendor's one costs you.");
     if (sell.trim() && sellN === null) return setError("That sell price isn't a number.");
     if (sell.trim() && typedMarkup === null) return setError("Sell is cost plus markup, so it needs a cost above zero.");
+    // The server says the same (optionSellPatch); saying it here keeps the typing in the boxes.
+    if (typedMarkup !== null && typedMarkup < 0) {
+      return setError(`Sell is below this vendor's cost of ${formatCurrency(costN)}. Set it at cost or above.`);
+    }
     setSaving(true);
     const res = await run(
       `add:${item.id}`,
@@ -72,7 +76,10 @@ export function AddVendorPrice({
           itemId: item.id,
           vendor: who,
           buyPrice: cost,
-          markupPct: typedMarkup === null ? "" : String(typedMarkup),
+          // The TYPED SELL goes to the server, which turns it into the markup and reads back
+          // where it landed (a column that rounds it says so in the toast instead of silently).
+          markupPct: "",
+          sell: sell.trim() ? sell : null,
           isDefault,
         }),
       `Added ${who}`,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ExternalLink, Mail, MapPin, Phone, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -265,6 +265,18 @@ function VendorSheet({
   const [pick, setPick] = useState("");
   const [picked, setPicked] = useState<PriceItem | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Which contact boxes are mid-save. Only THAT box waits: disabling the whole form on a blur
+   *  disabled the box the person had just tabbed into, and whatever they typed next was lost. */
+  const [savingFields, setSavingFields] = useState<Set<VendorCardField>>(() => new Set());
+  /** One save at a time, in the order the boxes were left. The first detail on a vendor with no
+   *  card INSERTS the card; two of those racing is the second one refused as a duplicate. */
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  /** The vendor's name as the server last answered it, so a save queued behind a rename finds the
+   *  card under its new name. */
+  const nameRef = useRef(vendor.name);
+  useEffect(() => {
+    nameRef.current = vendor.name;
+  }, [vendor.name]);
 
   const onItemIds = new Set(vendor.items.map((r) => r.item.id));
   const needle = pick.trim().toLowerCase();
@@ -276,21 +288,43 @@ function VendorSheet({
     : [];
 
   /** One contact detail, saved on its own the moment it's left (no Save button), with Undo. */
-  async function saveField(field: VendorCardField, raw: string, current: string | null) {
+  function saveField(field: VendorCardField, raw: string, current: string | null): Promise<void> {
     const value = raw.trim();
-    if (value === (current ?? "").trim()) return;
-    setBusy(true);
-    const res = await saveVendorField({ name: vendor.name, field, value });
-    setBusy(false);
+    if (value === (current ?? "").trim()) return Promise.resolve();
+    const mark = (on: boolean) =>
+      setSavingFields((prev) => {
+        const next = new Set(prev);
+        if (on) next.add(field);
+        else next.delete(field);
+        return next;
+      });
+    mark(true);
+    const run = saveQueue.current.then(async () => {
+      try {
+        await saveOneField(field, value);
+      } finally {
+        mark(false);
+      }
+    });
+    saveQueue.current = run.catch(() => undefined);
+    return run;
+  }
+
+  async function saveOneField(field: VendorCardField, value: string) {
+    const res = await saveVendorField({ name: nameRef.current, field, value });
     if (!res.ok) return toast(res.error ?? "Couldn't save that.", "error");
-    const nameNow = res.name ?? vendor.name;
+    const nameNow = res.name ?? nameRef.current;
+    nameRef.current = nameNow;
     if (field === "name") onRenamed(nameNow);
     toast(res.note ? `Saved · ${res.note}` : "Saved", "success", {
       label: "Undo",
       onClick: async () => {
-        const back = await saveVendorField({ name: nameNow, field, value: res.previous ?? "" });
+        const back = await saveVendorField({ name: nameRef.current, field, value: res.previous ?? "" });
         if (!back.ok) return toast(back.error ?? "Couldn't undo that.", "error");
-        if (field === "name" && back.name) onRenamed(back.name);
+        if (field === "name" && back.name) {
+          nameRef.current = back.name;
+          onRenamed(back.name);
+        }
         toast("Undone", "success");
         startRefresh(() => router.refresh());
       },
@@ -300,7 +334,9 @@ function VendorSheet({
 
   async function archiveAll() {
     setBusy(true);
-    const res = await archiveVendor(vendor.name);
+    // Let any contact detail still saving land first, so the archive sees the finished card.
+    await saveQueue.current;
+    const res = await archiveVendor(nameRef.current);
     setBusy(false);
     if (!res.ok) return toast(res.error ?? "Couldn't archive that vendor.", "error");
     const undo = res.undo;
@@ -343,7 +379,7 @@ function VendorSheet({
                     autoComplete="off"
                     defaultValue={current ?? ""}
                     placeholder={f.placeholder}
-                    disabled={busy || (!cardsAvailable && f.key !== "name")}
+                    disabled={savingFields.has(f.key) || (!cardsAvailable && f.key !== "name")}
                     onChange={
                       f.key === "phone"
                         ? (e) => {

@@ -15,7 +15,10 @@
  * lib/pricing/markup.ts (the one place cost turns into sell); nothing here re-implements them.
  */
 import { dbError } from "@/lib/db-error";
-import { effectiveMarkupPct, marginFromMarkup, sellPrice } from "@/lib/pricing/markup";import { normalizeUnit } from "@/lib/pricing/units";
+import { optionMarkupPct } from "@/lib/pricing/item-options";
+import { marginFromMarkup, sellPrice } from "@/lib/pricing/markup";
+import { normalizeUnit } from "@/lib/pricing/units";
+import { formatCurrency } from "@/lib/utils";
 import { parseCellNumber, type PriceItem } from "./price-list-math";
 
 /** One row of 0282's price_list_item_options, as the page selects it. */
@@ -53,7 +56,7 @@ export type MarkupSource = "option" | "item" | "org" | "none";
 /**
  * What one option row shows.
  *
- * THE MARKUP FALL-THROUGH, run through lib/pricing/markup.ts rather than re-written here:
+ * THE MARKUP FALL-THROUGH, run through the estimate's own optionMarkupPct rather than re-written here:
  * an option's OWN markup always wins when it states one — even 0, because a typed 0 means "sell
  * this one at cost" and that is a decision. When it states nothing, the item's own markup answers,
  * and then the org default. That is exactly `effectiveMarkupPct`'s level → item → org ladder, so
@@ -70,7 +73,15 @@ export function optionView(
   const hasStated = stated !== null && Number.isFinite(stated);
   const itemPct = Number(item.markup_pct) || 0;
   const orgPct = Number(orgDefaultPct) || 0;
-  const pct = effectiveMarkupPct({ levelPct: hasStated ? stated : null, itemPct, orgDefaultPct: orgPct });
+  // THE ESTIMATE'S OWN FUNCTION, not a copy of its ladder: a copy honoured a stated negative markup
+  // that the estimate reads as "not set", so this sheet showed $900 while the quote charged $1,000.
+  // New writes refuse a sell below cost (optionSellPatch / cleanOptionFields), and anything older
+  // still reads here exactly as the estimate prices it.
+  const pct = optionMarkupPct(
+    { description: "", buy_price: null, markup_pct: item.markup_pct },
+    { markup_pct: hasStated ? stated : null },
+    { orgDefaultPct: orgPct },
+  );
   const source: MarkupSource = hasStated ? "option" : itemPct > 0 ? "item" : orgPct > 0 ? "org" : "none";
   return {
     name: optionName(option),
@@ -200,7 +211,9 @@ export function cleanOptionFields(
     } else {
       const n = toNumber(raw);
       if (n === null) return { error: "That markup isn't a number. Leave it blank to use the item's own." };
-      if (n <= -100) return { error: "A markup below -100% would sell for less than nothing." };
+      // BELOW COST IS REFUSED, not stored: the estimate reads a negative markup as "not set" and
+      // prices at cost or above, so a stored -10% would show one sell here and charge another.
+      if (n < 0) return { error: "A markup below 0 sells under this vendor's cost. Use 0 to sell at cost." };
       // Up to the column's six decimals (0296), not two: this is also the door Undo writes a
       // sell-derived markup back through, and rounding it to two would move the sell it restores.
       clean.markup_pct = roundTo(n, OPTION_MARKUP_DECIMALS);
@@ -281,6 +294,7 @@ export function optionSellPatch(
   const m = markupForSell(cost, n);
   if (m === null) return { error: "That sell price can't be reached from this cost." };
   if (m <= -100) return { error: "A sell of nothing would be a markup of -100%. Archive the vendor instead." };
+  if (m < 0) return { error: `Sell is below this vendor's cost of ${formatCurrency(cost)}. Set it at cost or above.` };
   return { patch: { markup_pct: m }, sell: roundTo(n, 2) };
 }
 
@@ -347,8 +361,8 @@ export interface VendorSummary {
 /**
  * Every vendor in the org: one per name, whether it came from a card, from items, or both.
  * Pure, so the grouping (the one place two spellings could split a vendor in two) is tested.
- * A card that was archived and is on no live item is left out; one still on items stays listed,
- * because its prices still quote.
+ * A vendor on no live item is left out unless it has a live card; one still on items stays
+ * listed (even with its card archived), because its prices still quote.
  */
 export function summarizeVendors(
   options: ItemOption[],
@@ -408,7 +422,10 @@ export function summarizeVendors(
       s.archivedItems.sort(byItem);
       return s;
     })
-    .filter((s) => !(s.card?.archived && s.items.length === 0))
+    // Listed while it prices an item or has a live card. A vendor whose rows are all archived and
+    // has no card is gone from here (a second Archive on it could only refuse); its archived rows
+    // come back from each item's Show Archived Vendors, and the archive toast carries Undo.
+    .filter((s) => s.items.length > 0 || (s.card !== null && !s.card.archived))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

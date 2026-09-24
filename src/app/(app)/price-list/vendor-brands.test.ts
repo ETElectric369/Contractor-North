@@ -107,6 +107,27 @@ describe("typing a Sell sets the markup, and the markup gives back the Sell, to 
     expect(optionSellPatch({ buy_price: 100 }, "0")).toEqual({ error: expect.stringMatching(/Archive/) });
   });
 
+  it("a Sell below cost is refused on every door, so the sheet and the estimate can't disagree", () => {
+    // Was: stored -10%, the sheet showed $900, the estimate charged $1,000.
+    expect(optionSellPatch({ buy_price: 1000 }, "900")).toEqual({ error: expect.stringMatching(/below this vendor's cost of \$1,000\.00/) });
+    expect(optionSellPatch({ buy_price: 1000 }, "999.99")).toEqual({ error: expect.stringMatching(/below/) });
+    expect(optionSellPatch({ buy_price: 1000 }, "1000")).toEqual({ patch: { markup_pct: 0 }, sell: 1000 });
+    expect(cleanOptionFields({ markupPct: "-10" }, "update")).toEqual({ error: expect.stringMatching(/Use 0 to sell at cost/) });
+    expect(cleanOptionFields({ markupPct: "-0.000001" }, "update")).toEqual({ error: expect.stringMatching(/below 0/) });
+  });
+
+  it("an OLD negative markup reads on the sheet exactly as the estimate prices it", () => {
+    const o = opt({ buy_price: 1000, markup_pct: -10 });
+    const onList = optionView(o, item({ markup_pct: 0 }), 25);
+    const onQuote = optionChoice(
+      { code: "830", description: "Windows", unit: "ea", buy_price: 830, markup_pct: 0 },
+      { ...o, buy_price: "1000", markup_pct: "-10" },
+      { orgDefaultPct: 25 },
+    ).unitPrice;
+    expect(onList.sell).toBe(onQuote);
+    expect(onList.sell).toBe(1000);
+  });
+
   it("a typed '$1,500.00' is read the way the price list reads its cells", () => {
     const r = optionSellPatch({ buy_price: 1200 }, "$1,500.00");
     expect(r).toEqual({ patch: { markup_pct: 25 }, sell: 1500 });
@@ -241,13 +262,20 @@ describe("vendors across items: one vendor per name, never split by a spelling",
     expect(andersen.items.map((r) => r.option.id)).toEqual(["a1", "a2"]); // "old" is an archived item
     expect(andersen.defaults).toBe(1);
     expect(andersen.items[0].sell).toBe(1500);
-    expect(vs.map((v) => v.name)).toEqual(["Andersen", "Marvin", "Milgard"]);
+    expect(vs.map((v) => v.name)).toEqual(["Andersen", "Marvin"]); // Milgard: only archived rows, no card
   });
 
-  it("an archived vendor row on an item stays findable under the vendor, not among its live items", () => {
-    const milgard = summarizeVendors(options, items, [], 0).find((v) => v.key === "milgard")!;
+  it("an archived vendor row on an item stays findable under the vendor's card, not among its live items", () => {
+    const milgard = summarizeVendors(options, items, [card({ id: "c3", name: "Milgard" })], 0).find((v) => v.key === "milgard")!;
     expect(milgard.items).toEqual([]);
     expect(milgard.archivedItems.map((r) => r.option.id)).toEqual(["m1"]);
+  });
+
+  it("a vendor with no card whose rows are all archived leaves the list, so Archive can't be pressed twice", () => {
+    // Before 0296 no vendor has a card, so this is every vendor right after Archive <Vendor>.
+    const vs = summarizeVendors(options, items, [], 0);
+    expect(vs.find((v) => v.key === "milgard")).toBeUndefined();
+    expect(summarizeVendors([opt({ id: "x", vendor: "Andersen", archived: true })], items, [], 0)).toEqual([]);
   });
 
   it("a card's spelling wins, and a card with no items yet is still a vendor", () => {

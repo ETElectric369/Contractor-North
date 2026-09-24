@@ -696,7 +696,13 @@ async function nextSortOrder(supabase: StaffDb, orgId: string, itemId: string): 
 }
 
 export async function addItemOption(
-  input: { itemId: string; isDefault?: boolean } & OptionFieldsInput,
+  input: {
+    itemId: string;
+    isDefault?: boolean;
+    /** A typed Sell. When given it SETS the markup (through optionSellPatch, the same door the
+     *  row's Sell cell uses) and `markupPct` is ignored; blank/absent = the markup as passed. */
+    sell?: string | number | null;
+  } & OptionFieldsInput,
 ): Promise<OptionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -705,6 +711,14 @@ export async function addItemOption(
 
   const cleaned = cleanOptionFields(input, "create");
   if ("error" in cleaned) return { ok: false, error: cleaned.error };
+  const typedSell = input.sell === null || input.sell === undefined || String(input.sell).trim() === "" ? null : input.sell;
+  let wantSell: number | null = null;
+  if (typedSell !== null) {
+    const r = optionSellPatch({ buy_price: Number(cleaned.clean.buy_price) || 0 }, typedSell);
+    if ("error" in r) return { ok: false, error: r.error };
+    cleaned.clean.markup_pct = r.patch.markup_pct;
+    wantSell = r.sell;
+  }
   const owned = await ownItem(supabase, orgId, input.itemId);
   if (typeof owned === "string") return { ok: false, error: owned };
   // ONE BRAND, ONE SPELLING: "andersen" typed on a new item joins the Andersen already listed.
@@ -727,7 +741,7 @@ export async function addItemOption(
       created_by: userId,
       // org_id is left to the set_org_id trigger, exactly like every other table in 0270+.
     })
-    .select("id");
+    .select("id, markup_pct, buy_price");
   if (error) {
     const named = { vendor: String(cleaned.clean.vendor), label: (cleaned.clean.label as string | null | undefined) ?? null };
     // 0282's one-per-maker index counts ARCHIVED rows too, so "already a vendor on this item" can
@@ -751,9 +765,18 @@ export async function addItemOption(
   // THE SILENT-WRITE LAW: an insert RLS refused comes back as zero rows, not an error.
   if (!data?.length) return { ok: false, error: "Nothing was saved. Reload the page and try again." };
   revalidatePath("/price-list");
+  // READ BACK A TYPED SELL, as setItemOptionSell does: before 0296 widens the column, a markup with
+  // more than two decimals is rounded on the way in and the sell moves a few cents. Say so.
+  const notes: string[] = [];
+  if (wantSell !== null) {
+    const stored = data[0] as { markup_pct: number | string | null; buy_price: number | string };
+    const landed = sellPrice(Number(stored.buy_price) || 0, Number(stored.markup_pct) || 0);
+    if (landed !== wantSell) notes.push(`The closest it can hold is ${formatCurrency(landed)}, a cent or so off what you typed.`);
+  }
   // The toast already names what was added, so this note says the CONSEQUENCE rather than the name
   // again: the item's own number just stopped being the one that prices it.
-  return { ok: true, note: input.isDefault ? "This item prices at it now, instead of its own number." : undefined };
+  if (input.isDefault) notes.push("This item prices at it now, instead of its own number.");
+  return { ok: true, note: notes.length ? notes.join(" ") : undefined };
 }
 
 /** Patch one option. Writes ONLY what the caller passed, so a change to the part number can never
