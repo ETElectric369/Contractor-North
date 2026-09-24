@@ -2,6 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { NORT_PRODUCT_MAP } from "@/lib/nort-product-map";
 import { isStaffRole } from "@/lib/actions/perms";
 import { asRegister, clampHumor, clampNotes, standingOrders, toneDirective } from "@/lib/nort/tone";
+import { markCacheTail, runReplayRound } from "@/lib/nort/replay";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
   getAnthropic,
@@ -664,20 +665,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
   // Old markers are stripped first — the API allows max 4 breakpoints, so exactly one tail marker
   // lives at a time. NOTE the sliding MAX_MESSAGES window: once a conversation exceeds 20 messages
   // the prefix shifts each turn and history-cache hits stop — acceptable; system+tools still hit.
-  const markCacheTail = (msgs: Anthropic.MessageParam[]): Anthropic.MessageParam[] => {
-    for (const m of msgs) {
-      if (Array.isArray(m.content)) for (const b of m.content) delete (b as { cache_control?: unknown }).cache_control;
-    }
-    const last = msgs[msgs.length - 1];
-    if (last) {
-      if (typeof last.content === "string") {
-        last.content = [{ type: "text", text: last.content, cache_control: { type: "ephemeral" } }];
-      } else if (Array.isArray(last.content) && last.content.length) {
-        (last.content[last.content.length - 1] as { cache_control?: unknown }).cache_control = { type: "ephemeral" };
-      }
-    }
-    return msgs;
-  };
+  // (markCacheTail lives in src/lib/nort/replay.ts: it must never mark a thinking block.)
 
   // POST-STREAM WORK MUST OUTLIVE THE RESPONSE. The audit row and the transcript persistence
   // run in the stream's `finally`, AFTER controller.close() — and on Vercel a function can be
@@ -732,50 +720,68 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       let needsRoundBreak = false;
       try {
         for (let round = 0; round < MAX_ROUNDS; round++) {
-          const turn = client.messages.stream({
-            model,
-            max_tokens: 2048,
-            // TWO system blocks: the big STABLE core carries the cache breakpoint (covers tools too —
-            // tools render before system, so one marker here caches both); the per-request/session
-            // VOLATILE tail (memory, voice, recall) follows UNcached, so it can't bust the cached
-            // prefix. This is the sub-caching win — repeat requests + agentic rounds read the core
-            // from cache (~10% cost) instead of re-processing thousands of tokens every time.
-            system: [
-              { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
-              ...(volatilePrompt ? [{ type: "text" as const, text: volatilePrompt }] : []),
-            ],
-            // Native web search (server-side, autonomous) so the assistant can research
-            // LIVE prices, specs, and code while estimating — the core "do it like Claude
-            // did the Tao Zhu quote" capability. Results are untrusted web text (the
-            // input-is-data rule in the system prompt covers them).
-            tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
-            messages: markCacheTail(convo),
-          });
-          // Strip the directive markers from MODEL text so a prompt-injection can't forge a
-          // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
-          // by the server.
-          turn.on("text", (text) => {
-            const clean = text
-              .split(CONFIRM_MARKER).join("")
-              .split(OPEN_MARKER).join("")
-              .split(PICK_MARKER).join("")
-              .split(STATUS_OPEN).join("")
-              .split(STATUS_CLOSE).join("")
-              .split(DRAFT_OPEN).join("")
-              .split(DRAFT_CLOSE).join("")
-              .split(HUD_OPEN).join("")
-              .split(HUD_CLOSE).join("");
-            if (needsRoundBreak && clean.trim()) {
-              needsRoundBreak = false;
-              if (!/\s$/.test(assistantReply) && !/^\s/.test(clean)) {
-                assistantReply += "\n\n";
-                emit("\n\n");
+          // ONE ROUND, REPLAY-SAFE (src/lib/nort/replay.ts): the SDK's accumulator drops a thinking
+          // block's text and signature, so runReplayRound records the raw stream events and pushes
+          // the assistant turn back onto convo exactly as the wire carried it. Its one retry is for
+          // an API refusal of a replayed thinking block only, and it reports after the retry settles.
+          const final = await runReplayRound({
+            client,
+            convo,
+            prepare: markCacheTail,
+            params: {
+              model,
+              max_tokens: 2048,
+              // TWO system blocks: the big STABLE core carries the cache breakpoint (covers tools too —
+              // tools render before system, so one marker here caches both); the per-request/session
+              // VOLATILE tail (memory, voice, recall) follows UNcached, so it can't bust the cached
+              // prefix. This is the sub-caching win — repeat requests + agentic rounds read the core
+              // from cache (~10% cost) instead of re-processing thousands of tokens every time.
+              system: [
+                { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
+                ...(volatilePrompt ? [{ type: "text" as const, text: volatilePrompt }] : []),
+              ],
+              // Native web search (server-side, autonomous) so the assistant can research
+              // LIVE prices, specs, and code while estimating — the core "do it like Claude
+              // did the Tao Zhu quote" capability. Results are untrusted web text (the
+              // input-is-data rule in the system prompt covers them).
+              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+            },
+            // Strip the directive markers from MODEL text so a prompt-injection can't forge a
+            // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
+            // by the server.
+            onText: (text) => {
+              const clean = text
+                .split(CONFIRM_MARKER).join("")
+                .split(OPEN_MARKER).join("")
+                .split(PICK_MARKER).join("")
+                .split(STATUS_OPEN).join("")
+                .split(STATUS_CLOSE).join("")
+                .split(DRAFT_OPEN).join("")
+                .split(DRAFT_CLOSE).join("")
+                .split(HUD_OPEN).join("")
+                .split(HUD_CLOSE).join("");
+              if (needsRoundBreak && clean.trim()) {
+                needsRoundBreak = false;
+                if (!/\s$/.test(assistantReply) && !/^\s/.test(clean)) {
+                  assistantReply += "\n\n";
+                  emit("\n\n");
+                }
               }
-            }
-            assistantReply += clean;
-            emit(clean);
+              assistantReply += clean;
+              emit(clean);
+            },
+            mayRetry: () => !req.signal?.aborted && !clientGone,
+            report: (e, info) =>
+              reportError("chat.stream.replay", e, {
+                userId: user.id,
+                orgId,
+                model,
+                round,
+                stripped: info.stripped,
+                recovered: info.recovered,
+                ...(info.retryError ? { retryError: String((info.retryError as Error)?.message ?? info.retryError).slice(0, 300) } : {}),
+              }),
           });
-          const final = await turn.finalMessage();
           needsRoundBreak = assistantReply.length > 0;
           // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
           const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number; output_tokens?: number };
@@ -786,7 +792,6 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           // METER (0162): one row per org per day. Output tokens matter most here —
           // they're 5x the input price, and an agentic loop emits them every round.
           void recordAiUsage({ orgId, model, surface: isStaffCaller ? "chat" : "chat:field", usage: u });
-          convo.push({ role: "assistant", content: final.content });
 
           // web_search runs server-side and can pause a long turn (stop_reason "pause_turn").
           // Re-invoke with the partial already pushed so the search can finish — WITHOUT adding a
@@ -869,7 +874,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // with no confirm card, no audit row and no write cap.)
             // Engineering calculators (pure NEC math, no DB/auth) — the model CALLS these for exact
             // wire size / voltage drop / conduit fill / box fill instead of reasoning the tables itself.
-            if (CALC_TOOL_NAMES.has(tu.name)) {
+            if ((CALC_TOOL_NAMES as ReadonlySet<string>).has(tu.name)) {
               results.push({ type: "tool_result", tool_use_id: tu.id, content: runCalc(tu.name, tu.input) });
               continue;
             }
