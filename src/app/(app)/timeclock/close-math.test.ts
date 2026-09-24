@@ -86,20 +86,20 @@ describe("needsStatedStop: a forgotten clock is not closed at now by one tap", (
   const now = Date.parse("2001-01-02T04:00:00Z");
   const base = { nowMs: now, picked: false, unattended: false };
 
-  it("asks on a now-ish close of a 10.5-hour shift nobody picked a time for", () => {
-    expect(needsStatedStop({ ...base, clockInMs: now - 10.5 * H, closeMs: now + 30_000 })).toBe(true);
+  it("asks on a now-ish close of a 12.5-hour shift nobody picked a time for", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 12.5 * H, closeMs: now + 30_000 })).toBe(true);
   });
   it("a picked time passes", () => {
-    expect(needsStatedStop({ ...base, picked: true, clockInMs: now - 10.5 * H, closeMs: now })).toBe(false);
+    expect(needsStatedStop({ ...base, picked: true, clockInMs: now - 12.5 * H, closeMs: now })).toBe(false);
   });
   it("an unattended geofence close passes (it is observed and already flagged)", () => {
-    expect(needsStatedStop({ ...base, unattended: true, clockInMs: now - 10.5 * H, closeMs: now })).toBe(false);
+    expect(needsStatedStop({ ...base, unattended: true, clockInMs: now - 12.5 * H, closeMs: now })).toBe(false);
   });
-  it("a close three hours ago on an 11-hour shift is an observed time, not a default", () => {
-    expect(needsStatedStop({ ...base, clockInMs: now - 11 * H, closeMs: now - 3 * H })).toBe(false);
+  it("a close three hours ago on a 13-hour shift is an observed time, not a default", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 13 * H, closeMs: now - 3 * H })).toBe(false);
   });
-  it("a now-ish close of a 9-hour shift is an ordinary clock-out", () => {
-    expect(needsStatedStop({ ...base, clockInMs: now - 9 * H, closeMs: now })).toBe(false);
+  it("a now-ish close of an 11.9-hour shift is an ordinary clock-out (the line is twelve)", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 11.9 * H, closeMs: now })).toBe(false);
   });
 });
 

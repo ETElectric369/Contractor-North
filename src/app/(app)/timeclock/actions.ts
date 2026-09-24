@@ -24,7 +24,7 @@ import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 import { clampCloseAtMs, needsStatedStop, stopCrumb, withAutoConfirmedCrumb, withStopCrumb } from "./close-math";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { MAX_SHIFT_HOURS, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 
 export type ClockResult = {
   ok: boolean;
@@ -380,7 +380,7 @@ export async function switchJob(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in")
+    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in, profiles:profile_id(full_name)")
     .eq("id", input.entry_id)
     .eq("status", "open")
     .maybeSingle();
@@ -403,12 +403,15 @@ export async function switchJob(input: {
       return {
         ok: false,
         needsTime: true,
-        error: `You've been on the clock since ${since}, more than 10 hours. Pick when you stopped on Timeclock, then clock in on this job.`,
+        error: `You've been on the clock since ${since}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock, then clock in on this job.`,
       };
     }
+    // The office's own door names whose clock it is: "Clock Out Brian" on Timecards.
+    const owner = (entry as { profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null }).profiles;
+    const ownerName = (Array.isArray(owner) ? owner[0] : owner)?.full_name ?? null;
     return {
       ok: false,
-      error: `That clock has been running since ${since}, more than 10 hours. Stop it at the time the shift really ended (Timecards, Stop The Clock), then clock in on this job.`,
+      error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. Stop it at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
     };
   }
 
@@ -600,7 +603,7 @@ export async function clockOut(input: {
       return {
         ok: false,
         needsTime: true,
-        error: `You've been on the clock since ${dayClock(entClockIn as string, tz)}, more than 10 hours. Pick when you stopped on Timeclock.`,
+        error: `You've been on the clock since ${dayClock(entClockIn as string, tz)}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock.`,
       };
     }
     if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
@@ -612,7 +615,7 @@ export async function clockOut(input: {
     }
     // A stop time stated after a long run says so on the card, and the office hears about it. Not
     // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
-    // a 10-to-18-hour close by a person, however it arrived, must never land without a trace. Only
+    // a LONG_SHIFT_HOURS-to-18-hour close by a person, however it arrived, must never land without a trace. Only
     // the unattended geofence close is exempt, and auto_closed_reason already flags that one.
     if (!unattended && isLongOpenShift(ciMsForStop, nowMs)) {
       const tz = await orgTz(supabase);
@@ -1175,11 +1178,12 @@ async function overlapRefusal(
   if (!clash) return null;
 
   // Only now, with something to actually say, pay for the two reads the sentence needs.
-  let name = opts?.name;
-  if (!name) {
+  let fullName: string | null = opts?.name ?? null;
+  if (!fullName) {
     const { data: p } = await supabase.from("profiles").select("full_name").eq("id", profileId).maybeSingle();
-    name = (p as { full_name?: string | null } | null)?.full_name ?? "That person";
+    fullName = (p as { full_name?: string | null } | null)?.full_name ?? null;
   }
+  const name = fullName || "That person";
   let tz = opts?.tz;
   if (!tz) {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
@@ -1196,7 +1200,7 @@ async function overlapRefusal(
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
   return clash.clock_out
     ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
-    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Stop that clock first: tap their shift on Timecards and use Stop The Clock.`;
+    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Stop that clock first: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`;
 }
 
 /**
@@ -1303,7 +1307,7 @@ export async function createManualEntry(input: {
 }
 
 /**
- * STOP THE CLOCK: the office closes somebody's RUNNING shift at the time it really stopped.
+ * CLOCK OUT FOR THEM: the office closes somebody's RUNNING shift at the time it really stopped.
  *
  * Erik, 2026-09-24: "Brian did it the other day too and I had no way to stop it to set the time for
  * the invoice". Brian clocked in on Herringbone at 1:37 PM and forgot. The office could see the
@@ -1311,8 +1315,10 @@ export async function createManualEntry(input: {
  * or closed it at "now", which would have billed the customer for the night. Erik fixed the times
  * by hand a day later, and the invoice waited on it.
  *
- * This is the one door that stops a clock at a STATED time, for every caller: the Stop The Clock
- * sheet, updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
+ * This is the one door that stops a clock at a STATED time, for every caller: the office's sheet
+ * (Clock Out Brian on an ordinary shift, Stop Brian's Clock on a forgotten one; 2026-09-24 Erik
+ * asked for "an option to [end] an employees time clock and clock out for them" at any time),
+ * updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
  * land here and get the same bounds, the same card crumb and the same message to the crew member.
  *
  *   * bounds (stopProblem): after the start, not in the future, at most 18 hours, lunch shorter than

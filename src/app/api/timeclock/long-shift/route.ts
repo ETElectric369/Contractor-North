@@ -6,27 +6,39 @@ import { createNotifications } from "@/lib/notifications";
 import { orgStaffIds, sendPushToProfiles } from "@/lib/push";
 import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
-import { pickLongShiftNudges, quietHold } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
 
 /**
- * THE TEN-HOUR NUDGE (2026-09-24). Hourly (vercel.json "0 * * * *").
+ * THE LONG-SHIFT JOB (2026-09-24). Hourly (vercel.json "0 * * * *").
  *
  * Erik: "Brian did it the other day too and I had no way to stop it to set the time for the
- * invoice". A forgotten clock was found by the office a day later, by hand. This asks the person
- * whose clock it is while he still remembers when he stopped: once, at LONG_SHIFT_HOURS, never
- * between 9 PM and 6 AM org-local (the 6 AM run picks those up). Brian's 1:37 PM clock-in reaches
- * ten hours at 11:37 PM, inside the hold, so the push goes out at 6:00 AM, 16.4 hours in and still
- * under the 18-hour ceiling his own picker allows.
+ * invoice". A forgotten clock was found by the office a day later, by hand. Then, the same day:
+ * "I think 12 hours is a good question point mark" and "Put a line on the Bell at 10 hours and buzz
+ * at 12". So a running clock is spoken about in two steps, each at most once per shift:
+ *
+ *   OFFICE_BELL_HOURS (10): a line on the office's bell. No push, nobody asked. A bell line is
+ *     silent, so it goes out at any hour.
+ *   LONG_SHIFT_HOURS (12): the person whose clock it is is asked (push and bell) while he still
+ *     remembers when he stopped, and the office's phones buzz. Pushes never go out between 9 PM and
+ *     6 AM org-local; the 6 AM run does them. Brian's 1:37 PM clock-in puts the office's line on the
+ *     bell at 11:37 PM, reaches twelve hours at 1:37 AM inside the hold, and is asked at 6:00 AM,
+ *     16.4 hours in and still under the 18-hour ceiling his own picker allows.
  *
  * It never closes anything. A clock stops only at a time a person states (payroll does not invent
  * hours, and nothing here observed when the work ended).
  *
- * CLAIM FIRST. long_shift_nudged_at (0291) is set with a guarded UPDATE before anything is sent,
- * and a zero-row claim is skipped, so two overlapping runs can never ask the same man twice.
+ * CLAIM FIRST, PER STEP. Each step has its own column (0291): long_shift_warned_at for the bell
+ * line, long_shift_nudged_at for the question and the buzz. It is set with a guarded UPDATE before
+ * anything is sent, and a zero-row claim is skipped, so two overlapping runs never tell anybody
+ * twice, and the 10-hour line can never stand in for the 12-hour question.
  *
- * The service client bypasses RLS: every query is org-scoped by hand. The push uses the
- * clock_out kind, so a person who turned clock-out pushes off in Settings is not pushed; the bell
- * reaches him either way. The office hears about a crew member's clock on the bell only.
+ * WHO HEARS. The office is its staff who may see the timecards (owner, admin, office: orgStaffIds,
+ * active only), about a crew member's clock; a staff member's own clock is his own business, as it
+ * was. Each push respects the reader's own switch in Settings: the crew member's rides clock_out,
+ * the office's rides long_shift. A removed person's phone is never pushed, but the office still
+ * hears about the clock he left running: that is exactly the one nobody else will stop.
+ *
+ * The service client bypasses RLS: every query is org-scoped by hand.
  *
  *   GET /api/timeclock/long-shift   Authorization: Bearer <CRON_SECRET>
  */
@@ -35,7 +47,7 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const counts = { orgs: 0, held: 0, candidates: 0, claimed: 0, told_office: 0, failed: 0 };
+  const counts = { orgs: 0, held: 0, bells_due: 0, nudges_due: 0, office_bells: 0, asked: 0, office_buzzes: 0, failed: 0 };
   const { data: orgs, error: orgErr } = await supabase.from("organizations").select("id, settings");
   if (orgErr) {
     reportError("cron-long-shift", orgErr);
@@ -46,71 +58,112 @@ export async function GET(request: Request) {
     counts.orgs++;
     const tz = getOrgSettings(org.settings).timezone;
     const nowMs = Date.now();
-    if (quietHold(nowMs, tz)) {
-      counts.held++;
-      continue;
-    }
+    // Counted, not skipped: the night holds the pushes, never the office's bell line.
+    if (quietHold(nowMs, tz)) counts.held++;
     try {
       const { data: open, error } = await supabase
         .from("time_entries")
-        .select("id, profile_id, clock_in, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active)")
+        .select(
+          "id, profile_id, clock_in, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active)",
+        )
         .eq("org_id", org.id)
         .eq("status", "open")
-        .is("long_shift_nudged_at", null);
+        .or("long_shift_warned_at.is.null,long_shift_nudged_at.is.null");
       if (error) throw error;
 
+      type Person = { full_name?: string | null; role?: string | null; active?: boolean | null };
+      type Job = { job_number?: string | null; name?: string | null };
       type Row = {
         id: string;
         profile_id: string;
         clock_in: string;
+        long_shift_warned_at: string | null;
         long_shift_nudged_at: string | null;
-        job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
-        profiles?: { full_name?: string | null; role?: string | null; active?: boolean | null } | { full_name?: string | null; role?: string | null; active?: boolean | null }[] | null;
+        job?: Job | Job[] | null;
+        profiles?: Person | Person[] | null;
       };
       const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
-      const rows = pickLongShiftNudges((open ?? []) as unknown as Row[], nowMs, tz);
-      counts.candidates += rows.length;
-      let staffIds: string[] | null = null;
+      const { bell, nudge } = pickLongShiftSteps((open ?? []) as unknown as Row[], nowMs, tz);
+      counts.bells_due += bell.length;
+      counts.nudges_due += nudge.length;
+      if (!bell.length && !nudge.length) continue;
 
-      for (const r of rows) {
+      let staffIds: string[] | null = null;
+      const office = async () => (staffIds ??= await orgStaffIds(org.id));
+
+      /** The guarded claim: true only when THIS run set the column. */
+      const claim = async (id: string, column: "long_shift_warned_at" | "long_shift_nudged_at") => {
         const { data: claimed, error: claimErr } = await supabase
           .from("time_entries")
-          .update({ long_shift_nudged_at: new Date(nowMs).toISOString() })
-          .eq("id", r.id)
+          .update({ [column]: new Date(nowMs).toISOString() })
+          .eq("id", id)
           .eq("org_id", org.id)
           .eq("status", "open")
-          .is("long_shift_nudged_at", null)
+          .is(column, null)
           .select("id");
         if (claimErr) throw claimErr;
-        if (!claimed?.length) continue; // another run took it, or the clock stopped meanwhile
-        counts.claimed++;
+        return !!claimed?.length; // zero rows: another run took it, or the clock stopped meanwhile
+      };
 
+      /** The facts every sentence names, in the org's clock. */
+      const facts = (r: Row) => {
         const person = one(r.profiles);
-        if (person?.active === false) continue; // a removed person's phone is never pushed
         const job = one(r.job);
-        const label = job ? jobLabel(job) : null;
         const inAt = new Date(r.clock_in);
         const since = `${inAt.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${inAt
           .toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
-          .replace(/ /g, " ")}`;
+          .replace(/ /g, " ")}`; // ICU's narrow no-break space before AM/PM, as a plain space
+        const name = (person?.full_name ?? "").trim();
+        return {
+          person,
+          crew: !isStaffRole(person?.role ?? ""),
+          label: job ? jobLabel(job) : null,
+          since,
+          first: name.split(/\s+/)[0] || "A crew member",
+          door: clockDoorWords(name).clockOut,
+          hours: Math.floor((nowMs - inAt.getTime()) / 3_600_000),
+        };
+      };
 
-        const title = "Still On The Clock?";
-        const body = `You've been clocked in${label ? ` at ${label}` : ""} since ${since}. Tap to set when you stopped.`;
-        await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
-        await createNotifications(org.id, [r.profile_id], { type: "long_shift", title, body, url: "/timeclock" });
+      // ── STEP ONE: the office's bell line at OFFICE_BELL_HOURS. Silent, so never held. ──
+      for (const r of bell) {
+        if (!(await claim(r.id, "long_shift_warned_at"))) continue;
+        const f = facts(r);
+        if (!f.crew) continue;
+        await createNotifications(org.id, await office(), {
+          type: "long_shift",
+          title: `${f.first} Is Still On The Clock`,
+          body:
+            `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago. ` +
+            `If the shift is over, ${f.door} on Timecards. At ${LONG_SHIFT_HOURS} hours ${f.first} is asked.`,
+          url: `/timecards?entry=${r.id}`,
+        });
+        counts.office_bells++;
+      }
 
-        if (!isStaffRole(person?.role ?? "")) {
-          staffIds ??= await orgStaffIds(org.id);
-          const name = (person?.full_name ?? "").trim();
-          const first = name.split(/\s+/)[0] || "A crew member";
-          const hours = Math.floor((nowMs - inAt.getTime()) / 3_600_000);
-          await createNotifications(org.id, staffIds, {
-            type: "long_shift",
-            title: `${first} Is Still On The Clock`,
-            body: `Clocked in ${since}${label ? ` at ${label}` : ""}, ${hours} hours ago.`,
+      // ── STEP TWO: at LONG_SHIFT_HOURS the person is asked and the office buzzes (never at night). ──
+      for (const r of nudge) {
+        if (!(await claim(r.id, "long_shift_nudged_at"))) continue;
+        const f = facts(r);
+
+        if (f.person?.active !== false) {
+          const title = "Still On The Clock?";
+          const body = `You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}. Tap to set when you stopped.`;
+          await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
+          await createNotifications(org.id, [r.profile_id], { type: "long_shift", title, body, url: "/timeclock" });
+          counts.asked++;
+        }
+
+        if (f.crew) {
+          await sendPushToProfiles(await office(), "long_shift", {
+            title: `${f.first} Is Still On The Clock`,
+            body:
+              `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago` +
+              `${f.person?.active === false ? " (no longer on your crew)" : `. ${f.first} has been asked when the shift ended`}. ` +
+              `${f.door} on Timecards if you know.`,
             url: `/timecards?entry=${r.id}`,
           });
-          counts.told_office++;
+          counts.office_buzzes++;
         }
       }
     } catch (e) {
@@ -120,5 +173,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json(counts);
+  return NextResponse.json({ ...counts, bell_hours: OFFICE_BELL_HOURS, ask_hours: LONG_SHIFT_HOURS });
 }

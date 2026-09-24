@@ -215,7 +215,7 @@ export function GeofenceMonitor({
     promptShownAtRef.current = Date.now();
     setPickedIso(null);
     setError(null);
-    // A CLOCK RUNNING 10 HOURS OR MORE (lib/long-shift) opens straight onto the picker, seeded at
+    // A CLOCK RUNNING LONG_SHIFT_HOURS (TWELVE) OR MORE (lib/long-shift) opens straight onto the picker, seeded at
     // the clock-in, with no "Clock Out Now": a close at now on a forgotten shift writes the night
     // onto payroll, and the server refuses it anyway.
     const long = isLongOpenShift(Date.parse(clockInRef.current), Date.now());
@@ -284,7 +284,7 @@ export function GeofenceMonitor({
             return;
           }
           setError(res.error ?? "Could not clock out — try again.");
-          // The clock crossed ten hours while the sheet was up: the answer is a picked time.
+          // The clock crossed LONG_SHIFT_HOURS while the sheet was up: the answer is a picked time.
           if (res.needsTime) {
             longPromptRef.current = true;
             setPickedIso(null);

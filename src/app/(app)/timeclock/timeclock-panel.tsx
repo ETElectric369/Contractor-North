@@ -307,7 +307,7 @@ export function TimeclockPanel({
           gps,
         });
         if (!res.ok) {
-          // A switch on a clock running 10 hours would close it at now (0288's cut); the server
+          // A switch on a clock running LONG_SHIFT_HOURS would close it at now (0288's cut); the server
           // asks for the stop time instead, and this card is where it is picked.
           if (res.needsTime) {
             setForceLongFor(openEntry.id);

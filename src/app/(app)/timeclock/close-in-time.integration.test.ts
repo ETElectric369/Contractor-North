@@ -83,15 +83,19 @@ d("a running clock can be stopped, never in the future (0291)", () => {
     });
     await c.connect();
     await c.query("begin");
+    // Both of the long-shift job's claims: the office's bell line at 10 hours, the question at 12.
     const col = await one(
-      `select 1 as ok from pg_attribute
-        where attrelid = 'public.time_entries'::regclass and attname = 'long_shift_nudged_at' and not attisdropped`,
+      `select count(*) = 2 as ok from pg_attribute
+        where attrelid = 'public.time_entries'::regclass
+          and attname in ('long_shift_warned_at', 'long_shift_nudged_at')
+          and atttypid = 'timestamptz'::regtype
+          and not attisdropped`,
     );
     const trg = await one(
       `select 1 as ok from pg_trigger
         where tgrelid = 'public.time_entries'::regclass and tgname = 'guard_time_entry_close_in_time' and tgenabled <> 'D'`,
     );
-    has0291 = !!col && !!trg;
+    has0291 = !!col?.ok && !!trg;
 
     const staff = await one(
       `select id, org_id from public.profiles
@@ -192,6 +196,24 @@ d("a running clock can be stopped, never in the future (0291)", () => {
     });
     expect(msg).toMatch(LONG);
     expect(msg).not.toMatch(/note/i);
+  });
+
+  it("each long-shift step claims its own column, once", async () => {
+    if (!needs()) return;
+    const id = await entry("2001-01-01T16:00:00Z", null);
+    const msg = await refusal(async () => {
+      await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role" })]);
+      await c.query("set local role service_role");
+      const claim = (col: "long_shift_warned_at" | "long_shift_nudged_at") =>
+        c.query(`update public.time_entries set ${col} = now() where id = $1 and status = 'open' and ${col} is null returning id`, [id]);
+      // The 10-hour bell line claims, and a second run's claim of it matches nothing.
+      expect((await claim("long_shift_warned_at")).rows).toHaveLength(1);
+      expect((await claim("long_shift_warned_at")).rows).toHaveLength(0);
+      // The bell never stands in for the 12-hour question: that claim is still free, and also once.
+      expect((await claim("long_shift_nudged_at")).rows).toHaveLength(1);
+      expect((await claim("long_shift_nudged_at")).rows).toHaveLength(0);
+    });
+    expect(msg).toBeNull();
   });
 
   it("the service role can claim an open shift for the long-shift nudge", async () => {

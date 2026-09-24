@@ -7,10 +7,12 @@
  * other door closed it at "now", which writes a 30-hour shift nobody worked.
  *
  * Everything that has to decide "is this shift a forgotten punch?" asks this file: the office's
- * Stop The Clock sheet, the crew's own Timeclock card, the geofence prompt, the server's clock-out
- * backstop, the hourly nudge, the My Day inbox and Nort. A threshold written in each of them drifts
- * (the timecards page said 12 hours while the leak detector said 16), and a crew member told one
- * thing on his phone and another on the office screen stops believing either.
+ * clock-out sheet (Clock Out Brian, or Stop Brian's Clock on a forgotten one), the crew's own
+ * Timeclock card, the geofence prompt, the server's clock-out backstop, the hourly job (the office's
+ * bell line at OFFICE_BELL_HOURS, the question and the buzz at LONG_SHIFT_HOURS), the My Day inbox
+ * and Nort. A threshold written in each of them drifts (the timecards page said 12 hours while the
+ * leak detector said 16), and a crew member told one thing on his phone and another on the office
+ * screen stops believing either.
  *
  * Pure: no database, no React, nothing from app/. It never writes a time. A clock only stops at a
  * time a person states, because nothing observed the moment the work ended and payroll does not
@@ -21,8 +23,20 @@ import { tzMinutesOfDay, todayStrInTz } from "./tz";
 
 const H = 3_600_000;
 
-/** A shift running this long has probably been forgotten. Not a ceiling: a real 11-hour day saves. */
-export const LONG_SHIFT_HOURS = 10;
+/**
+ * A shift running this long has probably been forgotten. Not a ceiling: a real 13-hour day saves.
+ *
+ * TWELVE, not ten (Erik, 2026-09-24: "I think 12 hours is a good question point mark"). Ten asked
+ * about ordinary long days. Every sentence that names the line reads it from here
+ * (LONG_SHIFT_PHRASE), so the crew member's phone and the office's screen never quote two numbers.
+ */
+export const LONG_SHIFT_HOURS = 12;
+/**
+ * The office's early word: a clock running this long puts a line on the office's bell, and only
+ * that (Erik, 2026-09-24: "Put a line on the Bell at 10 hours and buzz at 12"). Nothing is asked
+ * and nothing buzzes until LONG_SHIFT_HOURS; a bell line is silent, so it is not held for the night.
+ */
+export const OFFICE_BELL_HOURS = 10;
 /** No single shift is longer than this. The database refuses one (0214/0281) unless the system
  *  closed it itself and said why. */
 export const MAX_SHIFT_HOURS = 18;
@@ -37,6 +51,39 @@ export const MAX_SHIFT_HOURS = 18;
 export function isLongOpenShift(clockInMs: number, nowMs: number): boolean {
   if (!Number.isFinite(clockInMs) || !Number.isFinite(nowMs)) return false;
   return nowMs - clockInMs >= LONG_SHIFT_HOURS * H;
+}
+
+/** "more than 12 hours": the line as every refusal and prompt says it, read from the constant. */
+export const LONG_SHIFT_PHRASE = `more than ${LONG_SHIFT_HOURS} hours`;
+
+/**
+ * WHAT THE OFFICE'S DOOR ON SOMEBODY ELSE'S RUNNING CLOCK SAYS (Erik, 2026-09-24: "an option to
+ * [end] an employees time clock and clock out for them").
+ *
+ *   clockOut: the trigger everywhere the office sees that clock, and the sheet's title and button on
+ *             an ordinary shift: "Clock Out Brian" ("Clock Them Out" with no name on the row).
+ *   stop:     the sheet's title and button on a forgotten one (LONG_SHIFT_HOURS, or begun on an
+ *             earlier day): "Stop Brian's Clock", because that sheet asks when it really ended.
+ *
+ * `self`: the viewer's own running clock, which he clocks out of himself ("Clock Out",
+ * "Stop Your Clock"); a door never names its own reader in the third person.
+ */
+export function clockDoorWords(fullName: string | null | undefined, opts: { self?: boolean } = {}): {
+  clockOut: string;
+  stop: string;
+} {
+  if (opts.self) return { clockOut: "Clock Out", stop: "Stop Your Clock" };
+  const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
+  // A placeholder a list printed for a missing name ("—") is not a name.
+  if (!/\p{L}/u.test(first)) return { clockOut: "Clock Them Out", stop: "Stop Their Clock" };
+  return { clockOut: `Clock Out ${first}`, stop: `Stop ${first}'s Clock` };
+}
+
+/** The office's sheet treats this shift as forgotten: it has run LONG_SHIFT_HOURS, or it began on
+ *  an earlier org-local day. Then the sheet reads "Stop Brian's Clock" and its stop time starts
+ *  empty; otherwise it reads "Clock Out Brian" with the stop time at now. */
+export function isForgottenShift(clockInMs: number, nowMs: number, tz: string): boolean {
+  return isLongOpenShift(clockInMs, nowMs) || startedEarlierDay(clockInMs, nowMs, tz);
 }
 
 /** The instants a stated stop may take: a minute after the clock-in, up to a minute from now, and
@@ -81,7 +128,8 @@ export function stopProblem(input: {
   return null;
 }
 
-/** Between 9 PM and 6 AM org-local nobody gets a push about a clock. The next run after 6 AM does it. */
+/** Between 9 PM and 6 AM org-local nobody gets a push about a clock. The next run after 6 AM does it.
+ *  A bell line is not a push, and is not held (pickLongShiftSteps). */
 export function quietHold(nowMs: number, tz: string): boolean {
   const min = tzMinutesOfDay(new Date(nowMs), tz || DEFAULT_TIMEZONE);
   return min >= 21 * 60 || min < 6 * 60;
@@ -94,16 +142,35 @@ export function startedEarlierDay(clockInMs: number, nowMs: number, tz: string):
   return todayStrInTz(z, new Date(clockInMs)) < todayStrInTz(z, new Date(nowMs));
 }
 
-export type NudgeCandidate = { clock_in: string; long_shift_nudged_at?: string | null };
+export type LongShiftCandidate = {
+  clock_in: string;
+  long_shift_warned_at?: string | null;
+  long_shift_nudged_at?: string | null;
+};
 
 /**
- * The open shifts the hourly job should ask about now: running at least LONG_SHIFT_HOURS and never
- * asked about before. Nothing during the quiet hours; the 6 AM run picks them up.
+ * What the hourly job owes each open shift right now, in its two steps (0291 claims each once):
+ *
+ *   bell:  running OFFICE_BELL_HOURS and the office has not had its bell line. A bell line is
+ *          silent, so the night does not hold it.
+ *   nudge: running LONG_SHIFT_HOURS and nobody has been asked. It pushes (the crew member, and the
+ *          office's phones), so nothing goes out between 9 PM and 6 AM; the 6 AM run does it.
+ *
+ * A row can be in both lists on one run (the job was down at 10 hours, or both marks fell in one
+ * hour): the office gets its line and its buzz, never one in place of the other.
  */
-export function pickLongShiftNudges<T extends NudgeCandidate>(openRows: T[], nowMs: number, tz: string): T[] {
-  if (quietHold(nowMs, tz)) return [];
-  return openRows.filter((r) => {
+export function pickLongShiftSteps<T extends LongShiftCandidate>(
+  openRows: T[],
+  nowMs: number,
+  tz: string,
+): { bell: T[]; nudge: T[] } {
+  const held = quietHold(nowMs, tz);
+  const ran = (r: T, hours: number) => {
     const ci = Date.parse(r.clock_in);
-    return Number.isFinite(ci) && isLongOpenShift(ci, nowMs) && !r.long_shift_nudged_at;
-  });
+    return Number.isFinite(ci) && Number.isFinite(nowMs) && nowMs - ci >= hours * H;
+  };
+  return {
+    bell: openRows.filter((r) => !r.long_shift_warned_at && ran(r, OFFICE_BELL_HOURS)),
+    nudge: held ? [] : openRows.filter((r) => !r.long_shift_nudged_at && ran(r, LONG_SHIFT_HOURS)),
+  };
 }

@@ -56,7 +56,11 @@ export type PushKind =
   | "booked" // a customer picked a time on their /pick link — the work self-scheduled
   // Tap to Pay on iPhone: the one-shot launch announcement (Apple 3.3) and a card declined
   // after the tech had already left the screen (Apple 5.12).
-  | "tap_to_pay";
+  | "tap_to_pay"
+  // The office's buzz about a crew member's clock still running at LONG_SHIFT_HOURS (the hourly
+  // /api/timeclock/long-shift job, 2026-09-24). Its own kind, so muting the crew-side clock_out
+  // reminder never mutes the office's word about somebody else's clock.
+  | "long_shift";
 
 // What each trigger defaults to when a user hasn't set an explicit toggle.
 const DEFAULTS: Record<PushKind, boolean> = {
@@ -78,6 +82,8 @@ const DEFAULTS: Record<PushKind, boolean> = {
   // (5.12). Its own kind, defaulted ON, so neither goes quiet as a side effect of someone
   // muting "Invoices paid" — opting out of THIS, by name, is still each person's to do.
   tap_to_pay: true,
+  // Erik asked for it by name ("buzz at 12"), so it is on until a person switches it off.
+  long_shift: true,
 };
 
 /**

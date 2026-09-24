@@ -49,7 +49,7 @@ const en: Dict = {
   tc_putOnPrev: "Put It On {job} Instead",
   tc_switchedCut: "Switched to {job}. The first part is its own entry ({hours}).",
   tc_switchedWhole: "Now on {job}. This whole shift moved over.",
-  // A clock running 10 hours or more (lib/long-shift): the card asks when he stopped instead of
+  // A clock running LONG_SHIFT_HOURS (twelve) or more (lib/long-shift): the card asks when he stopped instead of
   // closing at now. {when} fills from the panel.
   tc_longShiftTitle: "You're still clocked in from {when}.",
   tc_longShiftBody: "When did you stop?",
