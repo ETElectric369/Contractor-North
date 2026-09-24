@@ -2,7 +2,7 @@ import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import Link from "next/link";
-import { TrendingUp, Receipt, FileText, Wallet } from "lucide-react";
+import { TrendingUp, Receipt, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,9 @@ import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
 import { computeArAging, computeRevenueTrend, computeQuoteStats, trailing12Months } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { getOwnerMoney, isOwnerMoneyWindowKey, type OwnerMoneyWindowKey } from "@/lib/analytics/owner-money";
+import { ownerRegister } from "@/lib/owner-draw";
+import { LeftForCard } from "./left-for-card";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +23,14 @@ const monthLabel = (k: string) =>
   // k is "YYYY-MM" — a wall month; render in UTC so it never slips to the prior month.
   new Date(`${k}-15T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short" });
 
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ w?: string }>;
+}) {
+  const { w } = await searchParams;
+  // This Year unless the owner picked another window (0286's Left For You card).
+  const windowKey: OwnerMoneyWindowKey = isOwnerMoneyWindowKey(w) ? w : "this_year";
   const supabase = await createClient();
   const {
     data: { user },
@@ -33,7 +43,15 @@ export default async function AnalyticsPage() {
   // pipeline discipline) — a UTC boundary put a June-30-evening Pacific payment in July
   // and called a due-today invoice late the night before.
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const tz = orgSettings.timezone;
+
+  // LEFT FOR YOU (0286). The owner always sees it; office staff (admin, office) see it unless the
+  // owner switched "Office Can See This" off, in which case they get no card at all. Techs never
+  // reach this page (the redirect above).
+  const viewerIsOwner = me.role === "owner";
+  const showOwnerMoney = viewerIsOwner || orgSettings.office_sees_owner_money;
+  const ownerMoneyP = showOwnerMoney ? getOwnerMoney(supabase, windowKey) : Promise.resolve(null);
   const todayYmd = todayStrInTz(tz);
   const windowStart = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz).toISOString();
 
@@ -109,7 +127,13 @@ export default async function AnalyticsPage() {
   // its id. 0215/0216 revoke those columns from the `authenticated` role — RLS cannot restrict
   // columns — so a PostgREST embed can no longer carry them for anyone. Office staff get the
   // real numbers; anyone else costs labor at zero rather than reading the crew's pay.
-  attachRates((entries ?? []) as any[], await payRateMap(supabase), (e: any) => ({ id: e.profiles?.id, holder: e }));
+  const rates = await payRateMap(supabase);
+  attachRates((entries ?? []) as any[], rates, (e: any) => ({ id: e.profiles?.id, holder: e }));
+
+  const ownerMoney = await ownerMoneyP;
+  // Who "you" is on the card: the owners by name (from the same names profile_pay carries) and the
+  // viewer, in the register payroll-view started (lib/owner-draw).
+  const voice = ownerRegister(ownerMoney?.money?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
 
   const jobRows = computeJobProfitRows({
     jobs: jobs ?? [],
@@ -121,14 +145,9 @@ export default async function AnalyticsPage() {
     entries: entries ?? [],
   }).slice(0, 8);
 
-  // ── Overhead (all time, by category — matches the tile's label) ──────────
-  const overhead = new Map<string, number>();
-  for (const b of (bills ?? []) as any[]) {
-    if (b.job_id) continue;
-    const k = b.category ?? "Other";
-    overhead.set(k, (overhead.get(k) ?? 0) + Number(b.amount));
-  }
-  const overheadTotal = [...overhead.values()].reduce((s, v) => s + v, 0);
+  // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
+  // counted only no-job bills, all time, in the old category words, and disagreed with Business
+  // Costs. The Left For You card carries business costs now, in the six buckets, for the window.
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
     <Card key={label}>
@@ -148,11 +167,21 @@ export default async function AnalyticsPage() {
     <div className="mx-auto max-w-5xl">
       <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit." />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {showOwnerMoney && (
+        <LeftForCard
+          money={ownerMoney?.money ?? null}
+          problem={ownerMoney?.problem ?? null}
+          voice={voice}
+          windowKey={windowKey}
+          viewerIsOwner={viewerIsOwner}
+          officeSees={orgSettings.office_sees_owner_money}
+        />
+      )}
+
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
         {stat("Collected (12 mo)", formatCurrency(trend.collected12), TrendingUp, "bg-green-50 text-green-600")}
         {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
         {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
-        {stat("Overhead (all time)", formatCurrency(overheadTotal), Wallet, "bg-amber-50 text-amber-600")}
       </div>
 
       <Card className="mb-6">
@@ -210,24 +239,13 @@ export default async function AnalyticsPage() {
             <div className="flex justify-between"><span className="text-slate-500">Lost / expired</span><span className="font-medium text-red-600">{qs.lost}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Awaiting answer</span><span className="font-medium text-slate-800">{qs.awaiting}</span></div>
             <div className="flex justify-between border-t border-slate-100 pt-2"><span className="text-slate-500">Pipeline value (sent)</span><span className="font-semibold text-slate-900">{formatCurrency(qs.pipelineValue)}</span></div>
-            {overhead.size > 0 && (
-              <div className="border-t border-slate-100 pt-3">
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Overhead by category</div>
-                {[...overhead.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => (
-                  <div key={k} className="flex justify-between text-xs">
-                    <span className="text-slate-500">{k}</span>
-                    <span className="text-slate-700">{formatCurrency(v)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
           </CardContent>
         </Card>
       </div>
 
       <Card>
         <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          Job profitability (collected − labor − materials − bills)
+          Job profitability (collected − crew pay − materials − bills − petty cash)
         </div>
         <ul className="divide-y divide-slate-100">
           {jobRows.map((j) => (

@@ -1041,7 +1041,9 @@ export async function setCustomDomain(
 /** Settings keys that must ONLY be set through their own validated/guarded actions (uniqueness,
  *  secrets) — never via the generic passthrough, or a crafted patch could squat a domain/handle
  *  or overwrite the inbound secret. */
-const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret"];
+// office_sees_owner_money (0286) is the OWNER's call and has its own owner-only setter
+// (analytics/actions.ts setOfficeSeesOwnerMoney); an admin's general settings save must not carry it.
+const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money"];
 
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator

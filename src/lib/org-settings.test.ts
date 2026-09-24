@@ -261,3 +261,14 @@ describe("getOrgSettings — the surcharge is sanitized on read, like every othe
     }
   });
 });
+
+describe("office_sees_owner_money: the owner's one switch, normalized on read (0286)", () => {
+  it("is on by default, and only a real false turns it off", () => {
+    expect(getOrgSettings({}).office_sees_owner_money).toBe(true);
+    expect(getOrgSettings(null).office_sees_owner_money).toBe(true);
+    expect(getOrgSettings({ office_sees_owner_money: false }).office_sees_owner_money).toBe(false);
+    for (const odd of ["false", 0, null, "", "no"]) {
+      expect(getOrgSettings({ office_sees_owner_money: odd as never }).office_sees_owner_money).toBe(true);
+    }
+  });
+});
