@@ -13,6 +13,7 @@ import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
+import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { BugReporter } from "@/components/bug-reporter";
 import { NativePushBridge } from "@/components/native-push-bridge";
 import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
@@ -265,6 +266,7 @@ export default async function AppLayout({
       <CommandBar isStaff={isStaff} />
       {/* Queued field work files itself from ANY screen, and says so (audit 9). */}
       <OfflineDrain userId={profile.id} />
+      <ShellNavigationWatch />
       {/* In the App Store app: a tapped notification opens the thing it is about, and the APNs
           device token is refreshed on launch so alerts can't quietly stop. No-op on the web. */}
       <NativePushBridge />

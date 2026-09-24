@@ -19,10 +19,22 @@ index 0000000..15d582e
 +</dict>
 +</plist>
 diff --git a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
-index 9d9bd32..e7b4872 100644
+index 9d9bd32..19df14e 100644
 --- a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
 +++ b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
-@@ -30,6 +30,15 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+@@ -9,6 +9,11 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+     weak var plugin: StripeTerminalPlugin?
+     private let apiClient = APIClient()
+ 
++    /// CONTRACTOR NORTH PATCH (2026-09-24): see APIClient.failAllPending.
++    func pageListenersGone() {
++        apiClient.failAllPending(reason: "page listeners removed")
++    }
++
+     var discoverCancelable: Cancelable?
+     private var discoveryToken: DiscoveryToken?
+     var collectCancelable: Cancelable?
+@@ -30,6 +35,15 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
              apiClient.initialize(plugin: self.plugin, tokenProviderEndpoint: call.getString("tokenProviderEndpoint", ""))
              Terminal.initWithTokenProvider(apiClient)
          }
@@ -38,7 +50,7 @@ index 9d9bd32..e7b4872 100644
          self.isInitialize = true
          self.plugin?.notifyListeners(TerminalEvents.Loaded.rawValue, data: [:])
          call.resolve()
-@@ -633,7 +642,31 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+@@ -633,16 +647,57 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
  class APIClient: ConnectionTokenProvider {
      weak var plugin: StripeTerminalPlugin?
      var tokenProviderEndpoint: String = ""
@@ -71,8 +83,25 @@ index 9d9bd32..e7b4872 100644
  
      func initialize(plugin: StripeTerminalPlugin?, tokenProviderEndpoint: String) {
          self.plugin = plugin
-@@ -642,7 +675,8 @@ class APIClient: ConnectionTokenProvider {
+         self.tokenProviderEndpoint = tokenProviderEndpoint
+     }
  
++    /// CONTRACTOR NORTH PATCH (2026-09-24). The page that would have answered these is gone: its
++    /// listeners were just removed (Capacitor resets the bridge when any navigation starts). A
++    /// request queued before that sat here until the SDK's 60 s timer, and the SDK joins every new
++    /// connect onto the one in flight, so the NEXT page's warm-up inherited the hang too. Fail them
++    /// now; the SDK drops the failed promise and asks the provider again on the next connect.
++    func failAllPending(reason: String) {
++        let waiting = pendingCompletion
++        pendingCompletion.removeAll()
++        guard !waiting.isEmpty else { return }
++        NSLog("[StripeTerminal] failing \(waiting.count) connection-token request(s): \(reason)")
++        let error = NSError(domain: "com.getcapacitor.community.stripe.terminal",
++                            code: 3001,
++                            userInfo: [NSLocalizedDescriptionKey: "No page is listening for a Stripe session"])
++        for entry in waiting { entry.completion(nil, error) }
++    }
++
      func setConnectionToken(_ call: CAPPluginCall) {
          let token = call.getString("token", "")
 -        if let completion = pendingCompletion.isEmpty ? nil : pendingCompletion.removeFirst() {
@@ -81,13 +110,48 @@ index 9d9bd32..e7b4872 100644
              if token == "" {
                  let error = NSError(domain: "com.getcapacitor.community.stripe.terminal",
                                      code: 3000,
-@@ -661,7 +695,8 @@ class APIClient: ConnectionTokenProvider {
+@@ -661,7 +716,23 @@ class APIClient: ConnectionTokenProvider {
      // Fetches a ConnectionToken from your backend
      func fetchConnectionToken(_ completion: @escaping ConnectionTokenCompletionBlock) {
          if tokenProviderEndpoint == "" {
 -            pendingCompletion.append(completion)
 +            prunePendingTokens()
++            // CONTRACTOR NORTH PATCH (2026-09-24). notifyListeners with nobody listening is a no-op, so
++            // a request made while the page had lost its listener (a failed navigation wipes every
++            // plugin listener while the old page keeps running) sat in this queue until the SDK gave
++            // up at 60 s and failed the connect with 9052, and until the page happened to re-arm every
++            // later request did the same. Nobody is listening means nobody will answer: say so at once.
++            // The SDK fails the connect with 9050 in about a second, the page's classify reads that
++            // with no fetch of its own on record as a lost listener, and its next turn re-arms.
++            guard self.plugin?.hasListeners(TerminalEvents.RequestedConnectionToken.rawValue) == true else {
++                NSLog("[StripeTerminal] connection token requested with no page listening; failing fast")
++                let error = NSError(domain: "com.getcapacitor.community.stripe.terminal",
++                                    code: 3001,
++                                    userInfo: [NSLocalizedDescriptionKey: "No page is listening for a Stripe session"])
++                completion(nil, error)
++                return
++            }
 +            pendingCompletion.append(PendingToken(completion: completion, at: Date()))
              self.plugin?.notifyListeners(TerminalEvents.RequestedConnectionToken.rawValue, data: [:])
          } else {
              let config = URLSessionConfiguration.default
+diff --git a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminalPlugin.swift b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminalPlugin.swift
+index 1a31617..f8a861c 100644
+--- a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminalPlugin.swift
++++ b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminalPlugin.swift
+@@ -30,6 +30,15 @@ public class StripeTerminalPlugin: CAPPlugin, CAPBridgedPlugin {
+     ]
+     private let implementation = StripeTerminal()
+ 
++    // CONTRACTOR NORTH PATCH (2026-09-24). Capacitor calls this (with a nil call, through
++    // perform(_:with:)) whenever a navigation starts, so it is the one moment the page that asked
++    // for a connection token stops being able to answer. `call` is passed straight through and
++    // never read here: it is nil on that path.
++    override public func removeAllListeners(_ call: CAPPluginCall) {
++        super.removeAllListeners(call)
++        implementation.pageListenersGone()
++    }
++
+     override public func load() {
+         super.load()
+         self.implementation.plugin = self

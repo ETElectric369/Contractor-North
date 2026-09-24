@@ -181,6 +181,20 @@ describe("a 60-second token wait this page never heard", () => {
     expect(error).not.toContain("—");
   });
 
+  it("reads the patched plugin's instant refusal the same way: a lost listener, not the internet", async () => {
+    // Since 2026-09-24 the plugin answers a token request no page is listening for with an error at
+    // once, and the SDK fails the connect with 9050 in about a second instead of 9052 at 60 s.
+    const tap = await freshBridge();
+    t.connect = async () => {
+      throw new Error("Connecting to the reader failed because the app completed fetchConnectionToken with an error.");
+    };
+    const r = await tap.collectTapPayment(PI);
+    expect(r.ok).toBe(false);
+    const error = (r as { error: string }).error;
+    expect(error).toMatch(/lost track of the card reader/);
+    expect(error).not.toMatch(/internet/i);
+  });
+
   it("still names the fetch's own reason when this page did fetch and it failed", async () => {
     const tap = await freshBridge();
     vi.stubGlobal(

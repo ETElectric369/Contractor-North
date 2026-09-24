@@ -870,8 +870,12 @@ function classify(e: unknown): { kind: TapFailKind; sentence: string } | null {
     const f = lastTokenFailure;
     if (f) return { kind: f.kind, sentence: tokenSentence(f) };
     // Every fetch this page makes ends in an answer inside ~32 s (feedToken), and a failed one is
-    // remembered above. A 60-second wait with nothing remembered means no fetch ever ran.
-    if (/within 60 seconds/i.test(m)) return { kind: "listener-lost", sentence: TOKEN_UNHEARD_SENTENCE };
+    // remembered above. A 60-second wait with nothing remembered means no fetch ever ran. So does a
+    // 9050 with nothing remembered: since 2026-09-24 the patched plugin answers a token request
+    // that no page is listening for with an error at once, instead of letting it run out the 60 s.
+    if (/within 60 seconds|completed fetchConnectionToken with an error|No page is listening/i.test(m)) {
+      return { kind: "listener-lost", sentence: TOKEN_UNHEARD_SENTENCE };
+    }
     return { kind: "network", sentence: NETWORK_SENTENCE };
   }
   if (/network|offline|internet/i.test(m)) return { kind: "network", sentence: NETWORK_SENTENCE };

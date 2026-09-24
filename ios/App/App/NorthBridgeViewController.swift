@@ -1,4 +1,5 @@
 import Capacitor
+import WebKit
 
 // The shell's root view controller. Capacitor only knows about a local plugin if it is
 // registered on the bridge before the web view loads, and the hook for that is
@@ -11,8 +12,72 @@ import Capacitor
 // A mismatch registers the plugin on a view controller that is never on screen — no error,
 // no log line, just a missing plugin.
 class NorthBridgeViewController: CAPBridgeViewController {
+    /// WKWebView holds its navigation delegate weakly, so the relay lives here.
+    private var navigationRelay: NavigationFailureRelay?
+
     override func capacitorDidLoad() {
         super.capacitorDidLoad()
         bridge?.registerPluginInstance(TapToPayEducationPlugin())
+        installNavigationFailureRelay()
+    }
+
+    /// Capacitor builds its navigation delegate inside a final loadView and offers no hook to
+    /// replace it, so the relay wraps it instead: every callback still reaches Capacitor's own
+    /// handler, and one of them is also told to the page.
+    private func installNavigationFailureRelay() {
+        guard let webView = webView,
+              let inner = webView.navigationDelegate as? (NSObject & WKNavigationDelegate) else { return }
+        let relay = NavigationFailureRelay(inner: inner)
+        navigationRelay = relay
+        webView.navigationDelegate = relay
+    }
+}
+
+/// A NAVIGATION THAT FAILS BEFORE IT LANDS (the 09-23 sweep). Capacitor resets the bridge when a
+/// navigation STARTS, wiping every plugin listener, and when that navigation then fails (no
+/// signal, a timeout) the old page is still on screen and still running, with nothing listening:
+/// Tap to Pay could not hear the reader for the rest of the session, a notification tap went
+/// nowhere, and the tap that started it ("Didn't open new job") simply did nothing. The old page
+/// gets no event of its own, so this tells it: a `cn:navigation-failed` event it can report,
+/// explain, and recover from.
+final class NavigationFailureRelay: NSObject, WKNavigationDelegate {
+    private let inner: NSObject & WKNavigationDelegate
+
+    init(inner: NSObject & WKNavigationDelegate) {
+        self.inner = inner
+        super.init()
+    }
+
+    // Everything this class does not implement goes to Capacitor's handler untouched. WebKit asks
+    // respondsToSelector once, when the delegate is set, so both halves must answer for the inner
+    // handler's methods or WebKit would never call them.
+    override func responds(to aSelector: Selector!) -> Bool {
+        return super.responds(to: aSelector) || inner.responds(to: aSelector)
+    }
+
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        return inner.responds(to: aSelector) ? inner : super.forwardingTarget(for: aSelector)
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        inner.webView?(webView, didFailProvisionalNavigation: navigation, withError: error)
+
+        let ns = error as NSError
+        // Not failures: a navigation cancelled on purpose (Capacitor sends outside links to
+        // Safari by cancelling them), a load a policy change interrupted, or one a plugin handled.
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+        if ns.domain == "WebKitErrorDomain" && [101, 102, 204].contains(ns.code) { return }
+
+        let detail: [String: Any] = [
+            "domain": ns.domain,
+            "code": ns.code,
+            "url": (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? "",
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: detail),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView.evaluateJavaScript(
+            "window.dispatchEvent(new CustomEvent('cn:navigation-failed', { detail: \(json) }))",
+            completionHandler: nil
+        )
     }
 }
