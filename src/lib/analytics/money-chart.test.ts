@@ -6,6 +6,9 @@ import {
   buildMoneyChartData,
   compactMoney,
   defaultSeriesOn,
+  drawnMonth,
+  emptyChartSentence,
+  labelWidth,
   layoutMoneyChart,
   monthAxisLabels,
   monthRangeLabel,
@@ -317,5 +320,149 @@ describe("MoneyChartSvg: the markup", () => {
     expect(html).toContain('data-month="2026-06"');
     expect(heights(html)).toHaveLength(2);
     expect(html.match(/<button/g)).toHaveLength(2);
+  });
+});
+
+describe("review fixes (feat/money-chart-0924)", () => {
+  const owner = () => buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+
+  it("a ?w= month the chart does not draw is not selected: the page falls back to the segment", () => {
+    expect(drawnMonth("2026-08", owner())).toBe("2026-08");
+    expect(drawnMonth("2025-11", owner())).toBeNull(); // valid on the server, but before ET's trimmed start
+    expect(drawnMonth(null, owner())).toBeNull();
+    expect(drawnMonth("2026-08", null)).toBeNull();
+    // An office viewer's Collected-only chart starts in June, so the owner's April link selects nothing.
+    expect(drawnMonth("2026-04", buildMoneyChartData(etYear(), { ownerFigures: false, leftLabel: "Left For Erik" }))).toBeNull();
+  });
+
+  it("...and the chart itself never fades every month for a month it does not draw", () => {
+    const d = owner();
+    const on: MoneySeriesKey[] = ["collected", "left"];
+    const html = renderToStaticMarkup(
+      createElement(MoneyChartSvg, {
+        layout: layoutMoneyChart(d.months, on),
+        months: d.months,
+        series: d.series.filter((s) => on.includes(s.key)),
+        selected: "2025-11",
+        ariaLabel: "Money by Month",
+      }),
+    );
+    expect(html).not.toContain("opacity-40");
+    expect(html).not.toContain('aria-pressed="true"');
+  });
+
+  it("a tiny chart keeps whole-dollar ticks, and every tick reads differently", () => {
+    for (const [lo, hi] of [
+      [0, 1.23],
+      [0, 1],
+      [0, 3],
+      [0, 7.5],
+      [0, 10],
+      [-0.3, 1.23],
+      [0, 0.4],
+    ]) {
+      const s = niceScale(lo, hi);
+      expect(s.ticks.length).toBeGreaterThanOrEqual(3);
+      expect(s.ticks.length).toBeLessThanOrEqual(5);
+      for (const t of s.ticks) expect(Number.isInteger(t)).toBe(true);
+      const labels = s.ticks.map(compactMoney);
+      expect(new Set(labels).size).toBe(labels.length);
+      expect(s.hi).toBeGreaterThanOrEqual(hi);
+    }
+    expect(niceScale(0, 1.23).ticks).toEqual([0, 1, 2]);
+    expect(niceScale(0, 10).ticks).toEqual([0, 5, 10]);
+  });
+
+  it("a figure under $10 keeps its cents; a -30¢ month never reads $0", () => {
+    expect(compactMoney(1.23)).toBe("$1.23");
+    expect(compactMoney(-0.3)).toBe("−$0.30");
+    expect(compactMoney(0.3)).toBe("$0.30");
+    expect(compactMoney(5)).toBe("$5");
+    expect(compactMoney(0.001)).toBe("$0");
+    expect(compactMoney(-47.44)).toBe("−$47");
+  });
+
+  it("the empty chart says 'nothing yet' only when nothing was ever received", () => {
+    const start = ownerMoneyChartWindow(TODAY).start; // 2025-10-01
+    expect(emptyChartSentence(null, start)).toBe("Nothing received yet. Your first payment will show up here.");
+    expect(emptyChartSentence("2025-06-10", start)).toBe("Nothing received in the last 12 months.");
+    expect(emptyChartSentence("2026-06-11", start)).toBe("Nothing received yet. Your first payment will show up here.");
+  });
+
+  it("a cost series that is $0 in every month shown gets no chip (a solo owner has no Crew Pay chip)", () => {
+    const solo = money([row("2026-07", { received: 5000, materialsAndBills: 900 }), row("2026-08", { received: 4000, businessCostsTotal: 120 })]);
+    const d = buildMoneyChartData(solo, { ownerFigures: true, leftLabel: "Left For You" });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "business"]);
+    for (const m of d.months) expect(Object.keys(m.values)).not.toContain("crewPay");
+    // Collected and Left are always offered, even with no cost at all.
+    const plain = money([row("2026-08", { received: 4000 })]);
+    expect(buildMoneyChartData(plain, { ownerFigures: true, leftLabel: "Left For You" }).series.map((s) => s.key)).toEqual(["collected", "left"]);
+  });
+
+  it("every value on is $0: the frame keeps its full height and says so", () => {
+    const costsOnly = chartMonths([["2026-04", 0, -47.44], ["2026-05", 0, -138.62]]);
+    const normal = layoutMoneyChart(chartMonths([["2026-07", 21000, 4000]]), ["collected", "left"]);
+    const flat = layoutMoneyChart(costsOnly, ["collected"]);
+    expect(flat.flat).toBe(true);
+    expect(normal.flat).toBe(false);
+    expect(flat.height).toBeGreaterThanOrEqual(normal.height - 20);
+    const d = owner();
+    const html = renderToStaticMarkup(
+      createElement(MoneyChartSvg, { layout: flat, months: costsOnly, series: d.series.filter((s) => s.key === "collected"), selected: null, ariaLabel: "x" }),
+    );
+    expect(html).toContain("Collected is $0 in every month shown.");
+  });
+
+  it("EDGES: every figure lies inside the plot, ET with four series on (Erik's toggles) and a month-to-date loss", () => {
+    const within = (l: ReturnType<typeof layoutMoneyChart>) => {
+      for (const [gi, g] of l.groups.entries()) {
+        const centre = l.padLeft + gi * l.minGroupWidth + l.minGroupWidth / 2;
+        for (const b of g.bars) {
+          if (!b.label) continue;
+          const half = (labelWidth(b.label) * 1.1) / 2; // the real font runs a little wider than the estimate
+          expect(centre + b.labelX - half).toBeGreaterThanOrEqual(0);
+          expect(centre + b.labelX + half).toBeLessThanOrEqual(l.minPlotWidth);
+        }
+      }
+    };
+    const d = owner();
+    const four = layoutMoneyChart(d.months, ["collected", "left", "materials", "crewPay"]);
+    expect(four.padRight).toBeGreaterThan(0); // Sep's Crew Pay "$3.4k" needs room past the last group
+    within(four);
+    within(layoutMoneyChart(d.months, ["collected", "left"]));
+    // Seven months, the current one a month-to-date loss: "−$1.2k" on the last Left bar.
+    const seven = chartMonths([
+      ["2026-04", 0, -47.44],
+      ["2026-05", 0, -138.62],
+      ["2026-06", 12503.98, 5188.62],
+      ["2026-07", 20754.81, 14849.2],
+      ["2026-08", 19132.53, 11482.3],
+      ["2026-09", 20516.56, 13155.63],
+      ["2026-10", 0, -1200],
+    ]);
+    const l7 = layoutMoneyChart(seven, ["collected", "left"]);
+    within(l7);
+    // The rendered plot carries the room: the groups sit between it.
+    const html = renderToStaticMarkup(
+      createElement(MoneyChartSvg, { layout: four, months: d.months, series: d.series.filter((s) => s.key !== "business"), selected: null, ariaLabel: "x" }),
+    );
+    expect(html).toContain(`padding-right:${four.padRight}px`);
+    expect(html).toContain(`right:${four.padRight}px`);
+  });
+
+  it("PHONE: ET's six months x 2 bars still fit 375px with the edge room", () => {
+    const l = layoutMoneyChart(owner().months, ["collected", "left"]);
+    expect(l.axisWidth + l.minPlotWidth).toBeLessThanOrEqual(375 - 32 - 2 - 24);
+  });
+
+  it("small chart text reads at slate-500 or darker, and a picked month dims only the other months' bars", () => {
+    const d = owner();
+    const on: MoneySeriesKey[] = ["collected", "left"];
+    const html = renderToStaticMarkup(
+      createElement(MoneyChartSvg, { layout: layoutMoneyChart(d.months, on), months: d.months, series: d.series.filter((s) => on.includes(s.key)), selected: "2026-08", ariaLabel: "x" }),
+    );
+    expect(html).not.toContain("slate-400");
+    // The dim wraps bars only: no figure <text> sits inside an opacity-40 group.
+    for (const m of html.matchAll(/<g class="[^"]*opacity-40">([\s\S]*?)<\/g>/g)) expect(m[1]).not.toContain("<text");
   });
 });
