@@ -8,6 +8,7 @@ import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "l
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { createClient } from "@/lib/supabase/client";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
+import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
@@ -84,7 +85,9 @@ export function GlobalAssistant() {
     // can start the moment the panel opens — tap → talk, one motion.
     try {
       const synth = window.speechSynthesis;
-      if (synth) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
+      // Not in the app: there the browser voice runs in the app's own process, and priming it switches
+      // the app's audio session on against WebKit's (the crackle, 2026-09-24). See quietBrowserVoice.
+      if (synth && !isNativeShell()) { const u = new SpeechSynthesisUtterance(" "); u.volume = 0; synth.speak(u); }
     } catch {}
     unlockAudio();
     void standDownReaderForVoice(); // the Tap to Pay reader and Nort's voice don't share the phone (native-tap)

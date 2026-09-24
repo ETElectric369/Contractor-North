@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { NO_VOICE_LINE, TRY_AGAIN_LINE } from "@/lib/voice-failure";
 import { speakSmart, unlockAudio, stopSpeaking, splitSentences, SpeakQueue, startBargeInMonitor } from "@/lib/tts";
+import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import { classifyConfirmReply } from "@/lib/confirm-parse";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
@@ -1103,7 +1104,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // Prime iOS audio INSIDE this tap so the reply can be spoken after the round-trip.
     try {
       const synth = window.speechSynthesis;
-      if (synth) { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; synth.speak(w); }
+      // Not in the app: priming the in-process browser voice fights WebKit for the speaker (see tts quietBrowserVoice).
+      if (synth && !isNativeShell()) { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; synth.speak(w); }
     } catch {}
     unlockAudio();
     void standDownReaderForVoice(); // the Tap to Pay reader and Nort's voice don't share the phone (native-tap)

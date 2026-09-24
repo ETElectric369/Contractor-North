@@ -107,15 +107,17 @@ final class NavigationFailureRelay: NSObject, WKNavigationDelegate {
 /// DIAGNOSTIC, Debug builds only (2026-09-24). Nort's spoken replies crackle in the app and play clean
 /// in Safari on the same phone; the mic, the player and the Tap to Pay reader are ruled out. What is
 /// left is the audio session the app's web view plays through, which the page cannot see. This prints
-/// it to the console (read over the cable with `devicectl … --console`): once at start, on every route
-/// change and interruption, and whenever any of it changes, checked twice a second.
+/// it to the console (read over the cable with `devicectl … --console`): once at start and on every
+/// route change, interruption and media-services reset. Event-driven only: an earlier version also
+/// polled the session twice a second, and polling the audio server on a half-second beat while
+/// hunting a half-second crackle only muddies the test.
 final class AudioSessionProbe {
     static let shared = AudioSessionProbe()
-    private var timer: Timer?
-    private var last = ""
+    private var started = false
 
     func start() {
-        guard timer == nil else { return }
+        guard !started else { return }
+        started = true
         let center = NotificationCenter.default
         center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
             let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 0
@@ -129,9 +131,6 @@ final class AudioSessionProbe {
             self?.log("mediaServicesReset", force: true)
         }
         log("start", force: true)
-        timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            self?.log("changed", force: false)
-        }
     }
 
     private func snapshot() -> String {
@@ -145,10 +144,7 @@ final class AudioSessionProbe {
     }
 
     private func log(_ why: String, force: Bool) {
-        let now = snapshot()
-        guard force || now != last else { return }
-        last = now
-        print("[AudioProbe] \(why): \(now)")
+        print("[AudioProbe] \(why): \(snapshot())")
     }
 }
 #endif

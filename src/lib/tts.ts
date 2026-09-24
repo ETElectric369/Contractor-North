@@ -69,6 +69,21 @@ function releaseElement(a: HTMLAudioElement | null) {
   } catch {}
 }
 
+/**
+ * THE BROWSER VOICE LIVES IN THE APP'S PROCESS (research, 2026-09-24). In a WKWebView, speechSynthesis
+ * is an AVSpeechSynthesizer in the HOST app, on the app's own audio session, while the neural voice
+ * plays in WebKit's process. Every speechSynthesis call can switch the app's session on, and a
+ * cancel() ran before EVERY sentence of every reply "just in case": a small fight over the speaker at
+ * each sentence boundary, heard as a crackle in the app and never in Safari (which owns both sides).
+ * So cancel only when that voice is actually speaking or has something queued.
+ */
+export function quietBrowserVoice() {
+  try {
+    const synth = window.speechSynthesis;
+    if (synth && (synth.speaking || synth.pending)) synth.cancel();
+  } catch {}
+}
+
 /** Call from a user gesture (the mic tap) so neural audio can play afterward on iOS. */
 export function unlockAudio() {
   const a = getAudio();
@@ -82,7 +97,7 @@ export function unlockAudio() {
 /** Stop any in-flight speech immediately (neural audio + browser voice). Used by the
  *  voice-mode Stop button so the user can cut Claude off mid-sentence, like chat. */
 export function stopSpeaking() {
-  try { window.speechSynthesis?.cancel(); } catch {}
+  quietBrowserVoice();
   try {
     if (audioEl) {
       audioEl.onended = null;
@@ -197,7 +212,7 @@ export function speakSmart(text: string, onEnd?: () => void) {
       const url = URL.createObjectURL(new Blob([buf], { type: "audio/mpeg" }));
       const a = getAudio();
       if (!a) { URL.revokeObjectURL(url); browserSpeak(t, fire); return; }
-      try { window.speechSynthesis?.cancel(); } catch {}
+      quietBrowserVoice();
       a.onended = () => { URL.revokeObjectURL(url); releaseElement(a); fire(); };
       a.src = url;
       a.play().catch(() => { a.onended = null; URL.revokeObjectURL(url); releaseElement(a); browserSpeak(t, fire); });
@@ -290,10 +305,9 @@ function playClipUrl(url: string): Promise<void> {
       a.onerror = null;
       try { a.removeEventListener("pause", onPause); } catch {}
       try { URL.revokeObjectURL(url); } catch {}
-      releaseElement(a);
       resolve();
     };
-    try { window.speechSynthesis?.cancel(); } catch {}
+    quietBrowserVoice();
     a.onended = finish;
     a.onerror = finish;
     a.src = url;
@@ -355,6 +369,9 @@ export class SpeakQueue {
   private fire() {
     if (this.fired) return;
     this.fired = true;
+    // The lock-screen card clears once the whole reply is done. Emptying the element after EVERY
+    // sentence made WebKit tear its playback down and set it up again between sentences.
+    releaseElement(audioEl);
     try { this.onDone?.(); } catch {}
   }
 
