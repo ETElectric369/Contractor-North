@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
@@ -13,10 +13,13 @@ import { useDraft } from "@/lib/use-draft";
 import { useToast } from "@/components/toast";
 import { createInvoiceFromQuote, createBlankInvoice } from "./actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { createParamClaim } from "@/lib/param-claim";
 
 // The billing page mounts this button TWICE (header + empty state); only the
 // FIRST mounted instance may answer ?new=1 or two modals would stack.
-let newParamClaimed = false;
+// Named per holder (lib/param-claim), so a strip that died on a dropped connection can't
+// leave this door shut for the rest of the session.
+const newParam = createParamClaim();
 
 interface QuoteOption {
   id: string;
@@ -100,6 +103,10 @@ export function NewInvoiceButton({
     if (Number.isFinite(rate) && rate > 0) setTaxRate(rate);
   }
 
+  // This instance's name on the ?new=1 claim; it lets go on unmount as well as below.
+  const claimant = useId();
+  useEffect(() => () => newParam.release(claimant), [claimant]);
+
   // Open straight from the quick-add menu's "New invoice" (/billing?new=1), then
   // strip the param so a refresh or back-button doesn't reopen the form.
   // ?customer=<id> may ride along (the customer page's ⋯ New-invoice door) to
@@ -107,11 +114,10 @@ export function NewInvoiceButton({
   // an explicit "invoice THIS customer" intent.
   useEffect(() => {
     if (searchParams.get("new") !== "1") {
-      newParamClaimed = false; // param gone → release for the next quick-add tap
+      newParam.release(claimant); // param gone → release for the next quick-add tap
       return;
     }
-    if (newParamClaimed) return;
-    newParamClaimed = true;
+    if (!newParam.take(claimant)) return;
     const preset = searchParams.get("customer");
     if (preset && customers.some((c) => c.id === preset)) {
       setMode("blank"); // the customer select only exists on a blank invoice
@@ -126,7 +132,7 @@ export function NewInvoiceButton({
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     // openModal is stable enough for this once-per-param effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, pathname, router]);
+  }, [searchParams, pathname, router, claimant]);
 
   // Confirmed close (the Modal's two-tap guard has already asked when dirty) —
   // an explicit discard, so the stored draft goes too.

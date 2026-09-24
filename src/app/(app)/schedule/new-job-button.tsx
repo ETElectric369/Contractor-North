@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useId, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { useToast } from "@/components/toast";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { addressPrefillOnCustomerPick } from "@/lib/schedule-options";
 import { createJob } from "./actions";
+import { createParamClaim } from "@/lib/param-claim";
 
 // The new-job form offers the spine's non-terminal statuses (a brand-new job is never
 // complete/cancelled), in this form's "most likely first" order. Derived from
@@ -54,7 +55,9 @@ interface JobForm {
 
 // The jobs page mounts this button TWICE (header + empty state); only the
 // FIRST mounted instance may answer ?new=1 or two modals would stack.
-let newParamClaimed = false;
+// Named per holder (lib/param-claim), so a strip that died on a dropped connection can't
+// leave this door shut for the rest of the session.
+const newParam = createParamClaim();
 
 export function NewJobButton({
   customers,
@@ -120,21 +123,24 @@ export function NewJobButton({
   if (initialSnap.current === null) initialSnap.current = JSON.stringify(emptyForm());
   const dirty = JSON.stringify(form) !== initialSnap.current;
 
+  // This instance's name on the ?new=1 claim; it lets go on unmount as well as below.
+  const claimant = useId();
+  useEffect(() => () => newParam.release(claimant), [claimant]);
+
   // Open straight from the quick-add menu's "New job" (/jobs?new=1), then strip
   // the param so a refresh or back-button doesn't reopen the form.
   useEffect(() => {
     if (searchParams.get("new") !== "1") {
-      newParamClaimed = false; // param gone → release for the next quick-add tap
+      newParam.release(claimant); // param gone → release for the next quick-add tap
       return;
     }
-    if (newParamClaimed) return;
-    newParamClaimed = true;
+    if (!newParam.take(claimant)) return;
     setOpen(true);
     const params = new URLSearchParams(Array.from(searchParams.entries()));
     params.delete("new");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [searchParams, pathname, router]);
+  }, [searchParams, pathname, router, claimant]);
 
   function openModal() {
     if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
