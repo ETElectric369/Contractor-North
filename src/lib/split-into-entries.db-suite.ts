@@ -1,5 +1,5 @@
 /**
- * THE SPLIT-INTO-ENTRIES DATABASE SUITE (migrations 0288 + 0289), written once and run against any
+ * THE SPLIT-INTO-ENTRIES DATABASE SUITE (migrations 0288 + 0290), written once and run against any
  * Postgres that has them: split-into-entries.integration.test.ts runs it against the production
  * database inside ONE transaction that is always rolled back (the billing test's pattern), so
  * nothing it creates survives.
@@ -11,7 +11,12 @@
  * "now", and it picks a person with nothing on the clock around now.
  *
  * Before the migrations are applied, each test says so on the console and returns: loud, not a
- * green lie, and the rest of the run still goes.
+ * green lie, and the rest of the run still goes. That is also what keeps CI green in the minutes
+ * between a push and the migration it needs being applied.
+ *
+ * 0289 (the one-time conversion of the old splits) had its own cases here: the carve, its proofs and
+ * the freeze. 0290 dropped the old split table and the carve with it, so those cases went too, and
+ * this file no longer names the table (tests/no-time-allocations.test.ts has no exemption now).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { aggregatePayrollEntries } from "./payroll-math";
@@ -27,7 +32,7 @@ const iso = (v: unknown) => new Date(v as string).toISOString();
 export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
   let c: SqlClient;
   let has0288 = false;
-  let has0289 = false;
+  let has0290 = false;
   let orgId = "";
   let staffId = "";
   let techId = "";
@@ -73,8 +78,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
       return { message: String(e?.message ?? e), detail: e?.detail };
     }
   };
-  const needs = (what: "0288" | "0289") => {
-    const ok = what === "0288" ? has0288 : has0289;
+  const needs = (what: "0288" | "0290") => {
+    const ok = what === "0288" ? has0288 : has0290;
     if (!ok) console.warn(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
     return ok;
   };
@@ -155,18 +160,6 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
     const ph = args.map((_, i) => `$${i + 1}`).join(", ");
     return (await one(`select public.${fn}(${ph}) as r`, args)).r;
   };
-  /** An old-style split row, for the carve and the "still has an old split" refusal. 0289 freezes the
-   *  table; cn.legacy_fixture is the door it keeps for exactly this, on a direct connection only. */
-  const alloc = async (entryId: string, job: string | null, hours: number, sort: number, code: string | null = null) => {
-    await c.query("select set_config('cn.legacy_fixture', 'on', true)");
-    const r = await one(
-      `insert into public.time_allocations (time_entry_id, org_id, job_id, job_code, hours, sort_order)
-       values ($1, $2, $3, $4, $5, $6) returning id`,
-      [entryId, orgId, job, code, hours, sort],
-    );
-    await c.query("select set_config('cn.legacy_fixture', '', true)");
-    return r.id as string;
-  };
 
   beforeAll(async () => {
     c = await connect();
@@ -174,11 +167,13 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
     const fns = (
       await c.query(
         `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public' and p.proname in ('split_time_entry', 'carve_legacy_allocations')`,
+          where n.nspname = 'public' and p.proname = 'split_time_entry'`,
       )
     ).rows.map((r) => r.proname);
     has0288 = fns.includes("split_time_entry");
-    has0289 = fns.includes("carve_legacy_allocations");
+    // 0290 dropped the old split table. The name is built so no source file spells it.
+    const oldTable = ["time", "allocations"].join("_");
+    has0290 = has0288 && (await one("select to_regclass($1) is null as gone", [`public.${oldTable}`])).gone === true;
 
     // An org with active staff and an active tech, and staff of some OTHER org. Without them the
     // boundary cannot be exercised, and that has to be loud (tests/ci-guard.test.ts), not a skip.
@@ -319,8 +314,6 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         const closed = await entry({ in: "2001-01-04T16:00:00Z", out: "2001-01-04T22:00:00Z", lunch: 30 });
         const ghost = await entry({ in: "2001-01-04T23:00:00Z", out: "2001-01-04T23:00:00Z" });
         const open = idleId ? await entry({ profile: idleId, in: "2001-01-05T16:00:00Z", status: "open" }) : null;
-        const legacy = await entry({ in: "2001-01-06T16:00:00Z", out: "2001-01-06T20:00:00Z" });
-        await alloc(legacy, jobA, 2, 0);
         const split = (id: string, at: string, lunch: string | null = null) =>
           refusal(() => rpc("split_time_entry", [id, at, jobB, null, lunch, null]));
 
@@ -330,7 +323,6 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect((await split(closed, "2001-01-04T23:30:00Z"))?.message).toMatch(/Pick a split time inside the shift/);
         expect((await split(closed, "2001-01-04T16:00:30Z", "right"))?.message).toMatch(/at least a minute/);
         expect((await split(closed, "2001-01-04T16:20:00Z", "left"))?.message).toMatch(/30-minute lunch does not fit in the first part/);
-        expect((await split(legacy, "2001-01-06T18:00:00Z"))?.message).toMatch(/old-style split/);
         const noJob = await refusal(() => rpc("split_time_entry", [closed, "2001-01-04T19:00:00Z", null, " ", null, null]));
         expect(noJob?.message).toMatch(/Pick a job or a time code/);
 
@@ -725,203 +717,73 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect((await row(open)).status).toBe("open");
       });
     });
-
-    it("the old table's ceiling now binds the server and staff on INSERT too (the Jul 14 extra row)", async () => {
-      if (!needs("0288")) return;
-      await step(async () => {
-        const id = await entry({ in: "2001-01-21T18:30:00Z", out: "2001-01-22T00:30:00Z", lunch: 30 });
-        await alloc(id, jobA, 4.5, 0);
-        await alloc(id, jobA, 1, 1); // 5.5 h: the whole shift
-        const extra = await refusal(() => alloc(id, jobB, 1, 2));
-        expect(extra?.message).toMatch(/more hours than the shift worked/);
-      });
-    });
   });
 
-  // ── 0289: the carve ───────────────────────────────────────────────────────────────────────────
-  describe("the carve (0289)", () => {
-    it("carves the three ET shapes with every proof, and a dry run changes nothing", async () => {
-      if (!needs("0289")) return;
+  // ── 0290: the old table is gone ───────────────────────────────────────────────────────────────
+  describe("the old split table is gone (0290)", () => {
+    it("the table and every function that served it are gone, and the archive stays", async () => {
+      if (!needs("0290")) return;
+      const oldTable = ["time", "allocations"].join("_");
+      const naming = (
+        await c.query(
+          `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.prosrc ilike '%' || $1 || '%'`,
+          [oldTable],
+        )
+      ).rows.map((r) => r.proname);
+      expect(naming).toEqual([]);
+      const served = (
+        await c.query(
+          `select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public'
+              and p.proname ilike '%alloc%'`,
+        )
+      ).rows.map((r) => r.proname);
+      // guard_time_allocation, guard_billed_time_allocation, refuse_time_allocation_insert, the frozen
+      // replace RPC and carve_legacy_allocations: nothing else in public was ever named for them.
+      expect(served).toEqual([]);
+      expect((await one("select to_regclass($1) is not null as kept", [`archive.${oldTable}`])).kept).toBe(true);
+    });
+
+    // The three functions 0290 rewrote (guard_billed_time_entry, guard_invoice_item_claim,
+    // split_time_entry) must behave the same before and after it, so these run on both sides of it.
+    it("a billed shift still cannot be deleted, and an unbilled one can", async () => {
+      if (!needs("0288")) return;
       await step(async () => {
-        // E1, Jul 14's shape: 10:30-16:30 Pacific, lunch, 4.5 h on A (billed with the shift on a PAID
-        // invoice) + 1 h on B (on a draft). Erik: B was the LAST hour.
-        const e1 = await entry({ profile: staffId, in: "2001-02-01T18:30:00Z", out: "2001-02-02T00:30:00Z", lunch: 30 });
-        const a1 = await alloc(e1, jobA, 4.5, 1);
-        const a2 = await alloc(e1, jobB, 1, 0); // recorded first, worked last: p_order decides
-        // E2, Jul 31's shape: on B, 3.8 h on C first (paid invoice) then 3.0 h on B (draft).
-        const e2 = await entry({ profile: staffId, job: jobB, in: "2001-02-03T17:14:00Z", out: "2001-02-04T00:32:00Z", lunch: 30 });
-        const a3 = await alloc(e2, jobC, 3.8, 0);
-        const a4 = await alloc(e2, jobB, 3, 1);
-        // E3, Aug 5's shape: an unlabeled row and a same-job row, both on the draft: they merge back.
-        const e3 = await entry({ profile: staffId, job: jobB, in: "2001-02-05T22:00:00Z", out: "2001-02-06T01:30:32.917Z" });
-        const a5 = await alloc(e3, null, 1.28, 0);
-        const a6 = await alloc(e3, jobB, 2.23, 1);
+        const billed = await entry({ in: "2001-02-20T16:00:00Z", out: "2001-02-20T20:00:00Z" });
+        const inv = await invoice("sent", jobA);
+        await line(inv.id, [billed], 4);
+        const r = await refusal(() => c.query("delete from public.time_entries where id = $1", [billed]));
+        expect(r?.message).toBe(`${inv.number} already bills this shift`);
+        expect(await row(billed)).toBeTruthy();
 
-        const paidA = await invoice("paid", jobA);
-        const paidLine = await line(paidA.id, [e1, a1], 26);
-        const paidC = await invoice("paid", jobC);
-        const paidCLine = await line(paidC.id, [a3]);
-        const draftB = await invoice("draft", jobB);
-        const draftLine = await line(draftB.id, [a2, a4, a5, a6], 50.5);
-        const paidBefore = [await lineIds(paidLine), await lineIds(paidCLine)];
-        const order = { [e1]: [a1, a2] };
-
-        const dry = await one("select public.carve_legacy_allocations(true, $1::uuid[], $2::jsonb) as r", [[e1, e2, e3], JSON.stringify(order)]);
-        expect(dry.r.dry).toBe(true);
-        expect(dry.r.entries).toBe(3);
-        expect(iso((await row(e1)).clock_out)).toBe("2001-02-02T00:30:00.000Z");
-        expect(num((await one("select count(*) as n from public.time_allocations where time_entry_id = any($1::uuid[])", [[e1, e2, e3]])).n)).toBe(6);
-
-        const real = await one("select public.carve_legacy_allocations(false, $1::uuid[], $2::jsonb) as r", [[e1, e2, e3], JSON.stringify(order)]);
-        expect(real.r.dry).toBe(false);
-
-        // E1: A 10:30-15:30 with the lunch (keeps the id), B 15:30-16:30 as the old row's id.
-        const k1 = await row(e1);
-        expect([iso(k1.clock_in), iso(k1.clock_out), num(k1.lunch_minutes), k1.job_id]).toEqual([
-          "2001-02-01T18:30:00.000Z", "2001-02-01T23:30:00.000Z", 30, jobA,
-        ]);
-        const p2 = await row(a2);
-        expect([iso(p2.clock_in), iso(p2.clock_out), p2.job_id, p2.split_from, p2.split_how]).toEqual([
-          "2001-02-01T23:30:00.000Z", "2001-02-02T00:30:00.000Z", jobB, e1, "converted",
-        ]);
-        // E2: C first 10:14-14:02, then B (home) 14:02-17:32 with the lunch.
-        const p3 = await row(a3);
-        expect([iso(p3.clock_in), iso(p3.clock_out), p3.job_id]).toEqual(["2001-02-03T17:14:00.000Z", "2001-02-03T21:02:00.000Z", jobC]);
-        const k2 = await row(e2);
-        expect([iso(k2.clock_in), iso(k2.clock_out), num(k2.lunch_minutes)]).toEqual(["2001-02-03T21:02:00.000Z", "2001-02-04T00:32:00.000Z", 30]);
-        // E3: one whole entry again, untouched.
-        const k3 = await row(e3);
-        expect([iso(k3.clock_in), iso(k3.clock_out), k3.job_id]).toEqual(["2001-02-05T22:00:00.000Z", "2001-02-06T01:30:32.917Z", jobB]);
-        expect(await row(a4)).toBeUndefined();
-        expect(await row(a5)).toBeUndefined();
-
-        // Worked seconds per entry family are exactly what they were.
-        expect(await workedS([e1, a2])).toBe(5.5 * 3600);
-        expect(await workedS([e2, a3])).toBe(24480);
-        expect(await workedS([e3])).toBe(12632.917);
-
-        // Paid lines: byte-identical. The draft: + e2, + e3; the retired ids off; a2 stays (it IS an entry now).
-        expect([await lineIds(paidLine), await lineIds(paidCLine)]).toEqual(paidBefore);
-        expect(new Set(await lineIds(draftLine))).toEqual(new Set([a2, e2, e3]));
-        expect(num((await one("select quantity from public.invoice_items where id = $1", [draftLine])).quantity)).toBe(50.5);
-
-        // The old rows: archived with where their hours went, and gone from the live table.
-        const arch = (await c.query("select id, became, carve_note from archive.time_allocations where time_entry_id = any($1::uuid[])", [[e1, e2, e3]])).rows;
-        const note = Object.fromEntries(arch.map((x) => [x.id, [x.became, x.carve_note]]));
-        expect(note[a1]).toEqual([e1, "home"]);
-        expect(note[a2]).toEqual([a2, "piece"]);
-        expect(note[a3]).toEqual([a3, "piece"]);
-        expect(note[a4]).toEqual([e2, "home"]);
-        expect(note[a5]).toEqual([e3, "home"]);
-        expect(note[a6]).toEqual([e3, "home"]);
-        expect(num((await one("select count(*) as n from public.time_allocations where time_entry_id = any($1::uuid[])", [[e1, e2, e3]])).n)).toBe(0);
+        const free = await entry({ in: "2001-02-21T16:00:00Z", out: "2001-02-21T20:00:00Z" });
+        expect(await refusal(() => c.query("delete from public.time_entries where id = $1", [free]))).toBeNull();
       });
     });
 
-    it("keeps a paid split paid exactly: lock, rate and day copied, gross unchanged", async () => {
-      if (!needs("0289")) return;
+    it("a shift billed on one invoice is refused on a second, and the refusal still calls it hours", async () => {
+      if (!needs("0288")) return;
       await step(async () => {
-        const paidAt = "2001-02-20T00:00:00.000Z";
-        const e = await entry({ in: "2001-02-07T20:30:00Z", out: "2001-02-08T00:00:00Z", rate: 40, paidAt });
-        const home = await alloc(e, jobA, 1, 0);
-        const other = await alloc(e, jobB, 2.5, 1);
-        await one("select public.carve_legacy_allocations(false, $1::uuid[], null) as r", [[e]]);
-        const p = await row(other);
-        expect([iso(p.paid_at), num(p.rate_override)]).toEqual([paidAt, 40]);
-        expect(iso((await row(e)).clock_out)).toBe("2001-02-07T21:30:00.000Z");
-        expect(await workedS([e, other])).toBe(3.5 * 3600);
-        expect(home).toBeTruthy();
+        const id = await entry({ in: "2001-02-22T16:00:00Z", out: "2001-02-22T20:00:00Z" });
+        const first = await invoice("sent", jobA);
+        await line(first.id, [id], 4);
+        const second = await invoice("draft", jobA);
+        const r = await refusal(() => line(second.id, [id], 4));
+        expect(r?.message).toBe(`hours already billed on ${first.number}`);
       });
     });
 
-    it("trims an unclaimed, unpaid over-split to the clock, last non-home piece first", async () => {
-      if (!needs("0289")) return;
+    it("split_time_entry cuts a shift with or without the old table", async () => {
+      if (!needs("0288")) return;
       await step(async () => {
-        const e = await entry({ in: "2001-02-09T16:00:00Z", out: "2001-02-09T18:00:00Z" }); // 2 h
-        await alloc(e, jobA, 1, 0);
-        const b = await alloc(e, jobB, 0.5, 1);
-        await c.query("update public.time_allocations set hours = 1.5 where id = $1", [b]); // 2.5 h of rows now
-        const r = await one("select public.carve_legacy_allocations(false, $1::uuid[], null) as r", [[e]]);
-        expect(r.r.trims).toHaveLength(1);
-        expect(num(r.r.trims[0].trimmed_seconds)).toBe(1800);
-        expect(iso((await row(e)).clock_out)).toBe("2001-02-09T17:00:00.000Z");
-        expect(iso((await row(b)).clock_in)).toBe("2001-02-09T17:00:00.000Z");
-        expect(await workedS([e, b])).toBe(2 * 3600);
-      });
-    });
-
-    it("stops the whole run on a billed split that disagrees with its clock, and on an open one", async () => {
-      if (!needs("0289")) return;
-      await step(async () => {
-        const e = await entry({ in: "2001-02-10T16:00:00Z", out: "2001-02-10T18:00:00Z" });
-        await alloc(e, jobA, 1, 0);
-        const b = await alloc(e, jobB, 0.5, 1);
-        await c.query("update public.time_allocations set hours = 1.5 where id = $1", [b]);
-        const inv = await invoice("draft", jobB);
-        await line(inv.id, [b]);
-        const r = await refusal(() => one("select public.carve_legacy_allocations(false, $1::uuid[], null)", [[e]]));
-        expect(r?.message).toMatch(/worked 2\.0000 h but its split rows total 2\.5000 h, and it is billed/);
-        expect(num((await one("select count(*) as n from public.time_allocations where time_entry_id = $1", [e])).n)).toBe(2);
-
-        if (idleId) {
-          const open = await entry({ profile: idleId, in: "2001-02-11T16:00:00Z", status: "open" });
-          await alloc(open, jobA, 0.5, 0);
-          const r2 = await refusal(() => one("select public.carve_legacy_allocations(false, $1::uuid[], null)", [[open]]));
-          expect(r2?.message).toMatch(/still open/);
-        }
-
-        const wrongOrder = await refusal(() =>
-          one("select public.carve_legacy_allocations(false, $1::uuid[], $2::jsonb)", [[e], JSON.stringify({ [e]: [e] })]),
-        );
-        expect(wrongOrder?.message).toMatch(/names a row that is not on that entry/);
-      });
-    });
-
-    it("an entry whose rows cover its clock on another job or code takes that job, and its notes say so", async () => {
-      if (!needs("0289")) return;
-      await step(async () => {
-        // On job A, one code-only row covering the whole clock: the entry becomes that DRIVE time.
-        const e = await entry({ in: "2001-02-13T16:00:00Z", out: "2001-02-13T18:00:00Z", code: null });
-        await alloc(e, null, 2, 0, "DRIVE");
-        await one("select public.carve_legacy_allocations(false, $1::uuid[], null) as r", [[e]]);
-        const k = await one("select job_id, job_code, notes from public.time_entries where id = $1", [e]);
-        expect(k.job_id).toBeNull();
-        expect(k.job_code).toBe("DRIVE");
-        expect(k.notes).toBe("[Rebuilt from an old split: this time was recorded on DRIVE, not TEST split job A.]");
-        expect(await workedS([e])).toBe(2 * 3600);
-      });
-    });
-
-    it("after 0289 the old table takes no rows from anyone but the fixture door, and replace_time_allocations says why", async () => {
-      if (!needs("0289")) return;
-      await step(async () => {
-        const e = await entry({ in: "2001-02-12T16:00:00Z", out: "2001-02-12T18:00:00Z" });
-        const frozen = await refusal(() =>
-          c.query("insert into public.time_allocations (time_entry_id, org_id, job_id, hours) values ($1, $2, $3, 1)", [e, orgId, jobA]),
-        );
-        expect(frozen?.message).toMatch(/Splits are ordinary entries now/);
+        const id = await entry({ in: "2001-02-23T16:00:00Z", out: "2001-02-23T20:00:00Z" });
         await as(staffId);
-        const viaRpc = await refusal(() => rpc("replace_time_allocations", [e, JSON.stringify([{ hours: 1 }])]));
-        expect(viaRpc?.message).toMatch(/Splits are ordinary entries now/);
-        // The fixture flag means nothing to a PostgREST caller.
-        await c.query("select set_config('cn.legacy_fixture', 'on', true)");
-        const staffInsert = await refusal(() =>
-          c.query("insert into public.time_allocations (time_entry_id, org_id, job_id, hours) values ($1, $2, $3, 1)", [e, orgId, jobA]),
-        );
-        expect(staffInsert?.message).toMatch(/Splits are ordinary entries now/);
+        const r = await rpc("split_time_entry", [id, "2001-02-23T18:00:00Z", jobB, null, null, null]);
+        await asServer();
+        expect(r.right_id).toBeTruthy();
+        expect(await workedS([id, r.right_id])).toBe(4 * 3600);
       });
-    });
-
-    it("the carve is not callable by any client role", async () => {
-      if (!needs("0289")) return;
-      const { rows } = await c.query(
-        `select has_function_privilege('authenticated', p.oid, 'execute') as authed,
-                has_function_privilege('anon', p.oid, 'execute') as anon,
-                has_function_privilege('service_role', p.oid, 'execute') as service
-           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-          where n.nspname = 'public' and p.proname = 'carve_legacy_allocations'`,
-      );
-      expect(rows[0]).toEqual({ authed: false, anon: false, service: false });
     });
   });
 }
