@@ -4,6 +4,7 @@ import { generateDueTemplates } from "@/lib/recurring-engine";
 import { sendDayAheadDigests } from "@/lib/action-items/digest";
 import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
 import { sweepOrphanedUploads } from "@/lib/storage-sweep";
+import { backfillProcessorFees } from "@/lib/processor-fee-capture";
 import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
@@ -12,6 +13,7 @@ export const runtime = "nodejs";
  * The daily automation runner (Vercel Cron). One scheduled endpoint that does the
  * org-wide background work the app can't do interactively:
  *   - generate due recurring jobs/expenses (all orgs),
+ *   - read Stripe's real processing fee onto online payments still missing one,
  *   - push the staff "day ahead" digest (needs-action count + top items → /planner),
  *   - push the "Close out your day" money-leak nudge (stray time / uncosted work /
  *     missing return visit — YESTERDAY's gaps, since this cron runs mornings).
@@ -30,6 +32,15 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.recurring_error = e?.message ?? "failed";
     reportError("cron-recurring", e);
+  }
+  try {
+    // Stripe's real fee onto every online payment still missing one (migration 0284): the ones
+    // the webhook could not read at the moment the money landed, and the payments recorded before
+    // the column existed. Server-side because the Stripe keys live here; bounded per run.
+    result.processor_fees = await backfillProcessorFees(supabase);
+  } catch (e: any) {
+    result.processor_fees_error = e?.message ?? "failed";
+    reportError("cron-processor-fees", e);
   }
   // Customer reminders (quote follow-up / invoice due / appts) moved to their OWN cron
   // /api/automations/reminders (a few times a day, not just here) — see that route.

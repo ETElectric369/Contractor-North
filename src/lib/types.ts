@@ -370,4 +370,8 @@ export interface Payment {
   paid_at: string;
   recorded_by: string | null;
   created_at: string;
+  /** Stripe pi_… for an online payment (0220); null for one recorded by hand. */
+  stripe_payment_intent?: string | null;
+  /** What Stripe took for it, in dollars (0284). NULL = not known yet; 0 is a real zero. Staff only. */
+  processor_fee?: number | null;
 }
