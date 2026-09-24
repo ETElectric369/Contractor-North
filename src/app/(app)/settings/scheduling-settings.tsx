@@ -5,16 +5,20 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
+import { TEXTS_NOT_READY_LINE, TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
 
 export function SchedulingSettings({
   settings,
   employees = [],
   ownerName,
+  textReady = true,
 }: {
   settings: OrgSettings;
   employees?: { id: string; full_name: string | null }[];
   ownerName?: string;
+  /** Can this org text (lib/sms-readiness)? false: the text option shows as not active. */
+  textReady?: boolean;
 }) {
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
@@ -92,9 +96,27 @@ export function SchedulingSettings({
           carries one 30-minute unpaid-lunch box, off by default. The office can set any entry to
           any number of minutes from Timecards.
         </p>
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={remindClock} onChange={(e) => setRemindClock(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Text timeclock reminders to techs — a morning nudge if they haven&apos;t clocked in, and an end-of-day reminder to clock out / fill in the day&apos;s details.</span>
+        {/* NOT ACTIVE UNTIL IT CAN TEXT (2026-09-24). This box sat ticked on an org that could not
+            send a single text: the onboarding-truth problem. While texting isn't set up it shows
+            unticked and can't be changed, and says why in one line; the stored choice is kept, so
+            the day texting is set up the reminders start as chosen with no code change. */}
+        <label className={`flex items-start gap-2 text-sm ${textReady ? "text-slate-600" : "text-slate-400"}`}>
+          <input
+            type="checkbox"
+            checked={textReady ? remindClock : false}
+            disabled={!textReady}
+            onChange={(e) => setRemindClock(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand disabled:opacity-60"
+          />
+          <span>
+            Text timeclock reminders to techs: a morning nudge if they haven&apos;t clocked in, and an end-of-day
+            reminder to clock out and fill in the day&apos;s details.
+            {!textReady && (
+              <span className="mt-0.5 block text-xs text-amber-700">
+                Not active. {TEXTS_NOT_READY_LINE} {TEXTING_CARD_PLACE} shows what&apos;s missing.
+              </span>
+            )}
+          </span>
         </label>
       </div>
 

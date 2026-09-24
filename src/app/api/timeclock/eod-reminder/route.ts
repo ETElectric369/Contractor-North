@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
-import { sendSms } from "@/lib/sms";
+import { sendSms, smsReadiness } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { sendCloseOutNudges } from "@/lib/action-items/eod-sweep";
 import { todayBoundsInTz } from "@/lib/tz";
@@ -13,7 +13,9 @@ import { reportError } from "@/lib/observe";
  *   • are still clocked in (open entry) — remind them to clock out, or
  *   • clocked out but left no notes and no job breakdown — fill out the EOD form.
  * Re-running only texts those still not done. Per-org opt-out via
- * settings.remind_timeclock === false (default on).
+ * settings.remind_timeclock === false (default on). An org that cannot text yet
+ * (lib/sms-readiness) is skipped and counted in `not_ready`; the night debrief push below still
+ * goes out, since it never needed texting.
  *
  *   GET /api/timeclock/eod-reminder   Authorization: Bearer <CRON_SECRET>
  */
@@ -22,12 +24,20 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  const { data: orgs } = await supabase.from("organizations").select("id, name, settings");
   let checked = 0;
   let reminded = 0;
+  let not_ready = 0;
 
   for (const org of orgs ?? []) {
     if (!getOrgSettings(org.settings).remind_timeclock) continue; // per-org opt-out (Settings → Scheduling)
+    // TEXTING NOT SET UP (lib/sms-readiness): the org's choice is kept, nothing is sent, and the
+    // skip is counted. Settings shows this option as not active and lists what is missing, so
+    // the person who ticked it reads the truth there rather than in a cron reply nobody opens.
+    if (!smsReadiness(org).ready) {
+      not_ready++;
+      continue;
+    }
     // "Today" is the org's LOCAL day, not the (UTC-on-Vercel) server day, so a
     // Pacific evening shift counts toward today rather than tomorrow.
     const { dayStart } = todayBoundsInTz(getOrgSettings(org.settings).timezone);
@@ -95,5 +105,5 @@ export async function GET(request: Request) {
     reportError("cron-close-out", e);
   }
 
-  return NextResponse.json({ checked, reminded, close_out });
+  return NextResponse.json({ checked, reminded, not_ready, close_out });
 }

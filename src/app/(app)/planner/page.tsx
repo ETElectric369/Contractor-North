@@ -663,7 +663,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <a
               href={`sms:${i.phone}&body=${encodeURIComponent("On my way — running a few minutes behind. See you soon.")}`}
               className={navBtnCls}
-              title="Running late? One tap sends them a heads-up"
+              title="Running late? Opens a heads-up text from this phone"
             >
               <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running late?</span>
             </a>

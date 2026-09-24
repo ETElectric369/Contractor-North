@@ -1,5 +1,7 @@
 import "server-only";
 import { reportError } from "@/lib/observe";
+import { getOrgSettings } from "@/lib/org-settings";
+import { pickSmsSender, smsReadinessFrom, type SmsEnv, type SmsReadiness } from "@/lib/sms-readiness";
 
 /**
  * Twilio's To/From must be E.164 (org-settings.ts documents sms_from_number that way), but the
@@ -31,6 +33,27 @@ function twilioAuth(): { sid: string; user: string; pass: string } | null {
   return null;
 }
 
+/** What this server holds for texting, as presence only (never a value). */
+export function smsEnv(): SmsEnv {
+  return {
+    account: !!twilioAuth(),
+    messagingService: !!process.env.TWILIO_MESSAGING_SERVICE_SID,
+    platformNumber: !!process.env.TWILIO_FROM_NUMBER,
+  };
+}
+
+/**
+ * CAN THIS ORG TEXT (lib/sms-readiness)? Every door that texts asks this first, with the org row
+ * it already holds (name + settings), and says so where the person tapped when it can't.
+ */
+export function smsReadiness(org: { name?: string | null; settings?: unknown } | null | undefined): SmsReadiness {
+  return smsReadinessFrom({
+    env: smsEnv(),
+    orgNumber: getOrgSettings(org?.settings).sms_from_number,
+    orgName: org?.name ?? null,
+  });
+}
+
 /**
  * Send an SMS via Twilio. Returns false (not sent) when Twilio isn't configured
  * or the number is missing, so callers stay safe before setup.
@@ -50,40 +73,49 @@ export async function sendSms(
   const auth = twilioAuth();
   const override = fromOverride && fromOverride.trim();
   const msgServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  // A per-org number wins; otherwise the Messaging Service is the default sender (fall back to a
-  // bare from-number only when no Messaging Service is set).
-  const from = override || (msgServiceSid ? null : process.env.TWILIO_FROM_NUMBER);
-  if (!auth || (!from && !msgServiceSid)) {
-    console.log(`[sms] (Twilio not configured) would text ${to}: ${body}`);
+  // The SAME rule smsReadiness answers with (lib/sms-readiness pickSmsSender): a per-org number
+  // wins; otherwise the Messaging Service; a bare from-number only when there is no service.
+  const sender = pickSmsSender(smsEnv(), override);
+  if (!auth || !sender) {
+    // Every door asks smsReadiness before it gets here, so this is the backstop, not the message.
     return false;
   }
+  const from = sender === "org_number" ? override : sender === "platform_number" ? process.env.TWILIO_FROM_NUMBER : null;
   // The org's own number goes out in E.164; anything we can't read that way (a short code, an
   // alphanumeric sender id, an international number) is still sent as typed — Twilio is the judge
   // — but it's flagged, because a "(530) 555-1234" in Settings → Automation is the setup mistake
   // this whole class of failure comes from and it must not sit invisible.
   const fromE164 = from ? e164(from) : null;
   if (from && !fromE164) {
-    reportError("sms:from", new Error(`Text-from number "${from}" isn't in +1XXXXXXXXXX form — Settings → Automation`), { from });
+    reportError("sms:from", new Error(`Text-from number "${from}" isn't in +1XXXXXXXXXX form (Settings, Customers, Texting)`), { from });
   }
   const fromParam = fromE164 ?? from;
 
   // Same for To: normalized when it's a US shape we recognize, sent as typed otherwise.
   const params = new URLSearchParams({ To: e164(to) ?? to, Body: body });
   if (fromParam) params.set("From", fromParam);
-  else params.set("MessagingServiceSid", msgServiceSid!);
+  else params.set("MessagingServiceSid", msgServiceSid as string);
 
-  const res = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${auth.sid}/Messages.json`,
-    {
-      method: "POST",
-      headers: {
-        Authorization:
-          "Basic " + Buffer.from(`${auth.user}:${auth.pass}`).toString("base64"),
-        "Content-Type": "application/x-www-form-urlencoded",
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${auth.sid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization:
+            "Basic " + Buffer.from(`${auth.user}:${auth.pass}`).toString("base64"),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params,
       },
-      body: params,
-    },
-  );
+    );
+  } catch (e) {
+    // A dropped connection is a text that did not go, said the same way as a refusal: a throw
+    // here used to end a whole cron run, so one bad minute skipped every org after this one.
+    reportError("sms", e, { to, from: fromParam ?? null });
+    return false;
+  }
   if (!res.ok) {
     // A Twilio REJECTION (21211 bad To, 21212 bad From, 21610 opted out, 30007 filtered) went to
     // console only, so it never reached error_events and every caller rendered the "add your

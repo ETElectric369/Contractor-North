@@ -295,7 +295,8 @@ function ReceiptRow({
 }) {
   const [texting, setTexting] = useState(false);
   const [texted, setTexted] = useState(false);
-  /** The SMS service said this customer has no number: the text door becomes this phone's. */
+  /** The SMS service said this customer has no number, or that texting isn't set up yet
+   *  (lib/sms-readiness): either way the text door becomes this phone's. */
   const [noPhone, setNoPhone] = useState(false);
   const [emailing, setEmailing] = useState(false);
   const [emailed, setEmailed] = useState(false);
@@ -322,6 +323,12 @@ function ReceiptRow({
       // has no phone number."); a rewording there degrades to the plain toast, never to silence.
       if (/no phone/i.test(r.error ?? "")) {
         setNoPhone(true);
+        return;
+      }
+      // Texting isn't set up: say so here, where he tapped, and hand him the door that works.
+      if (r.notReady) {
+        setNoPhone(true);
+        toast("Texting isn't set up yet, so the business can't text it. Text From This Phone sends it from yours.", "info");
         return;
       }
       toast(r.error ?? "The text didn't send — open the invoice and send it from there.", "error");

@@ -7,7 +7,9 @@ import { useToast } from "@/components/toast";
 import { emailQuote, textQuote } from "@/app/(app)/quotes/actions";
 import { emailInvoice, textInvoice } from "@/app/(app)/billing/actions";
 
-type Result = { ok: boolean; error?: string };
+/** `notReady`: texting isn't set up (lib/sms-readiness). Nothing was sent; the refusal names the
+ *  doors that work, and is said as information, not as a failure of his. */
+type Result = { ok: boolean; error?: string; notReady?: boolean };
 
 function SendChip({
   label,
@@ -41,7 +43,7 @@ function SendChip({
     try {
       const res = await run();
       if (!res?.ok) {
-        toast(res?.error ?? "Couldn't send — try again.", "error");
+        toast(res?.error ?? "Couldn't send — try again.", res?.notReady ? "info" : "error");
         return;
       }
       toast(successText, "success");

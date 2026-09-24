@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireCron } from "@/lib/cron-guard";
-import { sendSms } from "@/lib/sms";
+import { sendSms, smsReadiness } from "@/lib/sms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
 
@@ -9,7 +9,8 @@ import { todayBoundsInTz } from "@/lib/tz";
  * (the service client bypasses RLS, so every query MUST be org-scoped — otherwise
  * one global pass would text every tenant's techs), finds active techs who have NOT
  * clocked in today and texts them. Re-runs naturally nag until they clock in.
- * Per-org opt-out via settings.remind_timeclock === false (default on).
+ * Per-org opt-out via settings.remind_timeclock === false (default on). An org that cannot text
+ * yet (lib/sms-readiness) is skipped and counted in `not_ready`.
  *
  *   GET /api/timeclock/nudge   Authorization: Bearer <CRON_SECRET>
  */
@@ -18,12 +19,20 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const { data: orgs } = await supabase.from("organizations").select("id, settings");
+  const { data: orgs } = await supabase.from("organizations").select("id, name, settings");
   let checked = 0;
   let texted = 0;
+  let not_ready = 0;
 
   for (const org of orgs ?? []) {
     if (!getOrgSettings(org.settings).remind_timeclock) continue; // per-org opt-out (Settings → Scheduling)
+    // TEXTING NOT SET UP (lib/sms-readiness): the org's choice is kept, nothing is sent, and the
+    // skip is counted. Settings shows this option as not active and lists what is missing, so
+    // the person who ticked it reads the truth there rather than in a cron reply nobody opens.
+    if (!smsReadiness(org).ready) {
+      not_ready++;
+      continue;
+    }
     const { data: techs } = await supabase
       .from("profiles")
       .select("id, full_name, phone")
@@ -53,5 +62,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ checked, texted });
+  return NextResponse.json({ checked, texted, not_ready });
 }

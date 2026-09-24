@@ -15,7 +15,8 @@ import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
 import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "@/lib/bill-itemisation";
-import { sendSms } from "@/lib/sms";
+import { sendSms, smsReadiness } from "@/lib/sms";
+import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
@@ -407,7 +408,7 @@ export async function invoiceShareText(
 
 export async function textInvoice(
   id: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -417,18 +418,22 @@ export async function textInvoice(
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
+  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+  // TEXTING NOT SET UP (lib/sms-readiness): said where he tapped, before the invoice is stamped
+  // sent or anything is promised. The receipt row reads `notReady` and opens Text From This Phone.
+  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
   const customer = (invoice as any).customers;
   if (!customer?.phone)
     return { ok: false, error: "This customer has no phone number." };
 
-  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   const link = await publicInvoiceLink(supabase, (invoice as any).org_id, (invoice as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
-  if (!sent)
-    return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
+  // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
+  // already logged why.
+  if (!sent) return { ok: false, error: TEXT_REFUSED };
   // The text is already in the customer's hand, so the deed happened whatever the row does next
   // — which is why this is stamped (0267) and why a failure here is reported as "it went out but
   // the status didn't stick" rather than as a failed send. Silent is the one thing it can't be:

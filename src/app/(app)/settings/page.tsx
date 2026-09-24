@@ -41,6 +41,8 @@ import { SchedulingSettings } from "./scheduling-settings";
 import { PaymentMethods } from "./payment-methods";
 import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
+import { TextingCard } from "./texting-card";
+import { smsReadiness } from "@/lib/sms";
 import { TaxRatesManager } from "./tax-rates-manager";
 import { JobCodesManager } from "./job-codes-manager";
 import { HomepageCard } from "./homepage-card";
@@ -196,6 +198,9 @@ export default async function SettingsPage({
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const sitesDomain = process.env.SITES_DOMAIN || "contractornorth.com";
   const settings = getOrgSettings((org as any)?.settings);
+  // CAN THIS ORG TEXT (lib/sms-readiness)? One answer for the Texting card and every text option.
+  // Words and a sender kind only cross to the client, never a key.
+  const texting = smsReadiness(org as { name?: string | null; settings?: unknown } | null);
   const docCounters = await getDocCounters(); // null until migration 0088 is applied
 
   // The scheduler's crew picker still needs the team names (read-only here — editing
@@ -663,6 +668,7 @@ export default async function SettingsPage({
                   settings={settings}
                   employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
                   ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
+                  textReady={texting.ready}
                 />
               </Section>
               <Section title="Job codes">
@@ -690,6 +696,9 @@ export default async function SettingsPage({
           content: (
             <div className="space-y-6">
               <Section title="Reminders & follow-ups"><AutomationSettings settings={settings} /></Section>
+              <Section title="Texting">
+                <TextingCard status={texting} number={settings.sms_from_number ?? ""} />
+              </Section>
               {/* THE INTAKE DOOR (0185) — the "request an estimate" link for the org's own site.
                   The questions behind it are a form, under Playbook, once the door is on. */}
               <Section title="Request-an-estimate link">
