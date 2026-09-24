@@ -1,6 +1,7 @@
 import type { createClient } from "@/lib/supabase/server";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { customerAddressFrom } from "@/lib/inquiries/lead-address";
+import { formatPhone } from "@/lib/utils";
 
 /**
  * THE WIN MINTS THE CUSTOMER — one implementation of the deferred-customer doctrine.
@@ -62,7 +63,7 @@ export async function customerForInquiry(
         type: inq.type ?? "residential",
         status: "active",
         email: inq.email,
-        phone: inq.phone,
+        phone: formatPhone(inq.phone) || null, // the one formatter — a web lead's phone arrives however they typed it
         // WHERE THE PERSON IS, not where the work is — customerAddressFrom is the one rule
         // (shared with lead conversion and migration 0192's SQL twin).
         ...customerAddressFrom(inq),

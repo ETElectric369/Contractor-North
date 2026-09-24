@@ -14,7 +14,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
-import { escapeLike } from "@/lib/utils";
+import { escapeLike, formatPhone } from "@/lib/utils";
 import { shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
@@ -725,7 +725,7 @@ export async function updateJob(
       .from("customers")
       .insert({
         name: newCustomerName,
-        phone: emptyToNull(formData.get("new_customer_phone")),
+        phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null, // the one formatter
         email: emptyToNull(formData.get("new_customer_email")),
         status: "active",
         created_by: ctx.userId,

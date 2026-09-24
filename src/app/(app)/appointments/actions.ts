@@ -4,7 +4,7 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 
 import { revalidatePath } from "next/cache";
 import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
-import { formatFullAddress } from "@/lib/utils";
+import { formatFullAddress, formatPhone } from "@/lib/utils";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
@@ -65,7 +65,7 @@ async function resolveCustomer(
     if (!newName) return { customerId: null, error: "Enter a name for the new customer." };
     const { data: c, error } = await supabase
       .from("customers")
-      .insert({ name: newName, phone: emptyToNull(formData.get("new_customer_phone")), created_by: userId })
+      .insert({ name: newName, phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null, created_by: userId })
       .select("id")
       .single();
     if (error || !c) return { customerId: null, error: error?.message ?? "Could not create the new customer." };
