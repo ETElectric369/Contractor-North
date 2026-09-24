@@ -79,6 +79,46 @@ export function clockDoorWords(fullName: string | null | undefined, opts: { self
   return { clockOut: `Clock Out ${first}`, stop: `Stop ${first}'s Clock` };
 }
 
+/**
+ * WHAT IS SAID ONCE THE OFFICE HAS CLOCKED SOMEBODY OUT (Erik, 2026-09-24: "'Brian is Clocked Out'").
+ * The deed is a clock-out, so it is said as one, never as "stopped Brian's clock".
+ *
+ *   headline:      "Brian is Clocked Out", "They're Clocked Out" with no name, "You're Clocked Out"
+ *   told:          "Brian has been told." (empty for your own clock: nobody is told about himself)
+ *   subject / was: "Brian was already clocked out", "They were...", "You were..."
+ *   clockOutVerb:  "Clock Brian out", "Clock them out", "Clock out"
+ *   clockOutFirst: the same, "first": "Clock Brian out first, then move the shift to someone else."
+ *
+ * A name is read the way clockDoorWords reads it: a placeholder with no letter in it is no name.
+ */
+export function clockedOutWords(
+  fullName: string | null | undefined,
+  self = false,
+): { headline: string; told: string; subject: string; was: string; clockOutVerb: string; clockOutFirst: string } {
+  if (self) {
+    return { headline: "You're Clocked Out", told: "", subject: "You", was: "were", clockOutVerb: "Clock out", clockOutFirst: "Clock out first" };
+  }
+  const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
+  if (!/\p{L}/u.test(first)) {
+    return {
+      headline: "They're Clocked Out",
+      told: "They have been told.",
+      subject: "They",
+      was: "were",
+      clockOutVerb: "Clock them out",
+      clockOutFirst: "Clock them out first",
+    };
+  }
+  return {
+    headline: `${first} is Clocked Out`,
+    told: `${first} has been told.`,
+    subject: first,
+    was: "was",
+    clockOutVerb: `Clock ${first} out`,
+    clockOutFirst: `Clock ${first} out first`,
+  };
+}
+
 /** The office's sheet treats this shift as forgotten: it has run LONG_SHIFT_HOURS, or it began on
  *  an earlier org-local day. Then the sheet reads "Stop Brian's Clock" and its stop time starts
  *  empty; otherwise it reads "Clock Out Brian" with the stop time at now. */

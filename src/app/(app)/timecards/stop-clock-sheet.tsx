@@ -6,7 +6,8 @@
  * Erik, 2026-09-24: "Brian did it the other day too and I had no way to stop it to set the time for
  * the invoice". The editor refused an open row and every other door closed it at "now". This sheet
  * asks the one question that matters, when did the work really stop, and closes the clock at that
- * time through stopShift (which writes who stopped it on the card and tells the crew member).
+ * time through stopShift (which writes who clocked him out on the card and tells the crew member).
+ * What it says after is Erik's own words for the deed: "Brian is Clocked Out" (clockedOutWords).
  *
  * TWO SHEETS IN ONE, and the words say which (clockDoorWords). Erik, the same day: "an option to
  * [end] an employees time clock and clock out for them", at any time, not only a forgotten one.
@@ -31,7 +32,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { clockInputValue, splitClock } from "@/lib/split-preview";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
-import { MAX_SHIFT_HOURS, clockDoorWords, isForgottenShift, stopProblem } from "@/lib/long-shift";
+import { MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isForgottenShift, stopProblem } from "@/lib/long-shift";
 import type { JobCode } from "@/lib/types";
 import { stopShift, updateOpenEntry } from "../timeclock/actions";
 
@@ -103,7 +104,9 @@ export function StopClockSheet({
   // Frozen at mount: which sheet this is must not change under somebody typing.
   const [openedAt] = useState(() => Date.now());
   const forgotten = isForgottenShift(clockInMs, openedAt, tz);
-  const words = clockDoorWords(entry.profiles?.full_name, { self: !!viewerId && entry.profile_id === viewerId });
+  const self = !!viewerId && entry.profile_id === viewerId;
+  const words = clockDoorWords(entry.profiles?.full_name, { self });
+  const said = clockedOutWords(entry.profiles?.full_name, self);
   const verb = forgotten ? words.stop : words.clockOut;
 
   // The seeded start, kept to tell "the office moved the start" from "left alone". The inputs hold
@@ -194,10 +197,10 @@ export function StopClockSheet({
       } catch {
         return setError("No connection. The clock is still running; try again.");
       }
-      if (!res.ok) return setError(res.error ?? "The clock didn't stop. Try again.");
+      if (!res.ok) return setError(res.error ?? `That didn't go through, so the clock is still running. Try again.`);
       onClose();
       router.refresh();
-      toast(res.sentence ?? "Stopped the clock.", "success");
+      toast(res.sentence ?? `${said.headline}.`, "success");
       if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
     });
   }
@@ -265,15 +268,15 @@ export function StopClockSheet({
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label htmlFor="s-start-date">Started</Label>
+            <Label htmlFor="s-start-date">Clocked in</Label>
             <Input id="s-start-date" type="date" className="h-11" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="s-start-time" className="invisible">Start time</Label>
-            <Input id="s-start-time" type="time" className="h-11" aria-label="Start time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            <Label htmlFor="s-start-time" className="invisible">Clock-in time</Label>
+            <Input id="s-start-time" type="time" className="h-11" aria-label="Clock-in time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
           </div>
           <div>
-            <Label htmlFor="s-stop-date">Stopped</Label>
+            <Label htmlFor="s-stop-date">Clocked out</Label>
             <Input
               id="s-stop-date"
               type="date"
@@ -286,12 +289,12 @@ export function StopClockSheet({
             />
           </div>
           <div>
-            <Label htmlFor="s-stop-time" className="invisible">Stop time</Label>
+            <Label htmlFor="s-stop-time" className="invisible">Clock-out time</Label>
             <Input
               id="s-stop-time"
               type="time"
               className="h-11"
-              aria-label="Stop time"
+              aria-label="Clock-out time"
               value={stopTime}
               onChange={(e) => {
                 followNow.current = false;

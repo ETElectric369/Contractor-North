@@ -111,14 +111,14 @@ describe("stopCrumb: the card says who set the stop time", () => {
 
   it("office wording", () => {
     expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: null, tz, how: "office" })).toBe(
-      "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]",
+      "[clocked out by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]",
     );
   });
 
   it("names a moved start", () => {
     const moved = "2001-01-01T20:00:00Z"; // 12:00 PM
     expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: moved, tz, how: "office" })).toBe(
-      "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM; start moved from 1:37 PM to 12:00 PM]",
+      "[clocked out by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM; start moved from 1:37 PM to 12:00 PM]",
     );
     // An unmoved start says nothing extra.
     expect(
@@ -148,7 +148,7 @@ describe("stopCrumb: the card says who set the stop time", () => {
   });
 
   it("is appended once, on its own line", () => {
-    const crumb = "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]";
+    const crumb = "[clocked out by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]";
     const once = withStopCrumb("pulled wire", crumb);
     expect(once).toBe(`pulled wire\n${crumb}`);
     expect(withStopCrumb(once, crumb)).toBe(once);
