@@ -55,7 +55,7 @@ export default async function TimeclockPage() {
         // office staff and only your own row to anyone else, so this staff branch is now
         // enforced by the database rather than by the branch itself.
         .from("profile_pay")
-        .select("id, full_name, hourly_rate, bill_rate")
+        .select("id, full_name, hourly_rate, bill_rate, paid_by_draw")
         .eq("active", true)
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };

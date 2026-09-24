@@ -42,6 +42,8 @@ interface Member {
   // mistake. bill_rate is never offered or defaulted into the pay field.
   hourly_rate?: number | null;
   bill_rate?: number | null;
+  /** 0286: the owner is paid by owner's draw, so his shifts carry no pay-rate override. */
+  paid_by_draw?: boolean | null;
 }
 interface JobOption {
   id: string;
@@ -157,6 +159,10 @@ export function EditEntryButton({
   const billRate = Number(person?.bill_rate ?? 0);
   const billRateTyped =
     rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
+  // THE OWNER'S SHIFT HAS NO PAY RATE (0286): he is paid by owner's draw. The field is not offered,
+  // and an edit never sends a new one for him; whatever the row already holds round-trips untouched,
+  // so an unrelated edit to an old row can never be refused over it.
+  const ownerShift = person?.paid_by_draw === true;
 
   // Payroll locks — surfaced up front so the office doesn't discover them as a save error.
   const basePaid = !!entry.paid_at;
@@ -213,7 +219,20 @@ export function EditEntryButton({
         // Only touch the override when the user actually edited the field; otherwise round-trip
         // the stored value so an unrelated edit can't wipe a supervisor rate. (Number-cast the
         // seed — a numeric column can arrive as a string and must round-trip as the same value.)
-        rate_override: rateDirty ? (rate > 0 ? rate : null) : entry.rate_override == null ? null : Number(entry.rate_override),
+        // The owner's shift never takes a NEW rate (0286), even one typed before the person was
+        // switched to him: the stored value round-trips instead. A shift MOVED onto him drops its
+        // crew override: he is paid by draw, the Rate field is hidden for him, and 0286's trigger
+        // refuses an override riding along on the move (a save the office could never fix here).
+        rate_override:
+          ownerShift && (profileId || entry.profile_id) !== entry.profile_id
+            ? null
+            : rateDirty && !ownerShift
+              ? rate > 0
+                ? rate
+                : null
+              : entry.rate_override == null
+                ? null
+                : Number(entry.rate_override),
           profile_id: profileId || undefined,
           allocations,
         });
@@ -496,15 +515,17 @@ export function EditEntryButton({
               <Label htmlFor="e-miles">Miles</Label>
               <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />
             </div>
-            <div>
-              <Label htmlFor="e-rate">Rate ($/hr, blank/0 = default)</Label>
-              <NumberInput id="e-rate" value={rate} onValueChange={(v) => { setRate(v); setRateDirty(true); }} step={0.5} />
-              {baseRate > 0 && (
-                <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
-              )}
-            </div>
+            {!ownerShift && (
+              <div>
+                <Label htmlFor="e-rate">Rate ($/hr, blank/0 = default)</Label>
+                <NumberInput id="e-rate" value={rate} onValueChange={(v) => { setRate(v); setRateDirty(true); }} step={0.5} />
+                {baseRate > 0 && (
+                  <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
+                )}
+              </div>
+            )}
           </div>
-          {billRateTyped && (
+          {billRateTyped && !ownerShift && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>

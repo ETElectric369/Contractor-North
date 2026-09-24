@@ -33,6 +33,8 @@ interface Member {
   // mistake. bill_rate is never offered or defaulted into the pay field.
   hourly_rate?: number | null;
   bill_rate?: number | null;
+  /** 0286: the owner is paid by owner's draw, so his shifts carry no pay-rate override. */
+  paid_by_draw?: boolean | null;
 }
 
 export function AddEntryButton({
@@ -125,6 +127,9 @@ export function AddEntryButton({
   const billRate = Number(person?.bill_rate ?? 0);
   const billRateTyped =
     rate > 0 && billRate > 0 && Math.abs(rate - billRate) <= 0.01 && Math.abs(billRate - baseRate) > 0.01;
+  // The owner's shift has no pay rate at all (0286): the field is not offered, and a figure typed
+  // for somebody else before switching the person to him is never sent.
+  const ownerShift = person?.paid_by_draw === true;
 
   // Span-aware, with an EXPLICIT end date (parity with the Edit modal): a same-day
   // end<start is rejected (a typo, not a 23h shift), while a real overnight is opt-in via
@@ -156,7 +161,7 @@ export function AddEntryButton({
         notes,
         miles,
         // Blank/0 ⇒ default rate; a positive number sets a per-entry override.
-        rate_override: rate > 0 ? rate : null,
+        rate_override: !ownerShift && rate > 0 ? rate : null,
       });
       if (!res.ok) {
         setError(res.error ?? "Could not add entry.");
@@ -276,15 +281,17 @@ export function AddEntryButton({
               <Label htmlFor="m-miles">Miles</Label>
               <NumberInput id="m-miles" value={miles} onValueChange={setMiles} />
             </div>
-            <div className="col-span-2 sm:col-span-3">
-              <Label htmlFor="m-rate">Rate ($/hr, blank/0 = default)</Label>
-              <NumberInput id="m-rate" value={rate} onValueChange={setRate} step={0.5} />
-              {baseRate > 0 && (
-                <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
-              )}
-            </div>
+            {!ownerShift && (
+              <div className="col-span-2 sm:col-span-3">
+                <Label htmlFor="m-rate">Rate ($/hr, blank/0 = default)</Label>
+                <NumberInput id="m-rate" value={rate} onValueChange={setRate} step={0.5} />
+                {baseRate > 0 && (
+                  <p className="mt-1 text-xs text-slate-400">{`Base $${baseRate.toFixed(2)}/hr — leave blank to use it`}</p>
+                )}
+              </div>
+            )}
           </div>
-          {billRateTyped && (
+          {billRateTyped && !ownerShift && (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-700">
               {`That's ${person?.full_name ?? "this person"}'s bill rate (what customers are charged)${baseRate > 0 ? ` — their pay rate is $${baseRate.toFixed(2)}/hr.` : "."}`}
             </div>

@@ -21,7 +21,7 @@ export function OpenEntryEditor({
   entry: { id: string } & Record<string, any>;
   jobCodes: JobCode[];
   jobs: { id: string; job_number: string; name: string }[];
-  members: { id: string; full_name: string | null; hourly_rate?: number | null; bill_rate?: number | null }[];
+  members: { id: string; full_name: string | null; hourly_rate?: number | null; bill_rate?: number | null; paid_by_draw?: boolean | null }[];
   /** Org setting timeclock_job_codes — must ride through to the editor so the deep-link
    *  path hides the code picker exactly like the page's other editor mounts. */
   jobCodesEnabled?: boolean;

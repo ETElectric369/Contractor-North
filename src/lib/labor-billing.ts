@@ -1,5 +1,6 @@
 import { hoursBetween } from "@/lib/utils";
 import { payRateForEntry } from "@/lib/payroll-math";
+import { isPaidByDraw } from "@/lib/profile-columns";
 
 /** One billable-labor line for a worker on a job. `sourceIds` are the time_entry / time_allocation
  *  ids whose hours this line bills — the line's CLAIM on them (0255). A claim is what lets a second
@@ -106,12 +107,18 @@ export function withoutClaimedLabor(
  * to `jobId`: an entry's same-job/unlabeled allocations, or its gross hours when it has no split.
  * Each entry is costed at its OWN pay rate (rate_override ?? base) via payRateForEntry. Accepts the
  * job's own entries (job hub, pre-filtered) OR all entries (analytics) — same result either way.
+ *
+ * THE OWNER'S HOURS ARE HOURS, NOT A COST (0286). The owner is paid by owner's draw: his hours count
+ * in `hours` (the job took them) and again in `ownerHours` (so a screen can say "Your Hours" and
+ * "$X per hour you worked"), they add $0 to `cost`, and they are NEVER `unratedHours` — his rate is
+ * not missing, he simply has none, and "3 hours have no rate" about the owner would be a false
+ * alarm. Billing is untouched: computeJobLaborBilling still bills him at his bill_rate.
  */
 export function laborCostForJob(
   entries: any[],
   jobId: string,
   fallbackRate = 0,
-): { hours: number; cost: number; unratedHours: number } {
+): { hours: number; cost: number; unratedHours: number; ownerHours: number } {
   // UNRATED HOURS ARE REPORTED, NEVER SWALLOWED (v800 audit). A worker with no hourly_rate and
   // no fallback costs $0/hr, so their labor vanished from job profit entirely — a labor-only
   // job with an unrated crew member read as PURE PROFIT. The cost still cannot be invented
@@ -120,32 +127,38 @@ export function laborCostForJob(
   let hours = 0;
   let cost = 0;
   let unratedHours = 0;
+  let ownerHours = 0;
   for (const e of entries ?? []) {
-    const rate = payRateForEntry(e, fallbackRate);
+    const owner = isPaidByDraw(e?.profiles) || e?.paid_by_draw === true;
+    const rate = owner ? 0 : payRateForEntry(e, fallbackRate);
+    const count = (h: number) => {
+      hours += h;
+      if (owner) {
+        ownerHours += h;
+        return;
+      }
+      if (!(rate > 0)) unratedHours += h;
+      cost += h * rate;
+    };
     const allocs = e.time_allocations ?? [];
     if (allocs.length) {
       for (const a of allocs) {
         // belongs to this job if the allocation names it, or it's unlabeled and the entry is on this job
         const belongs = a.job_id ? a.job_id === jobId : e.job_id === jobId;
         if (!belongs) continue;
-        const h = Number(a.hours ?? 0);
-        hours += h;
-        if (!(rate > 0)) unratedHours += h;
-        cost += h * rate;
+        count(Number(a.hours ?? 0));
       }
       continue;
     }
     if (e.job_id === jobId && e.status === "closed" && e.clock_out) {
-      const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-      hours += h;
-      if (!(rate > 0)) unratedHours += h;
-      cost += h * rate;
+      count(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes));
     }
   }
   return {
     hours: Math.round(hours * 100) / 100,
     cost: Math.round(cost * 100) / 100,
     unratedHours: Math.round(unratedHours * 100) / 100,
+    ownerHours: Math.round(ownerHours * 100) / 100,
   };
 }
 

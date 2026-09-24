@@ -14,6 +14,7 @@ import {
   firstName,
   isPayMethod,
   lockRefusalReason,
+  ownerWagesRefusal,
   paymentSentence,
   sayMoney,
   sumLockedGross,
@@ -95,14 +96,21 @@ export async function markPeriodPaid(input: {
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, userId } = ctx;
 
+  // The person's rate, and whether he is the owner (0286: paid by owner's draw, so there is no
+  // wage period to lock). Read FIRST, so an owner is refused before any other check or write.
+  const { data: prof } = await supabase
+    .from("profile_pay")
+    .select("hourly_rate, full_name, paid_by_draw")
+    .eq("id", input.profileId)
+    .maybeSingle();
+  if ((prof as any)?.paid_by_draw === true) return { ok: false, error: ownerWagesRefusal((prof as any)?.full_name) };
+  const rate = Number(prof?.hourly_rate ?? 0);
+
   const { startIso, endIso, tz } = await periodInstants(supabase, input.periodStart, input.periodEnd);
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
   const autoErr = await autoClosedEntryError(supabase, input.profileId, startIso, endIso);
   if (autoErr) return { ok: false, error: autoErr };
-
-  const { data: prof } = await supabase.from("profile_pay").select("hourly_rate").eq("id", input.profileId).maybeSingle();
-  const rate = Number(prof?.hourly_rate ?? 0);
 
   const { data: entries } = await supabase
     .from("time_entries")
@@ -314,12 +322,19 @@ export async function settleMileage(input: {
     return { ok: false, error: "Enter the amount you decided to pay for mileage — the app never computes it." };
   }
 
+  // Read first: an owner (0286, paid by owner's draw) has no mileage to settle as wages, and is
+  // refused before anything is checked or stamped.
+  const { data: prof } = await supabase
+    .from("profile_pay")
+    .select("commute_baseline_miles, full_name, paid_by_draw")
+    .eq("id", input.profileId)
+    .maybeSingle();
+  if ((prof as any)?.paid_by_draw === true) return { ok: false, error: ownerWagesRefusal((prof as any)?.full_name) };
+  const baseline = Math.max(0, Number(prof?.commute_baseline_miles ?? 0));
+
   const { startIso, endIso, tz } = await periodInstants(supabase, input.periodStart, input.periodEnd);
   const openErr = await openEntryError(supabase, input.profileId, startIso, endIso);
   if (openErr) return { ok: false, error: openErr };
-
-  const { data: prof } = await supabase.from("profile_pay").select("commute_baseline_miles").eq("id", input.profileId).maybeSingle();
-  const baseline = Math.max(0, Number(prof?.commute_baseline_miles ?? 0));
 
   const { data: entries } = await supabase
     .from("time_entries")
@@ -843,7 +858,7 @@ export async function recordPayment(input: {
   // wrong reason is its own dead end.
   const { data: person, error: personErr } = await supabase
     .from("profiles")
-    .select("id, full_name, active")
+    .select("id, full_name, active, role")
     .eq("id", input.profileId)
     .maybeSingle();
   if (personErr) {
@@ -851,6 +866,10 @@ export async function recordPayment(input: {
   }
   if (!person) return { ok: false, error: "That person isn't on this shop's list. Reload the page and pick them again." };
   const name = (person as any).full_name ?? "";
+  // THE OWNER IS PAID BY OWNER'S DRAW (0286): role 'owner' is exactly profile_pay.paid_by_draw's
+  // own predicate, read here off the row already in hand. Refused before the insert, in words;
+  // refuse_wages_for_an_owner would refuse the insert anyway.
+  if ((person as any).role === "owner") return { ok: false, error: ownerWagesRefusal(name) };
 
   // SWITCHED OFF IS NOT A REFUSAL. Settling up with someone who has LEFT is the most ordinary
   // version of Erik's complaint ("i have paid brian a large chunk of that... theres been no way for

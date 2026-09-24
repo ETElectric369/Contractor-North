@@ -55,7 +55,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
       bills: [{ job_id: "A", amount: 200 }],
       entries: [laborEntry("A", 8, 50)], // 8h × $50 = 400
     });
-    expect(rows).toEqual([{ id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400 }]);
+    expect(rows).toEqual([{ id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400, ownerHours: 0, perOwnerHour: null }]);
   });
 
   it("revenue is the PAYMENTS ledger, not invoices.amount_paid — a credit writeoff is no cash", () => {
@@ -147,6 +147,27 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
     expect(rows[0].cost).toBe(120); // 3h × $40
   });
 
+  // 0286: the owner is paid by owner's draw. His hours are billed to the customer and counted, and
+  // they are never a cost. Erik's J-046 (Jason Waldow) read $479.14 with his hours costed at $125.
+  it("the owner's hours cost $0 and come back as ownerHours with profit per owner hour", () => {
+    const owner = { job_id: "A", status: "closed", profiles: { hourly_rate: 0, paid_by_draw: true }, time_allocations: [{ job_id: "A", hours: 10 }] };
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("A")],
+      payments: [pay("A", 2000)],
+      bills: [{ job_id: "A", amount: 300 }],
+      entries: [owner, laborEntry("A", 5, 40)], // crew 5h x $40 = 200
+    });
+    expect(rows[0]).toMatchObject({ rev: 2000, cost: 500, profit: 1500, ownerHours: 10, perOwnerHour: 150 });
+  });
+
+  it("per owner hour is null until something is collected, and the job stays on the board", () => {
+    const owner = { job_id: "A", status: "closed", profiles: { hourly_rate: 0, paid_by_draw: true }, time_allocations: [{ job_id: "A", hours: 6 }] };
+    const rows = computeJobProfitRows({ ...empty, jobs: [job("A")], entries: [owner] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ rev: 0, cost: 0, profit: 0, ownerHours: 6, perOwnerHour: null });
+  });
+
   it("drops jobs with zero revenue AND zero cost", () => {
     const rows = computeJobProfitRows({
       ...empty,
@@ -179,21 +200,26 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
 });
 
 describe("computeProfitByType — margin by work type", () => {
-  const row = (id: string, rev: number, cost: number): JobProfitRow => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status: "complete", rev, cost, profit: rev - cost });
+  const row = (id: string, rev: number, cost: number, ownerHours = 0): JobProfitRow => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status: "complete", rev, cost, profit: rev - cost, ownerHours, perOwnerHour: null });
 
   it("groups jobs by type, sums money, computes margin %, sorts by profit", () => {
     const rows = [row("a", 1000, 600), row("b", 500, 450), row("c", 2000, 1000)];
     const typeOf = new Map([["a", "Panel swap"], ["b", "Panel swap"], ["c", "Service call"]]);
     const out = computeProfitByType(rows, typeOf);
     expect(out).toEqual([
-      { type: "Service call", jobs: 1, revenue: 2000, cost: 1000, profit: 1000, marginPct: 50 },
-      { type: "Panel swap", jobs: 2, revenue: 1500, cost: 1050, profit: 450, marginPct: 30 },
+      { type: "Service call", jobs: 1, revenue: 2000, cost: 1000, profit: 1000, marginPct: 50, ownerHours: 0, profitPerOwnerHour: null },
+      { type: "Panel swap", jobs: 2, revenue: 1500, cost: 1050, profit: 450, marginPct: 30, ownerHours: 0, profitPerOwnerHour: null },
     ]);
+  });
+
+  it("sums owner hours per type and says what each owner hour earned (0286)", () => {
+    const out = computeProfitByType([row("a", 1000, 200, 8), row("b", 600, 0, 4)], new Map([["a", "Panel swap"], ["b", "Panel swap"]]));
+    expect(out[0]).toMatchObject({ ownerHours: 12, profit: 1400, profitPerOwnerHour: 116.67 });
   });
 
   it("jobs with no type fall under 'Uncategorized'; null margin when zero revenue", () => {
     const out = computeProfitByType([row("x", 0, 200)], new Map());
-    expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null }]);
+    expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null, ownerHours: 0, profitPerOwnerHour: null }]);
   });
 });
 

@@ -323,6 +323,12 @@ export interface OrgSettings {
    *  open it instead of North's built-in request flow (cn-v499: flag the lead +
    *  ping the office to text time options). Empty = built-in request flow. */
   calendly_url: string;
+  /** Whether office staff (admin and office roles) see the owner's "Left For You" card on
+   *  /analytics (0286). On by default (Erik 2026-09-24: "office staff should see mine (optional
+   *  toggle)"). ONLY THE OWNER may change it: the dedicated setter checks the role, updateOrgSettings
+   *  strips the key, and the guard_owner_money_visibility trigger refuses anyone else at the DB.
+   *  Sanitized on read: anything but a real `false` reads as on. */
+  office_sees_owner_money: boolean;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -425,6 +431,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   reviews: [],
   sms_from_number: "",
   calendly_url: "",
+  office_sees_owner_money: true,
 };
 
 /** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place
@@ -596,6 +603,10 @@ export function getOrgSettings(raw: unknown): OrgSettings {
     // meant, or it stays shut.
     merged.bank_transfer_enabled = merged.bank_transfer_enabled === true;
   }
+  // The owner's one visibility switch (0286). Normalized on read, the doc_style lesson: a stored
+  // "false" string or a stray 0 must not quietly hide the card, so only a real boolean false turns
+  // it off, and a missing key reads as the default, on.
+  merged.office_sees_owner_money = merged.office_sees_owner_money !== false;
   return merged;
 }
 

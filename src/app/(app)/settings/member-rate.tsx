@@ -7,15 +7,22 @@ import { NumberInput } from "@/components/ui/number-input";
 import { updateMemberRate } from "./actions";
 
 /** Inline pay + charge rate editor on the Team list. Pay = what you pay this
- *  person (job cost); Bill = what the customer is charged for their labor. */
+ *  person (job cost); Bill = what the customer is charged for their labor.
+ *
+ *  AN OWNER HAS NO PAY RATE (0286): he is paid by owner's draw, so his row says "Owner's Draw"
+ *  where the Pay box was and keeps only the Bill box, and a save sends the bill rate alone. Sending
+ *  a pay figure for him would be refused, and sending null would wipe the old hourly_rate that his
+ *  bill rate may still fall back to. */
 export function MemberRate({
   id,
   rate,
   billRate,
+  paidByDraw = false,
 }: {
   id: string;
   rate: number | null;
   billRate: number | null;
+  paidByDraw?: boolean;
 }) {
   const router = useRouter();
   const [pay, setPay] = useState(rate ?? 0);
@@ -25,12 +32,15 @@ export function MemberRate({
   const [err, setErr] = useState<string | null>(null);
 
   function save() {
-    if ((rate ?? 0) === pay && (billRate ?? 0) === bill) return;
+    const payChanged = !paidByDraw && (rate ?? 0) !== pay;
+    if (!payChanged && (billRate ?? 0) === bill) return;
     start(async () => {
       // CHECK THE RESULT (audit v921 high): the action returns {ok:false,error} for a non-staff
       // caller or a rejected write, and the old code flashed the green check regardless — the
       // office thought a pay change saved when it hadn't. Only claim success on ok.
-      const res = await updateMemberRate(id, pay || null, bill || null);
+      const res = paidByDraw
+        ? await updateMemberRate(id, undefined, bill || null)
+        : await updateMemberRate(id, pay || null, bill || null);
       if (!res?.ok) {
         setErr(res?.error ?? "That didn't save — try again.");
         setPay(rate ?? 0);
@@ -46,11 +56,17 @@ export function MemberRate({
 
   return (
     <span className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-      <span className="flex items-center gap-1" title="What you pay this person — job cost">
-        Pay $
-        <NumberInput value={pay} onValueChange={setPay} onBlur={save} className="h-7 w-14 text-right text-xs" aria-label="Pay rate" />
-        /hr
-      </span>
+      {paidByDraw ? (
+        <span className="flex h-7 items-center" title="The owner is paid by owner's draw, so the owner's hours are not a cost">
+          Owner&apos;s Draw
+        </span>
+      ) : (
+        <span className="flex items-center gap-1" title="What you pay this person — job cost">
+          Pay $
+          <NumberInput value={pay} onValueChange={setPay} onBlur={save} className="h-7 w-14 text-right text-xs" aria-label="Pay rate" />
+          /hr
+        </span>
+      )}
       <span className="flex items-center gap-1" title="What the customer is charged — invoice labor">
         Bill $
         <NumberInput value={bill} onValueChange={setBill} onBlur={save} className="h-7 w-14 text-right text-xs" aria-label="Charge rate" />
