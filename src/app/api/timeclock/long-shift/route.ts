@@ -4,6 +4,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { reportError } from "@/lib/observe";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIdsOrThrow, sendPushToProfiles } from "@/lib/push";
+import { sendSms, smsReadiness } from "@/lib/sms";
 import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
@@ -18,9 +19,13 @@ import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps
  *
  *   OFFICE_BELL_HOURS (10): a line on the office's bell. No push, nobody asked. A bell line is
  *     silent, so it goes out at any hour.
- *   LONG_SHIFT_HOURS (12): the person whose clock it is is asked (push and bell) while he still
- *     remembers when he stopped, and the office's phones buzz. Pushes never go out between 9 PM and
- *     6 AM org-local; the 6 AM run does them. Brian's 1:37 PM clock-in puts the office's line on the
+ *   LONG_SHIFT_HOURS (12): the person whose clock it is is asked (push and bell, and a text when
+ *     the org can text: lib/sms-readiness) while he still remembers when he stopped, and the
+ *     office's phones buzz. The push is the primary; the text reaches a phone whose app is not
+ *     signed in or has pushes off. The text rides the org's "Text timeclock reminders" box
+ *     (Settings, Scheduling). Until texting is set up, or with that box unticked, the text is
+ *     skipped and counted.
+ *     Pushes and texts never go out between 9 PM and 6 AM org-local; the 6 AM run does them. Brian's 1:37 PM clock-in puts the office's line on the
  *     bell at 11:37 PM, reaches twelve hours at 1:37 AM inside the hold, and is asked at 6:00 AM,
  *     16.4 hours in and still under the 18-hour ceiling his own picker allows.
  *
@@ -49,8 +54,20 @@ export async function GET(request: Request) {
   if ("error" in guard) return guard.error;
   const { supabase } = guard;
 
-  const counts = { orgs: 0, held: 0, bells_due: 0, nudges_due: 0, office_bells: 0, asked: 0, office_buzzes: 0, failed: 0 };
-  const { data: orgs, error: orgErr } = await supabase.from("organizations").select("id, settings");
+  const counts = {
+    orgs: 0,
+    held: 0,
+    bells_due: 0,
+    nudges_due: 0,
+    office_bells: 0,
+    asked: 0,
+    texted: 0,
+    text_not_ready: 0,
+    text_off: 0,
+    office_buzzes: 0,
+    failed: 0,
+  };
+  const { data: orgs, error: orgErr } = await supabase.from("organizations").select("id, name, settings");
   if (orgErr) {
     reportError("cron-long-shift", orgErr);
     return NextResponse.json({ ...counts, failed: 1 }, { status: 500 });
@@ -66,14 +83,14 @@ export async function GET(request: Request) {
       const { data: open, error } = await supabase
         .from("time_entries")
         .select(
-          "id, profile_id, clock_in, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active)",
+          "id, profile_id, clock_in, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
         )
         .eq("org_id", org.id)
         .eq("status", "open")
         .or("long_shift_warned_at.is.null,long_shift_nudged_at.is.null");
       if (error) throw error;
 
-      type Person = { full_name?: string | null; role?: string | null; active?: boolean | null };
+      type Person = { full_name?: string | null; role?: string | null; active?: boolean | null; phone?: string | null };
       type Job = { job_number?: string | null; name?: string | null };
       type Row = {
         id: string;
@@ -94,6 +111,7 @@ export async function GET(request: Request) {
       let staffIds: string[] | null = null;
       const office = async () => (staffIds ??= await orgStaffIdsOrThrow(org.id));
       const stamp = new Date(nowMs).toISOString();
+      let texting: ReturnType<typeof smsReadiness> | undefined;
 
       /** The guarded claim: true only when THIS run set the column. */
       const claim = async (id: string, column: "long_shift_warned_at" | "long_shift_nudged_at") => {
@@ -191,6 +209,32 @@ export async function GET(request: Request) {
             counts.failed++;
           }
           counts.asked++;
+          // THE SAME QUESTION BY TEXT, when the org can text and he has a number. Readiness is
+          // asked once per org (texting ready = the same answer for every row).
+          const phone = (f.person?.phone ?? "").trim();
+          if (phone && !getOrgSettings(org.settings).remind_timeclock) {
+            // The owner's "Text timeclock reminders" box is off (Settings, Scheduling): this text
+            // rides that box, so no text goes out without one he can see. The push above stands.
+            counts.text_off++;
+          } else if (phone) {
+            if (!(texting ??= smsReadiness(org)).ready) {
+              counts.text_not_ready++;
+            } else {
+              const who = ((org as { name?: string | null }).name ?? "").trim();
+              const text =
+                `${who ? `${who}: ` : ""}You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}, ` +
+                `more than ${LONG_SHIFT_HOURS} hours. Open Timeclock to set when you stopped.`;
+              // A refusal or a dropped connection answers false (sendSms logs why). The catch is the
+              // belt: nothing about a text may cost the office its buzz below.
+              try {
+                if (await sendSms(phone, text, getOrgSettings(org.settings).sms_from_number)) counts.texted++;
+                else counts.failed++;
+              } catch (e) {
+                counts.failed++;
+                reportError("cron-long-shift", e, { orgId: org.id, entryId: r.id, step: "text" });
+              }
+            }
+          }
         }
 
         if (f.crew && to.length) {

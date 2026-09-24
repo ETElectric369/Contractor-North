@@ -128,7 +128,7 @@ describe("stopShift", () => {
     state.client = fakeSupabase(stopRoutes(openRow({ status: "closed", clock_out: "2001-01-02T01:00:00.000Z" })), calls);
     const r = await stop("2001-01-02T01:00:00.000Z");
     expect(r.ok).toBe(false);
-    expect(r.error).toBe("That clock was already stopped at Mon Jan 1, 5:00 PM. Reload to see its times.");
+    expect(r.error).toBe("Brian was already clocked out at Mon Jan 1, 5:00 PM. Reload to see the times.");
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
@@ -145,7 +145,7 @@ describe("stopShift", () => {
   it("a zero-row update is a refusal, not a stopped clock, and tells nobody", async () => {
     state.client = fakeSupabase(stopRoutes(openRow(), []), calls);
     const r = await stop("2001-01-02T01:00:00.000Z");
-    expect(r).toMatchObject({ ok: false, error: "That clock was stopped a moment ago somewhere else. Reload to see it." });
+    expect(r).toMatchObject({ ok: false, error: "Brian was clocked out a moment ago somewhere else. Reload to see it." });
     expect(r.sentence).toBeUndefined();
     expect(spies.notify).toEqual([]);
     expect(spies.push).toEqual([]);
@@ -156,7 +156,8 @@ describe("stopShift", () => {
     const r = await stop("2001-01-02T01:00:00.000Z", { clock_in: "2001-01-01T20:00:00.000Z" });
     expect(r.ok).toBe(true);
     expect(r.hours).toBe(5);
-    expect(r.sentence).toBe("Stopped Brian's clock: Mon Jan 1, 12:00 PM to 5:00 PM (5.00 h). Brian has been told.");
+    // Erik, 2026-09-24: "Brian is Clocked Out". The deed in his words, then the facts.
+    expect(r.sentence).toBe("Brian is Clocked Out: 5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM. Brian has been told.");
 
     const upd = calls.find((c) => c.table === "time_entries" && c.verb === "update")!;
     expect(upd.filters).toContainEqual(["eq", "status", "open"]);
@@ -167,7 +168,7 @@ describe("stopShift", () => {
       status: "closed",
       auto_closed_reason: null,
     });
-    expect(upd.payload.notes).toMatch(/^pulled wire\n\[clock stopped by Erik Taylor on .+; it had been running since Jan 1, 1:37 PM; start moved from 1:37 PM to 12:00 PM\]$/);
+    expect(upd.payload.notes).toMatch(/^pulled wire\n\[clocked out by Erik Taylor on .+; it had been running since Jan 1, 1:37 PM; start moved from 1:37 PM to 12:00 PM\]$/);
     // Fields nobody sent are not touched.
     expect(upd.payload).not.toHaveProperty("job_id");
     expect(upd.payload).not.toHaveProperty("miles");
@@ -177,9 +178,9 @@ describe("stopShift", () => {
     const [org, to, n] = spies.notify[0];
     expect(org).toBe("org-1");
     expect(to).toEqual(["brian-1"]);
-    expect(n).toMatchObject({ type: "clock_stopped", title: "The Office Stopped Your Clock", url: "/timeclock" });
+    expect(n).toMatchObject({ type: "clock_stopped", title: "You're Clocked Out", url: "/timeclock" });
     expect(n.body).toBe(
-      "Erik stopped your clock on Herringbone. Your shift now reads Mon Jan 1, 12:00 PM to 5:00 PM, 5.00 h, no lunch. If that is wrong, tell Erik.",
+      "Erik clocked you out at 5:00 PM: 5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM, no lunch. If that is wrong, tell Erik.",
     );
     expect(spies.push).toHaveLength(1);
     expect(spies.push[0][0]).toEqual(["brian-1"]);
@@ -189,9 +190,22 @@ describe("stopShift", () => {
   it("stopping your own clock tells nobody, and the sentence leaves the telling out", async () => {
     state.client = fakeSupabase(stopRoutes(openRow({ profile_id: "user-1" })), calls);
     const r = await stop("2001-01-02T01:00:00.000Z", { lunch_minutes: 30 });
-    expect(r.sentence).toBe("Stopped your clock: Mon Jan 1, 1:37 PM to 5:00 PM (2.88 h).");
+    expect(r.sentence).toBe("You're Clocked Out: 2.88 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM.");
     expect(spies.notify).toEqual([]);
     expect(spies.push).toEqual([]);
+  });
+
+  it("a row with no name reads They're Clocked Out, and a nameless office reads The office", async () => {
+    const nameless = { ...openRow(), profiles: null };
+    state.client = fakeSupabase((q) => {
+      if (q.table === "profiles") return { data: { full_name: "" } };
+      return stopRoutes(nameless)(q);
+    }, calls);
+    const r = await stop("2001-01-02T01:00:00.000Z");
+    expect(r.sentence).toBe("They're Clocked Out: 3.38 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM. They have been told.");
+    expect(spies.notify[0][2].body).toBe(
+      "The office clocked you out at 5:00 PM: 3.38 h on Herringbone, Mon Jan 1, 1:37 PM to 5:00 PM, no lunch. If that is wrong, tell the office.",
+    );
   });
 
   it("never uses an em-dash in what it says", async () => {
@@ -218,10 +232,10 @@ describe("updateTimeEntry on a running clock", () => {
     state.client = fakeSupabase(stopRoutes(openRow()), calls);
     const r = await edit();
     expect(r.ok).toBe(true);
-    expect(r.sentence).toMatch(/^Stopped Brian's clock/);
+    expect(r.sentence).toMatch(/^Brian is Clocked Out: /);
     const upd = calls.find((c) => c.verb === "update")!;
     expect(upd.filters).toContainEqual(["eq", "status", "open"]);
-    expect(upd.payload.notes).toMatch(/^\[clock stopped by Erik Taylor/);
+    expect(upd.payload.notes).toMatch(/^\[clocked out by Erik Taylor/);
     expect(spies.notify).toHaveLength(1);
 
     const future = await edit({ clock_out: new Date(Date.now() + 3 * H).toISOString() });
@@ -232,7 +246,7 @@ describe("updateTimeEntry on a running clock", () => {
     state.client = fakeSupabase(stopRoutes(openRow()), calls);
     expect(await edit({ profile_id: "jimmy-1" })).toMatchObject({
       ok: false,
-      error: "Stop the clock first, then move the shift to someone else.",
+      error: "Clock Brian out first, then move the shift to someone else.",
     });
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
@@ -353,7 +367,7 @@ describe("switchJob on a clock past twelve hours", () => {
     const r = await switchJob({ entry_id: ENTRY, job_id: OTHER });
     expect(r.ok).toBe(false);
     expect(r.needsTime).toBeUndefined();
-    expect(r.error).toMatch(/^That clock has been running since .+, more than 12 hours\. Stop it at the time the shift really ended \(Timecards, Clock Out Brian\), then clock in on this job\.$/);
+    expect(r.error).toMatch(/^That clock has been running since .+, more than 12 hours\. Clock Brian out at the time the shift really ended \(Timecards, Clock Out Brian\), then clock in on this job\.$/);
     expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
   });
 

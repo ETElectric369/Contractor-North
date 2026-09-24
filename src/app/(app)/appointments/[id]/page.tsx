@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { SettleUpButton } from "@/components/settle-up-button";
+import { smsReadiness } from "@/lib/sms";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { UnscheduleButton } from "../unschedule-button";
 import { Inspector, type CapturePhoto, type InspectionTemplate } from "./inspector";
@@ -218,6 +219,7 @@ export default async function AppointmentCapturePage({
               cardEnabled={canAcceptPayments(connectStateFromOrg((org ?? {}) as any))}
               methods={orgSettings.payment_methods}
               venmoConfigured={Boolean(orgSettings.venmo_handle?.trim())}
+              textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
           {(a.status === "scheduled" || a.status === "proposed") && (

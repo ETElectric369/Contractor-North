@@ -133,7 +133,7 @@ export function EditEntryButton({
   const router = useRouter();
   /** A RUNNING clock is stopped, not edited (2026-09-24): the trigger names whose clock it is,
    *  "Clock Out Brian" (Erik: "an option to [end] an employees time clock and clock out for them"),
-   *  and the modal is the clock-out sheet, which becomes "Stop Brian's Clock" on a forgotten one.
+   *  and the modal is the clock-out sheet, whose clock-out time starts empty on a forgotten one.
    *  The closed-entry form below is untouched. */
   const isOpen = entry.status === "open" && !entry.clock_out;
   const clockOutWords = clockDoorWords(entry.profiles?.full_name, { self: !!viewerId && entry.profile_id === viewerId }).clockOut;

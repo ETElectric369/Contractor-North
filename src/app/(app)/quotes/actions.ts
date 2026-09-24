@@ -35,7 +35,8 @@ import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
-import { sendSms } from "@/lib/sms";
+import { sendSms, smsReadiness } from "@/lib/sms";
+import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
 import { createWorkOrderFromQuote } from "../work-orders/actions";
 import { createMaterialListFromQuote } from "../materials/actions";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
@@ -73,7 +74,7 @@ export async function setQuoteType(id: string, docType: "estimate" | "quote") {
 
 export async function textQuote(
   id: string,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; notReady?: boolean }> {
   const supabase = await createClient();
   const { data: quote } = await supabase
     .from("quotes")
@@ -85,19 +86,23 @@ export async function textQuote(
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
+  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
+  // TEXTING NOT SET UP (lib/sms-readiness): said here, where he tapped, before anything is promised
+  // or stamped. Nothing is sent and the estimate stays a draft.
+  if (!smsReadiness(org).ready) return { ok: false, notReady: true, error: TEXT_NOT_READY_REFUSAL };
   // Same order the document itself resolves in: the customer when there is one, else the lead.
   const customer = (quote as any).customers ?? (quote as any).inquiry;
   if (!customer?.phone)
     return { ok: false, error: "There's no phone number on file for whoever this estimate is for — add one on their lead or contact, then send again." };
 
   const label = docLabel(quote as { doc_type?: string | null });
-  const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token);
   const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
-  if (!sent)
-    return { ok: false, error: "Text not sent — add your Twilio account to enable SMS." };
+  // Texting is set up (asked above), so a false here is the service refusing it; sendSms has
+  // already logged why. It is never "add your Twilio account" on an account that has one.
+  if (!sent) return { ok: false, error: TEXT_REFUSED };
   // Mark as sent once texted (unless already accepted/declined) — mirrors emailQuote.
   if (["draft"].includes((quote as any).status ?? "")) {
     await supabase.from("quotes").update({ status: "sent" }).eq("id", id);

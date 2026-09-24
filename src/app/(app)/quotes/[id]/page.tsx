@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { smsReadiness } from "@/lib/sms";
 import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -178,7 +179,7 @@ export default async function QuoteDetailPage({
         {/* Impulse verbs first (Send / advance status / Duplicate); the ⋯ Actions
             menu rides LAST — the one seek door, holding conversions + Delete. */}
         <div className="flex flex-wrap items-center gap-2">
-          <EmailButton id={q.id} kind="quote" />
+          <EmailButton id={q.id} kind="quote" textReady={smsReadiness(orgRow as { settings?: unknown } | null).ready} />
           <StatusControl id={q.id} status={q.status} />
           <DuplicateQuoteButton id={q.id} />
           <SectionActionsMenu tree={quoteMap} />

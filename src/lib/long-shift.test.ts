@@ -5,6 +5,7 @@ import {
   MAX_SHIFT_HOURS,
   OFFICE_BELL_HOURS,
   clockDoorWords,
+  clockedOutWords,
   isForgottenShift,
   isLongOpenShift,
   stopWindow,
@@ -184,17 +185,52 @@ describe("pickLongShiftSteps: a bell line at ten hours, a question and a buzz at
 
 describe("clockDoorWords: the office's door names whose clock it is", () => {
   it("names the first name, in Title Case words", () => {
-    expect(clockDoorWords("Brian Cole")).toEqual({ clockOut: "Clock Out Brian", stop: "Stop Brian's Clock" });
+    expect(clockDoorWords("Brian Cole")).toEqual({ clockOut: "Clock Out Brian" });
   });
 
   it("has words for a row with no name", () => {
-    expect(clockDoorWords(null)).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
-    expect(clockDoorWords("   ")).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
-    expect(clockDoorWords("—")).toEqual({ clockOut: "Clock Them Out", stop: "Stop Their Clock" });
+    expect(clockDoorWords(null)).toEqual({ clockOut: "Clock Them Out" });
+    expect(clockDoorWords("   ")).toEqual({ clockOut: "Clock Them Out" });
+    expect(clockDoorWords("—")).toEqual({ clockOut: "Clock Them Out" });
   });
 
   it("never names the viewer to himself", () => {
-    expect(clockDoorWords("Erik Taylor", { self: true })).toEqual({ clockOut: "Clock Out", stop: "Stop Your Clock" });
+    expect(clockDoorWords("Erik Taylor", { self: true })).toEqual({ clockOut: "Clock Out" });
+  });
+});
+
+describe("clockedOutWords: the deed is said as a clock-out (Erik: \"Brian is Clocked Out\")", () => {
+  it("names the first name", () => {
+    expect(clockedOutWords("Brian Cole")).toEqual({
+      headline: "Brian is Clocked Out",
+      told: "Brian has been told.",
+      subject: "Brian",
+      was: "was",
+      clockOutVerb: "Clock Brian out",
+      clockOutFirst: "Clock Brian out first",
+    });
+  });
+
+  it("has words for a row with no name", () => {
+    for (const nameless of [null, "  ", "—"]) {
+      const w = clockedOutWords(nameless);
+      expect(w.headline).toBe("They're Clocked Out");
+      expect(w.told).toBe("They have been told.");
+      expect(w.clockOutFirst).toBe("Clock them out first");
+    }
+  });
+
+  it("speaks to the reader about his own clock, and tells nobody", () => {
+    const w = clockedOutWords("Erik Taylor", true);
+    expect(w.headline).toBe("You're Clocked Out");
+    expect(w.told).toBe("");
+    expect(`${w.subject} ${w.was} already clocked out`).toBe("You were already clocked out");
+  });
+
+  it("never says the clock was stopped", () => {
+    for (const w of [clockedOutWords("Brian"), clockedOutWords(null), clockedOutWords("Erik", true)]) {
+      expect(Object.values(w).join(" ")).not.toMatch(/stop/i);
+    }
   });
 });
 

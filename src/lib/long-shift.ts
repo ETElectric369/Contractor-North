@@ -7,7 +7,7 @@
  * other door closed it at "now", which writes a 30-hour shift nobody worked.
  *
  * Everything that has to decide "is this shift a forgotten punch?" asks this file: the office's
- * clock-out sheet (Clock Out Brian, or Stop Brian's Clock on a forgotten one), the crew's own
+ * clock-out sheet (Clock Out Brian, its clock-out time empty on a forgotten one), the crew's own
  * Timeclock card, the geofence prompt, the server's clock-out backstop, the hourly job (the office's
  * bell line at OFFICE_BELL_HOURS, the question and the buzz at LONG_SHIFT_HOURS), the My Day inbox
  * and Nort. A threshold written in each of them drifts (the timecards page said 12 hours while the
@@ -58,30 +58,70 @@ export const LONG_SHIFT_PHRASE = `more than ${LONG_SHIFT_HOURS} hours`;
 
 /**
  * WHAT THE OFFICE'S DOOR ON SOMEBODY ELSE'S RUNNING CLOCK SAYS (Erik, 2026-09-24: "an option to
- * [end] an employees time clock and clock out for them").
+ * [end] an employees time clock and clock out for them", and then "'Brian is Clocked Out'").
  *
- *   clockOut: the trigger everywhere the office sees that clock, and the sheet's title and button on
- *             an ordinary shift: "Clock Out Brian" ("Clock Them Out" with no name on the row).
- *   stop:     the sheet's title and button on a forgotten one (LONG_SHIFT_HOURS, or begun on an
- *             earlier day): "Stop Brian's Clock", because that sheet asks when it really ended.
+ *   clockOut: the trigger everywhere the office sees that clock, and the sheet's title and button,
+ *             on an ordinary shift and a forgotten one alike: "Clock Out Brian" ("Clock Them Out"
+ *             with no name on the row). The deed is a clock-out, so it is never called "stopping
+ *             his clock"; a forgotten shift's sheet differs by what it asks (its clock-out time
+ *             starts empty), not by its name.
  *
- * `self`: the viewer's own running clock, which he clocks out of himself ("Clock Out",
- * "Stop Your Clock"); a door never names its own reader in the third person.
+ * `self`: the viewer's own running clock, which he clocks out of himself ("Clock Out"); a door
+ * never names its own reader in the third person.
  */
 export function clockDoorWords(fullName: string | null | undefined, opts: { self?: boolean } = {}): {
   clockOut: string;
-  stop: string;
 } {
-  if (opts.self) return { clockOut: "Clock Out", stop: "Stop Your Clock" };
+  if (opts.self) return { clockOut: "Clock Out" };
   const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
   // A placeholder a list printed for a missing name ("—") is not a name.
-  if (!/\p{L}/u.test(first)) return { clockOut: "Clock Them Out", stop: "Stop Their Clock" };
-  return { clockOut: `Clock Out ${first}`, stop: `Stop ${first}'s Clock` };
+  if (!/\p{L}/u.test(first)) return { clockOut: "Clock Them Out" };
+  return { clockOut: `Clock Out ${first}` };
+}
+
+/**
+ * WHAT IS SAID ONCE THE OFFICE HAS CLOCKED SOMEBODY OUT (Erik, 2026-09-24: "'Brian is Clocked Out'").
+ * The deed is a clock-out, so it is said as one, never as "stopped Brian's clock".
+ *
+ *   headline:      "Brian is Clocked Out", "They're Clocked Out" with no name, "You're Clocked Out"
+ *   told:          "Brian has been told." (empty for your own clock: nobody is told about himself)
+ *   subject / was: "Brian was already clocked out", "They were...", "You were..."
+ *   clockOutVerb:  "Clock Brian out", "Clock them out", "Clock out"
+ *   clockOutFirst: the same, "first": "Clock Brian out first, then move the shift to someone else."
+ *
+ * A name is read the way clockDoorWords reads it: a placeholder with no letter in it is no name.
+ */
+export function clockedOutWords(
+  fullName: string | null | undefined,
+  self = false,
+): { headline: string; told: string; subject: string; was: string; clockOutVerb: string; clockOutFirst: string } {
+  if (self) {
+    return { headline: "You're Clocked Out", told: "", subject: "You", was: "were", clockOutVerb: "Clock out", clockOutFirst: "Clock out first" };
+  }
+  const first = String(fullName ?? "").trim().split(/\s+/)[0] ?? "";
+  if (!/\p{L}/u.test(first)) {
+    return {
+      headline: "They're Clocked Out",
+      told: "They have been told.",
+      subject: "They",
+      was: "were",
+      clockOutVerb: "Clock them out",
+      clockOutFirst: "Clock them out first",
+    };
+  }
+  return {
+    headline: `${first} is Clocked Out`,
+    told: `${first} has been told.`,
+    subject: first,
+    was: "was",
+    clockOutVerb: `Clock ${first} out`,
+    clockOutFirst: `Clock ${first} out first`,
+  };
 }
 
 /** The office's sheet treats this shift as forgotten: it has run LONG_SHIFT_HOURS, or it began on
- *  an earlier org-local day. Then the sheet reads "Stop Brian's Clock" and its stop time starts
- *  empty; otherwise it reads "Clock Out Brian" with the stop time at now. */
+ *  an earlier org-local day. Then the sheet ("Clock Out Brian" either way) starts its clock-out
+ *  time empty and asks when the work really ended; otherwise the clock-out time is now. */
 export function isForgottenShift(clockInMs: number, nowMs: number, tz: string): boolean {
   return isLongOpenShift(clockInMs, nowMs) || startedEarlierDay(clockInMs, nowMs, tz);
 }

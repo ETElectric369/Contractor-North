@@ -24,7 +24,7 @@ import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 import { clampCloseAtMs, needsStatedStop, stopCrumb, withAutoConfirmedCrumb, withStopCrumb } from "./close-math";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 
 export type ClockResult = {
   ok: boolean;
@@ -411,7 +411,7 @@ export async function switchJob(input: {
     const ownerName = (Array.isArray(owner) ? owner[0] : owner)?.full_name ?? null;
     return {
       ok: false,
-      error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. Stop it at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
+      error: `That clock has been running since ${since}, ${LONG_SHIFT_PHRASE}. ${clockedOutWords(ownerName, false).clockOutVerb} at the time the shift really ended (Timecards, ${clockDoorWords(ownerName).clockOut}), then clock in on this job.`,
     };
   }
 
@@ -1200,7 +1200,7 @@ async function overlapRefusal(
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
   return clash.clock_out
     ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
-    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Stop that clock first: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`;
+    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. ${clockedOutWords(fullName, false).clockOutFirst}: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`;
 }
 
 /**
@@ -1316,7 +1316,7 @@ export async function createManualEntry(input: {
  * by hand a day later, and the invoice waited on it.
  *
  * This is the one door that stops a clock at a STATED time, for every caller: the office's sheet
- * (Clock Out Brian on an ordinary shift, Stop Brian's Clock on a forgotten one; 2026-09-24 Erik
+ * (Clock Out Brian, on an ordinary shift or a forgotten one; 2026-09-24 Erik
  * asked for "an option to [end] an employees time clock and clock out for them" at any time),
  * updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
  * land here and get the same bounds, the same card crumb and the same message to the crew member.
@@ -1362,13 +1362,18 @@ export async function stopShift(input: {
     job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
   } | null;
   if (!stored) return { ok: false, error: "Entry not found." };
+  const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+  const ownerFull = (one(stored.profiles)?.full_name ?? "").trim();
+  const ownerName = ownerFull || "That person";
+  const self = stored.profile_id === ctx.userId;
+  const said = clockedOutWords(ownerFull, self);
   const tz = await orgTz(supabase);
   if (stored.status !== "open") {
     return {
       ok: false,
       error: stored.clock_out
-        ? `That clock was already stopped at ${dayClock(stored.clock_out, tz)}. Reload to see its times.`
-        : "That clock was already stopped. Reload to see its times.",
+        ? `${said.subject} ${said.was} already clocked out at ${dayClock(stored.clock_out, tz)}. Reload to see the times.`
+        : `${said.subject} ${said.was} already clocked out. Reload to see the times.`,
     };
   }
 
@@ -1379,9 +1384,6 @@ export async function stopShift(input: {
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
   const problem = stopProblem({ startMs, stopMs, nowMs: Date.now(), lunchMin: lunch, who: "he", tz });
   if (problem) return { ok: false, error: problem };
-
-  const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
-  const ownerName = (one(stored.profiles)?.full_name ?? "").trim() || "That person";
 
   const overlaps = await overlapRefusal(supabase, stored.profile_id, startMs, stopMs, { excludeId: stored.id, name: ownerName, tz });
   if (overlaps) return { ok: false, error: overlaps };
@@ -1394,7 +1396,8 @@ export async function stopShift(input: {
   }
 
   const { data: actor } = await supabase.from("profiles").select("full_name").eq("id", ctx.userId).maybeSingle();
-  const actorName = ((actor as { full_name?: string | null } | null)?.full_name ?? "").trim() || "The office";
+  const actorFull = ((actor as { full_name?: string | null } | null)?.full_name ?? "").trim();
+  const actorName = actorFull || "The office";
   const startOut = new Date(startMs).toISOString();
   const stopOut = new Date(stopMs).toISOString();
   const notes = withStopCrumb(
@@ -1441,7 +1444,7 @@ export async function stopShift(input: {
   // The silent-write law: zero rows means somebody else stopped it first. Nothing here was saved.
   if (!upd?.length) {
     revalidateTime([stored.job_id]);
-    return { ok: false, error: "That clock was stopped a moment ago somewhere else. Reload to see it." };
+    return { ok: false, error: `${said.subject} ${said.was} clocked out a moment ago somewhere else. Reload to see it.` };
   }
 
   const hours = hoursBetween(startOut, stopOut, lunch);
@@ -1458,15 +1461,17 @@ export async function stopShift(input: {
         ? jobLabel(job)
         : null;
   const when = `${dayOnly(startOut, tz)}, ${clockOnly(startOut, tz)} to ${clockOnly(stopOut, tz)}`;
-  const self = stored.profile_id === ctx.userId;
+  // "5.00 h on Herringbone, Mon Jan 1, 12:00 PM to 5:00 PM": the facts every line below names.
+  const facts = `${hours.toFixed(2)} h${newJobLabel ? ` on ${newJobLabel}` : ""}, ${when}`;
 
   if (!self) {
-    const actorFirst = firstName(actorName);
-    const title = "The Office Stopped Your Clock";
+    // The actor's own name when the office has one; a profile with no name reads "The office".
+    const actorFirst = actorFull ? firstName(actorFull) : "The office";
+    const tellWho = actorFull ? actorFirst : "the office";
+    const title = "You're Clocked Out";
     const body =
-      `${actorFirst} stopped your clock${newJobLabel ? ` on ${newJobLabel}` : ""}. ` +
-      `Your shift now reads ${when}, ${hours.toFixed(2)} h, ${lunch > 0 ? `${lunch} min lunch` : "no lunch"}. ` +
-      `If that is wrong, tell ${actorFirst}.`;
+      `${actorFirst} clocked you out at ${clockOnly(stopOut, tz)}: ${facts}, ${lunch > 0 ? `${lunch} min lunch` : "no lunch"}. ` +
+      `If that is wrong, tell ${tellWho}.`;
     // Both are best-effort by construction (they never throw); allSettled keeps it that way even if
     // that changes, so a push outage can never make a stopped clock look unstopped.
     await Promise.allSettled([
@@ -1478,10 +1483,8 @@ export async function stopShift(input: {
   revalidateTime([stored.job_id, typeof jobId === "string" ? jobId : null]);
   revalidatePath("/payroll");
 
-  const ownerFirst = firstName(ownerName);
-  const sentence = self
-    ? `Stopped your clock: ${when} (${hours.toFixed(2)} h).`
-    : `Stopped ${ownerFirst}'s clock: ${when} (${hours.toFixed(2)} h). ${ownerFirst} has been told.`;
+  // Erik, 2026-09-24: "Brian is Clocked Out". The deed first, in his words, then the facts.
+  const sentence = self ? `${said.headline}: ${facts}.` : `${said.headline}: ${facts}. ${said.told}`;
   return { ok: true, hours, sentence };
 }
 
@@ -1569,10 +1572,11 @@ export async function updateTimeEntry(input: {
   // diverging the books.
   const { data: prev } = await supabase
     .from("time_entries")
-    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason, status")
+    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason, status, profiles:profile_id(full_name)")
     .eq("id", input.id)
     .maybeSingle();
   const stored = prev as {
+    profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
     job_id: string | null;
     clock_in: string;
     clock_out: string | null;
@@ -1589,7 +1593,8 @@ export async function updateTimeEntry(input: {
 
   if (stored.status === "open") {
     if (input.profile_id && input.profile_id !== stored.profile_id) {
-      return { ok: false, error: "Stop the clock first, then move the shift to someone else." };
+      const owner = Array.isArray(stored.profiles) ? stored.profiles[0] : stored.profiles;
+      return { ok: false, error: `${clockedOutWords(owner?.full_name, stored.profile_id === ctx.userId).clockOutFirst}, then move the shift to someone else.` };
     }
     return stopShift({
       entry_id: input.id,

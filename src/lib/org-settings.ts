@@ -75,7 +75,9 @@ export interface OrgSettings {
   geofence_radius_m: number; // meters from the clock-in point before auto clock-out
   /** Timeclock SMS reminders (the two crons: morning "no clock-in yet" nudge + the
    *  end-of-day clock-out/EOD-form reminder). Default ON; the crons skip an org that
-   *  turns this off. Settings → Scheduling owns the toggle. */
+   *  turns this off. Settings → Scheduling owns the toggle. A stored ON is only a CHOICE: until
+   *  the org can text (lib/sms-readiness) the crons skip it and count the skip, and Settings shows
+   *  the option as not active. */
   remind_timeclock: boolean;
   /** Ask the crew for job CODES on the timeclock (the clock-in/switch code selects). false =
    *  codes off: entries carry just the JOB, and timeclock job labels lead with customer ·
@@ -315,7 +317,8 @@ export interface OrgSettings {
   reviews: { name: string; text: string; rating?: number }[];
   /** This org's own Twilio "from" number (E.164, e.g. "+15305551234") for its outbound texts,
    *  so each org sends under its OWN registered number/brand. Empty = fall back to the platform
-   *  default (TWILIO_FROM_NUMBER). Critical for multi-tenant A2P compliance. */
+   *  default (the messaging service, else TWILIO_FROM_NUMBER). Critical for multi-tenant A2P
+   *  compliance. Typed on Settings, Customers, Texting; one of the pieces lib/sms-readiness checks. */
   sms_from_number: string;
   /** External scheduling link (Calendly or similar). When set, the PUBLIC
    *  "schedule your site visit" buttons (inquiry splash + estimate configurator)

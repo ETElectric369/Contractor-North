@@ -6,8 +6,11 @@ import { Mail, MessageSquare, Loader2 } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { emailQuote, textQuote } from "@/app/(app)/quotes/actions";
 import { emailInvoice, textInvoice } from "@/app/(app)/billing/actions";
+import { TEXT_NOT_READY_REFUSAL } from "@/lib/sms-readiness";
 
-type Result = { ok: boolean; error?: string };
+/** `notReady`: texting isn't set up (lib/sms-readiness). Nothing was sent; the refusal names the
+ *  doors that work, and is said as information, not as a failure of his. */
+type Result = { ok: boolean; error?: string; notReady?: boolean };
 
 function SendChip({
   label,
@@ -17,6 +20,7 @@ function SendChip({
   successText,
   onDone,
   primary = false,
+  notActive,
 }: {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -29,6 +33,9 @@ function SendChip({
   onDone?: () => void;
   /** Render as a filled primary action instead of an outlined chip. */
   primary?: boolean;
+  /** This door can't work yet (texting isn't set up): the chip shows as not active and a tap says
+   *  this, where he tapped, with no confirm that promises a send and no trip to the server. */
+  notActive?: string;
 }) {
   const toast = useToast();
   // Busy state only — success/failure now report through the app-wide toast so a
@@ -36,12 +43,16 @@ function SendChip({
   const [busy, setBusy] = useState(false);
 
   async function go() {
+    if (notActive) {
+      toast(notActive, "info");
+      return;
+    }
     if (!confirm(confirmText ?? `${label}?`)) return;
     setBusy(true);
     try {
       const res = await run();
       if (!res?.ok) {
-        toast(res?.error ?? "Couldn't send — try again.", "error");
+        toast(res?.error ?? "Couldn't send — try again.", res?.notReady ? "info" : "error");
         return;
       }
       toast(successText, "success");
@@ -55,8 +66,12 @@ function SendChip({
     <button
       onClick={go}
       disabled={busy}
+      aria-disabled={notActive ? true : undefined}
+      title={notActive}
       className={
-        primary
+        notActive
+          ? "inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-white px-3 text-sm font-medium text-slate-400"
+          : primary
           ? "inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
           : "inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
       }
@@ -76,12 +91,16 @@ export function EmailButton({
   kind,
   customerName,
   amount,
+  textReady = true,
 }: {
   id: string;
   kind: "quote" | "invoice";
   /** Invoice only: customer + amount spelled into the confirm prompt. */
   customerName?: string | null;
   amount?: number | null;
+  /** Can this org text (smsReadiness(org).ready, asked by the page)? false: the Text chip shows as
+   *  not active and says why when tapped, instead of asking "Text this invoice to Nora?" first. */
+  textReady?: boolean;
 }) {
   const router = useRouter();
   const isInvoice = kind === "invoice";
@@ -113,6 +132,7 @@ export function EmailButton({
         icon={MessageSquare}
         confirmText={textConfirm}
         successText={isInvoice ? "Invoice texted" : "Estimate texted"}
+        notActive={textReady ? undefined : TEXT_NOT_READY_REFUSAL}
         onDone={isInvoice ? () => router.refresh() : undefined}
         run={() => (kind === "quote" ? textQuote(id) : textInvoice(id))}
       />

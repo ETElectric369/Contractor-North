@@ -1,6 +1,7 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { storyForJob } from "@/lib/story";
 import { SettleUpButton } from "@/components/settle-up-button";
+import { smsReadiness } from "@/lib/sms";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
@@ -1436,6 +1437,7 @@ export default async function JobDetailPage({
               cardEnabled={canAcceptPayments(connectStateFromOrg((org ?? {}) as any))}
               methods={getOrgSettings((org as any)?.settings).payment_methods}
               venmoConfigured={Boolean(getOrgSettings((org as any)?.settings).venmo_handle?.trim())}
+              textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap

@@ -19,6 +19,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { smsReadiness } from "@/lib/sms";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
 import { listCustomerOptions } from "@/lib/schedule-options";
@@ -96,6 +97,9 @@ export default async function InvoicePage({
   const paymentMethods = orgSettings.payment_methods;
   // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".
   const cardEnabled = canAcceptPayments(connectStateFromOrg((org ?? {}) as any));
+  // Can this org text (lib/sms-readiness)? Every Text door on the page reads it BEFORE it promises a
+  // send, so a tap never asks "Text this invoice to Nora?" only to say texting isn't set up.
+  const textReady = smsReadiness(org as { settings?: unknown } | null).ready;
 
   // A deposit/progress/final invoice on a job carries a progress-report summary
   // so the payment request doubles as a running-balance statement.
@@ -186,13 +190,14 @@ export default async function InvoicePage({
               draft too: Pay Now sends the invoice the moment it builds the door, because putting a
               bill in front of a customer is sending it. */}
           {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
-            <PayNowButton source="invoice" invoiceId={inv.id} balance={invoiceBalance(inv.total, inv.amount_paid)} cardEnabled={cardEnabled} />
+            <PayNowButton source="invoice" invoiceId={inv.id} balance={invoiceBalance(inv.total, inv.amount_paid)} cardEnabled={cardEnabled} textReady={textReady} />
           )}
           <EmailButton
             id={inv.id}
             kind="invoice"
             customerName={inv.customers?.name ?? null}
             amount={Number(inv.total)}
+            textReady={textReady}
           />
           {/* RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now,
               in the same row. This used to be an anchor that scrolled to a form in the right
@@ -281,6 +286,7 @@ export default async function InvoicePage({
            about their copy being older says "Dave Gove", not "the customer". */
         customerName={inv.customers?.name ?? null}
         runningClocks={runningClocks}
+        textReady={textReady}
         tz={orgSettings.timezone}
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,

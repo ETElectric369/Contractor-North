@@ -115,6 +115,7 @@ export function InvoiceDetail({
   customerName = null,
   customerHoldsOlderCopy = false,
   runningClocks = [],
+  textReady = true,
   tz = "America/Los_Angeles",
 }: {
   invoice: Invoice;
@@ -139,6 +140,8 @@ export function InvoiceDetail({
    *  until somebody stops the clock, so the card says so. */
   /** `door` is the trigger's words ("Clock Out Brian"; "Clock Out" on the viewer's own clock). */
   runningClocks?: { id: string; clockIn: string; name: string; self?: boolean; door: string }[];
+  /** Can this org text (lib/sms-readiness)? The resend chip's Text door reads it before it promises. */
+  textReady?: boolean;
   /** The org's timezone, for the "since" time on a running clock. */
   tz?: string;
 }) {
@@ -832,7 +835,7 @@ export function InvoiceDetail({
               <div key={c.id} className="flex flex-wrap items-center gap-2">
                 <span className="min-w-0 flex-1">
                   {c.self ? "You're" : `${c.name} is`} still on the clock on this job since {clockSince(c.clockIn, tz)}. Those
-                  hours are not on this invoice until the clock is stopped.
+                  hours are not on this invoice until {c.self ? "you're" : `${c.name} is`} clocked out.
                 </span>
                 <Link
                   href={`/timecards?entry=${c.id}`}
@@ -952,6 +955,7 @@ export function InvoiceDetail({
                   kind="invoice"
                   customerName={customerName}
                   amount={Number(invoice.total)}
+                  textReady={textReady}
                 />
               </div>
             ) : (
