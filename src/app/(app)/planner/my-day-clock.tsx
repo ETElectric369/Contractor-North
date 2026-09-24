@@ -10,6 +10,7 @@ import type { GeoPoint } from "@/lib/types";
 import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
 import { lunchMinutesFor, LUNCH_LABEL } from "@/lib/lunch-rule";
+import { isLongOpenShift } from "@/lib/long-shift";
 import { useToast } from "@/components/toast";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -237,7 +238,17 @@ export function MyDayClock({
             </div>
           )}
         </div>
-        {open ? (
+        {open && isLongOpenShift(new Date(open.clock_in).getTime(), now) ? (
+          /* A clock running 10 hours or more was probably forgotten: the one-tap close at now would
+             write the night onto payroll. Timeclock asks when he stopped (lib/long-shift); the
+             server refuses a now-close past the line anyway, so this is the door, not the guard. */
+          <Link
+            href="/timeclock"
+            className="ml-auto inline-flex h-12 shrink-0 items-center gap-2 rounded-lg bg-red-600 px-5 text-base font-medium text-white hover:bg-red-700"
+          >
+            <Square className="h-5 w-5" /> Set When You Stopped
+          </Link>
+        ) : open ? (
           <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="ml-auto shrink-0">
             {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Square className="h-5 w-5" />} Clock Out
           </Button>

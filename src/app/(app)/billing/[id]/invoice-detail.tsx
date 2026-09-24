@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -89,6 +90,15 @@ function LineRowText({ item: it }: { item: InvoiceItem }) {
   );
 }
 
+/** "Tue Sep 22, 1:37 PM" in the org's clock. */
+function clockSince(iso: string, tz: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "earlier";
+  const day = d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" }).replace(",", "");
+  const t = d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  return `${day}, ${t}`;
+}
+
 export function InvoiceDetail({
   invoice,
   items,
@@ -104,6 +114,8 @@ export function InvoiceDetail({
   jobs = [],
   customerName = null,
   customerHoldsOlderCopy = false,
+  runningClocks = [],
+  tz = "America/Los_Angeles",
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -123,6 +135,11 @@ export function InvoiceDetail({
   /** 0269: revised_at is later than sent_at — the bill in their hands is not this one. Decided by
    *  lib/invoice-revision.ts on the server, never re-derived here. */
   customerHoldsOlderCopy?: boolean;
+  /** Shifts still running on this invoice's job (page.tsx reads them). Their hours bill nothing
+   *  until somebody stops the clock, so the card says so. */
+  runningClocks?: { id: string; clockIn: string; name: string }[];
+  /** The org's timezone, for the "since" time on a running clock. */
+  tz?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -805,6 +822,27 @@ export function InvoiceDetail({
             {descrDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
           </div>
         </div>
+
+        {/* A CLOCK STILL RUNNING ON THIS JOB (2026-09-24): its hours are not on this invoice, and
+            nothing used to say so. One line per clock, with the way to stop it at the real time. */}
+        {runningClocks.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+            {runningClocks.map((c) => (
+              <div key={c.id} className="flex flex-wrap items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  {c.name} is still on the clock on this job since {clockSince(c.clockIn, tz)}. Those hours are not on
+                  this invoice until the clock is stopped.
+                </span>
+                <Link
+                  href={`/timecards?entry=${c.id}`}
+                  className="inline-flex h-11 shrink-0 items-center rounded-lg border border-amber-400 bg-white px-4 text-sm font-medium text-amber-900 hover:bg-amber-100"
+                >
+                  Stop The Clock
+                </Link>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* THE IMPORT ROW FOLLOWS THE SERVER, NOT THE OLD DRAFT HABIT (cn-v962 review). All four
             importers moved from requireDraftInvoice to requireLiveInvoice in this wave, on the

@@ -12,7 +12,6 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import {
   formatCurrency,
   formatDuration,
-  formatDate,
   formatDateShort,
   formatTime,
   hoursBetween,
@@ -31,12 +30,7 @@ import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-f
 import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
-import { tolerateMissingColumns } from "@/lib/inspection/schema";
-import { comparePlanToActual, needsAttention as needsAttentionRows, explain, type PlannedDay } from "@/lib/plan-vs-actual";
-// The schedule's own answer for one person on one day. The SAME pure pick /schedule's crew board
-// and /timeclock's "Next up" use, so the three surfaces cannot name different jobs for the same
-// Wednesday (crew-plan.ts).
-import { pickScheduledJobForDay } from "../timeclock/crew-plan";
+import { LONG_SHIFT_HOURS, isLongOpenShift } from "@/lib/long-shift";
 
 export const dynamic = "force-dynamic";
 
@@ -185,7 +179,7 @@ export default async function TimecardsPage({
   for (const [id, r] of payMap) baselineById[id] = Number(r.commute_baseline_miles ?? 0);
 
   // "Needs attention" pull — open entries that should have been closed: anything
-  // still open from a PAST day (a forgotten clock-out) or open more than 12 hours
+  // still open from a PAST day (a forgotten clock-out) or open LONG_SHIFT_HOURS or more
   // today. One cheap org-wide query (open entries are a handful at most), so the
   // strip works regardless of which week is being viewed.
   //
@@ -207,163 +201,11 @@ export default async function TimecardsPage({
     // more, it is a shift with no hours on it, and that never ages out of being wrong.
     if (e.auto_closed_reason) return true;
     const inMs = new Date(e.clock_in).getTime();
-    return inMs < todayStartMs || Date.now() - inMs > 12 * 3_600_000;
+    // The shared long-shift rule (lib/long-shift), not a threshold of this page's own.
+    return inMs < todayStartMs || Date.now() - inMs >= LONG_SHIFT_HOURS * 3_600_000;
   });
 
-  /**
-   * PLAN vs ACTUAL for the week on screen. What the plan said, against where the hours landed.
-   *
-   * WHY THIS FEEDER GREW A SECOND READ (2026-09-18). It used to hand comparePlanToActual the
-   * crew_day_assignments rows and nothing else, so any day with hours and no assignment row came
-   * back "unplanned". ET Electric has written 24 of those rows in the app's whole life and none
-   * since 2026-08-07 — the /timeclock week grid that wrote them lost both of its population
-   * mechanisms in cn-v590 and the grid itself went in cn-v951 — so EVERY day anybody worked
-   * produced a finding. Erik got five in one card, all of them about the job he and Jimmy had
-   * genuinely been on all week: "we worked on the job that was in the schedule and the time cards
-   * say Jason Waldow. Is this box accurate in any way that can help us?"
-   *
-   * It was not. So the plan now comes from where he actually keeps it — the JOB SCHEDULE — and
-   * crew_day_assignments goes back to being what it is, a per-day OVERRIDE (0139/0170) that wins
-   * when it exists and is silent when it does not. Three things are read:
-   *
-   *   1. THE OVERRIDE, as before, tolerantly (the 0170 `kind` column is young and a payroll review
-   *      page must not go blank because one column isn't there yet).
-   *   2. THE JOBS whose scheduled window touches this week, with their roster (assigned_to).
-   *   3. THEIR SEGMENTS — every segment of those jobs, not just the week's, because SEGMENTS-FIRST
-   *      only works if you can tell "this job has segments and none cover Wednesday" from "this
-   *      job has no segments at all". 0266 gives every org member the read; this page is staff.
-   *
-   * No status filter on the jobs: a job finished on Friday was still scheduled Monday, and
-   * dropping it would resurrect exactly the false findings this is here to stop.
-   */
-  const weekFirst = weekDayStrs[0];
-  const weekLast = weekDayStrs[6];
-  type WeekJob = {
-    id: string;
-    job_number: string | null;
-    name: string | null;
-    assigned_to: string[] | null;
-    scheduled_start: string | null;
-    scheduled_end: string | null;
-  };
-  const [planRows, { data: weekJobRows }] = await Promise.all([
-    tolerateMissingColumns<{ profile_id: string; work_date: string; job_id: string | null; kind: string }[]>(() =>
-      supabase
-        .from("crew_day_assignments")
-        .select("profile_id, work_date, job_id, kind")
-        .gte("work_date", weekFirst)
-        .lte("work_date", weekLast),
-    ),
-    supabase
-      .from("jobs")
-      .select("id, job_number, name, assigned_to, scheduled_start, scheduled_end")
-      .lte("scheduled_start", end.toISOString())
-      .or(`scheduled_end.gte.${start.toISOString()},and(scheduled_end.is.null,scheduled_start.gte.${start.toISOString()})`),
-  ]);
-  const weekJobs = (weekJobRows ?? []) as unknown as WeekJob[];
-  let weekSegs: { job_id: string; start_date: string; end_date: string }[] = [];
-  if (weekJobs.length) {
-    const { data: segRows } = await supabase
-      .from("job_schedule_segments")
-      .select("job_id, start_date, end_date")
-      .in(
-        "job_id",
-        weekJobs.map((j) => j.id),
-      );
-    weekSegs = (segRows ?? []) as typeof weekSegs;
-  }
-  /* WHICH DAYS EACH JOB RUNS — segments-first, with the scheduled_start→scheduled_end MIRROR
-   * behind it. Copied in shape from timeclock/next-up.tsx and schedule/crew-board-panel.tsx,
-   * which is the point: the card that tells a man where he is going and the card that tells the
-   * office where he went must read the calendar the same way, or they disagree about the same
-   * Wednesday. A segmented job runs only on its segment days (its base range is stretched
-   * min-start→max-end, so a Mon+Fri job would otherwise claim Wednesday); a job with no segments
-   * runs across its own window. The org-local days are resolved HERE because tz is a server
-   * concern and crew-plan.ts stays pure. */
-  const segsByJob = new Map<string, { start: string; end: string }[]>();
-  for (const s of weekSegs) {
-    if (!s.job_id) continue;
-    const list = segsByJob.get(s.job_id) ?? [];
-    list.push({ start: s.start_date, end: s.end_date });
-    segsByJob.set(s.job_id, list);
-  }
-  const rangesByJob = new Map<string, { start: string; end: string }[]>();
-  for (const j of weekJobs) {
-    const segs = segsByJob.get(j.id);
-    if (segs?.length) {
-      rangesByJob.set(j.id, segs);
-      continue;
-    }
-    if (!j.scheduled_start) continue; // unscheduled: it says nothing about any day, and that stands
-    const s = todayStrInTz(tz, new Date(j.scheduled_start));
-    const e = j.scheduled_end ? todayStrInTz(tz, new Date(j.scheduled_end)) : s;
-    rangesByJob.set(j.id, [{ start: s, end: e < s ? s : e }]);
-  }
-  /** Every job that was RUNNING on each day of the week, whoever the roster names. This is the
-   *  half of Erik's sentence the per-person pick cannot answer: jobs.assigned_to is a coarse list
-   *  nobody grooms, so hours landing on a job the calendar had open that day are not a warning,
-   *  even when the roster never named that person. */
-  const calendarJobsByDay = new Map<string, Set<string>>();
-  for (const d of weekDayStrs) {
-    const running = new Set<string>();
-    for (const [jobId, ranges] of rangesByJob) {
-      if (ranges.some((r) => r.start <= d && d <= r.end)) running.add(jobId);
-    }
-    calendarJobsByDay.set(d, running);
-  }
-  const jobsByPerson = new Map<string, WeekJob[]>();
-  for (const j of weekJobs) {
-    for (const pid of j.assigned_to ?? []) {
-      if (!pid) continue;
-      const list = jobsByPerson.get(String(pid)) ?? [];
-      list.push(j);
-      jobsByPerson.set(String(pid), list);
-    }
-  }
-  const actualDays = (entries ?? []).map((e: any) => ({
-    profileId: String(e.profile_id ?? ""),
-    workDate: todayStrInTz(tz, new Date(e.clock_in)),
-    jobId: e.job_id ?? null,
-    // THE SAME ONE RULE. This hand-rolled `hoursBetween(...) - lunch/60` instead of handing
-    // hoursBetween the lunch it already knows how to deduct, which skipped the clamp — a
-    // short shift with a long lunch came out NEGATIVE here and zero everywhere else, and a
-    // negative day is read as "no hours", which is the difference between a no_show finding
-    // and an unplanned one. Two formulas that agree on ordinary days are still two formulas.
-    hours: e.clock_out ? hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) : 0,
-  }));
-  /* THE PLAN, BOTH LAYERS. Assignments for the whole week (a no-hours one is still a no_show), and
-   * a schedule-derived day only where hours actually landed — a scheduled day nobody worked is
-   * silence by design, so manufacturing rows for it would only make work for comparePlanToActual
-   * to throw away. Precedence is settled INSIDE that function, not by the order of this array. */
-  const NO_SINGLE_DAYS: ReadonlyMap<string, string | null> = new Map();
-  const plannedDays: PlannedDay[] = (planRows ?? []).map((r) => ({
-    profileId: r.profile_id,
-    workDate: r.work_date,
-    jobId: r.job_id,
-    kind: (r.kind === "off" ? "off" : "job") as "job" | "off",
-    source: "assignment" as const,
-  }));
-  for (const k of new Set(actualDays.filter((d) => d.profileId).map((d) => `${d.profileId}|${d.workDate}`))) {
-    const [profileId, workDate] = k.split("|");
-    const sched = pickScheduledJobForDay(jobsByPerson.get(profileId) ?? [], workDate, rangesByJob, NO_SINGLE_DAYS);
-    if (sched) plannedDays.push({ profileId, workDate, jobId: sched.id, kind: "job", source: "schedule" });
-  }
-  const drift = needsAttentionRows(comparePlanToActual(plannedDays, actualDays, calendarJobsByDay));
   const nameById = new Map<string, string>(((members ?? []) as any[]).map((m) => [m.id, m.full_name ?? "Crew member"]));
-  // THE NAME, NOT THE NUMBER. Erik, three separate bug reports: "timecards and all jobs need to be
-  // displayed as job name not job number everywhere" / "need to see job name not job number" /
-  // "this week should show jobs worked not job codes". A number is a filing reference; nobody
-  // recognises their own week from J-022. jobLabel is the SSOT and already prefers the name — these
-  // three call sites were hand-rolling the label instead of asking it.
-  const jobLabelById = new Map<string, string>(((jobs ?? []) as any[]).map((j) => [j.id, jobLabel(j)]));
-  // ...AND EVERY JOB A FINDING CAN NAME. That list above is the 50 newest jobs — a picker, not a
-  // dictionary — so a drift line about anything older read "a job", which is no help at all on the
-  // one card that exists to say where the hours went. The week's scheduled jobs and the week's own
-  // entries both carry job_number/name already, so they fill the gaps for free.
-  for (const j of weekJobs) jobLabelById.set(j.id, jobLabel(j));
-  for (const e of (entries ?? []) as any[]) {
-    if (e.job_id && e.job) jobLabelById.set(String(e.job_id), jobLabel(e.job));
-  }
 
   /* WHO IS IN THIS WEEK — names for the grid legend, in the order their first shift lands.
    *  (The per-person TALLY that used to be built here — hours, miles, a Card each — is gone: it
@@ -485,6 +327,7 @@ export default async function TimecardsPage({
             tz={tz}
             neighbors={neighborsOf(weekRows, String(e.id))}
             rebuiltFromOldSplit={rebuiltOf(weekRows, String(e.id))}
+            workDayEnd={workWin.end}
           />
         </>
       ),
@@ -720,30 +563,21 @@ export default async function TimecardsPage({
     owedTotal = Math.round(owing.reduce((s, b) => s + b.owed, 0) * 100) / 100;
   }
 
-  /* ── FIX THESE ─────────────────────────────────────────────────────────────────────────────
+  /* ── FIX THESE: BROKEN SHIFTS ONLY ─────────────────────────────────────────────────────────
    *
-   *  TWO CARDS BECOME ONE. "Different from the plan" and "Needs attention" sat back to back with
-   *  near-identical amber chrome and no line between them, so they read as one long
-   *  undifferentiated warning list — Erik: "i dont even know what it all is and it looks like
-   *  duplicates". They ARE one list, so this stops pretending otherwise and puts them in the
-   *  order the money is in.
+   *  A broken shift is hours that are WRONG: a clock still running from a forgotten clock-out, or a
+   *  0193 ghost auto-closed at zero and worth nothing. Every row names the verb that fixes it and
+   *  opens that entry through the ?entry= door, which is now the Stop The Clock sheet for a
+   *  running clock.
    *
-   *  WORST MONEY FIRST. A broken shift is hours that are WRONG — a forgotten clock-out inflating
-   *  a week, or a 0193 ghost auto-closed at zero and worth nothing — and that is the next check.
-   *  A plan drift is hours that are probably RIGHT but filed against the wrong job, which costs
-   *  later, at invoicing. So broken rows first in normal weight, drift under a rule in lighter
-   *  type.
-   *
-   *  THE TWO FEEDERS: `needsAttention` above (broken shifts, untouched), and the plan comparison
-   *  from lib/plan-vs-actual. That second one was rebuilt on 2026-09-18 — it took the plan from
-   *  crew_day_assignments alone, a table nobody has written to since August, so every worked day
-   *  came back "nothing planned" and the drift half of this card had never once been right. It
-   *  reads the JOB SCHEDULE now (see the feeder above); the rendering here did not change. */
-  const entryIdByPersonDay = new Map<string, string>();
-  for (const e of (entries ?? []) as any[]) {
-    const k = `${e.profile_id}|${todayStrInTz(tz, new Date(e.clock_in))}`;
-    if (!entryIdByPersonDay.has(k)) entryIdByPersonDay.set(k, String(e.id));
-  }
+   *  THE PLAN-DRIFT HALF IS GONE (2026-09-24). It compared the job calendar to where the hours
+   *  landed and listed "moved", "unplanned" and "no-show" days under the broken rows. Erik asked
+   *  on 09-18 "Is this box accurate in any way that can help us", and on 09-23, three minutes after
+   *  fixing Brian's forgotten Herringbone shift by hand: "there's no way to fix it, I don't think
+   *  this is useful". He was right both times. A calendar edited after the fact produced findings
+   *  that no row could act on: the hours were already on the job they were worked on, and the only
+   *  thing "wrong" was a schedule nobody needs to rewrite. So the box shows the rows that have a
+   *  fix, and nothing else. */
   const brokenRows = (needsAttention as any[]).map((e) => {
     const day = todayStrInTz(tz, new Date(e.clock_in));
     const openHrs = formatDuration(hoursBetween(e.clock_in, new Date(), 0));
@@ -754,31 +588,20 @@ export default async function TimecardsPage({
       job: e.job ? jobLabel(e.job) : null,
       /* A zero-closed row is NOT open (audit 7: "Brian · open 98h" on a shift 0193 closed at zero
          on Monday was a lie that grew by the hour). Say what the system actually did, with its
-         reason. Kept word for word from the card this replaces. */
+         reason. */
       badge: e.auto_closed_reason
-        ? `auto-closed — ${String(e.auto_closed_reason).replace(/_/g, " ")}`
+        ? // Older reasons were written with an em-dash (0193, the geofence close); the card says them plainly.
+          `auto-closed: ${String(e.auto_closed_reason).replace(/_/g, " ").replace(/\s*—\s*/g, ": ")}`
         : new Date(e.clock_in).getTime() < todayStartMs
           ? `open ${openHrs} · past day`
           : `open ${openHrs}`,
+      // The row names what tapping it does.
+      verb: e.auto_closed_reason ? "Set The Hours" : "Stop The Clock",
       // The deep link names the ENTRY'S OWN WEEK, not the page's (same reason as the grid pills).
       href: hrefFor(weekOf(day), `entry=${e.id}`),
     };
   });
-  const driftRows = drift.slice(0, 8).map((r) => {
-    const entryId = entryIdByPersonDay.get(`${r.profileId}|${r.workDate}`);
-    return {
-      key: `${r.profileId}|${r.workDate}`,
-      date: formatDate(r.workDate),
-      text: explain(r, (id) => jobLabelById.get(id) ?? "a job", nameById.get(r.profileId) ?? "Someone"),
-      /* ONE WAY IN, NOT TWO. A drift row with hours has an entry behind it, so it opens that
-         entry's editor through the ?entry= door OpenEntryEditor already answers — no second
-         mechanism invented here. A no_show has no entry to open BY DEFINITION (that is what
-         no_show means), and a row with nowhere to go is a dead end, so that one goes to its day
-         on the calendar, where the stale plan actually lives. */
-      href: entryId ? hrefFor(weekOf(r.workDate), `entry=${entryId}`) : `/schedule?view=day&date=${r.workDate}`,
-    };
-  });
-  const fixCount = brokenRows.length + drift.length;
+  const fixCount = brokenRows.length;
 
   // The ?entry= deep link (a grid pill tap) — find the entry and auto-open its editor below.
   // The stack scrolls 26 weeks, but `entries` holds ONE week — so a tap on any pill outside the
@@ -868,13 +691,56 @@ export default async function TimecardsPage({
               <p className="mt-1 text-base text-slate-400">Nobody right now</p>
             ) : (
               <ul className="mt-0.5">
-                {onClock.map((c) => (
-                  <li key={c.id} className="flex min-h-[44px] items-center gap-2.5 text-base">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" aria-hidden />
-                    <span className="shrink-0 font-medium text-slate-900">{c.name}</span>
-                    {c.jobLabel && <span className="min-w-0 truncate text-slate-500">{c.jobLabel}</span>}
-                  </li>
-                ))}
+                {/* EACH ROW IS THE WAY TO STOP THAT CLOCK (2026-09-24). Erik could see Brian's
+                    clock running here and had nothing to tap. The row opens the entry through the
+                    ?entry= door, which is the Stop The Clock sheet for a running clock. A clock
+                    running LONG_SHIFT_HOURS or more is tinted, because it was probably forgotten. */}
+                {onClock.map((c) => {
+                  const inMs = c.clockIn ? Date.parse(c.clockIn) : NaN;
+                  const long = Number.isFinite(inMs) && isLongOpenShift(inMs, Date.now());
+                  const inDay = c.clockIn ? todayStrInTz(tz, new Date(c.clockIn)) : todayStr;
+                  const since = c.clockIn
+                    ? inDay === todayStr
+                      ? formatTime(c.clockIn, tz)
+                      : `${new Date(c.clockIn).toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${formatTime(c.clockIn, tz)}`
+                    : null;
+                  const body = (
+                    <>
+                      <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-green-500" aria-hidden />
+                      {/* "since" gets its own line: it is the fact that shows a forgotten clock, and
+                          sharing one truncated line with the name, the job and the verb cut it off
+                          at 375px. */}
+                      <span className="flex min-w-0 flex-1 flex-col py-1">
+                        <span className="truncate">
+                          <span className="font-medium text-slate-900">{c.name}</span>
+                          {c.jobLabel && <span className="text-slate-500"> · {c.jobLabel}</span>}
+                        </span>
+                        {since && <span className={`truncate text-sm ${long ? "text-amber-800" : "text-slate-500"}`}>since {since}</span>}
+                      </span>
+                    </>
+                  );
+                  return (
+                    <li key={c.id}>
+                      {c.entryId ? (
+                        <Link
+                          href={hrefFor(weekOf(inDay), `entry=${c.entryId}`)}
+                          scroll={false}
+                          className={`-mx-2 flex min-h-[44px] items-center gap-2.5 rounded-lg px-2 text-base active:bg-slate-100 ${
+                            long ? "bg-amber-50 text-amber-900" : ""
+                          }`}
+                        >
+                          {body}
+                          <span className={`flex shrink-0 items-center gap-0.5 text-sm font-medium ${long ? "text-amber-800" : "text-slate-600"}`}>
+                            Stop The Clock
+                            <ChevronRight className="h-4 w-4" aria-hidden />
+                          </span>
+                        </Link>
+                      ) : (
+                        <div className="flex min-h-[44px] items-center gap-2.5 text-base">{body}</div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>
@@ -947,6 +813,7 @@ export default async function TimecardsPage({
           tz={tz}
           neighbors={neighborsOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
           rebuiltFromOldSplit={rebuiltOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
+          workDayEnd={workWin.end}
           /* Nort's fill (time.splitEntry): the sheet opens with its cut in it; a person taps Split Shift. */
           initialSplit={splitParam === "1" ? { at: splitAtParam ?? null, jobId: splitJobParam ?? null, code: splitCodeParam ?? null } : null}
         />
@@ -988,16 +855,7 @@ export default async function TimecardsPage({
         <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
       </Link>
 
-      {/* ── FIX THESE ─────────────────────────────────────────────────────────────────────────
-          One amber card where "Needs attention" and "Different from the plan" used to sit back to
-          back. Both are still here, both feeders untouched — broken hours first (money on the
-          next check), plan drift under the rule in lighter type (money at invoicing).
-
-          KEPT FROM THE PLAN CARD, because it is the reason that list is allowed to exist: this is
-          NOT a discipline tool. A mismatch is nearly always a stale plan, not somebody lying — a
-          crew gets pulled to a callback, a job finishes early. The value is the office seeing it
-          on Friday rather than at invoicing, when the hours are already on the wrong job and the
-          customer is already looking at the number. */}
+      {/* ── FIX THESE: the broken shifts, each with the verb that fixes it (see brokenRows). ── */}
       {fixCount > 0 ? (
         <Card className="mb-4 border-amber-200 bg-amber-50/60">
           <CardContent className="py-3">
@@ -1023,39 +881,14 @@ export default async function TimecardsPage({
                           {r.badge}
                         </Badge>
                       </span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
+                      <span className="flex shrink-0 items-center gap-0.5 text-sm font-medium text-amber-800">
+                        {r.verb}
+                        <ChevronRight className="h-4 w-4 text-amber-700" aria-hidden />
+                      </span>
                     </Link>
                   </li>
                 ))}
               </ul>
-            )}
-            {driftRows.length > 0 && (
-              <>
-                {brokenRows.length > 0 && <div className="my-1 border-t border-amber-200/80" />}
-                <ul>
-                  {driftRows.map((r) => (
-                    <li key={r.key}>
-                      <Link
-                        href={r.href}
-                        scroll={false}
-                        className="flex min-h-[44px] items-center gap-2 py-2 text-sm font-light text-slate-600 active:bg-amber-100/60"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="text-xs tabular-nums text-slate-400">{r.date}</span> {r.text}
-                        </span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-amber-700" aria-hidden />
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-                {drift.length > driftRows.length && (
-                  <p className="text-xs text-slate-400">+{drift.length - driftRows.length} more this week.</p>
-                )}
-                <p className="mt-1 text-xs text-slate-500">
-                  A plan line is usually the plan moving and nobody updating it. Worth a look before these hours go on
-                  an invoice.
-                </p>
-              </>
             )}
           </CardContent>
         </Card>

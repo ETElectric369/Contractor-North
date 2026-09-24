@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { todayStrInTz } from "@/lib/tz";
+import { isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
@@ -156,6 +157,12 @@ export function JobTimeButton({
     });
 
   const doClockOut = () => run(() => clockOutCurrent({}));
+  /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. So
+   *  does a Switch that would CUT it (a running entry with a job or a code): 0288 closes the old
+   *  part at now, the same one-tap mistake, and switchJob refuses it. A re-point closes nothing. */
+  const longRunning = !!openEntry && isLongOpenShift(new Date(openEntry.clock_in).getTime(), now);
+  const longShift =
+    longRunning && (state === "here" || (state === "switch" && (!!openEntry?.job_id || !!openEntry?.job_code)));
 
   const doLogHours = () =>
     run(() =>
@@ -262,21 +269,28 @@ export function JobTimeButton({
             onSave={
               state === "in"
                 ? doClockIn
-                : state === "switch"
-                  ? doSwitch
-                  : isStaff
-                    ? doClockOut
-                    : () => router.push("/timeclock")
+                : longShift
+                  ? () => router.push("/timeclock")
+                  : state === "switch"
+                    ? doSwitch
+                    : isStaff
+                      ? doClockOut
+                      : () => router.push("/timeclock")
             }
             saving={pending}
             saveLabel={
               state === "in"
                 ? "Clock Me In"
-                : state === "switch"
-                  ? "Switch to This Job"
-                  : isStaff
-                    ? "Clock Me Out"
-                    : "Clock Out on the Timeclock"
+                : longShift
+                  ? // Probably forgotten (lib/long-shift): Timeclock asks when he stopped. A close
+                    // (or a switch's cut) at now would write the night onto payroll, and the server
+                    // refuses it anyway.
+                    "Set When You Stopped"
+                  : state === "switch"
+                    ? "Switch to This Job"
+                    : isStaff
+                      ? "Clock Me Out"
+                      : "Clock Out on the Timeclock"
             }
           />
         }
@@ -301,6 +315,11 @@ export function JobTimeButton({
               <p className="text-sm text-slate-600">
                 You&apos;re on the clock with no job yet, since {fmtTime(openEntry.clock_in)}. Switching puts this whole shift on{" "}
                 <span className="font-medium">{jobNumber}</span>, from the start.
+              </p>
+            ) : longShift ? (
+              <p className="text-sm text-amber-800">
+                You&apos;re still on the clock at <span className="font-medium">{openEntry.jobLabel ?? openEntry.job_code ?? "another job"}</span> since{" "}
+                {new Date(openEntry.clock_in).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}, more than 10 hours. Set when you stopped on the Timeclock first, then clock in here.
               </p>
             ) : (
               <p className="text-sm text-slate-600">

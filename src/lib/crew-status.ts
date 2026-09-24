@@ -12,6 +12,10 @@ export type CrewMember = {
   name: string;
   clockedIn: boolean;
   jobLabel: string | null;
+  /** The running entry, so the office can open it straight onto Stop The Clock. Null off the clock. */
+  entryId: string | null;
+  /** When that entry clocked in (ISO). Null off the clock. */
+  clockIn: string | null;
 };
 
 export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
@@ -24,7 +28,7 @@ export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
   const ids = members.map((m: { id: string }) => m.id);
   const { data: open } = await supabase
     .from("time_entries")
-    .select("profile_id, job:job_id(job_number, name)")
+    .select("id, profile_id, clock_in, job:job_id(job_number, name)")
     .eq("status", "open")
     .in("profile_id", ids);
 
@@ -49,6 +53,8 @@ export async function getCrewStatus(supabase: any): Promise<CrewMember[]> {
       // /timecards itself was fixed; this strip across the top of it was still number-led, which
       // is why it kept looking unfixed.
       jobLabel: job ? jobLabel(job) : null,
+      entryId: o?.id ?? null,
+      clockIn: o?.clock_in ?? null,
     };
   });
 }

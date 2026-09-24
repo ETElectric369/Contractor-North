@@ -102,6 +102,28 @@ export default async function InvoicePage({
   const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
   const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
 
+  /* A CLOCK STILL RUNNING ON THIS JOB IS HOURS THIS INVOICE DOES NOT HAVE (2026-09-24). Erik: "I
+     had no way to stop it to set the time for the invoice". An open shift bills nothing (the labor
+     import reads closed rows only, and that stays), so the invoice looked short with no reason
+     given. The note names who and since when, with the way to stop it one tap away. */
+  const invJobId = ((inv as { job_id?: string | null }).job_id ?? null) as string | null;
+  const runningClocks =
+    invJobId && inv.status !== "void"
+      ? (((
+          await supabase
+            .from("time_entries")
+            .select("id, clock_in, profiles:profile_id(full_name)")
+            .eq("job_id", invJobId)
+            .eq("status", "open")
+        ).data ?? []) as unknown as { id: string; clock_in: string; profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null }[]).map(
+          (r) => ({
+            id: r.id,
+            clockIn: r.clock_in,
+            name: ((Array.isArray(r.profiles) ? r.profiles[0] : r.profiles)?.full_name ?? "").trim() || "Someone",
+          }),
+        )
+      : [];
+
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/billing" fallbackLabel="Back to Billing" />
@@ -248,6 +270,8 @@ export default async function InvoicePage({
         /* Who holds this bill — the same name the Send Invoice confirm spells out, so the notice
            about their copy being older says "Dave Gove", not "the customer". */
         customerName={inv.customers?.name ?? null}
+        runningClocks={runningClocks}
+        tz={orgSettings.timezone}
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,
           (inv as { revised_at?: string | null }).revised_at,

@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { clampCloseAtMs, autoClockoutPromptState, withAutoConfirmedCrumb, AUTO_CONFIRMED_CRUMB } from "./close-math";
+import {
+  clampCloseAtMs,
+  autoClockoutPromptState,
+  withAutoConfirmedCrumb,
+  AUTO_CONFIRMED_CRUMB,
+  needsStatedStop,
+  stopCrumb,
+  withStopCrumb,
+} from "./close-math";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 
 const H = 3_600_000;
@@ -71,5 +79,79 @@ describe("switch breadcrumb — when the geofence anchor was deliberately cleare
 
   it("ignores a lookalike the tech typed by hand", () => {
     expect(lastSwitchMs("[switched to the other job at lunch]")).toBeNull();
+  });
+});
+
+describe("needsStatedStop: a forgotten clock is not closed at now by one tap", () => {
+  const now = Date.parse("2001-01-02T04:00:00Z");
+  const base = { nowMs: now, picked: false, unattended: false };
+
+  it("asks on a now-ish close of a 10.5-hour shift nobody picked a time for", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 10.5 * H, closeMs: now + 30_000 })).toBe(true);
+  });
+  it("a picked time passes", () => {
+    expect(needsStatedStop({ ...base, picked: true, clockInMs: now - 10.5 * H, closeMs: now })).toBe(false);
+  });
+  it("an unattended geofence close passes (it is observed and already flagged)", () => {
+    expect(needsStatedStop({ ...base, unattended: true, clockInMs: now - 10.5 * H, closeMs: now })).toBe(false);
+  });
+  it("a close three hours ago on an 11-hour shift is an observed time, not a default", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 11 * H, closeMs: now - 3 * H })).toBe(false);
+  });
+  it("a now-ish close of a 9-hour shift is an ordinary clock-out", () => {
+    expect(needsStatedStop({ ...base, clockInMs: now - 9 * H, closeMs: now })).toBe(false);
+  });
+});
+
+describe("stopCrumb: the card says who set the stop time", () => {
+  const tz = "America/Los_Angeles";
+  // Jan 1 2001, 1:37 PM Pacific; stopped by the office Jan 2, 11:56 PM.
+  const since = "2001-01-01T21:37:00Z";
+  const at = "2001-01-03T07:56:00Z";
+
+  it("office wording", () => {
+    expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: null, tz, how: "office" })).toBe(
+      "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]",
+    );
+  });
+
+  it("names a moved start", () => {
+    const moved = "2001-01-01T20:00:00Z"; // 12:00 PM
+    expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: moved, tz, how: "office" })).toBe(
+      "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM; start moved from 1:37 PM to 12:00 PM]",
+    );
+    // An unmoved start says nothing extra.
+    expect(
+      stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: since, tz, how: "office" }),
+    ).not.toMatch(/start moved/);
+  });
+
+  it("names both days when the start moved to another day", () => {
+    const dayBefore = "2000-12-31T07:00:00Z"; // Dec 30, 11:00 PM Pacific
+    expect(stopCrumb({ byName: "Erik Taylor", atIso: at, runningSinceIso: since, newStartIso: dayBefore, tz, how: "office" })).toMatch(
+      /; start moved from Jan 1, 1:37 PM to Dec 30, 11:00 PM\]$/,
+    );
+  });
+
+  it("self wording", () => {
+    expect(
+      stopCrumb({ byName: "Brian Taylor", atIso: "2001-01-02T15:02:00Z", runningSinceIso: since, newStartIso: null, tz, how: "self" }),
+    ).toBe("[stop time picked by Brian Taylor on Jan 2, 7:02 AM, after the shift]");
+  });
+
+  it("never uses an em-dash", () => {
+    for (const how of ["office", "self"] as const) {
+      expect(
+        stopCrumb({ byName: "A", atIso: at, runningSinceIso: since, newStartIso: "2001-01-01T20:00:00Z", tz, how }),
+      ).not.toMatch(/—/);
+    }
+  });
+
+  it("is appended once, on its own line", () => {
+    const crumb = "[clock stopped by Erik Taylor on Jan 2, 11:56 PM; it had been running since Jan 1, 1:37 PM]";
+    const once = withStopCrumb("pulled wire", crumb);
+    expect(once).toBe(`pulled wire\n${crumb}`);
+    expect(withStopCrumb(once, crumb)).toBe(once);
+    expect(withStopCrumb(null, crumb)).toBe(crumb);
   });
 });

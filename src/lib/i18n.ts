@@ -49,6 +49,14 @@ const en: Dict = {
   tc_putOnPrev: "Put It On {job} Instead",
   tc_switchedCut: "Switched to {job}. The first part is its own entry ({hours}).",
   tc_switchedWhole: "Now on {job}. This whole shift moved over.",
+  // A clock running 10 hours or more (lib/long-shift): the card asks when he stopped instead of
+  // closing at now. {when} fills from the panel.
+  tc_longShiftTitle: "You're still clocked in from {when}.",
+  tc_longShiftBody: "When did you stop?",
+  tc_whenStopped: "The time you stopped work on this shift.",
+  tc_nowChip: "Now ({hours} h)",
+  tc_clockOutAtThatTime: "Clock Out At That Time",
+  tc_pickStop: "Pick the time you stopped.",
   // settings
   s_language: "Language",
   s_languageDesc: "Your preferred language for the app and the AI assistant.",
@@ -84,6 +92,12 @@ const es: Dict = {
   tc_putOnPrev: "Ponerlo En {job}",
   tc_switchedCut: "Cambiaste a {job}. La primera parte es su propia entrada ({hours}).",
   tc_switchedWhole: "Ahora en {job}. Todo este turno se movió.",
+  tc_longShiftTitle: "Sigues con entrada marcada desde {when}.",
+  tc_longShiftBody: "¿A qué hora terminaste?",
+  tc_whenStopped: "La hora en que terminaste de trabajar en este turno.",
+  tc_nowChip: "Ahora ({hours} h)",
+  tc_clockOutAtThatTime: "Marcar Salida A Esa Hora",
+  tc_pickStop: "Elige la hora en que terminaste.",
   s_language: "Idioma",
   s_languageDesc: "Tu idioma preferido para la app y el asistente de IA.",
 };

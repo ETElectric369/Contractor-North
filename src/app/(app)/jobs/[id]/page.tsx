@@ -26,6 +26,7 @@ import {
   formatDate,
   formatDateTime,
   formatDuration,
+  formatTime,
   hoursBetween,
   initials,
   formatCityStateZip,
@@ -1001,7 +1002,19 @@ export default async function JobDetailPage({
                     ) : null}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-medium text-slate-800">{h != null ? formatDuration(h) : "open"}</span>
+                    <span className="font-medium text-slate-800">
+                      {h != null
+                        ? formatDuration(h)
+                        : !e.clock_out
+                          ? /* A running clock says since when, with the day when it began on an
+                               earlier one; the office's Stop The Clock sits right beside it. */
+                            `On The Clock Since ${
+                              todayStrInTz(tz, new Date(e.clock_in)) === todayStrInTz(tz)
+                                ? formatTime(e.clock_in, tz)
+                                : `${new Date(e.clock_in).toLocaleDateString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" })}, ${formatTime(e.clock_in, tz)}`
+                            }`
+                          : "open"}
+                    </span>
                     <EditEntryButton
                       entry={e}
                       jobCodes={(jobCodes ?? []) as any}
@@ -1011,6 +1024,7 @@ export default async function JobDetailPage({
                       jobCodesEnabled={jobCodesEnabled}
                       tz={tz}
                       rebuiltFromOldSplit={!!splitParents.get(e.id)?.converted}
+                      workDayEnd={workDay.end}
                     />
                   </div>
                 </li>

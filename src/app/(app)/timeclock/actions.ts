@@ -21,11 +21,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
-import { clampCloseAtMs, withAutoConfirmedCrumb } from "./close-math";
+import { clampCloseAtMs, needsStatedStop, stopCrumb, withAutoConfirmedCrumb, withStopCrumb } from "./close-math";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
+import { MAX_SHIFT_HOURS, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 
-export type ClockResult = { ok: boolean; error?: string; warning?: string };
+export type ClockResult = {
+  ok: boolean;
+  error?: string;
+  warning?: string;
+  /** The clock has been running LONG_SHIFT_HOURS or more and nobody said when it stopped: the
+   *  caller should ask for a stop time instead of closing at now (the Timeclock long-shift block). */
+  needsTime?: boolean;
+};
 
 /**
  * The simple clock-in flow's server-side job resolution: the DEFAULT punch carries no
@@ -372,11 +380,37 @@ export async function switchJob(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override")
+    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in")
     .eq("id", input.entry_id)
     .eq("status", "open")
     .maybeSingle();
   if (!entry) return { ok: false, error: "No open entry to switch." };
+
+  /**
+   * A SWITCH ON A FORGOTTEN CLOCK IS A CLOSE AT NOW (review of 0291, 2026-09-24). In cut mode
+   * switch_job (0288) writes clock_out = now() on the running entry, which is the very one-tap
+   * mistake clockOut refuses past LONG_SHIFT_HOURS: Brian forgets on job A Tuesday, opens job B's
+   * page Wednesday morning, taps Switch, and job A gets a 17-hour shift that payroll pays and the
+   * labor import bills. So the switch asks the same question the clock-out does. A re-point (no job
+   * and no code yet) closes nothing and moves the whole running shift, so it is left alone.
+   */
+  const ciMs = entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
+  const wouldCut = !!entry.job_id || !!entry.job_code;
+  if (wouldCut && isLongOpenShift(ciMs, Date.now())) {
+    const tz = await orgTz(supabase);
+    const since = dayClock(String(entry.clock_in), tz);
+    if (entry.profile_id === user.id) {
+      return {
+        ok: false,
+        needsTime: true,
+        error: `You've been on the clock since ${since}, more than 10 hours. Pick when you stopped on Timeclock, then clock in on this job.`,
+      };
+    }
+    return {
+      ok: false,
+      error: `That clock has been running since ${since}, more than 10 hours. Stop it at the time the shift really ended (Timecards, Stop The Clock), then clock in on this job.`,
+    };
+  }
 
   // The new job must be visible to the caller (RLS-scoped): never point an entry at a foreign job.
   const jobId = await visibleJobIdOrNull(supabase, input.job_id);
@@ -501,6 +535,9 @@ export async function clockOut(input: {
   /** Set when the SYSTEM closed this shift with nobody answering, so the card says why and the
    *  office's "needs attention" list picks it up (0193's column). Null on every human close. */
   autoClosedReason?: string | null;
+  /** The person STATED `at` (the Timeclock long-shift picker, the geofence prompt's picker). A clock
+   *  that has run LONG_SHIFT_HOURS closes only at a stated time; see needsStatedStop. */
+  picked?: boolean;
 }): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -516,11 +553,17 @@ export async function clockOut(input: {
   // "already closed" from "entry is gone" in the zero-row branch below (audit v921, the projection law).
   const { data: entRow } = await supabase
     .from("time_entries")
-    .select("clock_in, lunch_minutes, status")
+    .select("clock_in, lunch_minutes, status, notes, org_id")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .maybeSingle();
-  const ent = entRow as { clock_in?: string; lunch_minutes?: number | null; status?: string | null } | null;
+  const ent = entRow as {
+    clock_in?: string;
+    lunch_minutes?: number | null;
+    status?: string | null;
+    notes?: string | null;
+    org_id?: string | null;
+  } | null;
   const entClockIn = ent?.clock_in ?? null;
 
   // Clock-out time defaults to now; `at` (the geofence "time they left") is honored only inside
@@ -531,6 +574,50 @@ export async function clockOut(input: {
     if (!isNaN(atMs) && atMs <= Date.now() + 60_000) {
       const ciMs = entClockIn ? Date.parse(entClockIn) : 0;
       clockOutIso = new Date(clampCloseAtMs(atMs, ciMs, Date.now())).toISOString();
+    }
+  }
+
+  /**
+   * A FORGOTTEN CLOCK IS NOT CLOSED AT "NOW" BY ONE TAP (Erik, 2026-09-24).
+   *
+   * Brian clocks in Tuesday at 1:37 PM and forgets. Wednesday morning he taps Clock Out, and the
+   * old door wrote a 17-hour shift nobody worked, which the office then had to find and undo by
+   * hand before it could invoice the job. Past LONG_SHIFT_HOURS a plain tap is refused with a
+   * sentence that sends him to the picker on Timeclock; nothing is written, and his clock keeps
+   * running until he says when it stopped. Every door lands here (the panel, My Day, the job page,
+   * the geofence prompt, Nort's "clock me out"), so a stale tab or a voice command gets the same
+   * answer as the button.
+   */
+  const ciMsForStop = entClockIn ? Date.parse(entClockIn) : NaN;
+  const closeMs = Date.parse(clockOutIso);
+  const nowMs = Date.now();
+  let lateStop: { tz: string; name: string } | null = null;
+  if (ent?.status === "open" && Number.isFinite(ciMsForStop)) {
+    const picked = !!input.picked;
+    const unattended = !!input.autoClosedReason;
+    if (needsStatedStop({ clockInMs: ciMsForStop, closeMs, nowMs, picked, unattended })) {
+      const tz = await orgTz(supabase);
+      return {
+        ok: false,
+        needsTime: true,
+        error: `You've been on the clock since ${dayClock(entClockIn as string, tz)}, more than 10 hours. Pick when you stopped on Timeclock.`,
+      };
+    }
+    if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
+      return {
+        ok: false,
+        error:
+          "That's more than 18 hours after you clocked in. Pick when you really stopped. If the shift truly ran that long, the office has to enter it.",
+      };
+    }
+    // A stop time stated after a long run says so on the card, and the office hears about it. Not
+    // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
+    // a 10-to-18-hour close by a person, however it arrived, must never land without a trace. Only
+    // the unattended geofence close is exempt, and auto_closed_reason already flags that one.
+    if (!unattended && isLongOpenShift(ciMsForStop, nowMs)) {
+      const tz = await orgTz(supabase);
+      const { data: me } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
+      lateStop = { tz, name: ((me as { full_name?: string | null } | null)?.full_name ?? "").trim() };
     }
   }
 
@@ -606,6 +693,22 @@ export async function clockOut(input: {
     }
   }
 
+  // The stop time a person picked after a long run is written on the card in the same UPDATE, so
+  // the office can tell it from a live punch.
+  const typedNotes = input.notes && input.notes.trim() ? input.notes : null;
+  const lateCrumb =
+    lateStop && entClockIn
+      ? stopCrumb({
+          how: "self",
+          byName: lateStop.name || "the crew member",
+          atIso: new Date(nowMs).toISOString(),
+          runningSinceIso: entClockIn,
+          newStartIso: null,
+          tz: lateStop.tz,
+        })
+      : null;
+  const notesOut = lateCrumb ? withStopCrumb(typedNotes ?? ent?.notes ?? null, lateCrumb) : typedNotes;
+
   const { data: closedRows, error } = await supabase
     .from("time_entries")
     .update({
@@ -617,7 +720,7 @@ export async function clockOut(input: {
       // Nort both pass "". The office then reads a blank card, the EOD cron texts the tech to
       // fill in a note they already wrote, and the breadcrumb the office needs to re-derive a
       // split is gone. An empty string means "not supplied", not "delete it".
-      ...(input.notes && input.notes.trim() ? { notes: input.notes } : {}),
+      ...(notesOut ? { notes: notesOut } : {}),
       gps_out: input.gps,
       status: "closed",
       source: input.auto ? "auto_gps" : undefined,
@@ -684,6 +787,21 @@ export async function clockOut(input: {
     if (lErr || !upd?.length) {
       lunchWarning = "You're clocked out, but the lunch didn't save on the part before the switch. Ask the office to add it on Timecards.";
     }
+  }
+
+  // The office hears that a stop time was set after the fact: on the bell only, with the shift a tap
+  // away. Never fails the clock-out that already landed (createNotifications never throws).
+  if (lateStop && entClockIn && ent?.org_id) {
+    const name = lateStop.name || "A crew member";
+    const first = firstName(name);
+    const hours = hoursBetween(entClockIn, clockOutIso, lunchMinutes);
+    const staff = (await orgStaffIds(ent.org_id)).filter((id) => id !== user.id);
+    await createNotifications(ent.org_id, staff, {
+      type: "clock_stopped_late",
+      title: `${first} Set His Stop Time Late`,
+      body: `${first} was still on the clock from ${shortDayClock(entClockIn, lateStop.tz)} and picked ${clockOnly(clockOutIso, lateStop.tz)} as his stop, ${hours.toFixed(2)} h.`,
+      url: `/timecards?entry=${input.entry_id}`,
+    });
   }
 
   revalidatePath("/timeclock");
@@ -824,6 +942,9 @@ export async function geoClockOut(
    *  (0288), so a leave-site verdict formed against the old entry must not close the new one: when
    *  this is given and is no longer the open entry, nothing happens. */
   watchedEntryId?: string | null,
+  /** The person picked `atIso` in the prompt (the geofence sheet's "Pick the time"). Past
+   *  LONG_SHIFT_HOURS only a picked time closes the shift; "Clock Out Now" passes false. */
+  picked = false,
 ): Promise<ClockResult> {
   const supabase = await createClient();
   const {
@@ -856,6 +977,7 @@ export async function geoClockOut(
     autoClosedReason: unattended
       ? "closed automatically from the last GPS fix at the job site — nobody answered the prompt"
       : null,
+    picked,
   });
 }
 
@@ -1074,7 +1196,7 @@ async function overlapRefusal(
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
   return clash.clock_out
     ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
-    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Close that shift first.`;
+    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. Stop that clock first: tap their shift on Timecards and use Stop The Clock.`;
 }
 
 /**
@@ -1180,6 +1302,228 @@ export async function createManualEntry(input: {
   return { ok: true };
 }
 
+/**
+ * STOP THE CLOCK: the office closes somebody's RUNNING shift at the time it really stopped.
+ *
+ * Erik, 2026-09-24: "Brian did it the other day too and I had no way to stop it to set the time for
+ * the invoice". Brian clocked in on Herringbone at 1:37 PM and forgot. The office could see the
+ * clock running on Timecards and on the job, and the only doors it had either refused an open row
+ * or closed it at "now", which would have billed the customer for the night. Erik fixed the times
+ * by hand a day later, and the invoice waited on it.
+ *
+ * This is the one door that stops a clock at a STATED time, for every caller: the Stop The Clock
+ * sheet, updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
+ * land here and get the same bounds, the same card crumb and the same message to the crew member.
+ *
+ *   * bounds (stopProblem): after the start, not in the future, at most 18 hours, lunch shorter than
+ *     the shift. 0291 refuses a future close under this for every session caller.
+ *   * the row must still be OPEN when the write lands (.eq status open): a clock stopped a moment
+ *     ago on his phone is not stopped twice, and the answer says so rather than claiming success.
+ *   * the card says who stopped it and when (stopCrumb), and the person whose clock it was is told,
+ *     on the bell and by push, with the times it now reads.
+ */
+export async function stopShift(input: {
+  entry_id: string;
+  clock_out: string;
+  /** A corrected start ("he really started at noon"). Omitted: the stored clock-in stands. */
+  clock_in?: string;
+  lunch_minutes: number;
+  job_id?: string | null;
+  job_code?: string | null;
+  notes?: string;
+  miles?: number;
+  rate_override?: number | null;
+}): Promise<ClockResult & { hours?: number; sentence?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: row } = await supabase
+    .from("time_entries")
+    .select("id, profile_id, org_id, clock_in, clock_out, status, job_id, notes, paid_at, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .eq("id", input.entry_id)
+    .maybeSingle();
+  const stored = row as {
+    id: string;
+    profile_id: string;
+    org_id: string;
+    clock_in: string;
+    clock_out: string | null;
+    status: string;
+    job_id: string | null;
+    notes: string | null;
+    profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
+    job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
+  } | null;
+  if (!stored) return { ok: false, error: "Entry not found." };
+  const tz = await orgTz(supabase);
+  if (stored.status !== "open") {
+    return {
+      ok: false,
+      error: stored.clock_out
+        ? `That clock was already stopped at ${dayClock(stored.clock_out, tz)}. Reload to see its times.`
+        : "That clock was already stopped. Reload to see its times.",
+    };
+  }
+
+  const startIso = input.clock_in ?? stored.clock_in;
+  const startMs = Date.parse(startIso);
+  const stopMs = Date.parse(input.clock_out);
+  if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return { ok: false, error: "Pick the time the shift stopped." };
+  const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
+  const problem = stopProblem({ startMs, stopMs, nowMs: Date.now(), lunchMin: lunch, who: "he", tz });
+  if (problem) return { ok: false, error: problem };
+
+  const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+  const ownerName = (one(stored.profiles)?.full_name ?? "").trim() || "That person";
+
+  const overlaps = await overlapRefusal(supabase, stored.profile_id, startMs, stopMs, { excludeId: stored.id, name: ownerName, tz });
+  if (overlaps) return { ok: false, error: overlaps };
+
+  // A job the caller cannot see never lands on the row (a crafted id, a foreign org).
+  let jobId: string | null | undefined = undefined;
+  if (input.job_id !== undefined) {
+    jobId = input.job_id ? await visibleJobIdOrNull(supabase, input.job_id) : null;
+    if (input.job_id && !jobId) return { ok: false, error: "That job isn't available." };
+  }
+
+  const { data: actor } = await supabase.from("profiles").select("full_name").eq("id", ctx.userId).maybeSingle();
+  const actorName = ((actor as { full_name?: string | null } | null)?.full_name ?? "").trim() || "The office";
+  const startOut = new Date(startMs).toISOString();
+  const stopOut = new Date(stopMs).toISOString();
+  const notes = withStopCrumb(
+    input.notes !== undefined ? input.notes : stored.notes,
+    stopCrumb({
+      how: "office",
+      byName: actorName,
+      atIso: new Date().toISOString(),
+      runningSinceIso: stored.clock_in,
+      newStartIso: input.clock_in ? startOut : null,
+      tz,
+    }),
+  );
+
+  // Field-presence rules mirror updateTimeEntry: a field the caller did not send is not touched.
+  const patch: Record<string, unknown> = {
+    clock_in: startOut,
+    clock_out: stopOut,
+    lunch_minutes: lunch,
+    status: "closed",
+    notes,
+    auto_closed_reason: null,
+  };
+  if (jobId !== undefined) patch.job_id = jobId;
+  if (input.job_code !== undefined) patch.job_code = input.job_code;
+  if (input.miles !== undefined) patch.miles = input.miles ?? 0;
+  // 0286 still applies underneath: a pay rate on an owner's shift is refused by the database.
+  if (input.rate_override !== undefined) patch.rate_override = input.rate_override;
+
+  const { data: upd, error } = await supabase
+    .from("time_entries")
+    .update(patch)
+    .eq("id", stored.id)
+    .eq("status", "open")
+    .select("id");
+  if (error) {
+    const raw = String((error as { message?: unknown } | null)?.message ?? "");
+    if (/overlap a shift already recorded/i.test(raw)) {
+      const again = await overlapRefusal(supabase, stored.profile_id, startMs, stopMs, { excludeId: stored.id, name: ownerName, tz });
+      if (again) return { ok: false, error: again };
+    }
+    return { ok: false, error: dbError(error) };
+  }
+  // The silent-write law: zero rows means somebody else stopped it first. Nothing here was saved.
+  if (!upd?.length) {
+    revalidateTime([stored.job_id]);
+    return { ok: false, error: "That clock was stopped a moment ago somewhere else. Reload to see it." };
+  }
+
+  const hours = hoursBetween(startOut, stopOut, lunch);
+  const job = one(stored.job);
+  const newJobLabel =
+    jobId !== undefined && jobId !== stored.job_id
+      ? jobId
+        ? await (async () => {
+            const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
+            return j ? jobLabel(j as { job_number?: string | null; name?: string | null }) : null;
+          })()
+        : null
+      : job
+        ? jobLabel(job)
+        : null;
+  const when = `${dayOnly(startOut, tz)}, ${clockOnly(startOut, tz)} to ${clockOnly(stopOut, tz)}`;
+  const self = stored.profile_id === ctx.userId;
+
+  if (!self) {
+    const actorFirst = firstName(actorName);
+    const title = "The Office Stopped Your Clock";
+    const body =
+      `${actorFirst} stopped your clock${newJobLabel ? ` on ${newJobLabel}` : ""}. ` +
+      `Your shift now reads ${when}, ${hours.toFixed(2)} h, ${lunch > 0 ? `${lunch} min lunch` : "no lunch"}. ` +
+      `If that is wrong, tell ${actorFirst}.`;
+    // Both are best-effort by construction (they never throw); allSettled keeps it that way even if
+    // that changes, so a push outage can never make a stopped clock look unstopped.
+    await Promise.allSettled([
+      createNotifications(stored.org_id, [stored.profile_id], { type: "clock_stopped", title, body, url: "/timeclock" }),
+      sendPushToProfiles([stored.profile_id], "clock_out", { title, body, url: "/timeclock" }),
+    ]);
+  }
+
+  revalidateTime([stored.job_id, typeof jobId === "string" ? jobId : null]);
+  revalidatePath("/payroll");
+
+  const ownerFirst = firstName(ownerName);
+  const sentence = self
+    ? `Stopped your clock: ${when} (${hours.toFixed(2)} h).`
+    : `Stopped ${ownerFirst}'s clock: ${when} (${hours.toFixed(2)} h). ${ownerFirst} has been told.`;
+  return { ok: true, hours, sentence };
+}
+
+/**
+ * Fix a RUNNING shift's job, code or notes without stopping it. The office sees Brian clocked into
+ * the wrong job at 9 AM; stopping and restarting his clock would cut his day in two for nothing.
+ * Patches only those fields, and only while the row is still open.
+ */
+export async function updateOpenEntry(input: {
+  id: string;
+  job_id?: string | null;
+  job_code?: string | null;
+  notes?: string;
+}): Promise<ClockResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: prev } = await supabase.from("time_entries").select("job_id, status").eq("id", input.id).maybeSingle();
+  const before = prev as { job_id: string | null; status: string } | null;
+  if (!before) return { ok: false, error: "Entry not found." };
+
+  const patch: Record<string, unknown> = {};
+  if (input.job_id !== undefined) {
+    const jobId = input.job_id ? await visibleJobIdOrNull(supabase, input.job_id) : null;
+    if (input.job_id && !jobId) return { ok: false, error: "That job isn't available." };
+    patch.job_id = jobId;
+  }
+  if (input.job_code !== undefined) patch.job_code = input.job_code;
+  if (input.notes !== undefined) patch.notes = input.notes.trim() ? input.notes : null;
+  if (!Object.keys(patch).length) return { ok: false, error: "Nothing changed to save." };
+
+  const { data: upd, error } = await supabase
+    .from("time_entries")
+    .update(patch)
+    .eq("id", input.id)
+    .eq("status", "open")
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) {
+    revalidateTime([before.job_id]);
+    return { ok: false, error: "That clock isn't running any more. Reload." };
+  }
+  revalidateTime([before.job_id, typeof patch.job_id === "string" ? patch.job_id : null]);
+  revalidatePath("/payroll");
+  return { ok: true };
+}
+
 /** Edit an existing time entry (office payroll correction). STAFF ONLY — a tech
  *  must not be able to change their own times/job after the fact (that's how wrong
  *  hours reached the wrong jobs). Techs edit only the "what I did" note via
@@ -1196,10 +1540,64 @@ export async function updateTimeEntry(input: {
   rate_override?: number | null; // per-entry pay rate (e.g. supervisor rate); blank/0 ⇒ default
   profile_id?: string | null; // reassign the entry to a different team member
   // (A shift split across jobs is two entries now: splitTimeEntry, 0288. This door edits one.)
-}): Promise<ClockResult> {
+}): Promise<ClockResult & { hours?: number; sentence?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+
+  /**
+   * A RUNNING CLOCK IS STOPPED BY stopShift, NOT EDITED (2026-09-24). This door used to write
+   * status 'closed' onto whatever it was handed, so Nort's time.fixEntry ("close Brian's open entry
+   * at 5") or a crafted call closed a live shift with none of the stop's bounds, no line on the card
+   * saying who did it, and nobody telling Brian. Now every close of an open row goes through the one
+   * door, and a hand-over to somebody else waits until the clock is stopped.
+   */
+  //
+  // One stored-row fetch, first: its status decides which door this is. It also carries the
+  // previous job (so a reassign can refresh BOTH job pages' Time tab + labor totals) plus the
+  // pay-relevant fields and the two payroll locks. A base-paid entry (paid_at) freezes clock
+  // in/out, lunch, rate and person; a mileage-settled entry (mileage_paid_at) freezes miles — for
+  // EVERY caller (modal, registry, voice, crafted; no bypass param), because the payroll_runs
+  // snapshot the accountant exports must keep matching the live entries. Undo the period on
+  // /payroll, fix the entry, re-mark — that records a truthful new run instead of silently
+  // diverging the books.
+  const { data: prev } = await supabase
+    .from("time_entries")
+    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason, status")
+    .eq("id", input.id)
+    .maybeSingle();
+  const stored = prev as {
+    job_id: string | null;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number | null;
+    rate_override: number | null;
+    profile_id: string;
+    miles: number | null;
+    paid_at: string | null;
+    mileage_paid_at: string | null;
+    auto_closed_reason: string | null;
+    status: string | null;
+  } | null;
+  if (!stored) return { ok: false, error: "Entry not found." };
+
+  if (stored.status === "open") {
+    if (input.profile_id && input.profile_id !== stored.profile_id) {
+      return { ok: false, error: "Stop the clock first, then move the shift to someone else." };
+    }
+    return stopShift({
+      entry_id: input.id,
+      clock_in: input.clock_in,
+      clock_out: input.clock_out,
+      lunch_minutes: input.lunch_minutes,
+      job_id: input.job_id,
+      job_code: input.job_code,
+      notes: input.notes,
+      miles: input.miles,
+      rate_override: input.rate_override,
+    });
+  }
+
   const ci = new Date(input.clock_in);
   const co = new Date(input.clock_out);
   if (isNaN(ci.getTime()) || isNaN(co.getTime())) {
@@ -1229,33 +1627,6 @@ export async function updateTimeEntry(input: {
   // Only set rate_override when the caller sent the field (mirrors createManualEntry),
   // so older callers that omit it never wipe an existing supervisor rate. `null` clears it.
   if (input.rate_override !== undefined) patch.rate_override = input.rate_override;
-
-  // One stored-row fetch: the previous job (so a reassign can refresh BOTH job
-  // pages' Time tab + labor totals) plus the pay-relevant fields and the two
-  // payroll locks. A base-paid entry (paid_at) freezes clock in/out, lunch, rate
-  // and person; a mileage-settled entry (mileage_paid_at) freezes miles — for
-  // EVERY caller (modal, registry, voice, crafted; no bypass param), because the
-  // payroll_runs snapshot the accountant exports must keep matching the live
-  // entries. Undo the period on /payroll, fix the entry, re-mark — that records
-  // a truthful new run instead of silently diverging the books.
-  const { data: prev } = await supabase
-    .from("time_entries")
-    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason")
-    .eq("id", input.id)
-    .maybeSingle();
-  const stored = prev as {
-    job_id: string | null;
-    clock_in: string;
-    clock_out: string | null;
-    lunch_minutes: number | null;
-    rate_override: number | null;
-    profile_id: string;
-    miles: number | null;
-    paid_at: string | null;
-    mileage_paid_at: string | null;
-    auto_closed_reason: string | null;
-  } | null;
-  if (!stored) return { ok: false, error: "Entry not found." };
 
   // Lunch on this door is EXACTLY what the office typed (Erik 2026-09-08 — lunch is opt-in
   // now, so 0 is a real answer). The old auto floor here quietly raised a typed 0 back to 30
@@ -1630,6 +2001,41 @@ function shiftWhen(clockIn: string, clockOut: string, tz: string): string {
   const weekday = a.toLocaleDateString("en-US", { timeZone: tz, weekday: "long" });
   const monthDay = a.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
   return `${weekday} ${monthDay}, ${at(a)} to ${at(b)}`;
+}
+
+// ── the words a stopped clock is described in, always in the ORG's clock ──
+/** The org's timezone through the caller's own client (RLS scopes it to their org). */
+async function orgTz(supabase: SupabaseClient): Promise<string> {
+  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  return getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+}
+/** "1:37 PM" */
+function clockOnly(iso: string, tz: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+}
+/** "Tue Sep 22" */
+function dayOnly(iso: string, tz: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const wd = d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" });
+  const md = d.toLocaleDateString("en-US", { timeZone: tz, month: "short", day: "numeric" });
+  return `${wd} ${md}`;
+}
+/** "Tue Sep 22, 1:37 PM" */
+function dayClock(iso: string, tz: string): string {
+  return `${dayOnly(iso, tz)}, ${clockOnly(iso, tz)}`;
+}
+/** "Tue 1:37 PM" */
+function shortDayClock(iso: string, tz: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${clockOnly(iso, tz)}`;
+}
+function firstName(full: string | null | undefined): string {
+  const f = (full ?? "").trim().split(/\s+/)[0];
+  return f || "They";
 }
 
 /**

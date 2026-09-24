@@ -7,6 +7,7 @@ import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
+import { isLongOpenShift, stopWindow } from "@/lib/long-shift";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
@@ -147,6 +148,13 @@ export function GeofenceMonitor({
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const [pickedIso, setPickedIso] = useState<string | null>(null);
+  const pickedIsoRef = useRef(pickedIso);
+  pickedIsoRef.current = pickedIso;
+  /** This prompt opened on a clock already running LONG_SHIFT_HOURS (straight onto the picker). */
+  const longPromptRef = useRef(false);
+  /** The clock-in, in a ref so openPrompt still touches only refs and stable setters. */
+  const clockInRef = useRef(clockInIso);
+  clockInRef.current = clockInIso;
   const [closedAt, setClosedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Location permission is off/revoked — the fence can't watch, and he needs to know. */
@@ -207,7 +215,12 @@ export function GeofenceMonitor({
     promptShownAtRef.current = Date.now();
     setPickedIso(null);
     setError(null);
-    setPhase("prompt");
+    // A CLOCK RUNNING 10 HOURS OR MORE (lib/long-shift) opens straight onto the picker, seeded at
+    // the clock-in, with no "Clock Out Now": a close at now on a forgotten shift writes the night
+    // onto payroll, and the server refuses it anyway.
+    const long = isLongOpenShift(Date.parse(clockInRef.current), Date.now());
+    longPromptRef.current = long;
+    setPhase(long ? "picking" : "prompt");
     // Site-leave PUSH (Erik: "push at geofence for clock out only for techs") — the sheet
     // only renders while the app is foregrounded; the push also lands on the lock screen.
     // Fire-and-forget (never delays the sheet); the server no-ops for staff and for anyone
@@ -250,7 +263,7 @@ export function GeofenceMonitor({
 
   // The one write path for every close. `atIso` is now / the user's pick / the
   // observed last-at-site time — see the component doc.
-  function submit(gps: GeoPoint | null, atIso: string, auto = false) {
+  function submit(gps: GeoPoint | null, atIso: string, auto = false, picked = false) {
     setError(null);
     setPhase("saving");
     // `auto` here means "nobody answered" — the same flag the notification below keys on. It is
@@ -258,7 +271,9 @@ export function GeofenceMonitor({
     // person agreed to.
     // The entry this monitor fenced rides along: a Switch Job closes it and opens a new one (0288),
     // and a leave-site verdict about the old shift must never close the new one.
-    geoClockOut(gps, atIso, auto, entryId)
+    // `picked`: the person STATED this time in the picker. Past LONG_SHIFT_HOURS only a picked time
+    // (or the unanswered observed close) is accepted by the server.
+    geoClockOut(gps, atIso, auto, entryId, picked)
       .then((res) => {
         if (!res.ok) {
           if (/not clocked in|already ended/i.test(res.error ?? "")) {
@@ -269,7 +284,14 @@ export function GeofenceMonitor({
             return;
           }
           setError(res.error ?? "Could not clock out — try again.");
-          setPhase("prompt");
+          // The clock crossed ten hours while the sheet was up: the answer is a picked time.
+          if (res.needsTime) {
+            longPromptRef.current = true;
+            setPickedIso(null);
+            setPhase("picking");
+            return;
+          }
+          setPhase(picked || longPromptRef.current ? "picking" : "prompt");
           return;
         }
         doneRef.current = true;
@@ -308,18 +330,26 @@ export function GeofenceMonitor({
   }
 
   function clockOutNow() {
-    submit(lastFixRef.current, new Date().toISOString());
+    submit(lastFixRef.current, new Date().toISOString(), false, false);
   }
 
   function clockOutPicked() {
-    const iso = pickedIso ?? new Date().toISOString(); // picker's "Use now" ⇒ now
-    const ms = Date.parse(iso);
     const ci = Date.parse(clockInIso);
-    if (isNaN(ms) || (!isNaN(ci) && ms < ci) || ms > Date.now() + 60_000) {
-      setError("Pick a time between clock-in and now.");
+    // On a long shift nothing counts as picked until the person picks: "now" is the very default
+    // this sheet exists to avoid.
+    const long = longPromptRef.current || isLongOpenShift(ci, Date.now());
+    if (long && !pickedIso) {
+      setError("Pick a time between clock-in and now, within 18 hours.");
       return;
     }
-    submit(lastFixRef.current, iso);
+    const iso = pickedIso ?? new Date().toISOString(); // picker's "Use now" ⇒ now
+    const ms = Date.parse(iso);
+    const win = Number.isFinite(ci) ? stopWindow(ci, Date.now()) : null;
+    if (isNaN(ms) || (win && (ms < win.minMs || ms > win.maxMs)) || ms > Date.now() + 60_000) {
+      setError("Pick a time between clock-in and now, within 18 hours.");
+      return;
+    }
+    submit(lastFixRef.current, iso, false, true);
   }
 
   function stillWorking() {
@@ -379,7 +409,9 @@ export function GeofenceMonitor({
       // over-bills). Only for live-sourced prompts — a wake prompt has no observed
       // exit, so it waits for the human.
       if (
-        phaseRef.current === "prompt" &&
+        // A long-shift sheet opens on the picker; untouched, it is the same unanswered prompt.
+        (phaseRef.current === "prompt" ||
+          (phaseRef.current === "picking" && longPromptRef.current && pickedIsoRef.current == null)) &&
         promptSourceRef.current === "live" &&
         promptShownAtRef.current > 0 &&
         now - promptShownAtRef.current >= AUTO_FALLBACK_MS &&
@@ -552,9 +584,16 @@ export function GeofenceMonitor({
     : "";
   const pickedMs = pickedIso ? Date.parse(pickedIso) : null;
   const ciMs = Date.parse(clockInIso);
+  const longShift = longPromptRef.current || isLongOpenShift(ciMs, Date.now());
+  // The 18-hour ceiling rides the shared window (lib/long-shift). On a long shift an untouched
+  // picker is NOT a valid answer: it would mean "now".
+  const pickWin = Number.isFinite(ciMs) ? stopWindow(ciMs, Date.now()) : null;
   const pickedValid =
-    pickedMs == null ||
-    (!isNaN(pickedMs) && (isNaN(ciMs) || pickedMs >= ciMs) && pickedMs <= Date.now() + 60_000);
+    pickedMs == null
+      ? !longShift
+      : !isNaN(pickedMs) &&
+        (pickWin ? pickedMs >= pickWin.minMs && pickedMs <= pickWin.maxMs : true) &&
+        pickedMs <= Date.now() + 60_000;
 
   // Non-blocking sheet (NOT a Modal — nothing behind it is disabled): floats above the
   // bottom nav like a toast, below the toast channel itself.
@@ -612,7 +651,11 @@ export function GeofenceMonitor({
                     hours, and the server clamps it to [clock-in, now]. */}
                 <ClockStartPicker
                   startExpanded
-                  caption="Clocking out at the time above — pick when you actually left."
+                  fieldLabel="Stop"
+                  /* A long shift starts the picker on the clock-in's day and time, so a man who
+                     forgot yesterday is not handed today as the answer. */
+                  initialIso={longShift ? clockInIso : undefined}
+                  caption="Clocking out at the time above. Pick when you actually left."
                   onChange={setPickedIso}
                 />
               </div>
@@ -620,7 +663,7 @@ export function GeofenceMonitor({
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
             {phase === "picking" && !pickedValid && (
-              <p className="mt-2 text-xs text-amber-600">Pick a time between clock-in and now.</p>
+              <p className="mt-2 text-xs text-amber-600">Pick a time between clock-in and now, within 18 hours.</p>
             )}
 
             <div className="mt-3 space-y-2">
@@ -630,17 +673,20 @@ export function GeofenceMonitor({
                     Clock Out at That Time
                   </Button>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setPickedIso(null);
-                        setError(null);
-                        setPhase("prompt");
-                      }}
-                    >
-                      Back
-                    </Button>
+                    {/* Back leads to Clock Out Now, which a long shift does not offer. */}
+                    {!longShift && (
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => {
+                          setPickedIso(null);
+                          setError(null);
+                          setPhase("prompt");
+                        }}
+                      >
+                        Back
+                      </Button>
+                    )}
                     <Button variant="ghost" className="flex-1" onClick={stillWorking}>
                       Still Working
                     </Button>
@@ -648,15 +694,17 @@ export function GeofenceMonitor({
                 </>
               ) : (
                 <>
-                  <Button className="w-full" disabled={phase === "saving"} onClick={clockOutNow}>
-                    {phase === "saving" ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" /> Clocking out…
-                      </>
-                    ) : (
-                      "Clock Out Now"
-                    )}
-                  </Button>
+                  {phase === "saving" ? (
+                    <Button className="w-full" disabled>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Clocking out…
+                    </Button>
+                  ) : (
+                    !longShift && (
+                      <Button className="w-full" onClick={clockOutNow}>
+                        Clock Out Now
+                      </Button>
+                    )
+                  )}
                   <div className="flex gap-2">
                     <Button
                       variant="outline"

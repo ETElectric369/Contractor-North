@@ -65,6 +65,17 @@ describe("getCrewStatus — the job label", () => {
     expect(crew[0]).toMatchObject({ clockedIn: true, jobLabel: null });
   });
 
+  it("carries the running entry and its clock-in, so the office can stop it from the card", async () => {
+    const crew = await getCrewStatus(
+      fakeSupabase(
+        [brian, { id: "u2", full_name: "Ryan" }],
+        [{ id: "e1", profile_id: "u1", clock_in: "2001-01-01T21:37:00Z", job: { job_number: "J-011", name: "Herringbone" } }],
+      ),
+    );
+    expect(crew[0]).toMatchObject({ clockedIn: true, entryId: "e1", clockIn: "2001-01-01T21:37:00Z" });
+    expect(crew[1]).toMatchObject({ clockedIn: false, entryId: null, clockIn: null });
+  });
+
   it("nobody active is an empty list, not a throw", async () => {
     expect(await getCrewStatus(fakeSupabase([], []))).toEqual([]);
   });

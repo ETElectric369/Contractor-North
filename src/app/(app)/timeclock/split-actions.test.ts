@@ -333,9 +333,13 @@ describe("switchJob goes through switch_job", () => {
 });
 
 describe("clock-out without the breakdown", () => {
+  // These close at NOW, so the running part starts a few hours ago: a clock running ten hours or
+  // more needs a stated stop time (needsStatedStop), and a one-tap close of it is refused.
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+
   it("a one-tap close writes only the entry, and never reads the old table", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in")) return { data: { clock_in: "2001-07-14T18:30:00Z", lunch_minutes: 0, status: "open" } };
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in")) return { data: { clock_in: hoursAgo(6), lunch_minutes: 0, status: "open" } };
       if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: ENTRY }] };
     }, calls);
     expect(await clockOut({ entry_id: ENTRY, lunch_minutes: 30, notes: "", gps: null })).toEqual({ ok: true });
@@ -345,9 +349,10 @@ describe("clock-out without the breakdown", () => {
 
   it("a lunch taken before the switch lands on the part before, and this part closes with none", async () => {
     const PRIOR = "b0000000-0000-4000-8000-0000000000aa";
+    const switched = hoursAgo(3);
     state.client = fakeSupabase((q) => {
-      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: "2001-07-14T21:00:00.000Z", lunch_minutes: 0, status: "open" } };
-      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in")) return { data: { id: PRIOR, clock_in: "2001-07-14T18:30:00.000Z", clock_out: "2001-07-14T21:00:00.000Z", lunch_minutes: 0 } };
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: switched, lunch_minutes: 0, status: "open" } };
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in")) return { data: { id: PRIOR, clock_in: hoursAgo(5.5), clock_out: switched, lunch_minutes: 0 } };
       if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: "x" }] };
     }, calls);
     const r = await clockOut({ entry_id: ENTRY, lunch_minutes: 0, lunch_on_entry_id: PRIOR, lunch_on_minutes: 30, notes: "", gps: null });
@@ -360,7 +365,7 @@ describe("clock-out without the breakdown", () => {
 
   it("a lunch that cannot go on the part before stays on this one, and says so", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: "2001-07-14T21:00:00.000Z", lunch_minutes: 0, status: "open" } };
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("clock_in, lunch")) return { data: { clock_in: hoursAgo(3), lunch_minutes: 0, status: "open" } };
       if (q.table === "time_entries" && q.verb === "select") return { data: null }; // not his, or not touching
       if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: ENTRY }] };
     }, calls);

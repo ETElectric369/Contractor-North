@@ -192,7 +192,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Fix timecard entry",
     description:
-      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. clock_in/clock_out are NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
+      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry; closing an open entry tells the crew member and writes who stopped it), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. clock_in/clock_out are NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
     // The other person's-timecard edit (time.addEntry is the CREATE): closing Brian's
     // still-open shift is the headline case. Fragment-first with the payroll boundary —
     // at least one CHANGE must be stated; the "Required" message rides the same
@@ -286,6 +286,9 @@ export const timeActions: Record<string, ActionDef> = {
         miles: e.miles ?? 0,
       });
       if (!res.ok) return res;
+      // An open entry went through stopShift, whose sentence names the times it now reads and
+      // that the crew member was told. Say that, not a generic "fixed".
+      if (res.sentence) return { ok: true, speak: res.sentence, ...(res.warning ? { warning: res.warning } : {}) };
       const prof = Array.isArray(e.profiles) ? e.profiles[0] : e.profiles;
       return { ok: true, speak: `Fixed — ${prof?.full_name ?? "the crew member"}'s timecard entry is updated.` };
     },
