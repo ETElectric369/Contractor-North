@@ -62,30 +62,29 @@ describe("progressSummary — finite, no misleading negative", () => {
 });
 
 describe("computeJobLaborBilling — id collision, rate-freeze, bad rates, lunch", () => {
-  const e = (profiles: any, hours: number, lunch = 0, allocs: any[] = []) => ({
+  const e = (profiles: any, hours: number, lunch = 0) => ({
     clock_in: "2026-06-01T08:00:00Z",
     clock_out: new Date(new Date("2026-06-01T08:00:00Z").getTime() + hours * 3_600_000).toISOString(),
-    lunch_minutes: lunch, profiles, time_allocations: allocs,
+    lunch_minutes: lunch, profiles,
   });
-  const a = (profiles: any, hours: number) => ({ hours, time_entries: { profiles } });
 
   it("does NOT merge two distinct rate-less workers (keys on name when id is absent)", () => {
-    const r = computeJobLaborBilling([], [a({ full_name: "A", bill_rate: 75 }, 10), a({ full_name: "B", bill_rate: 150 }, 10)], 0);
+    const r = computeJobLaborBilling([e({ full_name: "A", bill_rate: 75 }, 10), e({ full_name: "B", bill_rate: 150 }, 10)], 0);
     expect(r.lines).toHaveLength(2);
     expect(r.total).toBe(750 + 1500);
   });
   it("does not freeze a person's rate on the first (rate-less) snapshot", () => {
-    // alloc snapshot has no rate, entry snapshot has $75 — should bill all 8h at $75.
-    const r = computeJobLaborBilling([e({ id: "b", full_name: "Brian", bill_rate: 75 }, 3)], [a({ id: "b", full_name: "Brian" }, 5)], 0);
+    // one entry's snapshot has no rate, the other's has $75 — should bill all 8h at $75.
+    const r = computeJobLaborBilling([e({ id: "b", full_name: "Brian" }, 5), e({ id: "b", full_name: "Brian", bill_rate: 75 }, 3)], 0);
     expect(r.total).toBe(600);
   });
   it("treats a negative or non-finite rate as no rate (falls back to default)", () => {
-    expect(computeJobLaborBilling([e({ id: "x", full_name: "X", bill_rate: -50 }, 8)], [], 99).total).toBe(8 * 99);
-    expect(Number.isFinite(computeJobLaborBilling([e({ id: "i", full_name: "I", bill_rate: Infinity }, 4)], [], 50).total)).toBe(true);
+    expect(computeJobLaborBilling([e({ id: "x", full_name: "X", bill_rate: -50 }, 8)], 99).total).toBe(8 * 99);
+    expect(Number.isFinite(computeJobLaborBilling([e({ id: "i", full_name: "I", bill_rate: Infinity }, 4)], 50).total)).toBe(true);
   });
   it("a negative lunch can't add billable time", () => {
     // 8h shift, lunch -60 must not become 9h.
-    expect(computeJobLaborBilling([e({ id: "b", full_name: "Brian", bill_rate: 100 }, 8, -60)], [], 0).lines[0].quantity).toBe(8);
+    expect(computeJobLaborBilling([e({ id: "b", full_name: "Brian", bill_rate: 100 }, 8, -60)], 0).lines[0].quantity).toBe(8);
   });
 });
 

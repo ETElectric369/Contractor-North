@@ -35,7 +35,8 @@ export type TimeEntryRow = {
   clock_in?: string | null;
   clock_out?: string | null;
   profiles?: { full_name?: string | null } | null;
-  time_allocations?: { job_id?: string | null }[] | null;
+  /** A time code (Drive, Shop, PTO) on a job-less entry is where the hours went, not a missing job. */
+  job_code?: string | null;
 };
 
 export type StrayTimeFinding = {
@@ -55,12 +56,23 @@ const firstName = (full: string | null | undefined) => (full ?? "").trim().split
  *  (a) still OPEN from a past day (started before today, or running
  *      OPEN_ENTRY_STALE_HOURS+ — the hour rule catches evening starts the
  *      UTC date-cut misses), i.e. a clock silently accruing payroll; or
- *  (b) CLOSED on a past day with job_id NULL and no split allocations —
- *      real hours nobody can bill or cost to a job.
+ *  (b) CLOSED on a past day with job_id NULL — real hours nobody can bill or cost to a job —
+ *      unless its time code is one the org marked NON-BILLABLE (job_codes.billable = false:
+ *      Shop, PTO, Drive where the org says so). That time was filed job-less on purpose.
+ *      A BILLABLE code with no job (ROUGH, SVC split off to "no job") is still stray: it is
+ *      exactly the hours nobody bills, and the split sheet can make one.
  * Today's no-job closes are left alone: the EOD form may still attach them.
  * Accepts overlapping row sets (open feeder + recent feeder) — dedupes by id.
+ *
+ * `nonBillableCodes` is the same predicate labor billing uses (labor-billing.ts). Empty = every
+ * job-less close is stray, the safe default for a caller without the org's codes.
  */
-export function detectStrayTime(rows: TimeEntryRow[], todayStr: string, nowMs: number = Date.now()): StrayTimeFinding[] {
+export function detectStrayTime(
+  rows: TimeEntryRow[],
+  todayStr: string,
+  nowMs: number = Date.now(),
+  nonBillableCodes: ReadonlySet<string> = new Set(),
+): StrayTimeFinding[] {
   const out: StrayTimeFinding[] = [];
   const seen = new Set<string>();
   for (const e of rows ?? []) {
@@ -73,8 +85,9 @@ export function detectStrayTime(rows: TimeEntryRow[], todayStr: string, nowMs: n
       if (!startedPastDay && !(Number.isFinite(staleMs) && staleMs >= OPEN_ENTRY_STALE_HOURS * 3_600_000)) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: true, when: e.clock_in });
     } else if (e.status === "closed" && !e.job_id) {
-      // A split shift assigns its jobs via time_allocations — that's attached, not stray.
-      if ((e.time_allocations?.length ?? 0) > 0) continue;
+      // Non-billable time (Shop, PTO) is job-less on purpose: its code says where the hours went.
+      const code = (e.job_code ?? "").trim();
+      if (code && nonBillableCodes.has(code)) continue;
       if (!e.clock_out || e.clock_out.slice(0, 10) >= todayStr) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: false, when: e.clock_in ?? e.clock_out });
     }
@@ -83,7 +96,7 @@ export function detectStrayTime(rows: TimeEntryRow[], todayStr: string, nowMs: n
 }
 
 export type WorkedJob = {
-  /** Most recent clock_in touching this job (entry or allocation). */
+  /** Most recent clock_in on this job. */
   lastWorked: string;
   /** Someone is on the job RIGHT NOW — suppress "nothing scheduled next" noise. */
   hasOpenEntry: boolean;
@@ -93,8 +106,8 @@ export type WorkedJob = {
 
 /**
  * Roll recent time entries (fetched with clock_in ≥ NEEDS_RETURN_DAYS back) up to
- * the jobs they touched — via the entry's own job_id AND every split-allocation's
- * job_id — so detectors 2 & 3 reason about jobs, not entries.
+ * the jobs they touched (a split shift is ordinary entries, one job each, 0288) so
+ * detectors 2 & 3 reason about jobs, not entries.
  */
 export function rollupWorkedJobs(rows: TimeEntryRow[], todayStr: string): Map<string, WorkedJob> {
   const unbilledCut = daysAgoStr(todayStr, UNBILLED_WORK_DAYS);
@@ -103,7 +116,6 @@ export function rollupWorkedJobs(rows: TimeEntryRow[], todayStr: string): Map<st
     if (!e?.clock_in) continue;
     const jobIds = new Set<string>();
     if (e.job_id) jobIds.add(e.job_id);
-    for (const a of e.time_allocations ?? []) if (a?.job_id) jobIds.add(a.job_id);
     for (const id of jobIds) {
       const cur = map.get(id);
       const next: WorkedJob = {

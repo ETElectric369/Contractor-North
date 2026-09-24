@@ -10,6 +10,7 @@ import type { GeoPoint } from "@/lib/types";
 import { enqueue, listPending, remove as removeQueued } from "@/lib/offline/queue";
 import { clockIn, clockOut } from "../timeclock/actions";
 import { lunchMinutesFor, LUNCH_LABEL } from "@/lib/lunch-rule";
+import { useToast } from "@/components/toast";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
  *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
@@ -29,8 +30,8 @@ const OFFLINE_MSG = "No connection — try again when you have bars.";
  * gone): clocked out → one big "Clock In" (a job-less punch; the server resolves
  * today's job for every role now); clocked in → the ticking timer + job label + a
  * one-tap "Clock Out" with the one opt-in lunch box beside it (Erik 2026-09-08 — nothing
- * is deducted unless it's ticked), allocations stay omitted so mid-shift switch segments survive,
- * and the entry's own note rides through untouched. No week/today hour stats, no
+ * is deducted unless it's ticked), and the entry's own note rides through untouched. A mid-shift
+ * switch is its own entry already (0288), so a clock-out closes only the part still running. No week/today hour stats, no
  * pickers, no questionnaire — the "Timeclock →" link carries anything more.
  */
 export function MyDayClock({
@@ -50,6 +51,7 @@ export function MyDayClock({
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [err, setErr] = useState<string | null>(null);
+  const toast = useToast();
   // Unpaid lunch — off by default; nothing is deducted unless the tech ticks it.
   const [tookLunch, setTookLunch] = useState(false);
   const [held, setHeld] = useState(false);
@@ -149,6 +151,9 @@ export function MyDayClock({
           gps,
         });
         if (!res.ok) setErr(res.error ?? "Could not clock out.");
+        // Where the lunch landed after a Switch Job (the part before it, when it didn't fit this
+        // one) is said here too, and kept until it is read, as the Timeclock panel does.
+        else if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
       } catch {
         setErr(OFFLINE_MSG);
       }

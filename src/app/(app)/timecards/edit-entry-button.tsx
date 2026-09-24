@@ -2,15 +2,19 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Scissors, Trash2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
-import { updateTimeEntry, deleteTimeEntry } from "../timeclock/actions";
-import { buildShiftSpan, spanGrossHours } from "../timeclock/shift-span";
+import { updateTimeEntry, deleteTimeEntry, joinTimeEntries, moveTimeEntryCut, splitTimeEntry } from "../timeclock/actions";
+import { buildShiftSpan } from "../timeclock/shift-span";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
+import { useToast } from "@/components/toast";
+import { atFromClockTime, clockInputValue, splitClock } from "@/lib/split-preview";
+import { hoursBetween } from "@/lib/utils";
+import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
 
 interface Entry {
   id: string;
@@ -31,8 +35,24 @@ interface Entry {
   // The entry's current job (joined), so we can keep it as an option even when
   // it's older than the recent-jobs list and would otherwise vanish on save.
   job?: { job_number: string; name: string } | null;
-  // Existing split-across-jobs allocations, so the editor round-trips them.
-  time_allocations?: { job_id?: string | null; hours?: number | null; job_code?: string | null; description?: string | null }[];
+  status?: string | null;
+  /** 0288: the first entry of the shift this piece was cut from, and how. */
+  split_from?: string | null;
+  split_how?: string | null;
+}
+
+/** A touching piece of the same split shift, for Move The Split and Join Back. Its job, lunch and
+ *  miles ride along so Join Back can say whose job the hours land on, and its Undo can cut the
+ *  shift back where it was. */
+export interface SplitNeighbor {
+  id: string;
+  clock_in: string;
+  clock_out: string;
+  label: string;
+  job_id?: string | null;
+  job_code?: string | null;
+  lunch_minutes?: number | null;
+  miles?: number | null;
 }
 interface Member {
   id: string;
@@ -71,6 +91,10 @@ export function EditEntryButton({
   initialOpen = false,
   hideTrigger = false,
   onClosed,
+  tz = "America/Los_Angeles",
+  neighbors,
+  initialSplit = null,
+  rebuiltFromOldSplit = false,
 }: {
   entry: Entry;
   jobCodes: JobCode[];
@@ -87,12 +111,26 @@ export function EditEntryButton({
   /** Fires whenever the modal closes (cancel, save, delete) — the deep-link
    *  wrapper strips ?entry= here so a refresh doesn't re-open the modal. */
   onClosed?: () => void;
+  /** The org's timezone: every time on the split tools is its wall clock. */
+  tz?: string;
+  /** The touching pieces of this shift's split, when it has one (Timecards computes them). */
+  neighbors?: { prev?: SplitNeighbor | null; next?: SplitNeighbor | null } | null;
+  /** Open straight onto Split This Shift, filled in (Nort's fill: /timecards?entry=…&split=1). */
+  initialSplit?: SplitPrefill | null;
+  /** Any piece of this entry's shift was rebuilt from an old split by 0289, this entry included
+   *  when it is the first piece (which carries no split_how of its own). */
+  rebuiltFromOldSplit?: boolean;
 }) {
   const router = useRouter();
   const inP = parts(entry.clock_in);
   const outP = parts(entry.clock_out);
 
-  const [open, setOpen] = useState(initialOpen);
+  const [open, setOpen] = useState(initialOpen && !initialSplit);
+  const [splitting, setSplitting] = useState(initialOpen && !!initialSplit);
+  /** The sheet was opened from this edit form, so Cancel goes back to it (with whatever was typed
+   *  there still in it) instead of closing everything. */
+  const [splitFromForm, setSplitFromForm] = useState(false);
+  const toast = useToast();
   /**
    * A SAVED EDIT THAT MOVED BILLED HOURS HAS TO BE READ, NOT GLIMPSED.
    *
@@ -105,7 +143,15 @@ export function EditEntryButton({
   const close = () => {
     setBilledNote(null);
     setOpen(false);
+    setSplitting(false);
+    setSplitFromForm(false);
     onClosed?.();
+  };
+  const cancelSplit = () => {
+    if (!splitFromForm) return close();
+    setSplitting(false);
+    setSplitFromForm(false);
+    setOpen(true);
   };
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -133,23 +179,6 @@ export function EditEntryButton({
   const [rate, setRate] = useState(entry.rate_override == null ? 0 : Number(entry.rate_override));
   const [rateDirty, setRateDirty] = useState(false);
   const [notes, setNotes] = useState(entry.notes ?? "");
-  // "Break this shift into parts" rows. Each part carries ONE choice — `what` — encoded as
-  // `job:<id>` (bill that time to a job, like labor) or `code:<code>` (a time code such as
-  // Drive or Shop: paid, but not billed to any job). Erik wanted to separate drive-time from
-  // job-time, and shop-time from a customer, inside one clock session — a single job_code on
-  // the whole entry couldn't. Free `description` labels the part ("drive", "Andrew Cohen").
-  // Maps 1:1 onto time_allocations {job_id, job_code, hours, description} — no schema change.
-  type Part = { what: string; hours: number; description: string };
-  const allocWhat = (a: { job_id?: string | null; job_code?: string | null }): string =>
-    a.job_id ? `job:${a.job_id}` : a.job_code ? `code:${a.job_code}` : "";
-  const [splits, setSplits] = useState<Part[]>(() =>
-    (entry.time_allocations ?? []).map((a) => ({ what: allocWhat(a), hours: Number(a.hours ?? 0), description: a.description ?? "" })),
-  );
-  const addSplit = () => setSplits((s) => [...s, { what: jobId ? `job:${jobId}` : "", hours: 0, description: "" }]);
-  const setSplit = (i: number, patch: Partial<Part>) =>
-    setSplits((s) => s.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-  const removeSplit = (i: number) => setSplits((s) => s.filter((_, idx) => idx !== i));
-
   // Pay-rate guardrails: anchor the free Rate input to the selected person's REAL
   // base rate, and trip a non-blocking amber warning when the typed value is their
   // BILL rate — the $75-in-the-pay-slot mistake can never happen silently again.
@@ -173,11 +202,6 @@ export function EditEntryButton({
   // field meant an overnight shift could never be saved OR corrected here — the modal
   // (and updateTimeEntry) rejected it with "End must be after start" every time.
   const span = buildShiftSpan(date, startT, endT, endDate);
-  const grossHrs = spanGrossHours(span);
-  const lunchHrs = lunchMin / 60;
-  const workedHrs = Math.max(0, grossHrs - lunchHrs); // billable shift = gross minus the real lunch
-  const allocated = splits.reduce((s, r) => s + (Number(r.hours) || 0), 0);
-  const remainder = Math.round((workedHrs - allocated) * 100) / 100;
 
   function save() {
     setError(null);
@@ -185,22 +209,6 @@ export function EditEntryButton({
     if (!span) return setError("Invalid date/time.");
     const { clockIn: ci, clockOut: co } = span;
     if (co <= ci) return setError("End must be after start.");
-    if (allocated > workedHrs + 0.01) return setError(`Split adds up to ${allocated.toFixed(2)}h — more than the ${workedHrs.toFixed(2)}h worked.`);
-    // Each part → an allocation. `job:<id>` bills that time to the job; `code:<code>` tags it
-    // with a time code (Drive/Shop/…) and leaves job_id null, so it's PAID but not billed to any
-    // job. Pay never reads allocations (payroll-math uses clock times only), so labeling drive as
-    // "Drive" keeps it paid — it only changes what's billed and how analytics buckets the hours.
-    const allocations = splits
-      .filter((s) => s.what || (Number(s.hours) || 0) > 0)
-      .map((s) => {
-        const [kind, val] = s.what.split(":");
-        return {
-          job_id: kind === "job" ? val : null,
-          job_code: kind === "code" ? val : null,
-          hours: Number(s.hours) || 0,
-          description: s.description || "",
-        };
-      });
     start(async () => {
       // A REJECTED action must not tear the page down (v800). The office edits timecards on a
       // laptop in a truck as often as at a desk; an unhandled throw inside a transition drops
@@ -234,7 +242,6 @@ export function EditEntryButton({
                 ? null
                 : Number(entry.rate_override),
           profile_id: profileId || undefined,
-          allocations,
         });
       } catch {
         return setError("No connection — that didn't go through. Try again in a moment.");
@@ -265,6 +272,145 @@ export function EditEntryButton({
       if (!res.ok) return setError(res.error ?? "Could not delete.");
       close();
       router.refresh();
+    });
+  }
+
+  /**
+   * THE SPLIT, AND ITS WAY BACK. A split is saved the moment it is tapped (two ordinary entries), so
+   * the toast carries Undo, which joins them again: the NOT-annoying law, no save game and no dead
+   * end. A carried invoice claim is said out loud, never folded away.
+   */
+  function afterSplit(r: { left_id?: string; right_id?: string; warning?: string }) {
+    close();
+    router.refresh();
+    const left = r.left_id;
+    const right = r.right_id;
+    toast(
+      "Split into 2 entries.",
+      "success",
+      left && right
+        ? {
+            label: "Undo",
+            onClick: () => {
+              void joinTimeEntries({ left_id: left, right_id: right })
+                .then((j) => {
+                  toast(j.ok ? "Joined back into one shift." : (j.error ?? "Couldn't join them back."), j.ok ? "success" : "error");
+                  router.refresh();
+                })
+                .catch(() => toast("No connection — the split is still there. Try Join Back from the entry.", "error"));
+            },
+          }
+        : undefined,
+    );
+    // A carried claim names an invoice: it stays on screen until someone has read it.
+    if (r.warning) toast(r.warning, "info", undefined, { sticky: true });
+  }
+
+  // MOVE THE SPLIT (slide the time between two touching pieces; never reorders) and JOIN BACK.
+  const [moveHm, setMoveHm] = useState<Record<string, string>>({});
+  const boundaries = [
+    neighbors?.prev ? { key: "prev", left: neighbors.prev.id, right: entry.id, at: entry.clock_in, other: neighbors.prev } : null,
+    neighbors?.next && entry.clock_out
+      ? { key: "next", left: entry.id, right: neighbors.next.id, at: entry.clock_out, other: neighbors.next }
+      : null,
+  ].filter(Boolean) as { key: string; left: string; right: string; at: string; other: SplitNeighbor }[];
+
+  function moveCut(b: (typeof boundaries)[number]) {
+    setError(null);
+    const hm = moveHm[b.key] ?? clockInputValue(b.at, tz);
+    const leftStart = b.key === "prev" ? b.other.clock_in : entry.clock_in;
+    const rightEnd = b.key === "prev" ? (entry.clock_out ?? b.at) : b.other.clock_out;
+    const at = atFromClockTime({ clock_in: leftStart, clock_out: rightEnd }, hm, tz);
+    if (!at) return setError(`Pick a time between ${splitClock(leftStart, tz)} and ${splitClock(rightEnd, tz)}.`);
+    start(async () => {
+      let res: { ok: boolean; error?: string; warning?: string };
+      try {
+        res = await moveTimeEntryCut({ left_id: b.left, right_id: b.right, at });
+      } catch {
+        return setError("No connection — that didn't go through. Try again in a moment.");
+      }
+      if (!res.ok) return setError(res.error ?? "Couldn't move the split.");
+      if (res.warning) {
+        setBilledNote(res.warning);
+        router.refresh();
+        return;
+      }
+      close();
+      router.refresh();
+      toast(`Moved the split to ${splitClock(at, tz)}.`, "success");
+    });
+  }
+
+  /**
+   * JOIN BACK, SAID OUT LOUD AND UNDOABLE. The joined shift keeps the FIRST part's job, so on a
+   * cross-job split the second part's hours change customers: the sheet names that before the tap
+   * (joinConsequence) and the toast carries an Undo that cuts the shift again at the same time, on
+   * the same job, with the lunch and miles back where they were.
+   */
+  const joinParts = (b: (typeof boundaries)[number]) => {
+    const me = {
+      id: entry.id,
+      clock_in: entry.clock_in,
+      clock_out: entry.clock_out ?? b.at,
+      label: entry.job ? jobLabel(entry.job) : entry.job_code || "no job",
+      job_id: entry.job_id ?? null,
+      job_code: entry.job_code ?? null,
+      lunch_minutes: entry.lunch_minutes,
+      miles: entry.miles ?? 0,
+    };
+    return b.key === "prev" ? { left: b.other, right: me } : { left: me, right: b.other };
+  };
+  const joinConsequence = (b: (typeof boundaries)[number]): string | null => {
+    const { left, right } = joinParts(b);
+    if ((left.job_id ?? null) === (right.job_id ?? null) && (left.job_code ?? null) === (right.job_code ?? null)) return null;
+    const h = hoursBetween(right.clock_in, right.clock_out, Number(right.lunch_minutes) || 0);
+    return `Joining puts the ${Math.round(h * 100) / 100} h on ${right.label} onto ${left.label}.`;
+  };
+
+  function joinBack(b: (typeof boundaries)[number]) {
+    setError(null);
+    const { left, right } = joinParts(b);
+    const sentence = joinConsequence(b);
+    start(async () => {
+      let res: { ok: boolean; error?: string };
+      try {
+        res = await joinTimeEntries({ left_id: b.left, right_id: b.right });
+      } catch {
+        return setError("No connection — that didn't go through. Try again in a moment.");
+      }
+      if (!res.ok) return setError(res.error ?? "Couldn't join them back.");
+      close();
+      router.refresh();
+      // The Undo is the split that made the second part: same time, same job or code. Lunch and
+      // miles go back to the side that had them (a lunch on both sides was added together and
+      // comes back whole on the first).
+      const canUndo = !!(right.job_id || right.job_code);
+      const rightLunch = (Number(right.lunch_minutes) || 0) > 0 && !((Number(left.lunch_minutes) || 0) > 0);
+      const rightMiles = (Number(right.miles) || 0) > 0 && !((Number(left.miles) || 0) > 0);
+      toast(
+        sentence ? `Joined back into one shift. ${sentence.replace("Joining puts", "It put")}` : "Joined back into one shift.",
+        "success",
+        canUndo
+          ? {
+              label: "Undo",
+              onClick: () => {
+                void splitTimeEntry({
+                  entry_id: left.id,
+                  at: right.clock_in,
+                  job_id: right.job_id ?? null,
+                  job_code: right.job_code ?? null,
+                  lunch_on: rightLunch ? "right" : "left",
+                  miles_on: rightMiles ? "right" : "left",
+                })
+                  .then((s) => {
+                    toast(s.ok ? "Split again, as it was." : (s.error ?? "Couldn't split it again."), s.ok ? "success" : "error");
+                    router.refresh();
+                  })
+                  .catch(() => toast("No connection — the shift is still joined. Split it again from the entry.", "error"));
+              },
+            }
+          : undefined,
+      );
     });
   }
 
@@ -412,90 +558,49 @@ export function EditEntryButton({
                 </option>
               ))}
             </Select>
-            {splits.length > 0 && (
-              <p className="mt-1 text-xs text-slate-400">The parts below decide billing — the job above just covers any time you don&apos;t itemize.</p>
-            )}
           </div>
 
-          {/* Break this shift into parts — separate drive-time from job-time, or shop-time from a
-              customer, inside ONE clock session (a single job code on the whole entry couldn't).
-              Each part bills to a JOB (like labor) or carries a TIME CODE (Drive/Shop) that's paid
-              but not billed. Parts are hours and sum to the worked time. Pay is untouched — a
-              "Drive" part is still paid time, just labeled; only billing + analytics see the code. */}
-          <div className="rounded-lg border border-slate-200 p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-700">Break this shift into parts</span>
-              <button type="button" onClick={addSplit} className="text-xs font-semibold text-brand hover:underline">
-                + Add Part
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Drove, then worked, then shop time? Give each its hours. Pick a <strong>job</strong> to bill
-              that time to it, or a <strong>code</strong> like Drive/Shop for time that&apos;s paid but not
-              billed to a job. Any hours you don&apos;t itemize are still paid.
-            </p>
-            {splits.length > 0 && (
-              <div className="mt-2 space-y-2">
-                {splits.map((s, i) => (
-                  <div key={i} className="space-y-1.5 rounded-md border border-slate-100 bg-slate-50/60 p-2">
-                    <div className="flex items-center gap-2">
-                      <Select value={s.what} onChange={(e) => setSplit(i, { what: e.target.value })} className="min-w-0 flex-1">
-                        <option value="">— What —</option>
-                        <optgroup label="Bill to a job">
-                          {entry.job_id && !jobs.some((j) => j.id === entry.job_id) && (
-                            <option value={`job:${entry.job_id}`}>{entry.job ? jobLabel(entry.job) : "Current job"}</option>
-                          )}
-                          {/* Self-heal: a saved part must NEVER lose its job because the picker
-                              list happens not to contain it — render a preserving option so the
-                              select can't silently blank an existing allocation. */}
-                          {s.what.startsWith("job:") &&
-                            s.what.slice(4) !== entry.job_id &&
-                            !jobs.some((j) => `job:${j.id}` === s.what) && (
-                              <option value={s.what}>Job on this part (kept)</option>
-                            )}
-                          {jobs.map((j) => (
-                            <option key={j.id} value={`job:${j.id}`}>{jobLabel(j)}</option>
-                          ))}
-                        </optgroup>
-                        {(jobCodes.length > 0 || s.what.startsWith("code:")) && (
-                          <optgroup label="Time code — paid, not billed">
-                            {/* Same self-heal as jobs: a saved code the list no longer carries must
-                                stay selectable, not silently blank. */}
-                            {s.what.startsWith("code:") && !jobCodes.some((c) => `code:${c.code}` === s.what) && (
-                              <option value={s.what}>{s.what.slice(5)} (kept)</option>
-                            )}
-                            {jobCodes.map((c) => (
-                              <option key={c.id} value={`code:${c.code}`}>{c.code} — {c.description}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                      </Select>
-                      <div className="w-20 shrink-0">
-                        <NumberInput value={s.hours} onValueChange={(v) => setSplit(i, { hours: v })} step={0.25} aria-label="Hours" />
-                      </div>
-                      <button type="button" onClick={() => removeSplit(i)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Remove part">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <Input
-                      value={s.description}
-                      onChange={(e) => setSplit(i, { description: e.target.value })}
-                      placeholder="Label — e.g. drive, Andrew Cohen (optional)"
-                      className="text-sm"
-                    />
+          {/* SPLIT THIS SHIFT (0288): a day on two jobs is two entries. One cut opens its own sheet,
+              and the pieces of a split shift can slide their shared time or join back into one. */}
+          {entry.clock_out && (entry.status ?? "closed") === "closed" && (
+            <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+              <Button type="button" variant="outline" className="h-11 w-full" onClick={() => { setOpen(false); setSplitFromForm(true); setSplitting(true); }} disabled={pending}>
+                <Scissors className="h-4 w-4" /> Split This Shift
+              </Button>
+              <p className="text-xs text-slate-500">
+                Worked two jobs, or drove part of it? Cut it at the time you switched. Each part becomes its own entry.
+              </p>
+              {(entry.split_how === "converted" || rebuiltFromOldSplit) && (
+                <p className="text-xs text-slate-500">
+                  Rebuilt From An Old Split: this shift was split the old way and has been turned into separate entries.
+                </p>
+              )}
+              {boundaries.map((b) => (
+                <div key={b.key} className="space-y-2 border-t border-slate-100 pt-2">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {b.key === "prev" ? "Split from the part before" : "Split from the part after"} · {b.other.label}
                   </div>
-                ))}
-                <div className={allocated > workedHrs + 0.01 ? "text-xs font-medium text-red-600" : "text-xs text-slate-500"}>
-                  {allocated.toFixed(2)}h of {workedHrs.toFixed(2)}h worked accounted
-                  {allocated > workedHrs + 0.01
-                    ? " · more than worked"
-                    : remainder > 0.01
-                      ? ` · ${remainder.toFixed(2)}h left (still paid)`
-                      : " · fully accounted"}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="time"
+                      aria-label="Split time"
+                      value={moveHm[b.key] ?? clockInputValue(b.at, tz)}
+                      onChange={(e) => setMoveHm((m) => ({ ...m, [b.key]: e.target.value }))}
+                      className="h-11 min-w-0 flex-1"
+                    />
+                    <Button type="button" variant="outline" className="h-11 shrink-0" onClick={() => moveCut(b)} disabled={pending}>
+                      Move The Split
+                    </Button>
+                  </div>
+                  <p className="text-xs text-slate-400">Moving the split slides the time between the two parts. Their order stays the same.</p>
+                  <Button type="button" variant="ghost" className="h-11 w-full" onClick={() => joinBack(b)} disabled={pending}>
+                    <Link2 className="h-4 w-4" /> Join Back Into One Shift
+                  </Button>
+                  {joinConsequence(b) && <p className="text-xs text-amber-800">{joinConsequence(b)}</p>}
                 </div>
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {jobCodesEnabled && (
@@ -549,6 +654,18 @@ export function EditEntryButton({
           </div>
         </div>
       </Modal>
+      {splitting && (
+        <SplitShiftSheet
+          entry={entry}
+          jobs={jobs}
+          jobCodes={jobCodes}
+          tz={tz}
+          open={splitting}
+          onClose={cancelSplit}
+          onSplit={afterSplit}
+          prefill={initialSplit}
+        />
+      )}
     </>
   );
 }

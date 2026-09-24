@@ -278,11 +278,14 @@ export default async function AppLayout({
       {isStaff && <BugReporter orgId={profile.org_id} />}
       {openEntry && (
         <GeofenceMonitor
+          // A Switch Job closes the running entry and opens the next one (0288): a new entry is a
+          // new fence, so the monitor starts fresh instead of carrying the old site's trip state.
+          key={openEntry.id}
           entryId={openEntry.id}
           gpsIn={openEntry.gps_in}
           clockInIso={openEntry.clock_in}
           radiusM={settings.geofence_radius_m}
-          // The entry's CURRENT job — a mid-shift switch re-points it, and the monitor
+          // The entry's CURRENT job — a job-less start re-points on a switch, and the monitor
           // must retire the old site's anchor + trip state instead of fencing on it.
           jobId={openEntry.job_id ?? null}
           jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}

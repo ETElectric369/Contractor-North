@@ -43,7 +43,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     jobId,
     getOrgSettings((org as any)?.settings).material_markup_percent,
   );
-  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, labor.jobAllocs, defaultRate, levelRate, labor.nonBillableCodes);
+  const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, defaultRate, levelRate, labor.nonBillableCodes);
 
   // A LOST RECEIPT READ IS NOT A JOB WITH NO MATERIALS (review, 2026-09-20). unbilled-work throws
   // on this same failure, deliberately, because a reader that shrugs bills a customer short. This

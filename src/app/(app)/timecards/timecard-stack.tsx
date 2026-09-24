@@ -61,15 +61,14 @@ type WeekData = {
  * ── AND NOW IT IS THE ONLY LIST (cn-v956) ───────────────────────────────────────────────────
  *
  * Under this stack there used to be a second rendering of the same shifts: one Card per person,
- * their week's entries listed again with the job, the badges, the notes, the split lines and the
- * edit tools. Two lists of one set of facts, which is what Erik was looking at: "there is way too
+ * their week's entries listed again with the job, the badges, the notes and the edit tools. Two lists of one set of facts, which is what Erik was looking at: "there is way too
  * much in my face i dont even know what it all is and it looks like duplicates". Wave 2 made the
  * two agree on arithmetic. This one stops them being two.
  *
  * The per-person list is now a GROUPING of this stack, chosen by [By Day | By Person] above it,
  * and everything the card carried rides on the row: the job as a link, the code badge, the manual
- * and offline disclosures, lunch, the hours, the notes, the split lines and the pencil/duplicate
- * controls. THE ROW IS THE SAME ROW IN BOTH GROUPINGS (see ShiftRow) — By Day leads with the
+ * and offline disclosures, lunch, the hours, the notes and the pencil/duplicate controls. A split
+ * shift is ordinary entries (0288), bracketed "Split from one shift" so the pieces read as one day. THE ROW IS THE SAME ROW IN BOTH GROUPINGS (see ShiftRow) — By Day leads with the
  * person, By Person leads with the day, and nothing else differs, so the two cannot drift apart
  * again the way the two lists did.
  *
@@ -124,12 +123,13 @@ export type StackEntry = {
   source: "manual" | "offline" | null;
   lunchMin: number;
   notes: string | null;
-  /** The shift's split-across-jobs lines. Only the anchored week is read deeply enough to
-   *  carry these (see the page's note) — a row without them still opens the editor that has. */
-  allocations?: { jobCode: string | null; hours: number; description: string | null }[];
-  /** Duplicate + pencil, server-rendered on the page that owns the editor's projection. Same
-   *  reason as allocations: present for the anchored week, and every row is a tap into the
-   *  editor regardless, so no row is ever a dead end. */
+  /** 0288: the first entry's id when this row is a piece of a split shift (the bracket key). */
+  family?: string | null;
+  /** The family was rebuilt from an old split by 0289: labelled "Rebuilt From An Old Split". */
+  familyConverted?: boolean;
+  /** Duplicate + pencil, server-rendered on the page that owns the editor's projection. Present
+   *  for the anchored week, and every row is a tap into the editor regardless, so no row is ever
+   *  a dead end. */
   controls?: ReactNode;
 };
 
@@ -238,20 +238,49 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
 
         {e.notes && <p className="pl-[18px] text-xs text-slate-500">{e.notes}</p>}
 
-        {e.allocations && e.allocations.length > 0 && (
-          <ul className="mt-0.5 space-y-1 pl-[18px]">
-            {e.allocations.map((a, i) => (
-              <li key={i} className="flex items-start gap-2 text-xs text-slate-600">
-                {a.jobCode && <Badge tone="blue">{a.jobCode}</Badge>}
-                <span className="font-mono tabular-nums text-slate-500">{a.hours.toFixed(2)} h</span>
-                {a.description && <span>· {a.description}</span>}
-              </li>
-            ))}
-          </ul>
-        )}
       </div>
     </li>
   );
+}
+
+/**
+ * THE ROWS OF ONE GROUP, WITH SPLIT SHIFTS BRACKETED (0288).
+ *
+ * A split shift is two or more ordinary entries now, and on a list of a day's shifts that reads
+ * like a man who clocked in twice unless something says otherwise. So the pieces of one shift sit
+ * under one bracket, "Split from one shift", with the shift's total beside it, and every piece is
+ * still its own row with its own tap into its own editor. Converted families (0289) say where they
+ * came from instead: "Rebuilt From An Old Split".
+ */
+export function ShiftList({ rows, lead }: { rows: StackEntry[]; lead: (e: StackEntry) => string }) {
+  const out: ReactNode[] = [];
+  const done = new Set<string>();
+  for (const e of rows) {
+    if (done.has(e.id)) continue;
+    const kin = e.family ? rows.filter((r) => r.family === e.family) : [];
+    if (kin.length < 2) {
+      done.add(e.id);
+      out.push(<ShiftRow key={e.id} e={e} lead={lead(e)} />);
+      continue;
+    }
+    for (const k of kin) done.add(k.id);
+    const total = Math.round(kin.reduce((t, k) => t + k.hours, 0) * 100) / 100;
+    const converted = kin.some((k) => k.familyConverted);
+    out.push(
+      <li key={`split-${e.family}`} className="border-b border-slate-100 last:border-b-0">
+        <div className="flex items-baseline justify-between gap-2 px-3 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">
+          <span>{converted ? "Rebuilt From An Old Split" : "Split from one shift"}</span>
+          <span className="font-mono normal-case tabular-nums text-slate-400">{total.toFixed(2)} h</span>
+        </div>
+        <ul className="ml-3 border-l-2 border-brand/40">
+          {kin.map((k) => (
+            <ShiftRow key={k.id} e={k} lead={lead(k)} />
+          ))}
+        </ul>
+      </li>,
+    );
+  }
+  return <ul>{out}</ul>;
 }
 
 export function TimecardStack({
@@ -505,8 +534,8 @@ export function TimecardStack({
                   IT IS AN ADDITION, NEVER A REPLACEMENT. The grid was briefly the ONLY thing a
                   desktop got in By Day, the list hidden under it at sm:. But a pill is id, day,
                   start, end, label, sub, color, href (TimeGridEvent) and nothing else — so the
-                  manual and offline disclosures, the notes, lunch, the code badge, the split
-                  lines, duplicate, the pencil and the empty state all vanished at 640px, on the
+                  manual and offline disclosures, the notes, lunch, the code badge, duplicate,
+                  the pencil and the empty state all vanished at 640px, on the
                   DEFAULT grouping. That is 0168 broken (a punch that cannot say where its time
                   came from) and a dead end (no way to duplicate a shift, and a week with no
                   hours saying nothing at all).
@@ -548,12 +577,8 @@ export function TimecardStack({
                               )}
                             </span>
                           </div>
-                          <ul>
-                            {(byDay.get(ds) ?? []).map((e) => (
-                              // The person leads the row when the days are the spine.
-                              <ShiftRow key={e.id} e={e} lead={e.person} />
-                            ))}
-                          </ul>
+                          {/* The person leads the row when the days are the spine. */}
+                          <ShiftList rows={byDay.get(ds) ?? []} lead={(e) => e.person} />
                         </div>
                       ))
                   : people.map((p) => (
@@ -575,12 +600,8 @@ export function TimecardStack({
                             )}
                           </span>
                         </div>
-                        <ul>
-                          {p.entries.map((e) => (
-                            // The day leads the row when the people are the spine.
-                            <ShiftRow key={e.id} e={e} lead={labelFor(e.dayStr)} />
-                          ))}
-                        </ul>
+                        {/* The day leads the row when the people are the spine. */}
+                        <ShiftList rows={p.entries} lead={(e) => labelFor(e.dayStr)} />
                       </div>
                     ))}
                 {/* THE one empty state for a week with no hours — the page's second one (an

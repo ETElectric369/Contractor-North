@@ -1,117 +1,50 @@
 import { describe, it, expect } from "vitest";
-import { clampCloseAtMs, tailAllocationHours, autoClockoutPromptState } from "./close-math";
+import { clampCloseAtMs, autoClockoutPromptState, withAutoConfirmedCrumb, AUTO_CONFIRMED_CRUMB } from "./close-math";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
 
 const H = 3_600_000;
 
-describe("clampCloseAtMs — a close may never erase recorded work", () => {
-  // THE CRITICAL CASE. Tech clocks in on Job A at 07:00, switches to Job B at 11:00
-  // (4h recorded), works B until 16:00. The geofence anchor was left on site A, so the
-  // live watch's unanswered-prompt fallback asks to close at 10:58 — the last time GPS
-  // saw him at site A. Payroll would have paid 3.97h of an 8.5h day.
-  it("floors a stale geofence auto-close at the end of the last recorded segment", () => {
-    const clockIn = Date.parse("2026-07-20T14:00:00Z"); // 07:00 local
-    const staleAt = clockIn + 3.97 * H; // "last seen at site A"
-    const now = clockIn + 9 * H;
-    const out = clampCloseAtMs(staleAt, clockIn, 4, now);
-    expect(out).toBe(clockIn + 4 * H);
-    expect((out - clockIn) / H).toBeGreaterThanOrEqual(4);
-  });
-
+describe("clampCloseAtMs: a close lands inside the shift and never in the future", () => {
   it("leaves an honest backdated close alone", () => {
     const clockIn = Date.parse("2026-07-20T14:00:00Z");
     const at = clockIn + 8.5 * H;
     const now = clockIn + 9 * H;
-    expect(clampCloseAtMs(at, clockIn, 4, now)).toBe(at);
+    expect(clampCloseAtMs(at, clockIn, now)).toBe(at);
   });
 
-  it("keeps the pre-existing floor when nothing is recorded yet", () => {
+  it("floors a close at a minute after clock-in (never negative hours)", () => {
     const clockIn = Date.parse("2026-07-20T14:00:00Z");
-    // Requested BEFORE clock-in — never negative hours.
-    expect(clampCloseAtMs(clockIn - 5 * H, clockIn, 0, clockIn + H)).toBe(clockIn + 60_000);
+    expect(clampCloseAtMs(clockIn - 5 * H, clockIn, clockIn + H)).toBe(clockIn + 60_000);
   });
 
   it("never writes a close in the future", () => {
     const clockIn = Date.parse("2026-07-20T14:00:00Z");
     const now = clockIn + 2 * H;
-    expect(clampCloseAtMs(now + 10 * H, clockIn, 0, now)).toBe(now + 60_000);
+    expect(clampCloseAtMs(now + 10 * H, clockIn, now)).toBe(now + 60_000);
   });
 
   it("survives an unknown clock-in without inventing a floor", () => {
-    const at = Date.parse("2026-07-20T22:00:00Z");
-    expect(clampCloseAtMs(at, 0, 0, at + H)).toBe(at);
-  });
-
-  it("floors over multiple chained switches (recorded hours accumulate)", () => {
-    const clockIn = Date.parse("2026-07-20T14:00:00Z");
-    const now = clockIn + 10 * H;
-    // A → B at +3h, B → C at +6.5h ⇒ 6.5h recorded.
-    expect(clampCloseAtMs(clockIn + 2 * H, clockIn, 6.5, now)).toBe(clockIn + 6.5 * H);
+    const now = Date.parse("2026-07-20T20:00:00Z");
+    const at = now - H;
+    expect(clampCloseAtMs(at, NaN, now)).toBe(at);
   });
 });
 
-describe("tailAllocationHours — the segment after the last switch", () => {
-  // 8.5h worked, 4h recorded on Job A ⇒ 4.5h must bill to Job B. Before the backstop
-  // those 4.5h billed to NO job (billing treats "has rows" as fully allocated).
-  it("returns the un-recorded remainder", () => {
-    expect(tailAllocationHours(8.5, 4)).toBe(4.5);
+describe("autoClockoutPromptState: ask until somebody answers", () => {
+  it("asks on an auto-closed shift nobody has answered for", () => {
+    expect(autoClockoutPromptState({ notes: null }).show).toBe(true);
+    expect(autoClockoutPromptState({ notes: "pulled wire in the attic" }).show).toBe(true);
   });
 
-  it("is 0 when the entry is already fully allocated", () => {
-    expect(tailAllocationHours(8, 8)).toBe(0);
+  it("stays quiet once the answer is on the shift", () => {
+    expect(autoClockoutPromptState({ notes: withAutoConfirmedCrumb("pulled wire") }).show).toBe(false);
   });
 
-  it("never goes negative when the recorded rows over-fill the shift", () => {
-    // Can happen when lunch is deducted after the switches were recorded.
-    expect(tailAllocationHours(7.5, 8)).toBe(0);
-  });
-
-  it("ignores rounding dust rather than writing a junk row", () => {
-    expect(tailAllocationHours(8.004, 8)).toBe(0);
-  });
-
-  it("rounds to cents of an hour", () => {
-    expect(tailAllocationHours(8.333333, 4)).toBe(4.33);
-  });
-
-  it("treats a shift with no recorded segments as nothing to backfill by itself", () => {
-    // The caller only invokes this when rows exist; belt-and-braces on the math.
-    expect(tailAllocationHours(8, 0)).toBe(8);
-  });
-});
-
-describe("autoClockoutPromptState — surface the finish-timecard prompt", () => {
-  // Lunch is OPT-IN since 2026-09-08, so a >5h shift carrying no lunch is an ordinary
-  // shift, not a "missing meal". The prompt now has exactly one job: chase hours that
-  // haven't been broken down by job/code yet.
-  it("stays quiet on a fully-allocated >5h shift with no lunch", () => {
-    const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 0, allocatedHours: 8.5 });
-    expect(s.show).toBe(false);
-  });
-
-  it("surfaces the breakdown prompt when hours are still unallocated", () => {
-    const s = autoClockoutPromptState({ grossHours: 8, lunchMinutes: 0, allocatedHours: 0 });
-    expect(s.show).toBe(true);
-  });
-
-  it("nets a recorded lunch out of the worked hours before comparing", () => {
-    const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 30, allocatedHours: 8 });
-    expect(s.show).toBe(false);
-  });
-
-  it("stays quiet on a fully-allocated short shift", () => {
-    const s = autoClockoutPromptState({ grossHours: 4.5, lunchMinutes: 0, allocatedHours: 4.5 });
-    expect(s.show).toBe(false);
-  });
-
-  it("still surfaces the remainder on a short shift that isn't fully allocated", () => {
-    const s = autoClockoutPromptState({ grossHours: 4.5, lunchMinutes: 0, allocatedHours: 1 });
-    expect(s.show).toBe(true);
-  });
-
-  it("ignores rounding dust — a cent-level remainder on a lunched shift stays quiet", () => {
-    const s = autoClockoutPromptState({ grossHours: 8.5, lunchMinutes: 30, allocatedHours: 7.98 });
-    expect(s.show).toBe(false);
+  it("adds the crumb once, keeping the tech's own note", () => {
+    const once = withAutoConfirmedCrumb("pulled wire");
+    expect(once).toBe(`pulled wire\n${AUTO_CONFIRMED_CRUMB}`);
+    expect(withAutoConfirmedCrumb(once)).toBe(once);
+    expect(withAutoConfirmedCrumb("")).toBe(AUTO_CONFIRMED_CRUMB);
   });
 });
 

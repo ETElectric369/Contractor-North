@@ -32,12 +32,18 @@ describe("detectStrayTime — the forgotten clock and the job-less hours", () =>
     const out = detectStrayTime([{ id: "e3", status: "open", clock_in: "2026-07-01T14:00:00Z" }], TODAY, NOW);
     expect(out).toEqual([]);
   });
-  it("flags a past-day close with no job, but not one attached via split allocations", () => {
+  it("flags a past-day close with no job, but not a job-less piece on a NON-BILLABLE code (Shop/PTO)", () => {
     const rows = [
       { id: "e4", status: "closed", job_id: null, clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T21:00:00Z", profiles: { full_name: "Brian" } },
-      { id: "e5", status: "closed", job_id: null, clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T21:00:00Z", time_allocations: [{ job_id: "J1" }] },
+      { id: "e5", status: "closed", job_id: null, job_code: " SHOP ", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
+      { id: "e7", status: "closed", job_id: null, job_code: "  ", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
+      // A BILLABLE code split off to no job is hours nobody bills: still stray.
+      { id: "e8", status: "closed", job_id: null, job_code: "ROUGH", clock_in: "2026-06-30T13:00:00Z", clock_out: "2026-06-30T14:00:00Z" },
     ];
-    expect(detectStrayTime(rows, TODAY, NOW).map((f) => f.entryId)).toEqual(["e4"]);
+    const nonBillable = new Set(["SHOP", "PTO"]);
+    expect(detectStrayTime(rows, TODAY, NOW, nonBillable).map((f) => f.entryId)).toEqual(["e4", "e7", "e8"]);
+    // Without the org's codes to hand, every job-less close is stray (the safe default).
+    expect(detectStrayTime(rows, TODAY, NOW).map((f) => f.entryId)).toEqual(["e4", "e5", "e7", "e8"]);
   });
   it("leaves TODAY's no-job closes alone (the EOD form may still attach them) and dedupes overlapping feeds", () => {
     const today = { id: "e6", status: "closed", job_id: null, clock_out: "2026-07-01T01:00:00Z" };
@@ -48,9 +54,11 @@ describe("detectStrayTime — the forgotten clock and the job-less hours", () =>
 });
 
 describe("rollupWorkedJobs — entries → the jobs they touched", () => {
-  it("collects the entry's job AND split-allocation jobs, tracks last-worked/open/2-day window", () => {
+  it("collects each piece's own job, tracks last-worked/open/2-day window", () => {
     const rows = [
-      { id: "e1", status: "closed", job_id: "A", clock_in: `${daysAgoStr(TODAY, 3)}T15:00:00Z`, time_allocations: [{ job_id: "B" }] },
+      { id: "e1", status: "closed", job_id: "A", clock_in: `${daysAgoStr(TODAY, 3)}T15:00:00Z` },
+      // the second piece of that split day, on another job
+      { id: "e1b", status: "closed", job_id: "B", clock_in: `${daysAgoStr(TODAY, 3)}T18:00:00Z` },
       { id: "e2", status: "open", job_id: "A", clock_in: "2026-07-01T14:00:00Z" },
     ];
     const m = rollupWorkedJobs(rows, TODAY);

@@ -39,6 +39,9 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // is money-MOVEMENT, so none needs the WebAuthn step-up.
   "time.clockIn",
   "time.clockOut",
+  // A live switch of the caller's OWN running shift (0288 switch_job): the part so far closes as
+  // its own entry and the clock runs on. Tier-1, the same weight as clocking in and out.
+  "time.switchJob",
   "time.addEntry",
   // Fix ANOTHER crew member's entry — close an open shift, correct times/lunch/job
   // ("Brian left at 4:30"). Staff-gated + confirm:"financial" (it edits a wage record),
@@ -132,7 +135,16 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
  *  audit v921: memory.forget takes a uuid whose only source is memory.list, but nothing offered
  *  memory.list — no chat tool, no screen — so "Memory is full — clear some out" was an
  *  instruction nobody could follow. The remedy has to be reachable from the same table. */
-export const AGENT_READ_ALLOWED = new Set<string>(["memory.list"]);
+export const AGENT_READ_ALLOWED = new Set<string>([
+  "memory.list",
+  // FILL, NOT EXECUTE (Erik 2026-08-02, and 0288): Nort proposes one cut of a finished shift and
+  // hands back the link that opens Split This Shift filled in. It writes nothing; a person taps
+  // Split Shift. A new write power would have to clear the agent-write freeze; a fill does not.
+  "time.splitEntry",
+  // The entry ids time.splitEntry and time.fixEntry need: nothing else Nort can call returns a
+  // finished entry's id (hours_summary gives totals, who_is_clocked_in only open rows). Staff only.
+  "time.listEntries",
+]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
 const toToolName = (name: string) => name.replace(/\./g, "__");

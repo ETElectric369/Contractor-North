@@ -40,7 +40,7 @@ export async function GET(request: Request) {
         .eq("role", "tech"),
       supabase
         .from("time_entries")
-        .select("profile_id, status, notes, time_allocations(id)")
+        .select("profile_id, status, notes")
         .eq("org_id", org.id)
         // TODAY'S ROWS **OR** ANYTHING STILL OPEN (audit v921). Filtering on clock_in alone meant
         // a punch left open from yesterday was reminded once, on Monday evening, and never again:
@@ -65,9 +65,7 @@ export async function GET(request: Request) {
       if (todays.length === 0) continue; // never clocked in — handled by /nudge
 
       const stillOpen = todays.some((e) => e.status === "open");
-      const anyDocumented = todays.some(
-        (e) => (e.notes && e.notes.trim()) || (e.time_allocations && e.time_allocations.length > 0),
-      );
+      const anyDocumented = todays.some((e) => e.notes && e.notes.trim());
 
       let message = "";
       if (stillOpen) {

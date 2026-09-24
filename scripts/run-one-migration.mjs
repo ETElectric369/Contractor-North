@@ -28,6 +28,13 @@ const sql = readFileSync(path.join(root, file), "utf8");
 const client = new pg.Client(
   url ? { connectionString: url, ssl: { rejectUnauthorized: false } } : { ssl: { rejectUnauthorized: false } },
 );
+// A migration's RAISE NOTICEs are its report (0289 prints every converted piece and the one invoice
+// line it writes). Without a listener pg drops them, and the real run would be silent while only a
+// dry run showed what happened.
+client.on("notice", (n) => {
+  if (/does not exist, skipping/.test(n.message)) return;
+  console.log(`  NOTICE: ${n.message}`);
+});
 try {
   await client.connect();
   await client.query("begin");

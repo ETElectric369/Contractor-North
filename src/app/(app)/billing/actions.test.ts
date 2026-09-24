@@ -300,8 +300,7 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
     if (q.table === "invoices" && q.verb === "insert") return { data: { id: NEW_DRAW } };
     if (q.table === "invoices" && q.verb === "update") return { data: null };
     if (q.table === "invoices" && q.verb === "delete") return { data: null };
-    if (q.table === "time_entries") return { data: [{ id: "te-1", clock_in: "2026-09-15T15:00:00Z", clock_out: "2026-09-15T22:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: "p-1", full_name: "Erik" }, time_allocations: [] }] };
-    if (q.table === "time_allocations") return { data: [] };
+    if (q.table === "time_entries") return { data: [{ id: "te-1", clock_in: "2026-09-15T15:00:00Z", clock_out: "2026-09-15T22:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: "p-1", full_name: "Erik" } }] };
     if (q.table === "job_codes") return { data: [] };
     if (q.table === "profile_pay") return { data: [{ id: "p-1", hourly_rate: 45, bill_rate: 95 }] };
     if (q.table === "purchase_orders") return { data: [] };

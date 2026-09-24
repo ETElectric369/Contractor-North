@@ -63,9 +63,7 @@ export default async function TimeclockPage() {
   const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes] = await Promise.all([
     supabase
       .from("time_entries")
-      // Include any mid-shift switch segments already recorded on the open entry,
-      // so the panel re-seeds the split after a page reload instead of losing it.
-      .select("*, time_allocations(job_id, job_code, hours, description, sort_order)")
+      .select("*")
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
@@ -133,20 +131,54 @@ export default async function TimeclockPage() {
   };
 
   const openEntry = (openRes.data as TimeEntry) ?? null;
-  // The open entry's switch-recorded allocations, in the order they were written.
-  const openAllocations = (((openRes.data as any)?.time_allocations ?? []) as any[])
-    .slice()
-    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((a) => ({
-      job_id: (a.job_id ?? null) as string | null,
-      job_code: (a.job_code ?? null) as string | null,
-      hours: Number(a.hours) || 0,
-      description: (a.description ?? null) as string | null,
-    }));
+  // THE PART BEFORE THE SWITCH (0288): a Switch Job closes the running entry and opens this one at
+  // the same instant, so the caller's own closed entry that ENDED when this one began is the
+  // earlier part of today's shift. The lunch box can put the lunch there.
+  let previousPiece: { id: string; jobLabel: string; clock_in: string; clock_out: string; lunch_minutes: number | null } | null = null;
+  if (openEntry && user) {
+    const { data: prev } = await supabase
+      .from("time_entries")
+      .select("id, clock_in, clock_out, lunch_minutes, job_code, job:job_id(job_number, name, address, customers(name))")
+      .eq("profile_id", user.id)
+      .eq("status", "closed")
+      .eq("clock_out", openEntry.clock_in)
+      .maybeSingle();
+    const p = prev as any;
+    if (p?.clock_out) {
+      previousPiece = {
+        id: String(p.id),
+        clock_in: String(p.clock_in),
+        clock_out: String(p.clock_out),
+        lunch_minutes: p.lunch_minutes ?? null,
+        jobLabel: p.job
+          ? jobCodesOn
+            ? jobLabel(p.job)
+            : jobSiteLabel({ ...p.job, customer_name: p.job.customers?.name ?? null })
+          : (p.job_code ?? "the part before"),
+      };
+    }
+  }
   const week = (weekRes.data ?? []) as TimeEntry[];
+  // THE SHIFT SO FAR. After one or more Switch Jobs the running entry is only the latest part; walk
+  // back through the caller's own touching closed entries (each ended when the next began) and add
+  // them up, so the panel can say the whole shift beside the running part's timer.
+  let earlierShiftHours = 0;
+  if (openEntry) {
+    let cursor = Date.parse(openEntry.clock_in);
+    const seen = new Set<string>();
+    for (let hop = 0; hop < 12; hop++) {
+      const prev = week.find(
+        (e) => e.status === "closed" && e.clock_out && !seen.has(e.id) && Math.abs(Date.parse(e.clock_out) - cursor) < 1000,
+      );
+      if (!prev?.clock_out) break;
+      seen.add(prev.id);
+      earlierShiftHours += hoursBetween(prev.clock_in, prev.clock_out, prev.lunch_minutes);
+      cursor = Date.parse(prev.clock_in);
+    }
+  }
 
-  // Geofence auto-clock-out completion: the tech's most recent auto-closed entry that
-  // still has no code breakdown — prompt them to answer the clock-out questions.
+  // Geofence auto-clock-out completion: the caller's most recent auto-closed entry that nobody has
+  // answered for yet — the lunch it could not ask about (and, for the office, a switch time).
   let autoPrompt:
     | {
         id: string;
@@ -155,16 +187,13 @@ export default async function TimeclockPage() {
         lunch_minutes: number;
         jobId: string | null;
         jobLabel: string;
-        /** Hours already recorded on the entry (mid-shift switch segments) — the
-         *  prompt asks only about the remainder. */
-        allocatedHours: number;
       }
     | null = null;
   if (user) {
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
     const { data: autoEntry } = await supabase
       .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, job_id, job:job_id(job_number, name, address, customers(name))")
+      .select("id, clock_in, clock_out, lunch_minutes, job_id, notes, job:job_id(job_number, name, address, customers(name))")
       .eq("profile_id", user.id)
       .eq("source", "auto_gps")
       .eq("status", "closed")
@@ -173,28 +202,8 @@ export default async function TimeclockPage() {
       .limit(1)
       .maybeSingle();
     if ((autoEntry as any)?.clock_out) {
-      // How much of the shift is ALREADY recorded (mid-shift switch segments now
-      // survive the geofence close). Ask only about what's still unallocated —
-      // seeding the full shift onto the entry's post-switch job is what re-filed a
-      // whole day onto the wrong customer.
-      const { data: allocRows } = await supabase
-        .from("time_allocations")
-        .select("hours")
-        .eq("time_entry_id", (autoEntry as any).id);
-      const allocatedHours = ((allocRows ?? []) as { hours: number | null }[]).reduce(
-        (s, a) => s + (Number(a.hours) || 0),
-        0,
-      );
-      // Surface the prompt when there's unallocated time to break down OR when a >5h
-      // shift's auto-close skipped the 30-min meal (lunch still 0) even though the switch
-      // segments + tail already allocated the whole day — the switched-close meal-skip
-      // regression. The pure gate (autoClockoutPromptState) is unit-tested in close-math.
-      const grossHours = hoursBetween((autoEntry as any).clock_in, (autoEntry as any).clock_out, 0);
-      const { show } = autoClockoutPromptState({
-        grossHours,
-        lunchMinutes: (autoEntry as any).lunch_minutes ?? 0,
-        allocatedHours,
-      });
+      // Asked until it is answered: completeAutoClockOut stamps the answer onto the notes.
+      const { show } = autoClockoutPromptState({ notes: (autoEntry as any).notes ?? null });
       if (show) {
         const j = (autoEntry as any).job;
         autoPrompt = {
@@ -208,7 +217,6 @@ export default async function TimeclockPage() {
               ? jobLabel(j)
               : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null })
             : "the jobsite",
-          allocatedHours: Math.round(allocatedHours * 100) / 100,
         };
       }
     }
@@ -355,11 +363,14 @@ export default async function TimeclockPage() {
             jobCodes={(codesRes.data ?? []) as JobCode[]}
             jobs={jobOptions}
             jobCodesEnabled={jobCodesOn}
+            isStaff={isStaff}
+            tz={orgSettings.timezone}
           />
         )}
         <TimeclockPanel
           openEntry={openEntry}
-          openAllocations={openAllocations}
+          previousPiece={previousPiece}
+          earlierShiftHours={earlierShiftHours}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
           jobs={jobOptions}
           lang={lang}

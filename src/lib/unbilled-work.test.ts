@@ -18,7 +18,6 @@ const punch = (id: string, profiles: any, hours: number) => ({
   clock_out: new Date(Date.parse("2026-09-10T18:05:00Z") + hours * 3_600_000).toISOString(),
   lunch_minutes: 0,
   profiles,
-  time_allocations: [],
 });
 
 const INV61 = { id: "i61", invoice_number: "INV-061", status: "paid", created_at: "2026-08-29T05:03:05Z" };
@@ -102,12 +101,9 @@ describe("claimedIdsOfLines / laborRowIds — what a claim read asks about", () 
     expect(claimedIdsOfLines(null)).toEqual([]);
   });
 
-  it("names every entry, every allocation row on an entry, and every allocation tagged to the job", () => {
-    const labor = {
-      jobEntries: [{ id: "e1", time_allocations: [{ id: "a1" }, { id: "a2" }] }, { id: "e2", time_allocations: [] }],
-      jobAllocs: [{ id: "a3" }, { id: "a1" }],
-    };
-    expect(laborRowIds(labor).sort()).toEqual(["a1", "a2", "a3", "e1", "e2"]);
+  it("names every entry on the job, once", () => {
+    const labor = { jobEntries: [{ id: "e1" }, { id: "e2" }, { id: "e1" }, {}] };
+    expect(laborRowIds(labor).sort()).toEqual(["e1", "e2"]);
   });
 });
 
@@ -133,7 +129,6 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
   const base = {
     claims: claimsHolding(held),
     jobEntries: [...["e1", "e3", "e5", "e7", "e9"].map((id) => punch(id, erik, 4)), ...["e2", "e4", "e6", "e8"].map((id) => punch(id, brian, 4)), punch("e10", brian, 5.22)],
-    jobAllocs: [] as any[],
     nonBillableCodes: new Set<string>(),
     defaultRate: 0,
     levelRate: null,
@@ -241,20 +236,12 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.billsAmount).toBe(6.5);
   });
 
-  it("laborRowIds asks about a standalone allocation's PARENT shift too", () => {
-    // 90 of the 98 live labor claims are entry ids. Without the parent in the candidate list, a
-    // shift billed on another job and re-split onto this one is never looked up at all.
-    expect(laborRowIds({ jobEntries: [], jobAllocs: [{ id: "a-new", time_entries: { id: "e-brian" } }] })).toEqual(["a-new", "e-brian"]);
-  });
-
-  it("re-splitting a shift INV-061 already bills adds nothing to bill, and says whose it is", () => {
-    // INV-061 is dated 2026-08-29; this allocation was made three weeks later, by a door that
-    // checks no claim. Brian's 2 h on J-028 are already billed and already paid.
+  it("a billed shift split on its own job adds nothing to bill, and says whose it is (0288)", () => {
+    // split_time_entry appended the new piece's id to INV-061's line, so both pieces are held.
     const w = computeUnbilledWork({
       ...base,
-      claims: claimsHolding(["e-brian"]),
-      jobEntries: [],
-      jobAllocs: [{ id: "a-new", hours: 2, created_at: "2026-09-19T22:10:00Z", time_entries: { id: "e-brian", profiles: brian } }],
+      claims: claimsHolding(["e-brian", "e-brian-right"]),
+      jobEntries: [punch("e-brian", brian, 1.5), punch("e-brian-right", brian, 0.5)],
       bills: [],
     });
     expect(w.hours).toBe(0);
@@ -263,14 +250,13 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.claimedOn).toEqual(["INV-061"]);
   });
 
-  it("a split that predates the invoice is still billable — the live J-016 / J-013 pair", () => {
-    // INV-00032 holds Brian's entry id but the shift was split before it was written and it billed
-    // one hour of it; the other 2.5 h are Sue Waltz's, on J-013, unbilled to this day.
+  it("the piece of an old split that no invoice billed is still billable — the J-013 half of the Jun 25 day", () => {
+    // 0289 rebuilt Brian's Jun 25 shift as two entries: 1 h on J-016 (billed on INV-00032 by the
+    // entry id it kept) and 2.5 h on J-013, a new entry nobody has billed.
     const w = computeUnbilledWork({
       ...base,
       claims: claimsHolding(["e-brian"], { id: "i32", invoice_number: "INV-00032", status: "paid", created_at: "2026-06-28T10:22:59.067Z" }),
-      jobEntries: [],
-      jobAllocs: [{ id: "a-j013", hours: 2.5, created_at: "2026-06-28T10:19:04.188Z", time_entries: { id: "e-brian", profiles: brian } }],
+      jobEntries: [punch("e-j013", brian, 2.5)],
       bills: [],
     });
     expect(w.hours).toBe(2.5);

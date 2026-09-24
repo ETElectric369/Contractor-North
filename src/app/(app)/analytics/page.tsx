@@ -84,12 +84,9 @@ export default async function AnalyticsPage({
       supabase.from("jobs").select("id, job_number, name, status").order("created_at", { ascending: false }).limit(50000),
       supabase
         .from("time_entries")
-        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id), time_allocations(job_id, hours)")
+        .select("job_id, clock_in, clock_out, lunch_minutes, status, rate_override, profiles(id)")
         .eq("status", "closed")
-        // NO job_id FILTER (audit 9): a clock-in with no job whose hours were SPLIT onto jobs via
-        // allocations is real labor — the job page and Nort both cost it, and dropping it here
-        // meant one job carried two different labor numbers depending on which screen you asked.
-        // laborCostForJob already ignores entries that don't touch the job.
+        // laborCostForJob ignores entries that don't touch the job, so no job_id filter is needed.
         .order("clock_in", { ascending: false })
         .limit(50000),
       // id + status + po_id feed computeJobProfitRows' shared live-PO rule: a draft/cancelled
@@ -124,7 +121,7 @@ export default async function AnalyticsPage({
   const qs = computeQuoteStats((quotes ?? []) as any[]);
 
   // ── Job profitability ─────────────────────────────────────────────────────
-  // The ONE allocation-aware computation (revenue = collected − refunds; cost = split-aware
+  // The ONE computation (revenue = collected − refunds; cost = crew
   // labor + materials), now shared with the job hub AND Nort's get_job_financials /
   // list_job_profitability tools so a job can't show two different profits anywhere.
   // Labor rates: merged from the staff-scoped `profile_pay` view onto the embedded profile by

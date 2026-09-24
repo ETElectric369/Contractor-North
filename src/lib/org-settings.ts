@@ -77,11 +77,10 @@ export interface OrgSettings {
    *  end-of-day clock-out/EOD-form reminder). Default ON; the crons skip an org that
    *  turns this off. Settings → Scheduling owns the toggle. */
   remind_timeclock: boolean;
-  /** Ask the crew for job-CODE allocations on the timeclock (the clock-out breakdown's
-   *  code pickers + the clock-in/switch code selects). false = codes off: entries and
-   *  splits carry just the JOB, and timeclock job labels lead with customer · street
-   *  address instead of the job number (the crew knows work by whose house they're at).
-   *  Allocation/labeling behavior ONLY — never pay math (base pay stays clock_in/out/
+  /** Ask the crew for job CODES on the timeclock (the clock-in/switch code selects). false =
+   *  codes off: entries carry just the JOB, and timeclock job labels lead with customer ·
+   *  street address instead of the job number (the crew knows work by whose house they're at).
+   *  Labeling behavior ONLY — never pay math (base pay stays clock_in/out/
    *  lunch; mileage stays its own bucket). Default true = today's behavior everywhere. */
   timeclock_job_codes: boolean;
   /** Weather widget location: "device" = each user's GPS (the crew is mobile); "business" = the org's

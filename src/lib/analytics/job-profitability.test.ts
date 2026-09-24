@@ -35,12 +35,17 @@ describe("mergeBudgetActual — per-scope budget vs actual", () => {
 });
 
 const job = (id: string, status = "in_progress") => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status });
-// a closed entry fully allocated to `jobId` for `hours` at pay rate `rate`
+// a closed entry on `jobId` of `hours` length at pay rate `rate`
+const span = (hours: number) => ({
+  clock_in: "2026-06-01T08:00:00Z",
+  clock_out: new Date(Date.parse("2026-06-01T08:00:00Z") + hours * 3_600_000).toISOString(),
+  lunch_minutes: 0,
+});
 const laborEntry = (jobId: string, hours: number, rate: number) => ({
   job_id: jobId,
   status: "closed",
+  ...span(hours),
   profiles: { hourly_rate: rate },
-  time_allocations: [{ job_id: jobId, hours }],
 });
 // a payment of `amount` on `jobId`'s invoice (THE cash definition — not invoices.amount_paid)
 const pay = (jobId: string, amount: number, status = "paid") => ({ amount, invoices: { job_id: jobId, status } });
@@ -130,19 +135,12 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
     expect(rows[0].cost).toBe(500); // 300 (draft) + 200 (received); cancelled excluded
   });
 
-  it("only counts THIS job's allocated hours from a split shift", () => {
-    // one shift split across two jobs; A's cost is only its 3 allocated hours
-    const shift = {
-      job_id: "OTHER",
-      status: "closed",
-      profiles: { hourly_rate: 40 },
-      time_allocations: [{ job_id: "A", hours: 3 }, { job_id: "OTHER", hours: 5 }],
-    };
+  it("only counts THIS job's piece of a split shift (0288: a split is two entries)", () => {
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
       payments: [pay("A", 500)],
-      entries: [shift],
+      entries: [laborEntry("A", 3, 40), laborEntry("OTHER", 5, 40)],
     });
     expect(rows[0].cost).toBe(120); // 3h × $40
   });
@@ -150,7 +148,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
   // 0286: the owner is paid by owner's draw. His hours are billed to the customer and counted, and
   // they are never a cost. Erik's J-046 (Jason Waldow) read $479.14 with his hours costed at $125.
   it("the owner's hours cost $0 and come back as ownerHours with profit per owner hour", () => {
-    const owner = { job_id: "A", status: "closed", profiles: { hourly_rate: 0, paid_by_draw: true }, time_allocations: [{ job_id: "A", hours: 10 }] };
+    const owner = { job_id: "A", status: "closed", ...span(10), profiles: { hourly_rate: 0, paid_by_draw: true } };
     const rows = computeJobProfitRows({
       ...empty,
       jobs: [job("A")],
@@ -162,7 +160,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
   });
 
   it("per owner hour is null until something is collected, and the job stays on the board", () => {
-    const owner = { job_id: "A", status: "closed", profiles: { hourly_rate: 0, paid_by_draw: true }, time_allocations: [{ job_id: "A", hours: 6 }] };
+    const owner = { job_id: "A", status: "closed", ...span(6), profiles: { hourly_rate: 0, paid_by_draw: true } };
     const rows = computeJobProfitRows({ ...empty, jobs: [job("A")], entries: [owner] });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ rev: 0, cost: 0, profit: 0, ownerHours: 6, perOwnerHour: null });
@@ -352,8 +350,8 @@ describe("computeJobProfitRows — petty cash finally counts", () => {
  *
  * cn-v821 added a Labor row to both sides of budget-vs-actual and fed the actual side with
  * `.from("time_entries").select("*")`. In PostgREST `*` is THIS TABLE'S COLUMNS — it does not
- * expand embeds. So the rows reached laborCostForJob carrying no `profiles` (no pay rate) and no
- * `time_allocations` (no split), every hour priced at $0, and the Labor row read `actual: 0` on
+ * expand embeds. So the rows reached laborCostForJob carrying no `profiles` (no pay rate), every
+ * hour priced at $0, and the Labor row read `actual: 0` on
  * every job in every tenant. The commit claimed the two readers "can never report two different
  * labour numbers" and was false in the same breath that made it.
  *
@@ -396,7 +394,7 @@ describe("the two time_entries projections must stay identical", () => {
     expect(selects.length).toBeGreaterThanOrEqual(2);
     for (const sel of selects) {
       expect(sel, `a time_entries projection is missing the profiles embed: ${sel}`).toContain("profiles(");
-      expect(sel, `a time_entries projection is missing time_allocations: ${sel}`).toContain("time_allocations(");
+      expect(sel, `a time_entries projection is missing the clock times: ${sel}`).toContain("clock_out");
       expect(sel, "select(\"*\") does not expand embeds in PostgREST").not.toBe("*");
     }
   });

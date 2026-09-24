@@ -27,10 +27,9 @@ export type WhichJobResult = { ok: boolean; error?: string; stale?: boolean };
  *
  * This is that sentence and that door. One pick sets the job on the WHOLE open entry — every
  * hour since the punch, not just the minutes after the tap — through the page's own server
- * action. NOT switchJob: it records the outgoing segment first, and on a job-less punch that
- * segment is written with job_id NULL, so the morning would be banked to nothing and the job
- * would quietly under-cost. After the write lands the route is refreshed and the four doors
- * render in this block's place — no reload, nothing to find.
+ * action (the same whole-entry move switch_job makes on a job-less punch, open to every role
+ * here). After the write lands the route is refreshed and the four doors render in this block's
+ * place — no reload, nothing to find.
  *
  * Only ever offered when the punch has NO job. Moving a punch that already carries one stays
  * on Timecards (the office's after-the-fact correction path).

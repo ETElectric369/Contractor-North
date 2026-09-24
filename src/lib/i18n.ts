@@ -28,11 +28,6 @@ const en: Dict = {
   tc_noJob: "— No job —",
   tc_jobCode: "Job code",
   tc_selectCode: "— Select code —",
-  tc_jobsToday: "Jobs worked today",
-  tc_addJob: "Add job",
-  tc_breakdownHint: "Optional: break your day down by job, with time and what you did.",
-  tc_whatDone: "What was done on this job?",
-  tc_allocated: "Allocated",
   tc_whatToday: "What did you do today?",
   tc_dictate: "Dictate",
   tc_stop: "Stop",
@@ -42,6 +37,18 @@ const en: Dict = {
   tc_locationNote: "Location is stamped at clock in/out when it's available. Drive off with the app closed? You'll get a clock-out prompt the next time you open it.",
   tc_since: "Since",
   tc_thisWeek: "This week",
+  // After a Switch Job the running entry is only the part since the switch (0288); these say the
+  // whole shift, where the lunch lands, and what the switch did. {x} fills from the panel.
+  tc_shiftSoFar: "This shift so far: {total}",
+  tc_wrapUpTitle: "Wrapping up your day",
+  tc_wrapUpBody: "You worked {total} on {job}. Add miles and a note, then clock out.",
+  tc_wrapUpBodySplit: "You worked {total} this shift, {part} of it on {job}. Add miles and a note, then clock out.",
+  tc_lunchOnPrev: "The lunch goes on {job}.",
+  tc_lunchOnThis: "The lunch goes on this part of your shift.",
+  tc_putOnThis: "Put It On This Part Instead",
+  tc_putOnPrev: "Put It On {job} Instead",
+  tc_switchedCut: "Switched to {job}. The first part is its own entry ({hours}).",
+  tc_switchedWhole: "Now on {job}. This whole shift moved over.",
   // settings
   s_language: "Language",
   s_languageDesc: "Your preferred language for the app and the AI assistant.",
@@ -60,11 +67,6 @@ const es: Dict = {
   tc_noJob: "— Sin trabajo —",
   tc_jobCode: "Código de trabajo",
   tc_selectCode: "— Selecciona código —",
-  tc_jobsToday: "Trabajos de hoy",
-  tc_addJob: "Agregar trabajo",
-  tc_breakdownHint: "Opcional: desglosa tu día por trabajo, con tiempo y lo que hiciste.",
-  tc_whatDone: "¿Qué se hizo en este trabajo?",
-  tc_allocated: "Asignado",
   tc_whatToday: "¿Qué hiciste hoy?",
   tc_dictate: "Dictar",
   tc_stop: "Detener",
@@ -72,6 +74,16 @@ const es: Dict = {
   tc_locationNote: "La ubicación se registra al marcar entrada/salida cuando está disponible. ¿Te fuiste con la app cerrada? Se te pedirá marcar salida al volver a abrirla.",
   tc_since: "Desde",
   tc_thisWeek: "Esta semana",
+  tc_shiftSoFar: "Este turno hasta ahora: {total}",
+  tc_wrapUpTitle: "Terminando tu día",
+  tc_wrapUpBody: "Trabajaste {total} en {job}. Agrega millas y una nota, y marca salida.",
+  tc_wrapUpBodySplit: "Trabajaste {total} en este turno, {part} de eso en {job}. Agrega millas y una nota, y marca salida.",
+  tc_lunchOnPrev: "El almuerzo va en {job}.",
+  tc_lunchOnThis: "El almuerzo va en esta parte de tu turno.",
+  tc_putOnThis: "Ponerlo En Esta Parte",
+  tc_putOnPrev: "Ponerlo En {job}",
+  tc_switchedCut: "Cambiaste a {job}. La primera parte es su propia entrada ({hours}).",
+  tc_switchedWhole: "Ahora en {job}. Todo este turno se movió.",
   s_language: "Idioma",
   s_languageDesc: "Tu idioma preferido para la app y el asistente de IA.",
 };
@@ -84,4 +96,9 @@ export function dict(lang: string | null | undefined): Dict {
 export function translator(lang: string | null | undefined) {
   const d = dict(lang);
   return (key: string) => d[key] ?? key;
+}
+
+/** A translated string with its {name} slots filled: fillText(t("tc_lunchOnPrev"), { job }). */
+export function fillText(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? vars[k] : m));
 }

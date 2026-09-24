@@ -3,7 +3,7 @@ import { formatCurrency } from "@/lib/utils";
 /**
  * A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE IN SILENCE.
  *
- * This is the materials twin of allocation-claims.ts, and it exists for the same reason that one
+ * This is the materials twin of timeclock/claim-words.ts, and it exists for the same reason that one
  * does. An invoice line claims the bill it billed (invoice_items.source_ids, 0255), the importer
  * skips a claimed id forever after, and the claim is BY ID: it does not care which job the bill
  * sits on. So re-pointing a claimed receipt at the right job used to save clean and cost money at
