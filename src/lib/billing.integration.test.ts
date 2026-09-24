@@ -5,7 +5,7 @@ import pg from "pg";
 // and the `total > 0.005 or exists(items)` predicate — copies that stayed green no matter how
 // far the real guards drifted from them.
 import { DRAW_KINDS, isStandardBillingBlocker } from "./invoice-math";
-import { claimantNumbers, foldClaims } from "./unbilled-work";
+import { foldClaims } from "./unbilled-work";
 
 // Integration test of the draw-billing invariants the H1/H3/H4 guards rely on,
 // exercised against the REAL schema in a rolled-back transaction — the SQL behaviour
@@ -222,32 +222,25 @@ d("billing draw invariants (DB integration)", () => {
       expect(claims.owner.get(e1.id)?.invoice_number).toBe("TEST-INV-A");
       expect(claims.owner.has(e2.id)).toBe(false);
 
-      // CLAIMS ARE PER ROW, NOT PER JOB. Move e1 to a second job after INV-A billed it: J2's own
-      // invoice list knows nothing of it, so a J2 invoice reading claims by job alone would bill
-      // e1 again. The org-wide read BY ID (claimedSourcesOnJob's second read) is what still sees
-      // it — this is that read's SQL twin, folded by the app's own foldClaims. Moved back after.
+      // CLAIMS ARE PER ROW, NOT PER JOB. This case used to MOVE e1 to a second job after INV-A billed
+      // it, to prove the org-wide read by id still saw the claim. Since 0288 that move is itself a
+      // database refusal (a billed shift cannot change jobs, or the hour would be billable twice),
+      // so the case now pins the boundary instead. Under a savepoint so the refusal doesn't abort
+      // the transaction the rest of this case runs in.
       const { rows: [job2] } = await client.query(
         `insert into jobs (org_id, name, job_number, status, billing_type, customer_id)
          values ($1,'TEST integ job 2','TEST-J2','scheduled','tm',$2) returning id`,
         [orgId, custId],
       );
-      await client.query(`update time_entries set job_id=$1 where id=$2`, [job2.id, e1.id]);
-      const byIdSql = `select i.id, i.invoice_number, i.status, i.created_at::text as created_at, i.job_id,
-                              json_build_object('job_number', j.job_number) as jobs,
-                              json_agg(json_build_object('import_key', it.import_key, 'source_ids', it.source_ids)) as invoice_items
-                         from invoice_items it
-                         join invoices i on i.id = it.invoice_id
-                         left join jobs j on j.id = i.job_id
-                        where it.source_ids && $1::uuid[] and i.status<>'void'
-                        group by i.id, j.job_number`;
-      const onJ2 = (await client.query(claimsSql, [job2.id, invB.id])).rows;
-      expect(onJ2.length).toBe(0); // J2 has no invoices of its own
-      const elsewhere = (await client.query(byIdSql, [[e1.id, e2.id]])).rows;
-      const seenFromJ2 = foldClaims(onJ2, true, elsewhere, job2.id);
-      expect(seenFromJ2.owner.get(e1.id)?.invoice_number).toBe("TEST-INV-A");
-      expect(seenFromJ2.invoices.length).toBe(0); // INV-A is J1's invoice, not J2's "last invoice"
-      expect(claimantNumbers(seenFromJ2, [e1.id])).toEqual(["TEST-INV-A (TEST-J1)"]);
-      await client.query(`update time_entries set job_id=$1 where id=$2`, [jobId, e1.id]);
+      await client.query("savepoint move_billed");
+      let moveRefusal: { message?: string } | null = null;
+      try {
+        await client.query(`update time_entries set job_id=$1 where id=$2`, [job2.id, e1.id]);
+      } catch (e) {
+        moveRefusal = e as { message?: string };
+      }
+      await client.query("rollback to savepoint move_billed");
+      expect(moveRefusal?.message).toMatch(/TEST-INV-A already bills this shift/);
 
       // INV-B imports the unclaimed row and claims it; INV-A's claim is untouched.
       await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb)`, [invB.id, laborRow([e2.id], 5.25)]);
