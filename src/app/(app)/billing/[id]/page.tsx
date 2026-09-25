@@ -35,6 +35,7 @@ import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
 import { fetchSupplierNames } from "@/lib/supplier-names";
 import { readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { markupBoxSeed } from "@/lib/invoice-markup";
+import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -62,6 +63,9 @@ export default async function InvoicePage({
   if (invoiceErr) throw invoiceErr; // a real failure shouldn't masquerade as 404
   if (!invoice) notFound();
   const inv = invoice as Invoice & { customers: any; quotes: any };
+  // A BANK TRANSFER ON ITS WAY (audit v994 BK3, 0338): started now, read beside everything else,
+  // awaited at the render. A failed read shows no banner and costs the page nothing.
+  const inFlightP = pendingTransfers(supabase, String((inv as { org_id?: string }).org_id ?? ""), [String(inv.id)]).catch(() => null);
 
   // The customer/job pickers only matter while the invoice is still an editable
   // draft, so only pay for those lookups then.
@@ -211,6 +215,7 @@ export default async function InvoicePage({
     const self = !!viewerId && r.profileId === viewerId;
     return { id: r.id, clockIn: r.clockIn, name: self ? "You" : r.name, self, door: clockDoorWords(r.fullName, { self }).clockOut };
   });
+  const inFlight = (await inFlightP)?.byInvoice.get(String(inv.id)) ?? [];
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -340,6 +345,16 @@ export default async function InvoicePage({
             thisAmount={Number(inv.total ?? 0)}
             billingType={fin.billingType}
           />
+        </div>
+      )}
+
+      {inFlight.length > 0 && (
+        <div className="mb-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3">
+          <p className="text-sm font-medium text-sky-900">{transferOnItsWaySentence(inFlight, orgSettings.timezone)}</p>
+          <p className="mt-0.5 text-sm text-sky-800">
+            Nothing is recorded until it clears, in a few business days. Don&apos;t record it by hand, or it counts twice. The
+            customer&apos;s page says it is on its way, and no reminder goes out meanwhile.
+          </p>
         </div>
       )}
 

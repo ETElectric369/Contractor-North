@@ -6,6 +6,7 @@ import { reportError } from "@/lib/observe";
 import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
 import { docLabel } from "@/lib/doc-label";
 import { reminderSuppressed } from "@/lib/automations-math";
+import { pendingTransfers } from "@/lib/bank-transfer";
 
 /** The opt-in customer-reminder engine (run by the daily automations cron). For each
  *  org that has turned a reminder toggle ON, find what's due, send a branded email,
@@ -86,7 +87,14 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
           .eq("org_id", org.id)
           .in("status", ["sent", "partial"])
           .lt("due_date", today);
-        for (const inv of invs ?? []) {
+        // NEVER CHASE MONEY THAT IS ALREADY MOVING (audit v994 BK3, 0338). A bank debit on its way
+        // books nothing for 3-5 business days, so the balance still reads in full; the invoice is
+        // skipped until it clears or fails. A read that fails skips every invoice this run (fail
+        // CLOSED, like the dedup read above): a reminder a day late beats one sent to a man who paid.
+        const inFlight = await pendingTransfers(supabase, org.id, (invs ?? []).map((i: any) => String(i.id)));
+        if (inFlight.problem) reportError("reminders-pending-transfers", new Error(inFlight.problem), { orgId: org.id });
+        for (const inv of inFlight.problem ? [] : (invs ?? [])) {
+          if (inFlight.byInvoice.get(String(inv.id))?.length) continue;
           const bal = invoiceBalance(inv.total, inv.amount_paid);
           if (bal <= 0.005) continue;
           const cust = (inv as any).customers;

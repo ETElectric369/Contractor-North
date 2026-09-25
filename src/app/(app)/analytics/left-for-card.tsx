@@ -7,6 +7,7 @@ import {
   OWNER_MONEY_WINDOWS,
   costFigure,
   countedNotPaidLine,
+  hasUnratedHours,
   isOwnerMoneySegmentKey,
   notCountedLine,
   windowLabel,
@@ -107,7 +108,7 @@ export function LeftForCard({
                       <span className="text-xs text-slate-500">
                         {b}
                         {b === "Fees" && t.processorFees >= 0.005 && (
-                          <span className="text-slate-400"> (includes {formatCurrency(t.processorFees)} Stripe card fees)</span>
+                          <span className="text-slate-400"> (includes {formatCurrency(t.processorFees)} Stripe fees)</span>
                         )}
                       </span>
                       <span className="text-xs tabular-nums text-slate-700">{formatCurrency(t.businessCosts[b])}</span>
@@ -143,6 +144,13 @@ export function LeftForCard({
               <p className="mt-3 text-xs leading-relaxed text-slate-400">
                 {[notCounted, countedNotPaid].filter(Boolean).join(" ")}
               </p>
+            )}
+            {/* NO DEAD END (audit v994 MR3): hours priced at $0 for want of a pay rate come with the
+                door that fixes them, the Pay box on the Team page. */}
+            {hasUnratedHours(money) && (
+              <a href="/team" className="mt-1 inline-flex min-h-[44px] items-center text-sm font-medium text-brand-600">
+                Set Pay Rates
+              </a>
             )}
           </>
         )}

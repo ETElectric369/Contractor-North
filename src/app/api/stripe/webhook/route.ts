@@ -10,6 +10,8 @@ import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
 import { reportError } from "@/lib/observe";
 import { captureProcessorFee } from "@/lib/processor-fee-capture";
+import { paymentMethodKey } from "@/lib/payment-method";
+import { checkoutPaymentMethod, isBankCheckout, noteTransferStarted, resolveTransfer } from "@/lib/bank-transfer";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
@@ -70,6 +72,12 @@ function declineReason(err: Stripe.PaymentIntent.LastPaymentError | null | undef
  * payment_intent.succeeded and payment_intent.payment_failed. Those two are not on the endpoint
  * by default: a tap is charged but never booked (or never declines to the tech) until the
  * "connected accounts" destination in the Stripe dashboard carries both. Added 2026-09-11.
+ *
+ * BANK TRANSFER (ACH) NEEDS TWO MORE there before settings.bank_transfer_enabled may be turned on
+ * (Erik, audit v994 BK3): checkout.session.async_payment_succeeded (the money lands and is booked,
+ * method 'ach') and checkout.session.async_payment_failed (the debit bounced; nothing was booked,
+ * the office is told). Without them a debit is marked on its way (0338) and never ends; the daily
+ * cron tells the office about any that outlive a week.
  */
 /**
  * WHAT GOES ON THE INVOICE, WHICH IS NOT ALWAYS WHAT STRIPE CHARGED.
@@ -129,31 +137,26 @@ export async function POST(req: Request) {
     return new Response("Server not configured", { status: 500 });
   }
 
-  async function recordInvoicePayment(
-    invoiceId: string | undefined,
-    orgId: string | undefined,
-    amount: number,
-    eventId: string,
-    paymentIntent: string | null,
+  /**
+   * THE EVENT'S ACCOUNT IS THE ORG BOUNDARY — THE METADATA IS A CLAIM (audit v921).
+   *
+   * Everything a payment event writes is scoped by its metadata, which the sender chose. The
+   * connected endpoint delivers checkout.session.completed from EVERY connected account, so an
+   * account able to mint its own session could name another tenant's invoice and mark it paid with
+   * a $1 charge. It can't today (Express accounts hold no API keys and only /api/pay mints these
+   * sessions), which is exactly why the check belongs here: [[tenant-isolation-root-cause]] — a
+   * rule applied at one write path is a convention, not a boundary.
+   *
+   * ONE CHECK FOR EVERY WRITER: the payment row, and since 0338 the bank-transfer marker (audit
+   * v994 BK3), stand behind the same two questions. Returns the invoice (with the status a draft
+   * is said by - the projection law) or null after saying why in the ops log. A retry can't
+   * fix a claim that doesn't hold, so the caller acks rather than looping Stripe on it.
+   */
+  async function claimedInvoice(
+    invoiceId: string,
+    orgId: string,
     connectedAccount: string | null,
-    // WHICH DOOR THE MONEY CAME THROUGH — the ledger note and the words of the office push.
-    // Defaulted so the Checkout branch reads exactly as it always has; Tap to Pay passes its own.
-    // One writer, one extra parameter — NOT a second insert path (the double-record class this
-    // helper closed). No door moves a status here any more (lib/tap-settlement): a draft becomes a
-    // bill when a person sends it, and every pay door asks first.
-    via: { note: string; said: string } = { note: "Online payment", said: "paid online" },
-  ) {
-    if (!invoiceId || !orgId || amount <= 0) return;
-    /**
-     * THE EVENT'S ACCOUNT IS THE ORG BOUNDARY — THE METADATA IS A CLAIM (audit v921).
-     *
-     * Everything this writes is scoped by session.metadata, which the sender chose. The connected
-     * endpoint delivers checkout.session.completed from EVERY connected account, so an account
-     * able to mint its own session could name another tenant's invoice and mark it paid with a
-     * $1 charge. It can't today (Express accounts hold no API keys and only /api/pay mints these
-     * sessions), which is exactly why the check belongs here: [[tenant-isolation-root-cause]] —
-     * a rule applied at one write path is a convention, not a boundary.
-     */
+  ): Promise<{ id: string; status: string | null; invoice_number: string | null } | null> {
     if (connectedAccount) {
       const { data: owner } = await supabase
         .from("organizations")
@@ -162,22 +165,17 @@ export async function POST(req: Request) {
         .eq("stripe_account_id", connectedAccount)
         .maybeSingle();
       if (!owner) {
-        // A retry can't fix a claim that doesn't hold, so ack and leave a row in the ops log
-        // rather than looping Stripe forever on it.
         reportError("stripe:webhook:account-org-mismatch", new Error("checkout session names an org that doesn't own the connected account"), {
           orgId,
           invoiceId,
           connectedAccount,
         });
-        return;
+        return null;
       }
     }
     const { data: target } = await supabase
       .from("invoices")
-      // status rides along because a draft reaching this door has to be SAID (see below), and the
-      // projection law says you cannot notice what you did not select. Read inside the org-scoped
-      // lookup, behind the same tenant boundary the payment row stands behind.
-      .select("id, status")
+      .select("id, status, invoice_number")
       .eq("id", invoiceId)
       .eq("org_id", orgId)
       .maybeSingle();
@@ -186,8 +184,48 @@ export async function POST(req: Request) {
         orgId,
         invoiceId,
       });
-      return;
+      return null;
     }
+    return target as { id: string; status: string | null; invoice_number: string | null };
+  }
+
+  async function recordInvoicePayment(
+    invoiceId: string | undefined,
+    orgId: string | undefined,
+    amount: number,
+    eventId: string,
+    paymentIntent: string | null,
+    connectedAccount: string | null,
+    // WHICH DOOR THE MONEY CAME THROUGH — the ledger note, the words of the office push, and the
+    // method key the row is booked under. Defaulted so the Checkout branch reads exactly as it
+    // always has; Tap to Pay passes its own. One writer, one extra parameter — NOT a second insert
+    // path (the double-record class this helper closed). No door moves a status here any more
+    // (lib/tap-settlement): a draft becomes a bill when a person sends it, and every pay door asks
+    // first.
+    via: {
+      note: string;
+      said: string;
+      /**
+       * THE METHOD KEY THE ROW IS BOOKED UNDER (0287; audit v994 BK2). Every Stripe payment used to
+       * be booked 'card', so a bank debit read "Card" and "Card fee" on the invoice, the PDF, the
+       * statement and the owner's fees, and the "Bank fee" label could never show. The Checkout
+       * branch passes what the session was actually paid with (checkoutPaymentMethod); Tap to Pay
+       * is always a card. Absent means 'card', as it always was.
+       */
+      method?: "card" | "ach";
+    } = { note: "Online payment", said: "paid online" },
+  ): Promise<boolean> {
+    // TRUE ONLY WHEN THE CLAIM HELD AND THE MONEY IS AT REST (this event's row, or a retry that
+    // found it and healed it). A caller that writes anything else for this payment (the bank
+    // transfer marker, BK3) stands behind this answer, never behind the session's metadata: false
+    // means the account does not own the org or the invoice is not the org's, and nothing more may
+    // be written in either's name. Every failure that a retry can fix THROWS instead.
+    if (!invoiceId || !orgId || amount <= 0) return false;
+    // The org<->account and invoice<->org checks (claimedInvoice above). status rides along because
+    // a draft reaching this door has to be SAID (see below), and the projection law says you cannot
+    // notice what you did not select.
+    const target = await claimedInvoice(invoiceId, orgId, connectedAccount);
+    if (!target) return false;
     /**
      * A DRAFT IS SETTLED, NEVER SENT, AND ALWAYS SAID (Connected North Phase 1).
      *
@@ -198,7 +236,7 @@ export async function POST(req: Request) {
      * draft (paidStatus never advances one) - and an error_events row makes a person look. This
      * webhook never writes a status and never stamps sent_at (lib/tap-settlement).
      */
-    const onDraft = paymentReachedDraft((target as { status?: string | null }).status);
+    const onDraft = paymentReachedDraft(target.status);
 
     /**
      * SETTLE = RECALC, THEN REFRESH.
@@ -230,7 +268,7 @@ export async function POST(req: Request) {
       invoice_id: invoiceId,
       org_id: orgId,
       amount,
-      method: "card",
+      method: paymentMethodKey(via.method ?? "card"),
       note: via.note,
       stripe_event_id: eventId,
       // The ONE id a later charge.refunded / charge.dispute.created can be matched on. The
@@ -248,7 +286,7 @@ export async function POST(req: Request) {
           // Still not settled — let Stripe retry rather than acking a lie (see below).
           throw new Error(`settling invoice ${invoiceId} failed on retry`);
         }
-        return;
+        return true;
       }
       throw new Error(insErr.message);
     }
@@ -327,6 +365,7 @@ export async function POST(req: Request) {
     if (paymentIntent) {
       await captureProcessorFee(supabase, { orgId, paymentIntent, account: connectedAccount });
     }
+    return true;
   }
 
   async function syncSubscription(sub: Stripe.Subscription) {
@@ -462,23 +501,153 @@ export async function POST(req: Request) {
          * completed(paid) OR completed(unpaid) followed by an async event, so this gate — not
          * the event-id unique index — is what keeps one payment from being booked twice.
          */
+        const pi =
+          typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null);
+        const bank = isBankCheckout(session);
+        const credit = invoiceCredit((session.amount_total ?? 0) / 100, session.metadata);
         if (session.payment_status === "paid") {
-          await recordInvoicePayment(
+          const landed = await recordInvoicePayment(
             session.metadata.invoice_id,
             session.metadata.org_id,
-            invoiceCredit((session.amount_total ?? 0) / 100, session.metadata),
+            credit,
             event.id,
-            typeof session.payment_intent === "string"
-              ? session.payment_intent
-              : (session.payment_intent?.id ?? null),
+            pi,
             eventAccount,
+            // BK2: booked under the method it was actually paid with, and said that way.
+            bank
+              ? { note: "Online bank transfer", said: "paid by bank transfer", method: checkoutPaymentMethod(session) }
+              : { note: "Online payment", said: "paid online", method: checkoutPaymentMethod(session) },
           );
+          // BK3: a debit that was on its way has landed. Only after the money is booked (the
+          // helper throws on anything that did not come to rest, and Stripe retries the event), and
+          // only when the claim held: `landed` is false when the account does not own the org or
+          // the invoice is not the org's, and then no marker is written in their name either.
+          if (landed && bank && pi && session.metadata.invoice_id && session.metadata.org_id) {
+            const done = await resolveTransfer(supabase, {
+              orgId: session.metadata.org_id,
+              invoiceId: session.metadata.invoice_id,
+              paymentIntent: pi,
+              checkoutSession: session.id ?? null,
+              amount: credit,
+              status: "cleared",
+            });
+            // A MARKER THAT DID NOT MOVE IS RETRIED, NEVER ACKED. A pending row left behind keeps
+            // both Pay buttons hidden on a paid-but-partial invoice and the reminders quiet, for a
+            // week, with the failure only in the ops log. Throwing answers 500 and Stripe resends
+            // this event: the payment insert hits 23505 and heals without a second push, and
+            // resolveTransfer moves only a row still 'pending'. A database before 0338 has no
+            // marker to move ('no_table') and is acked.
+            if (done.outcome === "failed") {
+              reportError("stripe:webhook:bank-transfer-clear", done.error, { invoiceId: session.metadata.invoice_id, pi });
+              throw new Error(`clearing the bank transfer marker for invoice ${session.metadata.invoice_id} failed`);
+            }
+          }
+        } else if (event.type === "checkout.session.completed" && bank && pi) {
+          /**
+           * A BANK DEBIT STARTED (audit v994 BK3, 0338). completed(unpaid) books NO money - the
+           * debit is days away and can still fail - but it is not nothing either: the invoice would
+           * sit at its full balance with both Pay buttons, and the reminder cron would chase a
+           * customer whose money is already moving. So a marker is written that no total reads, the
+           * customer's page and /api/pay stop a second payment, and the office is told once.
+           */
+          const orgId = session.metadata.org_id;
+          const invoiceId = session.metadata.invoice_id;
+          const target = orgId && invoiceId ? await claimedInvoice(invoiceId, orgId, eventAccount) : null;
+          if (target && orgId && invoiceId) {
+            const started = await noteTransferStarted(supabase, {
+              orgId,
+              invoiceId,
+              paymentIntent: pi,
+              checkoutSession: session.id ?? null,
+              amount: credit,
+            });
+            if (started.outcome === "failed") {
+              // Retried, never acked (see the cleared branch above): with no marker the invoice
+              // keeps both Pay buttons and the reminders chase a customer whose money is moving -
+              // the second-payment door this marker exists to close. The upsert ignores a
+              // duplicate, so Stripe's resend writes it once and tells the office once.
+              reportError("stripe:webhook:bank-transfer-start", started.error, { invoiceId, pi });
+              throw new Error(`marking the bank transfer on invoice ${invoiceId} as on its way failed`);
+            } else if (started.outcome === "no_table") {
+              reportError("stripe:webhook:bank-transfer-start", new Error("pending_bank_transfers is missing: migration 0338 is not applied"), { invoiceId, pi });
+            } else if (started.outcome === "noted") {
+              try {
+                const { data: who } = await supabase
+                  .from("invoices")
+                  .select("customers(name)")
+                  .eq("id", invoiceId)
+                  .eq("org_id", orgId)
+                  .maybeSingle();
+                const cust = (who as { customers?: { name?: string | null } | null } | null)?.customers?.name;
+                await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+                  title: "Bank transfer on its way",
+                  body: `${formatCurrency(credit)} by bank transfer on ${target.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. It takes a few business days to clear, and nothing is recorded until it does. Don't record it by hand.`,
+                  url: `/billing/${invoiceId}`,
+                });
+              } catch (e) {
+                // The marker is written; only the courtesy failed. Never make Stripe retry for it.
+                reportError("stripe:webhook:bank-transfer-start-push", e, { invoiceId });
+              }
+            }
+          }
         }
       } else if (session.subscription && !fromConnectedAccount) {
         const sub = await getStripe().subscriptions.retrieve(
           session.subscription as string,
         );
         await syncSubscription(sub);
+      }
+      break;
+    }
+    /**
+     * A BANK DEBIT THAT DID NOT GO THROUGH (audit v994 BK3). Nothing was ever booked for it - the
+     * money is only recorded on async_payment_succeeded - so the invoice was open all along and
+     * stays open. What changes is the marker: it ends as 'failed', /i offers Pay again, reminders
+     * may chase again, and the office is told once, in words, so nobody waits on money that is not
+     * coming. NEVER WRITES A PAYMENT. Behind the same org<->account and invoice<->org checks.
+     */
+    case "checkout.session.async_payment_failed": {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.metadata?.kind !== "invoice_payment") break;
+      const orgId = session.metadata.org_id;
+      const invoiceId = session.metadata.invoice_id;
+      const pi = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null);
+      if (!orgId || !invoiceId || !pi) break;
+      const target = await claimedInvoice(invoiceId, orgId, eventAccount);
+      if (!target) break;
+      const amount = invoiceCredit((session.amount_total ?? 0) / 100, session.metadata);
+      const ended = await resolveTransfer(supabase, {
+        orgId,
+        invoiceId,
+        paymentIntent: pi,
+        checkoutSession: session.id ?? null,
+        amount,
+        status: "failed",
+      });
+      if (ended.outcome === "failed") {
+        // Retried, never acked: a marker left 'pending' hides both Pay buttons, silences the
+        // reminders and sends no word to the office that the debit bounced, and a week later the
+        // stale alert says it "has not cleared or failed", which is false. Throwing answers 500
+        // and Stripe resends this event; the update moves only a row still 'pending', and the push
+        // below fires only on 'resolved' or 'recorded', so the retry tells the office exactly once.
+        reportError("stripe:webhook:bank-transfer-fail", ended.error, { invoiceId, pi });
+        throw new Error(`ending the bank transfer marker for invoice ${invoiceId} failed`);
+      } else if (ended.outcome === "no_table") {
+        reportError("stripe:webhook:bank-transfer-fail", new Error("pending_bank_transfers is missing: migration 0338 is not applied"), { invoiceId, pi });
+      }
+      // Said once: a retried event finds the row already ended ('already') and stays quiet. The
+      // customer believes they paid (audit 8), so the office has to hear it. A courtesy that can
+      // never fail the webhook.
+      if (ended.outcome === "resolved" || ended.outcome === "recorded" || ended.outcome === "no_table") {
+        try {
+          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+            title: "Bank transfer failed",
+            body: `${formatCurrency(amount)} by bank transfer on ${target.invoice_number || "an invoice"} didn't go through. Nothing was recorded, and the invoice is still open.`,
+            url: `/billing/${invoiceId}`,
+          });
+        } catch (e) {
+          reportError("stripe:webhook:bank-transfer-fail-push", e, { invoiceId });
+        }
       }
       break;
     }
@@ -544,23 +713,6 @@ export async function POST(req: Request) {
         }
       } catch {
         /* alerting is best-effort; never fail the webhook */
-      }
-      break;
-    }
-    case "checkout.session.async_payment_failed": {
-      // Nothing to unwind — the payment_status gate above means nothing was ever recorded.
-      // But the customer believes they paid, so the office has to hear it (audit 8).
-      const session = event.data.object as Stripe.Checkout.Session;
-      if (session.metadata?.kind === "invoice_payment" && session.metadata.org_id) {
-        try {
-          await sendPushToProfiles(await orgStaffIds(session.metadata.org_id), "invoice_paid", {
-            title: "A customer's payment failed",
-            body: "Their bank declined the transfer after checkout — the invoice is still open.",
-            url: `/billing/${session.metadata.invoice_id}`,
-          });
-        } catch {
-          /* the push is a courtesy; never fail the webhook on it */
-        }
       }
       break;
     }

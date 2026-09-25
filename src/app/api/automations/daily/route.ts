@@ -7,6 +7,7 @@ import { sweepOrphanedUploads } from "@/lib/storage-sweep";
 import { backfillProcessorFees } from "@/lib/processor-fee-capture";
 import { reportError } from "@/lib/observe";
 import { findShelfProblems } from "@/lib/stock-reconcile-check";
+import { tellStaleBankTransfers } from "@/lib/bank-transfer-alerts";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,16 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.processor_fees_error = e?.message ?? "failed";
     reportError("cron-processor-fees", e);
+  }
+  try {
+    // A BANK TRANSFER "ON ITS WAY" FOR MORE THAN A WEEK (audit v994 BK3, 0338). ACH takes 3-5
+    // business days; a debit still pending after 7 means its async event never reached us (most
+    // likely not subscribed on the connected-accounts webhook), and the invoice may sit open over
+    // money that already landed. The office is told once per transfer, in words, and ops hears too.
+    result.stale_bank_transfers = await tellStaleBankTransfers(supabase);
+  } catch (e: any) {
+    result.stale_bank_transfers_error = e?.message ?? "failed";
+    reportError("cron-stale-bank-transfers", e);
   }
   // Customer reminders (quote follow-up / invoice due / appts) moved to their OWN cron
   // /api/automations/reminders (a few times a day, not just here) — see that route.
