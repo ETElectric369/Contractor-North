@@ -1,6 +1,7 @@
 import "server-only";
 
 import { reportError } from "@/lib/observe";
+import { dbError } from "@/lib/db-error";
 import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -130,6 +131,9 @@ export async function insertItemizedBill(
           amount: l.amount,
           category: l.category,
           billable: l.billable,
+          // A part-used amount a person set on the bill before an Undo (TD3); absent otherwise,
+          // so a line as read writes exactly what it always wrote.
+          ...(l.billed_amount !== undefined ? { billed_amount: l.billed_amount } : {}),
           sort_order: i,
         })),
       )
@@ -203,16 +207,31 @@ export function cleanDocNumber(raw: unknown): string | null {
  * the address" on the upload line while the row asked where it goes, with that job not even in the
  * list.
  */
-export const OPEN_JOBS_FOR_PAPER = 500;
+export const OPEN_JOBS_FOR_PAPER = 1000;
+
+/**
+ * THE JOBS A PAPER CAN BE FILED TO (Erik, audit v994 PR1): every open job AND every finished one.
+ * A CED ticket for J-046 lands after J-046 is complete, and it is still J-046's cost; with only
+ * open jobs on the list it could only become a business cost, be set aside, or be typed by hand.
+ * The matcher still PICKS only an open job (MarkJob.closed). Never a cancelled job.
+ */
+export const PAPER_JOB_STATUSES = [...ACTIVE_JOB_STATUSES, "complete"] as const;
+
+/** Is this status a finished job (fileable, never picked)? */
+export function isClosedForPaper(status: string | null | undefined): boolean {
+  return status === "complete";
+}
 
 /** Everything the exact job match needs, read once: the open jobs, the org's POs, and who the
  *  company itself is. */
 export type MarkContext = { markJobs: MarkJob[]; pos: MarkPo[]; selfNames: string[] };
 
 /**
- * The open jobs (with their number, name, street and customer) for the exact match of what is
- * printed on the paper (jobFromPaperMarks). The reader model never sees them (paperReaderSystem).
- * The same open jobs, and as many, as the Organize row's picker offers (OPEN_JOBS_FOR_PAPER).
+ * The open AND finished jobs (with their number, name, street and customer) for the exact match of
+ * what is printed on the paper (jobFromPaperMarks): an open one can be picked, a finished one
+ * (closed) never is, and a street it shares with an open job stops the street picking (PR1). The
+ * reader model never sees them (paperReaderSystem). The same jobs, and as many, as the Organize
+ * row's picker offers (PAPER_JOB_STATUSES, OPEN_JOBS_FOR_PAPER).
  *
  * Beside them, and never able to fail the read: this org's purchase orders (a printed PO number
  * finds its job), and SELF NAMES, the company's own name and its people's (Erik, 2026-09-24: a CED
@@ -220,9 +239,9 @@ export type MarkContext = { markJobs: MarkJob[]; pos: MarkPo[]; selfNames: strin
  * customer). A read that fails is an empty list: no PO match, no names set aside.
  */
 export async function loadMarkContext(supabase: any, orgId: string | null | undefined): Promise<MarkContext> {
-  let jq = supabase.from("jobs").select("id, job_number, name, address, customers(name, company_name)");
+  let jq = supabase.from("jobs").select("id, job_number, name, address, status, customers(name, company_name)");
   if (orgId) jq = jq.eq("org_id", orgId);
-  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
+  const { data: jobs } = await jq.in("status", PAPER_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
   const rows = (jobs ?? []) as any[];
   let pos: MarkPo[] = [];
   let selfNames: string[] = [];
@@ -261,6 +280,7 @@ export async function loadMarkContext(supabase: any, orgId: string | null | unde
       name: j.name ?? null,
       address: j.address ?? null,
       customerNames: [j.customers?.name, j.customers?.company_name],
+      ...(isClosedForPaper(j.status) ? { closed: true } : {}),
     })),
     pos,
     selfNames,
@@ -482,11 +502,24 @@ export function isMissingColumnError(err: unknown): boolean {
   return code === "42703" || code === "PGRST204" || /column .* does not exist|Could not find the .* column/i.test(message);
 }
 
-/** Update an organized_items row; on a missing-column error, once more without 0295's columns. */
-export async function updateItemTolerant(supabase: any, id: string, orgId: string | null | undefined, patch: Record<string, unknown>) {
+/**
+ * Update an organized_items row; on a missing-column error, once more without 0295's columns.
+ *
+ * `onlyIfStatus` (audit v994, TD6): the write lands only while the row is still in that status. A
+ * read takes 5 to 20 seconds, and a paper filed from another screen in the meantime must not be
+ * put back in the tray over its live bill by the read landing late. Zero rows back is the answer.
+ */
+export async function updateItemTolerant(
+  supabase: any,
+  id: string,
+  orgId: string | null | undefined,
+  patch: Record<string, unknown>,
+  opts: { onlyIfStatus?: string } = {},
+) {
   const write = (p: Record<string, unknown>) => {
     let q = supabase.from("organized_items").update(p).eq("id", id);
     if (orgId) q = q.eq("org_id", orgId);
+    if (opts.onlyIfStatus) q = q.eq("status", opts.onlyIfStatus);
     return q.select("id");
   };
   const first = await write(patch);
@@ -635,4 +668,387 @@ export async function insertPaperRow(
   }
   if (!res.data?.id) return { error: new Error("The paper's row came back empty.") };
   return { id: String(res.data.id) };
+}
+
+// ── WHAT ELSE STANDS ON A FILING (audit v994, TD1-TD5) ────────────────────────────────────────
+
+const moneySaid = (n: number) => `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** A bill a filing made, and everything that leans on it, read before it is torn down. */
+export type BillStanding = {
+  /** Copies set aside as duplicates OF this bill (0271). Deleting it makes them count again. */
+  setAside: { id: string; label: string }[];
+  /** Other papers tied to this bill (0295 tied_bill_id), which would be left filed over nothing. */
+  tiedPapers: { id: string; title: string; proposal: unknown }[];
+  /** The bill's lines as a person left them (switched off, part-used), in the bill's order. */
+  lines: BillLine[];
+  /** The bill's total as it stands now. */
+  amount: number | null;
+  /** A Shop Stock ticket (0303): its rolls come off with it, which is what its Undo means. */
+  onShelf: boolean;
+  /** Lines with a roll on the shop shelf, on a bill that is NOT a shelf ticket. */
+  stocked: string[];
+};
+
+const jobSaid = (b: { job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null }) =>
+  b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
+
+/**
+ * READ WHAT STANDS ON A BILL BEFORE IT COMES DOWN. Null: the bill is already gone. `error`: the
+ * read failed, and the caller refuses rather than guessing that nothing leans on it (a set-aside
+ * copy counting again is a cost counted twice, said nowhere).
+ */
+export async function readBillStanding(
+  supabase: any,
+  orgId: string | null | undefined,
+  billId: string,
+): Promise<BillStanding | { error: string } | null> {
+  const scoped = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
+  const [billRead, copiesRead, tiedRead] = await Promise.all([
+    scoped(
+      supabase
+        .from("bills")
+        .select("id, amount, on_shelf, bill_line_items(description, quantity, unit_price, amount, category, billable, billed_amount, is_stock, sort_order)")
+        .eq("id", billId),
+    ).maybeSingle(),
+    scoped(supabase.from("bills").select("id, supplier, amount, bill_date, job_id, jobs(job_number, name)").eq("superseded_by_bill_id", billId)).limit(20),
+    scoped(supabase.from("organized_items").select("id, title, vendor, proposal").eq("tied_bill_id", billId)).limit(50),
+  ]);
+  if (billRead?.error || copiesRead?.error || tiedRead?.error) {
+    reportError("organize:readBillStanding", billRead?.error ?? copiesRead?.error ?? tiedRead?.error, { billId });
+    return { error: "Couldn't check what else stands on this bill, so nothing was changed. Try again." };
+  }
+  const bill = billRead?.data as any;
+  if (!bill) return null;
+  const raw = [...((bill.bill_line_items ?? []) as any[])].sort((a, b) => Number(a?.sort_order ?? 0) - Number(b?.sort_order ?? 0));
+  const amount = bill.amount === null || bill.amount === undefined || !Number.isFinite(Number(bill.amount)) ? null : Number(bill.amount);
+  return {
+    setAside: ((copiesRead?.data ?? []) as any[]).map((c) => ({
+      id: String(c.id),
+      label: `${jobSaid(c)} (${c.supplier ?? "a bill"}${Number.isFinite(Number(c.amount)) ? `, ${moneySaid(Number(c.amount))}` : ""}${c.bill_date ? `, ${String(c.bill_date).slice(0, 10)}` : ""})`,
+    })),
+    tiedPapers: ((tiedRead?.data ?? []) as any[]).map((t) => ({ id: String(t.id), title: String(t.title ?? t.vendor ?? "a paper"), proposal: t.proposal })),
+    lines: cleanLines(raw),
+    amount,
+    onShelf: bill.on_shelf === true,
+    stocked: bill.on_shelf === true ? [] : raw.filter((l) => l?.is_stock === true).map((l) => String(l.description ?? "a line")),
+  };
+}
+
+/**
+ * WHY A BILL CAN'T COME DOWN FROM HERE, in the words for the button pressed, or null.
+ *
+ *   · A copy set aside as ITS duplicate (Erik, audit v994 TD2: "Undo refuses when a duplicate copy
+ *     was set aside against the bill, and names that copy"). Deleting the keeper un-sets-aside the
+ *     copy (the column is ON DELETE SET NULL), so the copy would count on its job again, silently.
+ *   · A line with a roll on the shop shelf, on a bill that is not a shelf ticket: the roll can't
+ *     ride back onto the paper, and taking the bill down would take the roll off with no word.
+ */
+export function standingRefusal(st: BillStanding, then: string, nothing: string, opts: { shelf?: boolean } = {}): string | null {
+  if (st.setAside.length) {
+    const c = st.setAside[0];
+    const more = st.setAside.length > 1 ? ` and ${st.setAside.length - 1} more` : "";
+    return `The copy on ${c.label}${more} was set aside as a duplicate of this bill, so taking this one down would make that copy count on its job again. On Bills, under The Same Ticket On Two Jobs, press Change Your Mind first, then ${then}. ${nothing}`;
+  }
+  if (opts.shelf !== false && st.stocked.length) {
+    const n = st.stocked.length;
+    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} on the shop shelf, and that can't go back onto the paper. On Bills, press Take It Off The Shelf on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
+  }
+  return null;
+}
+
+/**
+ * THE PAPERS TIED TO A BILL THAT JUST CAME DOWN go back to the tray, each in its own write (its
+ * proposal keeps what the reader said and loses only `filed`), and their titles come back so the
+ * sentence can name them. Before this they stayed "filed", tied to nothing, gone from the tray.
+ */
+export async function returnTiedPapers(
+  supabase: any,
+  orgId: string | null | undefined,
+  papers: BillStanding["tiedPapers"],
+  /** Set when the bill was deleted from Bills (papersAfterBillDeleted): the row says why it is back. */
+  billDeleted: PaperProposal["billDeleted"] = null,
+): Promise<string[]> {
+  const back: string[] = [];
+  for (const t of papers) {
+    const p = t.proposal && typeof t.proposal === "object" && !Array.isArray(t.proposal) ? (t.proposal as Record<string, unknown>) : null;
+    const proposal = billDeleted ? { proposal: { ...(p ?? {}), filed: null, billDeleted } } : p ? { proposal: { ...p, filed: null } } : {};
+    let q = supabase
+      .from("organized_items")
+      .update({ status: "needs_review", tied_bill_id: null, tied_supplier_invoice_id: null, job_id: null, ...proposal })
+      .eq("id", t.id);
+    if (orgId) q = q.eq("org_id", orgId);
+    const { data, error } = await q.select("id");
+    if (error || !data?.length) {
+      reportError("organize:returnTiedPapers", error ?? new Error("tied paper update wrote no rows"), { itemId: t.id });
+      continue;
+    }
+    back.push(t.title);
+  }
+  return back;
+}
+
+/**
+ * THE DOCUMENT A FILING POINTS AT, AND WHETHER THE FILING MADE IT (audit v994, TD1).
+ *
+ * A receipt recorded as a cost on the job page (billJobReceipt) gets a link row pointing at the
+ * job's OWN upload: the filing never made that document, and Undo or Delete must never take it
+ * off the job. Such a row says so (source 'job'); a row written before it said so is known by its
+ * document being older than the row itself (30 of ET's link rows). A document the filing made is
+ * always created after its paper's row.
+ */
+export async function filingDocument(
+  supabase: any,
+  orgId: string | null | undefined,
+  item: { document_id?: string | null; source?: string | null; created_at?: string | null },
+): Promise<{ id: string; file_url: string | null; owned: boolean } | { error: unknown } | null> {
+  if (!item.document_id) return null;
+  let q = supabase.from("documents").select("id, created_at, file_url").eq("id", item.document_id);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data, error } = await q.maybeSingle();
+  if (error) return { error };
+  if (!data) return null;
+  const older = !!data.created_at && !!item.created_at && Date.parse(String(data.created_at)) < Date.parse(String(item.created_at));
+  return { id: String(data.id), file_url: data.file_url ?? null, owned: item.source !== "job" && !older };
+}
+
+/** A table this database doesn't have yet (a migration not applied): nothing can lean on it. */
+function tableNotThere(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42P01" || code === "PGRST205" || /does not exist|could not find the table/i.test(msg);
+}
+
+/**
+ * WHAT ELSE STANDS ON A DOCUMENT A FILING MADE, READ BEFORE IT IS DELETED (review of audit v994
+ * wave 2, PR4). A photo filed from Organize now lands in the job's own folder, so Show On Portal
+ * takes it and the Panel tab can pick it. Deleting the documents row then took it off the
+ * customer's page (job_shared_documents cascades, 0300/0326) and cleared the panel's photo
+ * (job_panels.photo_document_id is ON DELETE SET NULL, 0333), with nothing said. So the door
+ * refuses in words and names where to change it. Null: nothing stands on it.
+ */
+export async function documentInUse(
+  supabase: any,
+  orgId: string | null | undefined,
+  documentId: string,
+): Promise<{ sentence: string } | { error: unknown } | null> {
+  let sq = supabase.from("job_shared_documents").select("document_id").eq("document_id", documentId).is("removed_at", null);
+  if (orgId) sq = sq.eq("org_id", orgId);
+  const { data: shared, error: shareErr } = await sq.limit(1);
+  if (shareErr && !tableNotThere(shareErr)) return { error: shareErr };
+  if (shared?.length)
+    return { sentence: "It is shown on the customer's page. Press Take Off Portal on the job's Customer Page tab first" };
+  let pq = supabase.from("job_panels").select("id, name").eq("photo_document_id", documentId).is("removed_at", null);
+  if (orgId) pq = pq.eq("org_id", orgId);
+  const { data: panels, error: panelErr } = await pq.limit(1);
+  if (panelErr && !tableNotThere(panelErr)) return { error: panelErr };
+  if (panels?.length) {
+    const name = String(panels[0]?.name ?? "").trim();
+    return { sentence: `It is the photo of ${name ? `the panel "${name}"` : "a panel"} on the job's Panel tab. Pick another photo for that panel first` };
+  }
+  return null;
+}
+
+/** A job's own storage folder: <org>/<job>/..., never one of 0213's staff-only folders. */
+export function isJobFolderPath(path: string | null | undefined, orgId: string | null | undefined): boolean {
+  const p = String(path ?? "");
+  if (!orgId || !p.startsWith(`${orgId}/`) || p.includes("..")) return false;
+  const second = p.split("/")[1] ?? "";
+  return !!second && !["employees", "organize", "bug-screenshots", "picks"].includes(second);
+}
+
+/**
+ * A PAPER FILED ON A JOB GETS ITS OWN COPY IN THE JOB'S FOLDER (audit v994, PR4). The paper lives
+ * in <org>/organize/, which 0213 keeps staff-only: the office saw a panel photo filed to J-047 and
+ * the tech on J-047 did not, and Show On Portal refused it as not in the job's folder. The copy
+ * keeps the file's extension (the Photos tab knows a picture by it); the organize original stays
+ * for the tray and Undo. Null: the copy didn't land, and the caller says so.
+ */
+export async function copyToJobFolder(supabase: any, orgId: string, jobId: string, from: string): Promise<string | null> {
+  const base = String(from.split("/").pop() ?? "file").replace(/^\d{10,}-/, "").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80) || "file";
+  const to = `${orgId}/${jobId}/${Date.now()}-${base}`;
+  try {
+    const { error } = await supabase.storage.from("documents").copy(from, to);
+    if (error) {
+      reportError("organize:copyToJobFolder", error, { from, to });
+      return null;
+    }
+    return to;
+  } catch (e) {
+    reportError("organize:copyToJobFolder", e, { from, to });
+    return null;
+  }
+}
+
+/** Take a copy a filing made back out of storage. Costs storage, never money: logged, not refused. */
+export async function removeCopy(supabase: any, path: string | null | undefined, orgId: string | null | undefined): Promise<void> {
+  if (!path || !isJobFolderPath(path, orgId)) return;
+  try {
+    const { error } = await supabase.storage.from("documents").remove([path]);
+    if (error) reportError("organize:removeCopy", error, { path });
+  } catch (e) {
+    reportError("organize:removeCopy", e, { path });
+  }
+}
+
+/** A paper that MADE a bill (organized_items.bill_id), read before the bill is deleted elsewhere. */
+export type PaperBehindBill = {
+  id: string;
+  title: string;
+  source: string | null;
+  created_at: string | null;
+  document_id: string | null;
+  file_url: string | null;
+  doc_type: string | null;
+  category: string | null;
+  kind: string | null;
+  proposal: unknown;
+};
+
+/**
+ * THE PAPERS BEHIND A BILL, read BEFORE the bill is deleted from Bills or a job's Costs (audit
+ * v994, TD5): organized_items.bill_id is ON DELETE SET NULL, so after the delete nothing says which
+ * paper made it. A failed read is an empty list (the bill is still the person's to delete).
+ */
+export async function papersBehindBill(supabase: any, orgId: string | null | undefined, billId: string): Promise<PaperBehindBill[]> {
+  try {
+    let q = supabase
+      .from("organized_items")
+      .select("id, title, vendor, source, created_at, document_id, file_url, doc_type, category, kind, proposal")
+      .eq("bill_id", billId);
+    if (orgId) q = q.eq("org_id", orgId);
+    const { data, error } = await q.limit(20);
+    if (error) {
+      reportError("organize:papersBehindBill", error, { billId });
+      return [];
+    }
+    return ((data ?? []) as any[]).map((r) => ({
+      id: String(r.id),
+      title: String(r.title ?? r.vendor ?? "a paper"),
+      source: r.source ?? null,
+      created_at: r.created_at ?? null,
+      document_id: r.document_id ?? null,
+      file_url: r.file_url ?? null,
+      doc_type: r.doc_type ?? null,
+      category: r.category ?? null,
+      kind: r.kind ?? null,
+      proposal: r.proposal ?? null,
+    }));
+  } catch (e) {
+    reportError("organize:papersBehindBill", e, { billId });
+    return [];
+  }
+}
+
+/**
+ * A BILL DELETED FROM BILLS PUTS ITS PAPER BACK (audit v994, TD5). The paper used to stay "filed"
+ * over nothing, and dropping the same file again was refused as "Already In: filed on J-052", a job
+ * with no such cost. Now: the copy the filing put on the job comes off, and the paper goes back to
+ * Sort These with the lines the bill had (so a re-file keeps a person's choices, TD3). A receipt
+ * recorded as a cost on the job page keeps its receipt on the job; its link row goes, so Record as
+ * Cost there makes it a cost again. Returns the sentence to say, or "".
+ */
+export async function papersAfterBillDeleted(
+  supabase: any,
+  orgId: string | null | undefined,
+  makers: PaperBehindBill[],
+  standing: BillStanding | null,
+  /** Who deleted the bill, kept on the paper beside when (billDeleted). */
+  by: string | null = null,
+): Promise<string> {
+  const billDeleted = { at: new Date().toISOString(), by };
+  const back: string[] = [];
+  const onJob: string[] = [];
+  for (const m of makers) {
+    const doc = await filingDocument(supabase, orgId, m);
+    const jobsOwn = m.source === "job" || (!!doc && !("error" in doc) && !doc.owned);
+    if (jobsOwn) {
+      let q = supabase.from("organized_items").delete().eq("id", m.id);
+      if (orgId) q = q.eq("org_id", orgId);
+      const { error } = await q.select("id");
+      if (error) reportError("organize:papersAfterBillDeleted.link", error, { itemId: m.id });
+      else onJob.push(m.title);
+      continue;
+    }
+    if (doc && !("error" in doc) && doc.owned) {
+      const { error: docErr } = await supabase.from("documents").delete().eq("id", doc.id).select("id");
+      if (docErr) reportError("organize:papersAfterBillDeleted.doc", docErr, { itemId: m.id, documentId: doc.id });
+      else if (doc.file_url && doc.file_url !== m.file_url) await removeCopy(supabase, doc.file_url, orgId);
+    }
+    const p = m.proposal && typeof m.proposal === "object" && !Array.isArray(m.proposal) ? (m.proposal as Record<string, unknown>) : null;
+    const isCost = m.kind === "receipt" || m.doc_type === "receipt" || m.doc_type === "bill";
+    const patch: Record<string, unknown> = {
+      status: "needs_review",
+      job_id: null,
+      document_id: null,
+      bill_id: null,
+      petty_cash_id: null,
+      ...(isCost ? { category: m.doc_type === "bill" || /bill|invoice/i.test(String(m.category ?? "")) ? "Bill" : "Receipt" } : {}),
+      ...(standing?.lines.length ? { line_items: standing.lines } : {}),
+      ...(standing && standing.amount !== null ? { amount: standing.amount } : {}),
+      // WHY IT IS BACK (review of wave 2, TD5): a deleted bill is often a duplicate, and a paper
+      // with no printed number has nothing stopping a second File It. The row asks.
+      proposal: { ...(p ?? {}), filed: null, billDeleted },
+    };
+    let q = supabase.from("organized_items").update(patch).eq("id", m.id);
+    if (orgId) q = q.eq("org_id", orgId);
+    const { data, error } = await q.select("id");
+    if (error || !data?.length) {
+      reportError("organize:papersAfterBillDeleted.back", error ?? new Error("paper update wrote no rows"), { itemId: m.id });
+      continue;
+    }
+    back.push(m.title);
+  }
+  const tied = standing?.tiedPapers.length ? await returnTiedPapers(supabase, orgId, standing.tiedPapers, billDeleted) : [];
+  const all = [...back, ...tied];
+  const parts = [
+    all.length
+      ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back in Sort These. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
+      : "",
+    onJob.length ? `The receipt stays on the job; Record as Cost there makes it a cost again.` : "",
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+/**
+ * THE CED DOCUMENTS A PAPER ADDED come off the list (Undo, and Delete: audit v994 TD4), except any
+ * something already points at: a bill covering it, a job a person set, or another paper tied to it.
+ * Those are kept and named.
+ */
+export async function takeDownLanded(
+  supabase: any,
+  orgId: string | null | undefined,
+  landed: string[],
+): Promise<{ kept: string[]; error?: string }> {
+  if (!landed.length || !orgId) return { kept: [] };
+  const { data: docs, error: docsErr } = await supabase
+    .from("supplier_invoices")
+    .select("id, invoice_number, job_id")
+    .eq("org_id", orgId)
+    .in("invoice_number", landed);
+  if (docsErr) return { kept: [], error: dbError(docsErr) };
+  const ids = ((docs ?? []) as any[]).map((d) => String(d.id));
+  const { data: links } = ids.length
+    ? await supabase.from("bill_supplier_invoices").select("supplier_invoice_id").in("supplier_invoice_id", ids)
+    : { data: [] };
+  const linked = new Set(((links ?? []) as any[]).map((l) => String(l.supplier_invoice_id)));
+  // ANOTHER PAPER TIED TO ONE OF THEM. tied_supplier_invoice_id is ON DELETE SET NULL (0295), so
+  // deleting the document would leave that paper "filed", tied to nothing, gone from the tray
+  // without a word. It is kept and named like the rest.
+  const { data: tiedPapers } = ids.length
+    ? await supabase.from("organized_items").select("tied_supplier_invoice_id").eq("org_id", orgId).in("tied_supplier_invoice_id", ids)
+    : { data: [] };
+  for (const t of (tiedPapers ?? []) as any[]) if (t?.tied_supplier_invoice_id) linked.add(String(t.tied_supplier_invoice_id));
+  const removable = ((docs ?? []) as any[]).filter((d) => !linked.has(String(d.id)) && !d.job_id);
+  const kept = ((docs ?? []) as any[]).filter((d) => !removable.includes(d)).map((d) => String(d.invoice_number));
+  if (removable.length) {
+    const { error: delErr } = await supabase
+      .from("supplier_invoices")
+      .delete()
+      .eq("org_id", orgId)
+      .in("id", removable.map((d) => String(d.id)))
+      .select("id");
+    if (delErr) return { kept, error: dbError(delErr) };
+  }
+  return { kept };
 }

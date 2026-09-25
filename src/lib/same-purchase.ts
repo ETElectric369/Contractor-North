@@ -91,9 +91,9 @@ const isLive = (b: LedgerBill) => !b.superseded_by_bill_id;
  *
  * CERTAIN ONLY: the same account, or the exact same spelling. This answer hides doors (File It
  * refuses, /bills counts the document covered and drops it from Purchases Not In Your Books), so
- * it never leans on a number alone. Whether a long number under ANOTHER spelling is enough is
- * Erik's open question (audit v994, DB5); until he answers, that case is only ever a "maybe" a
- * person looks at (billsMaybeCarryingNumber, offered by samePurchaseCandidates).
+ * it never leans on a number alone. A long number under ANOTHER spelling is a WARNING, never this
+ * (Erik, audit v994 DB5): billsMaybeCarryingNumber for a supplier's document, and
+ * billsCarryingLongNumberElsewhere for a paper in the tray.
  */
 export function billsCarryingNumber(
   number: string | null | undefined,
@@ -145,6 +145,43 @@ export function billsMaybeCarryingNumber(
         normalizeDocNumber(b.supplier_invoice_number) === n ||
         (b.named_numbers ?? []).some((x) => normalizeDocNumber(x) === n)),
   );
+}
+
+/**
+ * THE SAME LONG NUMBER, THE SUPPLIER SPELLED ANOTHER WAY (Erik, audit v994 DB5: "a long supplier
+ * number matches even when the supplier name is spelled differently, as a WARNING only").
+ *
+ * The reader wrote "Consolidated Electrical Distributors (CED)" on a rephotographed ticket, a
+ * spelling no CED alias holds, and the ticket already on the books under "Consolidated Electrical
+ * Dist." on the CED account was never found: File It wrote a second bill with the same number. A
+ * number of 7+ digits is one purchase whoever spelled the store, so every live bill carrying it
+ * that billsCarryingNumber did not already find is returned here, EXCEPT when both sides sit on
+ * supplier accounts and the accounts differ: two accounts a person set up are two suppliers.
+ *
+ * Only ever a warning: File It is not refused by it, nothing is tied by it, and it never decides
+ * which account a bill is written on. A person looks and decides.
+ */
+export function billsCarryingLongNumberElsewhere(
+  number: string | null | undefined,
+  who: { accountId?: string | null; supplier?: string | null },
+  bills: readonly LedgerBill[],
+  aliases: SupplierAliasIndex | null = null,
+  opts: { exceptBillId?: string | null } = {},
+): LedgerBill[] {
+  const n = normalizeDocNumber(number);
+  if (!n || !isLongNumber(n)) return [];
+  const certain = new Set(billsCarryingNumber(number, who, bills, aliases, opts).map((b) => b.id));
+  const mine = who.accountId || accountForSupplier(who.supplier, aliases);
+  return bills.filter((b) => {
+    if (!isLive(b) || b.id === opts.exceptBillId || certain.has(b.id)) return false;
+    const carries =
+      normalizeDocNumber(b.bill_number) === n ||
+      normalizeDocNumber(b.supplier_invoice_number) === n ||
+      (b.named_numbers ?? []).some((x) => normalizeDocNumber(x) === n);
+    if (!carries) return false;
+    const theirs = b.supplier_account_id || accountForSupplier(b.supplier, aliases);
+    return !(mine && theirs && mine !== theirs);
+  });
 }
 
 /** A supplier's own document, as the near-match needs it. */

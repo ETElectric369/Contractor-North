@@ -24,6 +24,7 @@ import { finishedWithWorkOffBill, finishWouldLeaveOffBill } from "@/lib/finish-j
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { restampLotsForBill } from "@/lib/stock-ledger";
+import { papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -1339,15 +1340,28 @@ export async function deleteBill(id: string, jobId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // WHAT STANDS ON THIS BILL, READ BEFORE IT GOES (audit v994, TD2 and TD5). A copy set aside as
+  // its duplicate would count on its job again with nothing said, so that refuses and names the
+  // copy. The papers behind it are read now, because bill_id is ON DELETE SET NULL: after the
+  // delete nothing says which paper made it, and that paper sat "filed" over nothing.
+  const standing = await readBillStanding(supabase, ctx.orgId, id);
+  if (standing && "error" in standing) return { ok: false, error: standing.error };
+  if (standing) {
+    const no = standingRefusal(standing, "delete it again", "Nothing was deleted.", { shelf: false });
+    if (no) return { ok: false, error: no };
+  }
+  const makers = standing ? await papersBehindBill(supabase, ctx.orgId, id) : [];
   let write = supabase.from("bills").delete().eq("id", id);
   if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
   const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Nothing was deleted. That bill isn't here, or this login can't delete it." };
+  const said = standing && (makers.length || standing.tiedPapers.length) ? await papersAfterBillDeleted(supabase, ctx.orgId, makers, standing, ctx.userId) : "";
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // a deleted cost moves job profitability
-  return { ok: true };
+  if (said) revalidatePath("/organize");
+  return said ? { ok: true, warning: `Bill deleted. ${said}` } : { ok: true };
 }
 
 export async function updateJobNotes(

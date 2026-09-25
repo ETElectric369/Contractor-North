@@ -196,7 +196,7 @@ export function JobBills({ jobId, bills, pos = [] }: { jobId: string; bills: Bil
                   start(async () => {
                     const res = await deleteBill(b.id, jobId);
                     if (!res?.ok) { toast(res?.error ?? "Couldn't delete bill — try again.", "error"); return; }
-                    toast("Bill deleted", "success");
+                    toast(res.warning ?? "Bill deleted", "success");
                     router.refresh();
                   })
                 }

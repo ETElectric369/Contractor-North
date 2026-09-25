@@ -17,7 +17,7 @@
 
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
-import { billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
+import { billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
 
@@ -167,9 +167,32 @@ export type PaperProposal = {
   } | null;
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
+  /**
+   * AI SUGGEST'S PROPOSAL FOR A NOTE OR A KEPT PAPER (Erik, audit v994 PR2: "AI Suggest on a note
+   * or kept paper PROPOSES; a person taps to confirm"). It used to make the task and file the note
+   * itself, from a button named Suggest, with its only message lost on refresh. Now it is kept on
+   * the row as a chip: Make Task: <title>, or Keep As Note. Nothing moves until one is tapped.
+   */
+  suggestTask?: { title: string; category: "office" | "operations" | "sales" } | null;
+  suggestKeep?: boolean | null;
   /** How the row was last filed, so Undo takes down exactly that and nothing else. */
   filed?: PaperFiled | null;
+  /**
+   * ITS BILL WAS DELETED FROM BILLS OR A JOB'S COSTS, AND THE PAPER CAME BACK (review of audit
+   * v994 wave 2, TD5). People delete a bill because it was a duplicate, and a paper with no printed
+   * number has nothing that stops a second File It, so the row says why it is back and asks: Set
+   * Aside if the bill was a duplicate, File It again if not. Cleared by the next File It.
+   */
+  billDeleted?: { at: string; by: string | null } | null;
 };
+
+/** The row's sentence for a paper whose bill was deleted (billDeleted), or null. */
+export const BILL_DELETED_SAID =
+  "Its bill was deleted from Bills. If that bill was a duplicate, press Set Aside; if not, File It again.";
+export function billDeletedSaid(item: PaperItem): string | null {
+  if (item.status && item.status !== "needs_review") return null;
+  return proposalOf(item).billDeleted ? BILL_DELETED_SAID : null;
+}
 
 /**
  * WHY IT WENT WHERE IT WENT, KEPT WITH HOW (audit v994, tray F1). The tray's pick lived only in
@@ -178,8 +201,12 @@ export type PaperProposal = {
  * proposal: Undo clears `filed`, and the paper goes back exactly as it was read.
  */
 export type PaperFiled = {
-  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo";
+  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note";
   landed?: string[];
+  /** A note a person turned into a task (AI Suggest's proposal, PR2): Undo takes the task off. */
+  taskId?: string | null;
+  /** The category the paper had before a task replaced it with "Task", given back by Undo. */
+  category?: string | null;
   /** "paper": what the paper names (a printed mark, matched exactly); "guess": a model's guess a
    *  person tapped; "person": a person's own pick. */
   picked?: "paper" | "guess" | "person" | null;
@@ -722,7 +749,7 @@ export type PaperMarks = {
   hint?: string | null;
 };
 
-/** An open job, as the matcher sees it. */
+/** A job, as the matcher sees it. */
 export type MarkJob = {
   id: string;
   job_number?: string | null;
@@ -730,6 +757,12 @@ export type MarkJob = {
   address?: string | null;
   /** The customer's name and company name. */
   customerNames?: (string | null | undefined)[];
+  /**
+   * A FINISHED JOB (status complete; Erik, audit v994 PR1). A paper can be FILED to one (a CED
+   * ticket that lands after the job closed is still that job's cost), but the matcher never picks
+   * one, and a street it shares with an open job stops the street from picking the open one.
+   */
+  closed?: boolean;
 };
 
 /** A purchase order this org wrote (purchase_orders), which names its job. */
@@ -737,7 +770,8 @@ export type MarkPo = { po_number: string | null; job_id: string | null };
 
 export type JobFromMarks =
   | { kind: "one"; jobId: string; from: JobMarkKind; words: string }
-  | { kind: "conflict"; sentence: string }
+  /** `veto`: only a street named the job, and finished jobs share that street (PR1). */
+  | { kind: "conflict"; sentence: string; veto?: boolean }
   | { kind: "none" };
 
 /** "J-046", "j 046" and "J046" are one printed number. */
@@ -860,17 +894,32 @@ export function jobFromPaperMarks(
   selfNames: readonly (string | null | undefined)[] = [],
 ): JobFromMarks {
   if (!marks) return { kind: "none" };
-  const openIds = new Set(jobs.map((j) => j.id));
+  // Only an OPEN job is ever picked. A finished one is known here for one reason: a street it
+  // shares with an open job is not enough to pick the open one (Erik, audit v994 PR1).
+  const openIds = new Set(jobs.filter((j) => !j.closed).map((j) => j.id));
   const self = new Set(selfNames.map((n) => wordsKey(n)).filter((n) => n.length >= 3));
-  const found: { kind: JobMarkKind; words: string; ids: Set<string> }[] = [];
-  const add = (kind: JobMarkKind, words: string | null | undefined, ids: string[]) => {
-    const set = new Set(ids.filter((id) => openIds.has(id)));
-    if (set.size) found.push({ kind, words: String(words ?? "").trim(), ids: set });
+  type StreetHit = { open: string[]; closed: MarkJob[] };
+  type Found = { kind: JobMarkKind; words: string; ids: Set<string>; byStreetOnly: Set<string>; closedOnStreet: MarkJob[] };
+  const found: Found[] = [];
+  /** `ids` came from a number, a name or a customer; `street` from a street alone. */
+  const add = (kind: JobMarkKind, words: string | null | undefined, ids: string[], street: StreetHit = { open: [], closed: [] }) => {
+    const firm = new Set(ids.filter((id) => openIds.has(id)));
+    const set = new Set([...firm, ...street.open]);
+    if (!set.size) return;
+    found.push({
+      kind,
+      words: String(words ?? "").trim(),
+      ids: set,
+      byStreetOnly: new Set(street.open.filter((id) => !firm.has(id))),
+      closedOnStreet: street.closed,
+    });
   };
   const jobStreets = new Map(jobs.map((j) => [j.id, streetParts(j.address)] as const));
-  const onStreet = (raw: string | null | undefined): string[] => {
+  const onStreet = (raw: string | null | undefined): StreetHit => {
     const s = streetParts(raw);
-    return s ? jobs.filter((j) => sameStreet(s, jobStreets.get(j.id) ?? null)).map((j) => j.id) : [];
+    if (!s) return { open: [], closed: [] };
+    const on = jobs.filter((j) => sameStreet(s, jobStreets.get(j.id) ?? null));
+    return { open: on.filter((j) => openIds.has(j.id)).map((j) => j.id), closed: on.filter((j) => !openIds.has(j.id)) };
   };
   /**
    * A job's name, exactly, never the company's own name or one of its people. A job named after
@@ -897,14 +946,14 @@ export function jobFromPaperMarks(
       ...jobs.filter((j) => compactKey(j.job_number) === po).map((j) => j.id),
       ...pos.filter((x) => x.job_id && compactKey(x.po_number) === po).map((x) => String(x.job_id)),
     );
-  poIds.push(...byName(marks.po), ...onStreet(marks.po));
-  add("po", marks.po, poIds);
+  poIds.push(...byName(marks.po));
+  add("po", marks.po, poIds, onStreet(marks.po));
 
   // The reader's own address, else the street inside its hint.
   const address = marks.address ?? addressInHint(marks.hint);
-  add("address", address, onStreet(address));
+  add("address", address, [], onStreet(address));
 
-  add("job_name", marks.jobName, [...byName(marks.jobName), ...onStreet(marks.jobName)]);
+  add("job_name", marks.jobName, byName(marks.jobName), onStreet(marks.jobName));
 
   const customer = wordsKey(marks.customer);
   if (customer.length >= 3 && !self.has(customer))
@@ -919,10 +968,29 @@ export function jobFromPaperMarks(
   const pick = [...decisive[0].ids][0];
   const disagree = found.find((f) => !f.ids.has(pick));
   if (disagree) {
-    const said = (f: (typeof found)[number]) => `the ${JOB_MARK_WORDS[f.kind]}${f.words ? ` "${f.words}"` : ""}`;
+    const said = (f: Found) => `the ${JOB_MARK_WORDS[f.kind]}${f.words ? ` "${f.words}"` : ""}`;
     return {
       kind: "conflict",
       sentence: `The paper points to more than one job (${said(decisive[0])} and ${said(disagree)}), so no job was picked.`,
+    };
+  }
+  // A STREET SHARED WITH FINISHED JOBS PICKS NOTHING (Erik, audit v994 PR1). 300 W Lake Blvd has
+  // an open job and finished ones; a ticket naming only the street could be for any of them, and a
+  // finished job still gets late tickets. A job number, a PO number, a job name or a customer that
+  // names the open job still picks it.
+  const backers = found.filter((f) => f.ids.has(pick));
+  const firm = backers.some((f) => !f.byStreetOnly.has(pick));
+  const closedHere = firm ? [] : [...new Map(backers.flatMap((f) => f.closedOnStreet).map((j) => [j.id, j] as const)).values()];
+  if (closedHere.length) {
+    const named = closedHere
+      .slice(0, 3)
+      .map((j) => `${j.job_number ?? ""}${j.name ? ` ${j.name}` : ""}`.trim() || "a finished job")
+      .join(", ");
+    const street = String(backers[0]?.words ?? "").trim();
+    return {
+      kind: "conflict",
+      veto: true,
+      sentence: `${street ? `${street} also has` : "That street also has"} finished ${closedHere.length === 1 ? "job" : "jobs"} (${named}${closedHere.length > 3 ? ", …" : ""}), so no job was picked. Pick the job.`,
     };
   }
   return { kind: "one", jobId: pick, from: decisive[0].kind, words: decisive[0].words };
@@ -957,8 +1025,29 @@ export function rematchPaper<T extends PaperItem>(
 ): T {
   if (item.status && item.status !== "needs_review") return item;
   const p = proposalOf(item);
-  if (markedJob(p) || p.jobConflict || p.ced) return item;
+  if (p.jobConflict || p.ced) return item;
   if (!isRead(item)) return item;
+  if (markedJob(p)) {
+    // A PICK A STREET MADE BEFORE FINISHED JOBS COUNTED (PR1) is asked again: if today's rules say
+    // finished jobs share that street, the row stops picking and says so. Any other stored pick
+    // stands exactly as the paper made it.
+    if (p.jobFrom === "job_number") return item;
+    // A STORED PICK OF A JOB THAT HAS SINCE FINISHED (review of wave 2, PR1). The matcher never
+    // picks a finished job, but a pick stored while it was open stood, and the pickers now list
+    // finished jobs, so the row started on it from a street, a PO or a name alone. Asked again here:
+    // it stops picking and says so. A printed job number still picks (above): that is the job.
+    const stored = jobs.find((j) => j.id === p.jobId);
+    if (stored?.closed) {
+      const label = `${stored.job_number ?? ""}${stored.name ? ` ${stored.name}` : ""}`.trim() || "The job the paper names";
+      return {
+        ...item,
+        proposal: { ...p, jobId: null, jobFrom: null, guessJobId: p.guessJobId ?? null, jobConflict: `${label} is finished, so no job was picked. Pick the job.` },
+      };
+    }
+    const again = jobFromPaperMarks(storedMarks(p), jobs, pos, selfNames);
+    if (again.kind !== "conflict" || !again.veto) return item;
+    return { ...item, proposal: { ...p, jobId: null, jobFrom: null, guessJobId: p.guessJobId ?? null, jobConflict: again.sentence } };
+  }
   const { job: r, companyUse } = placeFromMarks(storedMarks(p), jobs, pos, selfNames, {
     feeShaped: looksLikeSupplierFee(item.title, item.vendor, item.summary),
   });
@@ -1062,10 +1151,14 @@ export type BookedSupplierInvoice = {
  *   · "supplier_invoice": a CED document with this number that NO bill covers yet. It is not a
  *     cost (owner-money counts only bills), so there is nothing to tie to: File It goes ahead and
  *     links the new bill to it, and the button says so.
+ *   · "maybe_bill": a live bill carrying the same LONG number (7+ digits) under another spelling
+ *     of the supplier (Erik, audit v994 DB5). A WARNING only: File It is not refused, and a person
+ *     may tie the two or file it as a different purchase.
  *   · "paper": another paper in the tray with the same number. Said, never blocking.
  */
 export type NumberMatch =
   | { kind: "bill"; billId: string; jobId?: string | null; sentence: string }
+  | { kind: "maybe_bill"; billId: string; jobId?: string | null; sentence: string }
   | { kind: "supplier_invoice"; supplierInvoiceId: string; invoiceNumber: string; sentence: string }
   | { kind: "paper"; itemId: string; sentence: string };
 
@@ -1099,6 +1192,19 @@ export function findSameNumber(
       billId: b.id,
       jobId: b.job_id ?? null,
       sentence: `Already on the books: ${b.supplier ?? "a bill"} #${b.bill_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}.`,
+    });
+  }
+  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (DB5): said, never refused, never tied for them.
+  for (const b of billsCarryingLongNumberElsewhere(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id })) {
+    const amount = amountOf(b);
+    const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
+    const here = String(item.vendor ?? "").trim();
+    const there = String(b.supplier ?? "").trim();
+    out.push({
+      kind: "maybe_bill",
+      billId: b.id,
+      jobId: b.job_id ?? null,
+      sentence: `Maybe already on the books: ${there || "a bill"} #${b.bill_number || b.supplier_invoice_number}${amount !== null ? `, ${money(amount)}` : ""}${b.bill_date ? `, ${b.bill_date}` : ""}, on ${job}. It carries this number, but the supplier is spelled another way${here && there ? ` ("${here}" here, "${there}" there)` : ""}.`,
     });
   }
   for (const si of books.supplierInvoices ?? []) {
@@ -1142,7 +1248,9 @@ export function findSameNumber(
       sentence: `Another paper here has the same number (${p.title ?? p.vendor ?? "untitled"}), ${p.status === "needs_review" ? "still waiting to be filed" : "set aside"}.`,
     });
   }
-  return out;
+  // A bill found for certain (a CED document it covers) is never also a "maybe".
+  const certain = new Set(out.flatMap((m) => (m.kind === "bill" ? [m.billId] : [])));
+  return out.filter((m) => m.kind !== "maybe_bill" || !certain.has(m.billId));
 }
 
 /**

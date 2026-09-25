@@ -22,10 +22,25 @@ import { cleanDocNumber, insertPaperRow, updateItemTolerant } from "./paperwork-
 
 export type PaperResult = { ok: boolean; error?: string; message?: string };
 
-const ALREADY = (row: { status?: string | null; created_at?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null; bill_id?: string | null }) => {
+const ALREADY = (row: {
+  status?: string | null;
+  created_at?: string | null;
+  jobs?: { job_number?: string | null; name?: string | null } | null;
+  bill_id?: string | null;
+  tied_bill_id?: string | null;
+  document_id?: string | null;
+  petty_cash_id?: string | null;
+  proposal?: unknown;
+}) => {
   const when = row.created_at ? formatDate(row.created_at) : "earlier";
   if (row.status === "needs_review") return `Already In: added ${when}, waiting in the tray to be filed.`;
   if (row.status === "archived") return `Already In: added ${when} and kept in files.`;
+  // FILED OVER NOTHING (audit v994, TD5): its cost was deleted, or never landed, and the row still
+  // says filed. Saying "filed on J-052" for a job with no such cost sent him looking for a bill
+  // that isn't there; the way back is the paper's own Undo.
+  const how = proposalOf(row).filed?.how;
+  if (!row.bill_id && !row.tied_bill_id && !row.document_id && !row.petty_cash_id && (!how || how === "bill" || how === "photo"))
+    return `Already In: filed ${when}, but what it filed is gone. Find it in Organize, under Archive, and press Back to file it again.`;
   const where = row.jobs?.job_number ? `on ${row.jobs.job_number}${row.jobs.name ? ` ${row.jobs.name}` : ""}` : row.bill_id ? "as a business cost" : "in files";
   return `Already In: filed ${when} ${where}.`;
 };
@@ -41,7 +56,7 @@ export async function fingerprintSeen(sha256: string): Promise<{ ok: boolean; se
   if (!isSha256(sha256)) return { ok: true, seen: null };
   const { data, error } = await ctx.supabase
     .from("organized_items")
-    .select("id, status, created_at, bill_id, jobs(job_number, name)")
+    .select("id, status, created_at, bill_id, tied_bill_id, document_id, petty_cash_id, proposal, jobs(job_number, name)")
     .eq("org_id", ctx.orgId)
     .eq("content_sha256", sha256)
     .limit(1);

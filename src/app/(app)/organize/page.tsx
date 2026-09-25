@@ -1,11 +1,13 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
-import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, rematchTray } from "./paperwork-core";
+import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 
 export const dynamic = "force-dynamic";
+// A 12-page CED PDF or a slow read runs inside this page's server actions; the reader's own time,
+// not the platform's default, decides when it gives up (audit v994, SI4).
+export const maxDuration = 60;
 
 export default async function OrganizePage() {
   const supabase = await createClient();
@@ -23,10 +25,11 @@ export default async function OrganizePage() {
       .limit(100),
     supabase
       .from("jobs")
-      .select("id, job_number, name")
-      .in("status", ACTIVE_JOB_STATUSES)
+      .select("id, job_number, name, status")
+      // Open AND finished jobs (audit v994, PR1): a late ticket for a completed job is still that
+      // job's cost. The same jobs the reader matches against, so a job it picked is in the list.
+      .in("status", PAPER_JOB_STATUSES)
       .order("created_at", { ascending: false })
-      // The same open jobs the reader matches the paper against, so a job it picked is in the list.
       .limit(OPEN_JOBS_FOR_PAPER),
     // Every printed number already on the books, for "Same Purchase: Tie Them" (0295).
     Promise.resolve(orgRead).then((r) => loadBooks(supabase, orgIdOf(r))),
