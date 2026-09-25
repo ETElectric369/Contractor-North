@@ -17,7 +17,7 @@ vi.mock("../start-job-actions", () => ({
 }));
 vi.mock("../../timeclock/actions", () => ({ clockIn: vi.fn(), switchJob: vi.fn(), deleteTimeEntry: vi.fn() }));
 
-import { VisitStartCard, visitStartState } from "./visit-start-card";
+import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start-card";
 
 const TZ = "America/Los_Angeles";
 const preview = {
@@ -91,6 +91,46 @@ describe("office, no job yet", () => {
     expect(h).toContain("Tom Goodman already has");
     expect(h).toContain("3245 West Lake Boulevard");
     phoneSafe(h);
+  });
+
+  it("with a same-day job on offer, Link Instead LEADS and a new job is the second door", () => {
+    const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" } });
+    const btns = h.match(/<button\b[^>]*>.*?<\/button>/g) ?? [];
+    expect(btns[0]).toContain("Link To J-055 Instead");
+    expect(btns[0]).toContain("bg-[rgb(var(--glass-ink))] text-white"); // the primary style
+    expect(btns[1]).not.toContain("bg-[rgb(var(--glass-ink))] text-white");
+    expect(btns[1]).toContain("Make A New Job Anyway");
+    expect(h).not.toContain("Start The Job And Clock In");
+  });
+
+  it("Tom Goodman as it stood: on the clock on J-055 itself, the card links and never offers the switch", () => {
+    const h = render({ linkInstead: { ...j55, customer: "Tom Goodman" }, openEntry: onJ55 });
+    expect(h).toContain("on the clock on <span class=\"font-semibold\">J-055</span> since 12:00 PM");
+    expect(h).toContain("Link this visit to it.");
+    expect(h).toContain("Link To J-055</button>");
+    expect(h).not.toContain("Link To J-055 Instead");
+    expect(h).not.toContain("Switch To This Job");
+    expect(h).not.toContain("switches your clock here");
+    expect(h).not.toContain("Start The Job And Clock In");
+    expect(h).toContain("Make A New Job Anyway");
+    phoneSafe(h);
+  });
+
+  it("a clock on no job says the whole shift moves, not that a part ends", () => {
+    const h = render({ openEntry: { id: "e-0", job_id: null, label: "no job", clock_in: onJ55.clock_in, whole: true } });
+    expect(h).toContain("Starting this job moves that whole shift onto it.");
+    const linked = render({ job: j55, openEntry: { id: "e-0", job_id: null, label: "no job", clock_in: onJ55.clock_in, whole: true } });
+    expect(linked).toContain("Switching moves that whole shift onto J-055.");
+    expect(linked).not.toContain("ends that part now");
+  });
+
+  it("Visit Time is not offered inside the tapper's last finished shift", () => {
+    const now = Date.parse("2026-09-25T22:32:00Z");
+    // Visit at 10:00 AM; the J-050 shift ran to 11:30 AM.
+    expect(visitTimeOffered(preview.scheduledStart, "2026-09-25T18:30:00.000Z", now, TZ)).toBe(false);
+    expect(visitTimeOffered(preview.scheduledStart, "2026-09-25T16:30:00.000Z", now, TZ)).toBe(true);
+    expect(visitTimeOffered(preview.scheduledStart, null, now, TZ)).toBe(true);
+    expect(visitTimeOffered(null, null, now, TZ)).toBe(false);
   });
 
   it("names the running clock when the tapper is on another job", () => {

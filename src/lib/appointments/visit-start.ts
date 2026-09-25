@@ -94,31 +94,46 @@ export function jobShort(j: { job_number?: string | null; name?: string | null }
 }
 
 /**
+ * What happened to the tapper's clock:
+ *   in      a fresh clock-in at `at`;
+ *   switch  the running entry was CUT at `at` and a new one opened on the job (0288's cut);
+ *   move    the running entry had no job (or had just opened), so switch_job RE-POINTED it whole:
+ *           the shift since `since` now sits on the job. Nothing was cut.
+ */
+export type StartedClock =
+  | { kind: "in"; at: string }
+  | { kind: "switch"; at: string; from: string | null }
+  | { kind: "move"; since: string };
+
+/**
  * What the app says after the tap, in one sentence:
  *   "Started J-056 for Tom Goodman and clocked you in at 12:00 PM."
  *   "Started J-056 for Tom Goodman and switched your clock here from J-050 at 3:32 PM."
+ *   "Started J-056 for Tom Goodman and moved your shift since 12:00 PM onto it."
  *   "Started J-056 for Tom Goodman."
  */
 export function startedWords(input: {
   jobNumber: string;
   customer: string | null;
   tz: string;
-  clock?: { kind: "in"; at: string } | { kind: "switch"; at: string; from: string | null } | null;
+  clock?: StartedClock | null;
   /** The visit already had a job (someone else started it a moment ago): say so, never "Started". */
   existing?: boolean;
 }): string {
   const who = input.customer?.trim() ? ` for ${input.customer.trim()}` : "";
   const c = input.clock;
-  const at = c ? clockWords(c.at, input.tz) : "";
+  const at = c ? clockWords(c.kind === "move" ? c.since : c.at, input.tz) : "";
   if (input.existing) {
     // Somebody started it a moment ago: the job is theirs, the clock is this tap's.
     const head = `This visit already had ${input.jobNumber}${who}.`;
     if (!c) return head;
     if (c.kind === "in") return `${head} Clocked you in on it at ${at}.`;
+    if (c.kind === "move") return `${head} Moved your shift since ${at} onto it.`;
     return `${head} Switched your clock to it${c.from ? ` from ${c.from}` : ""} at ${at}.`;
   }
   const head = `Started ${input.jobNumber}${who}`;
   if (!c) return `${head}.`;
   if (c.kind === "in") return `${head} and clocked you in at ${at}.`;
+  if (c.kind === "move") return `${head} and moved your shift since ${at} onto it.`;
   return `${head} and switched your clock here${c.from ? ` from ${c.from}` : ""} at ${at}.`;
 }

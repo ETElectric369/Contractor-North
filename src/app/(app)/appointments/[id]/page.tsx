@@ -51,7 +51,7 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm, { data: meRow }, { data: openRow }] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -110,6 +110,16 @@ export default async function AppointmentCapturePage({
       .eq("profile_id", viewerId ?? "")
       .eq("status", "open")
       .maybeSingle(),
+    // The end of the viewer's latest finished shift: the sheet's one-tap Visit Time start is not
+    // offered when it would land inside hours already recorded (it could never be clocked out).
+    supabase
+      .from("time_entries")
+      .select("clock_out")
+      .eq("profile_id", viewerId ?? "")
+      .not("clock_out", "is", null)
+      .order("clock_out", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   if (!appt) notFound();
 
@@ -166,6 +176,8 @@ export default async function AppointmentCapturePage({
         job_id: oe.job_id,
         label: oeJob ? jobShort(oeJob) : (oe.job_code ?? "").trim() || "no job",
         clock_in: oe.clock_in,
+        // No job and no code: a switch re-points the whole shift (0288), and the card says so.
+        whole: !oe.job_id && !(oe.job_code ?? "").trim(),
       }
     : null;
   const linkInstead =
@@ -346,6 +358,7 @@ export default async function AppointmentCapturePage({
                 scheduledStart: a.starts_at ?? null,
               }}
               officePhone={(org as { phone?: string | null } | null)?.phone ?? null}
+              lastClockOut={(lastClosedRow as { clock_out?: string | null } | null)?.clock_out ?? null}
             />
           </div>
         )}

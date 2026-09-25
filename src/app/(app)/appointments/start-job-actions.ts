@@ -20,8 +20,9 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
-import { startedAtProblem, startedWords, clockWords, jobShort } from "@/lib/appointments/visit-start";
+import { startedAtProblem, startedWords, clockWords, jobShort, type StartedClock } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
+import { overlapRefusal } from "@/lib/overlap-refusal";
 import type { GeoPoint } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createJobFromAppointment, linkAppointmentTo } from "./actions";
@@ -39,9 +40,14 @@ export type StartJobResult = {
   /** The entry a fresh clock-in opened, for the Undo on the toast. Never set on a switch. */
   undoEntryId?: string;
   /** Refused because the tapper is already on the clock elsewhere: the sheet offers Switch To This
-   *  Job instead. Nothing was created. */
-  onClock?: { entryId: string; label: string; since: string };
+   *  Job instead (or, when that clock is on the job the visit could link to, Link To It). Nothing
+   *  was created. */
+  onClock?: OnClock;
 };
+
+/** The tapper's running clock, as the card needs it. `whole`: it has no job and no code, so a
+ *  switch RE-POINTS the whole shift onto the new job instead of cutting it (0288). */
+export type OnClock = { entryId: string; jobId: string | null; label: string; since: string; whole: boolean };
 
 type VisitRow = {
   id: string;
@@ -93,6 +99,17 @@ async function openEntryOf(supabase: SupabaseClient, userId: string): Promise<Op
   return (data as OpenRow | null) ?? null;
 }
 
+/** The running clock in the card's shape. */
+function onClockOf(o: OpenRow, tz: string): OnClock {
+  return {
+    entryId: o.id,
+    jobId: o.job_id,
+    label: openLabel(o),
+    since: clockWords(o.clock_in, tz),
+    whole: !o.job_id && !(o.job_code ?? "").trim(),
+  };
+}
+
 /** "J-050", or the time code a job-less clock runs on ("Shop"), or "the clock". */
 function openLabel(o: OpenRow): string {
   const j = one(o.job);
@@ -141,20 +158,43 @@ export async function startJobFromVisit(input: {
   if (input.clock !== "none") {
     running = await openEntryOf(supabase, ctx.userId);
     if (input.clock === "in" && running && !(visit.job_id && running.job_id === visit.job_id)) {
-      const label = openLabel(running);
-      const since = clockWords(running.clock_in, tz);
+      const oc = onClockOf(running, tz);
       return {
         ok: false,
-        onClock: { entryId: running.id, label, since },
-        error: `You're on the clock on ${label} since ${since}. Switch To This Job moves your clock here now. Nothing was started yet.`,
+        onClock: oc,
+        error: `You're on the clock on ${oc.label} since ${oc.since}. Switch To This Job moves your clock here now. Nothing was started yet.`,
       };
+    }
+    /* THE RIGHT SHIFT IS NEVER CUT FOR A DUPLICATE (review, Tom Goodman as it stood): Erik on the
+       clock on J-055, the job he made by hand for this very customer that afternoon, and the visit
+       still unlinked. A switch here would mint J-056 and cut his J-055 shift onto it. The card leads
+       with Link To J-055 in that case; this is the same answer for a stale page. */
+    if (input.clock === "switch" && running?.job_id && !visit.job_id) {
+      const pick = await loadLinkInstead(supabase, visit, tz);
+      if (pick && pick.id === running.job_id) {
+        const j = jobShort(pick);
+        return {
+          ok: false,
+          error: `You're on the clock on ${j}, the job ${visitWho(visit) ?? "this customer"} already has from today. Link this visit to ${j} instead. Nothing was started.`,
+        };
+      }
     }
   }
 
-  const existing = !!visit.job_id;
+  /* A START IN THE PAST MAY NOT LAND ON HOURS ALREADY RECORDED (review, 2026-09-25). The open row
+     clockIn inserts passes 0278/0291 (they judge a finished shift), so the clash only surfaced at
+     clock-out tonight, as a shift nobody could close. Asked here, before anything is made, with the
+     Timecards' own test and words. Only a fresh clock-in has a start to judge: a switch cuts at now. */
+  if (input.clock === "in" && startAt && !running) {
+    const clash = await overlapRefusal(supabase, ctx.userId, Date.parse(startAt), Date.now(), { tz });
+    if (clash) return { ok: false, error: `${clash} Nothing was started. Pick a start after that shift, or Now.` };
+  }
+
   const made = await createJobFromAppointment(visit.id);
   if (!made.ok || !made.id) return { ok: false, error: made.error ?? "The job could not be started. Nothing was changed." };
   const jobId = made.id;
+  // `already`: another device made this visit's job a moment ago, and made.id is THAT job.
+  const existing = !!visit.job_id || !!made.already;
 
   const { data: jobRow } = await supabase.from("jobs").select("id, job_number, name").eq("id", jobId).maybeSingle();
   if (!jobRow) return { ok: false, error: "The job was made but could not be read back. Reload the page before trying again." };
@@ -163,7 +203,7 @@ export async function startJobFromVisit(input: {
   const warnings: string[] = [];
   if (made.note) warnings.push(made.note);
 
-  let clock: { kind: "in"; at: string } | { kind: "switch"; at: string; from: string | null } | null = null;
+  let clock: StartedClock | null = null;
   let undoEntryId: string | undefined;
 
   if (input.clock === "switch" && running && running.job_id !== jobId) {
@@ -173,7 +213,9 @@ export async function startJobFromVisit(input: {
     if (!sw.ok) {
       warnings.push(`Your clock is still on ${from}: ${sw.error ?? "the switch did not go through."}`);
     } else {
-      clock = { kind: "switch", at, from };
+      // A job-less clock is RE-POINTED whole (0288), not cut: the shift since its clock-in is now
+      // on this job, and the sentence has to say that rather than "switched at 3:32 PM".
+      clock = sw.mode === "repointed" ? { kind: "move", since: running.clock_in } : { kind: "switch", at, from };
       if (sw.warning) warnings.push(sw.warning);
     }
   } else if (input.clock === "in" || input.clock === "switch") {
@@ -243,10 +285,40 @@ export async function linkVisitInstead(appointmentId: string, jobId: string): Pr
   const res = await linkAppointmentTo(appointmentId, "job", jobId);
   if (!res.ok) return { ok: false, error: res.error ?? "The visit could not be linked. Nothing was changed." };
 
+  /* STAMP FOLLOWS DEED, the lead too (review, 2026-09-25). A visit booked from a lead that takes the
+     existing job has converted that lead exactly as createJobFromAppointment would: the job carries
+     the lead (only when it carries none), and the lead is won (only when nobody stamped it yet). */
+  const warnings: string[] = [];
+  if (visit.inquiry_id) {
+    const nowIso = new Date().toISOString();
+    const { error: jErr } = await supabase
+      .from("jobs")
+      .update({ inquiry_id: visit.inquiry_id })
+      .eq("id", jobId)
+      .is("inquiry_id", null)
+      .select("id");
+    const { error: lErr } = await supabase
+      .from("inquiries")
+      .update({ status: "won", converted_at: nowIso, updated_at: nowIso })
+      .eq("id", visit.inquiry_id)
+      .is("converted_at", null)
+      .select("id");
+    if (jErr || lErr) warnings.push("The lead behind this visit could not be marked won. Mark it on Leads.");
+    revalidatePath("/leads");
+  }
+
   const jobNumber = jobShort(pick);
+  const running = await openEntryOf(supabase, ctx.userId);
+  const onIt = running?.job_id === jobId ? ` Your clock is already running on ${jobNumber}.` : "";
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/planner");
-  return { ok: true, jobId, jobNumber, message: `Linked this visit to ${jobNumber}. Nothing new was made.` };
+  return {
+    ok: true,
+    jobId,
+    jobNumber,
+    message: `Linked this visit to ${jobNumber}. Nothing new was made.${onIt}`,
+    ...(warnings.length ? { warning: warnings.join(" ") } : {}),
+  };
 }
 
 /**

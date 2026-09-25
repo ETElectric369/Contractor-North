@@ -10,7 +10,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *   - a tech is refused before anything is read or made;
  *   - a start in the future, or before midnight yesterday, is refused with nothing made;
  *   - "Link To J-055 Instead" is offered only for exactly one open job of the same customer made on
- *     the visit's day, and the link re-asks that rule before it writes.
+ *     the visit's day, and the link re-asks that rule before it writes;
+ *   - a switch never cuts the shift on that very job onto a duplicate (Tom Goodman as it stood);
+ *   - a start in the past that lands on hours already recorded is refused before anything is made;
+ *   - a job-less clock is MOVED whole, and the sentence says so;
+ *   - a lead-booked visit that links instead marks the lead won and hands the job its lead.
  *
  * The fake refuses any read it was not told about, by name.
  */
@@ -22,6 +26,8 @@ const state = vi.hoisted(() => ({
   open: [] as (any | null)[], // successive answers to the open-entry read
   inquiryCustomer: null as string | null,
   staffIds: ["office-1"],
+  closed: [] as any[], // the tapper's recorded shifts, for the overlap read
+  writes: [] as { table: string; patch: any; filters: [string, string, unknown][] }[],
 }));
 const spies = vi.hoisted(() => ({
   createJob: vi.fn(),
@@ -51,14 +57,19 @@ import { linkInsteadPick, startedAtProblem, startFloorMs, visitDay } from "@/lib
 
 const TZ = "America/Los_Angeles";
 
-type Q = { table: string; cols: string; filters: [string, string, unknown][] };
+type Q = { table: string; cols: string; filters: [string, string, unknown][]; patch?: any };
 
 function fake() {
   const calls: Q[] = [];
   const answer = (q: Q) => {
     const f = (col: string) => q.filters.find(([, c]) => c === col)?.[2];
+    if (q.patch !== undefined) {
+      state.writes.push({ table: q.table, patch: q.patch, filters: q.filters });
+      return { data: [{ id: f("id") }], error: null };
+    }
     if (q.table === "appointments") return { data: state.visit, error: null };
     if (q.table === "organizations") return { data: { settings: { timezone: TZ } }, error: null };
+    if (q.table === "time_entries" && q.filters.some(([op]) => op === "gte")) return { data: state.closed, error: null };
     if (q.table === "time_entries") return { data: state.open.length ? state.open.shift() : null, error: null };
     if (q.table === "jobs" && f("id")) {
       return { data: { id: f("id"), job_number: "J-056", name: "Inspection — Tom Goodman" }, error: null };
@@ -87,6 +98,22 @@ function fake() {
         },
         in(c: string, v: unknown) {
           q.filters.push(["in", c, v]);
+          return chain;
+        },
+        is(c: string, v: unknown) {
+          q.filters.push(["is", c, v]);
+          return chain;
+        },
+        gte(c: string, v: unknown) {
+          q.filters.push(["gte", c, v]);
+          return chain;
+        },
+        lte(c: string, v: unknown) {
+          q.filters.push(["lte", c, v]);
+          return chain;
+        },
+        update(patch: any) {
+          q.patch = patch;
           return chain;
         },
         order: () => chain,
@@ -125,6 +152,8 @@ beforeEach(() => {
   state.open = [];
   state.inquiryCustomer = null;
   state.staffIds = ["office-1"];
+  state.closed = [];
+  state.writes = [];
   state.client = fake().client;
   for (const s of Object.values(spies)) s.mockReset();
   spies.createJob.mockResolvedValue({ ok: true, id: "job-56" });
@@ -213,7 +242,7 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     state.open = [running];
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in" });
     expect(res.ok).toBe(false);
-    expect(res.onClock).toEqual({ entryId: "entry-50", label: "J-050", since: "8:00 AM" });
+    expect(res.onClock).toEqual({ entryId: "entry-50", jobId: "job-50", label: "J-050", since: "8:00 AM", whole: false });
     expect(res.error).toContain("Switch To This Job");
     expect(spies.createJob).not.toHaveBeenCalled();
     expect(spies.clockIn).not.toHaveBeenCalled();
@@ -232,6 +261,19 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     expect(res.undoEntryId).toBeUndefined(); // a switch is a cut, not a punch to delete
   });
 
+  it("a job-less clock is MOVED whole onto the new job, and the sentence says since when", async () => {
+    const jobless = { ...running, job_id: null, job: null };
+    state.open = [jobless];
+    const refused = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in" });
+    expect(refused.onClock).toMatchObject({ label: "no job", whole: true, jobId: null });
+
+    state.open = [jobless];
+    spies.switchJob.mockResolvedValue({ ok: true, entry_id: "entry-50", mode: "repointed" });
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "switch" });
+    expect(res.message).toBe("Started J-056 for Tom Goodman and moved your shift since 8:00 AM onto it.");
+    expect(res.message).not.toContain("switched");
+  });
+
   it("a switch the Timeclock refuses (the long-shift guard) leaves the clock where it was and says so", async () => {
     state.open = [running];
     spies.switchJob.mockResolvedValue({ ok: false, needsTime: true, error: "You've been on the clock since Thu Sep 24, 7:00 AM, more than 12 hours." });
@@ -239,6 +281,74 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     expect(res.ok).toBe(true);
     expect(res.message).toBe("Started J-056 for Tom Goodman.");
     expect(res.warning).toContain("Your clock is still on J-050: You've been on the clock since");
+  });
+});
+
+describe("Tom Goodman as it stood: on the clock on J-055, the visit unlinked", () => {
+  const j55 = {
+    id: "job-55",
+    job_number: "J-055",
+    name: "3245 West Lake Boulevard",
+    status: "in_progress",
+    customer_id: "cust-tom",
+    created_at: "2026-09-25T22:29:56.167Z",
+  };
+  const onJ55 = { id: "entry-849", job_id: "job-55", job_code: null, clock_in: NOON, job: { job_number: "J-055", name: j55.name } };
+
+  it("a switch that would cut the J-055 shift onto a new duplicate job is refused, with nothing made", async () => {
+    state.jobs = [j55];
+    state.open = [onJ55];
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "switch" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Link this visit to J-055 instead");
+    expect(spies.createJob).not.toHaveBeenCalled();
+    expect(spies.switchJob).not.toHaveBeenCalled();
+  });
+
+  it("the link says the clock is already running there", async () => {
+    state.jobs = [j55];
+    state.open = [onJ55];
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe("Linked this visit to J-055. Nothing new was made. Your clock is already running on J-055.");
+  });
+
+  it("a switch from some other job still goes through", async () => {
+    state.jobs = [j55];
+    state.open = [{ ...onJ55, job_id: "job-50", job: { job_number: "J-050", name: "Apache Ct" } }];
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "switch" });
+    expect(res.ok).toBe(true);
+    expect(spies.switchJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a start in the past never lands on hours already recorded", () => {
+  it("a closed 9:00 to 11:30 shift and a 10:00 start is refused, with nothing made", async () => {
+    state.closed = [{ id: "entry-j50", clock_in: "2026-09-25T16:00:00.000Z", clock_out: "2026-09-25T18:30:00.000Z" }];
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in", startAt: "2026-09-25T17:00:00.000Z" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("9:00 AM to 11:30 AM");
+    expect(res.error).toContain("Nothing was started.");
+    expect(spies.createJob).not.toHaveBeenCalled();
+    expect(spies.clockIn).not.toHaveBeenCalled();
+  });
+
+  it("a start after that shift is clear", async () => {
+    state.closed = [{ id: "entry-j50", clock_in: "2026-09-25T16:00:00.000Z", clock_out: "2026-09-25T18:30:00.000Z" }];
+    state.open = [null, { id: "entry-1", job_id: "job-56", job_code: null, clock_in: NOON, job: null }];
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in", startAt: NOON });
+    expect(res.ok).toBe(true);
+    expect(spies.clockIn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("two devices, one visit", () => {
+  it("when the other device's job won, the tap clocks into THAT job and says the visit already had it", async () => {
+    spies.createJob.mockResolvedValue({ ok: true, id: "job-55", already: true });
+    state.open = [null, { id: "entry-1", job_id: "job-55", job_code: null, clock_in: NOON, job: null }];
+    const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "in", startAt: NOON });
+    expect(spies.clockIn.mock.calls[0][0].job_id).toBe("job-55");
+    expect(res.message).toMatch(/^This visit already had /);
   });
 });
 
@@ -309,12 +419,27 @@ describe("Link To J-055 Instead", () => {
     expect(res).toMatchObject({ ok: true, jobId: "job-55", message: "Linked this visit to J-055. Nothing new was made." });
   });
 
-  it("finds the customer through the lead when the visit has none", async () => {
+  it("finds the customer through the lead when the visit has none, and the lead is won", async () => {
     state.visit = { ...tomVisit, customer_id: null, inquiry_id: "lead-tom" };
     state.inquiryCustomer = "cust-tom";
     state.jobs = [j55];
     const res = await linkVisitInstead("appt-tom", "job-55");
     expect(res.ok).toBe(true);
+    // The job carries the lead, only when it carries none.
+    const jobWrite = state.writes.find((w) => w.table === "jobs");
+    expect(jobWrite?.patch).toEqual({ inquiry_id: "lead-tom" });
+    expect(jobWrite?.filters).toEqual(expect.arrayContaining([["eq", "id", "job-55"], ["is", "inquiry_id", null]]));
+    // The lead is stamped won, only when nobody stamped it yet.
+    const leadWrite = state.writes.find((w) => w.table === "inquiries");
+    expect(leadWrite?.patch).toMatchObject({ status: "won" });
+    expect(leadWrite?.filters).toEqual(expect.arrayContaining([["eq", "id", "lead-tom"], ["is", "converted_at", null]]));
+    expect(spies.revalidate).toHaveBeenCalledWith("/leads");
+  });
+
+  it("a visit with no lead writes nothing to leads or the job", async () => {
+    state.jobs = [j55];
+    await linkVisitInstead("appt-tom", "job-55");
+    expect(state.writes).toEqual([]);
   });
 
   it("refuses a job the rule no longer names, and a visit that already has a job", async () => {
