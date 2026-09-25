@@ -19,6 +19,8 @@
  * this file no longer names the table (tests/no-time-allocations.test.ts has no exemption now).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { aggregatePayrollEntries } from "./payroll-math";
 
 export interface SqlClient {
@@ -841,6 +843,43 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect(await lineIds(vLine)).toEqual([p]);
         expect(await lineIds(liveLine)).toEqual([p]);
         expect(iso((await row(p)).clock_out)).toBe("2001-03-10T00:00:00.000Z");
+      });
+    });
+
+    // 0313's BACKFILL, run from the file itself (its section 3 only: plain rows and a temp table, no
+    // function replaced), so this case works the same before and after 0313 is applied. A shift cut
+    // cross-job TWICE before 0313 leaves the void line owing two pieces; an UPDATE ... FROM with one
+    // join row per piece gave the line only one, and the file's own check then refused on every run.
+    it("0313's backfill gives a void line EVERY piece it owes, two cross-job cuts of one shift", async () => {
+      if (!needs("0288")) return;
+      const sql = readFileSync(
+        fileURLToPath(new URL("../../supabase/migrations/0313_a_void_claim_follows_every_cut.sql", import.meta.url)),
+        "utf8",
+      );
+      const from = sql.indexOf("-- ── 3. BACKFILL");
+      const to = sql.indexOf("-- ── 4. THE CHECK");
+      expect(from).toBeGreaterThan(0);
+      expect(to).toBeGreaterThan(from);
+      await step(async () => {
+        const p = await entry({ in: "2001-03-12T16:00:00Z", out: "2001-03-13T00:00:00Z" });
+        const v = await invoice("void", jobA);
+        const vLine = await line(v.id, [p], 8);
+        // The invoice is older than every cut, as a void invoice from before 0313 would be.
+        await c.query("update public.invoices set created_at = '2001-03-14T00:00:00Z' where id = $1", [v.id]);
+        await as(staffId);
+        const r1 = (await rpc("split_time_entry", [p, "2001-03-12T20:00:00Z", jobB, null, null, null])).right_id;
+        const r2 = (await rpc("split_time_entry", [r1, "2001-03-12T22:00:00Z", jobC, null, null, null])).right_id;
+        await asServer();
+        expect((await row(r2)).split_from).toBe(p);
+        // What a cross-job cut left before 0313: the void line holds the first piece alone.
+        await c.query("update public.invoice_items set source_ids = array[$1]::uuid[] where id = $2", [p, vLine]);
+
+        await c.query(sql.slice(from, to) + "\ndrop table _0313_owed;");
+        expect([...(await lineIds(vLine))].sort()).toEqual([p, r1, r2].sort());
+
+        // Run again: it owes nothing and appends nothing twice.
+        await c.query(sql.slice(from, to) + "\ndrop table _0313_owed;");
+        expect(await lineIds(vLine)).toHaveLength(3);
       });
     });
   });

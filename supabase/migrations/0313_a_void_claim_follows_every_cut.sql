@@ -676,20 +676,25 @@ end $$;
 
 -- Void first is not needed here (every holder written is void), and the claim guard finds no live
 -- holder of these ids (checked just above), so each append passes it.
+-- ONE write per line, with ALL its owed pieces: a line cut cross-job twice owes two, and an
+-- UPDATE ... FROM that joins a target row to several source rows applies only one of them, so a
+-- per-piece join would append one piece, leave the other, and trip the check below on every run.
 update public.invoice_items it
-   set source_ids = it.source_ids || o.piece_id
-  from _0313_owed o
- where it.id = o.line_id
-   and not (o.piece_id = any (it.source_ids));
+   set source_ids = it.source_ids || a.pieces
+  from (select o.line_id, array_agg(distinct o.piece_id) as pieces
+          from _0313_owed o
+         group by o.line_id) a
+ where it.id = a.line_id;
 
 -- ── 4. THE CHECK ──────────────────────────────────────────────────────────────────────────────
 do $$
 declare
   v_n     bigint;
   v_owed  bigint;
+  v_lines bigint;
   v_names text;
 begin
-  select count(*) into v_owed from _0313_owed;
+  select count(*), count(distinct line_id) into v_owed, v_lines from _0313_owed;
 
   select string_agg(w.fn, ', ') into v_names
     from (values
@@ -735,7 +740,7 @@ begin
     raise exception '0313: % void lines still hold a shift without a piece cut from it after them. Nothing was changed.', v_n;
   end if;
 
-  raise notice '0313: void claims follow every cut; % void line(s) backfilled with a piece.', v_owed;
+  raise notice '0313: void claims follow every cut; % piece(s) added to % void line(s).', v_owed, v_lines;
 end $$;
 
 drop table _0313_owed;
