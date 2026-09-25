@@ -27,5 +27,13 @@
       "path": "/api/google/sync",
       "schedule": "*/15 * * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "release/next": false
+    }
+  },
+  "github": {
+    "silent": true
+  }
 }
