@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 /**
  * Migration 0254 — the crew's materials-list boundary, exercised where it actually lives.
@@ -42,6 +44,7 @@ d("material lists: the crew boundary (0254)", () => {
   let otherLineId = "";
   let otherJobId = ""; // another org's job, carrying otherListId
   let otherBareJobId = ""; // another org's job with no list — foreignness is the only reason to refuse
+  let pricedItemId = ""; // a shelf item the office priced (0302): the tech may see it, never its cost
 
   /** Speak as this user: the claims auth.uid() reads, under the role PostgREST uses. */
   const as = async (uid: string) => {
@@ -182,6 +185,23 @@ d("material lists: the crew boundary (0254)", () => {
       [other.id, ocust.id],
     );
     otherBareJobId = obare.id;
+
+    // THE SHELF'S HALF OF THE BOUNDARY (0302). If the migration is not on this database yet it is
+    // applied here, inside this transaction, which is rolled back: it only swaps one read policy on
+    // an empty table and adds one function, so it takes no lock anyone waits on.
+    const { rows: [has0302] } = await client.query("select to_regprocedure('public.shelf_for_crew()') is not null as yes");
+    if (!has0302.yes) {
+      await client.query(
+        readFileSync(fileURLToPath(new URL("../../supabase/migrations/0302_techs_see_the_shelf_not_its_prices.sql", import.meta.url)), "utf8"),
+      );
+      console.warn("[materials-crew-boundary] 0302 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
+    }
+    const { rows: [inv] } = await client.query(
+      `insert into inventory_items (org_id, name, part_number, unit, vendor, unit_cost)
+       values ($1, 'TEST 0302 12/2 NM-B', 'NMB122', 'ft', 'CED', 0.72) returning id`,
+      [orgId],
+    );
+    pricedItemId = inv.id;
   });
 
   afterAll(async () => {
@@ -482,6 +502,32 @@ d("material lists: the crew boundary (0254)", () => {
       [noJobListId],
     );
     expect(deleted.length).toBe(1);
+  });
+
+  // ── the shelf (0302): the crew sees what is there, never what it cost ──────────────────────
+  it("a tech's session reads NO row of inventory_items, however it asks", async () => {
+    await as(techId);
+    const { rows } = await client.query("select id, unit_cost, vendor from inventory_items where id = $1", [pricedItemId]);
+    expect(rows.length).toBe(0);
+    const { rows: all } = await client.query("select count(*)::int as n from inventory_items");
+    expect(all[0].n).toBe(0);
+    // Staff still read it, cost and all.
+    await as(staffId);
+    const { rows: staffRows } = await client.query("select unit_cost from inventory_items where id = $1", [pricedItemId]);
+    expect(Number(staffRows[0].unit_cost)).toBe(0.72);
+  });
+
+  it("shelf_for_crew gives a tech the name, unit and count, and no cost, vendor or part number", async () => {
+    await as(techId);
+    const { rows } = await client.query("select * from shelf_for_crew() where id = $1", [pricedItemId]);
+    expect(rows.length).toBe(1);
+    expect(Object.keys(rows[0]).sort()).toEqual(["id", "name", "on_hand", "unit"]);
+    expect(rows[0]).toMatchObject({ name: "TEST 0302 12/2 NM-B", unit: "ft" });
+    await asServer();
+    const { rows: acl } = await client.query(
+      "select has_function_privilege('anon', 'public.shelf_for_crew()', 'execute') as anon_can_run",
+    );
+    expect(acl[0].anon_can_run).toBe(false);
   });
 
   it("staff are still held to their own org", async () => {
