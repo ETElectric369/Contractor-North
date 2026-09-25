@@ -106,11 +106,44 @@ describe("Send My Code", () => {
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("a failed send is never silent: reported, and the customer reads 'couldn't send'", async () => {
-    rpc.mockResolvedValue({ data: ISSUED, error: null });
+  it("a failed send is never silent: reported, the code taken back, and the customer reads 'couldn't send'", async () => {
+    rpc.mockResolvedValueOnce({ data: ISSUED, error: null }).mockResolvedValueOnce({ data: true, error: null });
     sendEmail.mockResolvedValue({ ok: false, error: "Email failed: 500" });
     expect(await sendPortalCode(TOKEN)).toEqual({ ok: false, reason: "send_failed" });
     expect(reportError).toHaveBeenCalledWith("portal.codeSend", expect.any(Error));
+    // The undelivered code must not cancel the one in the inbox or count toward the limits.
+    expect(rpc).toHaveBeenLastCalledWith("portal_code_void", { p_token: TOKEN, p_code_id: ISSUED.code_id });
+  });
+
+  it("a send that throws is taken back the same way", async () => {
+    rpc.mockResolvedValueOnce({ data: ISSUED, error: null }).mockResolvedValueOnce({ data: true, error: null });
+    sendEmail.mockRejectedValue(new Error("network down"));
+    expect(await sendPortalCode(TOKEN)).toEqual({ ok: false, reason: "send_failed" });
+    expect(rpc).toHaveBeenLastCalledWith("portal_code_void", { p_token: TOKEN, p_code_id: ISSUED.code_id });
+  });
+
+  it("a sent code is never taken back", async () => {
+    rpc.mockResolvedValue({ data: ISSUED, error: null });
+    await sendPortalCode(TOKEN);
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("the day's ceiling: refused with the minutes to wait; the day's last code tells the office once", async () => {
+    const retry = new Date(Date.now() + 14 * 3_600_000).toISOString();
+    rpc.mockResolvedValueOnce({ data: { ok: false, reason: "day_limit", retry_at: retry }, error: null });
+    const r = await sendPortalCode(TOKEN);
+    expect(r).toMatchObject({ ok: false, reason: "day_limit" });
+    expect((r as { retryMinutes: number }).retryMinutes).toBeGreaterThan(14 * 60 - 2);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+
+    rpc.mockResolvedValueOnce({ data: { ...ISSUED, left_today: 3, customer_id: "c1" }, error: null });
+    expect((await sendPortalCode(TOKEN)).ok).toBe(true);
+    expect(reportError).not.toHaveBeenCalled();
+    rpc.mockResolvedValueOnce({ data: { ...ISSUED, left_today: 0, customer_id: "c1" }, error: null });
+    expect((await sendPortalCode(TOKEN)).ok).toBe(true);
+    expect(reportError).toHaveBeenCalledWith("portal.codeDayLimit", expect.any(Error), { customer_id: "c1" });
+    expect(JSON.stringify(reportError.mock.calls)).not.toContain("comcast");
   });
 
   it("not a link's shape: no database call at all", async () => {

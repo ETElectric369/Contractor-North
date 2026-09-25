@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest";
 import {
+  CODES_PER_DAY,
   CODE_MAX_TRIES,
   checkRefusalWords,
   codeMatches,
+  codeSentWords,
   generateCode,
   hashCode,
   hashSecret,
   isSessionSecret,
+  liveCodeWords,
   maskEmail,
   maskPhone,
   minutesUntil,
@@ -15,7 +18,15 @@ import {
   normalizeCode,
   sendRefusalWords,
 } from "./code";
-import { PORTAL_COOKIE, PORTAL_SESSION_SECONDS, portalCookieOptions, portalTokenFromPath } from "./session-cookie";
+import {
+  PORTAL_COOKIE,
+  PORTAL_OFFICE_COOKIE,
+  PORTAL_OFFICE_COOKIE_SECONDS,
+  PORTAL_OFFICE_SESSION_SECONDS,
+  PORTAL_SESSION_SECONDS,
+  portalCookieOptions,
+  portalTokenFromPath,
+} from "./session-cookie";
 
 /**
  * 0331's pure half: the code, its hash, the session secret, the masking and the words. The atomic
@@ -101,6 +112,13 @@ describe("the session", () => {
     expect(portalCookieOptions(TOKEN, 0).maxAge).toBe(0);
   });
 
+  it("the office's look rides its own cookie, which outlives its 8-hour session so an ended look can say so", () => {
+    expect(PORTAL_OFFICE_COOKIE).toBe("cn_portal_office");
+    expect(PORTAL_OFFICE_COOKIE).not.toBe(PORTAL_COOKIE);
+    expect(PORTAL_OFFICE_SESSION_SECONDS).toBe(8 * 3600);
+    expect(PORTAL_OFFICE_COOKIE_SECONDS).toBeGreaterThan(PORTAL_OFFICE_SESSION_SECONDS);
+  });
+
   it("knows a portal page's link from its path, and nothing else", () => {
     expect(portalTokenFromPath(`/portal/${TOKEN}`)).toBe(TOKEN);
     expect(portalTokenFromPath(`/portal/${TOKEN}/`)).toBe(TOKEN);
@@ -151,14 +169,28 @@ describe("the words", () => {
     expect(minutesUntil(null, now)).toBe(15);
     expect(sendRefusalWords("too_many", "ET Electric", 8)).toMatch(/try again in 8 minutes/);
     expect(sendRefusalWords("too_many", "ET Electric", 1)).toMatch(/try again in 1 minute\./);
+    expect(CODES_PER_DAY).toBe(10);
+    expect(sendRefusalWords("day_limit", "ET Electric", 14 * 60 + 5)).toBe(
+      "That's as many codes as we send in one day. Use the newest one in your email, try again in about 15 hours, or ask ET Electric for help.",
+    );
+    expect(sendRefusalWords("day_limit", "ET Electric", 40)).toMatch(/try again in 40 minutes,/);
     expect(sendRefusalWords("no_email", "ET Electric")).toBe(
       "ET Electric doesn't have an email for you yet. Ask them to add it so we can send your code.",
     );
   });
 
+  it("a send says every earlier code stopped working; a code already out says when it went", () => {
+    expect(codeSentWords("m*******@comcast.net")).toBe(
+      "We sent a 6-digit code to m*******@comcast.net. It works for 10 minutes. Any code we sent before this one no longer works.",
+    );
+    expect(liveCodeWords("m*******@comcast.net", 0)).toBe("We emailed a code to m*******@comcast.net just now. Enter it below.");
+    expect(liveCodeWords("m*******@comcast.net", 1)).toBe("We emailed a code to m*******@comcast.net 1 minute ago. Enter it below.");
+    expect(liveCodeWords("m*******@comcast.net", 7)).toMatch(/ 7 minutes ago\. /);
+  });
+
   it("no answer ever prints an address", () => {
     const all = [
-      ...(["no_link", "no_email", "too_many", "channel_unavailable", "busy", "send_failed"] as const).map((r) => sendRefusalWords(r, "B", 3)),
+      ...(["no_link", "no_email", "too_many", "day_limit", "channel_unavailable", "busy", "send_failed"] as const).map((r) => sendRefusalWords(r, "B", 3)),
       ...(["wrong", "expired", "used_up", "spent", "no_code", "no_link", "format", "busy", "error"] as const).map((r) =>
         checkRefusalWords(r, "B", 2),
       ),

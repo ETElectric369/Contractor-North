@@ -4,8 +4,9 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, LogOut, Mail, Phone } from "lucide-react";
 import {
-  CODE_TTL_MINUTES,
   checkRefusalWords,
+  codeSentWords,
+  liveCodeWords,
   normalizeCode,
   sendRefusalWords,
   type CheckRefusal,
@@ -20,7 +21,12 @@ import { PortalShell, type PortalOrg } from "./portal-shell";
  * link never changes, and the code is one tap away every time.
  *
  * No dead end: no email on file → Call and Email the business; a code that ran out → Send A New
- * Code right there; a code already in the inbox → I Already Have A Code. Every answer is said.
+ * Code right there; a code already in the inbox → I Already Have A Code; an email that isn't theirs
+ * any more → ask the business to update it, Call and Email right there. Every answer is said.
+ *
+ * A code already out and still good (the customer went to Mail for it and came back through the
+ * link in their texts) opens on the code box, not on Send My Code: a new send cancels the code they
+ * just read, and every send says so.
  */
 export type SendResult = { ok: true; maskedEmail: string | null } | { ok: false; reason: SendRefusal; retryMinutes?: number };
 export type CheckResult = { ok: true } | { ok: false; reason: CheckRefusal; triesLeft?: number };
@@ -33,20 +39,24 @@ const LINK_BTN =
 export function PortalSignIn({
   org,
   maskedEmail,
+  codeSentMinutesAgo = null,
   send,
   check,
 }: {
   org: PortalOrg;
   /** "m*******@comcast.net", or null when there is no email on file. Never the full address. */
   maskedEmail: string | null;
+  /** A code is already out and still good: how many minutes ago it went (0331 portal_gate). */
+  codeSentMinutesAgo?: number | null;
   send: () => Promise<SendResult>;
   check: (code: string) => Promise<CheckResult>;
 }) {
   const router = useRouter();
-  const [step, setStep] = useState<"start" | "code" | "opening">("start");
+  const codeOut = codeSentMinutesAgo != null;
+  const [step, setStep] = useState<"start" | "code" | "opening">(codeOut ? "code" : "start");
   const [to, setTo] = useState(maskedEmail);
   const [code, setCode] = useState("");
-  const [info, setInfo] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(codeOut ? liveCodeWords(maskedEmail, codeSentMinutesAgo) : null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const input = useRef<HTMLInputElement>(null);
@@ -64,12 +74,12 @@ export function PortalSignIn({
           if (r.maskedEmail) setTo(r.maskedEmail);
           setStep("code");
           setCode("");
-          setInfo(`We sent a 6-digit code to ${r.maskedEmail ?? to}. It works for ${CODE_TTL_MINUTES} minutes.`);
+          setInfo(codeSentWords(r.maskedEmail ?? to));
           setTimeout(() => input.current?.focus(), 0);
         } else {
           setError(sendRefusalWords(r.reason, business, r.retryMinutes));
           // Too many sends: the newest code in the inbox still works, so offer the box for it.
-          if (r.reason === "too_many") setStep("code");
+          if (r.reason === "too_many" || r.reason === "day_limit") setStep("code");
         }
       } catch {
         setError(sendRefusalWords("send_failed", business));
@@ -118,6 +128,7 @@ export function PortalSignIn({
               For your privacy, we&apos;ll email a 6-digit code to{" "}
               <span className="font-semibold [overflow-wrap:anywhere]">{to}</span>
             </p>
+            <NotYourEmail org={org} />
             <div className="mt-5">
               <button type="button" className={BTN} onClick={sendCode} disabled={pending}>
                 {pending ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Mail className="h-5 w-5" aria-hidden />}
@@ -174,6 +185,7 @@ export function PortalSignIn({
                 Send A New Code
               </button>
             </p>
+            <NotYourEmail org={org} />
           </form>
         )}
 
@@ -197,6 +209,33 @@ export function PortalSignIn({
         </p>
       </div>
     </PortalShell>
+  );
+}
+
+/** The address on file is wrong or old: the only fix is the business, so say so and put Call and
+ *  Email right here (the header's are bare icons on a phone). */
+function NotYourEmail({ org }: { org: PortalOrg }) {
+  const tel = org.phone ? org.phone.replace(/[^\d+]/g, "") : "";
+  return (
+    <div className="mt-3 text-sm text-slate-700">
+      <p>Not your email, or you don&apos;t use it anymore? Ask {org.name} to update it.</p>
+      {tel || org.email ? (
+        <div className="mt-1 flex flex-wrap gap-x-4">
+          {tel ? (
+            <a href={`tel:${tel}`} className={LINK_BTN}>
+              <Phone className="mr-1.5 h-4 w-4" aria-hidden />
+              Call {org.name}
+            </a>
+          ) : null}
+          {org.email ? (
+            <a href={`mailto:${org.email}?subject=${encodeURIComponent("Please update my email")}`} className={LINK_BTN}>
+              <Mail className="mr-1.5 h-4 w-4" aria-hidden />
+              Email {org.name}
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

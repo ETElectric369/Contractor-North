@@ -41,6 +41,15 @@
 -- An app deployed first finds no portal_gate and shows "This page isn't ready yet" (fail closed:
 -- never the page without the code).
 --
+-- LIMITS PER LINK: 3 codes per 15 minutes, and at most 10 in a day (the 10th is reported to
+-- error_events, so a customer flooded with codes isn't silent). 5 tries a code: at most 50 guesses a
+-- link a day against a million codes. A code whose email didn't go out is taken back
+-- (portal_code_void): it never counts, and the code it replaced works again.
+--
+-- WHAT ELSE ENDS A SESSION: a changed email on the customer (the device proved the OLD address, so
+-- it signs in again against the new one), and for an office look, its staff member no longer being
+-- active office staff (0158: deactivation is a database boundary), checked on every page load.
+--
 -- SMS: channel is 'email' | 'sms'. portal_code_issue answers 'sms' with channel_unavailable until
 -- texting is live; that branch is where the customer's phone gets read.
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -134,6 +143,26 @@ create trigger customer_portal_access_ends_sessions
   when (old.token is distinct from new.token or (old.enabled and not new.enabled))
   execute function public.customer_portal_access_ends_sessions();
 
+-- A changed email ends the customer's signed-in devices and the live code: each device proved the
+-- OLD address, and a code sent there must not open the page once the office has corrected it.
+-- (Case and spaces aren't a change. An office look is not the customer's and stays.)
+create or replace function public.customer_email_ends_portal_sessions()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  delete from public.customer_portal_sessions where customer_id = new.id and kind = 'customer';
+  update public.customer_portal_codes
+     set superseded_at = now()
+   where customer_id = new.id and consumed_at is null and superseded_at is null;
+  return null;
+end $$;
+revoke execute on function public.customer_email_ends_portal_sessions() from public, anon, authenticated;
+
+create trigger customer_email_ends_portal_sessions
+  after update of email on public.customers
+  for each row
+  when (lower(btrim(coalesce(old.email, ''))) is distinct from lower(btrim(coalesce(new.email, ''))))
+  execute function public.customer_email_ends_portal_sessions();
+
 -- ── 5. the portal's side (service role only) ────────────────────────────────────────────────────
 
 -- What the sign-in screen needs: is this a link, is it on, whose skin, and the address the code
@@ -166,7 +195,13 @@ begin
       'org', json_build_object(
         'name', o.name, 'logo_url', o.logo_url, 'phone', o.phone, 'email', o.email,
         'license', o.license, 'glass_tint', o.settings->>'glass_tint'),
-      'email', nullif(btrim(c.email), ''))
+      'email', nullif(btrim(c.email), ''),
+      -- A code already out and still good: the screen opens on the code box, so re-clicking the
+      -- link from a text doesn't send a new code that cancels the one just read.
+      'live_code_sent_at', (select k.created_at from public.customer_portal_codes k
+                             where k.customer_id = a.customer_id and k.org_id = a.org_id
+                               and k.consumed_at is null and k.superseded_at is null
+                               and k.expires_at > now() and k.attempts < 5))
       from public.customers c
       join public.organizations o on o.id = c.org_id
      where c.id = a.customer_id and c.org_id = a.org_id
@@ -199,6 +234,15 @@ begin
   if not found then
     return null;
   end if;
+  -- An office look lasts only while the person who opened it is still active office staff of this
+  -- org (0158). Otherwise it ends here, for good.
+  if s.kind = 'office' and not exists (
+       select 1 from public.profiles p
+        where p.id = s.started_by and p.org_id = s.org_id
+          and coalesce(p.active, true) and p.role in ('owner', 'admin', 'office')) then
+    delete from public.customer_portal_sessions where id = s.id;
+    return null;
+  end if;
   if s.kind = 'customer' then
     if s.last_seen_at < now() - interval '1 minute' then
       update public.customer_portal_sessions
@@ -225,6 +269,8 @@ declare
   v_to text;
   v_recent int;
   v_oldest timestamptz;
+  v_day int;
+  v_day_oldest timestamptz;
   v_id uuid;
   v_exp timestamptz;
 begin
@@ -253,6 +299,14 @@ begin
   delete from public.customer_portal_codes where customer_id = a.customer_id and created_at < now() - interval '1 day';
   delete from public.customer_portal_sessions where customer_id = a.customer_id and expires_at < now();
 
+  -- The day's ceiling: 10 codes a link in 24 hours (50 guesses at most). The housekeeping above keeps
+  -- exactly a day of rows; a code taken back by portal_code_void is gone and never counts.
+  select count(*), min(created_at) into v_day, v_day_oldest
+    from public.customer_portal_codes
+   where customer_id = a.customer_id;
+  if v_day >= 10 then
+    return json_build_object('ok', false, 'reason', 'day_limit', 'retry_at', v_day_oldest + interval '1 day');
+  end if;
   select count(*), min(created_at) into v_recent, v_oldest
     from public.customer_portal_codes
    where customer_id = a.customer_id and created_at > now() - interval '15 minutes';
@@ -270,12 +324,55 @@ begin
   return (
     select json_build_object(
       'ok', true, 'code_id', v_id, 'channel', 'email', 'to', v_to, 'expires_at', v_exp,
+      'left_today', 10 - (v_day + 1), 'customer_id', a.customer_id,
       'org', json_build_object('name', o.name, 'phone', o.phone, 'email', o.email, 'glass_tint', o.settings->>'glass_tint'))
       from public.organizations o where o.id = a.org_id
   );
 end $$;
 revoke execute on function public.portal_code_issue(text, text, text, text) from public, anon, authenticated;
 grant execute on function public.portal_code_issue(text, text, text, text) to service_role;
+
+-- The email didn't go out: take the code back. It never reached anyone, so it is deleted (it no
+-- longer counts toward the 15-minute window or the day), and if it was the live code, the one it
+-- replaced (superseded by this same send, so at its created_at) is live again when still good:
+-- the code already in the customer's inbox keeps working. A code anyone has tried is never voided.
+create or replace function public.portal_code_void(p_token text, p_code_id uuid)
+returns boolean language plpgsql volatile security definer set search_path = public as $$
+declare
+  a public.customer_portal_access%rowtype;
+  v_created timestamptz;
+  v_was_live boolean;
+begin
+  if p_token is null or length(p_token) < 32 or p_code_id is null then
+    return false;
+  end if;
+  select * into a from public.customer_portal_access where token = p_token for update;
+  if not found then
+    return false;
+  end if;
+  delete from public.customer_portal_codes
+   where id = p_code_id and customer_id = a.customer_id and org_id = a.org_id
+     and consumed_at is null and attempts = 0
+  returning created_at, superseded_at is null into v_created, v_was_live;
+  if v_created is null then
+    return false;
+  end if;
+  if v_was_live and a.enabled then
+    -- Only the newest such row: one live code per link (the unique index) holds even if two rows
+    -- were ever set aside at the same instant.
+    update public.customer_portal_codes
+       set superseded_at = null
+     where id = (select k.id from public.customer_portal_codes k
+                  where k.customer_id = a.customer_id and k.org_id = a.org_id
+                    and k.superseded_at = v_created and k.consumed_at is null
+                    and k.expires_at > now() and k.attempts < 5
+                  order by k.created_at desc, k.id
+                  limit 1);
+  end if;
+  return true;
+end $$;
+revoke execute on function public.portal_code_void(text, uuid) from public, anon, authenticated;
+grant execute on function public.portal_code_void(text, uuid) to service_role;
 
 -- One try. Counted BEFORE the caller compares, under the code's row lock, so five parallel guesses
 -- are five tries. Hands the salt and hash to the server to compare in constant time; a code that is
@@ -495,12 +592,14 @@ begin
     'public.portal_code_issue(text,text,text,text)',
     'public.portal_code_try(text)',
     'public.portal_code_redeem(text,uuid,text,text)',
+    'public.portal_code_void(text,uuid)',
     'public.portal_session_end(text,text)',
     'public.portal_preview_redeem(text,text,text)',
     'public.portal_link_devices(uuid)',
     'public.portal_sessions_end_all(uuid)',
     'public.portal_preview_ticket(uuid,text)',
-    'public.customer_portal_access_ends_sessions()'] loop
+    'public.customer_portal_access_ends_sessions()',
+    'public.customer_email_ends_portal_sessions()'] loop
     select count(*) into n from pg_proc
      where oid = f::regprocedure and prosecdef
        and exists (select 1 from unnest(coalesce(proconfig, '{}')) c where c like 'search_path=%');
@@ -519,6 +618,7 @@ begin
     'public.portal_code_issue(text,text,text,text)',
     'public.portal_code_try(text)',
     'public.portal_code_redeem(text,uuid,text,text)',
+    'public.portal_code_void(text,uuid)',
     'public.portal_session_end(text,text)',
     'public.portal_preview_redeem(text,text,text)'] loop
     if has_function_privilege('authenticated', f, 'execute') then
@@ -530,5 +630,10 @@ begin
                   where tgrelid = 'public.customer_portal_access'::regclass
                     and tgname = 'customer_portal_access_ends_sessions' and not tgisinternal) then
     raise exception '0331: New Link / Turn Off would not end sessions. Nothing was changed.';
+  end if;
+  if not exists (select 1 from pg_trigger
+                  where tgrelid = 'public.customers'::regclass
+                    and tgname = 'customer_email_ends_portal_sessions' and not tgisinternal) then
+    raise exception '0331: a changed email would not end sessions. Nothing was changed.';
   end if;
 end $$;

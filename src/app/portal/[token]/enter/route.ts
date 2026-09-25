@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { hashSecret, isSessionSecret, newSessionSecret } from "@/lib/portal/code";
-import { PORTAL_COOKIE, PORTAL_OFFICE_SESSION_SECONDS, isPortalToken, portalCookieOptions } from "@/lib/portal/session-cookie";
+import { PORTAL_OFFICE_COOKIE, PORTAL_OFFICE_COOKIE_SECONDS, isPortalToken, portalCookieOptions } from "@/lib/portal/session-cookie";
 
 /**
  * THE OFFICE'S SEE WHAT THEY SEE, ON THE CUSTOMER'S HOST (0331).
@@ -53,7 +53,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   dest.search = "";
   dest.searchParams.set("look", "office");
   const res = NextResponse.redirect(dest, 303);
-  res.cookies.set(PORTAL_COOKIE, secret, portalCookieOptions(token, PORTAL_OFFICE_SESSION_SECONDS));
+  // Its own cookie, which middleware never slides (the session behind it ends at 8 hours).
+  res.cookies.set(PORTAL_OFFICE_COOKIE, secret, portalCookieOptions(token, PORTAL_OFFICE_COOKIE_SECONDS));
   res.headers.set("cache-control", "no-store");
   res.headers.set("referrer-policy", "no-referrer");
   return res;

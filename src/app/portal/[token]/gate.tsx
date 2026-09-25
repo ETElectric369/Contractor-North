@@ -17,6 +17,12 @@ export function portalGate(access: PortalAccess, token: string): React.ReactNode
       return notFound();
     case "off":
       return <PortalTurnedOff orgName={access.orgName} />;
+    case "office_ended":
+      return (
+        <PortalNotice title="Your look at this customer's page ended.">
+          Go back to the app and tap See What They See to look again.
+        </PortalNotice>
+      );
     case "not_ready":
       return (
         <PortalNotice title="This page isn't ready yet.">
@@ -34,6 +40,7 @@ export function portalGate(access: PortalAccess, token: string): React.ReactNode
         <PortalSignIn
           org={access.org}
           maskedEmail={access.maskedEmail}
+          codeSentMinutesAgo={access.codeSentMinutesAgo}
           send={sendPortalCode.bind(null, token)}
           check={checkPortalCode.bind(null, token)}
         />
@@ -45,6 +52,7 @@ export function portalGate(access: PortalAccess, token: string): React.ReactNode
 export function gateTitle(access: PortalAccess): string | null {
   if (access.kind === "off") return `${access.orgName ? `${access.orgName} — ` : ""}Link turned off`;
   if (access.kind === "gate") return `${access.org.name} — Sign in`;
+  if (access.kind === "office_ended") return `${access.orgName ? `${access.orgName} — ` : ""}Look ended`;
   if (access.kind === "in") return null;
   return "Your account";
 }

@@ -9,8 +9,18 @@
  */
 export const PORTAL_COOKIE = "cn_portal";
 export const PORTAL_SESSION_SECONDS = 30 * 24 * 60 * 60;
-/** The office's See What They See: 8 hours, never slid. */
+/**
+ * The office's See What They See rides its OWN cookie, never the customer's: middleware slides
+ * cn_portal to 30 days on every page load, and an office look must end at its 8 hours. The session
+ * behind it lasts 8 hours (0331 portal_preview_redeem); the cookie outlives it on purpose, so an
+ * ended look shows "Your look ended, go back to the app" instead of the customer's sign-in screen,
+ * whose Send My Code would email the customer a code they never asked for.
+ */
+export const PORTAL_OFFICE_COOKIE = "cn_portal_office";
+/** The office session itself: 8 hours, never slid. */
 export const PORTAL_OFFICE_SESSION_SECONDS = 8 * 60 * 60;
+/** How long the office cookie is kept, so an ended look can say so. */
+export const PORTAL_OFFICE_COOKIE_SECONDS = 7 * 24 * 60 * 60;
 
 const TOKEN = /^[0-9a-f]{32,128}$/i;
 

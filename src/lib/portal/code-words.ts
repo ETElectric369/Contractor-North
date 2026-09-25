@@ -8,6 +8,9 @@ export const CODE_TTL_MINUTES = 10;
 export const CODE_MAX_TRIES = 5;
 export const SENDS_PER_WINDOW = 3;
 export const SEND_WINDOW_MINUTES = 15;
+/** At most this many codes a link in 24 hours (0331): 50 guesses a day, and a flooded inbox is
+ *  reported to the office. */
+export const CODES_PER_DAY = 10;
 export const SESSION_DAYS = 30;
 /** Per-IP ceilings, on the shared rate_limits table (0098). A household behind one address can send
  *  a few codes to a few links; a script walking links can't. */
@@ -53,7 +56,7 @@ export function maskPhone(phone: string | null | undefined): string | null {
 // ── what the customer reads ──────────────────────────────────────────────────────────────────────
 
 /** Why a send didn't go out, as the database says it (0331 portal_code_issue) plus the app's own. */
-export type SendRefusal = "no_link" | "no_email" | "too_many" | "channel_unavailable" | "busy" | "send_failed";
+export type SendRefusal = "no_link" | "no_email" | "too_many" | "day_limit" | "channel_unavailable" | "busy" | "send_failed";
 
 /** Minutes until a refused send can go again, rounded up, at least 1. */
 export function minutesUntil(retryAt: string | null | undefined, now: Date = new Date()): number {
@@ -68,6 +71,11 @@ export function sendRefusalWords(reason: SendRefusal, business: string, retryMin
       const m = retryMinutes ?? SEND_WINDOW_MINUTES;
       return `That's a few codes in a row. Use the newest one in your email, or try again in ${m} minute${m === 1 ? "" : "s"}.`;
     }
+    case "day_limit": {
+      const m = retryMinutes ?? 24 * 60;
+      const wait = m >= 90 ? `about ${Math.ceil(m / 60)} hours` : `${m} minute${m === 1 ? "" : "s"}`;
+      return `That's as many codes as we send in one day. Use the newest one in your email, try again in ${wait}, or ask ${business} for help.`;
+    }
     case "no_email":
       return `${business} doesn't have an email for you yet. Ask them to add it so we can send your code.`;
     case "no_link":
@@ -80,6 +88,19 @@ export function sendRefusalWords(reason: SendRefusal, business: string, retryMin
     default:
       return "We couldn't send your code just now. Try again in a minute.";
   }
+}
+
+/** After a send. Every send cancels the code before it, so say so: an older code typed next is
+ *  otherwise a mystery "didn't match". */
+export function codeSentWords(maskedEmail: string | null): string {
+  return `We sent a 6-digit code to ${maskedEmail ?? "your email"}. It works for ${CODE_TTL_MINUTES} minutes. Any code we sent before this one no longer works.`;
+}
+
+/** The page opened while a code is already out (re-clicking the link from a text, say): the code
+ *  box, not a new send that would cancel the code just read. */
+export function liveCodeWords(maskedEmail: string | null, minutesAgo: number): string {
+  const when = minutesAgo < 1 ? "just now" : `${minutesAgo} minute${minutesAgo === 1 ? "" : "s"} ago`;
+  return `We emailed a code to ${maskedEmail ?? "your email"} ${when}. Enter it below.`;
 }
 
 /** Why a code didn't work, as portal_code_try / the comparison says it. */

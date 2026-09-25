@@ -85,6 +85,37 @@ describe("the sign-in screen at 375px", () => {
   });
 });
 
+describe("an email that isn't theirs any more: no dead end", () => {
+  it("says to ask the business to update it, with Call and Email right there, on both steps", () => {
+    for (const html of [render(), render({ codeSentMinutesAgo: 2 })]) {
+      const words = text(html);
+      expect(words).toContain("Not your email, or you don't use it anymore? Ask ET Electric to update it.");
+      expect(words).toContain("Call ET Electric");
+      expect(words).toContain("Email ET Electric");
+      expect(html).toContain('href="mailto:office@example.com?subject=Please%20update%20my%20email"');
+    }
+  });
+});
+
+describe("a code already out (re-clicking the link from a text)", () => {
+  const html = render({ codeSentMinutesAgo: 3 });
+  const words = text(html);
+
+  it("opens on the code box, not on a send that would cancel the code just read", () => {
+    expect(words).toContain("We emailed a code to m*******@comcast.net 3 minutes ago. Enter it below.");
+    expect(html).toContain('id="portal-code"');
+    expect(words).toContain("Open My Page");
+    expect(words).toContain("Send A New Code");
+    expect(words).not.toContain("Send My Code");
+  });
+
+  it("no code out: the start, with Send My Code", () => {
+    const start = text(render({ codeSentMinutesAgo: null }));
+    expect(start).toContain("Send My Code");
+    expect(start).not.toContain("Enter it below");
+  });
+});
+
 describe("no email on file: no dead end", () => {
   const html = render({ maskedEmail: null });
   const words = text(html);

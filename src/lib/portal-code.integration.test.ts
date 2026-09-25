@@ -166,6 +166,7 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
       ["select public.portal_code_issue($1, 'email', $2, $3)", [token, "0".repeat(32), h]],
       ["select public.portal_code_try($1)", [token]],
       ["select public.portal_code_redeem($1, gen_random_uuid(), $2, $3)", [token, h, h]],
+      ["select public.portal_code_void($1, gen_random_uuid())", [token]],
       ["select public.portal_session_end($1, $2)", [token, h]],
       ["select public.portal_preview_redeem($1, $2, $3)", [token, h, h]],
     ];
@@ -194,7 +195,8 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     const g = await gate(await tokenOf(custA));
     expect(g.org.name).toBe(orgName);
     expect(g.email).toBe("test0331-a@example.com");
-    expect(Object.keys(g).sort()).toEqual(["email", "org"]);
+    expect(Object.keys(g).sort()).toEqual(["email", "live_code_sent_at", "org"]);
+    expect(g.live_code_sent_at).toBeNull();
     expect((await gate(await tokenOf(custNoEmail))).email).toBeNull();
     expect(await gate("0".repeat(32))).toBeNull();
     expect(await gate("short")).toBeNull();
@@ -479,6 +481,155 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     await c.query("rollback to savepoint s_look");
   });
 
+  it("a code already out: the sign-in screen's read says when it went, and nothing once it's spent or used up", async () => {
+    if (!needs()) return;
+    await c.query("savepoint s_live");
+    const token = await tokenOf(custA);
+    const { j } = await issue(token, "777777");
+    const g = await gate(token);
+    expect(new Date(g.live_code_sent_at).getTime()).toBe(new Date((await one("select created_at from public.customer_portal_codes where id = $1", [j.code_id])).created_at).getTime());
+    await c.query("update public.customer_portal_codes set attempts = 5 where id = $1", [j.code_id]);
+    expect((await gate(token)).live_code_sent_at).toBeNull();
+    await c.query("update public.customer_portal_codes set attempts = 0, expires_at = now() - interval '1 second' where id = $1", [j.code_id]);
+    expect((await gate(token)).live_code_sent_at).toBeNull();
+    // B's code is not A's.
+    await issue(await tokenOf(custB), "888888");
+    expect((await gate(token)).live_code_sent_at).toBeNull();
+    await c.query("rollback to savepoint s_live");
+  });
+
+  it("the day's ceiling: 10 codes a link in 24 hours (the 10th says so), then 'day_limit' with when", async () => {
+    if (!needs()) return;
+    await c.query("savepoint s_day");
+    const token = await tokenOf(custB);
+    // Nine earlier today, spread past the 15-minute window.
+    await c.query(
+      `insert into public.customer_portal_codes (customer_id, org_id, code_salt, code_hash, created_at, expires_at, superseded_at)
+       select $1, $2, $3, $4, now() - (i * interval '1 hour'), now() - (i * interval '1 hour') + interval '10 minutes', now() - (i * interval '1 hour') + interval '1 minute'
+         from generate_series(1, 9) i`,
+      [custB, orgId, "0".repeat(32), "0".repeat(64)],
+    );
+    const tenth = (await issue(token, "123123")).j;
+    expect(tenth.ok).toBe(true);
+    expect(tenth.left_today).toBe(0);
+    expect(tenth.customer_id).toBe(custB);
+    await c.query("update public.customer_portal_codes set created_at = created_at - interval '16 minutes' where id = $1", [tenth.code_id]);
+    const eleventh = (await issue(token, "123123")).j;
+    expect(eleventh).toMatchObject({ ok: false, reason: "day_limit" });
+    const hours = (new Date(eleventh.retry_at).getTime() - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(14);
+    expect(hours).toBeLessThan(15.1);
+    // A day on, the oldest are swept and it sends again.
+    await c.query("update public.customer_portal_codes set created_at = created_at - interval '1 day' where customer_id = $1", [custB]);
+    expect((await issue(token, "123123")).j.ok).toBe(true);
+    await c.query("rollback to savepoint s_day");
+  });
+
+  it("an email that didn't go out is taken back: it never counts, and the code already in the inbox works again", async () => {
+    if (!needs()) return;
+    await c.query("savepoint s_void");
+    const token = await tokenOf(custA);
+    const inbox = await issue(token, "246810");
+    const failed = await issue(token, "135791");
+    const voidIt = async (tok: string, id: string) => (await one("select public.portal_code_void($1, $2) as ok", [tok, id])).ok as boolean;
+    // Not from another customer's link.
+    expect(await voidIt(await tokenOf(custB), failed.j.code_id)).toBe(false);
+    expect(await voidIt(token, failed.j.code_id)).toBe(true);
+    expect((await one("select count(*)::int as n from public.customer_portal_codes where id = $1", [failed.j.code_id])).n).toBe(0);
+    expect(await liveCodes(custA)).toBe(1);
+    const t = await tryCode(token);
+    expect(t.state).toBe("check");
+    expect(t.code_id).toBe(inbox.j.code_id);
+    expect(codeMatches("246810", t.salt, t.hash)).toBe(true);
+    // Twice is nothing, and a code anyone has tried is never taken back.
+    expect(await voidIt(token, failed.j.code_id)).toBe(false);
+    expect(await voidIt(token, inbox.j.code_id)).toBe(false);
+    // It never counted: three more sends fit the window (inbox + 2 = 3, and the voided one isn't there).
+    expect((await issue(token, "000001")).j.ok).toBe(true);
+    expect((await issue(token, "000002")).j.ok).toBe(true);
+    expect((await issue(token, "000003")).j).toMatchObject({ ok: false, reason: "too_many" });
+    await c.query("rollback to savepoint s_void");
+  });
+
+  it("a changed email signs the customer's devices out and cancels the live code; case and spaces aren't a change", async () => {
+    if (!needs()) return;
+    await c.query("savepoint s_email");
+    const token = await tokenOf(custA);
+    const device = await signIn(token, "112233");
+    await c.query(
+      "insert into public.customer_portal_sessions (customer_id, org_id, session_hash, kind, started_by, expires_at) values ($1, $2, $3, 'office', $4, now() + interval '8 hours')",
+      [custA, orgId, hashSecret(newSessionSecret()), staffId],
+    );
+    await issue(token, "445566");
+    await c.query("update public.customers set email = '  TEST0331-A@example.com ' where id = $1", [custA]);
+    expect(await check(token, device)).toEqual({ kind: "customer" });
+    expect(await liveCodes(custA)).toBe(1);
+    await c.query("update public.customers set email = 'test0331-a-new@example.com' where id = $1", [custA]);
+    expect(await check(token, device)).toBeNull();
+    expect(await sessions(custA, "customer")).toBe(0);
+    expect(await sessions(custA, "office")).toBe(1);
+    expect(await liveCodes(custA)).toBe(0);
+    // B untouched.
+    const other = await signIn(await tokenOf(custB), "778899");
+    await c.query("update public.customers set email = 'test0331-a-newer@example.com' where id = $1", [custA]);
+    expect(await check(await tokenOf(custB), other)).toEqual({ kind: "customer" });
+    await c.query("rollback to savepoint s_email");
+  });
+
+  it("an office look ends when its staff member is deactivated or no longer office staff (0158)", async () => {
+    if (!needs()) return;
+    /** Flip a staff row's `active` the way our server's offboarding does (the service role gets past
+     *  0225's owner-seat guard); only ever inside an inner savepoint that is undone at once. */
+    const setActive = async (id: string, active: boolean) => {
+      await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ role: "service_role" })]);
+      try {
+        await c.query("update public.profiles set active = $2 where id = $1", [id, active]);
+      } finally {
+        await asServer();
+      }
+    };
+    await c.query("savepoint s_staff");
+    const token = await tokenOf(custA);
+    const look = newSessionSecret();
+    const add = (secret: string, by: string | null) =>
+      c.query(
+        "insert into public.customer_portal_sessions (customer_id, org_id, session_hash, kind, started_by, expires_at) values ($1, $2, $3, 'office', $4, now() + interval '8 hours')",
+        [custA, orgId, hashSecret(secret), by],
+      );
+    await add(look, staffId);
+    expect(await check(token, look)).toEqual({ kind: "office" });
+    // A real staff row: touched only inside an inner savepoint, undone at once, so its row lock is
+    // held for milliseconds, never for the rest of the run.
+    await c.query("savepoint s_staff_row");
+    try {
+      await setActive(staffId, false);
+      expect(await check(token, look)).toBeNull();
+      expect((await one("select count(*)::int as n from public.customer_portal_sessions where session_hash = $1", [hashSecret(look)])).n).toBe(0);
+      await setActive(staffId, true);
+      // Gone for good, not back on reactivation.
+      expect(await check(token, look)).toBeNull();
+    } finally {
+      await c.query("rollback to savepoint s_staff_row");
+    }
+
+    const techLook = newSessionSecret();
+    await add(techLook, techId);
+    expect(await check(token, techLook)).toBeNull();
+    const orphan = newSessionSecret();
+    await add(orphan, null);
+    expect(await check(token, orphan)).toBeNull();
+    // A customer's own device doesn't depend on any staff member.
+    const device = await signIn(token, "909090");
+    await c.query("savepoint s_staff_row2");
+    try {
+      await setActive(staffId, false);
+      expect(await check(token, device)).toEqual({ kind: "customer" });
+    } finally {
+      await c.query("rollback to savepoint s_staff_row2");
+    }
+    await c.query("rollback to savepoint s_staff");
+  });
+
   it("the tables are RLS-on with only the written-down deny, and every new function pins its search_path", async () => {
     if (!needs()) return;
     const { rows } = await c.query(
@@ -497,9 +648,10 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
       `select p.proname, p.prosecdef, array_to_string(p.proconfig, ',') as cfg
          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public' and p.proname in ('portal_gate','portal_session_check','portal_code_issue','portal_code_try','portal_code_redeem',
-          'portal_session_end','portal_preview_redeem','portal_link_devices','portal_sessions_end_all','portal_preview_ticket')`,
+          'portal_session_end','portal_preview_redeem','portal_link_devices','portal_sessions_end_all','portal_preview_ticket',
+          'portal_code_void','customer_email_ends_portal_sessions')`,
     );
-    expect(fns.rows).toHaveLength(10);
+    expect(fns.rows).toHaveLength(12);
     for (const f of fns.rows) {
       expect(f.prosecdef, f.proname).toBe(true);
       expect(f.cfg, f.proname).toMatch(/search_path=/);
