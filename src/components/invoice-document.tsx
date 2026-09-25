@@ -5,7 +5,7 @@ import { DENSITY_ROW, normalizeDocStyle, sheetStyleVars } from "@/lib/doc-style"
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
-import { invoiceBalance, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
+import { customerLines, invoiceBalance, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
 import { paymentMethodLabel } from "@/lib/payment-method";
 
 /**
@@ -22,6 +22,10 @@ export type InvoiceDocItem = InvoiceLine & {
   unit?: string | null;
   unit_price: number;
   line_total: number;
+  /** The stored row's import key and edited flag, when the caller read the row itself (print). The
+   *  public projection carries neither: its words are already the customer's (0315). */
+  import_key?: string | null;
+  edited?: boolean | null;
 };
 
 export function InvoiceDocument({
@@ -47,6 +51,7 @@ export function InvoiceDocument({
   documentFooter,
   progress,
   docStyle,
+  supplierNames,
 }: {
   co: any;
   template: any;
@@ -74,6 +79,8 @@ export function InvoiceDocument({
   progress?: { estimate: number; workToDate: number; received: number; thisAmount: number; billingType: any } | null;
   /** Org doc_style, raw — normalized HERE (sanitize on read; public RPC hands it over untyped). */
   docStyle?: unknown;
+  /** The org's supplier names (supplierNameSet), so a line that names one prints as "Materials". */
+  supplierNames?: ReadonlySet<string>;
 }) {
   const c = customer;
   const balance = invoiceBalance(total, amountPaid); // floored at 0 — never a negative "Please remit"
@@ -81,9 +88,11 @@ export function InvoiceDocument({
   const coSized = { ...co, logoSize: ds.logo_size };
   const rowPad = DENSITY_ROW[ds.density];
   const gap = { paddingLeft: ds.col_gap };
-  // Every receipt's "Supplies & tax - <supplier>" row prints as ONE "Supplies & Tax" line on the
-  // customer's copy (INV-074). Same cents; the office editor and the stored rows stay per receipt.
-  const lines = mergeSuppliesAndTax(items);
+  // THIS IS THE CUSTOMER'S COPY, so no line names a supplier or a supplier's paper (customerLines,
+  // audit v994 PL1: "Materials — CED (bill #8802-…)" prints "Materials"), and every receipt's
+  // "Supplies & tax" row prints as ONE "Supplies & Tax" line (INV-074). Same cents; the office
+  // editor and the stored rows keep the full words, per receipt.
+  const lines = mergeSuppliesAndTax(customerLines(items, supplierNames));
   // Oldest first, with what was left after each. The Balance column only prints when the payments
   // add up to Amount Paid; a customer credit would make it end on a different figure than the
   // Balance Due box above it.

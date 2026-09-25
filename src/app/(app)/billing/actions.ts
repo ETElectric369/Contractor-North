@@ -22,7 +22,7 @@ import { pushInvoiceToQbo } from "@/lib/quickbooks";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
-import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
 import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
@@ -1507,7 +1507,12 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   // the office what this invoice carries and what it deliberately left where it was — a different
   // sentence from "Labor imported".
   const after = await landedSourceIds(supabase, invoiceId, "labor", rows);
-  return { ok: true, stats: withClaimStats(rep.stats, rows, landedDiff(before, after), free.skippedIds, claims, "time entries") };
+  const stats = withClaimStats(rep.stats, rows, landedDiff(before, after), free.skippedIds, claims, "time entries");
+  // NEVER THEIR PAY RATE, AND NEVER SILENTLY (audit v994 PL2): anyone priced at the level or
+  // default rate because they have no bill rate is named, with the rate used and where to set theirs.
+  const unrated = noBillRateWarnings(offer.map((o) => o.line));
+  if (unrated.length) stats.warnings = [...(stats.warnings ?? []), ...unrated];
+  return { ok: true, stats };
 }
 
 /**

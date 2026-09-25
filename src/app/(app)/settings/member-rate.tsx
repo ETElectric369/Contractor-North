@@ -72,6 +72,13 @@ export function MemberRate({
         <NumberInput value={bill} onValueChange={setBill} onBlur={save} className="h-7 w-14 text-right text-xs" aria-label="Charge rate" />
         /hr
       </span>
+      {/* NEVER BILLED AT THEIR PAY (audit v994 PL2). With no bill rate, their hours bill at the
+          customer's level rate or your default labor rate. Said here, where it is fixed. */}
+      {!(Number(billRate) > 0) && !pending && (
+        <span className="text-amber-700" title="Invoices bill their hours at the customer's level rate or your default labor rate, never their pay">
+          No bill rate set - bills at the level or default rate
+        </span>
+      )}
       {pending && <span className="text-slate-400">…</span>}
       {saved && <Check className="h-3.5 w-3.5 text-green-600" />}
       {err && <span className="text-rose-600">{err}</span>}

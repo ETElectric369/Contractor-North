@@ -4,6 +4,7 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { customerUnbilled, unbilledWorkForJob, type CustomerUnbilled } from "@/lib/unbilled-work";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
+import { fetchSupplierNames } from "@/lib/supplier-names";
 import { portalPathsToSign, shapePortalJob, type PortalJobRaw, type PortalJobView } from "./job-view-shape";
 
 /**
@@ -67,8 +68,10 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
     Number(raw.billing?.milestones ?? 0),
   );
 
-  const [signed, unbilled] = await Promise.all([
+  const [signed, suppliers, unbilled] = await Promise.all([
     signDocumentUrls(svc, portalPathsToSign(raw), PORTAL_FILE_TTL_SECONDS),
+    // The org's supplier names, so no line on the page names one (audit v994 PL1).
+    fetchSupplierNames(svc, orgId),
     billsActuals
       ? unbilledWorkForJob(svc, raw.scope.job_id, { orgId }).then(
           (u): CustomerUnbilled | null => customerUnbilled(u),
@@ -81,5 +84,5 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
       : Promise.resolve<CustomerUnbilled | null>(null),
   ]);
 
-  return { kind: "ok", view: shapePortalJob(raw, { signed, unbilled, now: new Date() }) };
+  return { kind: "ok", view: shapePortalJob(raw, { signed, unbilled, suppliers, now: new Date() }) };
 }

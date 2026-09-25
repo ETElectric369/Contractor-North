@@ -31,6 +31,7 @@ import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { isActualsDraw } from "@/lib/actuals-draw";
 import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
+import { fetchSupplierNames } from "@/lib/supplier-names";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -102,6 +103,21 @@ export default async function InvoicePage({
   // Can this org text (lib/sms-readiness)? Every Text door on the page reads it BEFORE it promises a
   // send, so a tap never asks "Text this invoice to Nora?" only to say texting isn't set up.
   const textReady = smsReadiness(org as { settings?: unknown } | null).ready;
+
+  /* TWO THINGS THE OFFICE IS TOLD ABOUT A LINE, THAT THE CUSTOMER NEVER SEES (audit v994).
+     PL1: a materials line keeps the supplier's name here, and the customer's copy reads "Materials";
+     the row says so, from the same rule the customer's doors run (customerLineWords).
+     PL2: a labor line for someone with no bill rate was billed at the customer's level rate or the
+     org's default labor rate, never at what they are paid; the row says so, so nobody mistakes it
+     for that person's own rate. profile_pay is the staff-scoped view (0215/0286): an owner's figure
+     is already folded into bill_rate there, so he is never "unrated". */
+  const [supplierNames, { data: payRows }] = await Promise.all([
+    fetchSupplierNames(supabase),
+    supabase.from("profile_pay").select("id, bill_rate"),
+  ]);
+  const noBillRateIds = ((payRows ?? []) as { id: string; bill_rate: number | string | null }[])
+    .filter((r) => !(Number(r.bill_rate) > 0))
+    .map((r) => String(r.id));
 
   // A deposit/progress/final invoice on a job carries a progress-report summary
   // so the payment request doubles as a running-balance statement.
@@ -330,6 +346,8 @@ export default async function InvoicePage({
         importMode={importMode}
         importHeld={importHeld}
         textReady={textReady}
+        supplierNames={[...supplierNames]}
+        noBillRateIds={noBillRateIds}
         tz={orgSettings.timezone}
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,

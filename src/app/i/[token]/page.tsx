@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { fetchSupplierNames } from "@/lib/supplier-names";
 import { PrintButton } from "@/components/print-button";
 import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -7,7 +8,7 @@ import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
 import { NO_INDEX } from "@/lib/no-index";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { customerLines, invoiceBalance } from "@/lib/invoice-math";
 import { cardFeeDecision, feePctLabel, payUrl } from "@/lib/org-settings";
 import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
 import type { Metadata } from "next";
@@ -25,6 +26,19 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice"), robots: NO_INDEX };
 }
 
+/** The supplier names of the org that owns this link, read as the service role and pinned to that
+ *  one org. The link is the credential (the same one public_invoice took); nothing here is shown. */
+async function orgSupplierNames(token: string): Promise<ReadonlySet<string>> {
+  try {
+    const svc = createServiceClient();
+    const { data } = await svc.from("invoices").select("org_id").eq("public_token", token).maybeSingle();
+    const orgId = (data as { org_id?: string | null } | null)?.org_id;
+    return orgId ? await fetchSupplierNames(svc, orgId) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export default async function PublicInvoicePage({
   params,
   searchParams,
@@ -39,7 +53,14 @@ export default async function PublicInvoicePage({
   if (!data) notFound();
 
   const inv = data.invoice;
-  const pdfReady = await sharePdfReady("invoice", token, String(inv.status ?? ""));
+  const [pdfReady, supplierNames] = await Promise.all([
+    sharePdfReady("invoice", token, String(inv.status ?? "")),
+    orgSupplierNames(token),
+  ]);
+  // NO LINE NAMES A SUPPLIER (audit v994 PL1, scrub on read). public_invoice does this itself once
+  // 0315 is applied; until then, and as the last door either way, the page does it with the same
+  // rule (customerLines), including on bills that went out before the rule existed.
+  data.items = customerLines(Array.isArray(data.items) ? data.items : [], supplierNames);
   const org = data.org as Organization | null;
   const co = companyFromOrg(org);
   const balance = invoiceBalance(inv.total, inv.amount_paid);
