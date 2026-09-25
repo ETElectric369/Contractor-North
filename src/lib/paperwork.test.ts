@@ -377,6 +377,26 @@ describe("finished jobs: fileable, never picked, and a street they share picks n
     const byNumber: PaperItem = { ...row, proposal: { jobId: "j02", jobFrom: "job_number", jobHint: "J-002", marks: { jobNumber: "J-002", address: "235 TIMBERCREEK RD" } } };
     expect(rematchPaper(byNumber, JOBS)).toBe(byNumber);
   });
+
+  it("a row picked while its job was open stops picking once that job is finished, from a street or a PO alone", () => {
+    // J-046 has since finished; nothing else sits on 518 Crater Lake Rd, so the street alone finds nothing.
+    const row: PaperItem = {
+      id: "p2",
+      status: "needs_review",
+      doc_type: "bill",
+      amount: 40,
+      proposal: { jobId: "j46", jobFrom: "address", jobHint: "518 CRATER LAKE RD", marks: { address: "518 CRATER LAKE RD" } },
+    };
+    const again = rematchPaper(row, JOBS);
+    // The pickers list finished jobs, and still nothing is picked.
+    expect(suggestedDestination(again, JOBS.map((j) => j.id))).toBe("");
+    expect((again.proposal as { jobConflict?: string }).jobConflict).toBe("J-046 Jason Waldow is finished, so no job was picked. Pick the job.");
+    const byPo: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "po", jobHint: "WALDOW", marks: { po: "WALDOW" } } };
+    expect(suggestedDestination(rematchPaper(byPo, JOBS), JOBS.map((j) => j.id))).toBe("");
+    // A printed job number is that job, finished or not: it stands.
+    const byNumber: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "job_number", jobHint: "J-046", marks: { jobNumber: "J-046" } } };
+    expect(rematchPaper(byNumber, JOBS)).toBe(byNumber);
+  });
 });
 
 describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {

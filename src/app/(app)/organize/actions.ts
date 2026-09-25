@@ -18,6 +18,7 @@ import {
   paperTypeLabel,
   paperTypeOfItem,
   isLinelessReturn,
+  isPicture,
   linesPointWithTotal,
   paperPickOf,
   pickedBecause,
@@ -52,6 +53,7 @@ import {
   cleanDocNumber,
   cleanLines,
   copyToJobFolder,
+  documentInUse,
   exactAccountFor,
   filingDocument,
   insertItemizedBill,
@@ -209,7 +211,10 @@ async function readInto(
     doc_type: keepsItself ? null : f.doc_type,
     doc_number: f.doc_number,
     pricing_provisional: f.pricing_provisional,
-    proposal: f.proposal,
+    // A NOTE THAT KEEPS ITSELF SAYS HOW (review of wave 2, TD5): with no `filed` on it, a filed row
+    // with no links read as "filed over nothing", and dropping the same file again said what it
+    // filed is gone, of a note nothing was ever filed from.
+    proposal: keepsItself ? ({ ...f.proposal, filed: { how: "note" } } satisfies PaperProposal) : f.proposal,
   }, waiting);
   if (error) return { ok: false, error: dbError(error) };
   if (!landed?.length) {
@@ -774,6 +779,13 @@ async function tearDownFiling(supabase: any, orgId: string | null, item: any, wo
   // points at the job's OWN upload; that one is never this teardown's to delete.
   const doc = await filingDocument(supabase, orgId, item);
   if (doc && "error" in doc) return { refused: `${dbError(doc.error)} ${words.nothing}` };
+  // WHAT STANDS ON THAT DOCUMENT (review of wave 2, PR4): the customer's page or a panel's photo.
+  // Read before anything is deleted, so a refusal leaves the filing exactly as it was.
+  if (doc && doc.owned) {
+    const used = await documentInUse(supabase, orgId, doc.id);
+    if (used && "error" in used) return { refused: `${dbError(used.error)} ${words.nothing}` };
+    if (used) return { refused: `${used.sentence}, then ${words.then}. ${words.nothing}` };
+  }
 
   // THE BILL COMES DOWN FIRST, AND ONLY IF THE DATABASE LETS IT (0278; audit of cn-v951..v966).
   //
@@ -1047,7 +1059,12 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     // missing from the tech's Photos tab on J-047 and Show On Portal refused it. The document
     // points at a copy in <org>/<job>/; the paper keeps its original for the tray. A receipt or a
     // bill stays where it is: it is the office's paper, with prices on it.
-    if (item.file_url && ctx.orgId && (dest.type === "photo" || !isCost)) {
+    //
+    // PICTURES ONLY (review of wave 2, PR4). Every other paper kept on a job stays in the office's
+    // folder as before: a supplier's quote or price sheet read as "not a cost" is still the
+    // office's paper with prices on it, and the job folder is one every tech on the job can open.
+    // A plan or permit that belongs on the job goes up from the job's own Plans door.
+    if (item.file_url && ctx.orgId && (dest.type === "photo" || isPicture(item as PaperItem))) {
       copyPath = await copyToJobFolder(supabase, ctx.orgId, dest.jobId, String(item.file_url));
       if (!copyPath) return backToTray("The file couldn't be copied onto the job, so it is back in the tray. Try again.");
     }
@@ -1199,6 +1216,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if ("proposal" in item)
     patch.proposal = {
       ...proposalOf(item),
+      // A person filed it again: why it came back (a deleted bill) is answered.
+      ...(dest.type === "unfiled" ? {} : { billDeleted: null }),
       filed: dest.type === "unfiled" ? null : { how: dest.type === "photo" ? "photo" : "bill", ...(provenance?.filed ?? {}) },
     } satisfies PaperProposal;
   const { data: wrote, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
@@ -1364,7 +1383,7 @@ export async function tiePaperwork(id: string, target: { billId: string }): Prom
     tied_bill_id: target.billId,
     tied_supplier_invoice_id: null,
     job_id: hit.jobId ?? null,
-    proposal: { ...proposalOf(item), filed: { how: "tie" } } satisfies PaperProposal,
+    proposal: { ...proposalOf(item), billDeleted: null, filed: { how: "tie" } } satisfies PaperProposal,
   };
   // Only while it is still waiting: a File It pressed a moment ago on another screen wins.
   const { data: back, error } = await supabase
@@ -1556,6 +1575,15 @@ export async function unarchiveItem(id: string): Promise<Result> {
 }
 
 /**
+ * AI SUGGEST WRITES ONLY ONTO A PAPER STILL WAITING (review of wave 2, TD6). The paper is read
+ * before the model's 5-20 seconds; a paper filed in that time had its whole proposal replaced with
+ * the one read before, and the `filed` record inside it (what Undo takes down: the CED documents it
+ * added, the task it made) was gone. Every suggestion write is onlyIfStatus needs_review.
+ */
+const SUGGEST_MISSED =
+  "Nothing was suggested: this paper was filed or moved while AI Suggest was looking, or it isn't here any more. Refresh to see where it is.";
+
+/**
  * Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
  * bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
  * or keep a reference note. Returns what it did.
@@ -1709,9 +1737,9 @@ ${jobLines.join("\n") || "(none)"}`,
       const label = jobLabelOf(String(parsed.job_id));
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, bucketFrom: null, why: reason || null },
-      });
+      }, { onlyIfStatus: "needs_review" });
       if (sErr) return { ok: false, message: dbError(sErr) };
-      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
       revalidatePath("/bills");
       if (state === "picture")
@@ -1743,9 +1771,9 @@ ${jobLines.join("\n") || "(none)"}`,
         };
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), guessJobId: null, bucket: cat, bucketFrom: "ai", why: reason || null },
-      });
+      }, { onlyIfStatus: "needs_review" });
       if (sErr) return { ok: false, message: dbError(sErr) };
-      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
       revalidatePath("/bills");
       return { ok: true, message: `A guess: Business Cost, ${cat}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
@@ -1783,7 +1811,7 @@ ${jobLines.join("\n") || "(none)"}`,
           : { ...proposalOf(item), suggestTask: null, suggestKeep: true, why: reason || null };
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, { proposal }, { onlyIfStatus: "needs_review" });
       if (sErr) return { ok: false, message: dbError(sErr) };
-      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper was just moved, isn't here any more, or this login can't change it." };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
       return {
         ok: true,

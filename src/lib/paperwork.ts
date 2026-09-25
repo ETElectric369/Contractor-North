@@ -177,7 +177,22 @@ export type PaperProposal = {
   suggestKeep?: boolean | null;
   /** How the row was last filed, so Undo takes down exactly that and nothing else. */
   filed?: PaperFiled | null;
+  /**
+   * ITS BILL WAS DELETED FROM BILLS OR A JOB'S COSTS, AND THE PAPER CAME BACK (review of audit
+   * v994 wave 2, TD5). People delete a bill because it was a duplicate, and a paper with no printed
+   * number has nothing that stops a second File It, so the row says why it is back and asks: Set
+   * Aside if the bill was a duplicate, File It again if not. Cleared by the next File It.
+   */
+  billDeleted?: { at: string; by: string | null } | null;
 };
+
+/** The row's sentence for a paper whose bill was deleted (billDeleted), or null. */
+export const BILL_DELETED_SAID =
+  "Its bill was deleted from Bills. If that bill was a duplicate, press Set Aside; if not, File It again.";
+export function billDeletedSaid(item: PaperItem): string | null {
+  if (item.status && item.status !== "needs_review") return null;
+  return proposalOf(item).billDeleted ? BILL_DELETED_SAID : null;
+}
 
 /**
  * WHY IT WENT WHERE IT WENT, KEPT WITH HOW (audit v994, tray F1). The tray's pick lived only in
@@ -1017,6 +1032,18 @@ export function rematchPaper<T extends PaperItem>(
     // finished jobs share that street, the row stops picking and says so. Any other stored pick
     // stands exactly as the paper made it.
     if (p.jobFrom === "job_number") return item;
+    // A STORED PICK OF A JOB THAT HAS SINCE FINISHED (review of wave 2, PR1). The matcher never
+    // picks a finished job, but a pick stored while it was open stood, and the pickers now list
+    // finished jobs, so the row started on it from a street, a PO or a name alone. Asked again here:
+    // it stops picking and says so. A printed job number still picks (above): that is the job.
+    const stored = jobs.find((j) => j.id === p.jobId);
+    if (stored?.closed) {
+      const label = `${stored.job_number ?? ""}${stored.name ? ` ${stored.name}` : ""}`.trim() || "The job the paper names";
+      return {
+        ...item,
+        proposal: { ...p, jobId: null, jobFrom: null, guessJobId: p.guessJobId ?? null, jobConflict: `${label} is finished, so no job was picked. Pick the job.` },
+      };
+    }
     const again = jobFromPaperMarks(storedMarks(p), jobs, pos, selfNames);
     if (again.kind !== "conflict" || !again.veto) return item;
     return { ...item, proposal: { ...p, jobId: null, jobFrom: null, guessJobId: p.guessJobId ?? null, jobConflict: again.sentence } };

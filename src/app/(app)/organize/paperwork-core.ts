@@ -762,13 +762,20 @@ export function standingRefusal(st: BillStanding, then: string, nothing: string,
  * proposal keeps what the reader said and loses only `filed`), and their titles come back so the
  * sentence can name them. Before this they stayed "filed", tied to nothing, gone from the tray.
  */
-export async function returnTiedPapers(supabase: any, orgId: string | null | undefined, papers: BillStanding["tiedPapers"]): Promise<string[]> {
+export async function returnTiedPapers(
+  supabase: any,
+  orgId: string | null | undefined,
+  papers: BillStanding["tiedPapers"],
+  /** Set when the bill was deleted from Bills (papersAfterBillDeleted): the row says why it is back. */
+  billDeleted: PaperProposal["billDeleted"] = null,
+): Promise<string[]> {
   const back: string[] = [];
   for (const t of papers) {
     const p = t.proposal && typeof t.proposal === "object" && !Array.isArray(t.proposal) ? (t.proposal as Record<string, unknown>) : null;
+    const proposal = billDeleted ? { proposal: { ...(p ?? {}), filed: null, billDeleted } } : p ? { proposal: { ...p, filed: null } } : {};
     let q = supabase
       .from("organized_items")
-      .update({ status: "needs_review", tied_bill_id: null, tied_supplier_invoice_id: null, job_id: null, ...(p ? { proposal: { ...p, filed: null } } : {}) })
+      .update({ status: "needs_review", tied_bill_id: null, tied_supplier_invoice_id: null, job_id: null, ...proposal })
       .eq("id", t.id);
     if (orgId) q = q.eq("org_id", orgId);
     const { data, error } = await q.select("id");
@@ -803,6 +810,43 @@ export async function filingDocument(
   if (!data) return null;
   const older = !!data.created_at && !!item.created_at && Date.parse(String(data.created_at)) < Date.parse(String(item.created_at));
   return { id: String(data.id), file_url: data.file_url ?? null, owned: item.source !== "job" && !older };
+}
+
+/** A table this database doesn't have yet (a migration not applied): nothing can lean on it. */
+function tableNotThere(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42P01" || code === "PGRST205" || /does not exist|could not find the table/i.test(msg);
+}
+
+/**
+ * WHAT ELSE STANDS ON A DOCUMENT A FILING MADE, READ BEFORE IT IS DELETED (review of audit v994
+ * wave 2, PR4). A photo filed from Organize now lands in the job's own folder, so Show On Portal
+ * takes it and the Panel tab can pick it. Deleting the documents row then took it off the
+ * customer's page (job_shared_documents cascades, 0300/0326) and cleared the panel's photo
+ * (job_panels.photo_document_id is ON DELETE SET NULL, 0333), with nothing said. So the door
+ * refuses in words and names where to change it. Null: nothing stands on it.
+ */
+export async function documentInUse(
+  supabase: any,
+  orgId: string | null | undefined,
+  documentId: string,
+): Promise<{ sentence: string } | { error: unknown } | null> {
+  let sq = supabase.from("job_shared_documents").select("document_id").eq("document_id", documentId).is("removed_at", null);
+  if (orgId) sq = sq.eq("org_id", orgId);
+  const { data: shared, error: shareErr } = await sq.limit(1);
+  if (shareErr && !tableNotThere(shareErr)) return { error: shareErr };
+  if (shared?.length)
+    return { sentence: "It is shown on the customer's page. Press Take Off Portal on the job's Customer Page tab first" };
+  let pq = supabase.from("job_panels").select("id, name").eq("photo_document_id", documentId).is("removed_at", null);
+  if (orgId) pq = pq.eq("org_id", orgId);
+  const { data: panels, error: panelErr } = await pq.limit(1);
+  if (panelErr && !tableNotThere(panelErr)) return { error: panelErr };
+  if (panels?.length) {
+    const name = String(panels[0]?.name ?? "").trim();
+    return { sentence: `It is the photo of ${name ? `the panel "${name}"` : "a panel"} on the job's Panel tab. Pick another photo for that panel first` };
+  }
+  return null;
 }
 
 /** A job's own storage folder: <org>/<job>/..., never one of 0213's staff-only folders. */
@@ -909,7 +953,10 @@ export async function papersAfterBillDeleted(
   orgId: string | null | undefined,
   makers: PaperBehindBill[],
   standing: BillStanding | null,
+  /** Who deleted the bill, kept on the paper beside when (billDeleted). */
+  by: string | null = null,
 ): Promise<string> {
+  const billDeleted = { at: new Date().toISOString(), by };
   const back: string[] = [];
   const onJob: string[] = [];
   for (const m of makers) {
@@ -939,7 +986,9 @@ export async function papersAfterBillDeleted(
       ...(isCost ? { category: m.doc_type === "bill" || /bill|invoice/i.test(String(m.category ?? "")) ? "Bill" : "Receipt" } : {}),
       ...(standing?.lines.length ? { line_items: standing.lines } : {}),
       ...(standing && standing.amount !== null ? { amount: standing.amount } : {}),
-      ...(p ? { proposal: { ...p, filed: null } } : {}),
+      // WHY IT IS BACK (review of wave 2, TD5): a deleted bill is often a duplicate, and a paper
+      // with no printed number has nothing stopping a second File It. The row asks.
+      proposal: { ...(p ?? {}), filed: null, billDeleted },
     };
     let q = supabase.from("organized_items").update(patch).eq("id", m.id);
     if (orgId) q = q.eq("org_id", orgId);
@@ -950,10 +999,12 @@ export async function papersAfterBillDeleted(
     }
     back.push(m.title);
   }
-  const tied = standing?.tiedPapers.length ? await returnTiedPapers(supabase, orgId, standing.tiedPapers) : [];
+  const tied = standing?.tiedPapers.length ? await returnTiedPapers(supabase, orgId, standing.tiedPapers, billDeleted) : [];
   const all = [...back, ...tied];
   const parts = [
-    all.length ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back in Sort These, ready to file again.` : "",
+    all.length
+      ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back in Sort These. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
+      : "",
     onJob.length ? `The receipt stays on the job; Record as Cost there makes it a cost again.` : "",
   ].filter(Boolean);
   return parts.join(" ");

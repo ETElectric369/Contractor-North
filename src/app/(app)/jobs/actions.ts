@@ -1242,7 +1242,7 @@ export async function deleteBill(id: string, jobId: string): Promise<Result> {
   const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Nothing was deleted. That bill isn't here, or this login can't delete it." };
-  const said = standing && (makers.length || standing.tiedPapers.length) ? await papersAfterBillDeleted(supabase, ctx.orgId, makers, standing) : "";
+  const said = standing && (makers.length || standing.tiedPapers.length) ? await papersAfterBillDeleted(supabase, ctx.orgId, makers, standing, ctx.userId) : "";
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // a deleted cost moves job profitability

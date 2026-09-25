@@ -17,6 +17,7 @@ import {
   bucketIsReaders,
   describePaper,
   fileRefusal,
+  billDeletedSaid,
   guessOf,
   isReturnWithoutLines,
   SHELF_TRAY_NEEDS_LINES,
@@ -469,6 +470,9 @@ export function PaperworkRow({
     </div>
   ) : null;
 
+  /** Why it is back in the tray: its bill was deleted, maybe as a duplicate (review of wave 2, TD5). */
+  const billBack = billDeletedSaid(item);
+
   const conflict = p.jobConflict ? (
     <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
       {p.jobConflict}
@@ -690,6 +694,12 @@ export function PaperworkRow({
                 <p key={matchKey(m)}>{m.sentence}</p>
               ))}
             </div>
+          )}
+
+          {billBack && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {billBack}
+            </p>
           )}
 
           {said && (

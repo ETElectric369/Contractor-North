@@ -89,6 +89,9 @@ function fakeSupabase(
 ) {
   const next = (key: string) => {
     const q = script[key];
+    // What stands on a document (the customer's page, a panel's photo) is nothing unless a test
+    // says otherwise.
+    if ((!q || q.length === 0) && (key === "job_shared_documents.select" || key === "job_panels.select")) return { data: [], error: null };
     if (!q || q.length === 0) throw new Error(`unscripted call: ${key}`);
     return q.shift();
   };
@@ -119,6 +122,7 @@ function fakeSupabase(
         order() { return chain; },
         not() { return chain; },
         limit() { return chain; },
+        is() { return chain; },
         neq() { return chain; },
         in() { return chain; },
         single: () => Promise.resolve(next(`${table}.${verb}`)),

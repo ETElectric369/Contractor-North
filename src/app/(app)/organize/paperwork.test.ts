@@ -51,6 +51,9 @@ type Call = { table: string; verb: string; payload?: any; selected?: boolean; eq
 function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
   const next = (key: string) => {
     const q = script[key];
+    // What stands on a document (the customer's page, a panel's photo) is nothing unless a test
+    // says otherwise.
+    if ((!q || q.length === 0) && (key === "job_shared_documents.select" || key === "job_panels.select")) return { data: [], error: null };
     if (!q || q.length === 0) throw new Error(`unscripted call: ${key}`);
     return q.shift();
   };
@@ -217,6 +220,38 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     expect(ai.systems[0]).not.toContain("Jason");
     expect(ai.systems[0]).not.toContain("Crater Lake");
     expect(ai.systems[0]).not.toContain('"job_id"');
+  });
+
+  it("a note that keeps itself says how it was filed, so a second drop of it is never 'what it filed is gone'", async () => {
+    ai.parsed = { paper_type: "other", kind: "note", title: "Gate code 4411", category: "Note", amount: null, confidence: "high" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.insert": [{ data: { id: "oi-n" }, error: null }],
+        "jobs.select": [JOBS],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-n" }], error: null }],
+      },
+      calls,
+    );
+    const res = await analyzeAndFile({ path: "org-1/organize/n.jpg", name: "n.jpg", mime: "image/jpeg", size: 1000 });
+    expect(res.item).toMatchObject({ status: "filed", destination: "note" });
+    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "filed", proposal: expect.objectContaining({ filed: { how: "note" } }) });
+  });
+
+  it("AI Suggest on a paper filed while it was looking writes nothing and says so", async () => {
+    ai.parsed = { action: "file_job", job_id: "job-046", reason: "The street." };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...PAPER, org_id: "org-1" }, error: null }],
+        "jobs.select": [JOBS],
+        "organized_items.update": [{ data: [], error: null }],
+      },
+      calls,
+    );
+    const res = await aiReviewItem("oi-9");
+    expect(res.ok).toBe(false);
+    expect(res.message).toContain("filed or moved while AI Suggest was looking");
+    expect(did("organized_items", "update")!.eqs).toContainEqual(["status", "needs_review"]);
   });
 
   it("a picture of handwriting is still a picture: it is not kept as a note, it waits and asks what it is", async () => {
@@ -1623,6 +1658,72 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     });
   });
 
+  it("Undo of a job photo shown on the customer's page refuses, says where to take it off, and deletes nothing", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...PICTURE, status: "filed", job_id: "job-046", document_id: "doc-p", proposal: { picture: true, filed: { how: "photo" } } }, error: null },
+        ],
+        "documents.select": [{ data: { id: "doc-p", created_at: "2026-09-25T10:00:00Z", file_url: "org-1/job-046/1790000000000-panel.jpg" }, error: null }],
+        "job_shared_documents.select": [{ data: [{ document_id: "doc-p" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-p");
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe(
+      "It is shown on the customer's page. Press Take Off Portal on the job's Customer Page tab first, then press Undo again. Nothing was undone.",
+    );
+    expect(did("job_shared_documents", "select")!.eqs).toEqual(
+      expect.arrayContaining([
+        ["document_id", "doc-p"],
+        ["org_id", "org-1"],
+      ]),
+    );
+    expect(did("documents", "delete")).toBeUndefined();
+    expect(did("organized_items", "update")).toBeUndefined();
+    expect(storageLog.removed).toEqual([]);
+  });
+
+  it("Delete of a filed photo that is a panel's photo refuses and names the panel", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...PICTURE, status: "filed", job_id: "job-046", document_id: "doc-p", proposal: { picture: true, filed: { how: "photo" } } }, error: null },
+        ],
+        "documents.select": [{ data: { id: "doc-p", created_at: "2026-09-25T10:00:00Z", file_url: "org-1/job-046/1790000000000-panel.jpg" }, error: null }],
+        "job_panels.select": [{ data: [{ id: "panel-1", name: "Main" }], error: null }],
+      },
+      calls,
+    );
+    const res = await deleteOrganizedItem("oi-p");
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe(
+      'It is the photo of the panel "Main" on the job\'s Panel tab. Pick another photo for that panel first, then delete this again. Nothing was deleted.',
+    );
+    expect(did("documents", "delete")).toBeUndefined();
+    expect(did("organized_items", "delete")).toBeUndefined();
+  });
+
+  it("a paper kept on a job that is not a picture stays in the office's folder: no copy where techs can open it", async () => {
+    const QUOTE = { ...PICTURE, id: "oi-q", title: "Supplier quote", category: "Other", proposal: {}, file_url: "org-1/organize/quote.pdf" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: QUOTE, error: null }],
+        "organized_items.update": [
+          { data: [{ id: "oi-q" }], error: null },
+          { data: [{ id: "oi-q" }], error: null },
+        ],
+        "documents.insert": [{ data: { id: "doc-q" }, error: null }],
+      },
+      calls,
+    );
+    const res = await fileItem("oi-q", { type: "job", jobId: "job-046" });
+    expect(res.ok).toBe(true);
+    expect(storageLog.copied).toEqual([]);
+    expect(did("documents", "insert")!.payload).toMatchObject({ job_id: "job-046", file_url: "org-1/organize/quote.pdf" });
+  });
+
   it("Bill Or Receipt makes it a receipt first, then reads it for the total, even if the model still calls it a photo", async () => {
     ai.parsed = { paper_type: "photo", kind: "job_document", title: "Home Depot", vendor: "Home Depot", amount: 23.4, category: "Photo", confidence: "medium" };
     state.client = fakeSupabase(
@@ -1685,6 +1786,8 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     );
     const job = await aiReviewItem("oi-p");
     expect(job.message).toContain("press Job Photo on the row");
+    // Only onto a paper still waiting: one filed during the model's look keeps its `filed` record.
+    expect(did("organized_items", "update")!.eqs).toContainEqual(["status", "needs_review"]);
     expect(job.message).not.toContain("Tap it on the row");
 
     calls.length = 0;
@@ -2256,7 +2359,17 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
     const res = await deleteBill("bill-2", "job-046");
     expect(res.ok).toBe(true);
     expect(res.warning).toContain('Its paper, "CED — $653.25", is back in Sort These');
-    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", bill_id: null, document_id: null, job_id: null, category: "Bill", proposal: { po: "X", filed: null } });
+    // A deleted bill is often a duplicate: the paper is not "ready to file again", it asks.
+    expect(res.warning).toContain("If this bill was a duplicate, press Set Aside on that paper; if not, File It again.");
+    expect(res.warning).not.toContain("ready to file again");
+    expect(did("organized_items", "update")!.payload).toMatchObject({
+      status: "needs_review",
+      bill_id: null,
+      document_id: null,
+      job_id: null,
+      category: "Bill",
+      proposal: { po: "X", filed: null, billDeleted: { by: "user-1", at: expect.any(String) } },
+    });
     expect(did("documents", "delete")).toBeDefined();
   });
 
