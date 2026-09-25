@@ -24,6 +24,10 @@ import { intakePaths } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { intakeAnswerLines } from "@/lib/inquiries/carry-intake-answers";
 import { parsePlanBrief } from "@/lib/plan-brief";
+import { isStaffRole } from "@/lib/actions/perms";
+import { jobShort } from "@/lib/appointments/visit-start";
+import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
+import { VisitStartCard } from "./visit-start-card";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +51,7 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm, { data: meRow }, { data: openRow }] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -55,11 +59,14 @@ export default async function AppointmentCapturePage({
         // answers that the booking doors paste into `notes`, and the only way this page can tell
         // "the office wrote this note" from "this paragraph IS the intake summary, shown properly
         // below" is to have the original to compare against.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake)",
+        // jobs(...) is the linked job the top card names ("Clock In On J-055"); the lead's
+        // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake, customer_id), jobs(id, job_number, name)",
       )
       .eq("id", id)
       .maybeSingle(),
-    supabase.from("organizations").select("settings, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
+    // phone: the crew's "Call The Office" door on a visit with no job yet.
+    supabase.from("organizations").select("settings, phone, stripe_account_id, stripe_account_status, stripe_charges_enabled").limit(1).maybeSingle(),
     // Jobs/customers/staff option lists for the Edit-details modal (the same
     // SSOT helper the schedule's picker uses).
     getSchedulePickerOptions(supabase),
@@ -94,6 +101,15 @@ export default async function AppointmentCapturePage({
     tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
       supabase.from("forms").select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
     ),
+    // WHO IS LOOKING, and whether they are on the clock: the top card's four faces (start / ask the
+    // office / clock in / you're on the clock here) and its Switch To This Job depend on both.
+    supabase.from("profiles").select("role").eq("id", viewerId ?? "").maybeSingle(),
+    supabase
+      .from("time_entries")
+      .select("id, job_id, job_code, clock_in, job:job_id(job_number, name)")
+      .eq("profile_id", viewerId ?? "")
+      .eq("status", "open")
+      .maybeSingle(),
   ]);
   if (!appt) notFound();
 
@@ -124,6 +140,38 @@ export default async function AppointmentCapturePage({
 
   const dayStr = a.starts_at ? todayStrInTz(tz, new Date(a.starts_at)) : "";
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
+
+  /* THE TOP CARD (Erik, 2026-09-25, Tom Goodman): "I just needed a job linked to that lead to start
+     the clock, simple." What it needs: who is looking, their running clock, the linked job, and,
+     for the office on a visit with no job, the one same-day job of this customer it could link to
+     instead (the same read linkVisitInstead re-asks before it links). */
+  const viewerIsStaff = isStaffRole((meRow as { role?: string } | null)?.role ?? "");
+  const linkedJob = (Array.isArray(a.jobs) ? a.jobs[0] : a.jobs) as
+    | { id: string; job_number: string | null; name: string | null }
+    | null
+    | undefined;
+  const oe = openRow as
+    | {
+        id: string;
+        job_id: string | null;
+        job_code: string | null;
+        clock_in: string;
+        job: { job_number: string | null; name: string | null } | { job_number: string | null; name: string | null }[] | null;
+      }
+    | null;
+  const oeJob = oe ? (Array.isArray(oe.job) ? oe.job[0] : oe.job) : null;
+  const viewerOpenEntry = oe
+    ? {
+        id: oe.id,
+        job_id: oe.job_id,
+        label: oeJob ? jobShort(oeJob) : (oe.job_code ?? "").trim() || "no job",
+        clock_in: oe.clock_in,
+      }
+    : null;
+  const linkInstead =
+    viewerIsStaff && !a.job_id && a.status !== "cancelled"
+      ? await loadLinkInstead(supabase, { ...a, inquiry_id: a.inquiry_id ?? null }, tz)
+      : null;
 
   /**
    * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the walk-through, as answers, in their name.
@@ -276,6 +324,31 @@ export default async function AppointmentCapturePage({
             </NavLink>
           )}
         </div>
+        {/* START THE WORK, FIRST. The visit that turns into a job and a running clock is one tap
+            here; the Inspector and the estimator are still below for the visits that need them. */}
+        {a.status !== "cancelled" && (
+          <div className="my-4">
+            <VisitStartCard
+              appointmentId={a.id}
+              tz={tz}
+              isStaff={viewerIsStaff}
+              job={a.job_id ? { id: a.job_id, job_number: linkedJob?.job_number ?? null, name: linkedJob?.name ?? null } : null}
+              openEntry={viewerOpenEntry}
+              linkInstead={
+                linkInstead
+                  ? { id: linkInstead.id, job_number: linkInstead.job_number, name: linkInstead.name, customer: who }
+                  : null
+              }
+              preview={{
+                name: a.title || "Job from appointment",
+                customer: who,
+                address: a.location ?? null,
+                scheduledStart: a.starts_at ?? null,
+              }}
+              officePhone={(org as { phone?: string | null } | null)?.phone ?? null}
+            />
+          </div>
+        )}
         {notesShown && <p className="mt-2 whitespace-pre-wrap text-sm text-slate-600">{notesShown}</p>}
         {/* The customer's own answers, as answers. See the block above for why this is read-only
             and why it is attributed out loud. */}
@@ -313,6 +386,9 @@ export default async function AppointmentCapturePage({
           one smart thing that starts with the appointed questions and fragments from those first".
           Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
           still here, reordered so the ask comes first and everything captured reads as one list. */}
+      {/* The walk-through and the estimate, for the visits that need them. Under their own heading
+          so the page reads: start the work (above), or walk it through and price it (here). */}
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Walk Through Or Estimate</h2>
       <Inspector
         appointmentId={a.id}
         orgId={a.org_id}

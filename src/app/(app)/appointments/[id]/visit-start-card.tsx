@@ -1,0 +1,443 @@
+"use client";
+
+/**
+ * THE TOP OF THE VISIT: start the work, or clock in on it.
+ *
+ * Erik, 2026-09-25, on Tom Goodman's inspection: "when I showed up, I didn't need the inspector or
+ * the estimator. I just needed a job linked to that lead to start the clock, simple." The page led
+ * with the Inspector; the only job door was inside Edit Details. So he made J-055 by hand and
+ * backdated his clock, and the visit pointed at nothing.
+ *
+ * Four states, one card:
+ *   start    office, no job yet:   Start The Job And Clock In (a small sheet: what the job will be,
+ *                                  when the clock starts) · Start The Job · and, when this customer
+ *                                  has exactly one open job made on the visit's day, Link To J-055
+ *                                  Instead. The app offers; a person taps.
+ *   ask      crew, no job yet:     Ask The Office (the bell) · Call / Text The Office. No dead end.
+ *   linked   anybody, job linked:  Clock In On J-055 (Switch To J-055 when on the clock elsewhere)
+ *                                  · Open J-055.
+ *   here     already on it:        You're On The Clock Here · Open J-055.
+ *
+ * Every time shown or picked is the ORG's clock.
+ */
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Play, ArrowLeftRight, Clock, Link2, Phone, MessageSquare, Bell, Briefcase } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
+import { useToast } from "@/components/toast";
+import { getPosition } from "@/lib/geo";
+import type { GeoPoint } from "@/lib/types";
+import { formatDateTimeTz } from "@/lib/tz";
+import { clockWords, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
+import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
+import { clockIn, switchJob, deleteTimeEntry } from "../../timeclock/actions";
+import { askOfficeToStartJob, linkVisitInstead, startJobFromVisit, type StartJobResult } from "../start-job-actions";
+
+export type VisitStartJob = { id: string; job_number: string | null; name: string | null };
+export type VisitStartOpenEntry = { id: string; job_id: string | null; label: string; clock_in: string };
+
+export type VisitStartState = "start" | "ask" | "linked" | "switch" | "here";
+
+/** Which face the card shows. Pure, so the render test and the page agree. */
+export function visitStartState(input: {
+  isStaff: boolean;
+  job: VisitStartJob | null;
+  openEntry: VisitStartOpenEntry | null;
+}): VisitStartState {
+  if (!input.job) return input.isStaff ? "start" : "ask";
+  if (input.openEntry?.job_id === input.job.id) return "here";
+  return input.openEntry ? "switch" : "linked";
+}
+
+/** The tap is the user gesture (the iOS-PWA rule), so a fix can be asked for; never waits long. */
+async function gpsBestEffort(): Promise<GeoPoint | null> {
+  try {
+    const r = await getPosition({ timeout: 4_000 });
+    return r.status === "ok" ? { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy } : null;
+  } catch {
+    return null;
+  }
+}
+
+const OFFLINE = "No connection. That didn't go through; try again when you have a bar or two.";
+
+const btn = "h-11 w-full justify-center sm:w-auto";
+const linkBtn =
+  "btn-gloss inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-[rgb(var(--glass-tint))]/10 sm:w-auto";
+
+export function VisitStartCard({
+  appointmentId,
+  tz,
+  isStaff,
+  job,
+  openEntry,
+  linkInstead,
+  preview,
+  officePhone,
+}: {
+  appointmentId: string;
+  tz: string;
+  isStaff: boolean;
+  job: VisitStartJob | null;
+  openEntry: VisitStartOpenEntry | null;
+  linkInstead: (VisitStartJob & { customer: string | null }) | null;
+  /** What the job will be, from the same fields createJobFromAppointment carries. */
+  preview: { name: string; customer: string | null; address: string | null; scheduledStart: string | null };
+  officePhone: string | null;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [sheet, setSheet] = useState(false);
+  // The sheet's clock choice. "now" sends null; "visit" the visit's own start; "pick" the picker's.
+  const [choice, setChoice] = useState<"now" | "visit" | "pick">("now");
+  const [picked, setPicked] = useState<string | null>(null);
+  // The server can find a running clock the page didn't know about (clocked in on another tab).
+  const [onClock, setOnClock] = useState<{ entryId: string; label: string; since: string } | null>(
+    openEntry && openEntry.job_id !== job?.id
+      ? { entryId: openEntry.id, label: openEntry.label, since: clockWords(openEntry.clock_in, tz) }
+      : null,
+  );
+
+  const state = visitStartState({ isStaff, job, openEntry });
+  const jobNo = job ? jobShort(job) : "";
+
+  const nowMs = Date.now();
+  const visitOk = !!preview.scheduledStart && startedAtProblem(preview.scheduledStart, nowMs, tz) == null;
+  const startIso = choice === "now" ? null : choice === "visit" ? preview.scheduledStart : picked;
+  const problem = choice === "pick" && !picked ? "Pick a start time." : startedAtProblem(startIso, nowMs, tz);
+
+  function run<T extends { ok: boolean; error?: string }>(fn: () => Promise<T>, after: (r: T) => void) {
+    setErr(null);
+    setNote(null);
+    start(async () => {
+      let res: T;
+      try {
+        res = await fn();
+      } catch {
+        setErr(OFFLINE);
+        return;
+      }
+      if (!res?.ok) {
+        const oc = (res as unknown as StartJobResult).onClock;
+        if (oc) setOnClock(oc);
+        setErr(res?.error ?? "Something went wrong. Nothing was changed.");
+        return;
+      }
+      after(res);
+    });
+  }
+
+  /** A job was made or linked: say what happened, then go to it. */
+  function landOnJob(res: StartJobResult) {
+    setSheet(false);
+    const undoId = res.undoEntryId;
+    toast(
+      res.message ?? "Done.",
+      "success",
+      undoId
+        ? {
+            label: "Undo Clock-In",
+            onClick: async () => {
+              try {
+                const u = await deleteTimeEntry(undoId);
+                toast(
+                  u.ok ? `Clock-in undone. ${res.jobNumber ?? "The job"} stays.` : (u.error ?? "The clock-in could not be undone."),
+                  u.ok ? "success" : "error",
+                );
+              } catch {
+                toast(OFFLINE, "error");
+              }
+              router.refresh();
+            },
+          }
+        : undefined,
+    );
+    if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
+    if (res.jobId) router.push(`/jobs/${res.jobId}`);
+    else router.refresh();
+  }
+
+  const startWithClock = () =>
+    run(
+      async () => {
+        const gps = await gpsBestEffort();
+        return startJobFromVisit({
+          appointmentId,
+          clock: onClock ? "switch" : "in",
+          startAt: onClock ? null : startIso,
+          gps,
+        });
+      },
+      landOnJob,
+    );
+
+  const startOnly = () => run(() => startJobFromVisit({ appointmentId, clock: "none" }), landOnJob);
+
+  const linkInsteadTap = () => run(() => linkVisitInstead(appointmentId, linkInstead!.id), landOnJob);
+
+  const clockHere = () =>
+    run(
+      async () => {
+        const gps = await gpsBestEffort();
+        if (openEntry && state === "switch") {
+          return switchJob({ entry_id: openEntry.id, job_id: job!.id, job_code: null, gps });
+        }
+        return clockIn({ job_id: job!.id, job_code: null, gps, clock_in_at: null });
+      },
+      (res: { ok: boolean; warning?: string }) => {
+        const at = clockWords(new Date().toISOString(), tz);
+        toast(
+          state === "switch"
+            ? `Switched your clock to ${jobNo} from ${openEntry?.label ?? "the other job"} at ${at}.`
+            : `Clocked you in on ${jobNo} at ${at}.`,
+          "success",
+        );
+        if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
+        router.refresh();
+      },
+    );
+
+  const ask = () =>
+    run(
+      () => askOfficeToStartJob(appointmentId),
+      (res: { ok: boolean; message?: string }) => setNote(res.message ?? "The office has been asked."),
+    );
+
+  const tel = (officePhone ?? "").replace(/[^\d+]/g, "");
+
+  return (
+    <section
+      className="rounded-xl border border-teal-200 bg-teal-50/60 p-4"
+      aria-label="Start the work"
+      data-visit-start={state}
+    >
+      {state === "start" && (
+        <>
+          <h2 className="text-base font-semibold text-slate-900">Here to do the work?</h2>
+          <p className="mt-0.5 text-sm text-slate-600">
+            Start a job from this visit. It brings {preview.customer ?? "the customer"}, the address and the visit time
+            along.
+          </p>
+          {onClock && (
+            <p className="mt-1 text-sm text-amber-700">
+              You&rsquo;re on the clock on {onClock.label} since {onClock.since}. Starting this job switches your clock here.
+            </p>
+          )}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button
+              className={btn}
+              onClick={() => {
+                setErr(null);
+                setChoice("now");
+                setPicked(null);
+                setSheet(true);
+              }}
+              disabled={pending}
+            >
+              <Play /> Start The Job And Clock In
+            </Button>
+            <Button variant="outline" className={btn} onClick={startOnly} disabled={pending}>
+              <Briefcase /> Start The Job
+            </Button>
+          </div>
+          {linkInstead && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm text-slate-700">
+                {linkInstead.customer ?? "This customer"} already has{" "}
+                <span className="font-semibold">{jobShort(linkInstead)}</span>
+                {linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : ""}, made that day. Use it
+                instead of making a second job?
+              </p>
+              <Button variant="outline" className={`${btn} mt-2`} onClick={linkInsteadTap} disabled={pending}>
+                <Link2 /> Link To {jobShort(linkInstead)} Instead
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+
+      {state === "ask" && (
+        <>
+          <h2 className="text-base font-semibold text-slate-900">Ask the office to start the job</h2>
+          <p className="mt-0.5 text-sm text-slate-600">
+            This visit has no job yet, and only the office can start one. Once they do, you can clock in right here.
+          </p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <Button className={btn} onClick={ask} disabled={pending}>
+              <Bell /> Ask The Office
+            </Button>
+            {tel && (
+              <a href={`tel:${tel}`} className={linkBtn}>
+                <Phone className="h-4 w-4" /> Call The Office
+              </a>
+            )}
+            {tel && (
+              <a href={`sms:${tel}`} className={linkBtn}>
+                <MessageSquare className="h-4 w-4" /> Text The Office
+              </a>
+            )}
+          </div>
+        </>
+      )}
+
+      {(state === "linked" || state === "switch" || state === "here") && job && (
+        <>
+          <h2 className="text-base font-semibold text-slate-900">
+            This visit is {jobNo}
+            {job.name && job.job_number ? <span className="font-normal text-slate-600"> · {job.name}</span> : null}
+          </h2>
+          {state === "switch" && openEntry && (
+            <p className="mt-0.5 text-sm text-amber-700">
+              You&rsquo;re on the clock on {openEntry.label} since {clockWords(openEntry.clock_in, tz)}. Switching ends
+              that part now and starts this one.
+            </p>
+          )}
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {state === "here" ? (
+              <span
+                className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-green-300 bg-green-50 px-4 text-sm font-semibold text-green-700 sm:w-auto"
+                role="status"
+              >
+                <Clock className="h-4 w-4" /> You&rsquo;re On The Clock Here
+              </span>
+            ) : (
+              <Button className={btn} onClick={clockHere} disabled={pending}>
+                {state === "switch" ? <ArrowLeftRight /> : <Play />}
+                {state === "switch" ? `Switch To ${jobNo}` : `Clock In On ${jobNo}`}
+              </Button>
+            )}
+            <Link href={`/jobs/${job.id}`} className={linkBtn}>
+              <Briefcase className="h-4 w-4" /> Open {jobNo}
+            </Link>
+          </div>
+        </>
+      )}
+
+      {err && !sheet && (
+        <p className="mt-2 text-sm text-red-600" role="alert">
+          {err}
+        </p>
+      )}
+      {note && (
+        <p className="mt-2 text-sm text-green-700" role="status">
+          {note}
+        </p>
+      )}
+
+      {state === "start" && (
+        <Modal
+          open={sheet}
+          onClose={() => setSheet(false)}
+          title="Start The Job And Clock In"
+          size="sm"
+          footer={
+            <>
+              <Button type="button" variant="outline" className="h-11" onClick={() => setSheet(false)} disabled={pending}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="h-11"
+                onClick={startWithClock}
+                disabled={pending || (!onClock && !!problem)}
+              >
+                {pending ? "Starting…" : onClock ? "Switch To This Job" : "Start The Job And Clock In"}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">The job will be</p>
+              <dl className="mt-1.5 space-y-1 text-sm">
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-slate-500">Name</dt>
+                  <dd className="font-medium text-slate-900">{preview.name}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-slate-500">Customer</dt>
+                  <dd className="text-slate-800">{preview.customer ?? "None yet"}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-slate-500">Address</dt>
+                  <dd className="text-slate-800">{preview.address ?? "None yet"}</dd>
+                </div>
+                {preview.scheduledStart && (
+                  <div className="flex gap-2">
+                    <dt className="w-20 shrink-0 text-slate-500">Planned</dt>
+                    <dd className="text-slate-800">{formatDateTimeTz(preview.scheduledStart, tz)}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+
+            {onClock ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                You&rsquo;re on the clock on {onClock.label} since {onClock.since}. This switches your clock to the new
+                job now: the part on {onClock.label} ends at this moment. No second clock is opened.
+              </p>
+            ) : (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Started at</p>
+                <div className="mt-1.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Started at">
+                  {(
+                    [
+                      ["now", "Now"],
+                      ...(visitOk ? [["visit", `Visit Time · ${clockWords(preview.scheduledStart!, tz)}`]] : []),
+                      ["pick", "Pick A Time"],
+                    ] as [typeof choice, string][]
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={choice === k}
+                      onClick={() => {
+                        setChoice(k);
+                        setErr(null);
+                        // The picker opens on the current minute and only reports a change, so the
+                        // start it shows is seeded here: what is on screen is what gets sent.
+                        if (k === "pick") {
+                          const n = pickerParts(undefined, tz);
+                          setPicked(pickerInstant(n.date, n.time, tz));
+                        }
+                      }}
+                      className={`h-11 rounded-lg border px-3 text-sm font-medium ${
+                        choice === k
+                          ? "border-[rgb(var(--glass-ink))] bg-[rgb(var(--glass-ink))] text-white"
+                          : "border-slate-300 bg-white text-slate-700"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {choice === "pick" && (
+                  <ClockStartPicker
+                    className="mt-2"
+                    startExpanded
+                    staff
+                    tz={tz}
+                    caption="Your clock starts at the time above."
+                    onChange={(iso) => setPicked(iso)}
+                  />
+                )}
+                {problem && choice !== "now" && <p className="mt-1 text-sm text-red-600">{problem}</p>}
+              </div>
+            )}
+            {err && (
+              <p className="text-sm text-red-600" role="alert">
+                {err}
+              </p>
+            )}
+          </div>
+        </Modal>
+      )}
+    </section>
+  );
+}
