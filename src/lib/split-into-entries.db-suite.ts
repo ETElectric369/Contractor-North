@@ -1,5 +1,5 @@
 /**
- * THE SPLIT-INTO-ENTRIES DATABASE SUITE (migrations 0288 + 0290), written once and run against any
+ * THE SPLIT-INTO-ENTRIES DATABASE SUITE (migrations 0288 + 0290 + 0313), written once and run against any
  * Postgres that has them: split-into-entries.integration.test.ts runs it against the production
  * database inside ONE transaction that is always rolled back (the billing test's pattern), so
  * nothing it creates survives.
@@ -19,6 +19,8 @@
  * this file no longer names the table (tests/no-time-allocations.test.ts has no exemption now).
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { aggregatePayrollEntries } from "./payroll-math";
 
 export interface SqlClient {
@@ -33,6 +35,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
   let c: SqlClient;
   let has0288 = false;
   let has0290 = false;
+  /** 0313: a void line's claim follows every cut, and join/move call a void holder void. */
+  let has0313 = false;
   let orgId = "";
   let staffId = "";
   let techId = "";
@@ -78,8 +82,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
       return { message: String(e?.message ?? e), detail: e?.detail };
     }
   };
-  const needs = (what: "0288" | "0290") => {
-    const ok = what === "0288" ? has0288 : has0290;
+  const needs = (what: "0288" | "0290" | "0313") => {
+    const ok = what === "0288" ? has0288 : what === "0290" ? has0290 : has0313;
     if (!ok) console.warn(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
     return ok;
   };
@@ -174,6 +178,15 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
     // 0290 dropped the old split table. The name is built so no source file spells it.
     const oldTable = ["time", "allocations"].join("_");
     has0290 = has0288 && (await one("select to_regclass($1) is null as gone", [`public.${oldTable}`])).gone === true;
+    has0313 =
+      has0288 &&
+      (
+        await one(
+          `select position('A VOID LINE KEEPS ITS WHOLE CLAIM' in p.prosrc) > 0 as ok
+             from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.proname = 'split_time_entry'`,
+        )
+      )?.ok === true;
 
     // An org with active staff and an active tech, and staff of some OTHER org. Without them the
     // boundary cannot be exercised, and that has to be loud (tests/ci-guard.test.ts), not a skip.
@@ -420,7 +433,10 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         await line(inv.id, [a]);
         await as(staffId);
         const billed = await refusal(() => rpc("join_time_entries", [a, b]));
-        expect(billed?.message).toBe(`${inv.number} bills the first part and not the second, so joining them would make unbilled hours look billed.`);
+        // 0313 gives the status too, as move always did.
+        expect(billed?.message).toBe(
+          `${inv.number}${has0313 ? " (draft)" : ""} bills the first part and not the second, so joining them would make unbilled hours look billed.`,
+        );
         expect((await refusal(() => rpc("join_time_entries", [b, gap])))?.message).toMatch(/do not touch/);
         await asServer();
         const p1 = await entry({ in: "2001-01-14T16:00:00Z", out: "2001-01-14T20:00:00Z" });
@@ -715,6 +731,155 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         expect(r.mode).toBe("repointed");
         expect((await row(open)).job_id).toBe(jobA);
         expect((await row(open)).status).toBe("open");
+      });
+    });
+  });
+
+  // ── 0313: a void claim follows every cut ──────────────────────────────────────────────────────
+  // Audit v994 DB2. A void invoice bills nothing, but its lines say which hours it billed, and the
+  // un-void guard compares exactly those ids with every live line. A cross-job cut used to leave the
+  // void line holding the first piece alone, so the second piece could be billed again and the
+  // void invoice un-voided beside it.
+  describe("a void claim follows every cut (0313)", () => {
+    const unvoid = (invoiceId: string) => c.query("update public.invoices set status = 'sent' where id = $1", [invoiceId]);
+    const statusOf = async (invoiceId: string) => (await one("select status::text as s from public.invoices where id = $1", [invoiceId])).s;
+
+    it("void, cross-job split, bill the piece: the un-void is refused; Undo works; with the piece off, the un-void goes", async () => {
+      if (!needs("0313")) return;
+      await step(async () => {
+        // INV-V billed Brian's whole 8 h shift on job A and was voided.
+        const p = await entry({ in: "2001-03-05T16:00:00Z", out: "2001-03-06T00:00:00Z" });
+        const v = await invoice("void", jobA);
+        const vLine = await line(v.id, [p], 8);
+
+        // The office cuts it at noon Pacific, the afternoon on job B. A void invoice bills nothing,
+        // so the cut is allowed, and the void line now holds both pieces.
+        await as(staffId);
+        const first = await rpc("split_time_entry", [p, "2001-03-05T20:00:00Z", jobB, null, null, null]);
+        await asServer();
+        expect(await lineIds(vLine)).toEqual([p, first.right_id]);
+        expect(first.carried.map((x: any) => [x.invoice_number, x.status])).toEqual([[v.number, "void"]]);
+        expect((await row(first.right_id)).job_id).toBe(jobB);
+
+        // The Undo right after the cut works: both pieces have the same holders.
+        await as(staffId);
+        const undo = await rpc("join_time_entries", [p, first.right_id]);
+        await asServer();
+        expect(undo.kept_id).toBe(p);
+        expect(await lineIds(vLine)).toEqual([p]);
+        expect(await workedS([p])).toBe(8 * 3600);
+
+        // Cut again, and bill the afternoon on job B's own invoice. The void holder does not block it.
+        await as(staffId);
+        const r = (await rpc("split_time_entry", [p, "2001-03-05T20:00:00Z", jobB, null, null, null])).right_id;
+        await asServer();
+        expect(await lineIds(vLine)).toEqual([p, r]);
+        const x = await invoice("draft", jobB);
+        const xLine = await line(x.id, [r], 4);
+
+        // Putting INV-V back would bill those 4 h twice: refused, naming INV-X.
+        const back = await refusal(() => unvoid(v.id));
+        expect(back?.message).toBe(`work already billed on ${x.number}`);
+        expect(await statusOf(v.id)).toBe("void");
+
+        // Join Back now refuses, naming the LIVE invoice with its status, not the void one.
+        await as(staffId);
+        const j = await refusal(() => rpc("join_time_entries", [p, r]));
+        await asServer();
+        expect(j?.message).toBe(
+          `${x.number} (draft) bills the second part and not the first, so joining them would make unbilled hours look billed.`,
+        );
+
+        // Take the piece off INV-X and nothing live bills those hours: INV-V may come back, and it
+        // then holds both pieces, so neither can be billed a second time.
+        await c.query("delete from public.invoice_items where id = $1", [xLine]);
+        await unvoid(v.id); // (refusal() rolls back even a success, so this one runs for real)
+        expect(await statusOf(v.id)).toBe("sent");
+        const again = await invoice("draft", jobB);
+        expect((await refusal(() => line(again.id, [r], 4)))?.message).toBe(`hours already billed on ${v.number}`);
+      });
+    });
+
+    it("a void holder that differs between the pieces is called void by Join Back and Move The Split", async () => {
+      if (!needs("0313")) return;
+      await step(async () => {
+        // Cut first (nothing billed), then the afternoon billed on job B and that invoice voided.
+        const p = await entry({ in: "2001-03-07T16:00:00Z", out: "2001-03-08T00:00:00Z" });
+        await as(staffId);
+        const r = (await rpc("split_time_entry", [p, "2001-03-07T20:00:00Z", jobB, null, null, null])).right_id;
+        await asServer();
+        const x = await invoice("draft", jobB);
+        await line(x.id, [r], 4);
+        await c.query("update public.invoices set status = 'void' where id = $1", [x.id]);
+
+        await as(staffId);
+        const j = await refusal(() => rpc("join_time_entries", [p, r]));
+        const m = await refusal(() => rpc("move_time_entry_cut", [p, r, "2001-03-07T21:00:00Z"]));
+        await asServer();
+        expect(j?.message).toBe(
+          `${x.number} (void) still holds the second part and not the first, so joining them would change what ${x.number} bills if it is ever un-voided. Leave them split.`,
+        );
+        expect(m?.message).toBe(
+          `${x.number} (void) still holds the second part and not the first, so moving the split would change what ${x.number} bills if it is ever un-voided. Leave the split where it is.`,
+        );
+        expect(m?.detail).toBe(`invoice:${x.id}`);
+        expect(iso((await row(p)).clock_out)).toBe("2001-03-07T20:00:00.000Z");
+        expect(await row(r)).toBeTruthy();
+      });
+    });
+
+    it("a cross-job cut of a shift a LIVE invoice bills is still refused, and a void holder beside it changes nothing", async () => {
+      if (!needs("0313")) return;
+      await step(async () => {
+        const p = await entry({ in: "2001-03-09T16:00:00Z", out: "2001-03-10T00:00:00Z" });
+        const v = await invoice("void", jobA);
+        const vLine = await line(v.id, [p], 8);
+        const live = await invoice("sent", jobA);
+        const liveLine = await line(live.id, [p], 8);
+        await as(staffId);
+        const r = await refusal(() => rpc("split_time_entry", [p, "2001-03-09T20:00:00Z", jobB, null, null, null]));
+        await asServer();
+        expect(r?.message).toMatch(new RegExp(`^${live.number} \\(sent\\) already bills this whole shift`));
+        expect(await lineIds(vLine)).toEqual([p]);
+        expect(await lineIds(liveLine)).toEqual([p]);
+        expect(iso((await row(p)).clock_out)).toBe("2001-03-10T00:00:00.000Z");
+      });
+    });
+
+    // 0313's BACKFILL, run from the file itself (its section 3 only: plain rows and a temp table, no
+    // function replaced), so this case works the same before and after 0313 is applied. A shift cut
+    // cross-job TWICE before 0313 leaves the void line owing two pieces; an UPDATE ... FROM with one
+    // join row per piece gave the line only one, and the file's own check then refused on every run.
+    it("0313's backfill gives a void line EVERY piece it owes, two cross-job cuts of one shift", async () => {
+      if (!needs("0288")) return;
+      const sql = readFileSync(
+        fileURLToPath(new URL("../../supabase/migrations/0313_a_void_claim_follows_every_cut.sql", import.meta.url)),
+        "utf8",
+      );
+      const from = sql.indexOf("-- ── 3. BACKFILL");
+      const to = sql.indexOf("-- ── 4. THE CHECK");
+      expect(from).toBeGreaterThan(0);
+      expect(to).toBeGreaterThan(from);
+      await step(async () => {
+        const p = await entry({ in: "2001-03-12T16:00:00Z", out: "2001-03-13T00:00:00Z" });
+        const v = await invoice("void", jobA);
+        const vLine = await line(v.id, [p], 8);
+        // The invoice is older than every cut, as a void invoice from before 0313 would be.
+        await c.query("update public.invoices set created_at = '2001-03-14T00:00:00Z' where id = $1", [v.id]);
+        await as(staffId);
+        const r1 = (await rpc("split_time_entry", [p, "2001-03-12T20:00:00Z", jobB, null, null, null])).right_id;
+        const r2 = (await rpc("split_time_entry", [r1, "2001-03-12T22:00:00Z", jobC, null, null, null])).right_id;
+        await asServer();
+        expect((await row(r2)).split_from).toBe(p);
+        // What a cross-job cut left before 0313: the void line holds the first piece alone.
+        await c.query("update public.invoice_items set source_ids = array[$1]::uuid[] where id = $2", [p, vLine]);
+
+        await c.query(sql.slice(from, to) + "\ndrop table _0313_owed;");
+        expect([...(await lineIds(vLine))].sort()).toEqual([p, r1, r2].sort());
+
+        // Run again: it owes nothing and appends nothing twice.
+        await c.query(sql.slice(from, to) + "\ndrop table _0313_owed;");
+        expect(await lineIds(vLine)).toHaveLength(3);
       });
     });
   });
