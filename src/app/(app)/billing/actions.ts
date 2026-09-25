@@ -3701,7 +3701,7 @@ export async function settleUp(input: {
   if (noFigure) {
     return {
       ok: false,
-      error: "There's no open bill here to pay by card. Record Payment writes one for what they paid, or make the invoice from the job's Invoices tab first.",
+      error: "There's no open bill here to pay by card yet. Record Payment writes one for what they paid, or make the invoice first and take the card from it.",
     };
   }
 

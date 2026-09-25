@@ -261,8 +261,8 @@ export default async function InvoicePage({
           {/* PAY NOW — the card door, up here with the other verbs (Erik 2026-09-10: "the pay now
               button should have the credit card stuff"). It replaces the old Collect Payment link,
               which opened the customer's checkout in a new tab of the OFFICE's browser. Shown on a
-              draft too: Pay Now sends the invoice the moment it builds the door, because putting a
-              bill in front of a customer is sending it. */}
+              draft too - and there it ASKS first ("Send INV-078 as the bill first?") and sends it
+              only on the yes (Connected North Phase 1: no pay door sends a draft on its own). */}
           {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
             <PayNowButton source="invoice" invoiceId={inv.id} balance={invoiceBalance(inv.total, inv.amount_paid)} cardEnabled={cardEnabled} textReady={textReady} />
           )}
