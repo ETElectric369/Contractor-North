@@ -228,8 +228,33 @@ describe("the preview: notes in plain words, ticks that leave the deciding to a 
         kind: "supplier",
         trade: "Pipe",
         is_person: false,
+        source_url: null,
+        maps_url: null,
       },
     ]);
+  });
+
+  it("a LOOKED-UP pick changes only what Add sends: its ticked fields and where they were found (Phase 2)", () => {
+    const rows = buildPreview(raw(["Granite Peak Plumbing"]), []);
+    rows[0].email = "bids@granitepeak.example";
+    const site = "https://granitepeak.example/contact";
+    const choice = {
+      id: "choice-1",
+      place: "Truckee, CA",
+      fields: { phone: { value: "(530) 555-0142", source: site }, email: { value: "office@granitepeak.example", source: site } },
+      maps_url: null,
+      source_url: site,
+    };
+    // Phone was empty (ticked); the typed email differs and was left unticked: it stays.
+    rows[0].pick = { choice, take: ["phone"] };
+    expect(rowsToAdd(rows, [])[0]).toMatchObject({ phone: "(530) 555-0142", email: "bids@granitepeak.example", source_url: site, maps_url: null });
+    // The preview row itself still says what the file said: a pick fills Add, it isn't saved anywhere.
+    expect(rows[0].phone).toBeNull();
+    // None Of These (no pick) or nothing ticked: no source rides along.
+    rows[0].pick = { choice, take: [] };
+    expect(rowsToAdd(rows, [])[0]).toMatchObject({ phone: null, source_url: null });
+    rows[0].pick = null;
+    expect(rowsToAdd(rows, [])[0]).toMatchObject({ phone: null, source_url: null });
   });
 
   it("a name over 120 characters is blocked until shortened", () => {

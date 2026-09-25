@@ -27,16 +27,16 @@ export function kindsMissing(err: { code?: string; message?: string } | null | u
   if (!err) return false;
   if (err.code === "42703" || err.code === "PGRST204") return true;
   const msg = String(err.message ?? "");
-  return /\b(kind|trade|is_person|import_batch)\b/.test(msg) && /does not exist|schema cache|could not find/i.test(msg);
+  return /\b(kind|trade|is_person|import_batch|source_url|maps_url|looked_up_at)\b/.test(msg) && /does not exist|schema cache|could not find/i.test(msg);
 }
 
 export const KINDS_NOT_READY =
   "Sorting vendors into suppliers, subcontractors and brands arrives with the next update. Add them one at a time for now.";
 
-/** THE PROJECTION LAW: every column a card is read with, in one place. 0341's three are asked
+/** THE PROJECTION LAW: every column a card is read with, in one place. 0341's columns are asked
  *  for first and dropped on a database that doesn't have them yet. */
 export const CARD_COLUMNS = "id, name, contact_name, phone, email, website, address, notes, archived";
-export const CARD_COLUMNS_0341 = `${CARD_COLUMNS}, kind, trade, is_person`;
+export const CARD_COLUMNS_0341 = `${CARD_COLUMNS}, kind, trade, is_person, source_url, maps_url, looked_up_at`;
 
 /** Every card of this org (live and archived), with 0341's columns when the database has them. */
 export async function cardsOf(

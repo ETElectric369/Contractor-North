@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ExternalLink, Mail, MapPin, Phone, Plus, Search, X } from "lucide-react";
+import { FoundChanges, LookupChoices } from "./vendor-choices";
+import { lookUpVendors } from "./vendor-lookup-actions";
+import { autoPick, changesFor, lookupPrice, type FoundField, type LookupAnswer, type LookupChoice } from "./vendor-lookup-math";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -13,6 +16,7 @@ import { formatCurrency, formatPhone } from "@/lib/utils";
 import { AddVendorPrice } from "./add-vendor-price";
 import {
   kindCarriesPrices,
+  linkOf,
   listedKind,
   matchesVendorFilter,
   optionName,
@@ -28,7 +32,7 @@ import {
   type VendorSummary,
 } from "./item-options-math";
 import type { PriceItem } from "./price-list-math";
-import { addVendor, archiveVendor, restoreVendor, saveVendorField } from "./vendor-actions";
+import { addVendor, archiveVendor, restoreVendor, saveLookedUp, saveVendorField, undoLookedUp } from "./vendor-actions";
 import { VendorImport } from "./vendor-import";
 import { KIND_CHOICES, KIND_LABEL, type ExistingVendor } from "./vendor-import-math";
 import { ArchivedVendorRow, VendorPriceRow, useOptionWrites } from "./vendor-price-row";
@@ -175,6 +179,13 @@ export function VendorsManager({
   );
 }
 
+/** The card's map link: the one saved with a looked-up pick, else a map search of its address. */
+function mapHref(card: VendorCard | null): string | null {
+  const saved = linkOf(card?.maps_url);
+  if (saved) return saved;
+  return card?.address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(card.address)}` : null;
+}
+
 /** The kind in words, and the trade after it: "Subcontractor · Plumbing". */
 function kindLine(kind: VendorKind | null, trade: string | null | undefined): string {
   return [KIND_LABEL[kind ?? "none"], trade?.trim()].filter(Boolean).join(" · ");
@@ -188,6 +199,7 @@ function VendorTile({ vendor: v, showKind, onOpen }: { vendor: VendorSummary; sh
   const card = v.card;
   const tel = card?.phone ? card.phone.replace(/[^\d+]/g, "") : "";
   const web = websiteHref(card?.website);
+  const map = mapHref(card);
   return (
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm hover:border-brand/50">
       <button type="button" onClick={onOpen} className="block w-full px-4 pt-3 pb-2 text-left">
@@ -210,7 +222,7 @@ function VendorTile({ vendor: v, showKind, onOpen }: { vendor: VendorSummary; sh
           </p>
         )}
       </button>
-      {(tel || web || card?.address) && (
+      {(tel || web || map) && (
         <div className="flex flex-wrap gap-1 px-2 pb-2">
           {tel && (
             <a href={`tel:${tel}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-slate-700 hover:bg-slate-50">
@@ -222,9 +234,9 @@ function VendorTile({ vendor: v, showKind, onOpen }: { vendor: VendorSummary; sh
               <ExternalLink className="h-4 w-4" /> Website
             </a>
           )}
-          {card?.address && (
+          {map && (
             <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(card.address)}`}
+              href={map}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm text-slate-700 hover:bg-slate-50"
@@ -499,6 +511,7 @@ function VendorSheet({
   const card = vendor.card;
   const tel = card?.phone ? card.phone.replace(/[^\d+]/g, "") : "";
   const web = websiteHref(card?.website);
+  const map = mapHref(card);
   const kind = listedKind(vendor);
   // A SUBCONTRACTOR NEVER CARRIES PRICES (0341): no "Put It On An Item" for one. It can only
   // become one while it's on no item (saveVendorField refuses otherwise), so this never hides
@@ -585,7 +598,16 @@ function VendorSheet({
               );
             })}
           </div>
-          {(tel || card?.email || web || card?.address) && (
+          {kindsAvailable && cardsAvailable && (
+            <CardLookup
+              key={vendor.key}
+              name={vendor.name}
+              card={card}
+              onSaved={() => startRefresh(() => router.refresh())}
+              beforeSave={() => saveQueue.current}
+            />
+          )}
+          {(tel || card?.email || web || map) && (
             <div className="mt-2 flex flex-wrap gap-2">
               {tel && (
                 <a href={`tel:${tel}`} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:border-brand">
@@ -602,9 +624,9 @@ function VendorSheet({
                   <ExternalLink className="h-4 w-4" /> Website
                 </a>
               )}
-              {card?.address && (
+              {map && (
                 <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(card.address)}`}
+                  href={map}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-sm text-slate-700 hover:border-brand"
@@ -730,5 +752,141 @@ function VendorSheet({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/* ── LOOK UP, ON A VENDOR'S CARD (Phase 2, paid) ─────────────────────────────────────────────── */
+
+/**
+ * The card's Look Up: the price before the tap, the choices that came back, and then what the pick
+ * would change. It fills only the empty boxes; a box somebody typed shows old → new and starts
+ * unticked. Nothing is saved until Save, which writes the ticked details and where they were found,
+ * with Undo.
+ */
+function CardLookup({
+  name,
+  card,
+  onSaved,
+  beforeSave,
+}: {
+  name: string;
+  card: VendorCard | null;
+  onSaved: () => void;
+  /** Wait for any contact box still saving, so the pick is compared with what's really there. */
+  beforeSave: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [look, setLook] = useState<{ answer: LookupAnswer; auto: boolean; hidden: boolean } | null>(null);
+  const [pick, setPick] = useState<{ choice: LookupChoice; take: FoundField[] } | null>(null);
+  const isPerson = card?.is_person === true;
+  const current = { phone: card?.phone ?? null, email: card?.email ?? null, website: card?.website ?? null, address: card?.address ?? null };
+
+  const pickOf = (choice: LookupChoice) => ({ choice, take: changesFor(current, choice).filter((c) => c.take).map((c) => c.field) });
+
+  async function run() {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await lookUpVendors({ names: [{ name, isPerson }] });
+      if (!res.ok) return setError(res.error);
+      const answer = res.results[0]?.answer;
+      if (!answer) return setError("The lookup didn't answer. Try again.");
+      const only = autoPick(answer, isPerson);
+      setLook({ answer, auto: !!only, hidden: false });
+      setPick(only ? pickOf(only) : null);
+    } catch {
+      setError("The lookup didn't answer. Check the connection and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (!pick || busy) return;
+    const fields: Partial<Record<FoundField, string>> = {};
+    for (const f of pick.take) if (pick.choice.fields[f]) fields[f] = pick.choice.fields[f]!.value;
+    if (!Object.keys(fields).length) return;
+    setBusy(true);
+    await beforeSave();
+    const res = await saveLookedUp({ name, fields, source_url: pick.choice.source_url, maps_url: pick.choice.maps_url });
+    setBusy(false);
+    if (!res.ok) return toast(res.error ?? "Couldn't save that.", "error");
+    const n = Object.keys(fields).length;
+    const undo = res.undo;
+    toast(`Saved ${n} detail${n === 1 ? "" : "s"} for ${name}.`, "success", undo
+      ? {
+          label: "Undo",
+          onClick: async () => {
+            const back = await undoLookedUp(undo);
+            if (!back.ok) return toast(back.error ?? "Couldn't undo that.", "error");
+            toast("Undone", "success");
+            onSaved();
+          },
+        }
+      : undefined);
+    setLook(null);
+    setPick(null);
+    onSaved();
+  }
+
+  const taken = pick ? pick.take.filter((f) => pick.choice.fields[f]).length : 0;
+  return (
+    <div className="mt-3 space-y-2">
+      {!look ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => void run()} disabled={busy}>
+            <Search className="h-4 w-4" /> {busy ? "Looking Up…" : "Look Up Contact Info"}
+          </Button>
+          <span className="text-xs text-slate-500">{lookupPrice(1)}. Counts toward your monthly AI allowance. Nothing is saved until you press Save.</span>
+        </div>
+      ) : look.hidden ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span>{look.answer.found ? "None of the choices were used." : "Left blank."}</span>
+          {look.answer.found && (
+            <Button variant="ghost" onClick={() => setLook({ ...look, hidden: false })}>
+              Show Choices Again
+            </Button>
+          )}
+        </div>
+      ) : (
+        <LookupChoices
+          name={name}
+          answer={look.answer}
+          isPerson={isPerson}
+          pickedId={pick?.choice.id ?? null}
+          autoPicked={look.auto}
+          onPick={(c) => {
+            setPick(pickOf(c));
+            setLook({ ...look, auto: false });
+          }}
+          onNone={() => {
+            setPick(null);
+            setLook({ ...look, auto: false, hidden: true });
+          }}
+        />
+      )}
+      {pick && (
+        <div className="space-y-2 rounded-lg border border-slate-200 px-3 py-2">
+          <FoundChanges
+            changes={changesFor(current, pick.choice)}
+            take={pick.take}
+            onToggle={(field, on) =>
+              setPick((p) => (p ? { ...p, take: on ? [...new Set([...p.take, field])] : p.take.filter((f) => f !== field) } : p))
+            }
+          />
+          <Button onClick={() => void save()} disabled={busy || taken === 0}>
+            {taken === 0 ? "Nothing Ticked" : `Save ${taken} Detail${taken === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

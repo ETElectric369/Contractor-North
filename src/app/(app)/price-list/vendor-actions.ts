@@ -430,7 +430,7 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
   }
 
   const refused: { name: string; why: string }[] = [];
-  const inserts: (VendorCardClean & { name: string })[] = [];
+  const inserts: (VendorCardClean & { name: string; looked_up_at?: string })[] = [];
   const restores: { id: string; name: string; patch: Record<string, unknown> }[] = [];
   const seen = new Set<string>();
   for (const raw of list) {
@@ -457,13 +457,16 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
       refused.push({ name, why: `${String(card.name)} is already on your Vendors list.` });
       continue;
     }
+    // A LOOKED-UP ROW carries the page its details were found on (Look Up, Phase 2). The stamp says
+    // when a person took them; it is set here, at the press, never by the lookup.
+    const lookedUp = cleaned.clean.source_url ? { looked_up_at: new Date().toISOString() } : {};
     if (card) {
-      const patch: Record<string, unknown> = { archived: false, import_batch: batchId };
+      const patch: Record<string, unknown> = { archived: false, import_batch: batchId, ...lookedUp };
       for (const [k, v] of Object.entries(cleaned.clean)) if (v !== null && v !== undefined && k !== "name") patch[k] = v;
       restores.push({ id: String(card.id), name: String(card.name), patch });
       continue;
     }
-    inserts.push({ ...cleaned.clean, name });
+    inserts.push({ ...cleaned.clean, ...lookedUp, name });
   }
 
   let added = 0;
@@ -595,4 +598,119 @@ export async function undoVendorImport(input: {
     );
   }
   return { ok: true, archived, leftAlone, note: bits.join(" ") };
+}
+
+/* ── A LOOKED-UP CHOICE, SAVED ONTO A CARD (Look Up, Phase 2) ─────────────────────────────── */
+
+export type LookedUpField = "phone" | "email" | "website" | "address";
+const LOOKED_UP_FIELDS: LookedUpField[] = ["phone", "email", "website", "address"];
+
+export type LookedUpUndo = {
+  cardId: string;
+  /** The card was made by this save (the vendor was only on items): Undo archives it. */
+  created: boolean;
+  /** What the save replaced, to put back. */
+  previous: Record<string, string | null>;
+  /** updated_at after the save: Undo puts things back only while the card still carries it. */
+  stamp: string;
+};
+
+/**
+ * SAVE THE FIELDS A PERSON TICKED from a looked-up choice onto a vendor's card, in one write, with
+ * the page they were found on (source_url), its map link and when (looked_up_at). The person chose
+ * each field on screen: empty ones started ticked, typed ones showed old → new and started unticked.
+ * Only phone, email, website and address are taken; each goes through cleanVendorCard like a typed
+ * one. A vendor that is only on items gets its card here. Returns what it replaced, for Undo.
+ */
+export async function saveLookedUp(input: {
+  name: string;
+  fields: Partial<Record<LookedUpField, string>>;
+  source_url: string;
+  maps_url?: string | null;
+}): Promise<VendorResult & { undo?: LookedUpUndo }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId, userId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  if (!vendorKey(input?.name)) return { ok: false, error: "No vendor was named. Reload the page." };
+
+  const picked: Partial<Record<LookedUpField, string>> = {};
+  for (const f of LOOKED_UP_FIELDS) {
+    const v = input?.fields?.[f];
+    if (typeof v === "string" && v.trim()) picked[f] = v;
+  }
+  if (!Object.keys(picked).length) return { ok: false, error: "Nothing is ticked, so nothing was saved." };
+  const cleaned = cleanVendorCard({ ...picked, source_url: input.source_url, maps_url: input.maps_url ?? null }, "update");
+  if ("error" in cleaned) return { ok: false, error: cleaned.error };
+  if (!cleaned.clean.source_url) return { ok: false, error: "A looked-up detail has to say where it was found. Look it up again." };
+
+  const cards = await cardsOf(supabase, orgId);
+  if ("error" in cards) return { ok: false, error: cardsMissing(cards.error) ? CARDS_NOT_READY : dbError(cards.error) };
+  if (!cards.kinds) return { ok: false, error: "Looking vendors up arrives with the next update. Add the details yourself for now." };
+  const key = vendorKey(input.name);
+  const card = cards.rows.find((c) => vendorKey(String(c.name ?? "")) === key) ?? null;
+  const patch: Record<string, unknown> = { ...cleaned.clean, looked_up_at: new Date().toISOString() };
+
+  if (!card) {
+    const { data, error } = await supabase
+      .from("price_list_vendors")
+      .insert({ ...patch, name: input.name.trim(), created_by: userId })
+      .select("id, updated_at");
+    if (error) return { ok: false, error: kindsMissing(error) ? KINDS_NOT_READY : vendorCardRefusal(error, input.name) };
+    const row = (data ?? [])[0] as { id: string; updated_at: string } | undefined;
+    if (!row) return { ok: false, error: "Nothing was saved. Reload the page and try again." };
+    revalidatePath("/price-list");
+    return { ok: true, undo: { cardId: row.id, created: true, previous: {}, stamp: String(row.updated_at) } };
+  }
+
+  const previous: Record<string, string | null> = {};
+  for (const k of Object.keys(patch)) previous[k] = (card[k] as string | null | undefined) ?? null;
+  const { data, error } = await supabase
+    .from("price_list_vendors")
+    .update(patch)
+    .eq("id", String(card.id))
+    .eq("org_id", orgId)
+    .select("id, updated_at");
+  if (error) return { ok: false, error: kindsMissing(error) ? KINDS_NOT_READY : vendorCardRefusal(error, input.name) };
+  const row = (data ?? [])[0] as { id: string; updated_at: string } | undefined;
+  if (!row) return { ok: false, error: "Nothing was saved. That vendor may have been removed, so reload the page." };
+  revalidatePath("/price-list");
+  return { ok: true, undo: { cardId: String(card.id), created: false, previous, stamp: String(row.updated_at) } };
+}
+
+/** Undo a saveLookedUp: put back exactly what it replaced, only while nobody has changed the card
+ *  since (its updated_at is still the stamp the save handed back). A card the save made is archived. */
+export async function undoLookedUp(undo: LookedUpUndo): Promise<VendorResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  if (!undo?.cardId || !undo.stamp) return { ok: false, error: "That can't be found to undo." };
+
+  const allowed = new Set<string>([...LOOKED_UP_FIELDS, "source_url", "maps_url", "looked_up_at"]);
+  const patch: Record<string, unknown> = undo.created ? { archived: true } : {};
+  if (!undo.created) {
+    for (const [k, v] of Object.entries(undo.previous ?? {})) {
+      if (!allowed.has(k)) continue;
+      if (k === "looked_up_at") {
+        patch[k] = v && !Number.isNaN(Date.parse(v)) ? v : null;
+        continue;
+      }
+      const c = cleanVendorCard({ [k]: v ?? "" } as VendorCardInput, "update");
+      if ("error" in c) return { ok: false, error: c.error };
+      patch[k] = (c.clean as Record<string, unknown>)[k] ?? null;
+    }
+    if (!Object.keys(patch).length) return { ok: false, error: "That can't be found to undo." };
+  }
+  const { data, error } = await supabase
+    .from("price_list_vendors")
+    .update(patch)
+    .eq("id", undo.cardId)
+    .eq("org_id", orgId)
+    .eq("updated_at", undo.stamp)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That vendor has been changed since, so Undo left it alone." };
+  revalidatePath("/price-list");
+  return { ok: true };
 }

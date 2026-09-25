@@ -20,6 +20,13 @@
 --   import_batch  the one Add press that created this card, so Undo can archive exactly that
 --          batch and nothing else. Indexed with org_id, the way Undo reads it.
 --
+-- AND WHERE A LOOKED-UP CARD CAME FROM (Phase 2, Look Up: paid, capped, every field sourced). These
+-- were planned as 0342; they ride in 0341 because neither is applied yet and one step is one risk.
+--   source_url    the page the picked choice's details were found on ("Found On ..."), http(s) only,
+--                 at most 500 characters. Written only when a person picks a looked-up choice.
+--   maps_url      a map link for that choice, same rule.
+--   looked_up_at  when that pick was saved. NULL = typed by a person, never looked up.
+--
 -- UNCHANGED: RLS (0296's read / staff insert / staff update, tenant line on every verb), no delete
 -- policy (archive, never delete), set_org_id, touch_updated_at, and the exact one-per-name index
 -- on (org_id, lower(btrim(name))). Undo relies on touch_updated_at firing on UPDATE only: an
@@ -48,7 +55,10 @@ end $$;
 alter table public.price_list_vendors
   add column if not exists trade text,
   add column if not exists is_person boolean not null default false,
-  add column if not exists import_batch uuid;
+  add column if not exists import_batch uuid,
+  add column if not exists source_url text,
+  add column if not exists maps_url text,
+  add column if not exists looked_up_at timestamptz;
 
 do $$
 begin
@@ -59,6 +69,18 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'price_list_vendors_trade_check') then
     alter table public.price_list_vendors
       add constraint price_list_vendors_trade_check check (trade is null or length(btrim(trade)) between 1 and 60);
+  end if;
+  -- A LINK IS A WEB LINK: http(s), no spaces, at most 500 characters. The app checks the same
+  -- (websiteHref's rule, scheme required); this holds it for any other writer.
+  if not exists (select 1 from pg_constraint where conname = 'price_list_vendors_source_url_check') then
+    alter table public.price_list_vendors
+      add constraint price_list_vendors_source_url_check
+      check (source_url is null or (source_url ~* '^https?://[^[:space:]]+$' and length(source_url) <= 500));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'price_list_vendors_maps_url_check') then
+    alter table public.price_list_vendors
+      add constraint price_list_vendors_maps_url_check
+      check (maps_url is null or (maps_url ~* '^https?://[^[:space:]]+$' and length(maps_url) <= 500));
   end if;
 end $$;
 
@@ -74,3 +96,9 @@ comment on column public.price_list_vendors.is_person is
   'The name is a person''s, not a company''s (0341). A guess the import makes; a person can change it.';
 comment on column public.price_list_vendors.import_batch is
   'The Add press that created this card (0341), so Undo archives exactly that batch, and only the cards nobody has edited since.';
+comment on column public.price_list_vendors.source_url is
+  'The page a looked-up choice was found on (0341, Look Up). http(s) only, at most 500 characters. Written only when a person picks that choice.';
+comment on column public.price_list_vendors.maps_url is
+  'A map link for the picked looked-up choice (0341, Look Up). http(s) only, at most 500 characters.';
+comment on column public.price_list_vendors.looked_up_at is
+  'When a person saved a looked-up choice onto this card (0341, Look Up). NULL = typed, never looked up.';

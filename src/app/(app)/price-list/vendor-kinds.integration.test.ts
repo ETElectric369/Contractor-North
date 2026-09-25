@@ -7,11 +7,12 @@ import pg from "pg";
  * Migration 0341: a vendor has a kind (vendor import, Phase 1).
  *
  * price_list_vendors gains kind (brand / supplier / subcontractor, NULL = Not Sorted), trade,
- * is_person and import_batch. Pinned here, against the real database, inside ONE transaction that
- * is always rolled back:
+ * is_person and import_batch, and (Look Up, Phase 2) source_url, maps_url and looked_up_at. Pinned
+ * here, against the real database, inside ONE transaction that is always rolled back:
  *   · every card made before 0341 is backfilled to 'brand' (today's prices behave as before), and a
  *     re-run never touches a card a person left Not Sorted;
- *   · the kind is a whitelist and the trade is short, in the database as well as the app;
+ *   · the kind is a whitelist and the trade is short, in the database as well as the app, and a
+ *     looked-up source or map link is an http(s) address of at most 500 characters;
  *   · an insert leaves updated_at = created_at and an edit moves updated_at: the fact Undo relies on
  *     to archive only the cards nobody has touched since the import;
  *   · 0296's boundary is unchanged: staff write, a tech can't, and another company can't read,
@@ -70,7 +71,11 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
-    // Asked before anything is locked: no transaction, no DDL.
+    // BEGIN FIRST: nothing on this connection runs outside the transaction that is rolled back.
+    await c.query("begin");
+    await c.query("set local lock_timeout = '3s'");
+    await c.query("set local statement_timeout = '15s'");
+    // Asked before any DDL: is 0341 already on this database?
     const has = await one(
       "select exists (select 1 from information_schema.columns where table_schema='public' and table_name='price_list_vendors' and column_name='kind') as yes",
     );
@@ -78,9 +83,6 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
       waiting = true;
       return;
     }
-    await c.query("begin");
-    await c.query("set local lock_timeout = '3s'");
-    await c.query("set local statement_timeout = '15s'");
 
     const fx = await one(
       `select t.org_id, t.id as tech_id, s.id as staff_id
@@ -111,7 +113,7 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
 
   afterAll(async () => {
     try {
-      if (!waiting) await c?.query("rollback");
+      await c?.query("rollback");
     } finally {
       await c?.end();
     }
@@ -153,6 +155,30 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
     expect(await refused("insert into price_list_vendors (name, trade) values ('TEST 0341 Long Trade', $1)", ["x".repeat(61)])).toBe("23514");
     expect(await refused("insert into price_list_vendors (name, trade) values ('TEST 0341 Blank Trade', '  ')", [])).toBe("23514");
     expect(await refused("insert into price_list_vendors (name, kind) values ('TEST 0341 Supplier', 'supplier')", [])).toBeNull();
+    await asServer();
+  });
+
+  it("Look Up's columns: a source and a map link are web addresses only, and when it was taken is a time", async () => {
+    if (!ready()) return;
+    await as(staffId);
+    const bad = (col: string, v: string) => refused(`insert into price_list_vendors (name, ${col}) values ('TEST 0341 Bad Link', $1)`, [v]);
+    for (const col of ["source_url", "maps_url"]) {
+      expect(await bad(col, "javascript:alert(1)")).toBe("23514");
+      expect(await bad(col, "https://has a space.example")).toBe("23514");
+      expect(await bad(col, `https://x.example/${"a".repeat(490)}`)).toBe("23514");
+      expect(await bad(col, "granitepeak.example")).toBe("23514");
+    }
+    const row = await one(
+      `insert into price_list_vendors (name, kind, phone, source_url, maps_url, looked_up_at)
+       values ('TEST 0341 Looked Up', 'subcontractor', '(530) 555-0142', 'https://granitepeak.example/contact',
+               'https://www.google.com/maps/search/?api=1&query=Granite', now())
+       returning org_id, source_url, (looked_up_at is not null) as stamped`,
+    );
+    expect(row).toEqual({ org_id: orgId, source_url: "https://granitepeak.example/contact", stamped: true });
+    await asServer();
+    // Another company can't see it.
+    await as(otherStaffId);
+    expect((await c.query("select source_url from price_list_vendors where name = 'TEST 0341 Looked Up'")).rowCount).toBe(0);
     await asServer();
   });
 

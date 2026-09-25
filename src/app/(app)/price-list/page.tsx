@@ -32,11 +32,12 @@ type KitRow = { id: string; name: string; category: string | null; kit_items: (K
  *  option row, the modal and the sell-price resolution read has to be named right here, or it is
  *  undefined at runtime with nothing to show for it. */
 const OPTION_SELECT = "id, item_id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, archived, sort_order";
-/** 0296's vendor cards: how to reach each vendor, once per name. 0341's kind, trade and is_person
- *  are asked for first and the query retried without them, so a deploy that lands before 0341
- *  still shows every card (as a brand, which is what every card was before it). */
+/** 0296's vendor cards: how to reach each vendor, once per name. 0341's kind, trade, is_person and
+ *  Look Up's source_url, maps_url and looked_up_at are asked for first and the query retried
+ *  without them, so a deploy that lands before 0341 still shows every card (as a brand, which is
+ *  what every card was before it). */
 const CARD_SELECT = "id, name, contact_name, phone, email, website, address, notes, archived";
-const CARD_SELECT_0341 = `${CARD_SELECT}, kind, trade, is_person`;
+const CARD_SELECT_0341 = `${CARD_SELECT}, kind, trade, is_person, source_url, maps_url, looked_up_at`;
 
 export default async function PriceListPage() {
   const supabase = await createClient();

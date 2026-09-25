@@ -10,7 +10,7 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
-import { recordAiUsage, aiSpendExceeded, modelFor } from "@/lib/ai-cost";
+import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
 import { after } from "next/server";
@@ -785,7 +785,8 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
           });
           needsRoundBreak = assistantReply.length > 0;
           // Accumulate cache telemetry across rounds (usage fields are 0/undefined pre-caching).
-          const u = final.usage as unknown as { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number; output_tokens?: number };
+          // server_tool_use rides along to recordAiUsage: costOf prices each web search at $0.01.
+          const u = final.usage as unknown as TokenUsage & { cache_read_input_tokens?: number; cache_creation_input_tokens?: number; input_tokens?: number; output_tokens?: number };
           cacheRead += u?.cache_read_input_tokens ?? 0;
           cacheWrite += u?.cache_creation_input_tokens ?? 0;
           inputUncached += u?.input_tokens ?? 0;

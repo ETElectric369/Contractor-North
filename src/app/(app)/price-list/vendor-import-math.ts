@@ -1,5 +1,6 @@
 import { matchSupplierNames } from "@/lib/supplier-identity";
 import { vendorKey, type VendorKind } from "./item-options-math";
+import { applyPick, type FoundField, type LookupChoice } from "./vendor-lookup-math";
 
 /**
  * A VENDOR LIST, DROPPED ON THE VENDORS TAB, SORTED FOR A PERSON TO DECIDE (vendor import,
@@ -332,6 +333,9 @@ export interface PreviewRow {
   /** How many times this exact name appears in the file (the preview keeps one). */
   copies: number;
   ticked: boolean;
+  /** A looked-up choice a person picked (or the only one found), and which of its fields to take.
+   *  It fills the row only: nothing is saved until Add (Look Up, Phase 2). */
+  pick?: { choice: LookupChoice; take: FoundField[] } | null;
 }
 
 /** One Kind's words, for chips and selects. Title Case: they are clickable. */
@@ -461,20 +465,28 @@ export function rowsToAdd(rows: PreviewRow[], existing: ExistingVendor[]): {
   kind: VendorKind | null;
   trade: string | null;
   is_person: boolean;
+  source_url: string | null;
+  maps_url: string | null;
 }[] {
   return rows
     .filter((r) => r.ticked && vendorKey(r.name) && !isBlocked(notesFor(r, rows, existing)))
-    .map((r) => ({
-      name: r.name.trim(),
-      contact_name: r.contact_name,
-      phone: r.phone,
-      email: r.email,
-      website: r.website,
-      address: r.address,
-      kind: r.kind,
-      trade: r.trade?.trim() || null,
-      is_person: r.is_person,
-    }));
+    .map((r) => {
+      // A pick's ticked fields replace what the row said; its source rides along only then.
+      const found = applyPick({ phone: r.phone, email: r.email, website: r.website, address: r.address }, r.pick);
+      return {
+        name: r.name.trim(),
+        contact_name: r.contact_name,
+        phone: found.phone ?? null,
+        email: found.email ?? null,
+        website: found.website ?? null,
+        address: found.address ?? null,
+        kind: r.kind,
+        trade: r.trade?.trim() || null,
+        is_person: r.is_person,
+        source_url: found.source_url,
+        maps_url: found.maps_url,
+      };
+    });
 }
 
 /** "29 Names In Vendors.xlsx", with what was left out said too. */
