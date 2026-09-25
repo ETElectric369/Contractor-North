@@ -52,9 +52,13 @@ interface TaxRateLite { id: string; name: string; rate: number; is_default: bool
 interface CustomerLite { id: string; name: string; }
 interface JobLite { id: string; name: string | null; job_number: string | null; customer_id: string | null; }
 
-/** ISO timestamp → "YYYY-MM-DD" in local time, for a <input type=date>. */
+/** ISO timestamp → "YYYY-MM-DD" in local time, for a <input type=date>. A plain date column
+ *  (due_date is `date`) is already that, and goes through untouched: `new Date("2026-10-08")` is
+ *  UTC midnight, which in California is Oct 7, so the box showed a day before the header's
+ *  "Due Oct 8" (INV-078, 2026-09-24) and a Save from it moved the date back a day. */
 const toDateInput = (iso?: string | null) => {
   if (!iso) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   const p = (n: number) => String(n).padStart(2, "0");
