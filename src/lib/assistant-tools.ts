@@ -185,7 +185,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_price_list",
     description:
-      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + book markup). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL cost (use buy_price verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. PRICING THE LINE: default_sell_price is buy_price at the EFFECTIVE default markup — the item's own markup_pct when it's > 0, else the org's Settings default markup (the fallback chain every pricing surface uses) — and it is only right when the customer has NO pricing level. A customer ON a pricing level gets the LEVEL'S markup instead (sell = buy_price × (1 + level markup% / 100)), exactly like the quote builder; check the customer's pricing level before quoting a sell price, and say which markup you used. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
+      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + book markup). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL cost (use buy_price verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. VENDORS: a code can carry several vendors (brands) under it. When the org made one the DEFAULT, the row is priced at that vendor, exactly as the quote pickers price it: priced_at_vendor names it, buy_price and default_sell_price are that vendor's, own_buy_price is the code's own allowance, and vendors[] lists every vendor with its own buy and sell. A line priced at a vendor must NAME it in its description as '(Vendor)' before the [CODE] tag, the way the pickers write it, or the order sheet costs it at the allowance. PRICING THE LINE: default_sell_price is buy_price at markup_pct_used, the markup the one pricing rule resolved with NO customer level — the vendor's own stated markup when it states one, else the item's own markup_pct when it's > 0, else the org's Settings default markup. markup_pct is the ITEM's own book markup, shown for reference; do not rebuild the sell from it. default_sell_price is only right when the customer has NO pricing level. A customer ON a pricing level gets the LEVEL'S markup instead (sell = buy_price × (1 + level markup% / 100)), exactly like the quote builder; check the customer's pricing level before quoting a sell price, and say which markup you used. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
     input_schema: {
       type: "object",
       properties: {
@@ -1897,6 +1897,9 @@ export async function runDataTool(
             // there is one, else the item's own.
             buy_price: money(line.buyPrice),
             markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
+            // The markup default_sell_price was built with: the vendor's own when it states one.
+            // Without it a 40% vendor on a 0% item reads as "the org default" (audit v994).
+            markup_pct_used: line.markupPct,
             default_sell_price: line.unitPrice,
             ...(line.isItemOwn ? {} : { priced_at_vendor: line.makerLabel, own_buy_price: money(r.buy_price) }),
             ...(vendors ? { vendors } : {}),
@@ -1914,7 +1917,7 @@ export async function runDataTool(
           count: items.length,
           ...(matched_by ? { matched_by } : {}),
           items,
-          note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line. For a QUOTE LINE prefer price_material, which applies the customer's markup for you.",
+          note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line (and a priced_at_vendor's name, in parentheses, in its description). For a QUOTE LINE prefer price_material, which applies the customer's markup for you.",
         });
       }
 

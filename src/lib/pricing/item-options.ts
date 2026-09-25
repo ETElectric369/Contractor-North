@@ -348,6 +348,42 @@ export function describeChoice(base: string, item: OptionedPriceItem, choice: It
   return option ? describeWithMaker(base, option) : base;
 }
 
+/**
+ * WHICH VENDOR A WRITTEN LINE PRICED AT, read back from its own words.
+ *
+ * A quote line stores a description and a sell, not an option id. Every door that prices a code
+ * at a vendor names that vendor in the description in ONE shape (describeWithMaker: "(Marvin)" or
+ * "(Marvin, #M-1)"), so that shape is how a reader downstream, the order sheet, finds out what the
+ * line was sold as. Without it the order sheet matched "[830]", costed the line at the $830
+ * allowance and listed that under a line the customer paid Marvin money for (audit v994 VP2
+ * follow-through). Null when the words name no vendor under this code: the line priced at the
+ * item's own number, or somebody rewrote it, and the item's own cost is then the honest guess.
+ *
+ * The longest name wins, so "Andersen 400 Series" is never read as plain "Andersen".
+ */
+export function optionNamedIn(item: OptionedPriceItem, text: string | null | undefined): PriceItemOptionRow | null {
+  const hay = String(text ?? "").toLowerCase();
+  let best: PriceItemOptionRow | null = null;
+  for (const o of normalizeItemOptions(item.price_list_item_options)) {
+    const maker = makerName(o).toLowerCase();
+    if (!maker) continue;
+    if (!hay.includes(`(${maker})`) && !hay.includes(`(${maker}, #`)) continue;
+    if (!best || maker.length > makerName(best).length) best = o;
+  }
+  return best;
+}
+
+/** What a book line COSTS the company, read the way it was sold: the vendor its words name, else
+ *  the item's own buy price. The order sheet's est_cost, so a buy list never disagrees with the
+ *  quote it was built from about which window is being bought. */
+export function bookLineBuy(
+  item: OptionedPriceItem,
+  text: string | null | undefined,
+): { buyPrice: number; option: PriceItemOptionRow | null } {
+  const option = optionNamedIn(item, text);
+  return { buyPrice: num(option ? option.buy_price : item.buy_price), option };
+}
+
 /** The refusal sentence for a pick that is no longer on the code. Named here so the server action
  *  and any screen that resolves a stale pick refuse with the same words. */
 export function missingOptionMessage(item: OptionedPriceItem): string {

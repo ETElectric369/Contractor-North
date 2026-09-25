@@ -42,6 +42,18 @@ export interface ItemOption {
   sort_order?: number | null;
 }
 
+/**
+ * WHAT MAKING A VENDOR THE DEFAULT ACTUALLY REACHES, said the same way by every toast that makes
+ * one (add with the tick, Make Default, the edit form). Quote and invoice pickers, the AI
+ * estimator, Nort and the order sheet all resolve a code to its default vendor (priceBookLine);
+ * a KIT still adds a linked item at the item's own number (kit-line.ts, wave 2). A toast that said
+ * "this item prices at it now" promised a kit line it would not get (audit v994, VP2).
+ */
+export function defaultVendorNote(name?: string | null): string {
+  const lead = name ? `${name} is now the default for this code.` : "It is the default for this code now.";
+  return `${lead} New quote, invoice and estimator lines price at it; a kit still adds the item's own number.`;
+}
+
 /** How this option reads on a row: "Andersen" or "Andersen 400 Series". */
 export function optionName(o: { vendor?: string | null; label?: string | null }): string {
   const vendor = String(o.vendor ?? "").trim();

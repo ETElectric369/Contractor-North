@@ -47,8 +47,9 @@ export type PricedMaterial = {
   note: string;
   /** Only when the book missed AND there's no purchase history. */
   needs_web_price?: true;
-  /** Populated on a loose match so the model can reject a bad row instead of accepting rung 6. */
-  alternatives?: { code: string | null; description: string | null; buy_price: number }[];
+  /** Populated on a loose match so the model can reject a bad row instead of accepting rung 6.
+   *  Each runner-up is priced exactly as the top row would be (priceBookLine). */
+  alternatives?: { code: string | null; description: string | null; buy_price: number; sell_price: number; vendor?: string }[];
 };
 
 const money = (n: unknown) => Math.round((Number(n) || 0) * 100) / 100;
@@ -98,8 +99,22 @@ export async function priceMaterial(
       note: loose
         ? `Matched loosely (${hit.matched_by}) — check this is the right part before quoting it.`
         : "The company's own book price. Keep the [CODE] on the quote line.",
+      // Priced the SAME way as the top row (priceBookLine, this customer), so a runner-up is never
+      // an own allowance sitting next to a default vendor's cost (audit v994).
       ...(loose && hit.rows.length > 1
-        ? { alternatives: hit.rows.slice(1, 4).map((r) => ({ code: r.code, description: r.description, buy_price: money(r.buy_price) })) }
+        ? {
+            alternatives: hit.rows.slice(1, 4).map((r) => {
+              const alt = r as unknown as OptionedPriceItem;
+              const l = priceBookLine(alt, { levelPct: args.levelPct, orgDefaultPct: args.orgDefaultPct });
+              return {
+                code: r.code,
+                description: describeChoice(r.description ?? "", alt, l),
+                buy_price: money(l.buyPrice),
+                sell_price: l.unitPrice,
+                ...(l.isItemOwn ? {} : { vendor: l.makerLabel }),
+              };
+            }),
+          }
         : {}),
     };
   }

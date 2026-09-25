@@ -105,9 +105,12 @@ export function AddLineItems({
    *  places is a list nobody can read. */
   const [makersFor, setMakersFor] = useState<string | null>(null);
 
-  // KITS PRICE THE WAY THE TYPEAHEAD DOES (0240). A linked kit line is a price-list item, so it
-  // runs on the SAME two numbers the book picker above uses (kitLineView puts them to THE markup
-  // rule), and the two "add" doors on one page cannot quote the same item at two prices.
+  // KITS TAKE THE SAME TWO NUMBERS AS THE TYPEAHEAD (0240): a linked kit line is a price-list item,
+  // and kitLineView puts the customer's level and the org default to THE markup rule. ONE GAP IS
+  // STILL OPEN: a kit prices a linked item at the item's OWN buy price, while the typeahead above
+  // prices a code at its DEFAULT VENDOR (priceBookLine). For a code with a default vendor the two
+  // doors quote different numbers until kits resolve vendors too (audit v994 VP2, wave 2); the
+  // price list's Make Default toast says so rather than promising parity.
   const kitPricing: KitPickerPricing = {
     orgDefaultPct: pricing.orgDefaultPct ?? 0,
     levelPct: pricing.levelPct,
