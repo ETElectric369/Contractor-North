@@ -1,17 +1,15 @@
 import { notFound } from "next/navigation";
-import { pickSite } from "@/lib/site-address";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
 import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
-import { templateFor } from "@/components/doc-templates";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
 import { docTitle } from "@/lib/doc-title";
 import { NO_INDEX } from "@/lib/no-index";
-import { invoiceTypeLabel, invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { cardFeeDecision, feePctLabel, payUrl } from "@/lib/org-settings";
-import { InvoiceDocument } from "@/components/invoice-document";
+import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -42,11 +40,8 @@ export default async function PublicInvoicePage({
 
   const inv = data.invoice;
   const pdfReady = await sharePdfReady("invoice", token, String(inv.status ?? ""));
-  const items = data.items ?? [];
-  const c = data.customer;
   const org = data.org as Organization | null;
   const co = companyFromOrg(org);
-  const template = templateFor(org, "invoice");
   const balance = invoiceBalance(inv.total, inv.amount_paid);
   // "Pay now" only when the ORG can actually take a card, not merely when the platform has a
   // Stripe key (audit v921 — 0247 ships can_take_card on the org projection). Before this, an org
@@ -195,34 +190,8 @@ export default async function PublicInvoicePage({
         </div>
       )}
 
-      <InvoiceDocument
-        docStyle={(data.org as { doc_style?: unknown } | null)?.doc_style}
-        site={pickSite([
-          ...((data as { site_candidates?: never[] }).site_candidates ?? []),
-          { source: "customer", parts: (data as { customer?: never }).customer },
-        ])}
-        co={co}
-        template={template}
-        number={inv.invoice_number}
-        createdAt={inv.created_at}
-        dueDate={inv.due_date}
-        title={inv.title}
-        billingLabel={invoiceTypeLabel(inv.billing_type, inv.invoice_kind)}
-        description={inv.description}
-        customer={c}
-        items={items}
-        subtotal={inv.subtotal}
-        taxRate={inv.tax_rate}
-        tax={inv.tax}
-        total={inv.total}
-        amountPaid={inv.amount_paid}
-        // public_invoice has returned all three since 0247/0283; the page just never passed them,
-        // so the customer's live link showed less than the PDF of the same bill.
-        payments={((data as { payments?: never[] }).payments) ?? []}
-        notes={inv.notes}
-        terms={(data.org as { invoice_terms?: string | null } | null)?.invoice_terms ?? null}
-        documentFooter={(data.org as { document_footer?: string | null } | null)?.document_footer ?? null}
-      />
+      {/* The same mapping the portal job page uses for this bill (one door, one rendering). */}
+      <PublicInvoiceDocument data={data as PublicInvoiceData} />
     </div>
   );
 }

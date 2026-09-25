@@ -163,6 +163,38 @@ body.modal-open .app-bottom-nav {
     linear-gradient(165deg, #f4f8f7, #eef4f3 58%, #e7f0ee);
   background-size: 22px 22px, auto, auto, auto;
 }
+/* The customer portal wears the same sea-glass backdrop as the app shell, tinted with the org's
+   own glass color (set inline as --glass-tint). A separate class because .app-backdrop also
+   switches off the document's rubber-band and pull-to-refresh (the html:has rule above), and the
+   portal is a normal scrolling page a customer pulls down to refresh. */
+.portal-backdrop {
+  background:
+    radial-gradient(rgb(15 23 42 / 0.022) 1px, transparent 1.7px),
+    radial-gradient(1100px 560px at 10% 6%, rgb(var(--glass-tint) / 0.18), transparent 60%),
+    radial-gradient(1000px 680px at 98% 100%, rgb(var(--glass-tint) / 0.14), transparent 55%),
+    linear-gradient(165deg, #f4f8f7, #eef4f3 58%, #e7f0ee);
+  background-size: 22px 22px, auto, auto, auto;
+  background-attachment: scroll;
+}
+/* A portal panel: the dock's .glass, a touch more opaque so small grey text on it keeps its
+   contrast wherever the tinted backdrop is at its darkest. */
+.portal-glass {
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 14px 34px -20px rgba(15, 23, 42, 0.35);
+}
+.portal-glass > summary::-webkit-details-marker,
+.portal-summary::-webkit-details-marker {
+  display: none;
+}
+/* The native dialog the portal uses for its lightbox and pick sheet. */
+dialog.portal-dialog::backdrop {
+  background: rgb(15 23 42 / 0.82);
+}
 /* A glossy specular sheen across the top half of any button — glassier feel. */
 .btn-gloss {
   position: relative;

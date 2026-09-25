@@ -108,7 +108,9 @@ export type PortalPick = {
 export type PortalPhoto = { id: string; url: string; takenOn: string | null };
 
 export type PortalJobView = {
-  org: { name: string; logoUrl: string | null; phone: string | null; email: string | null; license: string | null; accent: string };
+  /** accent: the org's ink (accentHex, readable text on white). tint: the org's own glass color as
+   *  "#rrggbb", the sea-glass skin's fill (the same lever the app dock reads). */
+  org: { name: string; logoUrl: string | null; phone: string | null; email: string | null; license: string | null; accent: string; tint: string };
   customer: { name: string | null; companyName: string | null };
   job: {
     id: string;
@@ -131,6 +133,8 @@ export type PortalJobView = {
   unbilled: CustomerUnbilled | null;
 };
 
+/** The default sea-glass teal (org-settings DEFAULT_SETTINGS.glass_tint). */
+const DEFAULT_TINT = "#1b9488";
 const SENT = new Set(["sent", "partial", "paid", "overdue"]);
 const HEX = /^#[0-9a-f]{6}$/i;
 const HTTPS = /^https:\/\/[^\s]+$/i;
@@ -222,6 +226,7 @@ export function shapePortalJob(
       email: str(org?.email),
       license: str(org?.license),
       accent: accentHex(str(org?.glass_tint)),
+      tint: org?.glass_tint && HEX.test(org.glass_tint) ? org.glass_tint.toLowerCase() : DEFAULT_TINT,
     },
     customer: { name: str(raw.customer?.name), companyName: str(raw.customer?.company_name) },
     job: {

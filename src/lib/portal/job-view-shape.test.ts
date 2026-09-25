@@ -71,7 +71,7 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(Object.keys(v).sort()).toEqual(
       ["asOf", "asOfDay", "customer", "invoices", "job", "ledger", "org", "photos", "picks", "running", "timezone", "unbilled"].sort(),
     );
-    expect(Object.keys(v.org).sort()).toEqual(["accent", "email", "license", "logoUrl", "name", "phone"]);
+    expect(Object.keys(v.org).sort()).toEqual(["accent", "email", "license", "logoUrl", "name", "phone", "tint"]);
     expect(Object.keys(v.customer).sort()).toEqual(["companyName", "name"]);
     expect(Object.keys(v.job).sort()).toEqual(["id", "name", "number", "site", "status"]);
     expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "isDraft", "number", "payToken", "status", "total"]);
@@ -95,6 +95,12 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     for (const banned of [ORG, CUST, "/picks/", `${JOB}/`, "clock_in", "clock_out", "lunch", "buy_price", "markup", "hourly", "source", "file_path", "gps"]) {
       expect(text).not.toContain(banned);
     }
+  });
+
+  it("the skin takes the org's own glass color, and a bad one falls back to the default teal", () => {
+    expect(v.org.tint).toBe("#006d8f");
+    const bad = shapePortalJob(raw({ org: { ...r.org!, glass_tint: "red; background:url(x)" } }), { signed: new Map(), unbilled: null, now: NOW });
+    expect(bad.org.tint).toBe("#1b9488");
   });
 
   it("a draft bill is a running total with no pay door", () => {
