@@ -975,7 +975,9 @@ export async function rescheduleAppointment(
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
  *  customer, title → name, location → address, and start time. */
-export async function createJobFromAppointment(appointmentId: string): Promise<Result & { note?: string }> {
+export async function createJobFromAppointment(
+  appointmentId: string,
+): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -988,7 +990,7 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
-  if (appt.job_id) return { ok: true, id: appt.job_id };
+  if (appt.job_id) return { ok: true, id: appt.job_id, already: true };
 
   /* WHAT THE VISIT ALREADY KNEW TRAVELS WITH IT.
      Erik: "im not sure why it says 5 hours but i already marked it as a job … we need more
@@ -1046,6 +1048,44 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     .single();
   if (error) return { ok: false, error: dbError(error) };
 
+  // ABSORBED (0237): the job inherits this visit's very slot, so the booking's calendar life is
+  // over on EVERY surface at once — grid, My Day, feeders, Google, reminder emails. One column,
+  // one meaning; the per-surface type-based skips this replaces each covered one door and left
+  // the rest showing ghosts.
+  //
+  // THE LINK IS THE CLAIM (visit-start review, 2026-09-25). The job_id read above is a check, and
+  // two devices tapping Start The Job at once both passed it and both inserted a job; this update
+  // then overwrote the first link with the second, orphaning one job with a clock running on it.
+  // So the write only lands on a visit that still has no job, and the tap that lands zero rows
+  // re-reads to learn why: somebody else's job won (ours is deleted, it has no children yet, and
+  // the winner is returned so the caller clocks into THAT one), or the visit is gone.
+  // SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not a success. Hence .select("id").
+  const { data: absorbed } = await supabase
+    .from("appointments")
+    // …and the visit keeps the same answer the job just got (audit v921) — one contact, both records.
+    .update({ job_id: job.id, absorbed: true, ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}) })
+    .eq("id", appointmentId)
+    .is("job_id", null)
+    .select("id");
+  if (!absorbed?.length) {
+    const { data: again } = await supabase.from("appointments").select("job_id").eq("id", appointmentId).maybeSingle();
+    const winner = (again as { job_id?: string | null } | null)?.job_id ?? null;
+    if (winner && winner !== job.id) {
+      const { data: gone } = await supabase.from("jobs").delete().eq("id", job.id).select("id");
+      return {
+        ok: true,
+        id: winner,
+        already: true,
+        ...(gone?.length
+          ? {}
+          : { note: "Someone else started this visit's job a moment ago. A second job was made at the same instant and could not be removed; delete it from Jobs." }),
+      };
+    }
+  }
+  const absorbNote = absorbed?.length
+    ? undefined
+    : "That visit disappeared while the job was being created — the job was made from what it had.";
+
   /* A THREE-DAY VISIT CONVERTS TO A THREE-DAY JOB. scheduled_end above is clamped to one working
      day (it is a wall-clock pair), so without segments a Mon–Wed visit became a Monday job — and
      Tuesday and Wednesday, which the appointment had rightly marked busy, sprang free the moment
@@ -1063,24 +1103,6 @@ export async function createJobFromAppointment(appointmentId: string): Promise<R
     }
   }
 
-  // ABSORBED (0237): the job inherits this visit's very slot, so the booking's calendar life is
-  // over on EVERY surface at once — grid, My Day, feeders, Google, reminder emails. One column,
-  // one meaning; the per-surface type-based skips this replaces each covered one door and left
-  // the rest showing ghosts.
-  // SILENT-WRITE LAW (audit v921): a zero-row update here is a 204, not a success — the job would
-  // exist while the booking stayed LIVE, the exact ghost this column prevents. The only way to land
-  // zero rows is the appointment disappearing between the read above and this write (deleteAppointment
-  // hard-deletes), so we say that out loud instead of returning a clean ok; re-converting is NOT the
-  // answer (it would mint a second job), which is why this is a note on a successful create.
-  const { data: absorbed } = await supabase
-    .from("appointments")
-    // …and the visit keeps the same answer the job just got (audit v921) — one contact, both records.
-    .update({ job_id: job.id, absorbed: true, ...(!appt.customer_id && customerId ? { customer_id: customerId } : {}) })
-    .eq("id", appointmentId)
-    .select("id");
-  const absorbNote = absorbed?.length
-    ? undefined
-    : "That visit disappeared while the job was being created — the job was made from what it had.";
   /* STAMP FOLLOWS DEED — the lead too. This path minted jobs without ever telling the lead, so
      Karen sat on /leads as "contacted" while her job was already on the calendar ("the leads
      converted to jobs put back as leads are still there"). A lead whose work became a job is won,
