@@ -385,6 +385,7 @@ export function planShelving(
     if (!line) return { ok: false, error: "A line on this ticket isn't there any more. Reload and try again." };
     const label = lineLabel(line);
     if (isTaxLine(line)) return { ok: false, error: "Sales tax isn't a thing on a shelf. It rides with the lines it was charged on." };
+    if (isFreightLine(line)) return { ok: false, error: "Freight isn't a thing on a shelf. It stays with the ticket it was charged on." };
     const cost = billLineCost(line);
     if (!(cost > 0))
       return { ok: false, error: `${label}: its extension is $0.00, which means nothing shipped, so nothing from it can go on the shelf.` };
@@ -470,10 +471,16 @@ export type TicketLineChoice =
       keyPart?: string | null;
     };
 
-/** Does this ticket line need a person's answer before the ticket can go on the shelf? Tax lines
- *  and $0.00 lines ride along with no answer. */
-export function lineNeedsShelfAnswer(row: { amount?: unknown; category?: string | null }): boolean {
-  return !isTaxLine(row as BillLine) && Number(row.amount) > 0;
+/** A freight or shipping charge (supplierBillLines writes category "Freight"). Never a thing on a
+ *  shelf: on a shelf ticket it has no roll and counts as Tools & Supplies (owner-money.ts). */
+export function isFreightLine(row: { description?: string | null; category?: string | null }): boolean {
+  return /freight|shipping/i.test(String(row.category ?? "")) || /^\s*(freight|shipping)\b/i.test(String(row.description ?? ""));
+}
+
+/** Does this ticket line need a person's answer before the ticket can go on the shelf? Tax lines,
+ *  freight and $0.00 lines ride along with no answer. */
+export function lineNeedsShelfAnswer(row: { description?: string | null; amount?: unknown; category?: string | null }): boolean {
+  return !isTaxLine(row as BillLine) && !isFreightLine(row) && Number(row.amount) > 0;
 }
 
 /**
@@ -549,6 +556,9 @@ export type WaitingLineIn = {
   billedAmount: unknown;
   hasLot: boolean;
   billDate?: string | null;
+  /** The sent or paid invoice that already bills this receipt (or the order it delivered), as
+   *  "INV-069 (paid)". The receipt card has no Put The Rest On The Shelf there, so neither does this. */
+  heldBy?: string | null;
 };
 
 export type WaitingItem = {
@@ -556,9 +566,11 @@ export type WaitingItem = {
   kind: "part_billed" | "container" | "stock_document" | "lineless_paper";
   title: string;
   why: string;
-  /** Where the person acts on it, and the button they press there. */
-  href: string;
-  door: string;
+  /** Where the person acts on it, and the button they press there. Null when there is no such
+   *  button yet (a receipt a customer already holds): the card says so instead of sending anyone
+   *  to a door that isn't there. */
+  href: string | null;
+  door: string | null;
 };
 
 const CONTAINER_WORD = /\b(?:case|carton|spool|spl|roll|reel|coil|jar|tub|pail|bucket|drum|bag)\b/i;
@@ -588,6 +600,9 @@ export function waitingForShelf(input: {
     if (isTaxLine(line) || !(cost > 0)) continue;
     const where = `${l.jobLabel ?? "a job"}${l.billDate ? `, ${String(l.billDate).slice(0, 10)}` : ""}`;
     const billed = l.billedAmount == null || l.billedAmount === "" ? null : Number(l.billedAmount);
+    // A receipt the customer already holds: named, with no door (the receipt card has none there).
+    const held = l.heldBy ? ` It's on ${l.heldBy}, which the customer already has, so it can't go on the shelf from here yet.` : "";
+    const door = (d: string) => (l.heldBy ? { href: null, door: null } : { href: "/bills#receipt-billing", door: d });
     if (l.billable !== false && billed != null && billed < cost) {
       out.push({
         key: `line:${l.lineId}`,
@@ -595,10 +610,9 @@ export function waitingForShelf(input: {
         title: `${l.description} (${where})`,
         why:
           billed === 0
-            ? `None of its ${dollars(cost)} is billed to the customer, and the job still carries all of it.`
-            : `The customer is billed ${dollars(billed)} of its ${dollars(cost)}, and the job still carries the rest.`,
-        href: "/bills#receipt-billing",
-        door: "Put The Rest On The Shelf",
+            ? `None of its ${dollars(cost)} is billed to the customer, and the job still carries all of it.${held}`
+            : `The customer is billed ${dollars(billed)} of its ${dollars(cost)}, and the job still carries the rest.${held}`,
+        ...door("Put The Rest On The Shelf"),
       });
       continue;
     }
@@ -611,13 +625,12 @@ export function waitingForShelf(input: {
       key: `line:${l.lineId}`,
       kind: "container",
       title: `${l.description} (${where})`,
-      why: words
+      why: (words
         ? `Reads like a coil, a reel or a box, and all ${dollars(cost)} of it is billed to that job.`
         : counted
           ? `Its description counts what's in it, and all ${dollars(cost)} of it is billed to that job.`
-          : `The ticket read ${Number(l.quantity)} on it, which is usually a box or a coil, and all ${dollars(cost)} is billed to that job.`,
-      href: "/bills#receipt-billing",
-      door: "Put The Rest On The Shelf",
+          : `The ticket read ${Number(l.quantity)} on it, which is usually a box or a coil, and all ${dollars(cost)} is billed to that job.`) + held,
+      ...door("Put The Rest On The Shelf"),
     });
   }
   for (const d of input.stockDocuments ?? []) {
@@ -635,9 +648,9 @@ export function waitingForShelf(input: {
       key: `paper:${p.id}`,
       kind: "lineless_paper",
       title: p.title,
-      why: `"${p.words}" is written on it, but it was read with no lines. ${SHELF_NEEDS_LINES}`,
+      why: `"${p.words}" is written on it, but it was read with no lines, and a roll on the shelf is a line. Read it again so its lines come with it.`,
       href: "/organize",
-      door: "Fix Details",
+      door: "Read Again",
     });
   }
   return out;

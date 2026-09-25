@@ -2025,7 +2025,7 @@ async function shelveRecordedBill(
     message:
       `${number} is on the shop shelf now: ${sayMoney(total)}${closed ? ", which the supplier already shows as paid" : ""}. ` +
       `${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${sayMoney(l.cost)})`).join(", ")} on the shelf.` +
-      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket.` : "") +
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies.` : "") +
       lineNote,
   };
 }

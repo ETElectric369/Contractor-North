@@ -543,6 +543,19 @@ export function SupplierInvoicesCard({
                         If it is a different purchase, give it a job up in Invoices With No Job, and Different Purchase: Record It Anyway appears here.
                       </p>
                     )}
+                    {/* Shop stock is a different purchase too: the intro says Record To Shelf is on
+                        every row, so a row with a same-purchase match carries it here, as the same
+                        person's decision the Tie asks for. */}
+                    {actions.recordToShelf && actions.shelfLines && (
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full"
+                        disabled={pending}
+                        onClick={() => openShelf(invoice.id, invoice.invoiceNumber, true)}
+                      >
+                        {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Different Purchase: Record To Shelf"}
+                      </Button>
+                    )}
                   </div>
                 ) : null}
                 {failedAt === `tie:${invoice.id}` && error && (

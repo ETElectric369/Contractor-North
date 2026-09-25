@@ -114,6 +114,58 @@ export async function deleteInventoryItem(id: string): Promise<Result> {
   return { ok: true };
 }
 
+/**
+ * MARK INACTIVE / MAKE ACTIVE (review of Phase 2). An item with rolls or moves on the shelf's record
+ * can never be deleted (0304 keeps its history), and that refusal names this door, so it has to
+ * exist. Inactive hides the item from Shop Stock and the pickers; it never hides money, so an item
+ * with anything still on the shelf is refused until it is counted to 0. A roll that later lands on
+ * the item makes it active again (shelve_bill_lines, 0328).
+ */
+export async function setInventoryItemActive(id: string, active: boolean): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  if (!active) {
+    const { data: item, error: itemErr } = await supabase
+      .from("inventory_items")
+      .select("id, name, unit, quantity_on_hand")
+      .eq("id", id)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (itemErr) return { ok: false, error: dbError(itemErr) };
+    if (!item) return { ok: false, error: "That item isn't there any more. Reload the page and try again." };
+    const { data: live, error: liveErr } = await supabase
+      .from("stock_lot_balance")
+      .select("lot_id, pieces_left, cost_left")
+      .eq("org_id", orgId)
+      .eq("item_id", id)
+      .eq("live", true);
+    if (liveErr) return { ok: false, error: dbError(liveErr) };
+    const left = ((live ?? []) as { pieces_left?: unknown; cost_left?: unknown }[]).some(
+      (l) => Number(l.pieces_left) > 0 || Number(l.cost_left) > 0,
+    );
+    const onHand = Number((item as { quantity_on_hand?: unknown }).quantity_on_hand) || 0;
+    if (left || onHand !== 0) {
+      const it = item as { name: string; unit: string };
+      return {
+        ok: false,
+        error: `${it.name} still has ${onHand} ${it.unit} on the shelf's record. Count It to 0 first, so its value doesn't disappear from Shop Stock with it.`,
+      };
+    }
+  }
+  const { data, error } = await supabase
+    .from("inventory_items")
+    .update({ active })
+    .eq("id", id)
+    .eq("org_id", orgId)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That item isn't there any more. Reload the page and try again." };
+  revalidatePath("/inventory");
+  return { ok: true };
+}
+
 /*
  * adjustQuantity IS GONE (Shop Stock, 0303). What is on hand is a cache the shelf's own record keeps
  * (rolls in, pieces out), and the database refuses a typed-over count, so a door that typed one

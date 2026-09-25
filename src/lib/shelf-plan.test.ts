@@ -9,6 +9,7 @@ import {
   suggestShelfItem,
   ticketShelfProblem,
   waitingForShelf,
+  lineNeedsShelfAnswer,
   type ShelfPickerItem,
 } from "./shelf-plan";
 
@@ -161,6 +162,13 @@ describe("ticketShelfProblem: the whole-ticket gate the tray's button and the se
   it("a return is refused", () => {
     expect(ticketShelfProblem(rows, -20, [])).toBe(SHELF_NO_RETURNS);
   });
+  it("freight rides along like tax: no answer, never a roll", () => {
+    expect(lineNeedsShelfAnswer({ description: "Shipping (Invoice 8802-1103061)", amount: 12.5, category: "Freight" })).toBe(false);
+    expect(lineNeedsShelfAnswer({ description: "Freight", amount: 12.5, category: null })).toBe(false);
+    expect(lineNeedsShelfAnswer({ description: "RED/YELLOW CONN", amount: 84.85, category: "Materials" })).toBe(true);
+    const withFreight = [...rows, { description: "Shipping (Invoice 8802-1103061)", amount: 12.5, category: "Freight" }];
+    expect(ticketShelfProblem(withFreight, 126.9, [{ index: 0, notStock: false, pieces: 500, unit: "ea", newItemName: "R/Y" }, { index: 1, notStock: true }])).toBeNull();
+  });
   it("every line that shipped needs an answer; tax rides along", () => {
     expect(ticketShelfProblem(rows, 114.4, [{ index: 0, notStock: false, pieces: 500, unit: "ea", newItemName: "R/Y" }])).toContain("1 line is still open");
     expect(ticketShelfProblem(rows, 114.4, [{ index: 0, notStock: false, pieces: 500, unit: "ea", newItemName: "R/Y" }, { index: 1, notStock: true }])).toBeNull();
@@ -209,11 +217,25 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
       ["line:142", "part_billed", "Put The Rest On The Shelf"],
       ["line:tw", "container", "Put The Rest On The Shelf"],
       ["doc:si", "stock_document", "Record To Shelf"],
-      ["paper:p", "lineless_paper", "Fix Details"],
+      ["paper:p", "lineless_paper", "Read Again"],
     ]);
     expect(w[0].why).toContain("None of its $111.60 is billed to the customer");
     expect(w[1].why).toContain("The ticket read 500 on it");
     expect(w[2].title).toBe("CED 8802-1103061, $114.40");
-    expect(w[3].why).toContain(SHELF_NEEDS_LINES);
+    expect(w[3].why).toContain("Read it again so its lines come with it");
+  });
+  it("a receipt the customer already holds is named with NO door: the receipt card has no button there", () => {
+    const w = waitingForShelf({
+      lines: [
+        { ...base, lineId: "tz", jobLabel: "Tao Zhu", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, heldBy: "INV-00028 (paid)" },
+        { ...base, lineId: "tw", jobLabel: "Jason Waldow", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, billedAmount: null, heldBy: "INV-069 (paid)" },
+      ],
+    });
+    expect(w.map((x) => [x.key, x.href, x.door])).toEqual([
+      ["line:tz", null, null],
+      ["line:tw", null, null],
+    ]);
+    expect(w[0].why).toContain("It's on INV-00028 (paid), which the customer already has");
+    expect(w[1].why).toContain("It's on INV-069 (paid)");
   });
 });

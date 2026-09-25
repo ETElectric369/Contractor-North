@@ -10,6 +10,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { useToast } from "@/components/toast";
 import { billedPortion } from "@/lib/bill-itemisation";
+import { isFreightLine } from "@/lib/shelf-plan";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
   containerHint,
@@ -193,12 +194,18 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
         toast(res?.error ?? "Couldn't change that line. Try again.", "error");
         return;
       }
-      toast(next ? "Back on the customer's bill" : "Off the customer's bill", "success", {
-        label: "Undo",
-        onClick: () => flip(lineId, !next),
-      });
-      // What it did to a roll on the shelf from this ticket, if anything. Said, never swallowed.
-      if (res.note) toast(res.note, "info");
+      // What it did to a roll on the shelf from this ticket, if anything. Said, never swallowed, and
+      // then there is no Undo: flipping back would not put a roll back on the shelf (0303 refuses to
+      // re-shelve one), so an Undo there would promise a way back that isn't one.
+      if (res.note) {
+        toast(next ? "Back on the customer's bill" : "Off the customer's bill", "success");
+        toast(res.note, "info");
+      } else {
+        toast(next ? "Back on the customer's bill" : "Off the customer's bill", "success", {
+          label: "Undo",
+          onClick: () => flip(lineId, !next),
+        });
+      }
       router.refresh();
     });
   }
@@ -383,6 +390,11 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                               </span>
                               {locked ? (
                                 <span className="shrink-0 text-xs text-slate-400">On {r.billedOn?.label}</span>
+                              ) : l.shelf ? (
+                                /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
+                                   roll without moving its pieces, so it doesn't render (the server
+                                   refuses it too). Take It Off The Shelf below is the way back. */
+                                <span className="shrink-0 text-xs text-slate-400">On the shelf</span>
                               ) : (
                                 <button
                                   type="button"
@@ -413,7 +425,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                                 container, and it is exactly as splittable. A suggestion that was
                                 also the only door would quietly decide which lines he is allowed
                                 to split. */}
-                            {!locked && l.billable && (
+                            {!locked && l.billable && !l.shelf && (
                               <div className="flex flex-wrap items-center gap-x-2">
                                 <button
                                   type="button"
@@ -462,7 +474,8 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                             ) : (
                               !locked &&
                               l.amount > 0 &&
-                              !/tax/i.test(String(l.category ?? "")) && (
+                              !/tax/i.test(String(l.category ?? "")) &&
+                              !isFreightLine(l) && (
                                 <button
                                   type="button"
                                   onClick={() => setShelving({ receipt: r, line: l })}

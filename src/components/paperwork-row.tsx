@@ -18,6 +18,7 @@ import {
   fileRefusal,
   guessOf,
   isReturnWithoutLines,
+  SHELF_TRAY_NEEDS_LINES,
   paperTypeOfItem,
   parseDestination,
   pickedBecause,
@@ -677,8 +678,9 @@ export function PaperworkRow({
                 {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Now"}
               </Button>
             )}
-            {/* A return with no lines can't go on a job (RETURN_NEEDS_LINES says Read Again): the door it names. */}
-            {r.state === "ready" && isReturnWithoutLines(item) && item.file_url && (
+            {/* A return with no lines can't go on a job (RETURN_NEEDS_LINES says Read Again), and a
+                ticket with no lines can't go on the shelf (SHELF_TRAY_NEEDS_LINES): the door both name. */}
+            {r.state === "ready" && (isReturnWithoutLines(item) || blocked === SHELF_TRAY_NEEDS_LINES) && item.file_url && (
               <Button variant="outline" onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
                 {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Again"}
               </Button>

@@ -216,6 +216,10 @@ export async function putOnShelf(input: ShelfPick): Promise<ShelfResult> {
   return { ok: true, id: res.lots[0].lotId, lot: res.lots[0] };
 }
 
+/** Why a roll off a ticket bought for the shelf has no Take It Off The Shelf. */
+export const SHELF_TICKET_ROLL_STAYS =
+  "This roll came in on a ticket bought for the shelf, so there's no job for it to go back to. Undo that ticket from the tray to take it back, or Count It if the pieces are gone.";
+
 /**
  * TAKE A ROLL BACK OFF THE SHELF, before anything has been taken from it (0304 refuses after, and
  * says which takes to undo). The roll stays in the shelf's history as taken off; its dollars go
@@ -226,6 +230,24 @@ export async function unshelveLot(lotId: string): Promise<{ ok: true } | { ok: f
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is staff-only." };
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company." };
+  // A ROLL OFF A SHELF TICKET HAS NO JOB TO GO BACK TO (review of Phase 2). Its ticket was bought
+  // for the shelf, so "back where it came from" is nowhere: the roll would leave the shelf and its
+  // dollars would sit on a ticket no screen can put back. The way back for that roll is the
+  // ticket's own Undo in the tray, or Count It when the pieces are gone.
+  const { data: lot, error: lotErr } = await supabase
+    .from("stock_lot_balance")
+    .select("lot_id, bill_id")
+    .eq("lot_id", lotId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (lotErr) return { ok: false, error: dbError(lotErr) };
+  if (!lot) return { ok: false, error: "That roll isn't on this company's shelf. Reload to see where it stands." };
+  const billId = (lot as { bill_id?: string | null }).bill_id;
+  if (billId) {
+    const { data: bill, error: billErr } = await supabase.from("bills").select("on_shelf").eq("id", billId).eq("org_id", orgId).maybeSingle();
+    if (billErr) return { ok: false, error: dbError(billErr) };
+    if ((bill as { on_shelf?: boolean | null } | null)?.on_shelf === true) return { ok: false, error: SHELF_TICKET_ROLL_STAYS };
+  }
   const { data, error } = await supabase
     .from("stock_lots")
     .update({ unshelved_at: new Date().toISOString() })

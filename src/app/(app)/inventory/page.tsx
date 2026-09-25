@@ -10,6 +10,7 @@ import { formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
+import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { NewItemButton } from "./new-item-button";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
@@ -35,10 +36,12 @@ export const dynamic = "force-dynamic";
 export default async function ShopStockPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; low?: string }>;
+  searchParams: Promise<{ q?: string; low?: string; inactive?: string }>;
 }) {
-  const { q, low } = await searchParams;
+  const { q, low, inactive } = await searchParams;
   const lowOnly = low === "1";
+  // Show Inactive Items: the only place an item marked inactive can be found and made active again.
+  const inactiveOnly = inactive === "1";
   const ctx = await requireStaff();
   if ("error" in ctx) redirect("/planner");
   const { supabase, orgId } = ctx;
@@ -50,7 +53,7 @@ export default async function ShopStockPage({
     .from("inventory_items")
     .select("id, name, part_number, key_part, description, category, unit, quantity_on_hand, reorder_point, vendor, location, active")
     .eq("org_id", orgId)
-    .eq("active", true)
+    .eq("active", !inactiveOnly)
     .order("name");
   const term = sanitizeSearch(q);
   if (term) itemQuery = itemQuery.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,key_part.ilike.%${term}%,category.ilike.%${term}%`);
@@ -74,7 +77,7 @@ export default async function ShopStockPage({
     // Waiting For The Shelf, signal 1 and 2: every job receipt line (live bills only, below).
     supabase
       .from("bill_line_items")
-      .select("id, bill_id, description, quantity, amount, category, billable, billed_amount, bills!inner(job_id, bill_date, superseded_by_bill_id)")
+      .select("id, bill_id, description, quantity, amount, category, billable, billed_amount, bills!inner(job_id, po_id, bill_date, superseded_by_bill_id)")
       .eq("org_id", orgId)
       .not("bills.job_id", "is", null)
       .limit(10000),
@@ -107,14 +110,35 @@ export default async function ShopStockPage({
   // Second breath: who moved what, and which receipt each roll came off.
   const billIds = Array.from(new Set(lotList.map((l) => l.bill_id).filter(Boolean).map(String)));
   const people = Array.from(new Set(moveList.map((m) => m.created_by).filter(Boolean).map(String)));
-  const [bills, profiles] = await Promise.all([
+  // Which receipts an invoice the customer holds already bills (the receipt, or the order it
+  // delivered): the same claim read the Bills page makes, scoped the same way, by job. On those the
+  // receipt card has no Put The Rest On The Shelf, so the Waiting card must not send anyone to it.
+  const receiptJobIds = Array.from(
+    new Set(((receiptLines.error ? [] : receiptLines.data) ?? []).map((l: any) => l?.bills?.job_id).filter(Boolean).map(String)),
+  );
+  const [bills, profiles, claimRows] = await Promise.all([
     billIds.length
       ? supabase.from("bills").select("id, supplier, bill_date, job_id, on_shelf").eq("org_id", orgId).in("id", billIds)
       : Promise.resolve({ data: [] as any[], error: null }),
     people.length
       ? supabase.from("profiles").select("id, full_name").in("id", people)
       : Promise.resolve({ data: [] as any[], error: null }),
+    receiptJobIds.length
+      ? supabase
+          .from("invoice_items")
+          .select("import_key, source_ids, invoices!inner(invoice_number, status, created_at, job_id)")
+          .in("invoices.job_id", receiptJobIds)
+          .not("invoices.status", "in", "(void,draft)")
+          .limit(5000)
+      : Promise.resolve({ data: [] as any[], error: null }),
   ]);
+  const heldBy = new Map<string, string>();
+  for (const row of [...((claimRows.error ? [] : claimRows.data) ?? [])].sort((a: any, b: any) =>
+    String(a.invoices?.created_at ?? "").localeCompare(String(b.invoices?.created_at ?? "")),
+  ) as any[]) {
+    const label = `${row.invoices?.invoice_number || "an invoice"} (${String(row.invoices?.status ?? "sent")})`;
+    for (const id of claimedIdsOfLines([{ import_key: row.import_key, source_ids: row.source_ids }])) if (!heldBy.has(id)) heldBy.set(id, label);
+  }
   const billOf = new Map(((bills.data ?? []) as any[]).map((b) => [String(b.id), b]));
   const whoOf = new Map(((profiles.data ?? []) as any[]).map((p) => [String(p.id), String(p.full_name ?? "Someone").split(" ")[0]]));
 
@@ -147,6 +171,10 @@ export default async function ShopStockPage({
       liveMoves: Number(l.live_moves) || 0,
       stale: l.cost_stale === true,
       offOn: meta?.unshelved_at ? day(meta.unshelved_at) : null,
+      backTo: bill?.job_id ? jobName.get(String(bill.job_id)) ?? "its job" : null,
+      // Unread bill (a failed read) is treated as a shelf ticket: no Take It Off, and the server
+      // refuses a shelf ticket's roll in words either way.
+      shelfTicket: l.kind !== "opening" && (!bill || bill.on_shelf === true || !bill.job_id),
     };
     const arr = lotsByItem.get(String(l.item_id)) ?? [];
     arr.push(view);
@@ -196,6 +224,7 @@ export default async function ShopStockPage({
       value: Math.round(itemLots.filter((l) => l.live).reduce((s, l) => s + l.costLeft, 0) * 100) / 100,
       lots: itemLots.sort((a, b) => String(a.boughtOn ?? "").localeCompare(String(b.boughtOn ?? ""))),
       moves: movesByItem.get(String(i.id)) ?? [],
+      active: i.active !== false,
     };
   });
 
@@ -221,6 +250,9 @@ export default async function ShopStockPage({
       billedAmount: l.billed_amount,
       hasLot: liveLotLines.has(String(l.id)),
       billDate: l.bills.bill_date ?? null,
+      // A failed claim read can't say who holds it: those lines keep the door, and the server
+      // (0328 and putRestOnShelf) refuses a held receipt in words.
+      heldBy: heldBy.get(String(l.bill_id)) ?? (l.bills.po_id ? heldBy.get(String(l.bills.po_id)) ?? null : null),
     }));
   const linked = new Set(((docLinks.data ?? []) as any[]).map((r) => String(r.supplier_invoice_id)));
   const stockDocuments = ((stockDocs.error ? [] : stockDocs.data) ?? [])
@@ -272,6 +304,7 @@ export default async function ShopStockPage({
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input name="q" defaultValue={q} placeholder="Search the shelf…" className="pl-9" />
             {lowOnly && <input type="hidden" name="low" value="1" />}
+            {inactiveOnly && <input type="hidden" name="inactive" value="1" />}
           </div>
         </form>
         {(lowStock.length > 0 || lowOnly) && (
@@ -286,12 +319,18 @@ export default async function ShopStockPage({
             {lowOnly ? "Show All" : `Need Reordering (${lowStock.length})`}
           </Link>
         )}
+        <Link
+          href={inactiveOnly ? withQuery({ q }) : withQuery({ q, inactive: "1" })}
+          className={`${linkClass} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}
+        >
+          {inactiveOnly ? "Show Active Items" : "Show Inactive Items"}
+        </Link>
       </div>
 
       {shown.length === 0 ? (
         <EmptyState
           icon={Boxes}
-          title={lowOnly ? "Nothing needs reordering" : q ? "No matches" : "Nothing on the shelf yet"}
+          title={inactiveOnly ? "No inactive items" : lowOnly ? "Nothing needs reordering" : q ? "No matches" : "Nothing on the shelf yet"}
           description={
             lowOnly
               ? "Everything with a reorder point set is above it."
@@ -332,9 +371,11 @@ export default async function ShopStockPage({
               <li key={w.key} className="px-3 py-2.5">
                 <p className="text-sm font-medium text-slate-900">{w.title}</p>
                 <p className="mt-0.5 text-xs text-slate-500">{w.why}</p>
-                <Link href={w.href} className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-                  {w.door}
-                </Link>
+                {w.href && w.door && (
+                  <Link href={w.href} className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                    {w.door}
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -344,10 +385,11 @@ export default async function ShopStockPage({
   );
 }
 
-function withQuery(params: { q?: string; low?: string }): string {
+function withQuery(params: { q?: string; low?: string; inactive?: string }): string {
   const sp = new URLSearchParams();
   if (params.q) sp.set("q", params.q);
   if (params.low) sp.set("low", params.low);
+  if (params.inactive) sp.set("inactive", params.inactive);
   const s = sp.toString();
   return s ? `/inventory?${s}` : "/inventory";
 }

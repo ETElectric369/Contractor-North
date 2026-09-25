@@ -6,6 +6,8 @@ import { requireStaff } from "@/lib/staff-guard";
 import { billLineCost } from "@/lib/bill-itemisation";
 import { formatCurrency } from "@/lib/utils";
 import { putOnShelf, restampLotsForBill, unshelveLot, type ShelfPick } from "@/lib/stock-ledger";
+import { isMissingShelf } from "@/lib/job-cost";
+import { importCostsIntoInvoice } from "@/app/(app)/billing/actions";
 import { round2, splitContradictsReceipt } from "./receipt-billing";
 
 export type Result = { ok: boolean; error?: string; note?: string };
@@ -27,6 +29,26 @@ async function restampAfterLineWrite(supabase: any, orgId: string | null | undef
   if (r.restamped > 0) return "The roll on the shelf from this ticket was re-costed to match.";
   return null;
 }
+
+/**
+ * A ROLL ON THE SHELF FROM THIS LINE FIXES WHAT THE JOB USED (review of Phase 2). The roll holds the
+ * pieces the job did NOT use, and a restamp can only move its dollars, never its pieces: switching
+ * the line off the customer's bill, or typing a new "used" figure, would re-cost a 190 ft roll as the
+ * whole 250 ft coil (or bill 60 ft while the shelf still holds 250). So while a roll sits on the line
+ * these two doors refuse, and say the way through: take the roll off the shelf, then change it and
+ * put the rest back. Bill The Whole Line (billed_amount null) still goes: it takes the roll off.
+ * Null means no roll (or a database before 0303); a string is the refusal, or a failed read.
+ */
+async function liveRollOnLine(supabase: any, orgId: string | null | undefined, lineId: string): Promise<string | null> {
+  let q = supabase.from("stock_lots").select("id").eq("bill_line_id", lineId).is("unshelved_at", null).limit(1);
+  if (orgId) q = q.eq("org_id", orgId);
+  const { data, error } = await q;
+  if (error) return isMissingShelf(error) ? null : `Couldn't check the shelf for this line, so nothing was changed: ${dbError(error)}`;
+  return data?.length ? ROLL_ON_LINE : null;
+}
+
+const ROLL_ON_LINE =
+  "A roll from this line is on the shelf, and it holds the pieces this job didn't use. Take It Off The Shelf first, change what this job used, then put the rest back on the shelf.";
 
 /**
  * SWITCH ONE RECEIPT LINE OFF THE CUSTOMER'S BILL (migration 0268).
@@ -57,6 +79,8 @@ export async function setReceiptLineBillable(lineId: string, billable: boolean):
     .eq("id", lineId)
     .maybeSingle();
   if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
+  const rolled = await liveRollOnLine(supabase, ctx.orgId, lineId);
+  if (rolled) return { ok: false, error: rolled };
 
   // org_id rides on the WRITE as well as the read. RLS already scopes this table, but a rule at
   // one read path is a convention, not a boundary (0173) — money columns get the explicit filter.
@@ -178,6 +202,10 @@ export async function setReceiptLineUsage(input: {
     });
     if (objection) return { ok: false, error: objection };
     amount = round2(n);
+    // A new "used" figure under a roll would re-cost the roll without moving its pieces. Bill The
+    // Whole Line (null, above) is let through: it takes the roll off the shelf, pieces and all.
+    const rolled = await liveRollOnLine(supabase, ctx.orgId, lineId);
+    if (rolled) return { ok: false, error: rolled };
   }
 
   // NOTHING SILENT. bill_line_items is staff-only behind RLS, so a non-staff or cross-org caller
@@ -232,32 +260,57 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
   if (!lineId) return { ok: false, error: "Couldn't tell which receipt line you meant." };
   const { data: line } = await ctx.supabase
     .from("bill_line_items")
-    .select("id, bill_id, bills(job_id, jobs(name))")
+    .select("id, bill_id, bills(job_id, po_id, jobs(name))")
     .eq("id", lineId)
     .maybeSingle();
   if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
 
+  const bill = (line as { bill_id?: string; bills?: { job_id?: string | null; po_id?: string | null; jobs?: { name?: string | null } | null } | null }).bills ?? null;
+  const jobId = bill?.job_id ?? null;
+  const jobName = bill?.jobs?.name ?? "The job";
+  const billId = String((line as { bill_id?: string }).bill_id ?? "");
+
+  /**
+   * WHO ALREADY BILLS THIS RECEIPT (review of Phase 2), asked BEFORE anything moves:
+   *   · a sent or paid invoice that billed the ORDER this receipt delivered (the importer skips a
+   *     bill whose PO is billed) - the customer paid for the coil through the PO line, so a roll off
+   *     it would be the same coil on the shelf to be billed again. Refused, like a claim on the
+   *     receipt itself (0328 refuses both in the database too);
+   *   · a DRAFT that holds the receipt or its order: it is brought up to date from the receipt right
+   *     after the shelving (below), so it bills what the job used and nothing that went on the shelf.
+   *     A line on it the office changed by hand never follows an import, so that draft refuses.
+   */
+  const claims = await claimantsOfBill(ctx.supabase, billId, bill?.po_id ?? null);
+  if ("error" in claims) return { ok: false, error: claims.error };
+  const held = claims.rows.find((c) => c.status !== "draft");
+  if (held)
+    return {
+      ok: false,
+      error: `${held.number} has gone to the customer and already bills ${held.via === "po" ? "the order this receipt delivered" : "this receipt"}, so what the job used can't change now. Nothing went on the shelf.`,
+    };
+  const edited = claims.rows.find((c) => c.edited);
+  if (edited)
+    return {
+      ok: false,
+      error: `${edited.number} is a draft with a line from this receipt that was changed by hand, and a changed line doesn't follow the receipt, so the customer would still be billed for what goes on the shelf. Use Start It Over for Materials on ${edited.number}, then put the rest on the shelf. Nothing went on the shelf.`,
+    };
+
   const res = await putOnShelf({ ...input, lineId });
   if (!res.ok) return { ok: false, error: res.error };
 
-  const bill = (line as { bill_id?: string; bills?: { job_id?: string | null; jobs?: { name?: string | null } | null } | null }).bills ?? null;
-  const jobId = bill?.job_id ?? null;
-  const jobName = bill?.jobs?.name ?? "The job";
-  // WHAT A DRAFT STILL SHOWS. A draft invoice that already pulled this ticket in still carries the
-  // line it imported until its materials are pulled in again; saying so is the difference between
-  // "it worked" and a man looking at the old row wondering whether it did.
-  let draftNote = "";
-  const billId = String((line as { bill_id?: string }).bill_id ?? "");
-  if (billId) {
-    const { data: drafts } = await ctx.supabase
-      .from("invoice_items")
-      .select("invoices!inner(invoice_number, status)")
-      .contains("source_ids", [billId])
-      .eq("invoices.status", "draft")
-      .limit(5);
-    const numbers = Array.from(new Set(((drafts ?? []) as any[]).map((d) => d?.invoices?.invoice_number).filter(Boolean)));
-    if (numbers.length) draftNote = ` ${numbers.join(", ")} is still a draft that bills this line: pull its materials in again and it follows.`;
+  // THE DRAFT FOLLOWS THE RECEIPT, in the same press. Pulling its materials in again refreshes every
+  // imported line nobody edited (checked above), keeping the markup already on the invoice. If that
+  // fails, the roll is on the shelf and the draft still bills the whole line: said, with the door.
+  const draftNotes: string[] = [];
+  for (const d of Array.from(new Map(claims.rows.map((c) => [c.invoiceId, c])).values())) {
+    const up = await importCostsIntoInvoice(d.invoiceId, undefined, { keepInvoiceMarkup: true });
+    if (up.ok) draftNotes.push(` ${d.number} (a draft) now bills this receipt as it stands.`);
+    else
+      draftNotes.push(
+        ` ${d.number} (a draft) still bills the whole line: its materials didn't refresh (${up.error ?? "try again"}). Press Materials from Costs on ${d.number} before you send it.`,
+      );
   }
+  const draftNote = draftNotes.join("");
   const lot = res.lot;
   const perPiece = lot.pieces > 0 ? lot.cost / lot.pieces : 0;
   const each = perPiece > 0 && perPiece < 1 ? `about ${Math.round(perPiece * 100)}¢` : formatCurrency(perPiece);
@@ -277,4 +330,45 @@ export async function takeRollOffShelf(lotId: string): Promise<Result> {
   const res = await unshelveLot(String(lotId ?? ""));
   if (!res.ok) return { ok: false, error: res.error };
   return { ok: true };
+}
+
+type BillClaimant = { invoiceId: string; number: string; status: string; edited: boolean; via: "bill" | "po" };
+
+/**
+ * Every live invoice line that bills this receipt, or the purchase order it delivered: by the
+ * source_ids claim (0255) or the older bill:/po: import key. A failed read refuses (never "no one").
+ */
+async function claimantsOfBill(supabase: any, billId: string, poId: string | null): Promise<{ rows: BillClaimant[] } | { error: string }> {
+  if (!billId) return { error: "Couldn't tell which receipt this line is on. Reload and try again." };
+  const cols = "id, edited, invoice_id, invoices!inner(id, invoice_number, status)";
+  const reads: { via: "bill" | "po"; q: any }[] = [
+    { via: "bill", q: supabase.from("invoice_items").select(cols).contains("source_ids", [billId]).neq("invoices.status", "void").limit(200) },
+    { via: "bill", q: supabase.from("invoice_items").select(cols).like("import_key", `bill:${billId}%`).neq("invoices.status", "void").limit(200) },
+  ];
+  if (poId) {
+    reads.push(
+      { via: "po", q: supabase.from("invoice_items").select(cols).contains("source_ids", [poId]).neq("invoices.status", "void").limit(200) },
+      { via: "po", q: supabase.from("invoice_items").select(cols).like("import_key", `po:${poId}%`).neq("invoices.status", "void").limit(200) },
+    );
+  }
+  const answers = await Promise.all(reads.map((r) => r.q));
+  const rows: BillClaimant[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < answers.length; i++) {
+    const { data, error } = answers[i] as { data: any[] | null; error: unknown };
+    if (error) return { error: `Couldn't check which invoices already bill this receipt, so nothing went on the shelf: ${dbError(error)}` };
+    for (const it of data ?? []) {
+      if (!it?.id || seen.has(String(it.id))) continue;
+      seen.add(String(it.id));
+      const inv = it.invoices ?? {};
+      rows.push({
+        invoiceId: String(it.invoice_id ?? inv.id),
+        number: String(inv.invoice_number || "An invoice"),
+        status: String(inv.status ?? ""),
+        edited: it.edited === true,
+        via: reads[i].via,
+      });
+    }
+  }
+  return { rows };
 }

@@ -8,6 +8,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import {
   SHELF_UNITS,
+  isFreightLine,
   lineNeedsShelfAnswer,
   shelfCountGuess,
   suggestShelfItem,
@@ -171,8 +172,9 @@ export function ShelfTicketSheet({
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          Each line opens with the count off the ticket. Confirm it, change it, or tap Not Stock for anything you used that day. A shelf
-          ticket is never a job cost and never a business-cost bucket: it counts as Put On The Shelf in the month it&apos;s dated.
+          Each line opens with the count off the ticket. Confirm it, change it, or tap Not Stock for anything the shop used up. What
+          goes on the shelf counts as Put On The Shelf in the month the ticket is dated; Not Stock lines, their tax and freight count
+          as Tools &amp; Supplies. Something a job used belongs on that job: file the ticket there instead.
         </p>
         {!loaded ? (
           <p className="text-sm text-slate-500">Reading the shelf…</p>
@@ -193,7 +195,11 @@ export function ShelfTicketSheet({
               ) : (
                 <p key={l.key} className="px-1 text-xs text-slate-500">
                   {l.description}: {formatCurrency(l.amount)}
-                  {/tax/i.test(String(l.category ?? "")) ? " (tax: it rides with the lines it was charged on)" : " (nothing shipped on this line)"}
+                  {/tax/i.test(String(l.category ?? ""))
+                    ? " (tax: it rides with the lines it was charged on)"
+                    : isFreightLine(l)
+                      ? " (freight: Tools & Supplies, never a roll)"
+                      : " (nothing shipped on this line)"}
                 </p>
               ),
             )}

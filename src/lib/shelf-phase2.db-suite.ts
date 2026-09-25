@@ -371,6 +371,80 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     });
   });
 
+  it("a receipt whose ORDER a sent invoice bills is refused too, and an itemised bill:<id>:... key counts as a claim (review of Phase 2)", async () => {
+    if (!needs()) return;
+    const tryShelve = async (billId: string, lineId: string, name: string) => {
+      const plan = planShelving(await linesOf(billId), [{ lineId, pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: name }]);
+      if (!plan.ok) throw new Error(plan.error);
+      const r = await refusal(async () => {
+        await as(staffId);
+        await c.query("select public.shelve_bill_lines($1, $2::jsonb, '[]'::jsonb)", [
+          billId,
+          JSON.stringify(plan.lots.map((l) => ({ line_id: l.lineId, billed_amount: l.billedAmount, pieces: l.pieces, unit: l.unit, cost: l.cost, item_name: l.newItemName }))),
+        ]);
+      });
+      await asServer();
+      return r;
+    };
+    await step(async () => {
+      // The order was billed on a sent invoice before its receipt arrived (po_number given, so no
+      // sequence is touched).
+      const t = await herringbone819(jobA);
+      const po = await one(
+        `insert into public.purchase_orders (org_id, job_id, po_number, vendor, status, total) values ($1, $2, 'TEST-PO-S2', 'TEST CED', 'sent', 199.48) returning id`,
+        [orgId, jobA],
+      );
+      await c.query("update public.bills set po_id = $1 where id = $2", [po.id, t.id]);
+      const inv = await one(
+        `insert into public.invoices (org_id, job_id, invoice_number, status, total, amount_paid) values ($1, $2, 'TEST-INV-PO', 'sent', 0, 0) returning id`,
+        [orgId, jobA],
+      );
+      await one(
+        `insert into public.invoice_items (org_id, invoice_id, description, quantity, unit_price, import_key, source_ids, import_source)
+         values ($1, $2, 'TEST Materials PO', 1, 199.48, $3, $4::uuid[], 'costs') returning id`,
+        [orgId, inv.id, `po:${po.id}`, [po.id]],
+      );
+      const r = await tryShelve(t.id, t.lineIds[1], "TEST 12/2 PO");
+      expect(r?.message).toContain("TEST-INV-PO has gone to the customer and already bills the order this ticket delivered");
+    });
+    await step(async () => {
+      // An older itemised row: no source_ids, only the bill:<id>:remainder key.
+      const t = await herringbone819(jobA);
+      const inv = await one(
+        `insert into public.invoices (org_id, job_id, invoice_number, status, total, amount_paid) values ($1, $2, 'TEST-INV-KEY', 'paid', 0, 0) returning id`,
+        [orgId, jobA],
+      );
+      await one(
+        `insert into public.invoice_items (org_id, invoice_id, description, quantity, unit_price, import_key, import_source)
+         values ($1, $2, 'TEST Supplies & tax', 1, 16.47, $3, 'costs') returning id`,
+        [orgId, inv.id, `bill:${t.id}:remainder`],
+      );
+      const r = await tryShelve(t.id, t.lineIds[1], "TEST 12/2 KEY");
+      expect(r?.message).toContain("TEST-INV-KEY has gone to the customer");
+    });
+  });
+
+  it("a roll landing on an item marked inactive makes it active again: no shelf money on a hidden item", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const t = await herringbone819(jobA);
+      const item = await one(
+        `insert into public.inventory_items (org_id, name, unit, quantity_on_hand, reorder_point, active) values ($1, 'TEST 12/2 INACTIVE', 'ft', 0, 0, false) returning id`,
+        [orgId],
+      );
+      const lines = await linesOf(t.id);
+      const plan = planShelving(lines, [{ lineId: t.lineIds[1], pieces: 250, used: 0, unit: "ft", bought: 250, itemId: item.id }]);
+      if (!plan.ok) throw new Error(plan.error);
+      await as(staffId);
+      await c.query("select public.shelve_bill_lines($1, $2::jsonb, '[]'::jsonb)", [
+        t.id,
+        JSON.stringify(plan.lots.map((l) => ({ line_id: l.lineId, billed_amount: l.billedAmount, pieces: l.pieces, unit: l.unit, cost: l.cost, item_id: l.itemId }))),
+      ]);
+      await asServer();
+      expect((await one("select active from public.inventory_items where id = $1", [item.id])).active).toBe(true);
+    });
+  });
+
   it("Count It: fewer than the record are written off oldest roll first at cost; more are found at $0; a tech can't count", async () => {
     if (!needs()) return;
     await step(async () => {

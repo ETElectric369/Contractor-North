@@ -105,7 +105,7 @@ function isMissingColumn(err: unknown): boolean {
 
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   const read = (o: BillColumns) =>
     supabase.from("bills").select(columns(o)).order("created_at", { ascending: false });
 
@@ -395,7 +395,10 @@ export default async function BillsPage({
     job_id: b.job_id ?? null,
     job_name: b.jobs?.name ?? null,
     amount: Number(b.amount) || 0,
-    billedOn: billedOn.get(String(b.id)) ?? null,
+    // A receipt whose ORDER is already billed is held too (review of Phase 2): the importer skips
+    // it (the customer paid for the delivery through the PO line), so its lines are as settled as
+    // a claimed receipt's, and Put The Rest On The Shelf on it would put a paid-for coil on the shelf.
+    billedOn: billedOn.get(String(b.id)) ?? (b.po_id ? billedOn.get(String(b.po_id)) ?? null : null),
     lines: (b.line_items ?? []).map((l: any) => ({
       id: String(l.id),
       description: String(l.description ?? ""),

@@ -18,11 +18,13 @@ vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/anthropic", () => ({ DEFAULT_MODEL: "test-model", getAnthropic: () => ({}) }));
 vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
 vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => [] }));
+const importCosts = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => ({ ok: true as boolean, error: undefined as string | undefined })));
+vi.mock("@/app/(app)/billing/actions", async (orig) => ({ ...(await orig<Record<string, unknown>>()), importCostsIntoInvoice: importCosts }));
 
 import { fileItem } from "./actions";
-import { putRestOnShelf } from "@/app/(app)/bills/receipt-billing-actions";
+import { putRestOnShelf, setReceiptLineBillable, setReceiptLineUsage } from "@/app/(app)/bills/receipt-billing-actions";
 import { recordSupplierInvoiceToShelf } from "@/app/(app)/bills/supplier-actions";
-import { SHELF_NEEDS_LINES } from "@/lib/shelf-plan";
+import { SHELF_TRAY_NEEDS_LINES, SHELF_TRAY_NO_LINES_NO_FILE } from "@/lib/paperwork";
 
 type Call = { table: string; verb: string; payload?: any; eqs: [string, unknown][] };
 type RpcCall = { fn: string; args: any };
@@ -63,6 +65,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[], rpcs: RpcCal
         neq() { return chain; },
         in() { return chain; },
         contains() { return chain; },
+        like() { return chain; },
         single: () => Promise.resolve(next(`${table}.${verb}`)),
         maybeSingle: () => Promise.resolve(next(`${table}.${verb}`)),
         then(resolve: any, reject: any) {
@@ -79,6 +82,7 @@ let rpcs: RpcCall[];
 beforeEach(() => {
   calls = [];
   rpcs = [];
+  importCosts.mockClear();
 });
 const did = (table: string, verb: string) => calls.find((c) => c.table === table && c.verb === verb);
 const lastDid = (table: string, verb: string) => [...calls].reverse().find((c) => c.table === table && c.verb === verb);
@@ -124,11 +128,15 @@ const MONEY_LINES = [
 ];
 
 describe("File It to Shop Stock (the tray)", () => {
-  it("refuses a lineless ticket before claiming anything, in the plan's words", async () => {
-    state.client = fakeSupabase({ "organized_items.select": [{ data: { ...PAPER, line_items: [] }, error: null }] }, calls, rpcs);
+  it("refuses a lineless ticket before claiming anything, in the plan's words, naming Read Again when there is a picture", async () => {
+    state.client = fakeSupabase({ "organized_items.select": [{ data: { ...PAPER, line_items: [], file_url: "org-1/p.jpg" }, error: null }] }, calls, rpcs);
     const res = await fileItem("oi-s", { type: "stock", lines: [] });
-    expect(res).toEqual({ ok: false, error: SHELF_NEEDS_LINES });
+    expect(res).toEqual({ ok: false, error: SHELF_TRAY_NEEDS_LINES });
+    expect(SHELF_TRAY_NEEDS_LINES).toContain("Read Again");
     expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
+
+    state.client = fakeSupabase({ "organized_items.select": [{ data: { ...PAPER, line_items: [] }, error: null }] }, calls, rpcs);
+    expect(await fileItem("oi-s", { type: "stock", lines: [] })).toEqual({ ok: false, error: SHELF_TRAY_NO_LINES_NO_FILE });
   });
 
   it("refuses a ticket with a line nobody answered, before claiming anything", async () => {
@@ -245,13 +253,19 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     { id: "l2", description: "Flexbox single gang 16 cu in", quantity: 2, unit_price: 4.45, amount: 8.9, category: "Electrical", billable: true, billed_amount: null },
     { id: "l3", description: "Tax at 9.000 percent", quantity: 1, unit_price: 16.47, amount: 16.47, category: "Tax", billable: true, billed_amount: null },
   ];
-  it("Herringbone 8/19, 0 used: one RPC, billed $0, 250 ft at $180.17, and the draft that still bills it is named", async () => {
+  const DRAFT_ROW = { id: "ii-1", edited: false, invoice_id: "inv-78", invoices: { id: "inv-78", invoice_number: "INV-078", status: "draft" } };
+  it("Herringbone 8/19, 0 used: one RPC, billed $0, 250 ft at $180.17, and the draft that bills it follows the receipt in the same press", async () => {
     state.client = fakeSupabase(
       {
         "bill_line_items.select": [
-          { data: { id: "l1", bill_id: "11e96fc3", bills: { job_id: "j011", jobs: { name: "13897 Herringbone" } } }, error: null }, // the card's read
+          { data: { id: "l1", bill_id: "11e96fc3", bills: { job_id: "j011", po_id: null, jobs: { name: "13897 Herringbone" } } }, error: null }, // the card's read
           { data: { id: "l1", bill_id: "11e96fc3" }, error: null }, // putOnShelf: which bill
           { data: COIL_LINES, error: null }, // shelveLines: the ticket
+        ],
+        // who already bills it: by source_ids, then by import key (the same row twice counts once)
+        "invoice_items.select": [
+          { data: [DRAFT_ROW], error: null },
+          { data: [DRAFT_ROW], error: null },
         ],
         "stock_lot_balance.select": [
           { data: [], error: null },
@@ -259,7 +273,6 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
         ],
         "inventory_items.select": [{ data: [], error: null }],
         "rpc.shelve_bill_lines": [{ data: { lots: [{ lot_id: "lot-1", item_id: "item-1", line_id: "l1" }] }, error: null }],
-        "invoice_items.select": [{ data: [{ invoices: { invoice_number: "INV-078", status: "draft" } }], error: null }],
       },
       calls,
       rpcs,
@@ -267,8 +280,10 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "250 ft is on the shelf at $180.17 (about 72¢ a foot). 13897 Herringbone's cost drops by $180.17. INV-078 is still a draft that bills this line: pull its materials in again and it follows.",
+      "250 ft is on the shelf at $180.17 (about 72¢ a foot). 13897 Herringbone's cost drops by $180.17. INV-078 (a draft) now bills this receipt as it stands.",
     );
+    // The draft's materials were pulled in again, once, at the markup already on it.
+    expect(importCosts.mock.calls).toEqual([["inv-78", undefined, { keepInvoiceMarkup: true }]]);
     expect(rpcs[0].args.p_lines).toEqual([
       { line_id: "l1", billed_amount: 0, pieces: 250, unit: "ft", cost: 180.17, item_id: null, item_name: "12/2 NM-B", key_part: null },
     ]);
@@ -283,6 +298,10 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
           { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", jobs: { name: "Herringbone" } } }, error: null },
           { data: { id: "l1", bill_id: "b" }, error: null },
           { data: COIL_LINES, error: null },
+        ],
+        "invoice_items.select": [
+          { data: [], error: null },
+          { data: [], error: null },
         ],
         "stock_lot_balance.select": [{ data: [{ lot_id: "lot-1", bill_line_id: "l1", cost: 180.17, live: true, live_moves: 0 }], error: null }],
       },
@@ -309,7 +328,10 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
       ],
       "inventory_items.select": [{ data: itemRows, error: null }],
       "rpc.shelve_bill_lines": [{ data: { lots: [{ lot_id: "lot-2", item_id: "item-122", line_id: "l1" }] }, error: null }],
-      "invoice_items.select": [{ data: [], error: null }],
+      "invoice_items.select": [
+        { data: [], error: null },
+        { data: [], error: null },
+      ],
     });
     state.client = fakeSupabase(script(items), calls, rpcs);
     const ok = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" });
@@ -324,6 +346,115 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     expect(rpcs).toEqual([]);
   });
 });
+
+describe("Put The Rest On The Shelf: who already bills the receipt (review of Phase 2)", () => {
+  const LINE = { data: { id: "l1", bill_id: "b", bills: { job_id: "j011", po_id: "po-7", jobs: { name: "Herringbone" } } }, error: null };
+  const row = (status: string, edited = false) => ({ id: `ii-${status}`, edited, invoice_id: `inv-${status}`, invoices: { id: `inv-${status}`, invoice_number: "INV-050", status } });
+  it("a receipt whose ORDER a paid invoice bills is refused before anything is read off the shelf", async () => {
+    state.client = fakeSupabase(
+      {
+        "bill_line_items.select": [LINE],
+        "invoice_items.select": [
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [row("paid")], error: null }, // the PO, by source_ids
+          { data: [], error: null },
+        ],
+      },
+      calls,
+      rpcs,
+    );
+    const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("INV-050 has gone to the customer and already bills the order this receipt delivered, so what the job used can't change now. Nothing went on the shelf.");
+    expect(rpcs).toEqual([]);
+    expect(importCosts).not.toHaveBeenCalled();
+  });
+  it("a draft whose line from this receipt was changed by hand is refused: it would never follow", async () => {
+    state.client = fakeSupabase(
+      {
+        "bill_line_items.select": [LINE],
+        "invoice_items.select": [
+          { data: [row("draft", true)], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ],
+      },
+      calls,
+      rpcs,
+    );
+    const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("changed by hand");
+    expect(res.error).toContain("Start It Over for Materials on INV-050");
+    expect(rpcs).toEqual([]);
+  });
+  it("a claim read that fails refuses: never read as nobody billing it", async () => {
+    state.client = fakeSupabase(
+      {
+        "bill_line_items.select": [LINE],
+        "invoice_items.select": [
+          { data: null, error: { message: "boom" } },
+          { data: [], error: null },
+          { data: [], error: null },
+          { data: [], error: null },
+        ],
+      },
+      calls,
+      rpcs,
+    );
+    const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Couldn't check which invoices already bill this receipt");
+    expect(rpcs).toEqual([]);
+  });
+});
+
+describe("A roll on a line fixes what the job used (review of Phase 2)", () => {
+  it("the customer switch refuses while a roll from the line is on the shelf, before any write", async () => {
+    state.client = fakeSupabase(
+      {
+        "bill_line_items.select": [{ data: { id: "l1", bill_id: "b", bills: { job_id: "j011" } }, error: null }],
+        "stock_lots.select": [{ data: [{ id: "lot-1" }], error: null }],
+      },
+      calls,
+      rpcs,
+    );
+    const res = await setReceiptLineBillable("l1", false);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Take It Off The Shelf first");
+    expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
+  });
+  it("a new 'used' figure refuses under a roll; Bill The Whole Line (null) still goes and takes the roll off", async () => {
+    const LINE = { data: { id: "l1", bill_id: "b", description: "NMB 12/2 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, is_stock: true, bills: { job_id: "j011", supplier: "CED" } }, error: null };
+    state.client = fakeSupabase({ "bill_line_items.select": [LINE], "stock_lots.select": [{ data: [{ id: "lot-1" }], error: null }] }, calls, rpcs);
+    const no = await setReceiptLineUsage({ lineId: "l1", billedAmount: 39.67, containerCount: 250, boughtQuantity: 250, usedQuantity: 60 });
+    expect(no.ok).toBe(false);
+    expect(no.error).toContain("Take It Off The Shelf first");
+    expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
+
+    state.client = fakeSupabase(
+      {
+        "bill_line_items.select": [LINE, { data: COIL_LINES_BILLED, error: null }],
+        "bill_line_items.update": [{ data: [{ id: "l1" }], error: null }],
+        "stock_lot_balance.select": [{ data: [{ lot_id: "lot-1", bill_line_id: "l1", cost: 180.17, live: true, live_moves: 0 }], error: null }],
+        "stock_lots.update": [{ data: [{ id: "lot-1" }], error: null }],
+      },
+      calls,
+      rpcs,
+    );
+    const whole = await setReceiptLineUsage({ lineId: "l1", billedAmount: null, containerCount: null, usedQuantity: null });
+    expect(whole.ok).toBe(true);
+    expect(whole.note).toContain("came off the shelf");
+    expect(lastDid("stock_lots", "update")!.payload).toHaveProperty("unshelved_at");
+  });
+});
+
+const COIL_LINES_BILLED = [
+  { id: "l1", description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, category: "Electrical", billable: true, billed_amount: null },
+  { id: "l3", description: "Tax at 9.000 percent", quantity: 1, unit_price: 16.47, amount: 16.47, category: "Tax", billable: true, billed_amount: null },
+];
 
 describe("Record To Shelf (a CED document)", () => {
   const STAFF = { data: { role: "owner", org_id: "org-1", active: true }, error: null };

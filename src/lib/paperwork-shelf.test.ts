@@ -3,6 +3,8 @@ import {
   companyUseWord,
   destinationValue,
   fileRefusal,
+  SHELF_TRAY_NEEDS_LINES,
+  SHELF_TRAY_NO_LINES_NO_FILE,
   paperPickOf,
   parseDestination,
   pickedBecause,
@@ -106,8 +108,13 @@ describe("the gate: what can go on the shelf", () => {
   it("a ticket with lines is ready", () => {
     expect(fileRefusal(stockPaper({ po: "STOCK" }), { type: "stock" })).toBeNull();
   });
-  it("a lineless ticket refuses with the plan's sentence", () => {
-    expect(fileRefusal(stockPaper({ po: "STOCK" }, { line_items: [] }), { type: "stock" })).toBe(SHELF_NEEDS_LINES);
+  it("a lineless ticket refuses with the plan's sentence and names Read Again, the door that brings its lines", () => {
+    const withPicture = fileRefusal(stockPaper({ po: "STOCK" }, { line_items: [], file_url: "org-1/t.jpg" }), { type: "stock" });
+    expect(withPicture).toBe(SHELF_TRAY_NEEDS_LINES);
+    expect(withPicture).toContain(SHELF_NEEDS_LINES);
+    expect(withPicture).toContain("Press Read Again");
+    // No picture: Read Again can't exist, so the sentence never names it.
+    expect(fileRefusal(stockPaper({ po: "STOCK" }, { line_items: [] }), { type: "stock" })).toBe(SHELF_TRAY_NO_LINES_NO_FILE);
   });
   it("a return refuses", () => {
     expect(fileRefusal(stockPaper({}, { amount: "-20.00", line_items: [{ description: "RETURN", amount: -20 }] }), { type: "stock" })).toBe(SHELF_NO_RETURNS);

@@ -29,6 +29,12 @@ export type ShelfLotView = {
   stale: boolean;
   /** The day it was taken back off the shelf, when it was. */
   offOn: string | null;
+  /** Where its dollars go if it comes back off the shelf: the job whose ticket it came off, or
+   *  null for a roll counted in by hand. */
+  backTo: string | null;
+  /** It came in on a ticket bought for the shelf: there is no job to send it back to, so it has no
+   *  Take It Off The Shelf (the ticket's Undo in the tray is the way back). */
+  shelfTicket: boolean;
 };
 
 export type ShelfMoveView = {
@@ -55,6 +61,8 @@ export type ShelfItemView = {
   value: number;
   lots: ShelfLotView[];
   moves: ShelfMoveView[];
+  /** False on the Show Inactive Items list. */
+  active: boolean;
 };
 
 /** The item as the edit sheet reads it: its own fields, never a cost. */
@@ -71,7 +79,7 @@ function asItem(it: ShelfItemView): InventoryItem {
     unit_cost: null,
     vendor: it.vendor,
     location: it.location,
-    active: true,
+    active: it.active,
     created_at: "",
     updated_at: "",
   };
@@ -161,7 +169,7 @@ export function ShopStockList({ items }: { items: ShelfItemView[] }) {
                     >
                       Add A Roll Counted In
                     </button>
-                    <ItemActions item={asItem(it)} />
+                    <ItemActions item={asItem(it)} hasHistory={it.lots.length > 0 || it.moves.length > 0} />
                   </div>
 
                   <div>
@@ -179,15 +187,27 @@ export function ShopStockList({ items }: { items: ShelfItemView[] }) {
                               {qty(l.piecesLeft)} {l.unit} left, {formatCurrency(l.costLeft)}
                               {l.stale ? " · its receipt changed, so its cost is being worked out again" : ""}
                             </p>
-                            {l.liveMoves === 0 && (
+                            {l.liveMoves === 0 && !l.shelfTicket && (
                               <button
                                 type="button"
                                 disabled={pending}
-                                onClick={() => act(() => takeLotOffShelf(l.id), `That roll is off the shelf; its ${formatCurrency(l.cost)} is back where it came from.`)}
+                                onClick={() =>
+                                  act(
+                                    () => takeLotOffShelf(l.id),
+                                    l.backTo
+                                      ? `That roll is off the shelf; its ${formatCurrency(l.cost)} is back on ${l.backTo}.`
+                                      : "That roll is off the shelf. It was counted in, not bought on a ticket, so no cost moves.",
+                                  )
+                                }
                                 className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                               >
                                 Take It Off The Shelf
                               </button>
+                            )}
+                            {l.liveMoves === 0 && l.shelfTicket && (
+                              <p className="text-xs text-slate-500">
+                                Bought for the shelf, so it has no job to go back to. Undo its ticket in the tray to take it back.
+                              </p>
                             )}
                           </li>
                         ))}

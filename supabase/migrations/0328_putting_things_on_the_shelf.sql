@@ -28,8 +28,18 @@
 --
 --    A TICKET A CUSTOMER ALREADY HOLDS IS REFUSED. A receipt claimed by a sent, part-paid or paid
 --    invoice has been charged to that customer as it stands; taking part of it off the job now
---    would put the same roll on the shelf that the customer already paid for. A DRAFT claimant is
---    not a wall (the Herringbone 8/19 coil on INV-078): the draft is refreshed from the receipt.
+--    would put the same roll on the shelf that the customer already paid for. The same goes for a
+--    receipt whose PURCHASE ORDER such an invoice bills: the importer skips a bill whose order is
+--    billed, because the customer paid for that delivery through the PO line (review of Phase 2).
+--    Both claim shapes count: source_ids (0255) and the older bill:/po: import keys, including the
+--    itemised "bill:<id>:..." keys, not only the bare one.
+--
+--    A DRAFT claimant is not refused here (the Herringbone 8/19 coil on INV-078), and THIS FUNCTION
+--    DOES NOT TOUCH THE DRAFT. The app does, in the same press (putRestOnShelf,
+--    receipt-billing-actions.ts): before shelving it refuses a draft whose line from this receipt
+--    was changed by hand (an import never overwrites an edited line, so it would keep billing the
+--    whole coil), and after shelving it pulls that draft's materials in again, so the draft bills
+--    what the job used. If that refresh fails the person is told, with the button that does it.
 --
 -- 2. stock_recount(item, counted, note): Count It on Shop Stock. The shelf's count is the
 --    ledger's, never typed (0303); a count that disagrees is written as moves. Fewer than the
@@ -70,7 +80,7 @@ begin
     raise exception 'The rolls to restamp came in the wrong shape. Nothing was changed.' using errcode = 'P0001';
   end if;
 
-  select b.id, b.org_id, b.superseded_by_bill_id into v_bill from public.bills b where b.id = p_bill;
+  select b.id, b.org_id, b.superseded_by_bill_id, b.po_id into v_bill from public.bills b where b.id = p_bill;
   if not found or v_bill.org_id is distinct from v_org then
     raise exception 'That ticket isn''t in this company.' using errcode = '42501';
   end if;
@@ -86,13 +96,26 @@ begin
   select coalesce(i.invoice_number, 'An invoice') into v_holder
     from public.invoice_items it
     join public.invoices i on i.id = it.invoice_id
-   where (it.source_ids @> array[p_bill] or it.import_key = 'bill:' || p_bill::text)
+   where (it.source_ids @> array[p_bill] or it.import_key = 'bill:' || p_bill::text or it.import_key like 'bill:' || p_bill::text || ':%')
      and i.status not in ('void', 'draft')
    order by i.created_at, i.id
    limit 1;
   if v_holder is not null then
     raise exception '% has gone to the customer and already bills this ticket, so what it used can''t change now. Nothing went on the shelf.', v_holder
       using errcode = 'P0001';
+  end if;
+  if v_bill.po_id is not null then
+    select coalesce(i.invoice_number, 'An invoice') into v_holder
+      from public.invoice_items it
+      join public.invoices i on i.id = it.invoice_id
+     where (it.source_ids @> array[v_bill.po_id] or it.import_key = 'po:' || v_bill.po_id::text or it.import_key like 'po:' || v_bill.po_id::text || ':%')
+       and i.status not in ('void', 'draft')
+     order by i.created_at, i.id
+     limit 1;
+    if v_holder is not null then
+      raise exception '% has gone to the customer and already bills the order this ticket delivered, so what it used can''t change now. Nothing went on the shelf.', v_holder
+        using errcode = 'P0001';
+    end if;
   end if;
 
   -- a. what each line's job used
@@ -138,6 +161,10 @@ begin
       insert into public.inventory_items (org_id, name, unit, key_part, quantity_on_hand, reorder_point)
       values (v_org, left(btrim(r->>'item_name'), 200), btrim(r->>'unit'), nullif(btrim(coalesce(r->>'key_part', '')), ''), 0, 0)
       returning id into v_item;
+    else
+      -- A roll landing on an item someone marked inactive makes it active again: an inactive item
+      -- is off Shop Stock's list, and a roll on it would be shelf money no screen shows.
+      update public.inventory_items set active = true where id = v_item and org_id = v_org and active is false;
     end if;
     insert into public.stock_lots (org_id, item_id, kind, bill_line_id, pieces, unit, cost)
     values (v_org, v_item, 'line', v_line, round((r->>'pieces')::numeric, 3), btrim(r->>'unit'), round((r->>'cost')::numeric, 2))

@@ -539,7 +539,7 @@ function BillEditModal({
       <div className="space-y-3">
         {billedNote && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
-            <div className="font-semibold">Saved. One thing about the invoice:</div>
+            <div className="font-semibold">Saved. One thing to know:</div>
             <div className="mt-1">{billedNote}</div>
             <Button variant="outline" size="sm" onClick={onClose} className="mt-2 h-11">
               Got It

@@ -1159,14 +1159,25 @@ export async function updateBill(
   if (!data) return { ok: false, error: "Nothing saved. That bill isn't here, or this login can't edit it." };
   // A ROLL ON THE SHELF FROM THIS TICKET (Shop Stock): a bill edit is a bill money path too, so its
   // take-less rolls are worked out again (one small read when it has none).
+  // What it did is SAID (nothing silent): a roll re-costed or taken off rides back as a warning the
+  // bill editor holds open, and so does a restamp that failed (0304 already marked the roll stale).
+  let shelfNote: string | null = null;
   if (ctx.orgId) {
     const restamp = await restampLotsForBill(supabase, ctx.orgId, id);
-    if (!restamp.ok) reportError("updateBill.restamp", new Error(restamp.error), { billId: id });
+    if (!restamp.ok) {
+      reportError("updateBill.restamp", new Error(restamp.error), { billId: id });
+      shelfNote = `The bill saved, but the roll on the shelf from this ticket couldn't be re-costed: ${restamp.error}`;
+    } else if (restamp.unshelved > 0) {
+      shelfNote = `${restamp.unshelved === 1 ? "The roll" : `${restamp.unshelved} rolls`} on the shelf from this ticket came off the shelf, because nothing of ${restamp.unshelved === 1 ? "its line" : "their lines"} is left for it.`;
+    } else if (restamp.restamped > 0) {
+      shelfNote = `${restamp.restamped === 1 ? "The roll" : `${restamp.restamped} rolls`} on the shelf from this ticket ${restamp.restamped === 1 ? "was" : "were"} re-costed to match.`;
+    }
   }
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability
-  return warning ? { ok: true, warning } : { ok: true };
+  const said = [warning, shelfNote].filter(Boolean).join(" ");
+  return said ? { ok: true, warning: said } : { ok: true };
 }
 
 /**

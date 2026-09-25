@@ -1040,7 +1040,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     const notStock = dest.lines.filter((c) => c.notStock).length;
     shelfSaid =
       ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} on the shelf.` +
-      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket and never go on the shelf.` : "");
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies, never on the shelf.` : "");
   }
 
   // THE CED DOCUMENT THIS PAPER IS (see linkTo above). 0277 lets one bill cover an invoice, once:

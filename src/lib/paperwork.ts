@@ -224,6 +224,8 @@ export type PaperItem = {
   on_paper?: string | null;
   /** What the reader transcribed, line by line (jsonb; File It writes these as the bill's lines). */
   line_items?: unknown;
+  /** The picture or PDF itself, when there is one: Read Again needs it. */
+  file_url?: string | null;
 };
 
 export function proposalOf(item: { proposal?: unknown }): PaperProposal {
@@ -296,6 +298,15 @@ export function linesPointWithTotal<T extends { amount?: unknown; unit_price?: u
   const turn = (v: unknown) => (v === null || v === undefined ? v : -Number(v) || 0);
   return lines.map((l) => ({ ...l, unit_price: turn(l.unit_price), amount: turn(l.amount) }));
 }
+
+/**
+ * A ticket read with no lines can't go on the shelf (a roll IS a line). The door that brings its
+ * lines is Read Again, which the row shows beside this sentence; Fix Details can't add lines, so it
+ * is never the answer (review of Phase 2). A paper with no picture can't be read again at all.
+ */
+export const SHELF_TRAY_NEEDS_LINES = `It was read with no lines. ${SHELF_NEEDS_LINES} Press Read Again so its lines come with it.`;
+export const SHELF_TRAY_NO_LINES_NO_FILE =
+  "It has no lines and no picture to read them from, so it can't go on the shelf. File it on a job or as a business cost.";
 
 export const RETURN_NEEDS_LINES =
   "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
@@ -1007,7 +1018,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     if (r.state === "needs_total") return r.sentence;
     const total = amountOf(item);
     if (total !== null && total < 0) return SHELF_NO_RETURNS;
-    if (!shelfRowsOf(item).length) return SHELF_NEEDS_LINES;
+    if (!shelfRowsOf(item).length) return item.file_url ? SHELF_TRAY_NEEDS_LINES : SHELF_TRAY_NO_LINES_NO_FILE;
     return null;
   }
   if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
