@@ -59,9 +59,10 @@ export default async function AppointmentCapturePage({
         // answers that the booking doors paste into `notes`, and the only way this page can tell
         // "the office wrote this note" from "this paragraph IS the intake summary, shown properly
         // below" is to have the original to compare against.
-        // jobs(...) is the linked job the top card names ("Clock In On J-055"); the lead's
+        // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
+        // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake, customer_id), jobs(id, job_number, name)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -157,7 +158,7 @@ export default async function AppointmentCapturePage({
      instead (the same read linkVisitInstead re-asks before it links). */
   const viewerIsStaff = isStaffRole((meRow as { role?: string } | null)?.role ?? "");
   const linkedJob = (Array.isArray(a.jobs) ? a.jobs[0] : a.jobs) as
-    | { id: string; job_number: string | null; name: string | null }
+    | { id: string; job_number: string | null; name: string | null; status: string | null }
     | null
     | undefined;
   const oe = openRow as
@@ -344,11 +345,27 @@ export default async function AppointmentCapturePage({
               appointmentId={a.id}
               tz={tz}
               isStaff={viewerIsStaff}
-              job={a.job_id ? { id: a.job_id, job_number: linkedJob?.job_number ?? null, name: linkedJob?.name ?? null } : null}
+              job={
+                a.job_id
+                  ? {
+                      id: a.job_id,
+                      job_number: linkedJob?.job_number ?? null,
+                      name: linkedJob?.name ?? null,
+                      status: linkedJob?.status ?? null,
+                    }
+                  : null
+              }
+              visitStatus={a.status ?? null}
               openEntry={viewerOpenEntry}
               linkInstead={
                 linkInstead
-                  ? { id: linkInstead.id, job_number: linkInstead.job_number, name: linkInstead.name, customer: who }
+                  ? {
+                      id: linkInstead.id,
+                      job_number: linkInstead.job_number,
+                      name: linkInstead.name,
+                      status: linkInstead.status,
+                      customer: who,
+                    }
                   : null
               }
               preview={{
