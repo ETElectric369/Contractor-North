@@ -675,7 +675,8 @@ async function payContext(
     readEvery<any>("hours", (from, to) =>
       supabase
         .from("time_entries")
-        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override")
+        // split_from: a split shift's miles count on the day it began (summarizeMileage, audit v994 SW5).
+        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, split_from")
         .eq("profile_id", profileId)
         .or("paid_at.is.null,mileage_paid_at.is.null")
         .order("id")

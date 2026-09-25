@@ -238,6 +238,7 @@ export function noteTapIdentity(stamp: string | null | undefined): void {
   lastTokenFailure = null;
   // Only an ECHO of the old session's reader; the SDK says where the new one stands.
   connStatus = "UNKNOWN";
+  readerConfiguredThisLoad = false;
   reconnectingAt = 0;
   // Not awaited: it takes its SDK turn like any other caller, behind whoever holds one now.
   void disconnectTapReader();
@@ -342,7 +343,23 @@ const progressSubs = new Set<(p: TapProgress) => void>();
 /** The last thing published, replayed to a late subscriber so a screen mounting mid-connect sees it. */
 let lastProgress: TapProgress | null = null;
 
+/**
+ * THIS PHONE WAS SET UP ON THIS PAGE LOAD (audit v994 SI10). A reader that reached "ready" once is
+ * a phone Apple has configured for this company, and a later disconnect does not undo that: Nort's
+ * voice stands the reader down (standDownReaderForVoice), and that publishes "not ready", which
+ * Settings used to read as "not set up yet" and bring the Get This iPhone Ready door back. The
+ * stage says whether the reader is connected NOW; this says whether the phone is SET UP. Cleared
+ * only when the signed-in identity moves, because set up for one company is not set up for another.
+ */
+let readerConfiguredThisLoad = false;
+
+/** Has this phone's reader been ready at least once since this page loaded, for this identity? */
+export function tapReaderConfiguredThisLoad(): boolean {
+  return readerConfiguredThisLoad;
+}
+
 function publish(stage: string, percent: number | null = null): void {
+  if (stage === STAGE.ready) readerConfiguredThisLoad = true;
   const p: TapProgress = { stage, percent };
   lastProgress = p;
   for (const cb of Array.from(progressSubs)) {
@@ -1748,6 +1765,9 @@ export async function cancelTapPayment(): Promise<void> {
  */
 export async function standDownReaderForVoice(): Promise<void> {
   if (!plugin() || inFlight || enabling) return;
+  // Nothing connected (the SDK said so): nothing to let go, and nothing to publish. An UNKNOWN echo
+  // still disconnects, because a warm-up may have connected before this page heard a status.
+  if (connStatus === "NOT_CONNECTED") return;
   await disconnectTapReader();
 }
 

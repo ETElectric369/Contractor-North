@@ -67,6 +67,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
   const [papers, setPapers] = useState<PapersState | null>(null);
   const [brands, setBrands] = useState<string[]>([]);
   const [options, setOptions] = useState<PickOptionChoice[]>([]);
+  const [priceBookNote, setPriceBookNote] = useState<string | null>(null);
   const [link, setLink] = useState<LinkState | null>(null);
 
   const load = useCallback(async () => {
@@ -83,6 +84,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
       setPapers(st.papers);
       setBrands(st.brands);
       setOptions(st.options);
+      setPriceBookNote(st.priceBookNote);
     }
     if (ln.ok)
       setLink({ url: ln.url, enabled: ln.enabled, hasLink: ln.hasLink, jobShown: ln.jobShown, customerId: ln.customerId, customerName: ln.customerName });
@@ -114,7 +116,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
       ) : (
         <>
           <StretchesCard jobId={jobId} rows={stretches} setRows={setStretches} who={who} />
-          <PicksCard jobId={jobId} orgId={orgId} rows={picks} setRows={setPicks} brands={brands} options={options} who={who} />
+          <PicksCard jobId={jobId} orgId={orgId} rows={picks} setRows={setPicks} brands={brands} options={options} priceBookNote={priceBookNote} who={who} />
           {papers ? <PapersCard jobId={jobId} orgId={orgId} state={papers} setState={setPapers} who={who} /> : null}
           <JobPortalPanel jobId={jobId} who={who} />
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -449,6 +451,7 @@ function PicksCard({
   setRows,
   brands,
   options,
+  priceBookNote,
   who,
 }: {
   jobId: string;
@@ -457,6 +460,7 @@ function PicksCard({
   setRows: React.Dispatch<React.SetStateAction<Pick[]>>;
   brands: string[];
   options: PickOptionChoice[];
+  priceBookNote: string | null;
   who: string;
 }) {
   const toast = useToast();
@@ -507,6 +511,9 @@ function PicksCard({
         The colors, faceplates and fixtures chosen for this job, with a swatch, a picture, a PDF or a link. {who} sees them read
         only. A price is never shown.
       </p>
+      {priceBookNote ? (
+        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{priceBookNote}</p>
+      ) : null}
 
       <datalist id={`pick-cats-${jobId}`}>
         {PICK_CATEGORIES.map((c) => (

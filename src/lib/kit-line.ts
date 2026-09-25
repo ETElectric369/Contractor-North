@@ -19,7 +19,7 @@
  * Every consumer (kits manager, kit picker, parametric sizing, order-sheet seed, Nort) reads
  * through here so they can never disagree about what a line is worth.
  */
-import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
+import { priceBookLine, type PriceItemOptionRow } from "@/lib/pricing/item-options";
 import { normalizeUnit } from "@/lib/pricing/units";
 
 /** The sizing rule — on the item when linked, on the line when not. 0241 made it generic: an item
@@ -54,6 +54,10 @@ export type KitLinkedItem = {
   qty_round?: string | null;
   sized_by?: string | null;
   qty_per?: number | string | null;
+  /** 0282: the vendors under this code, as KIT_ITEM_LINK_COLS_V3 embeds them (archived included,
+   *  so normalizeItemOptions can drop them without a filter at every call site). Absent on the
+   *  older rungs, and then the line prices at the item's own number exactly as before. */
+  price_list_item_options?: PriceItemOptionRow[] | PriceItemOptionRow | null;
 };
 
 /** A kit_items row as the pages select it. Every 0166/0240 column is optional because the query
@@ -93,6 +97,9 @@ export type KitLineView = {
   category: string | null;
   supplier: string | null;
   linked: boolean;
+  /** The vendor a linked line priced at ("Marvin", "Andersen 400 Series") when the code has a
+   *  default vendor; null for the item's own price and for a frozen line. */
+  vendor: string | null;
   /** True when the linked item has been ARCHIVED out of the book. The line still prices from it —
    *  changing the money on an archive would be a second, silent way to compute a total — but the
    *  contract says an archived row leaves every picker, so the surfaces need to be able to mark it
@@ -125,11 +132,25 @@ export function lineDisplayName(item: { code?: string | null; description: strin
   return code ? `${code} — ${desc}` : desc;
 }
 
-/** The item's buy price when linked, else null — the order sheet's question. */
+/** What a linked line COSTS: the org's default vendor when the code has one, else the item's own
+ *  buy price, the same answer kitLineView prices from. Null when frozen — the order sheet's question. */
 export function kitLineCost(line: KitLineRaw | null | undefined): number | null {
   const item = linkedItemOf(line);
   if (!item) return null;
-  return num(item.buy_price) ?? 0;
+  // Cost does not depend on markup, so any pricing will do here; the sell is not read.
+  return priceBookLine(bookItemOf(item), { levelPct: null, orgDefaultPct: null }).buyPrice;
+}
+
+/** The linked item in the shape the one price-book function reads. */
+function bookItemOf(item: KitLinkedItem) {
+  return {
+    code: item.code ?? null,
+    description: item.description ?? "",
+    unit: item.unit ?? null,
+    buy_price: num(item.buy_price) ?? 0,
+    markup_pct: num(item.markup_pct),
+    price_list_item_options: item.price_list_item_options ?? null,
+  };
 }
 
 /** The sizing rule this line sizes by: the item's when linked, the line's when not. */
@@ -151,17 +172,22 @@ export function kitLineSizing(line: KitLineRaw | null | undefined): KitSizing {
 export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView {
   const item = linkedItemOf(line);
   if (item) {
-    const cost = num(item.buy_price) ?? 0;
-    const pct = effectiveMarkupPct({
-      levelPct: pricing.levelPct,
-      itemPct: num(item.markup_pct),
+    /* THE SAME PRICE EVERY OTHER DOOR QUOTES (audit v994 VP2, the kit piece). A linked line is a
+       price-book item, so it resolves through priceBookLine exactly as the typeahead, the invoice
+       picker, the estimator and Nort do: the org's DEFAULT VENDOR when the code has one (named in
+       the words, "830 — Windows (Marvin)", so the crew orders the right one and the order sheet
+       reads it back), else the item's own buy price, both through THE one markup rule. An item
+       with no vendors comes out byte-identical to the old item-markup arithmetic. */
+    const choice = priceBookLine(bookItemOf(item), {
+      levelPct: pricing.levelPct ?? null,
       orgDefaultPct: pricing.orgDefaultPct,
     });
     return {
-      description: lineDisplayName(item),
-      unit: normalizeUnit(item.unit),
-      unit_price: sellPrice(cost, pct),
-      cost,
+      description: choice.isItemOwn ? lineDisplayName(item) : choice.description,
+      unit: normalizeUnit(choice.isItemOwn ? item.unit : choice.unit),
+      unit_price: choice.unitPrice,
+      cost: choice.buyPrice,
+      vendor: choice.isItemOwn ? null : choice.makerLabel,
       code: String(item.code ?? "").trim() || null,
       category: item.category ?? null,
       supplier: item.supplier ?? null,
@@ -179,18 +205,33 @@ export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView 
     category: null,
     supplier: null,
     linked: false,
+    vendor: null,
     archived: false,
     sizing: kitLineSizing(line),
   };
+}
+
+/** THE SNAPSHOT a linked line carries (kit_items.description/unit/unit_price), for the day it is
+ *  unlinked or its item vanishes. Built BY kitLineView, with the org default and no customer level
+ *  (a kit is authored for nobody in particular), so the frozen line is exactly what the kits
+ *  manager showed a second before: the default vendor's name, unit and sell when the code has one
+ *  (audit v994 VP2 follow-through: a snapshot that re-derived the item's own allowance froze
+ *  "830 — Windows (Marvin)" at $1,610 into "830 — Windows" at $830). The item must be read with
+ *  KIT_BOOK_OPTIONS_EMBED for the vendor to be seen; without it the item's own price is the answer. */
+export function kitLineSnapshot(item: KitLinkedItem, orgDefaultPct: number): { description: string; unit: string; unit_price: number } {
+  const view = kitLineView({ description: "", quantity: null, price_list_items: item }, { orgDefaultPct, levelPct: null });
+  return { description: view.description, unit: view.unit, unit_price: view.unit_price };
 }
 
 /* ── THE SHARED SELECT SHAPE ──────────────────────────────────────────────────────────────────
    Every kits query in the app selects the same columns in the same three tolerant rungs, because
    a deploy lands before its migration and naming an absent column fails the WHOLE query rather
    than degrading — which would empty every kit picker until the migration ran.
-     1. full  — 0166 sizing + 0240 link + the item embed
-     2. sized — 0166 sizing only (0240 not applied yet)
-     3. base  — pre-0166
+     1. vendors — the full embed plus 0282's vendors under each code
+     2. full  — 0166 sizing + 0240/0241 link + the item embed
+     3. link  — the 0240 embed without 0241's generic sizing pair
+     4. sized — 0166 sizing only (0240 not applied yet)
+     5. base  — pre-0166
    Pages run `firstThatWorks(kitsSelectRungs(...).map(...))`. */
 export const KIT_ITEM_BASE_COLS = "id, description, quantity, unit, unit_price, sort_order";
 export const KIT_ITEM_SIZING_COLS = "qty_per_sqft, qty_per_lf, qty_min, qty_round";
@@ -200,8 +241,21 @@ export const KIT_ITEM_LINK_COLS =
 export const KIT_ITEM_LINK_COLS_V2 =
   "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per)";
 
+/** 0282: the vendors under a code, as every kit read embeds them — `archived` carried rather than
+ *  filtered, so normalizeItemOptions drops the ones the org stopped carrying without a nested
+ *  filter restated at each call site. The kit WRITES (kit-actions' snapshot, the importer's kit
+ *  step) read the item through this same embed so the frozen copy matches what the view shows. */
+export const KIT_BOOK_OPTIONS_EMBED =
+  "price_list_item_options(id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, sort_order, archived)";
+
+/** 0282: the V2 embed plus the vendors under each code, so a kit line quotes at the code's default
+ *  vendor like every other door (audit v994 VP2). `archived` rides in the embed rather than as a
+ *  filter, because a nested filter would have to be restated at all five call sites. */
+export const KIT_ITEM_LINK_COLS_V3 = `price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per, ${KIT_BOOK_OPTIONS_EMBED})`;
+
 /** The kit_items(...) column lists, most capable first. */
 export const KIT_ITEM_SELECT_RUNGS = [
+  `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}, ${KIT_ITEM_LINK_COLS_V3}`,
   `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}, ${KIT_ITEM_LINK_COLS_V2}`,
   `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}, ${KIT_ITEM_LINK_COLS}`,
   `${KIT_ITEM_BASE_COLS}, ${KIT_ITEM_SIZING_COLS}`,

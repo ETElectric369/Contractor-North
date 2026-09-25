@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/import-extras";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -133,16 +134,12 @@ type PulledIn = {
   count: number;
   /** Importers that FAILED (a DB error — never a "nothing to pull" no-op). */
   missed: string[];
-  /** What the labor run did to a person's line and anything an importer left off or took off, one
-   *  sentence each - "Added 6 h to Labor - Erik Taylor at $100" (Erik's INV-078 rule). */
-  said: string[];
+  /** What the importers said besides their counts (audit v994 SI5): warnings a person must read
+   *  before sending (INV-074's edited tax row, a line taken off, hours that could not go on), and
+   *  notes (a return held, a counter preview, and labor's joins - "Added 6 h to Labor - Erik Taylor
+   *  at $100", Erik's INV-078 rule). Never swallowed: every door says them (importExtras). */
+  results: ImportOutcomeLike[];
 };
-
-/** The run's own sentences on the end of the door's note. */
-function withSaid(note: string, said: string[]): string {
-  if (!said.length) return note;
-  return `${note.replace(/\.$/, "")}. ${said.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(". ")}.`;
-}
 
 /**
  * Run the importers a caller asked for into one draft and count what landed. ONE helper for both
@@ -158,20 +155,17 @@ async function pullNewWorkInto(
   want: { labor: boolean; costs: boolean; changeOrders: boolean },
   markup: number,
 ): Promise<PulledIn> {
-  const out: PulledIn = { parts: [], count: 0, missed: [], said: [] };
-  type Outcome = { ok: boolean; empty?: boolean; error?: string; stats?: { pulled_in: number; notes?: string[]; warnings?: string[] } };
+  const out: PulledIn = { parts: [], count: 0, missed: [], results: [] };
+  type Outcome = { ok: boolean; empty?: boolean; emptyNote?: string; error?: string; stats?: { pulled_in: number; warnings?: string[]; notes?: string[] } };
   const fail = (e: unknown): Outcome => ({ ok: false, error: String((e as { message?: unknown })?.message ?? e), empty: false });
   const take = (r: Outcome, noun: [string, string], what: string, tag: string) => {
+    out.results.push(r);
     if (r.ok) {
       // pulled_in counts SOURCE ROWS newly on the invoice (a refreshed line whose claims did not
       // change is not "pulled in") — the honest number, not the RPC's lines-touched.
       const n = r.stats?.pulled_in ?? 0;
       if (n > 0) out.parts.push(`${n} ${n === 1 ? noun[0] : noun[1]}`);
       out.count += n;
-      // Labor's notes are the joins ("Added 6 h to ..."); every importer's warnings are money a
-      // person should look at (a line taken off, hours that could not go on). Never swallowed here.
-      if (tag === "labor") out.said.push(...(r.stats?.notes ?? []));
-      out.said.push(...(r.stats?.warnings ?? []));
       return;
     }
     if (!r.empty) {
@@ -396,11 +390,14 @@ export async function createInvoiceForJob(
     // never reads as "it made a new one".
     const label = draft.invoice_number ?? "the draft you already started";
     const pulled = await pullNewWorkInto(supabase, jobId, draft.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
+    const extras = importExtras(pulled.results);
+    const said = extrasSentence(extras);
+    const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ok: true, id: draft.id, partial: true, importWarning: withSaid(`Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.`, pulled.said) };
+      return { ok: true, id: draft.id, partial: true, importWarning: `Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
     }
     if (pulled.count > 0) {
-      return { ok: true, id: draft.id, importWarning: withSaid(`Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.`, pulled.said) };
+      return { ok: true, id: draft.id, ...heads, importWarning: `Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.${said}` };
     }
     // Nothing landed — but "nothing new" is decided from the FULL picture, never from the parts
     // the caller asked for (toggles off) or the rows an edited line holds back. If work is still
@@ -414,9 +411,11 @@ export async function createInvoiceForJob(
     return {
       ok: true,
       id: draft.id,
-      importWarning: withSaid(stillOff.length
-        ? `Opened ${label} — still unbilled on this job: ${joinAnd(stillOff)}.`
-        : `Opened ${label} — nothing new to pull in since.`, pulled.said),
+      ...heads,
+      importWarning:
+        (stillOff.length
+          ? `Opened ${label} — still unbilled on this job: ${joinAnd(stillOff)}.`
+          : `Opened ${label} — nothing new to pull in since.`) + said,
     };
   }
 
@@ -475,8 +474,11 @@ export async function createInvoiceForJob(
   // straight from the field instead of having to be back at a desk with the data entered.
   if (res.ok && res.id) {
     const pulled = await pullNewWorkInto(supabase, jobId, res.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
+    const extras = importExtras(pulled.results);
+    const said = extrasSentence(extras);
+    const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ...res, partial: true, importWarning: withSaid(`Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.`, pulled.said) };
+      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
     }
     if (prior) {
       const { data: made } = await supabase
@@ -504,25 +506,35 @@ export async function createInvoiceForJob(
         }
         revalidateMoney();
         revalidatePath(`/jobs/${jobId}`);
-        return nothingNewRefusal(prior, priorLabel, !!quote);
+        // A return held back is still money owed the customer: the shell goes, the sentence stays.
+        const refusal = nothingNewRefusal(prior, priorLabel, !!quote);
+        if (said && refusal.error) refusal.error += said;
+        return refusal;
       }
       if (landed === 0) {
         // Blank on purpose. The work the caller left off is named with its door, so the empty
         // draft can never read as "nothing new" while the Overview card shows a figure.
         return {
           ...res,
-          importWarning: leftOff.length
-            ? `Started ${newNumber} empty, as asked — still unbilled since ${priorLabel}: ${joinAnd(leftOff)}.`
-            : `Started ${newNumber} empty, as asked.`,
+          ...heads,
+          importWarning:
+            (leftOff.length
+              ? `Started ${newNumber} empty, as asked — still unbilled since ${priorLabel}: ${joinAnd(leftOff)}.`
+              : `Started ${newNumber} empty, as asked.`) + said,
         };
       }
       return {
         ...res,
+        ...heads,
         importWarning:
           `Started ${newNumber} for what's new since ${priorLabel} — ${landed} ${landed === 1 ? "line" : "lines"} pulled in.` +
-          (leftOff.length ? ` Left off, as asked: ${joinAnd(leftOff)}.` : ""),
+          (leftOff.length ? ` Left off, as asked: ${joinAnd(leftOff)}.` : "") +
+          said,
       };
     }
+    // The first invoice on the job: its count is on the page, but what the importers flagged is
+    // not, so it is said here too (audit v994 SI5).
+    if (said) return { ...res, ...heads, importWarning: said.trim() };
   }
   return res;
 }

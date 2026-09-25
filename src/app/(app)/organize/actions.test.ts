@@ -21,6 +21,10 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.
 vi.mock("@/lib/staff-guard", () => ({
   requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-1" })),
 }));
+// Organize's own job guard (audit v994 TL2) answers yes here unless a test says otherwise, so the
+// scripted jobs reads below stay the ones the filing itself makes.
+const jobGuard = vi.hoisted(() => ({ jobInOrg: vi.fn(async (_s: unknown, _o: unknown, id: unknown) => !!id) }));
+vi.mock("@/lib/job-in-org", () => jobGuard);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // The receipt reader's outside world. None of it is what these tests are about — they are about
 // what happens to the row AFTER the bill lands — so it is all pinned to one boring answer.

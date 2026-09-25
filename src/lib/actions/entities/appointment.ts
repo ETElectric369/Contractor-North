@@ -43,10 +43,26 @@ export function appointmentRecorded(
   row: { title?: string | null; starts_at?: string | null; ends_at?: string | null; customers?: { name?: string | null } | null },
   tz: string,
 ): string {
-  const end = row.ends_at ? `, until ${spokenWhen(row.ends_at, tz).replace(/^.* at /, "")}` : "";
+  const end = endSaid(row.starts_at, row.ends_at, tz);
   const who = row.customers?.name ? `, customer ${quotedData(row.customers.name)}` : ", no customer linked";
   // Title and name are database free text (a lead's name can reach the title): quoted, as data.
   return `${verb}: ${quotedData(row.title ?? "appointment")}, ${spokenWhen(row.starts_at, tz)}${end}${who}.`;
+}
+
+/** "until 10:00 AM PDT" on the same org-local day; the end's day too when it falls on another day;
+ *  and a plain warning when the stored end is at or before the start, so the read-back never makes
+ *  a broken row sound like a normal visit (audit v994 SI1). */
+function endSaid(startIso: string | null | undefined, endIso: string | null | undefined, tz: string): string {
+  if (!endIso) return "";
+  const endWhen = spokenWhen(endIso, tz);
+  const s = startIso ? new Date(startIso).getTime() : NaN;
+  const e = new Date(endIso).getTime();
+  if (Number.isFinite(s) && Number.isFinite(e) && e <= s) {
+    return `, and its stored end (${endWhen}) is not after its start, so the end needs fixing`;
+  }
+  const day = (iso: string) => spokenWhen(iso, tz).replace(/ at .*$/, "");
+  const sameDay = !!startIso && day(startIso) === day(endIso);
+  return `, until ${sameDay ? endWhen.replace(/^.* at /, "") : endWhen}`;
 }
 
 /** Convert the model's start (and optional end) in the org timezone, or say why not. */
@@ -69,7 +85,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Reschedule appointment",
     description:
-      "Reschedule an appointment / inspection to a new time — e.g. 'move the Smith inspection to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at). Keeps everything else; no cancel+recreate. " +
+      "Reschedule an appointment / inspection to a new time — e.g. 'move the Smith inspection to Thursday at 9am'. Find it first with schedule_overview (it returns the id), then pass that id plus the new starts_at (optionally ends_at). Without ends_at the visit keeps its length and the end moves with it. Keeps everything else; no cancel+recreate. " +
       LOCAL_TIME_RULE,
     input: z.object({ id: z.string(), starts_at: z.string().min(1), ends_at: z.string().nullable().optional() }),
     auth: "staff",

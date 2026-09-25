@@ -14,7 +14,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
-import { endAfterStart } from "@/lib/appointments/times";
+import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
@@ -915,13 +915,28 @@ export async function rescheduleAppointment(
   const supabase = ctx.supabase;
   const start = new Date(startsAtIso);
   if (isNaN(start.getTime())) return { ok: false, error: "I couldn't read that date/time." };
-  const patch: Record<string, string> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
+  const patch: Record<string, string | null> = { starts_at: start.toISOString(), updated_at: new Date().toISOString() };
   if (endsAtIso) {
     const end = new Date(endsAtIso);
     // Don't silently swallow a bad end time and still report success — tell the caller.
     if (isNaN(end.getTime())) return { ok: false, error: "I couldn't read the end time." };
     if (end.getTime() <= start.getTime()) return { ok: false, error: "The end time has to be after the start." };
     patch.ends_at = end.toISOString();
+  } else {
+    /* NO END GIVEN: THE VISIT KEEPS ITS LENGTH, NOT ITS OLD END (audit v994 SI1). Nort's "move the
+       Smith inspection to Thursday at 9" passes only a start, and the old end stayed where it was:
+       Tue 9-10 became Thu 9 AM to Tue 10 AM, and moved earlier it spanned three days on the
+       calendar and a 49-hour event in Google. The old span moves with the start when it was a
+       real span; an end that was missing or already at/before its start is cleared, and the
+       calendar draws its default hour. */
+    const { data: cur, error: curErr } = await supabase
+      .from("appointments")
+      .select("starts_at, ends_at") // THE PROJECTION LAW: the two columns the length is read from
+      .eq("id", id)
+      .maybeSingle();
+    if (curErr) return { ok: false, error: dbError(curErr) };
+    if (!cur) return { ok: false, error: "Appointment not found." };
+    patch.ends_at = keptEnd(start, (cur as { starts_at: string | null; ends_at: string | null }).starts_at, (cur as { ends_at: string | null }).ends_at);
   }
   const { data, error } = await supabase.from("appointments").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };

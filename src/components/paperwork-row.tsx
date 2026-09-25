@@ -11,6 +11,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
+import { callOrLost } from "@/lib/lost-signal";
 import { jobLabel } from "@/lib/schedule-options";
 import {
   PAPER_BUCKETS,
@@ -348,10 +349,13 @@ export function PaperworkRow({
     setSaid(null);
     setBusy(key);
     start(async () => {
-      const res = await fn();
+      // A dropped signal rejects (audit v994 SI2): caught here, the pick stays on the row and the
+      // row says so, instead of the page being swapped for the error card.
+      const res = await callOrLost(fn);
       setBusy(null);
       if (!res.ok) {
         setSaid({ text: res.error ?? "That didn't work. Nothing changed.", tone: "error" });
+        if ("lost" in res) router.refresh();
         return;
       }
       if (filedSentence) {

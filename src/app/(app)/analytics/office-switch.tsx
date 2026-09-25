@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOfficeSeesOwnerMoney } from "./actions";
+import { callOrLost } from "@/lib/lost-signal";
 
 /**
  * "Office Can See This": the owner's one control over who sees Left For You (0286). A real switch,
@@ -15,16 +16,31 @@ export function OfficeCanSeeSwitch({ initial }: { initial: boolean }) {
   const [on, setOn] = useState(initial);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  // The stored value, re-read on every refresh, wins over the local one: after a lost answer the
+  // page "is checking", and this is where the check lands. Without it `initial` was read once, so
+  // a write that committed before the answer was lost left the switch showing the old setting
+  // while the database held the new one. A stored value that moved answers the "may not have
+  // moved" sentence too, so that goes. (Adjusting state during render: React's pattern for
+  // following a prop, no effect and no extra paint.)
+  const [stored, setStored] = useState(initial);
+  if (initial !== stored) {
+    setStored(initial);
+    setOn(initial);
+    setErr(null);
+  }
 
   function flip() {
     const next = !on;
     setOn(next);
     setErr(null);
     start(async () => {
-      const res = await setOfficeSeesOwnerMoney(next);
+      // A dropped signal rejects (audit v994 SI2): the optimistic flip goes back and it says so,
+      // then the page re-reads the truth in case the write landed anyway.
+      const res = await callOrLost(() => setOfficeSeesOwnerMoney(next), "Couldn't reach the server, so the switch may not have moved. The page is checking.");
       if (!res.ok) {
         setOn(!next);
         setErr(res.error ?? "That didn't save. Try again.");
+        if ("lost" in res) router.refresh();
         return;
       }
       router.refresh();

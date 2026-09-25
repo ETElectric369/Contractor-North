@@ -48,6 +48,19 @@ export function tzMinutesOfDay(at: string | Date, tz: string): number {
   return local.getUTCHours() * 60 + local.getUTCMinutes();
 }
 
+/** An instant as a `<input type="datetime-local">` value ("YYYY-MM-DDTHH:MM") in the given
+ *  timezone, the exact inverse of the naive local string the server stores through localToInstant.
+ *  A form that fills this box in the PHONE's zone (Date#getHours) and saves it in the ORG's moves
+ *  the visit an hour on every save from Mountain time (audit v994 TZ2). "" for no instant. */
+export function tzLocalInputValue(at: string | Date | null | undefined, tz: string): string {
+  if (!at) return "";
+  const d = typeof at === "string" ? new Date(at) : at;
+  if (Number.isNaN(d.getTime())) return "";
+  const mins = tzMinutesOfDay(d, tz);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${todayStrInTz(tz, d)}T${p(Math.floor(mins / 60))}:${p(mins % 60)}`;
+}
+
 /** A time entry's place on the org-tz time grid: the ORG-LOCAL day column it
  *  belongs to + minutes-of-day for its top/bottom edge. An entry clocked
  *  7:00 AM Pacific lands at minute 420 on the PACIFIC day — never bucketed by

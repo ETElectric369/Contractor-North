@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
+import { reportError } from "@/lib/observe";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import {
   PHOTO_NOT_IN_JOB_FOLDER,
@@ -618,6 +619,9 @@ export async function jobShareState(jobId: string): Promise<
       papers: PapersState;
       brands: string[];
       options: PickOptionChoice[];
+      /** Set when the price book's vendors or brands didn't load: the Picks card says so, rather
+       *  than quietly hiding Fill From Your Price Book (audit v994 DD1). */
+      priceBookNote: string | null;
     }
   | { ok: false; error: string }
 > {
@@ -637,7 +641,10 @@ export async function jobShareState(jobId: string): Promise<
       .order("created_at", { ascending: false }),
     s.supabase
       .from("price_list_item_options")
-      .select("id, vendor, label, part_number, price_list_items(name, code)")
+      // price_list_items has `description`, not `name`: naming a missing column refused the WHOLE
+      // query (42703), options was always [], and Fill From Your Price Book never rendered (DD1).
+      // Names only: no buy_price or markup ever leaves the price book here.
+      .select("id, vendor, label, part_number, price_list_items(description, code)")
       .eq("org_id", s.orgId)
       .eq("archived", false)
       .order("vendor")
@@ -648,6 +655,13 @@ export async function jobShareState(jobId: string): Promise<
   const firstError = st.error ?? pk.error ?? docs.error;
   if (firstError) return { ok: false, error: dbError(firstError) };
   const picks = (pk.data ?? []) as PickRow[];
+  // The price book is help for the picks, not the picks: a failed read leaves the editor working,
+  // says so on the card, and lands in error_events so it is seen (nothing silent).
+  const bookError = opts.error ?? (vendors.error && !cardsTableMissing(vendors.error) ? vendors.error : null);
+  if (bookError) reportError("jobShareState.priceBook", bookError, { jobId });
+  const priceBookNote = bookError
+    ? "Your price book didn't load, so its vendors and brands aren't offered here. You can still type a pick by hand, or reopen this tab."
+    : null;
 
   // THE PAPERS. Before 0326 the share rows live under 0300's name: count the photos from there and
   // say the plans aren't ready, rather than failing the whole tab.
@@ -704,7 +718,7 @@ export async function jobShareState(jobId: string): Promise<
     brand: String(o.vendor ?? ""),
     label: o.label ?? null,
     partNumber: o.part_number ?? null,
-    itemName: o.price_list_items?.name ?? null,
+    itemName: o.price_list_items?.description ?? null,
     itemCode: o.price_list_items?.code ?? null,
   }));
   const brandSet = new Map<string, string>();
@@ -723,7 +737,15 @@ export async function jobShareState(jobId: string): Promise<
     papers,
     brands: [...brandSet.values()].sort((a, b) => a.localeCompare(b)),
     options,
+    priceBookNote,
   };
+}
+
+/** 0296's vendor cards not on this database yet: that is "no cards", not a failed price book. */
+function cardsTableMissing(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42P01" || code === "PGRST205" || (/price_list_vendors/.test(msg) && /does not exist|schema cache/i.test(msg));
 }
 
 // ── the office's own look at the customer's job page ───────────────────────────────────────────

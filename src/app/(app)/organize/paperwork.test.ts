@@ -16,6 +16,10 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.
 vi.mock("@/lib/staff-guard", () => ({
   requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-1" })),
 }));
+// Organize's own job guard (audit v994 TL2) answers yes here unless a test says otherwise, so the
+// scripted jobs reads below stay the ones the filing itself makes.
+const jobGuard = vi.hoisted(() => ({ jobInOrg: vi.fn(async (_s: unknown, _o: unknown, id: unknown) => !!id) }));
+vi.mock("@/lib/job-in-org", () => jobGuard);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const ai = vi.hoisted(() => ({ parsed: {} as any, systems: [] as string[] }));
 vi.mock("@/lib/anthropic", () => ({
@@ -2390,5 +2394,19 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
     expect(res.error).toContain("The copy on J-044 Dino");
     expect(res.error).toContain("Nothing was deleted.");
     expect(did("bills", "delete")).toBeUndefined();
+  });
+});
+
+describe("File It names only this company's jobs (audit v994 TL2)", () => {
+  it("another company's job id is refused before the paper is claimed or anything is written", async () => {
+    jobGuard.jobInOrg.mockResolvedValueOnce(false);
+    state.client = fakeSupabase({}, calls);
+    for (const dest of [{ type: "job" as const, jobId: "their-job" }, { type: "photo" as const, jobId: "their-job" }]) {
+      if (dest.type === "photo") jobGuard.jobInOrg.mockResolvedValueOnce(false);
+      const res = await fileItem("oi-9", dest);
+      expect(res).toEqual({ ok: false, error: "That job isn't in your book. Nothing was filed." });
+    }
+    expect(calls).toEqual([]);
+    expect(jobGuard.jobInOrg).toHaveBeenCalledWith(expect.anything(), "org-1", "their-job");
   });
 });

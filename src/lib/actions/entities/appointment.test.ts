@@ -111,6 +111,26 @@ describe("appointment.update — the reschedule door converts the same way", () 
     expect(r.recorded).toContain("Sat Sep 26 at 9:00 AM PDT");
   });
 
+  it("an end on another day says its day; an end before the start is flagged, not read as normal (SI1)", async () => {
+    const def = appointmentActions["appointment.update"];
+    rescheduleAppointment.mockImplementationOnce(async (_id: string, start: string) => {
+      db.stored = { title: "Inspection", starts_at: start, ends_at: "2026-09-22T17:00:00.000Z", customers: null };
+      return { ok: true };
+    });
+    const r = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-09-24T09:00" }), ctx);
+    expect(r.recorded).toContain("Thu Sep 24 at 9:00 AM PDT, and its stored end (Tue Sep 22 at 10:00 AM PDT) is not after its start");
+    rescheduleAppointment.mockImplementationOnce(async (_id: string, start: string) => {
+      db.stored = { title: "Two-day", starts_at: start, ends_at: "2026-09-25T17:00:00.000Z", customers: null };
+      return { ok: true };
+    });
+    const r2 = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-09-24T09:00" }), ctx);
+    expect(r2.recorded).toContain("Thu Sep 24 at 9:00 AM PDT, until Fri Sep 25 at 10:00 AM PDT");
+  });
+
+  it("the tool tells the model an omitted end keeps the visit's length", () => {
+    expect(appointmentActions["appointment.update"].description).toContain("keeps its length");
+  });
+
   it("the confirm card speaks a stamped offset out loud", () => {
     expect(readbackWhen("2026-09-26T09:00")).toBe("Sat 9/26 at 9am");
     expect(readbackWhen("2026-09-26T09:00:00Z")).toBe("Sat 9/26 at 9am UTC");

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, tzNaiveIsoToUtc, weekDayStrs } from "@/lib/tz";
+import { payPeriodBounds, payPeriodForOffset, timeEntryGridSpan, todayStrInTz, tzMinutesOfDay, tzLocalInputValue, tzNaiveIsoToUtc, weekDayStrs } from "@/lib/tz";
+import { localToInstant } from "@/lib/org-local-time";
 
 const ANCHOR = "2026-01-05"; // a Monday
 
@@ -138,5 +139,20 @@ describe("tzNaiveIsoToUtc — a spoken time is a wall-clock time", () => {
   it("garbage and undefined pass through untouched", () => {
     expect(tzNaiveIsoToUtc("yesterday at ten", "America/Los_Angeles")).toBe("yesterday at ten");
     expect(tzNaiveIsoToUtc(undefined, "America/Los_Angeles")).toBeUndefined();
+  });
+});
+
+describe("tzLocalInputValue — the Scheduled For box reads the org's clock (audit v994 TZ2)", () => {
+  it("10:00 AM Pacific fills 10:00 whatever zone the phone is in, and saves back to the same instant", () => {
+    const iso = "2026-09-25T17:00:00.000Z"; // 10:00 AM PDT
+    const v = tzLocalInputValue(iso, "America/Los_Angeles");
+    expect(v).toBe("2026-09-25T10:00");
+    const back = localToInstant(v, "America/Los_Angeles");
+    expect("iso" in back && back.iso).toBe(iso);
+  });
+  it("carries the org's day across midnight UTC, and is empty for no time", () => {
+    expect(tzLocalInputValue("2026-12-10T06:30:00.000Z", "America/Los_Angeles")).toBe("2026-12-09T22:30");
+    expect(tzLocalInputValue(null, "America/Los_Angeles")).toBe("");
+    expect(tzLocalInputValue("nonsense", "America/Los_Angeles")).toBe("");
   });
 });

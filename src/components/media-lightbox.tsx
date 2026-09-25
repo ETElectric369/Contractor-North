@@ -46,10 +46,14 @@ export function MediaLightbox({
   const fetchError = useRef<string | null>(null);
   const reported = useRef(false);
 
+  // A PDF starts at once: WebKit in the shell may never fire load for a cross-origin PDF frame,
+  // and waiting on it would send every PDF Download to Safari instead of the share sheet. ONE
+  // fetch per file (audit v994 NF1): the effect keys on whether to start, not on `shown`, so the
+  // PDF frame's own load (which sets `shown`) no longer aborts the download it started and begins
+  // a second one; a 6 MB plan set was fetched twice on cellular, with Safari in the gap.
+  const start = inShell && (isPdf || shown);
   useEffect(() => {
-    // A PDF starts at once: WebKit in the shell may never fire load for a cross-origin PDF frame,
-    // and waiting on it would send every PDF Download to Safari instead of the share sheet.
-    if (!inShell || (!shown && !isPdf)) return;
+    if (!start) return;
     let live = true;
     // Closing the lightbox (or Back) mid-download stops the transfer instead of letting a
     // multi-MB file finish on cellular for nobody (review of the 09-23 wave).
@@ -72,7 +76,7 @@ export function MediaLightbox({
       live = false;
       ctl.abort();
     };
-  }, [inShell, shown, url, name, isPdf]);
+  }, [start, url, name, isPdf]);
 
   function onDownload(e: React.MouseEvent<HTMLAnchorElement>) {
     if (!inShell) return; // a browser's own download, unchanged
@@ -157,7 +161,12 @@ export function MediaLightbox({
 }
 
 /** A renamed document ("Kitchen panel") has no extension, and Save to Files would write it with
- *  none. Add the one its type says, and leave a name that already has one alone. */
+ *  none. Add the one its type says, unless the name already ENDS in it.
+ *
+ *  "Already has an extension" used to mean any dot and two to five letters or digits at the end,
+ *  so a receipt named "Home Depot — $47.44" or a plan named "Permit rev.12" kept ".44" and ".12"
+ *  as its extension, and Files and Mail could not open what Save to Files wrote (audit v994 NF2).
+ *  For a type this knows, only that type's own extension counts; an unknown type adds nothing. */
 const EXTENSION_FOR: Record<string, string> = {
   "application/pdf": ".pdf",
   "image/jpeg": ".jpg",
@@ -166,8 +175,13 @@ const EXTENSION_FOR: Record<string, string> = {
   "image/webp": ".webp",
   "image/gif": ".gif",
 };
+/** Other spellings a file of that type legitimately ends in. */
+const ALSO_ENDS_IN: Record<string, string[]> = { ".jpg": [".jpeg"], ".heic": [".heif"] };
 export function withExtension(name: string, type: string): string {
   const base = String(name || "file").trim() || "file";
-  if (/\.[a-z0-9]{2,5}$/i.test(base)) return base;
-  return base + (EXTENSION_FOR[type.toLowerCase()] ?? "");
+  const ext = EXTENSION_FOR[String(type || "").toLowerCase().split(";")[0].trim()];
+  if (!ext) return base;
+  const lower = base.toLowerCase();
+  if ([ext, ...(ALSO_ENDS_IN[ext] ?? [])].some((e) => lower.endsWith(e))) return base;
+  return base + ext;
 }
