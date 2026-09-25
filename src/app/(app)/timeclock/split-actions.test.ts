@@ -178,10 +178,10 @@ describe("joinTimeEntries and moveTimeEntryCut", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries") return { data: [] };
       if (q.table === "rpc:join_time_entries")
-        return { error: { message: "INV-078 bills the second part and not the first, so joining them would make unbilled hours look billed." } };
+        return { error: { message: "INV-078 (draft) bills the second part and not the first, so joining them would make unbilled hours look billed." } };
     }, calls);
     const r = await joinTimeEntries({ left_id: ENTRY, right_id: RIGHT });
-    expect(r).toEqual({ ok: false, error: "INV-078 bills the second part and not the first, so joining them would make unbilled hours look billed." });
+    expect(r).toEqual({ ok: false, error: "INV-078 (draft) bills the second part and not the first, so joining them would make unbilled hours look billed." });
   });
 
   it("move names every invoice whose part changed length, with both figures", async () => {

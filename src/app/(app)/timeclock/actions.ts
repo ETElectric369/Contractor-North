@@ -1756,7 +1756,8 @@ export type SplitResult = ClockResult & {
   right_id?: string;
   left_hours?: number;
   right_hours?: number;
-  /** The invoices whose claim the new part now carries (same-job split of a billed shift). */
+  /** The invoices whose claim the new part now carries: a live one on a same-job split of a billed
+   *  shift, and every void one on any cut (0313: an un-void must not bill the new part twice). */
   carried?: { invoice_id: string; invoice_number: string | null; status: string }[];
   /** A refusal because an invoice bills the shift: where to go to take it off. */
   invoiceHref?: string;
