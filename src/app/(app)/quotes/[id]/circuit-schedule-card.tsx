@@ -49,18 +49,18 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
 
   return (
     <Card className="mt-6">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
         <div className="flex items-center gap-2">
           <Zap className="h-4 w-4 text-brand" />
-          <span className="text-sm font-semibold text-slate-900">Circuit schedule</span>
+          <span className="text-sm font-semibold text-slate-900">Circuit Schedule</span>
           <span className="text-xs text-slate-400">· prints as a second page</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={generate} disabled={generating || saving}>
-            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Sparkles className="h-4 w-4" /> {rows.length ? "Regenerate" : "Generate from Line Items"}</>}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={generate} disabled={generating || saving}>
+            {generating ? <><Loader2 className="h-4 w-4 animate-spin" /> Reading…</> : <><Sparkles className="h-4 w-4" /> {rows.length ? "Regenerate" : "Generate From Line Items"}</>}
           </Button>
           {dirty && (
-            <Button size="sm" onClick={save} disabled={saving || generating}>
+            <Button onClick={save} disabled={saving || generating}>
               {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Save className="h-4 w-4" /> Save</>}
             </Button>
           )}
@@ -71,7 +71,7 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
 
       {rows.length === 0 ? (
         <p className="px-5 py-6 text-center text-sm text-slate-400">
-          No circuit schedule yet — Generate one from the breakers &amp; wire in the line items, or add rows by hand.
+          No circuit schedule yet. Tap Generate From Line Items to read the breakers and wire in the line items, or Add Circuit to type rows by hand.
         </p>
       ) : (
         <div className="overflow-x-auto px-2 py-2">
@@ -82,7 +82,7 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
                 <th className="px-2 py-1.5 font-semibold">Description</th>
                 <th className="w-24 px-2 py-1.5 font-semibold">Wire</th>
                 <th className="w-24 px-2 py-1.5 font-semibold">Breaker</th>
-                <th className="w-40 px-2 py-1.5 font-semibold">Load / notes</th>
+                <th className="w-40 px-2 py-1.5 font-semibold">Load / Notes</th>
                 <th className="w-8" />
               </tr>
             </thead>
@@ -95,7 +95,16 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
                   <td className="px-1 py-1"><Input value={r.breaker ?? ""} onChange={(e) => set(i, { breaker: e.target.value })} placeholder="20A" /></td>
                   <td className="px-1 py-1"><Input value={r.load ?? ""} onChange={(e) => set(i, { load: e.target.value })} /></td>
                   <td className="px-1 py-1 text-center">
-                    <button onClick={() => delRow(i)} className="text-slate-400 hover:text-red-600" aria-label="Remove circuit"><Trash2 className="h-4 w-4" /></button>
+                    {/* 44px: a bare 16px trash icon is the tap target the whole app has been retiring. */}
+                    <button
+                      type="button"
+                      onClick={() => delRow(i)}
+                      className="inline-flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label="Remove Circuit"
+                      title="Remove Circuit"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -105,7 +114,7 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
       )}
 
       <div className="border-t border-slate-100 px-5 py-3">
-        <Button size="sm" variant="outline" onClick={addRow} disabled={generating}>
+        <Button variant="outline" onClick={addRow} disabled={generating}>
           <Plus className="h-4 w-4" /> Add Circuit
         </Button>
       </div>

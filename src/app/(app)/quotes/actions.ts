@@ -1064,14 +1064,17 @@ export async function saveQuote(input: SaveQuoteInput) {
  */
 export async function duplicateQuote(
   id: string,
-): Promise<{ ok: boolean; error?: string; id?: string }> {
+): Promise<{ ok: boolean; error?: string; id?: string; warning?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
+  // circuits rides along (Panel plan, phase 0): the copy used to drop the circuit schedule without
+  // saying so, so a copied estimate printed no second page and had nothing for a job's Panel tab
+  // to bring in.
   const { data: quote } = await supabase
     .from("quotes")
-    .select("customer_id, title, notes, tax_rate, valid_until, doc_type")
+    .select("customer_id, title, notes, tax_rate, valid_until, doc_type, circuits")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -1100,6 +1103,29 @@ export async function duplicateQuote(
     })),
   });
   if (!res.ok) return { ok: false, error: res.error };
+
+  // THE CIRCUIT SCHEDULE COMES WITH IT. saveQuote has no circuits field (it is the builder's
+  // autosave, and the builder never edits circuits), so the copy's schedule is written here, onto
+  // the row saveQuote just made, and read back: a zero-row update is a 204, not an error. The copy
+  // itself already exists by now, so a lost schedule is said out loud rather than failing the copy.
+  const circuits = Array.isArray((quote as { circuits?: unknown }).circuits)
+    ? ((quote as { circuits: QuoteCircuit[] }).circuits)
+    : [];
+  if (circuits.length && res.id) {
+    const { data: wrote, error: cErr } = await supabase
+      .from("quotes")
+      .update({ circuits })
+      .eq("id", res.id)
+      .select("id");
+    if (cErr || !wrote?.length) {
+      if (cErr) reportError("quotes.duplicateQuote.circuits", cErr, { from: id, to: res.id });
+      return {
+        ok: true,
+        id: res.id,
+        warning: `The copy is made, but its ${circuits.length} circuit${circuits.length === 1 ? "" : "s"} didn't come with it. Add them on the copy's Circuit Schedule.`,
+      };
+    }
+  }
   return { ok: true, id: res.id };
 }
 
@@ -2027,7 +2053,12 @@ export async function generateCircuitSchedule(
       max_tokens: 3000,
       system:
         "You are a master electrician laying out a residential branch-circuit (panel) schedule from an estimate's line items. " +
-        "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. Group loads the way an electrician actually wires them: kitchen small-appliance (two 20A), dishwasher, disposal, refrigerator/freezer, general receptacles, lighting (15A on 14 AWG), bath, laundry/dryer, range, EACH mini-split on its own circuit, bath fan, smoke/CO. Low-voltage (data/Cat6/coax/thermostat/doorbell) is NOT a breaker — leave it out. " +
+        "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. " +
+        // THE PART NUMBER IS THE SIZE (Panel plan, phase 0). E-017 read a Q120 line as "SP 15A": a
+        // Siemens Q1xx is ONE pole and the digits after the 1 are the amps. This short table stops
+        // that; the full decoder (src/lib/panel/breaker-catalog.ts) replaces it in phase 3.
+        "Siemens breaker codes: Q115 = 1-pole 15A, Q120 = 1-pole 20A, Q2xx = 2-pole (Q220 = 2P 20A, Q230 = 2P 30A, Q250 = 2P 50A), Q1515 = twin (two 1-pole 15A), Q2020 = twin (two 1-pole 20A), Q21530CT = quad (two 1-pole 15A plus one 2P 30A), Q22020CT = quad (two 1-pole 20A plus one 2P 20A); Q22020CT2 is NOT a quad with 1-poles, it is two 2P 20A. A twin or quad is several circuits in one part: count each pole group as its own circuit. " +
+        "Group loads the way an electrician actually wires them: kitchen small-appliance (two 20A), dishwasher, disposal, refrigerator/freezer, general receptacles, lighting (15A on 14 AWG), bath, laundry/dryer, range, EACH mini-split on its own circuit, bath fan, smoke/CO. Low-voltage (data/Cat6/coax/thermostat/doorbell) is NOT a breaker — leave it out. " +
         'Respond with ONLY a JSON ARRAY, one object per circuit: {"ckt": string, "description": string, "wire": string, "breaker": string, "load": string}. ' +
         'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',
       messages: [{ role: "user", content: `Estimate: ${quote.title ?? ""}\n${(quote as any).description ?? ""}\n\nLine items:\n${lines}` }],
@@ -2047,8 +2078,10 @@ export async function generateCircuitSchedule(
         load: r.load ? String(r.load).trim() : null,
       }))
       .filter((r) => r.description);
-    const { error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId);
+    // Read back (the silent-write law): a zero-row update is a 204, and "no error" is not "saved".
+    const { data: wrote, error } = await supabase.from("quotes").update({ circuits }).eq("id", quoteId).select("id");
     if (error) return { ok: false, error: dbError(error) };
+    if (!wrote?.length) return { ok: false, error: "The circuit schedule didn't save. Open the estimate again and retry." };
     // The circuit schedule renders on the printed quote — regenerating drops the stored copy (audit 7).
     await bustDocPdf("quote", quoteId);
     revalidatePath(`/quotes/${quoteId}`);
@@ -2079,11 +2112,13 @@ export async function saveCircuitSchedule(
       load: r.load ? String(r.load).trim() : null,
     }))
     .filter((r) => r.description || r.ckt || r.breaker || r.wire);
-  const { error } = await ctx.supabase
+  const { data: wrote, error } = await ctx.supabase
     .from("quotes")
     .update({ circuits: clean.length ? clean : null })
-    .eq("id", quoteId);
+    .eq("id", quoteId)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "The circuit schedule didn't save. Open the estimate again and retry." };
   // The schedule prints as the second page — a hand correction has to bust the stored PDF just
   // like generating one does, or the share link keeps handing out the old panel (audit v921).
   await bustDocPdf("quote", quoteId);
