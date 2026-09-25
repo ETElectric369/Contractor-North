@@ -28,6 +28,10 @@ import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { readBillShelfOff } from "@/lib/job-cost";
+import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
+import { jobLabel } from "@/lib/schedule-options";
+import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
+import type { JobCircuit, JobPanel } from "@/lib/types";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -471,6 +475,12 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     description:
       "Read ONE job in full — number, name, status, customer, address, billing type, description, schedule. Use for 'tell me about the Jones job', or before acting on a job. Pass a job_id.",
     input_schema: { type: "object", properties: { job_id: { type: "string" } } },
+  },
+  {
+    name: "get_job_panel",
+    description:
+      "Read a job's PANEL: its panel(s) (brand, main, spaces, which spaces have No Stab or take tandems), every circuit on the job's Panel tab (space, room, what it feeds, what the door says, size, new/existing, Planned/Roughed/Done, verified), the suggestions still waiting for someone to keep, the door as a space → circuit map, warnings (two on one space), and the breaker count (what the new circuits need against what came on the job's tickets, and what's short). Use for 'what's on 7 at Herringbone', 'what breakers am I short on J-011', 'is the dryer roughed', and before panel.suggest. job_id is the job's id OR its name / number as spoken. No prices: the panel carries none.",
+    input_schema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] },
   },
   {
     name: "list_contracts",
@@ -1017,6 +1027,9 @@ export async function runDataTool(
           scheduled_end: (j as any).scheduled_end,
         });
       }
+
+      case "get_job_panel":
+        return JSON.stringify(await readJobPanel(supabase, input.job_id));
 
       case "list_contracts": {
         const lim = clampLimit(input.limit, 20);
@@ -2613,4 +2626,124 @@ export async function runDataTool(
   } catch (e: any) {
     return JSON.stringify({ error: e?.message ?? "Query failed." });
   }
+}
+
+/**
+ * get_job_panel: the job's Panel tab as Nort reads it (Panel plan, phase 4). Every read is the
+ * caller's own session (RLS: the org's active members), so a tech and the office read the same
+ * panel, and nothing on it has a price. The breaker count uses breakers_bought_for_job (0334), which
+ * hands back descriptions and quantities only, never a cost, a supplier or a ticket number.
+ */
+async function readJobPanel(supabase: any, jobRef: unknown): Promise<Record<string, unknown>> {
+  const r = await resolveJobId(supabase, typeof jobRef === "string" ? jobRef : null);
+  if ("error" in r) return { error: r.error };
+  if (!r.id) return { error: "Which job? Pass the job's name, number, or id." };
+  const { data: job } = await supabase.from("jobs").select("id, job_number, name").eq("id", r.id).maybeSingle();
+  if (!job) return { found: false, message: "Job not found." };
+  const [pRes, cRes] = await Promise.all([
+    supabase
+      .from("job_panels")
+      .select("id, name, brand, main_amps, bus_amps, spaces, numbering, dead_spaces, twin_spaces, notes, removed_at")
+      .eq("job_id", r.id)
+      .is("removed_at", null)
+      .order("created_at"),
+    supabase
+      .from("job_circuits")
+      .select("id, panel_id, room, description, panel_label, amps, poles, kind, wire, wire_tag, space, half, work, progress, state, source, source_row, verified, sort_order, removed_at")
+      .eq("job_id", r.id)
+      .is("removed_at", null)
+      .order("sort_order"),
+  ]);
+  if (pRes.error || cRes.error) {
+    const e = pRes.error ?? cRes.error;
+    if (/job_(panels|circuits)/.test(String(e?.message ?? ""))) return { found: false, message: "The Panel tab isn't switched on for this database yet." };
+    throw e;
+  }
+  const panels = (pRes.data ?? []) as JobPanel[];
+  const circuits = (cRes.data ?? []) as JobCircuit[];
+  const kept = circuits.filter((c) => c.state === "kept");
+  const suggested = circuits.filter((c) => c.state === "suggested");
+  const where = (c: JobCircuit) =>
+    c.space == null ? null : `${c.space}${c.half ?? ""}${c.poles > 1 ? `-${c.space + 2 * (c.poles - 1)}${c.half ?? ""}` : ""}`;
+  const panelName = new Map(panels.map((p) => [p.id, p.name]));
+
+  const doors = panels.map((p) => {
+    const map = spaceMap(p, circuits);
+    const bySpace: Record<string, string[]> = {};
+    for (const [space, cell] of [...map.cells.entries()].sort((a, b) => a[0] - b[0])) {
+      const names = (ids: string[], half: string) =>
+        ids.map((id) => {
+          const c = circuits.find((x) => x.id === id)!;
+          return `${half}${circuitName(c)} (${sizeWords(c.poles, c.amps, c.kind)})`;
+        });
+      bySpace[String(space)] = [...names(cell.full, ""), ...names(cell.A, "A: "), ...names(cell.B, "B: ")];
+    }
+    return {
+      panel: p.name,
+      brand: p.brand,
+      main_amps: p.main_amps,
+      spaces: p.spaces,
+      space_1_is_at: p.numbering === "bottom_up" ? "the bottom" : "the top",
+      no_stab_spaces: p.dead_spaces ?? [],
+      tandem_spaces: p.twin_spaces ?? [],
+      notes: p.notes,
+      by_space: bySpace,
+      warnings: map.warnings.map((w) => w.message),
+    };
+  });
+
+  let breakers: Record<string, unknown> | null = null;
+  const bought = await supabase.rpc("breakers_bought_for_job", { p_job: r.id });
+  if (!bought.error) {
+    const card = breakerCard({
+      circuits,
+      panel: panels[0] ?? null,
+      bought: boughtLines(bought.data as { description: string; qty: number | string; credit_qty?: number | string }[] | null),
+    });
+    breakers = {
+      need: card.needWords,
+      already_in: card.alreadyInWords,
+      // No kept new circuit: nothing is counted, so there is no verdict and nothing is a spare.
+      verdict:
+        card.need.lines.length === 0 && card.need.unsized.length === 0
+          ? "Nothing counted yet: no new circuits are kept on the list. Keep the new circuits on the Panel tab to count what they need."
+          : card.check.verdict,
+      came_on_tickets: card.bought.map((g) => `${g.qty} x ${groupLabel(g)}`),
+      cant_read: card.unreadable.map((u) => `${u.qty} x ${u.description}: ${u.reason}${u.credit ? " Not counted either way." : ""}`),
+      to_order: card.orders.map((o) => `${o.qty} x ${o.description}`),
+      or_swap: card.check.swaps.map((s) => `${s.words}${s.warning ? ` (${s.warning})` : ""}${s.ifSpaceTakesQuad ? " Only if a space takes a quad." : ""}`),
+    };
+  }
+
+  return {
+    found: true,
+    job: jobLabel(job),
+    job_id: r.id,
+    panels: doors,
+    circuits: kept.map((c) => ({
+      id: c.id,
+      panel: c.panel_id ? (panelName.get(c.panel_id) ?? null) : null,
+      space: where(c),
+      room: titleWords(c.room) || null,
+      feeds: c.description,
+      door_says: c.panel_label,
+      size: sizeWords(c.poles, c.amps, c.kind),
+      type: c.kind ? KIND_WORDS[c.kind] : null,
+      wire: c.wire,
+      wire_tag: c.wire_tag,
+      work: WORK_WORDS[c.work],
+      progress: PROGRESS_WORDS[c.progress],
+      verified_on_site: c.verified,
+    })),
+    suggestions_waiting: suggested.map((c) => ({
+      id: c.id,
+      circuit: circuitName(c),
+      size: sizeWords(c.poles, c.amps, c.kind),
+      space: where(c),
+      from: sourceWords(c),
+      check: c.source_row?.check ?? null,
+    })),
+    breakers,
+    note: "Suggestions count for nothing until a person taps Keep on the Panel tab.",
+  };
 }

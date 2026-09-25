@@ -132,6 +132,11 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "material.addLine",
   "material.markPurchased",
   "material.removeLine",
+  // THE PANEL (Panel plan, phase 4): Nort FILLS, a person saves. panel.suggest writes only
+  // suggestions (state 'suggested', source 'nort'; 0333's guard lands any machine circuit as one
+  // whatever the request says), which count for nothing until someone taps Keep. There is no keep
+  // verb for the agent, on purpose. Tier-1: a suggestion is set aside with one tap.
+  "panel.suggest",
 ]);
 
 /** The READ actions offered alongside those writes. Normal reads live in DATA_TOOLS

@@ -9,7 +9,7 @@ import { useToast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
 import { AMP_SIZES } from "@/lib/panel/input";
-import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, labelDiffersWords } from "@/lib/panel/model";
+import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, labelDiffersWords, sourceWords } from "@/lib/panel/model";
 import type { CircuitKind, CircuitProgress, CircuitWork, JobCircuit, JobPanel } from "@/lib/types";
 import { markVerified, saveCircuit } from "../panel-actions";
 
@@ -288,7 +288,7 @@ export function CircuitEditSheet({
 
   const suggested = row.state === "suggested";
   const flag = labelDiffersWords({ panel_label: text.panel_label || null, description: text.description || null });
-  const from = row.source_row?.quote_number ? `From ${row.source_row.quote_number}` : null;
+  const from = sourceWords(row);
 
   return (
     <Modal

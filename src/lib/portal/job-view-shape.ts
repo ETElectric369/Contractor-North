@@ -22,6 +22,7 @@ import { customerLineWords, invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
 import { docFormat, isPortalDocKind, kindLabel, kindRank, type DocFormat, type PortalDocKind } from "./doc-kinds";
+import { normalizePortalPanels, type DirectoryPanel } from "@/lib/panel/directory";
 
 /** What portal_job_view returns (0301), as the server reads it. */
 export type PortalJobRaw = {
@@ -57,6 +58,9 @@ export type PortalJobRaw = {
   photos: { id: string; file_path: string | null; added_at: string | null }[] | null;
   /** 0326: the plans and drawings (absent before 0326 is applied: no section, never an error). */
   documents?: RawDocument[] | null;
+  /** 0335: the panels the office shows on this job (absent before 0335: no section, never an error).
+   *  Read field by field by normalizePortalPanels; never spread onto the page. */
+  panels?: unknown;
 };
 
 /** One shared paper as portal_job_view returns it (0326): already only the newest of its chain. */
@@ -163,6 +167,9 @@ export type PortalJobView = {
   photos: PortalPhoto[];
   /** 0326: the plans and drawings, grouped by kind in PORTAL_DOC_KINDS order, newest first within. */
   documents: PortalDocument[];
+  /** 0335: "Your Panel", once the office turns it on for the job: each shown panel and its kept
+   *  circuits in space order, customer-safe fields only (lib/panel/directory). Empty when off. */
+  panels: DirectoryPanel[];
   /** The work not on a bill yet, at the customer's price. null on a job that bills a contract or draws. */
   unbilled: CustomerUnbilled | null;
 };
@@ -346,6 +353,7 @@ export function shapePortalJob(
     picks,
     photos,
     documents,
+    panels: normalizePortalPanels(raw.panels),
     unbilled: extra.unbilled,
   };
 }

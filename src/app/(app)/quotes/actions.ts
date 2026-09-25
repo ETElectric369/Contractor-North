@@ -42,6 +42,8 @@ import { createMaterialListFromQuote } from "../materials/actions";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import type { QuoteCircuit } from "@/lib/types";
+import { promptCodeTable } from "@/lib/panel/breaker-catalog";
+import { isEstimatorStash, keepPlanUpload, type KeptPlan } from "@/lib/estimate/keep-plan-upload";
 
 /* Built from the ORG's settings, not NEXT_PUBLIC_SITE_URL — see orgDocUrl in lib/org-settings.
    Both callers below already fetch the org row, so this costs no extra query. */
@@ -1761,30 +1763,39 @@ async function intakePlanUpload(
   };
 }
 
-async function estimatorUpload(formData: FormData): Promise<
-  | { ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string }
+async function estimatorUpload(
+  formData: FormData,
+  opts: { orgId: string | null; keep?: boolean },
+): Promise<
+  | { ok: true; bytes: ArrayBuffer; size: number; name: string; mime: string; stashPath: string | null }
   | { ok: false; error: string }
 > {
   const storagePath = String(formData.get("storagePath") ?? "").trim();
   if (storagePath) {
+    // ONLY THE STASH (Panel plan, phase 4). Anything this door reads it may delete, so a path
+    // anywhere else in the org's folder (a job's photo, a filed plan) is refused before either.
+    if (!isEstimatorStash(opts.orgId, storagePath)) return { ok: false, error: "That upload isn't in the estimator's folder. Upload it again." };
     const supabase = await createClient();
     const { data: blob, error } = await supabase.storage.from("documents").download(storagePath);
     if (error || !blob) return { ok: false, error: "Couldn't read the uploaded file — try the upload again." };
     // THE STASH IS A TRANSPORT, NOT A LIBRARY (audit 7): delete on read, best-effort — an
     // orphan per estimate would grow the bucket forever, and a CED quote's net pricing must
-    // not sit where any org member (field techs included) can list and download it.
-    void supabase.storage.from("documents").remove([storagePath]).then(() => undefined, () => undefined);
+    // not sit where any org member (field techs included) can list and download it. The one
+    // exception is an upload the person said is PLANS (keep): the plan door files it
+    // (keepPlanUpload), and removes it itself if it can't be kept.
+    if (!opts.keep) void supabase.storage.from("documents").remove([storagePath]).then(() => undefined, () => undefined);
     return {
       ok: true,
       bytes: await blob.arrayBuffer(),
       size: blob.size,
       name: String(formData.get("fileName") ?? "") || storagePath.split("/").pop() || "upload",
       mime: blob.type || "",
+      stashPath: opts.keep ? storagePath : null,
     };
   }
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a file to upload." };
-  return { ok: true, bytes: await file.arrayBuffer(), size: file.size, name: file.name, mime: file.type };
+  return { ok: true, bytes: await file.arrayBuffer(), size: file.size, name: file.name, mime: file.type, stashPath: null };
 }
 
 export async function generateQuoteDraftFromSupplier(
@@ -1796,7 +1807,8 @@ export async function generateQuoteDraftFromSupplier(
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
   try {
-    const up = await estimatorUpload(formData);
+    // A SUPPLIER QUOTE IS NEVER KEPT: its net pricing is deleted the moment it is read (audit 7).
+    const up = await estimatorUpload(formData, { orgId: gate.orgId });
     if (!up.ok) return up;
     if (up.size > 20 * 1024 * 1024) return { ok: false, error: "File is too large (max 20 MB — the reader's ceiling)." };
     const isPdf = up.mime === "application/pdf" || /\.pdf$/i.test(up.name);
@@ -1907,18 +1919,37 @@ export async function generateQuoteDraftFromSupplier(
 
 export async function generateQuoteDraftFromPlan(
   formData: FormData,
-): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; items: DraftLineItem[]; questions: string[]; description: string; kept?: KeptPlan } | { ok: false; error: string; kept?: KeptPlan }> {
   // Gate BEFORE the 20 MB file is read and base64'd — an ungated caller shouldn't be able to make
   // the server do that work either.
   const gate = await guardEstimator();
   if (!gate.ok) return { ok: false, error: gate.error };
+  let kept: KeptPlan | undefined;
   try {
-    // The lead's stored plan first (intakePath), the office's own upload otherwise.
-    const up = (await intakePlanUpload(formData)) ?? (await estimatorUpload(formData));
+    // The lead's stored plan first (intakePath), the office's own upload otherwise. The office's
+    // upload through THIS door is plans, so it is kept (Erik's decision 3), never deleted on read.
+    const up = (await intakePlanUpload(formData)) ?? (await estimatorUpload(formData, { orgId: gate.orgId, keep: true }));
     if (!up.ok) return { ok: false, error: up.error === "Choose a file to upload." ? "Choose a plan PDF to upload." : up.error };
-    if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return { ok: false, error: "Upload the plan as a PDF." };
+    const stash: string | null = "stashPath" in up && typeof up.stashPath === "string" ? up.stashPath : null;
+    const refuse = async (error: string) => {
+      // Not a plan this door reads: it isn't kept either (the stash stays a transport).
+      if (stash) void (await createClient()).storage.from("documents").remove([stash]).then(() => undefined, () => undefined);
+      return { ok: false as const, error };
+    };
+    if (up.mime !== "application/pdf" && !/\.pdf$/i.test(up.name)) return refuse("Upload the plan as a PDF.");
     // Cap at 20 MB: base64 inflates ~33%, and Anthropic's per-request ceiling is 32 MB.
-    if (up.size > 20 * 1024 * 1024) return { ok: false, error: "Plan is too large (max 20 MB — the reader's ceiling)." };
+    if (up.size > 20 * 1024 * 1024) return refuse("Plan is too large (max 20 MB — the reader's ceiling).");
+    // FILED BEFORE THE READ: a take-off that fails still leaves the plans on file.
+    if (stash && gate.orgId) {
+      kept = await keepPlanUpload((await createClient()) as never, {
+        orgId: gate.orgId,
+        stashPath: stash,
+        name: up.name,
+        size: up.size,
+        jobId: formData.get("jobId"),
+        customerId: formData.get("customerId"),
+      });
+    }
     const mk = formData.get("markupPct");
     const markupPct = mk != null && String(mk) !== "" ? Number(mk) : undefined;
     const lr = formData.get("laborRate");
@@ -1929,9 +1960,9 @@ export async function generateQuoteDraftFromPlan(
       { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } },
       { type: "text", text: planTakeoffInstruction(note) },
     ];
-    return { ok: true, ...(await runEstimator(content, markupPct, laborRate)) };
+    return { ok: true, ...(await runEstimator(content, markupPct, laborRate)), kept };
   } catch (e) {
-    return estimatorError(e);
+    return { ...estimatorError(e), kept };
   }
 }
 
@@ -2054,10 +2085,11 @@ export async function generateCircuitSchedule(
       system:
         "You are a master electrician laying out a residential branch-circuit (panel) schedule from an estimate's line items. " +
         "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. " +
-        // THE PART NUMBER IS THE SIZE (Panel plan, phase 0). E-017 read a Q120 line as "SP 15A": a
-        // Siemens Q1xx is ONE pole and the digits after the 1 are the amps. This short table stops
-        // that; the full decoder (src/lib/panel/breaker-catalog.ts) replaces it in phase 3.
-        "Siemens breaker codes: Q115 = 1-pole 15A, Q120 = 1-pole 20A, Q2xx = 2-pole (Q220 = 2P 20A, Q230 = 2P 30A, Q250 = 2P 50A), Q1515 = twin (two 1-pole 15A), Q2020 = twin (two 1-pole 20A), Q21530CT = quad (two 1-pole 15A plus one 2P 30A), Q22020CT = quad (two 1-pole 20A plus one 2P 20A); Q22020CT2 is NOT a quad with 1-poles, it is two 2P 20A. A twin or quad is several circuits in one part: count each pole group as its own circuit. " +
+        // THE PART NUMBER IS THE SIZE (Panel plan, phase 0; phase 3). E-017 read a Q120 line as
+        // "SP 15A": a Siemens Q1xx is ONE pole and the digits after the 1 are the amps. The table
+        // comes from the Breakers card's own decoder (src/lib/panel/breaker-catalog.ts), so the
+        // estimate and the card can never disagree about what a Q2020 is.
+        promptCodeTable() +
         "Group loads the way an electrician actually wires them: kitchen small-appliance (two 20A), dishwasher, disposal, refrigerator/freezer, general receptacles, lighting (15A on 14 AWG), bath, laundry/dryer, range, EACH mini-split on its own circuit, bath fan, smoke/CO. Low-voltage (data/Cat6/coax/thermostat/doorbell) is NOT a breaker — leave it out. " +
         'Respond with ONLY a JSON ARRAY, one object per circuit: {"ckt": string, "description": string, "wire": string, "breaker": string, "load": string}. ' +
         'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',

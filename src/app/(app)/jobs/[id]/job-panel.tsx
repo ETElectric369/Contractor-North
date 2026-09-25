@@ -16,9 +16,11 @@ import {
   groupByRoom,
   labelDiffers,
   nextProgress,
+  sourceWords,
   spaceMap,
   titleWords,
 } from "@/lib/panel/model";
+import { labelCheckApplied } from "@/lib/panel/readers";
 import type { CircuitWork, JobCircuit, JobPanel } from "@/lib/types";
 import {
   addCircuit,
@@ -29,10 +31,15 @@ import {
   saveCircuit,
   setAsideSuggestions,
   takeOffCircuit,
+  undoLabelCheck,
   undoTakeOff,
+  applyLabelCheck,
   type PanelLoad,
 } from "../panel-actions";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
+import { JobPanelBreakers } from "./job-panel-breakers";
+import { JobPanelDirectory } from "./job-panel-directory";
+import { PanelReaders } from "./job-panel-readers";
 import { PanelSetupSheet } from "./panel-setup-sheet";
 
 /**
@@ -55,12 +62,23 @@ const QUICK_KEY = (jobId: string) => `cn-panel-quick-add:${jobId}`;
 type Quick = { room: string; amps: string; poles: string; work: CircuitWork };
 const QUICK_DEFAULT: Quick = { room: "", amps: "20", poles: "1", work: "new" };
 
+/** What Add A Circuit carries to the next add: the room and the amps only. A 2-pole (the floor heat,
+ *  the dryer) and an Existing or Reused circuit are one-offs: carried forward, the next three 120 V
+ *  outlets went in as 2-poles (J-011, 2026-09-25). Every add starts on 1-pole and New. */
+export function carryQuick(v: Partial<Quick> | null | undefined): Quick {
+  return {
+    ...QUICK_DEFAULT,
+    room: typeof v?.room === "string" ? v.room : "",
+    amps: typeof v?.amps === "string" && v.amps ? v.amps : QUICK_DEFAULT.amps,
+  };
+}
+
 function readQuick(jobId: string): Quick {
   try {
     const raw = typeof window !== "undefined" ? window.localStorage.getItem(QUICK_KEY(jobId)) : null;
     if (!raw) return QUICK_DEFAULT;
     const v = JSON.parse(raw) as Partial<Quick>;
-    return { ...QUICK_DEFAULT, ...v, work: (["new", "existing", "reused", "removed"] as CircuitWork[]).includes(v.work as CircuitWork) ? (v.work as CircuitWork) : "new" };
+    return carryQuick(v);
   } catch {
     return QUICK_DEFAULT;
   }
@@ -111,8 +129,14 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
 
   const live = circuits.filter((c) => !c.removed_at);
   const suggested = live.filter((c) => c.state === "suggested").sort((a, b) => a.sort_order - b.sort_order);
+  // A label check (a reader's "Panel Says Mini Fridge, Your List Says Fridge") is never kept as a
+  // circuit of its own: Keep All leaves it for its own Use What It Says or Not This.
+  const keepable = suggested.filter((c) => !c.source_row?.flag_for);
   const kept = live.filter((c) => c.state === "kept");
-  const takenOff = circuits.filter((c) => c.removed_at);
+  // What came off, circuits only: a label check that was used or set aside is not a circuit anyone
+  // took off, so it is listed on its own line in plain words below, with its own Undo.
+  const takenOff = circuits.filter((c) => c.removed_at && !c.source_row?.flag_for);
+  const checksDone = circuits.filter((c) => c.removed_at && c.source_row?.flag_for);
   const activePanel = panels.find((p) => p.id === activePanelId) ?? null;
   const placedHere = activePanel ? kept.filter((c) => c.panel_id === activePanel.id && c.space != null) : [];
   const groups = useMemo(() => groupByRoom(kept), [kept]);
@@ -216,6 +240,38 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     }
   }
 
+  /** Use What It Says: the check's change goes onto the circuit it names, only while that circuit
+   *  still says what the reader saw beside it. Undo puts both back the same careful way. */
+  async function applyCheck(c: JobCircuit) {
+    const r = await run(`check:${c.id}`, () => applyLabelCheck(c.id));
+    if (!r || !r.ok) return;
+    upsert([r.circuit, r.check]);
+    toast(r.words, "success", {
+      label: "Undo",
+      onClick: () => void undoCheck(c),
+    });
+  }
+
+  /** The Undo of Use It, from the toast or from Taken Off Or Set Aside: the circuit goes back to
+   *  what it said (only if it still says what the check put there) and the check waits again. */
+  async function undoCheck(c: JobCircuit) {
+    const u = await run(`check:${c.id}`, () => undoLabelCheck(c.id));
+    if (!u || !u.ok) return;
+    upsert([u.circuit, u.check]);
+    toast(u.words, "success");
+  }
+
+  /** A panel added or changed from anywhere on the tab (the setup sheet, or a read's Use). */
+  function panelSaved(row: JobPanel, placed?: { adopted: JobCircuit[]; notAdopted: string[] }) {
+    setPanels((ps) => (ps.some((p) => p.id === row.id) ? ps.map((p) => (p.id === row.id ? row : p)) : [...ps, row]));
+    // The first panel took the circuits already on the list: the door shows them now.
+    if (placed?.adopted.length) upsert(placed.adopted);
+    if (placed?.notAdopted.length) {
+      toast(`${placed.notAdopted.length} couldn't go on ${row.name}. ${placed.notAdopted.join(" ")}`, "info", undefined, { sticky: true });
+    }
+    if (!activePanelId) setActivePanelId(row.id);
+  }
+
   async function tapChip(c: JobCircuit) {
     const r = await run(`chip:${c.id}`, () => advanceProgress(c.id, c.progress));
     if (!r || !r.ok) return;
@@ -252,8 +308,9 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     });
     if (!r || !r.ok) return;
     upsert([r.row]);
-    setQuick(q);
-    writeQuick(jobId, q);
+    const next = carryQuick(q);
+    setQuick(next);
+    writeQuick(jobId, next);
     setFeeds("");
     toast(`Added ${circuitLine(r.row)}.`, "success", {
       label: "Undo",
@@ -290,39 +347,64 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           <h3 className="text-base font-semibold text-slate-900">Suggestions</h3>
           <p className="mt-0.5 text-sm text-slate-500">Nothing counts until you keep it.</p>
           <ul className="mt-3 space-y-2">
-            {suggested.map((c) => (
-              <li key={c.id} className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
-                  <span className="font-medium text-slate-600">{circuitLine(c)}</span>
-                  {c.source_row?.quote_number && (
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">
-                      From {c.source_row.quote_number}
-                    </span>
-                  )}
-                </div>
-                {c.source_row?.load && <div className="mt-0.5 text-xs text-slate-400">{c.source_row.load}</div>}
-                {c.source_row?.check && (
-                  <div className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-800">
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {c.source_row.check}
+            {suggested.map((c) => {
+              const from = sourceWords(c);
+              const aboutId = c.source_row?.flag_for ?? null;
+              const about = aboutId ? circuits.find((x) => x.id === aboutId) ?? null : null;
+              const canUse = !!aboutId && Object.keys(c.source_row?.use ?? {}).length > 0;
+              return (
+                <li key={c.id} className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
+                    <span className="font-medium text-slate-600">{aboutId ? `Label Check: ${about ? circuitName(about) : "A Circuit On Your List"}` : circuitLine(c)}</span>
+                    {from && (
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">{from}</span>
+                    )}
+                    {!aboutId && c.space != null && (
+                      <span className="text-[11px]">
+                        Space {c.space}
+                        {c.half ?? ""}
+                      </span>
+                    )}
+                    {c.source === "plan" && c.source_row?.ckt && <span className="text-[11px]">Plans: Ckt {c.source_row.ckt}</span>}
                   </div>
-                )}
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  <Button onClick={() => keep([c.id], `Kept ${circuitName(c)}.`)} disabled={busy !== null}>
-                    Keep
-                  </Button>
-                  <Button variant="outline" onClick={() => setEditing(c.id)} disabled={busy !== null}>
-                    Change
-                  </Button>
-                  <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
-                    Not This
-                  </Button>
-                </div>
-              </li>
-            ))}
+                  {c.source_row?.load && <div className="mt-0.5 text-xs text-slate-400">{c.source_row.load}</div>}
+                  {c.source_row?.check && (
+                    <div className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {c.source_row.check}
+                    </div>
+                  )}
+                  {aboutId ? (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Button onClick={() => applyCheck(c)} disabled={busy !== null || !canUse || !about}>
+                        {busy === `check:${c.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Use It
+                      </Button>
+                      <Button variant="outline" onClick={() => about && setEditing(about.id)} disabled={busy !== null || !about}>
+                        Open It
+                      </Button>
+                      <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
+                        Not This
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Button onClick={() => keep([c.id], `Kept ${circuitName(c)}.`)} disabled={busy !== null}>
+                        Keep
+                      </Button>
+                      <Button variant="outline" onClick={() => setEditing(c.id)} disabled={busy !== null}>
+                        Change
+                      </Button>
+                      <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
+                        Not This
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-          {suggested.length > 1 && (
-            <Button className="mt-3 w-full" onClick={() => keep(suggested.map((c) => c.id), `Kept ${suggested.length} circuits.`)} disabled={busy !== null}>
-              <Check className="h-4 w-4" /> Keep All ({suggested.length})
+          {keepable.length > 1 && (
+            <Button className="mt-3 w-full" onClick={() => keep(keepable.map((c) => c.id), `Kept ${keepable.length} circuits.`)} disabled={busy !== null}>
+              <Check className="h-4 w-4" /> Keep All ({keepable.length})
             </Button>
           )}
         </section>
@@ -481,8 +563,8 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         </section>
       )}
 
-      {/* ADD A CIRCUIT: remembers the room, amps, poles and work you used last, so sixteen twenties go
-          in as sixteen lines of "what it feeds" and a tap. */}
+      {/* ADD A CIRCUIT: remembers the room and amps you used last, so sixteen twenties go in as
+          sixteen lines of "what it feeds" and a tap. Poles and New/Existing reset to 1-pole and New. */}
       <form onSubmit={quickAdd} className={card} aria-label="Add A Circuit">
         <h3 className="text-base font-semibold text-slate-900">Add A Circuit</h3>
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-2">
@@ -548,11 +630,35 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         </div>
       </form>
 
-      {/* WHAT CAME OFF: Take Off and Not This are never the end of a circuit. */}
-      {takenOff.length > 0 && (
+      {/* THE READERS (phase 4): the panel photo (everyone), the plans (the office). Suggestions only. */}
+      <PanelReaders
+        jobId={jobId}
+        staff={staff}
+        orgId={initial.orgId}
+        photos={initial.photos}
+        plans={initial.plans}
+        photoReadsLeft={initial.photoReadsLeft}
+        planReadsLeft={initial.planReadsLeft}
+        panel={activePanel}
+        walkthrough={initial.walkthrough}
+        onRows={upsert}
+        onPanel={panelSaved}
+      />
+
+      {/* THE BREAKERS CARD (phase 3): what the new circuits need against what came on the tickets.
+          It reads the live list, so a Keep or a Take Off changes the count at once. */}
+      <JobPanelBreakers jobId={jobId} circuits={circuits} panel={activePanel} onRows={upsert} onAddPanel={() => setPanelSheet("new")} />
+
+      {/* THE DIRECTORY (phase 5): Print Panel Directory for everyone; Save As Circuit Map for the
+          office, which puts the printed directory on the customer's Plans And Drawings. */}
+      <JobPanelDirectory jobId={jobId} staff={staff} circuits={circuits} />
+
+      {/* WHAT CAME OFF: Take Off and Not This are never the end of a circuit. A label check that was
+          used or set aside is said as what it was, never drawn as a circuit someone took off. */}
+      {takenOff.length + checksDone.length > 0 && (
         <section className={card} aria-label="Taken Off">
           <button type="button" onClick={() => setShowOff((v) => !v)} className="flex min-h-[44px] w-full items-center justify-between text-left text-sm font-semibold text-slate-700">
-            <span>Taken Off Or Set Aside ({takenOff.length})</span>
+            <span>Taken Off Or Set Aside ({takenOff.length + checksDone.length})</span>
             {showOff ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
           {showOff && (
@@ -568,6 +674,30 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
                   </Button>
                 </li>
               ))}
+              {checksDone.map((c) => {
+                const about = circuits.find((x) => x.id === c.source_row?.flag_for) ?? null;
+                const used = labelCheckApplied(about, c.source_row?.use);
+                const name = about ? circuitName(about) : "A Circuit On Your List";
+                return (
+                  <li key={c.id} className="flex items-center justify-between gap-2 py-1">
+                    <span className="min-w-0 text-sm text-slate-500">
+                      <span className="block truncate">
+                        {used ? "Label Check Used" : "Label Check Set Aside"}: {name}
+                      </span>
+                      {c.source_row?.check && <span className="block text-xs text-slate-400">{c.source_row.check}</span>}
+                    </span>
+                    {used ? (
+                      <Button variant="outline" onClick={() => undoCheck(c)} disabled={busy !== null}>
+                        {busy === `check:${c.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Undo It
+                      </Button>
+                    ) : (
+                      <Button variant="outline" onClick={() => putBack(c)} disabled={busy !== null}>
+                        Put Back
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -592,12 +722,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           photos={initial.photos}
           takenNames={panels.filter((p) => p.id !== panelSheet).map((p) => p.name)}
           onSaved={(row, placed) => {
-            setPanels((ps) => (ps.some((p) => p.id === row.id) ? ps.map((p) => (p.id === row.id ? row : p)) : [...ps, row]));
-            // The first panel took the circuits already on the list: the door shows them now.
-            if (placed?.adopted.length) upsert(placed.adopted);
-            if (placed?.notAdopted.length) {
-              toast(`${placed.notAdopted.length} couldn't go on ${row.name}. ${placed.notAdopted.join(" ")}`, "info", undefined, { sticky: true });
-            }
+            panelSaved(row, placed);
             if (panelSheet === "new") {
               setActivePanelId(row.id);
               setPanelSheet(row.id);

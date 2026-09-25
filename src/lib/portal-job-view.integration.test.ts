@@ -102,6 +102,14 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
       }
       await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0326_the_customer_sees_the_latest_drawing.sql"), "utf8"));
     }
+    // 0335 appends the panel block to the same door: every case below must hold through it too.
+    if (
+      process.env.TEST_APPLY_PENDING === "1" &&
+      (await one("select to_regclass('public.job_panels') is not null as ok")).ok &&
+      !(await one("select position('job_panels' in pg_get_functiondef('public.portal_job_view(text, uuid)'::regprocedure)) > 0 as ok")).ok
+    ) {
+      await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0335_the_panel_on_their_page.sql"), "utf8"));
+    }
     ready = (
       await one(
         `select to_regclass('public.job_stretches') is not null
@@ -364,9 +372,11 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
   it("the customer's job: an allowlist of building blocks, their paper only, their photos only", async () => {
     if (!needs()) return;
     const v = await view(tokenA, jobA);
-    // 0326 adds the plans and drawings; this job shows none (its shared paper is a photo).
-    expect(Object.keys(v).filter((k) => k !== "documents").sort()).toEqual(VIEW_KEYS);
+    // 0326 adds the plans and drawings; this job shows none (its shared paper is a photo). 0335
+    // adds the panel, which the office has not turned on here (none on this job at all).
+    expect(Object.keys(v).filter((k) => k !== "documents" && k !== "panels").sort()).toEqual(VIEW_KEYS);
     if ("documents" in v) expect(v.documents).toEqual([]);
+    if ("panels" in v) expect(v.panels).toEqual([]);
     expect(v.scope).toEqual({ org_id: orgId, job_id: jobA, customer_id: custA });
     expect(Object.keys(v.job).sort()).toEqual(["address", "city", "id", "job_number", "name", "state", "status", "unit", "zip"]);
 

@@ -28,6 +28,7 @@ import {
   type StretchRow,
 } from "../portal-share-actions";
 import { PapersCard } from "./job-portal-papers";
+import { JobPortalPanel } from "./job-portal-panel";
 import { portalOfficeLookUrl } from "../../portal-look-actions";
 import { openOfficeLook } from "@/components/portal/open-office-look";
 
@@ -115,6 +116,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
           <StretchesCard jobId={jobId} rows={stretches} setRows={setStretches} who={who} />
           <PicksCard jobId={jobId} orgId={orgId} rows={picks} setRows={setPicks} brands={brands} options={options} who={who} />
           {papers ? <PapersCard jobId={jobId} orgId={orgId} state={papers} setState={setPapers} who={who} /> : null}
+          <JobPortalPanel jobId={jobId} who={who} />
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
               <Camera className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Photos

@@ -22,6 +22,8 @@ const DOC_PAGE: Record<string, (id: string) => string> = {
   "change-order": () => "/change-orders",
   // The prelim notice is printed from the job, and its id IS the job id.
   "prelim-notice": (jobId) => `/jobs/${jobId}`,
+  // The panel directory is printed from the job's Panel tab, and its id is the job id too.
+  panel: (jobId) => `/jobs/${jobId}?tab=panel`,
 };
 
 export function pdfPreviewBackHref(doc: string, id: string, back: string): string {

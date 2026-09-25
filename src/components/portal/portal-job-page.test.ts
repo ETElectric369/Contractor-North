@@ -270,6 +270,49 @@ describe("the plans and drawings section (0326)", () => {
   });
 });
 
+describe("Your Panel (0335), once the office shows it", () => {
+  // The block as portal_job_view hands it over, plus keys it must never carry: dropped on read.
+  const panels = [
+    {
+      name: "Main Panel",
+      main_amps: 125,
+      spaces: 32,
+      notes: "OFFICE NOTE",
+      circuits: [
+        { space: 7, half: null, poles: 1, amps: 15, kind: null, room: "Kitchen", label: "Entry Lights", feeds: "Kitchen And Living", is_new: false, wire_tag: "DWDS", source: "photo", progress: "roughed", part_number: "Q115" },
+        { space: 25, half: null, poles: 2, amps: 50, kind: "gfci", room: "Kitchen", label: "Range", feeds: null, is_new: false },
+        { space: 9, half: "A", poles: 1, amps: 20, kind: null, room: "Bath", label: "GFI Outlets", feeds: null, is_new: true },
+      ],
+    },
+  ];
+  const html = render(raw({ panels }));
+  const t = text(html);
+
+  it("has its own chip and section: the panel's name and size, one line per circuit, what it feeds only when that differs", () => {
+    expect(html).toContain('href="#panel"');
+    expect(html).toContain('id="panel"');
+    expect(t).toContain("Your Panel");
+    expect(t).toContain("Main Panel · 125A Main · 32 Spaces");
+    expect(html).toContain('data-panel-line="7 · Entry Lights · feeds Kitchen And Living · 15A"');
+    expect(html).toContain('data-panel-line="25/27 · Range · 2P 50A GFCI"');
+    expect(html).toContain('data-panel-line="9A · GFI Outlets · 20A"');
+    expect(t).toContain("This is the list on your panel door. Your electrician keeps it current.");
+    // A small New tag on the new work only.
+    expect((t.match(/\bNew\b/g) ?? []).length).toBe(1);
+  });
+
+  it("never a wire tag, a note, progress, a source or a part number, even when the block carried one", () => {
+    for (const secret of ["DWDS", "OFFICE NOTE", "Roughed", "roughed", "photo", "Q115"]) expect(t).not.toContain(secret);
+  });
+
+  it("no chip and no section while the office has it off (or before 0335)", () => {
+    for (const off of [render(raw({ panels: [] })), render(raw())]) {
+      expect(off).not.toContain('href="#panel"');
+      expect(text(off)).not.toContain("Your Panel");
+    }
+  });
+});
+
 describe("how the customer's pages say things", () => {
   it("never moves a day: the org's date prints as that date in any timezone", () => {
     expect(fmtDay("2026-09-18")).toBe("Sep 18");

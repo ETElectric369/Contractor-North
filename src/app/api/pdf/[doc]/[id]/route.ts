@@ -28,7 +28,13 @@ const DOCS: Record<string, string> = {
   "change-order": "change-order",
   "material-list": "material-list",
   "prelim-notice": "prelim-notice",
+  // The panel directory (Panel plan, phase 5): the id is the JOB's. It carries no money, so the
+  // crew may print it too (below), and it renders uncached (bustDocPdf knows invoice|quote only).
+  panel: "panel",
 };
+
+/** The one document the crew may print: the panel directory has no price, no supplier, no pay. */
+const MEMBER_DOCS = new Set(["panel"]);
 
 /** Friendly filename — WITH THE JOB NAME for invoices (Erik: "we need to add the job name to
  *  the file name when sharing or exporting a file"). Shared by the stored-bytes and the
@@ -62,6 +68,11 @@ async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, d
       filename = `${docLabel(q as { doc_type?: string | null })} ${q.quote_number}${custName ? ` — ${custName.slice(0, 60)}` : ""}.pdf`;
     }
   }
+  if (doc === "panel") {
+    const { data: j } = await supabase.from("jobs").select("name").eq("id", id).maybeSingle();
+    const jobName = String((j as { name?: string | null } | null)?.name ?? "").trim();
+    filename = `Panel Directory${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
+  }
   return filename;
 }
 
@@ -89,8 +100,12 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();
   if (!auth?.user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", auth.user.id).maybeSingle();
-  if (!isStaffRole((me as { role?: string } | null)?.role)) {
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", auth.user.id).maybeSingle();
+  const who = me as { role?: string; org_id?: string | null; active?: boolean | null } | null;
+  // The panel directory is the crew's too (an active member of an org; RLS on the panel tables
+  // is the boundary, and the print page 404s a job outside the org). Every other doc: staff only.
+  const memberMayPrint = MEMBER_DOCS.has(doc) && !!who?.org_id && who.active !== false;
+  if (!isStaffRole(who?.role) && !memberMayPrint) {
     return NextResponse.json({ error: "Staff only." }, { status: 403 });
   }
   const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
@@ -118,64 +133,69 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
   // (Erik: "not near instant no" — on a confirmed HIT, so the cost is in these phases).
   const t0 = Date.now();
   const phases: Record<string, number> = {};
-  try {
-    const pre = await fetch(printTarget, {
-      headers: reqCookie ? { cookie: reqCookie } : undefined,
-      redirect: "manual",
-      cache: "no-store",
-    });
-    phases.preflight = Date.now() - t0;
-    if (pre.status === 200) {
-      const visibleHtml = (await pre.text()).replace(/<script[\s\S]*?<\/script>/gi, "");
-      fingerprint = createHash("sha256").update(visibleHtml).digest("hex");
-      const tL = Date.now();
-      const { data: hit } = await svc
-        .from("doc_pdf_cache")
-        .select("fingerprint, path, doc_status")
-        .eq("doc", doc)
-        .eq("doc_id", id)
-        .eq("margin", m)
-        .maybeSingle();
-      phases.lookup = Date.now() - tL;
-      if (hit?.fingerprint === fingerprint && hit.path) {
-        // RE-STAMP ON HIT (audit 7): the fingerprint proves these bytes match the document as
-        // it is RIGHT NOW, so the stored doc_status is pure metadata — and without this, a
-        // status-only flip (draft→sent on send; the print pages render no status) stranded the
-        // stamp forever: every staff view HIT and returned early, the warm no-oped, and the
-        // customer door refused the copy indefinitely. Advancing the stamp here is what makes
-        // the send-time warm heal the natural preview-then-send flow.
-        if (doc === "invoice" || doc === "quote") {
-          try {
-            const { data: cur } = await svc.from(doc === "invoice" ? "invoices" : "quotes").select("status").eq("id", id).maybeSingle();
-            const curStatus = String((cur as { status?: string } | null)?.status ?? "");
-            if (curStatus && curStatus !== String((hit as { doc_status?: string }).doc_status ?? "")) {
-              const { data: upd } = await svc
-                .from("doc_pdf_cache")
-                .update({ doc_status: curStatus })
-                .eq("doc", doc)
-                .eq("doc_id", id)
-                .select("doc_id");
-              if (!upd?.length) console.error("doc_status re-stamp wrote 0 rows", { doc, id });
+  // The panel directory renders fresh every time (uncached, like its plan says): the stored-copy
+  // table is keyed for invoices and quotes, and a directory is printed rarely.
+  const cacheable = !MEMBER_DOCS.has(doc);
+  if (cacheable) {
+    try {
+      const pre = await fetch(printTarget, {
+        headers: reqCookie ? { cookie: reqCookie } : undefined,
+        redirect: "manual",
+        cache: "no-store",
+      });
+      phases.preflight = Date.now() - t0;
+      if (pre.status === 200) {
+        const visibleHtml = (await pre.text()).replace(/<script[\s\S]*?<\/script>/gi, "");
+        fingerprint = createHash("sha256").update(visibleHtml).digest("hex");
+        const tL = Date.now();
+        const { data: hit } = await svc
+          .from("doc_pdf_cache")
+          .select("fingerprint, path, doc_status")
+          .eq("doc", doc)
+          .eq("doc_id", id)
+          .eq("margin", m)
+          .maybeSingle();
+        phases.lookup = Date.now() - tL;
+        if (hit?.fingerprint === fingerprint && hit.path) {
+          // RE-STAMP ON HIT (audit 7): the fingerprint proves these bytes match the document as
+          // it is RIGHT NOW, so the stored doc_status is pure metadata — and without this, a
+          // status-only flip (draft→sent on send; the print pages render no status) stranded the
+          // stamp forever: every staff view HIT and returned early, the warm no-oped, and the
+          // customer door refused the copy indefinitely. Advancing the stamp here is what makes
+          // the send-time warm heal the natural preview-then-send flow.
+          if (doc === "invoice" || doc === "quote") {
+            try {
+              const { data: cur } = await svc.from(doc === "invoice" ? "invoices" : "quotes").select("status").eq("id", id).maybeSingle();
+              const curStatus = String((cur as { status?: string } | null)?.status ?? "");
+              if (curStatus && curStatus !== String((hit as { doc_status?: string }).doc_status ?? "")) {
+                const { data: upd } = await svc
+                  .from("doc_pdf_cache")
+                  .update({ doc_status: curStatus })
+                  .eq("doc", doc)
+                  .eq("doc_id", id)
+                  .select("doc_id");
+                if (!upd?.length) console.error("doc_status re-stamp wrote 0 rows", { doc, id });
+              }
+            } catch (e) {
+              console.error("doc_status re-stamp failed", e instanceof Error ? e.message : e);
             }
-          } catch (e) {
-            console.error("doc_status re-stamp failed", e instanceof Error ? e.message : e);
           }
+          const tD = Date.now();
+          const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
+          phases.download = Date.now() - tD;
+          if (blob) {
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            console.log(JSON.stringify({ pdfCache: "HIT", doc, id: id.slice(0, 8), kb: Math.round(bytes.length / 1024), ms: phases, total: Date.now() - t0 }));
+            return pdfResponse(bytes, await docFilename(supabase, doc, id));
+          }
+        } else {
+          console.log(JSON.stringify({ pdfCache: hit ? "STALE" : "MISS", doc, id: id.slice(0, 8), ms: phases }));
         }
-        const tD = Date.now();
-        const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
-        phases.download = Date.now() - tD;
-        if (blob) {
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          console.log(JSON.stringify({ pdfCache: "HIT", doc, id: id.slice(0, 8), kb: Math.round(bytes.length / 1024), ms: phases, total: Date.now() - t0 }));
-          return pdfResponse(bytes, await docFilename(supabase, doc, id));
-        }
-      } else {
-        console.log(JSON.stringify({ pdfCache: hit ? "STALE" : "MISS", doc, id: id.slice(0, 8), ms: phases }));
       }
+    } catch {
+      // The cache is a shortcut, never a gate — any failure here falls through to the render.
+      fingerprint = null;
     }
-  } catch {
-    // The cache is a shortcut, never a gate — any failure here falls through to the render.
-    fingerprint = null;
   }
 
   // Chromium: the Vercel lambda build on prod; a local Chrome for dev.
