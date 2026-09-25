@@ -101,12 +101,13 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Finish a job",
     description:
-      "Finish a job: mark it complete and auto-build a DRAFT invoice from its labor + materials (it does NOT send — that stays the user's Send button). Resolve the job with list_jobs. The app asks to confirm first.",
+      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '19.5 h ($2,437.50) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",
     confirm: "financial",
-    describe: () => "Finish this job and draft its invoice — from its accepted estimate if it has one, else from logged labor + materials. Say yes to confirm. (It won't send.)",
+    describe: () =>
+      "Finish this job. On an ordinary job I'll draft its invoice (from the accepted estimate if it has one, else from logged labor + materials). On a job billed with progress payments I won't bill anything new, and I'll tell you what's still not on a bill. Say yes to confirm. (It won't send.)",
     handler: (i) => finishJob(i.id, { sendInvoice: false }), // flags unset: the contract rule decides (quote vs actuals)
   },
   "job.scheduleDay": {
