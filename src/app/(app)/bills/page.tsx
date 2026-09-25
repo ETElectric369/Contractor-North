@@ -5,11 +5,21 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import {
   findDuplicateBills,
+  indexSupplierAliases,
   readBillInvoice,
   resolveSupplierAccount,
   suggestSupplierGroups,
   type BillFingerprint,
 } from "@/lib/supplier-identity";
+import {
+  billsCarryingNumber,
+  billsCoveredByDocuments,
+  namedNumbersOf,
+  samePurchaseCandidates,
+  samePurchaseSentence,
+  type LedgerBill,
+  type SupplierDoc,
+} from "@/lib/same-purchase";
 import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
@@ -52,6 +62,7 @@ import {
   voidSupplierPayment,
   setSupplierInvoiceJob,
   recordSupplierInvoiceAsBill,
+  tieSupplierInvoiceToBill,
   updateSupplierAccount,
 } from "./supplier-actions";
 
@@ -493,21 +504,47 @@ export default async function BillsPage({
   };
   for (const l of (billLinkRows ?? []) as any[]) cover(String(l.supplier_invoice_id ?? ""), String(l.bill_id ?? ""));
 
-  const billsNamingNumber = new Map<string, Set<string>>();
-  for (const b of liveBills) {
-    const reading = readBillInvoice({
-      notes: (b as any).notes ?? null,
-      lineDescriptions: ((b as any).line_items ?? []).map((l: any) => l.description),
-    });
-    const stored = (b as any).supplier_invoice_number ?? null;
-    for (const n of [...reading.numbers, ...(stored ? [String(stored)] : [])]) {
-      const key = String(n ?? "").trim();
-      if (!key) continue;
-      const set = billsNamingNumber.get(key) ?? new Set<string>();
-      set.add(String((b as any).id));
-      billsNamingNumber.set(key, set);
-    }
-  }
+  /**
+   * WHICH BILLS CARRY A DOCUMENT'S NUMBER: the ONE reading every door uses (same-purchase.ts,
+   * audit v994 DB1). It used to read the number off a bill's lines, its file name and its
+   * supplier_invoice_number, and never its bill_number, which is the column the tray and the job
+   * page write. So a CED ticket filed from the tray as 8802-1109000 left CED's own 8802-1109000
+   * under Purchases Not In Your Books with a live Record button, and one press made a second bill
+   * for the same money. Now bill_number counts too, spelled one way ("#8802 1109000" is
+   * "8802-1109000"), and only on the document's own account.
+   */
+  const aliasIndex = indexSupplierAliases((aliasRows ?? []) as any[]);
+  const ledgerBills: LedgerBill[] = liveBills.map((b: any) => {
+    const named = namedNumbersOf({ notes: b.notes ?? null, line_items: b.line_items ?? [] });
+    return {
+      id: String(b.id),
+      supplier: b.supplier ?? null,
+      supplier_account_id: b.supplier_account_id ?? null,
+      bill_number: b.bill_number ?? null,
+      supplier_invoice_number: b.supplier_invoice_number ?? null,
+      amount: b.amount ?? null,
+      bill_date: b.bill_date ?? null,
+      job_id: b.job_id ?? null,
+      superseded_by_bill_id: b.superseded_by_bill_id ?? null,
+      is_statement: !!b.is_statement || named.isStatement,
+      jobs: b.jobs ?? null,
+      named_numbers: named.numbers,
+    };
+  });
+  const ledgerDocs: SupplierDoc[] = ((invoiceRows ?? []) as any[]).map((r) => ({
+    id: String(r.id),
+    invoice_number: r.invoice_number ?? null,
+    supplier_account_id: r.supplier_account_id ?? null,
+    job_id: r.job_id ?? null,
+    total: r.total ?? null,
+    invoice_date: r.invoice_date ?? null,
+  }));
+  const billsCarrying = new Map<string, string[]>(
+    ledgerDocs.map((d) => [d.id, billsCarryingNumber(d.invoice_number, { accountId: d.supplier_account_id }, ledgerBills, aliasIndex).map((b) => b.id)]),
+  );
+  // Bills a supplier document already covers, by a link or by carrying its number: they are
+  // never offered as "maybe the same purchase" for a different document.
+  const coveredByDocs = billsCoveredByDocuments(ledgerBills, ledgerDocs, (billLinkRows ?? []) as any[], aliasIndex);
 
   const documentsOf = new Map<string, SupplierDocumentRow[]>();
   const supplierDocuments: SupplierDocumentRow[] = ((invoiceRows ?? []) as any[]).map((r) => {
@@ -536,10 +573,20 @@ export default async function BillsPage({
       // is how a scanned statement covers the invoices inside it.
       billCount: (() => {
         const bills = new Set(coveringBills.get(id) ?? []);
-        for (const b of billsNamingNumber.get(String(r.invoice_number ?? "").trim()) ?? []) bills.add(b);
+        for (const b of billsCarrying.get(id) ?? []) bills.add(b);
         return bills.size;
       })(),
     };
+    // NOT IN HIS BOOKS BY NUMBER, BUT MAYBE BY MONEY (audit v994, DB1). A counter ticket carries a
+    // sales-order number CED's invoice never prints, so the bills on this account (and job) that
+    // no document covers yet, within a few dollars and days, are offered beside it: Same Purchase:
+    // Tie Them. Only offered. Nothing is tied until a person presses it, and the server re-checks.
+    if (row.billCount === 0 && row.kind === "invoice") {
+      const doc = ledgerDocs.find((d) => d.id === id);
+      const candidates = doc ? samePurchaseCandidates(doc, ledgerBills, coveredByDocs, aliasIndex) : [];
+      if (candidates.length)
+        row.samePurchase = candidates.slice(0, 3).map((c) => ({ billId: c.billId, exact: c.exact, sentence: samePurchaseSentence(c) }));
+    }
     const accountId = String(r.supplier_account_id ?? "");
     if (accountId) documentsOf.set(accountId, [...(documentsOf.get(accountId) ?? []), row]);
     return row;
@@ -575,7 +622,7 @@ export default async function BillsPage({
   for (const r of (invoiceRows ?? []) as any[]) {
     const accountId = String(r.supplier_account_id ?? "");
     for (const id of coveringBills.get(String(r.id)) ?? []) coverBill(id, accountId);
-    for (const id of billsNamingNumber.get(String(r.invoice_number ?? "").trim()) ?? []) coverBill(id, accountId);
+    for (const id of billsCarrying.get(String(r.id)) ?? []) coverBill(id, accountId);
   }
 
   // ONLY WHERE THE QUESTION EXISTS - an account whose supplier documents we actually hold. Under
@@ -969,6 +1016,9 @@ export default async function BillsPage({
             // passed, so Erik had to ask me to write his $223.29 CED invoice into his books by
             // hand. Eleven more are sitting in that list behind this one line.
             recordAsBill: recordSupplierInvoiceAsBill,
+            // Same Purchase: Tie Them (audit v994, DB1): the answer to "maybe already in your
+            // books" on the same card, so a counter ticket and CED's invoice for it can be one.
+            tieToBill: tieSupplierInvoiceToBill,
           }}
         />
       )}

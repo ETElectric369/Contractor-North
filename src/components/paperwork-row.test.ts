@@ -187,6 +187,56 @@ describe("PaperworkRow", () => {
     expect(html).toContain("CED document, 8802-1101363, $162.45");
   });
 
+  // ── Paper A (audit v994): PO "TOOLS", the reader's bucket, read before marks were kept ──────
+  const TOOLS_TICKET: Partial<PaperRowItem> = {
+    doc_type: "bill",
+    vendor: "Consolidated Electrical Dist.",
+    amount: 44.44,
+    payment: "on_account",
+    doc_number: "8802-SO-257558",
+    proposal: { po: "TOOLS", bucket: "Tools & Supplies", jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR TOOLS" },
+  };
+
+  it("PO TOOLS the tray has matched: Tools & Supplies is picked, and says it came off the PO", () => {
+    const html = render({
+      ...TOOLS_TICKET,
+      proposal: { ...(TOOLS_TICKET.proposal as object), companyUse: { bucket: "Tools & Supplies", from: "po", words: "TOOLS" } },
+      on_paper: "PO TOOLS",
+    });
+    expect(html).toMatch(/<option value="cost:Tools &amp; Supplies" selected="">Tools &amp; Supplies(<!-- -->)? \(On The Paper\)<\/option>/);
+    expect(html).toContain("Business cost picked from the PO on the bill: TOOLS");
+    // The picked line already says the words; nothing repeats them.
+    expect(html).not.toContain("On the paper:");
+    expect(html).not.toMatch(/>Where does this go\?<\/p>/);
+  });
+
+  it("a reader's bucket is 'The reader's guess', never 'Not read off the paper', and the PO is shown", () => {
+    const html = render({ ...TOOLS_TICKET, on_paper: "PO TOOLS" });
+    expect(html).toMatch(/>Where does this go\?<\/p>/);
+    expect(html).toContain("On the paper: PO TOOLS");
+    expect(html).toMatch(/A Guess: (<!-- -->)?Business Cost, Tools &amp; Supplies/);
+    expect(html).toContain("The reader&#x27;s guess, from the paper (PO TOOLS).");
+    expect(html).not.toContain("Not read off the paper");
+  });
+
+  it("AI Suggest's bucket keeps 'Not read off the paper', with its reason", () => {
+    const html = render({ ...TOOLS_TICKET, proposal: { bucket: "Tools & Supplies", bucketFrom: "ai", why: "A tester is a tool." } });
+    expect(html).toContain("Not read off the paper: A tester is a tool.");
+  });
+
+  it("PO STOCK picks nothing, and says what the paper says", () => {
+    const html = render({ ...TOOLS_TICKET, proposal: { po: "STOCK", companyUse: { bucket: null, from: "po", words: "STOCK" } } });
+    expect(html).toMatch(/>Where does this go\?<\/p>/);
+    expect(html).toContain("On the paper: PO STOCK");
+    expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
+  });
+
+  it("a hint that was only the company's own name says nothing: the server's null is an answer", () => {
+    const html = render({ ...TOOLS_TICKET, proposal: { jobHint: "ERIK TAYLOR" }, on_paper: null });
+    expect(html).not.toContain("On the paper:");
+    expect(html).not.toContain("ERIK TAYLOR");
+  });
+
   it("every control is a 44px target", () => {
     const html = render({ proposal: { guessJobId: "job-046" } });
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toMatch(/h-11/);

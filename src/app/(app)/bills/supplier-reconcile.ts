@@ -61,6 +61,12 @@ export interface SupplierInvoiceRow extends SupplierDocument {
   jobName: string | null;
   /** How many scanned bills are linked to it. Zero means the app has no record of the purchase. */
   billCount: number;
+  /**
+   * Bills that may be this purchase already (same-purchase.ts, audit v994): the same number, or
+   * the same account and job within a few dollars and days. Offered as Same Purchase: Tie Them,
+   * never tied by the app. Absent when there are none.
+   */
+  samePurchase?: { billId: string; exact: boolean; sentence: string }[];
 }
 
 /** One of his jobs, with enough on it to tell five Rhodesias apart. */

@@ -60,6 +60,7 @@ import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobDescription } from "./job-description";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
+import { documentsForViewer } from "@/lib/tech-documents";
 import { jobLabel } from "@/lib/schedule-options";
 import { directionsTarget } from "@/lib/maps";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
@@ -639,8 +640,12 @@ export default async function JobDetailPage({
   // Organize notes filed to a job are documents rows with NO file (file_url null); the helper
   // skips them rather than sending a null path, which storage-js rethrows as a TypeError and
   // used to crash the whole RSC render.
-  const docUrls = await signDocumentUrls(supabase, (docRows ?? []).map((d: any) => d.file_url));
-  const docs = (docRows ?? []).map((d: any) => ({
+  //
+  // A TECH IS HANDED NO COST PAPER (audit v994, HB-2): chosen from an allow-list before anything
+  // is signed, so a receipt's picture, its signed URL and its name never reach a tech's page data.
+  const visibleDocRows = documentsForViewer((docRows ?? []) as any[], viewerIsStaff);
+  const docUrls = await signDocumentUrls(supabase, visibleDocRows.map((d: any) => d.file_url));
+  const docs = visibleDocRows.map((d: any) => ({
     ...d,
     signedUrl: (d.file_url && docUrls.get(d.file_url)) || null,
   }));

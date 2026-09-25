@@ -41,7 +41,14 @@ function onPhone() {
 /** What the reader said about one document, under its row. `done` = a bill exists for it (created
  *  now, or found already), so the Record as Cost verb goes away — a warning tone can still ride a
  *  done note (the reader's lines didn't add up; the bill is in, the notes carry the warning). */
-type BillNote = { text: string; done: boolean; tone: ReceiptTone };
+type BillNote = {
+  text: string;
+  done: boolean;
+  tone: ReceiptTone;
+  /** A bill already carries this paper's number, so nothing was written (audit v994): the row
+   *  offers Different Purchase: Record It Anyway, because only a person can say it isn't the same. */
+  different?: boolean;
+};
 
 const NOTE_COLOR: Record<ReceiptTone, string> = {
   ok: "text-emerald-600",
@@ -108,7 +115,12 @@ export function JobDocuments({
       touched = true;
       // Paper that isn't a cost (a Plan, a Permit) is simply filed — its row is the confirmation.
       if (out.kind === "filed" && out.why === "not_asked") continue;
-      note(out.docId, { text: out.sentence, done: out.kind !== "filed", tone: out.tone });
+      note(out.docId, {
+        text: out.sentence,
+        done: out.kind !== "filed",
+        tone: out.tone,
+        different: out.kind === "already" && out.samePurchase === true,
+      });
     }
     if (lost.length) setError(lost.join(" "));
     setBusy(false);
@@ -117,12 +129,17 @@ export function JobDocuments({
 
   // Convert an already-filed receipt/bill into a job cost on demand — the retry for anything
   // the upload-time read refused.
-  async function recordCost(d: Doc) {
+  async function recordCost(d: Doc, differentPurchase = false) {
     setBilling(d.id);
     note(d.id, null);
     try {
-      const out = await readReceiptDocument(d.id);
-      note(d.id, { text: out.sentence, done: out.kind !== "filed", tone: out.tone });
+      const out = await readReceiptDocument(d.id, differentPurchase ? { differentPurchase: true } : undefined);
+      note(d.id, {
+        text: out.sentence,
+        done: out.kind !== "filed",
+        tone: out.tone,
+        different: out.kind === "already" && out.samePurchase === true,
+      });
       if (out.kind === "billed") router.refresh();
     } finally {
       setBilling(null);
@@ -321,6 +338,18 @@ export function JobDocuments({
               {n && (
                 <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
                   {n.text}
+                </div>
+              )}
+              {n?.different && (
+                <div className="pl-15">
+                  <button
+                    onClick={() => recordCost(d, true)}
+                    disabled={billing === d.id}
+                    className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Different Purchase: Record It Anyway
+                  </button>
                 </div>
               )}
             </li>

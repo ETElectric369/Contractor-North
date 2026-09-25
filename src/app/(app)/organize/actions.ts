@@ -17,7 +17,9 @@ import {
   fileRefusal,
   paperTypeLabel,
   paperTypeOfItem,
+  paperPickOf,
   pickedBecause,
+  pickProvenance,
   proposalOf,
   readinessOf,
   rematchPaper,
@@ -36,6 +38,7 @@ import {
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
 } from "@/app/(app)/bills/receipt-billing";
+import { billLabel, billsCarryingNumber } from "@/lib/same-purchase";
 import {
   billStatusFromItem,
   cleanDocNumber,
@@ -198,7 +201,10 @@ async function readInto(
   };
   const pickedJob = labelOf(f.proposal.jobId);
   const guessedJob = labelOf(f.proposal.guessJobId);
-  const because = pickedBecause({ id: itemId, doc_type: f.doc_type, category: f.category, proposal: f.proposal });
+  const readItem = { id: itemId, doc_type: f.doc_type, category: f.category, proposal: f.proposal };
+  const because = pickedBecause(readItem);
+  // A company-use word ("TOOLS") the paper names picks a business cost the same way a job is.
+  const pickedCost = !pickedJob && paperPickOf(readItem).startsWith("cost:") ? paperPickOf(readItem).slice(5) : null;
   return {
     ok: true,
     item: {
@@ -216,12 +222,12 @@ async function readInto(
       destination: keepsItself ? "note" : "none",
       picture: f.proposal.picture === true,
       suggestion:
-        pickedJob || guessedJob || f.proposal.bucket
+        pickedJob || guessedJob || pickedCost || f.proposal.bucket
           ? {
-              jobLabel: pickedJob ?? guessedJob,
-              bucket: f.proposal.bucket ?? null,
-              picked: !!pickedJob,
-              because: pickedJob ? because : null,
+              jobLabel: pickedJob ?? (pickedCost ? null : guessedJob),
+              bucket: pickedCost ?? f.proposal.bucket ?? null,
+              picked: !!pickedJob || !!pickedCost,
+              because: pickedJob || pickedCost ? because : null,
             }
           : null,
     },
@@ -374,11 +380,20 @@ export async function billJobReceipt(
    *  they were standing at the counter. The AI fills only what was left blank.
    *  billDate is a date the person SET and beats the paper; fallbackBillDate is only the form's
    *  seeded day, used when the paper has no legible date either (so the bill is never dateless). */
-  stated?: { paid?: boolean; category?: string | null; billDate?: string | null; fallbackBillDate?: string | null },
+  stated?: {
+    paid?: boolean;
+    category?: string | null;
+    billDate?: string | null;
+    fallbackBillDate?: string | null;
+    /** A person looked at "already on the books" and said this is a different purchase. */
+    differentPurchase?: boolean;
+  },
 ): Promise<{
   ok: boolean;
   error?: string;
   already?: boolean;
+  /** A bill already carries this paper's number: nothing was written, and this says which. */
+  sameAs?: string;
   amount?: number | null;
   vendor?: string | null;
   lineCount?: number;
@@ -510,6 +525,27 @@ ${MASKED_PRICE_PROMPT_RULE}`,
   const docNumber = cleanDocNumber(parsed?.document_number);
   const accountId = await exactAccountFor(supabase, ctx.orgId, vendor);
 
+  // IS THIS PURCHASE ALREADY ON THE BOOKS? (audit v994, DB1.) This door never asked. A CED ticket
+  // filed from the tray, then snapped again on the job page, is a new photo, so a new document and
+  // a new fingerprint, and this wrote a second bill with the same number and no word: double job
+  // cost, and Import Costs billing the customer twice. The same reading every door uses
+  // (billsCarryingNumber: the number in either column, same supplier, live bills only). A match
+  // writes NOTHING and says so; the person decides, and "Different Purchase: Record It Anyway"
+  // comes back through here with differentPurchase. It is `ok` with a warning, not a refusal: the
+  // Add Cost sheet falls back to a typed bill on a refusal, which is the second bill again.
+  if (docNumber && !stated?.differentPurchase) {
+    const books = await loadBooks(supabase, ctx.orgId);
+    const same = billsCarryingNumber(docNumber, { accountId, supplier: vendor }, books.bills, books.aliases);
+    if (same.length) {
+      // THE FACT ONLY, NO DOOR (review of the fix). Each caller names the button it actually
+      // renders: the Add Cost sheet and Snap the Bill offer Different Purchase in place, and a
+      // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
+      // after another Record as Cost press (another paid read).
+      const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
+      return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
+    }
+  }
+
   const billId = await insertItemizedBill(
     supabase,
     {
@@ -519,9 +555,9 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       bill_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
       category: stated?.category || "Receipt",
       scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
-      notes: check.mismatch
-        ? `Receipt recorded as cost: ${doc.name}\n\n${check.note}`
-        : `Receipt recorded as cost: ${doc.name}`,
+      notes: `Receipt recorded as cost: ${doc.name}${
+        stated?.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : ""
+      }${check.mismatch ? `\n\n${check.note}` : ""}`,
       created_by: ctx.userId,
       pricing_provisional: provisional,
       bill_number: docNumber ?? undefined,
@@ -686,6 +722,29 @@ async function tearDownFiling(supabase: any, item: any, tail: string): Promise<s
 }
 
 /**
+ * The tray's exact match, run again on the server for the paper about to be filed, and what it
+ * says about who decided (pickProvenance). A read that fails is "no paper pick known", said as
+ * nothing rather than as a wrong answer, and never stops the filing: this is a record of the
+ * decision, not a gate on it.
+ */
+async function whoPicked(
+  supabase: any,
+  orgId: string | null,
+  item: PaperItem,
+  dest: Exclude<FileDestination, { type: "unfiled" }>,
+): Promise<ReturnType<typeof pickProvenance> | null> {
+  try {
+    const { markJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
+    const settled = rematchPaper(item, markJobs, pos, selfNames);
+    const destValue = dest.type === "overhead" ? `cost:${dest.category}` : `${dest.type}:${dest.jobId}`;
+    return pickProvenance(settled, destValue);
+  } catch (e) {
+    reportError("organize:fileItem.whoPicked", e, { itemId: item.id });
+    return null;
+  }
+}
+
+/**
  * FILE IT: THE ONE DOOR A PIECE OF PAPER BECOMES MONEY THROUGH (0295).
  *
  * A person picked where it goes and pressed the button. Every surface that files paper calls this:
@@ -741,6 +800,15 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     linkTo = found.flatMap((m) => (m.kind === "supplier_invoice" ? [{ id: m.supplierInvoiceId, number: m.invoiceNumber }] : []));
   }
 
+  // WHO DECIDED WHERE IT WENT (audit v994, tray F1). The tray's pick lived only in memory: the tray
+  // re-matches every waiting paper on each load and writes nothing, so a paper read before a rule
+  // learned something (Paper B, "13897 HERRINGBONE", read 24 minutes before the PO-street rule
+  // shipped) was filed with nothing on record saying the PO picked J-011, and a person overriding
+  // the paper looked exactly like a person agreeing with it. The same exact match runs here, on
+  // the server, while the row is still waiting (so rematchPaper does not step aside), and the
+  // answer rides inside `filed`, which Undo clears: the reader's proposal is never rewritten.
+  const provenance = dest.type === "unfiled" ? null : await whoPicked(supabase, ctx.orgId, item, dest);
+
   // CLAIM THE PAPER BEFORE WRITING A CENT (check-then-insert, the v951 class). The same paper
   // shows on /bills Sort These and in the /organize tray, and two presses at once both passed the
   // gate above, both found no bill, and both made one: two bills for one paper, the row pointing at
@@ -784,7 +852,9 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   const vendor = item.vendor ?? item.title;
   // What a person said at the "already on the books" question rides on the bill, so the next
   // person who sees two bills with one number knows it was decided, not missed.
-  const decided = opts.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : "";
+  const decided =
+    (opts.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : "") +
+    (provenance?.note ? `\n${provenance.note}` : "");
   const billFacts = isCost
     ? {
         pricing_provisional: item.pricing_provisional === true,
@@ -915,8 +985,12 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     status: dest.type === "unfiled" ? "needs_review" : "filed",
   };
   // How it was filed rides on the proposal, so Undo takes down exactly this and nothing else.
+  // And who decided it, beside how (whoPicked above): inside `filed`, so Undo takes it with it.
   if ("proposal" in item)
-    patch.proposal = { ...proposalOf(item), filed: dest.type === "unfiled" ? null : { how: dest.type === "photo" ? "photo" : "bill" } };
+    patch.proposal = {
+      ...proposalOf(item),
+      filed: dest.type === "unfiled" ? null : { how: dest.type === "photo" ? "photo" : "bill", ...(provenance?.filed ?? {}) },
+    } satisfies PaperProposal;
   const { data: wrote, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
   if (error || !wrote?.length) {
     // The row that says where the bill is did not save: a bill nothing points at is one Undo can
@@ -1274,6 +1348,16 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
       message: `The paper names the job: ${jobLabelOf(paperJob)}.${because ? ` ${because}.` : ""} It's picked on the row; press File It if that's right.`,
     };
   }
+  // The paper names the company's own use ("TOOLS" in the PO box): that is the pick, from the
+  // paper, and a model's second look has nothing to add to it.
+  const paperCost = paperPickOf(settled);
+  if (paperCost.startsWith("cost:")) {
+    const because = pickedBecause(settled);
+    return {
+      ok: true,
+      message: `The paper names a business cost: ${paperCost.slice(5)}.${because ? ` ${because}.` : ""} It's picked on the row; press File It if that's right.`,
+    };
+  }
 
   const p = proposalOf(item);
   const marks = storedMarks(p);
@@ -1370,7 +1454,7 @@ ${jobLines.join("\n") || "(none)"}`,
     if (action === "file_job" && markJobs.some((j) => j.id === parsed.job_id)) {
       const label = jobLabelOf(String(parsed.job_id));
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
-        proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, why: reason || null },
+        proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, bucketFrom: null, why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
       if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
@@ -1404,7 +1488,7 @@ ${jobLines.join("\n") || "(none)"}`,
             "This looks like a fee or a supplier's late charge, so nothing was suggested. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost: Fees yourself.",
         };
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
-        proposal: { ...proposalOf(item), guessJobId: null, bucket: cat, why: reason || null },
+        proposal: { ...proposalOf(item), guessJobId: null, bucket: cat, bucketFrom: "ai", why: reason || null },
       });
       if (sErr) return { ok: false, message: dbError(sErr) };
       if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
