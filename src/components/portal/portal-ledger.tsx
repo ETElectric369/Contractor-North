@@ -40,7 +40,7 @@ export function splitLabel(line: SplitLine, split: LedgerSplit): string {
 
 /**
  * Labor, Materials and any other group as their own lines, then the total they add up to. Used by
- * the money card (Work So Far) and at the foot of every stretch (Work In This Stretch).
+ * the money card (Work To Date) and at the foot of every stretch (Work Completed).
  */
 export function SplitRows({ split, total, totalLabel }: { split: LedgerSplit; total: number; totalLabel: string }) {
   return (
@@ -126,7 +126,7 @@ function StretchCard({ s, thisYear, open }: { s: LedgerStretch; thisYear: string
         ) : null}
 
         <dl className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-sm">
-          <SplitRows split={s.split} total={s.workTotal} totalLabel="Work In This Stretch" />
+          <SplitRows split={s.split} total={s.workTotal} totalLabel="Work Completed" />
           <div className="flex items-baseline justify-between gap-3 py-0.5">
             <dt className="text-slate-700">Paid</dt>
             <dd className="shrink-0 tabular-nums text-emerald-800">{formatCurrency(s.paidTotal)}</dd>

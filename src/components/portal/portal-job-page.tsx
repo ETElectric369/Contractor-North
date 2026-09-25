@@ -21,7 +21,7 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
  * separating time and material right at the top, its all mixed in"). The money card leads with
- * Labor (and its hours) and Materials as two lines that add up to Work So Far, then Paid and the
+ * Labor (and its hours) and Materials as two lines that add up to Work To Date, then Paid and the
  * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
  * headings (and any other kind of line under its own, only when there is one). One rule decides
  * which line is which everywhere: line-kind, from what the line stored, and for a typed line the
@@ -114,7 +114,7 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
         >
           <p className="mb-2 px-1 text-sm text-slate-700">
             Each stretch shows its labor, materials and payments. Tap one to see each day: the labor (who worked and how long)
-            and the materials (what was bought), as billed. The balance after each stretch is all the work so far minus all
+            and the materials (what was bought), as billed. The balance after each stretch is all the work to date minus all
             the payments so far.
           </p>
           <PortalLedger ledger={ledger} thisYear={thisYear} />
@@ -183,15 +183,15 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
           <p className="mb-3 rounded-xl bg-[rgb(var(--glass-tint)/0.16)] px-3 py-2 text-sm font-semibold text-[rgb(var(--glass-ink))]">
             Running total, not a bill yet.
             <span className="block text-xs font-normal text-slate-700">
-              {view.org.name} hasn&apos;t sent this as a bill. It is the work and payments so far, and it changes as the job goes.
+              {view.org.name} hasn&apos;t sent this as a bill. It is the work and payments to date, and it changes as the job goes.
             </span>
           </p>
         ) : null}
-        {/* Labor and Materials first, as two lines that add up to Work So Far (any other kind of
+        {/* Labor and Materials first, as two lines that add up to Work To Date (any other kind of
             line, a change order or a credit, gets its own line between them only when there is
             one), then what was paid and what is left. */}
         <dl data-portal-money className="text-base">
-          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel="Work So Far" />
+          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel="Work To Date" />
           <div className="flex items-baseline justify-between gap-3 py-0.5">
             <dt className="text-slate-700">Paid</dt>
             <dd className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(ledger.paidTotal)}</dd>
