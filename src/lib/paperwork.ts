@@ -172,6 +172,8 @@ export type PaperItem = {
   tied_supplier_invoice_id?: string | null;
   pricing_provisional?: boolean | null;
   confidence?: string | null;
+  /** What the reader transcribed, line by line (jsonb; File It writes these as the bill's lines). */
+  line_items?: unknown;
 };
 
 export function proposalOf(item: { proposal?: unknown }): PaperProposal {
@@ -187,6 +189,30 @@ export function amountOf(item: { amount?: number | string | null }): number | nu
   const n = Number(item.amount);
   return Number.isFinite(n) ? n : null;
 }
+
+/**
+ * A RETURN WITH NO LINES CANNOT GO ON A JOB (audit v994, DB4).
+ *
+ * A negative bill on a job is a supplier return, and the importer credits it to the customer. What
+ * holds that credit to what the customer was actually billed is its LINES: each returned part is
+ * matched to the purchase it reverses and credits at most what that purchase billed
+ * (returnLinesAgainstPurchases), and a line can be switched off like any other. With no lines
+ * there is nothing to match and nothing to switch off, so the whole return is credited at markup -
+ * the INV-078 housings, credited to Andrew when he was never charged for them. So File It asks for
+ * the lines first. A business cost is the company's own book and never reaches a customer, so it
+ * is not held to this.
+ */
+export function isReturnWithoutLines(item: PaperItem): boolean {
+  const t = paperTypeOfItem(item);
+  if (t !== "receipt" && t !== "bill") return false;
+  const total = amountOf(item);
+  if (total === null || !(Math.round(total * 100) < 0)) return false;
+  const lines = Array.isArray(item.line_items) ? item.line_items : [];
+  return !lines.some((l) => l && typeof l === "object" && String((l as { description?: unknown }).description ?? "").trim());
+}
+
+export const RETURN_NEEDS_LINES =
+  "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
 
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {
@@ -661,6 +687,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   if (isCost && dest.type === "keep") return "This is a cost. File it on a job or as a business cost, or change its type in Fix Details.";
   if (!isCost && dest.type === "overhead") return "Only a receipt or a bill can be a business cost. Change its type in Fix Details if it is one.";
   if (isCost && r.state === "needs_total") return r.sentence;
+  if (dest.type === "job" && isReturnWithoutLines(item)) return RETURN_NEEDS_LINES;
   return null;
 }
 

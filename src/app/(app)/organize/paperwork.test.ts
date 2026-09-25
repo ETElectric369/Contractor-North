@@ -40,7 +40,7 @@ vi.mock("@/app/(app)/bills/supplier-import-actions", async (orig) => {
 });
 
 import { aiReviewItem, analyzeAndFile, billJobReceipt, fileItem, readAsCost, tiePaperwork, unarchiveItem, undoPaperwork } from "./actions";
-import { addPaperwork, addSupplierDocuments } from "./paperwork-actions";
+import { addPaperwork, addSupplierDocuments, updatePaperwork } from "./paperwork-actions";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 
 type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][] };
@@ -550,6 +550,167 @@ describe("File It: the one door, with every check the weaker doors skipped", () 
     expect(res).toEqual({ ok: true });
     const order = calls.map((c) => `${c.table}.${c.verb}`);
     expect(order.indexOf("organized_items.update")).toBeLessThan(order.indexOf("bills.insert"));
+  });
+});
+
+/**
+ * A SUPPLIER RETURN FILED THROUGH ORGANIZE KEEPS ITS LINES (audit v994, DB4). The reader dropped a
+ * credit memo's lines, Fix Details → Bill kept the negative total, and File It wrote a lineless
+ * -$51.58 bill on Herringbone that the importer credited in full at markup: $64.48 back to Andrew
+ * for four housings he was never charged for.
+ */
+describe("a supplier return through Organize: its lines come with it, or it does not go on a job", () => {
+  const readInto = () =>
+    fakeSupabase(
+      {
+        "organized_items.insert": [{ data: { id: "oi-ret" }, error: null }],
+        "jobs.select": [JOBS],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }],
+      },
+      calls,
+    );
+
+  it("the reader keeps a credit memo's lines, and its total and lines read as money coming back", async () => {
+    // Read as printed: a positive credit total and positive lines.
+    ai.parsed = {
+      paper_type: "credit_memo",
+      kind: "job_document",
+      title: "CED credit",
+      vendor: "Consolidated Electrical Dist.",
+      amount: 51.58,
+      line_items: [
+        { description: "H245ICAT 4 in LED Shallow IC HSG", quantity: 4, unit_price: 11.83, amount: 47.32, category: "Electrical" },
+        { description: "Sales Tax", quantity: 1, unit_price: 4.26, amount: 4.26, category: "Tax" },
+      ],
+      confidence: "high",
+    };
+    state.client = readInto();
+    const res = await analyzeAndFile({ path: "org-1/organize/ret.jpg", name: "ret.jpg", mime: "image/jpeg", size: 1000 });
+    expect(res.ok).toBe(true);
+    const row = did("organized_items", "update")!.payload;
+    expect(row.doc_type).toBe("credit_memo");
+    expect(row.amount).toBe(-51.58);
+    expect(row.line_items.map((l: any) => [l.description, l.unit_price, l.amount])).toEqual([
+      ["H245ICAT 4 in LED Shallow IC HSG", -11.83, -47.32],
+      ["Sales Tax", -4.26, -4.26],
+    ]);
+    // It still waits: a credit memo is "a later update", and nothing was written as money.
+    expect(did("bills", "insert")).toBeUndefined();
+  });
+
+  it("lines the reader already signed as a credit are kept exactly as read", async () => {
+    ai.parsed = {
+      paper_type: "credit_memo",
+      vendor: "CED",
+      amount: -51.58,
+      line_items: [
+        { description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32, category: "Electrical" },
+        { description: "Restocking fee", quantity: 1, unit_price: 5, amount: 5, category: "Electrical" },
+      ],
+    };
+    state.client = readInto();
+    await analyzeAndFile({ path: "org-1/organize/ret2.jpg", name: "ret2.jpg", mime: "image/jpeg", size: 1000 });
+    const row = did("organized_items", "update")!.payload;
+    expect(row.line_items.map((l: any) => l.amount)).toEqual([-47.32, 5]);
+  });
+
+  it("tells the reader a credit memo's lines come with it and its total is negative", async () => {
+    ai.parsed = { paper_type: "receipt", kind: "receipt", vendor: "Home Depot", amount: 12 };
+    state.client = readInto();
+    await analyzeAndFile({ path: "org-1/organize/9.jpg", name: "9.jpg", mime: "image/jpeg", size: 1000 });
+    expect(ai.systems[0]).toContain("receipts, bills and credit memos ONLY");
+    expect(ai.systems[0]).toContain("the total is NEGATIVE");
+  });
+
+  it("File It refuses a return with no lines on a job, before anything is claimed or written", async () => {
+    const lineless = { ...PAPER, doc_number: null, vendor: "Consolidated Electrical Dist.", amount: -51.58, pricing_provisional: false, line_items: null };
+    state.client = fakeSupabase({ "organized_items.select": [{ data: lineless, error: null }] }, calls);
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Read Again so its lines come with it");
+    expect(did("organized_items", "update")).toBeUndefined();
+    expect(did("bills", "insert")).toBeUndefined();
+  });
+
+  it("a return WITH its lines files on the job as a negative bill carrying every line", async () => {
+    const lined = {
+      ...PAPER,
+      doc_number: null,
+      vendor: "Consolidated Electrical Dist.",
+      amount: -51.58,
+      pricing_provisional: false,
+      line_items: [
+        { description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32, category: "Electrical" },
+        { description: "Sales Tax", quantity: 1, unit_price: -4.26, amount: -4.26, category: "Tax" },
+      ],
+    };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: lined, error: null }],
+        "organized_items.update": [
+          { data: [{ id: "oi-9" }], error: null },
+          { data: [{ id: "oi-9" }], error: null },
+        ],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "documents.insert": [{ data: { id: "doc-1" }, error: null }],
+        "bills.insert": [{ data: { id: "bill-ret" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "bli-1" }, { id: "bli-2" }], error: null }],
+      },
+      calls,
+    );
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
+    expect(res).toEqual({ ok: true });
+    expect(did("bills", "insert")!.payload.amount).toBe(-51.58);
+    const lines = did("bill_line_items", "insert")!.payload as any[];
+    expect(lines.map((l) => [l.description, l.amount])).toEqual([
+      ["H245ICAT 4 in LED Shallow IC HSG", -47.32],
+      ["Sales Tax", -4.26],
+    ]);
+  });
+
+  describe("Fix Details: a credit memo switched to a bill keeps its sign", () => {
+    const MEMO = { id: "oi-ret", status: "needs_review", kind: "job_document", doc_type: "credit_memo", amount: -51.58, line_items: [] };
+    const fields = (amount: number) => ({ doc_type: "bill", vendor: "CED", amount, item_date: null, doc_number: null, payment: "on_account" });
+
+    it("a POSITIVE total asks whether it is a charge, and saves nothing", async () => {
+      state.client = fakeSupabase({ "organized_items.select": [{ data: MEMO, error: null }] }, calls);
+      const res = await updatePaperwork("oi-ret", fields(51.58));
+      expect(res.ok).toBe(false);
+      expect(res.askCharge).toBe(true);
+      expect(res.error).toContain("-51.58");
+      expect(res.error).toContain("It Is A Charge");
+      expect(did("organized_items", "update")).toBeUndefined();
+    });
+
+    it("the negative total a return is saves as a bill", async () => {
+      state.client = fakeSupabase(
+        { "organized_items.select": [{ data: MEMO, error: null }], "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }] },
+        calls,
+      );
+      const res = await updatePaperwork("oi-ret", fields(-51.58));
+      expect(res.ok).toBe(true);
+      expect(did("organized_items", "update")!.payload).toMatchObject({ doc_type: "bill", amount: -51.58, kind: "receipt" });
+    });
+
+    it("a person who says It Is A Charge is believed: a misread bill saves positive", async () => {
+      state.client = fakeSupabase(
+        { "organized_items.select": [{ data: MEMO, error: null }], "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }] },
+        calls,
+      );
+      const res = await updatePaperwork("oi-ret", fields(51.58), { creditIsACharge: true });
+      expect(res.ok).toBe(true);
+      expect(did("organized_items", "update")!.payload).toMatchObject({ doc_type: "bill", amount: 51.58 });
+    });
+
+    it("an ordinary bill's Fix Details is not asked anything", async () => {
+      state.client = fakeSupabase(
+        { "organized_items.select": [{ data: { ...MEMO, doc_type: "bill", kind: "receipt" }, error: null }], "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }] },
+        calls,
+      );
+      const res = await updatePaperwork("oi-ret", fields(51.58));
+      expect(res.ok).toBe(true);
+    });
   });
 });
 

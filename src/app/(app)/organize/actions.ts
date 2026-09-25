@@ -43,6 +43,7 @@ import {
   exactAccountFor,
   insertItemizedBill,
   insertPaperRow,
+  linesReadBackwards,
   loadBooks,
   loadMarkContext,
   matchesOnBooks,
@@ -473,7 +474,8 @@ ${MASKED_PRICE_PROMPT_RULE}`,
 
   const aiAmount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
-  const lines = cleanLines(parsed.line_items);
+  // A return read here (a negative total) keeps its lines pointing the same way (linesReadBackwards).
+  const lines = linesReadBackwards(aiAmount, cleanLines(parsed.line_items));
   const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
   const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
   // Trust the AI's scope only if it's one of THIS job's real scopes (never let it invent one);

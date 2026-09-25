@@ -171,12 +171,15 @@ export async function updatePaperwork(
     doc_number?: string | null;
     payment?: string | null;
   },
-): Promise<PaperResult> {
+  /** A person looked at a paper read as a credit memo and says it really is a charge (see below). */
+  opts: { creditIsACharge?: boolean } = {},
+): Promise<PaperResult & { askCharge?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  // `*` so a database without 0295's doc_type still answers (the column is simply not there).
   const { data: item } = await ctx.supabase
     .from("organized_items")
-    .select("id, status, kind")
+    .select("*")
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .maybeSingle();
@@ -190,6 +193,23 @@ export async function updatePaperwork(
   if (amount !== null && !Number.isFinite(amount)) return { ok: false, error: "The total has to be a number." };
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.item_date ?? "")) ? String(fields.item_date) : null;
   const payment = ["paid_at_purchase", "on_account", "unknown"].includes(String(fields.payment ?? "")) ? String(fields.payment) : null;
+
+  /**
+   * A CREDIT MEMO SWITCHED TO A BILL KEEPS ITS SIGN (audit v994, DB4). Credit memos wait in the tray
+   * ("a later update"), so Fix Details → Bill is how a return reaches a job, and it is the right
+   * move: a return is a negative bill. But a credit memo turned into a bill with a POSITIVE total is
+   * a charge for the goods that went back - the customer billed for parts they returned. A misread
+   * paper (a real bill the reader called a credit) is possible too, so this asks rather than
+   * blocks: the person says which it is, and the button that says "it is a charge" passes.
+   */
+  const wasCredit = paperTypeOf((item as { doc_type?: unknown }).doc_type) === "credit_memo";
+  if (wasCredit && (type === "bill" || type === "receipt") && amount !== null && Math.round(amount * 100) > 0 && !opts.creditIsACharge) {
+    return {
+      ok: false,
+      askCharge: true,
+      error: `This was read as a credit memo: money coming back to you. A return goes on a job as a negative total, -${Math.abs(amount).toFixed(2)}, so it comes off the customer's bill. If it really is a ${type} you paid or owe, press It Is A Charge.`,
+    };
+  }
 
   const patch: Record<string, unknown> = {
     vendor: fields.vendor ? String(fields.vendor).trim().slice(0, 200) || null : null,

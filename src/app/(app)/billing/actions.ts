@@ -1675,7 +1675,8 @@ async function importCostsCore(
       // read that decides what a CUSTOMER pays. THE PROJECTION LAW - the column existed, the
       // receipt reader set it, the price book already honoured it, and the one door where the
       // money reaches a homeowner never asked. See the flag below.
-      .select("id, supplier, bill_number, amount, po_id, pricing_provisional")
+      // `created_at` is the order supplier returns spend the purchase they reverse (DB3).
+      .select("id, supplier, bill_number, amount, po_id, pricing_provisional, created_at")
       .eq("job_id", inv.job_id)
       .is("superseded_by_bill_id", null),
   ]);
@@ -1758,7 +1759,27 @@ async function importCostsCore(
   // Each return's lines, held to what the customer was billed for the purchase it reverses - a
   // box billed in part credits that part, a purchase switched off credits nothing. The Unbilled
   // card and the work-to-date panel call the same function over the same bills.
-  const returnLines = returnLinesAgainstPurchases((bills ?? []) as any[], (b) => linesByBill.get(b.id) ?? []);
+  //
+  // A RETURN ALREADY CREDITED SPENDS THE PURCHASE FIRST (audit v994, DB3). Without the claim set
+  // the budget went in uuid order, so a later return could take the purchase an earlier credited
+  // one had already used up, and be credited again on top of it. "Already credited" is every
+  // other non-void invoice (claims.owner) AND this one: a draft that already carries a return is
+  // re-imported against the budget it spent, exactly as the Unbilled card (which excludes no
+  // invoice) sees it, so the two agree on which return got which cents.
+  const creditedReturns = new Set<string>(claims.owner.keys());
+  if (((bills ?? []) as any[]).some((b) => isReturnBill(b.amount))) {
+    const { data: held, error: heldErr } = await supabase
+      .from("invoice_items")
+      .select("source_ids")
+      .eq("invoice_id", invoiceId)
+      .eq("import_source", "costs");
+    if (heldErr) {
+      reportError("importCosts.returnsHeldHere", heldErr, { invoiceId });
+      return { ok: false, error: "Couldn't read this invoice's materials lines just now, so nothing was imported - try again in a moment." };
+    }
+    for (const it of (held ?? []) as { source_ids?: unknown[] | null }[]) for (const s of it.source_ids ?? []) creditedReturns.add(String(s));
+  }
+  const returnLines = returnLinesAgainstPurchases((bills ?? []) as any[], (b) => linesByBill.get(b.id) ?? [], creditedReturns);
 
   // Mark up cost → sell price. Markup is NOT shown on the line (customers don't
   // see your margin); only the price reflects it.

@@ -16,6 +16,7 @@ import {
   describePaper,
   fileRefusal,
   guessOf,
+  isReturnWithoutLines,
   paperTypeOfItem,
   parseDestination,
   pickedBecause,
@@ -143,28 +144,49 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
   const [paid, setPaid] = useState(item.payment ?? "unknown");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The server asked whether a paper read as a credit memo really is a charge (DB4).
+  const [askCharge, setAskCharge] = useState(false);
   const isCost = type === "receipt" || type === "bill";
 
-  async function save() {
+  async function save(creditIsACharge = false) {
     setSaving(true);
     setError(null);
-    const res = await updatePaperwork(item.id, {
-      doc_type: type,
-      vendor: vendor.trim() || null,
-      amount: amount.trim() === "" ? null : Number(amount.replace(/[$,\s]/g, "")),
-      item_date: date || null,
-      doc_number: number.trim() || null,
-      payment: isCost ? paid : null,
-    });
+    setAskCharge(false);
+    const res = await updatePaperwork(
+      item.id,
+      {
+        doc_type: type,
+        vendor: vendor.trim() || null,
+        amount: amount.trim() === "" ? null : Number(amount.replace(/[$,\s]/g, "")),
+        item_date: date || null,
+        doc_number: number.trim() || null,
+        payment: isCost ? paid : null,
+      },
+      { creditIsACharge },
+    );
     setSaving(false);
-    if (!res.ok) return setError(res.error ?? "Couldn't save.");
+    if (!res.ok) {
+      setAskCharge(res.askCharge === true);
+      return setError(res.error ?? "Couldn't save.");
+    }
     onSaved();
   }
 
   return (
-    <Modal open onClose={onClose} title="Fix Details" footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} />}>
+    <Modal open onClose={onClose} title="Fix Details" footer={<ModalActions onCancel={onClose} onSave={() => save()} saving={saving} />}>
       <div className="space-y-4">
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+            {askCharge && (
+              <div className="mt-2">
+                <Button variant="outline" onClick={() => save(true)} disabled={saving}>
+                  It Is A Charge
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
         <div>
           <Label htmlFor={`fd-type-${item.id}`}>What Kind Of Paper</Label>
           <Select id={`fd-type-${item.id}`} value={type} onChange={(e) => setType(e.target.value)} className="h-11">
@@ -609,6 +631,12 @@ export function PaperworkRow({
             {r.state === "not_read" && (
               <Button onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
                 {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Now"}
+              </Button>
+            )}
+            {/* A return with no lines can't go on a job (RETURN_NEEDS_LINES says Read Again): the door it names. */}
+            {r.state === "ready" && isReturnWithoutLines(item) && item.file_url && (
+              <Button variant="outline" onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
+                {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Again"}
               </Button>
             )}
             {(r.state === "later" || r.state === "supplier_documents") && (

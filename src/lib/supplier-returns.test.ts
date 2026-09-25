@@ -280,6 +280,70 @@ describe("returnLinesAgainstPurchases — the return is held to the purchase it 
   });
 });
 
+/**
+ * WHICH RETURN SPENDS THE PURCHASE FIRST (audit v994, DB3). The budget used to go in uuid order,
+ * blind to what was already credited, so a later return whose id happened to sort first took the
+ * purchase an earlier CREDITED return had used up - and was credited again on top of it.
+ */
+describe("returnLinesAgainstPurchases — the credited return spends first, then filing order", () => {
+  type B = { id: string; amount: string; created_at?: string; lines: BillLine[] };
+  const BUY: BillLine = { id: "p1", description: "4 in LED SHALLOW IC HSG", quantity: "4", unit_price: "25", amount: "100", category: "Electrical", billable: true, billed_amount: null };
+  const back = (id: string, count: number, created_at?: string): B => ({
+    id,
+    amount: String(-25 * count),
+    created_at,
+    lines: [{ id: `${id}-l`, description: "H245ICAT 4 in LED Shallow IC HSG", quantity: String(-count), unit_price: "-25", amount: String(-25 * count), category: "Electrical", billable: true, billed_amount: null }],
+  });
+  /** What each return credits, at cost, keyed by bill id. */
+  const credits = (bills: B[], claimed?: Set<string>) => {
+    const held = returnLinesAgainstPurchases(bills, (b) => b.lines, claimed);
+    return Object.fromEntries(
+      bills
+        .filter((b) => isReturnBill(b.amount))
+        .map((b) => [b.id, 0 - sum(returnCreditRows({ id: b.id, supplier: "CED", amount: b.amount }, held.get(b) ?? b.lines, 0)) || 0]),
+    );
+  };
+  const buy: B = { id: "5555-buy", amount: "100", created_at: "2026-09-01T10:00:00Z", lines: [BUY] };
+
+  it("a return already credited on an invoice keeps the purchase even when its uuid sorts LAST", () => {
+    const r1 = back("ffff-credited", 4, "2026-09-05T10:00:00Z"); // credited $100 on INV-A
+    const r2 = back("0000-later", 2, "2026-09-20T10:00:00Z"); // a later return, uuid sorts first
+    // Before: R2 took the whole $100 and was offered $50 on top of the $100 already credited.
+    expect(credits([buy, r2, r1], new Set(["ffff-credited"]))).toEqual({ "0000-later": 0, "ffff-credited": 100 });
+  });
+
+  it("the claim wins over filing order: a credited return filed AFTER a pending one still spends first", () => {
+    const pending = back("0000-pending", 2, "2026-09-02T10:00:00Z");
+    const credited = back("ffff-credited", 4, "2026-09-10T10:00:00Z");
+    expect(credits([buy, pending, credited], new Set(["ffff-credited"]))).toEqual({ "0000-pending": 0, "ffff-credited": 100 });
+  });
+
+  it("with nothing credited, the older return spends first whatever the uuids say, and the two never credit more than was billed", () => {
+    const older = back("ffff-older", 3, "2026-09-05T10:00:00Z");
+    const newer = back("0000-newer", 2, "2026-09-20T10:00:00Z");
+    const got = credits([buy, newer, older]);
+    expect(got).toEqual({ "0000-newer": 25, "ffff-older": 75 });
+  });
+
+  it("the card and the importer agree whatever order their queries returned the bills in", () => {
+    const buy2: B = { id: "1111-buy", amount: "50", created_at: "2026-09-02T10:00:00Z", lines: [{ ...BUY, id: "p2", quantity: "2", amount: "50" }] };
+    const r = back("aaaa-ret", 5, "2026-09-05T10:00:00Z");
+    const r2 = back("bbbb-ret", 2, "2026-09-06T10:00:00Z");
+    const a = credits([buy, buy2, r, r2]);
+    const b = credits([r2, buy2, r, buy]);
+    expect(a).toEqual(b);
+    expect(a["aaaa-ret"] + a["bbbb-ret"]).toBe(150); // 6 housings billed $150 in all; 7 went back
+  });
+
+  it("two returns filed in one statement (one timestamp) fall back to the bill id, so the order is still fixed", () => {
+    const at = "2026-09-24T23:10:19.210Z";
+    const x = back("aaaa", 3, at);
+    const y = back("bbbb", 3, at);
+    expect(credits([buy, y, x])).toEqual({ aaaa: 75, bbbb: 25 });
+    expect(credits([buy, x, y])).toEqual({ aaaa: 75, bbbb: 25 });
+  });
+});
+
 describe("returnsThatFit — a credit never takes an invoice below zero", () => {
   it("lands a return the invoice bills more than, and holds one it does not", () => {
     const a = { billId: "a", credit: 40 };

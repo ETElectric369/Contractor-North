@@ -6,7 +6,9 @@ import {
   findSameNumber,
   guessOf,
   isPicture,
+  isReturnWithoutLines,
   jobFromPaperMarks,
+  RETURN_NEEDS_LINES,
   normalizeDocNumber,
   NOT_FILED_YET,
   parseDestination,
@@ -88,6 +90,23 @@ describe("readinessOf / fileRefusal: nothing is filed by itself, and nothing hal
   it("only a cost can be a business cost, and a cost can't be kept in files", () => {
     expect(fileRefusal(receipt({ doc_type: "not_a_cost", kind: "job_document" }), { type: "overhead", category: "Other" })).toMatch(/Only a receipt or a bill/);
     expect(fileRefusal(receipt(), { type: "keep" })).toMatch(/This is a cost/);
+  });
+  it("a return with no lines is refused on a job, and says Read Again (audit v994, DB4)", () => {
+    // The INV-078 return after Organize dropped its lines and a person switched it to Bill.
+    const lineless = receipt({ doc_type: "bill", category: "Bill", vendor: "CED", amount: -51.58, line_items: null });
+    expect(isReturnWithoutLines(lineless)).toBe(true);
+    expect(fileRefusal(lineless, job)).toBe(RETURN_NEEDS_LINES);
+    expect(RETURN_NEEDS_LINES).toContain("Read Again");
+    // The company's own book never reaches a customer: a business cost is not held to it.
+    expect(fileRefusal(lineless, { type: "overhead", category: "Other" })).toBeNull();
+    // With its lines it files: the importer can hold each part to the purchase it reverses.
+    const lined = { ...lineless, line_items: [{ description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32 }] };
+    expect(isReturnWithoutLines(lined)).toBe(false);
+    expect(fileRefusal(lined, job)).toBeNull();
+    // An ordinary receipt with no lines (a hand-typed total) is untouched by this.
+    expect(fileRefusal(receipt({ line_items: [] }), job)).toBeNull();
+    // Lines that are only blanks are no lines.
+    expect(isReturnWithoutLines({ ...lineless, line_items: [{ description: "  " }] })).toBe(true);
   });
   it("too big to read keeps its controls and says fill it in", () => {
     const big: PaperItem = { id: "p3", kind: "job_document", status: "needs_review", proposal: { tooBig: true } };

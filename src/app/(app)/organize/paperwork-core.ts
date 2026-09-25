@@ -72,6 +72,21 @@ export function cleanLines(raw: any): BillLine[] {
     .slice(0, 100);
 }
 
+/**
+ * A RETURN'S LINES POINT THE SAME WAY AS ITS TOTAL (DB4). A return or credit memo is the purchase
+ * read backwards, and the money readers (returnCreditRows, returnLinesAgainstPurchases) find the
+ * returned parts by their NEGATIVE extensions. A reader that printed the total as a credit but
+ * copied the lines as they appear on the paper (positive) would leave every returned part looking
+ * like a charge. So when the total is below zero and the lines add up above it, every line is
+ * turned around; lines that already point the right way are left exactly as read.
+ */
+export function linesReadBackwards(total: number | null, lines: BillLine[]): BillLine[] {
+  if (total === null || !(Math.round(total * 100) < 0)) return lines;
+  const sum = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  if (!(Math.round(sum * 100) > 0)) return lines;
+  return lines.map((l) => ({ ...l, unit_price: -l.unit_price || 0, amount: -l.amount || 0 }));
+}
+
 /** A store receipt is already paid; a supplier bill/invoice is still owed. */
 function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
   return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
@@ -297,9 +312,9 @@ Respond with ONLY a JSON object (no prose):
   "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
   "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
   "po_number": what is printed or written in its PO, customer order or job box, copied exactly as it appears (a contractor often writes the job's name or street there instead of a number), or null,
-  "line_items": receipts and bills ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] otherwise,
+  "line_items": receipts, bills and credit memos ONLY — an array of every purchased or returned line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. On a credit memo or a return, every line that comes back (and its tax) has a NEGATIVE amount and unit_price; a restocking fee the supplier keeps stays positive. Use [] otherwise,
   "vendor": store/supplier name or null,
-  "amount": total in dollars as a number, or null,
+  "amount": total in dollars as a number, or null — on a credit memo or a return, the total is NEGATIVE (money coming back),
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
@@ -388,12 +403,23 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   else if (opts.personSaysCost && !/^(Receipt|Bill|Invoice)$/.test(category)) category = doc_type === "bill" ? "Bill" : "Receipt";
   const title = String(parsed?.title || fallbackTitle).slice(0, 200);
   const confidence = ["low", "medium", "high"].includes(parsed?.confidence) ? parsed.confidence : "medium";
-  const amount = parsed?.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  const readAmount = parsed?.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  // A credit memo is money coming back, whatever sign the reader printed on it.
+  const amount = doc_type === "credit_memo" && readAmount !== null ? -Math.abs(readAmount) : readAmount;
   const item_date = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.date ?? "")) ? String(parsed.date) : null;
   const vendor = parsed?.vendor ? String(parsed.vendor).slice(0, 200) : null;
   const summary = parsed?.summary ? String(parsed.summary).slice(0, 4000) : null;
   const isCost = kind === "receipt";
-  const lines = isCost ? cleanLines(parsed?.line_items) : [];
+  /**
+   * A CREDIT MEMO KEEPS ITS LINES (audit v994, DB4). They used to be dropped for anything that was
+   * not a receipt or a bill, and a credit memo is neither - until a person switches it to Bill in
+   * Fix Details and files it on a job. Then it became a negative bill with NO lines, the importer
+   * had nothing to hold against the purchase it reverses (returnLinesAgainstPurchases), and it
+   * credited the customer the whole return at markup - the INV-078 housings, $64.48 back for parts
+   * Andrew was never charged. The lines are what make a return creditable only for what was billed.
+   */
+  const keepsLines = isCost || doc_type === "credit_memo";
+  const lines = keepsLines ? linesReadBackwards(amount, cleanLines(parsed?.line_items)) : [];
   const payment = isCost
     ? ((["paid_at_purchase", "on_account", "unknown"].includes(String(parsed?.payment ?? "")) ? String(parsed.payment) : "unknown") as ReadFields["payment"])
     : null;

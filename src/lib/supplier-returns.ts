@@ -101,9 +101,24 @@ function sameItem(a: string, b: string): boolean {
  * So every returned line is matched, by its words (sameItem), to the purchase lines on this job's
  * own receipts, and it credits at most what those purchase lines billed - billLineBilledCost, the
  * one reading the importer bills by. A purchase switched off credits nothing; a container billed in
- * part credits up to that part; several returns of one purchase share what it billed, in a fixed
- * order (by bill id, then line id), so the card, the panel and the importer - which all call this
- * over the same job's bills - agree on which return got which cents.
+ * part credits up to that part; several returns of one purchase share what it billed.
+ *
+ * WHICH RETURN SPENDS THE PURCHASE FIRST (audit v994, DB3). This used to be "by bill id", a random
+ * uuid order that knew nothing about what had already been credited. Four housings billed $100;
+ * return R1 of all four credited $100 on INV-A; a later return R2 of two, whose uuid happened to
+ * sort first, took the whole $100 here, R1 (claimed, so skipped by every caller) took nothing,
+ * and the card and the next import offered R2's $50 plus markup on top: $150 back on $100 billed.
+ * The claim triggers cannot see it, because R2 is a different bill.
+ *
+ * So the order is the order the money actually moved:
+ *   1. a return already CREDITED on an invoice (`claimed`, the caller's claim set) spends first -
+ *      that credit is on paper a customer holds, and nothing computed here can take it back;
+ *   2. then the rest by when they were filed (`created_at`), oldest first, so a return filed
+ *      tomorrow can never shrink one the office is looking at today;
+ *   3. then the bill id, only to break a tie (two bills written in one statement share a stamp).
+ * The purchase budgets are laid out by bill id and line id, not in whatever order the caller's
+ * query returned them, so the card, the panel and the importer - which all call this over the same
+ * job's bills - agree on which return got which cents.
  *
  * A returned line with NO matching purchase on the job (a lump bill, a purchase filed elsewhere,
  * words the scanner read differently) is credited in full, as a return is by default: the app has
@@ -114,24 +129,37 @@ function sameItem(a: string, b: string): boolean {
  * the cap touched carries `billed_amount` = what it may credit (the mirror in returnCreditRows
  * reads that exactly as 0272's split, tax share and all). Purchases are not in the map.
  */
-export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: unknown }>(
+export function returnLinesAgainstPurchases<T extends { id?: unknown; amount?: unknown; created_at?: unknown }>(
   bills: readonly T[],
   linesOf: (b: T) => BillLine[] | null | undefined,
+  /** Bill ids already on a non-void invoice (the caller's claim set). Optional: without it the
+   *  order is filing order alone. */
+  claimed?: { has(id: string): boolean } | null,
 ): Map<T, BillLine[]> {
+  const byId = (x: unknown, y: unknown) => String(x ?? "").localeCompare(String(y ?? ""));
   const budgets: { words: string; left: number }[] = [];
-  for (const b of bills) {
-    if (!(Number(b.amount) > 0)) continue;
-    for (const l of linesOf(b) ?? []) {
+  const purchases = bills
+    .map((b, i) => ({ b, i }))
+    .filter(({ b }) => Number(b.amount) > 0)
+    .sort((x, y) => byId(x.b.id, y.b.id) || x.i - y.i);
+  for (const { b } of purchases) {
+    const lines = (linesOf(b) ?? []).map((l, i) => ({ l, i })).sort((x, y) => byId(x.l.id, y.l.id) || x.i - y.i);
+    for (const { l } of lines) {
       if (isTaxLine(l) || !(billLineCost(l) > 0)) continue;
       const words = itemWords(l.description);
       if (words) budgets.push({ words, left: cents(billLineBilledCost(l)) });
     }
   }
   const out = new Map<T, BillLine[]>();
+  const filedAt = (b: T) => {
+    const t = b.created_at == null ? NaN : Date.parse(String(b.created_at));
+    return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+  };
+  const isClaimed = (b: T) => (claimed && b.id != null ? claimed.has(String(b.id)) : false);
   const returns = bills
-    .map((b, i) => ({ b, i }))
+    .map((b, i) => ({ b, i, first: isClaimed(b) ? 0 : 1, at: filedAt(b) }))
     .filter(({ b }) => isReturnBill(b.amount))
-    .sort((x, y) => String(x.b.id ?? "").localeCompare(String(y.b.id ?? "")) || x.i - y.i);
+    .sort((x, y) => x.first - y.first || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || byId(x.b.id, y.b.id) || x.i - y.i);
   for (const { b } of returns) {
     const lines = linesOf(b) ?? [];
     const capped = new Map<BillLine, BillLine>();
