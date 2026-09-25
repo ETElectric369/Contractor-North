@@ -4,6 +4,7 @@ import { CONTENT_ROOTS } from "@/lib/site-content-roots";
 import { pageSlugFromPath, isLegacyCmsPath, legacyAliasTarget } from "@/lib/site-reserved";
 import { isDeadReservedHost } from "@/lib/public-host";
 import { shellFromUserAgent } from "@/lib/native-shell";
+import { PORTAL_COOKIE, portalCookieOptions, portalTokenFromPath } from "@/lib/portal/session-cookie";
 import {
   PLATFORM_ROBOTS_TXT,
   isPlatformApexHost,
@@ -272,7 +273,25 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return updateSession(request, !!onOrgSite);
+  return slidePortalCookie(request, await updateSession(request, !!onOrgSite));
+}
+
+/**
+ * THE PORTAL SIGN-IN SLIDES (0331). A signed-in customer's device stays signed in 30 days from its
+ * LAST visit: the database slides the session's end (portal_session_check), and this re-sets the
+ * cookie's Max-Age to match on each page load. DB-free on purpose: a dead or forged value re-set is
+ * still dead, the page asks the database. GET page loads only: a server action (POST) that signs in
+ * or out sets the cookie itself and must not race a second Set-Cookie from here, and /enter (the
+ * office's look) sets its own.
+ */
+function slidePortalCookie(request: NextRequest, res: NextResponse): NextResponse {
+  if (request.method !== "GET" || res.status >= 300) return res;
+  const token = portalTokenFromPath(request.nextUrl.pathname);
+  if (!token || /\/enter\/?$/.test(request.nextUrl.pathname)) return res;
+  const value = request.cookies.get(PORTAL_COOKIE)?.value;
+  if (!value || !/^[0-9a-f]{64}$/.test(value)) return res;
+  res.cookies.set(PORTAL_COOKIE, value, portalCookieOptions(token));
+  return res;
 }
 
 export const config = {

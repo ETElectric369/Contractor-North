@@ -68,6 +68,7 @@ export default async function CustomerDetailPage({
     { data: linkedRaw },
     { data: otherCustomers },
     { data: portalRow },
+    { data: portalDevices },
   ] = await Promise.all([
     supabase
       .from("jobs")
@@ -114,12 +115,22 @@ export default async function CustomerDetailPage({
           .eq("customer_id", id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    // "Signed in on N devices" (0331). Staff of this org only, inside the function too. A failed
+    // read leaves the count off the card (null), never a made-up 0.
+    viewerIsStaff
+      ? supabase.rpc("portal_link_devices", { p_customer_id: id }).then(
+          (r) => ({ data: r.error ? null : (r.data as { devices?: number } | null) }),
+          () => ({ data: null }),
+        )
+      : Promise.resolve({ data: null }),
   ]);
+  const deviceCount = Number(portalDevices?.devices);
   const portal = portalRow
     ? {
         token: (portalRow as { token: string }).token,
         enabled: (portalRow as { enabled: boolean }).enabled,
         lastOpenedAt: (portalRow as { last_opened_at: string | null }).last_opened_at ?? null,
+        devices: portalDevices && Number.isFinite(deviceCount) ? deviceCount : null,
       }
     : null;
 
@@ -193,7 +204,10 @@ export default async function CustomerDetailPage({
                   customerId={c.id}
                   customerName={c.name}
                   initial={portal}
-                  hasEmail={!!c.email}
+                  hasEmail={!!c.email?.trim()}
+                  addEmailDoor={
+                    <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} label="Add Their Email" />
+                  }
                 />
               </div>
             )}

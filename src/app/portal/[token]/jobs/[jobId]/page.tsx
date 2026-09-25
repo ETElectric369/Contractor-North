@@ -3,9 +3,10 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { NO_INDEX } from "@/lib/no-index";
 import { readPortalJob } from "@/lib/portal/job-view";
+import { readPortalAccess } from "@/lib/portal/access";
 import { PortalJobPage } from "@/components/portal/portal-job-page";
 import { PortalNotice, PortalTurnedOff } from "@/components/portal/portal-shell";
-import { OpenedBeacon } from "../../opened-beacon";
+import { gateTitle, portalGate, portalSignOut } from "../../gate";
 
 /**
  * THE CUSTOMER'S JOB PAGE, LIVE. Erik: "Update everything right away yes always", so there is no
@@ -14,12 +15,14 @@ import { OpenedBeacon } from "../../opened-beacon";
  * `private, no-cache, no-store` and neither the edge nor a shared cache keeps one customer's money
  * for the next request.
  *
- * THE DOOR is readPortalJob: one service-role call to portal_job_view with the whole gate inside
- * (the link is on, the job is this customer's, in this org, in a status customers are shown), then
- * the allowlisted shape. This page renders that shape and nothing else. A customer never touches
- * RLS or a staff path, and the token in the URL is the only credential: techs never see it (it
- * lives in an office-only table, 0298), and the office's "See What They See" adds ?look=office so
- * its own looks do not count as the customer opening it.
+ * THE DOOR is readPortalAccess, then readPortalJob. First (0331): this device must be signed in to
+ * THIS link (a code emailed to the address on file), or it gets the sign-in screen and nothing of
+ * the job is read, not even its name for the title. Then one service-role call to portal_job_view
+ * with the whole job gate inside (the link is on, the job is this customer's, in this org, in a
+ * status customers are shown), then the allowlisted shape. This page renders that shape and nothing
+ * else. A customer never touches RLS or a staff path; techs never see the token (it lives in an
+ * office-only table, 0298); the office's "See What They See" arrives on an office session and adds
+ * ?look=office, so its own looks do not count as the customer opening it.
  *
  * A job that is not this customer's, or no such link, is a plain 404 that never says which. A
  * turned-off or replaced link says so and names who to ask.
@@ -33,6 +36,8 @@ const read = cache((token: string, jobId: string) => readPortalJob(token, jobId)
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string; jobId: string }> }): Promise<Metadata> {
   const { token, jobId } = await params;
+  const shut = gateTitle(await readPortalAccess(token));
+  if (shut) return { title: shut, robots: NO_INDEX };
   const r = await read(token, jobId);
   const title =
     r.kind === "ok"
@@ -53,6 +58,10 @@ export default async function PortalJobRoute({
 }) {
   const { token, jobId } = await params;
   const { look } = await searchParams;
+  // THE DOOR (0331): not signed in on this device → the sign-in screen, and nothing is read.
+  const access = await readPortalAccess(token);
+  const shut = portalGate(access, token);
+  if (shut) return shut;
   const r = await read(token, jobId);
 
   if (r.kind === "off") return <PortalTurnedOff orgName={r.orgName} />;
@@ -72,12 +81,12 @@ export default async function PortalJobRoute({
     );
   }
 
-  const office = look === "office";
+  const office = access.kind === "in" && access.session === "office" ? true : look === "office";
   return (
-    <>
-      {/* Last Opened: stamped from the customer's own browser only (see the portal home page). */}
-      {!office && <OpenedBeacon token={token} />}
-      <PortalJobPage view={r.view} homeHref={`/portal/${token}${office ? "?look=office" : ""}`} />
-    </>
+    <PortalJobPage
+      view={r.view}
+      homeHref={`/portal/${token}${office ? "?look=office" : ""}`}
+      footer={portalSignOut(access, token)}
+    />
   );
 }

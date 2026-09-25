@@ -30,19 +30,52 @@ export async function findDuplicateContacts(): Promise<{ ok: boolean; error?: st
 /** A customer's portal link, as the office sees it on the contact page. The token itself is in
  *  customer_portal_access (0298), which only active office staff of the org can read: a tech's
  *  session gets no row back, so nothing here can hand one to the crew. */
-export type PortalLinkState = { token: string; enabled: boolean; lastOpenedAt: string | null };
+export type PortalLinkState = {
+  token: string;
+  enabled: boolean;
+  lastOpenedAt: string | null;
+  /** Devices signed in with a code (0331), office looks not counted. null: couldn't be read. */
+  devices: number | null;
+};
+
+/** "Signed in on N devices" (0331's portal_link_devices: staff of the customer's own org only). */
+async function readPortalDevices(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  customerId: string,
+): Promise<number | null> {
+  const { data, error } = await supabase.rpc("portal_link_devices", { p_customer_id: customerId });
+  if (error) return null;
+  const n = Number((data as { devices?: number } | null)?.devices);
+  return Number.isFinite(n) ? n : null;
+}
 
 async function readPortalLink(
   supabase: Awaited<ReturnType<typeof createClient>>,
   customerId: string,
 ): Promise<PortalLinkState | null> {
-  const { data } = await supabase
-    .from("customer_portal_access")
-    .select("token, enabled, last_opened_at")
-    .eq("customer_id", customerId)
-    .maybeSingle();
+  const [{ data }, devices] = await Promise.all([
+    supabase.from("customer_portal_access").select("token, enabled, last_opened_at").eq("customer_id", customerId).maybeSingle(),
+    readPortalDevices(supabase, customerId),
+  ]);
   if (!data) return null;
-  return { token: data.token, enabled: data.enabled, lastOpenedAt: data.last_opened_at ?? null };
+  return { token: data.token, enabled: data.enabled, lastOpenedAt: data.last_opened_at ?? null, devices };
+}
+
+/** Sign Out All Devices (0331). The link keeps working; every device that opens it needs a fresh
+ *  code. portal_sessions_end_all checks staff and org itself; this is the app-layer half, and the
+ *  card is read back so it shows what the database holds. */
+export async function signOutPortalDevices(
+  customerId: string,
+): Promise<{ ok: boolean; error?: string; ended?: number; link?: PortalLinkState }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data, error } = await ctx.supabase.rpc("portal_sessions_end_all", { p_customer_id: customerId });
+  if (error) return { ok: false, error: dbError(error) };
+  const link = await readPortalLink(ctx.supabase, customerId);
+  if (!link) return { ok: false, error: "They were signed out, but the card couldn't be read back. Refresh the page." };
+  if (link.devices !== 0) return { ok: false, error: "That didn't take. Refresh the page and try again." };
+  revalidatePath(`/crm/${customerId}`);
+  return { ok: true, ended: Number(data ?? 0), link };
 }
 
 /** Email the customer their passwordless portal link (invoices, contracts, quotes,
@@ -70,7 +103,8 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
     company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: c.name,
     heading: "Your customer portal",
-    message: "Here's your private link to your jobs: the work and payments day by day, your picks and photos, and your invoices, contracts and quotes. It's up to date every time you open it, no password needed. Bookmark it for easy access.",
+    // 0331: the link asks each new phone or computer for a code. Say so before they meet it.
+    message: "Here's your private link to your jobs: the work and payments day by day, your picks and photos, and your invoices, contracts and quotes. It's up to date every time you open it. The first time you open it on a phone or computer, we'll email you a 6-digit code to sign in; no password to remember. Bookmark it for easy access.",
     cta: { label: "Open my portal", link },
   });
   const res = await sendEmail({

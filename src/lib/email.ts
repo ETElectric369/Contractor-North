@@ -195,6 +195,28 @@ export function renderReminderEmail(input: {
   </div>`;
 }
 
+/** The customer portal's sign-in code (0331). Nothing else in it: no link, no account detail, so a
+ *  forwarded or glimpsed email opens nothing by itself. The code is digits only (the caller drew
+ *  it), escaped anyway. */
+export function renderPortalCodeEmail(input: {
+  company: { name: string; brand: string; phone?: string | null; email?: string | null };
+  code: string;
+  minutes: number;
+}): string {
+  const c = safeColor(input.company.brand);
+  return `
+  <div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
+    <div style="border-bottom:3px solid ${c};padding-bottom:12px;margin-bottom:16px">
+      <div style="font-size:20px;font-weight:700">${escape(input.company.name)}</div>
+      <div style="font-size:12px;color:#64748b">${[input.company.phone, input.company.email].filter(Boolean).map(escape).join(" · ")}</div>
+    </div>
+    <p style="font-size:14px;margin:0 0 12px">Here is your code to open your page with ${escape(input.company.name)}:</p>
+    <p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:0 0 12px;font-family:ui-monospace,Menlo,monospace">${escape(input.code)}</p>
+    <p style="font-size:14px;color:#475569;margin:0 0 8px">Type it on the page that asked for it. It works for ${Number(input.minutes)} minutes.</p>
+    <p style="font-size:13px;color:#64748b;margin-top:24px">Didn&#39;t ask for a code? You can ignore this email. Nobody can sign in to your page without it.</p>
+  </div>`;
+}
+
 /** A brand color is injected raw into email style attributes — constrain it to a
  *  valid hex so a malformed/hostile settings value can't break out of the attribute. */
 function safeColor(c: string | null | undefined): string {
