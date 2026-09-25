@@ -140,10 +140,33 @@ export async function archivePriceItem(id: string, archived = true): Promise<Res
   return { ok: true };
 }
 
+/**
+ * DELETE FOR GOOD — refused while the item has vendors under it (audit v994 VP5).
+ *
+ * A vendor row is archive-only (there is deliberately no deleteItemOption), but 0282's FK cascades
+ * it away with its item, and 0300 unlinks every job pick that named it. So deleting 830 Windows
+ * was a back door that deleted the Andersen/Milgard/Marvin prices, archived ones included, with
+ * a confirm that named only kits. Archive keeps every one of them; delete waits until there are
+ * none, and the refusal says which ones and where the Archive button is.
+ */
 export async function deletePriceItem(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const { data: vendors, error: vErr } = await supabase
+    .from("price_list_item_options")
+    .select("vendor, label")
+    .eq("item_id", id)
+    .limit(50);
+  if (vErr) return { ok: false, error: `Nothing was deleted: the vendors under this item didn't load (${dbError(vErr)}).` };
+  const names = [...new Set(((vendors ?? []) as { vendor: string; label: string | null }[]).map((o) => optionName(o)))];
+  if (names.length) {
+    const list = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+    return {
+      ok: false,
+      error: `Nothing was deleted. This item has ${names.length === 1 ? "a vendor" : `${names.length} vendors`} under it (${list}), and deleting it would delete their prices too. Archive it instead (the box button beside Delete): it leaves every picker and keeps the prices findable.`,
+    };
+  }
   const { data, error } = await supabase.from("price_list_items").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Nothing was deleted — that item may already be gone. Reload the page." };
@@ -683,6 +706,74 @@ async function clearOtherDefaults(supabase: StaffDb, orgId: string, itemId: stri
   return error ? optionWriteRefusal(error) : null;
 }
 
+/**
+ * MOVE THE DEFAULT SEAT, AND NEVER LEAVE IT EMPTY BY ACCIDENT (audit v994 VP3).
+ *
+ * 0282's one-default index is partial (is_default AND NOT archived), so the sitting default has
+ * to stand down before the new one sits: two statements, with a blink between them. The old code
+ * stood the default down and then tried the second write; when that write failed the item was
+ * left on its own allowance with a refusal toast that did not say so, and the next estimate
+ * quoted $830 for a window the org had priced at Milgard.
+ *
+ * So this reads who holds the seat first, and when the second write does not land it puts that
+ * vendor back and says which one still holds it. `toId: null` hands the item back to its own
+ * price, which is a single statement and cannot half-land.
+ */
+async function moveDefault(
+  supabase: StaffDb,
+  orgId: string,
+  itemId: string,
+  toId: string | null,
+): Promise<{ ok: true; picked: { vendor: string; label: string | null } | null } | { ok: false; error: string }> {
+  const { data: sittingRows, error: readErr } = await supabase
+    .from("price_list_item_options")
+    .select("id, vendor, label")
+    .eq("item_id", itemId)
+    .eq("org_id", orgId)
+    .eq("is_default", true)
+    .eq("archived", false);
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  const sitting = ((sittingRows ?? []) as { id: string; vendor: string; label: string | null }[]).find((o) => o.id !== toId) ?? null;
+  const already = ((sittingRows ?? []) as { id: string; vendor: string; label: string | null }[]).find((o) => o.id === toId) ?? null;
+
+  const failed = await clearOtherDefaults(supabase, orgId, itemId, toId);
+  if (failed) return { ok: false, error: failed };
+  if (!toId) return { ok: true, picked: null };
+  if (already) return { ok: true, picked: already };
+
+  const { data, error } = await supabase
+    .from("price_list_item_options")
+    .update({ is_default: true })
+    .eq("id", toId)
+    .eq("item_id", itemId)
+    .eq("org_id", orgId)
+    .eq("archived", false)
+    .select("id, vendor, label");
+  if (!error && data?.length) {
+    const picked = (data as { vendor: string; label: string | null }[])[0];
+    return { ok: true, picked };
+  }
+
+  // The seat is empty and the new vendor did not take it. Put the old one back, and say so.
+  const why = error
+    ? optionWriteRefusal(error)
+    : "That vendor isn't on this item any more, or it's archived. Reload the page and pick again.";
+  if (!sitting) return { ok: false, error: `${why} No vendor is the default, so this item still prices at its own number.` };
+  const { data: back } = await supabase
+    .from("price_list_item_options")
+    .update({ is_default: true })
+    .eq("id", sitting.id)
+    .eq("org_id", orgId)
+    .eq("archived", false)
+    .select("id");
+  return {
+    ok: false,
+    error: back?.length
+      ? `${why} ${optionName(sitting)} is still the default.`
+      : `${why} ${optionName(sitting)} stood down and could not be put back, so this item prices at its own number now. Make it the default again from the item's vendors.`,
+  };
+}
+
 /** Where a new option sits in the list: after the ones already there. */
 async function nextSortOrder(supabase: StaffDb, orgId: string, itemId: string): Promise<number> {
   const { data } = await supabase
@@ -724,19 +815,17 @@ export async function addItemOption(
   // ONE BRAND, ONE SPELLING: "andersen" typed on a new item joins the Andersen already listed.
   cleaned.clean.vendor = canonicalVendorName(String(cleaned.clean.vendor), await knownVendorNamesFor(supabase, orgId));
 
-  // 0282's one-default index is partial (is_default AND NOT archived), so the sitting default has
-  // to step down BEFORE the new row lands — the other order is a guaranteed unique violation.
-  if (input.isDefault) {
-    const failed = await clearOtherDefaults(supabase, orgId, input.itemId, null);
-    if (failed) return { ok: false, error: failed };
-  }
-
+  // THE NEW ROW LANDS AS AN ALTERNATIVE FIRST, and only then takes the default seat (audit v994
+  // VP3). Standing the sitting default down before an insert that can still be refused (the
+  // vendor is already on this item, even archived) left the item on its allowance with a refusal
+  // toast that never said so. Now a refused add changes nothing, and the promotion goes through
+  // moveDefault, which puts the old default back if the seat change itself fails.
   const { data, error } = await supabase
     .from("price_list_item_options")
     .insert({
       item_id: input.itemId,
       ...cleaned.clean,
-      is_default: Boolean(input.isDefault),
+      is_default: false,
       sort_order: await nextSortOrder(supabase, orgId, input.itemId),
       created_by: userId,
       // org_id is left to the set_org_id trigger, exactly like every other table in 0270+.
@@ -765,6 +854,7 @@ export async function addItemOption(
   // THE SILENT-WRITE LAW: an insert RLS refused comes back as zero rows, not an error.
   if (!data?.length) return { ok: false, error: "Nothing was saved. Reload the page and try again." };
   revalidatePath("/price-list");
+  const addedId = String((data[0] as { id: string }).id);
   // READ BACK A TYPED SELL, as setItemOptionSell does: before 0296 widens the column, a markup with
   // more than two decimals is rounded on the way in and the sell moves a few cents. Say so.
   const notes: string[] = [];
@@ -774,16 +864,24 @@ export async function addItemOption(
     if (landed !== wantSell) notes.push(`The closest it can hold is ${formatCurrency(landed)}, a cent or so off what you typed.`);
   }
   // The toast already names what was added, so this note says the CONSEQUENCE rather than the name
-  // again, and exactly how far it reaches (kits do not follow a default vendor yet).
-  if (input.isDefault) notes.push(defaultVendorNote());
+  // again, and exactly how far it reaches.
+  if (input.isDefault) {
+    const moved = await moveDefault(supabase, orgId, input.itemId, addedId);
+    // The vendor IS on the item; only the seat did not move. That is a success with a caveat,
+    // never a refusal (a refusal would invite a second add, which the one-per-maker index refuses).
+    if (!moved.ok) notes.push(`Added, but it isn't the default yet. ${moved.error}`);
+    else notes.push(defaultVendorNote());
+  }
   return { ok: true, note: notes.length ? notes.join(" ") : undefined };
 }
 
 /** Patch one option. Writes ONLY what the caller passed, so a change to the part number can never
- *  blank the price. A blank markup stays NULL (fall through), never a 0. */
-export async function updateItemOption(
-  input: { optionId: string; isDefault?: boolean } & OptionFieldsInput,
-): Promise<OptionResult> {
+ *  blank the price. A blank markup stays NULL (fall through), never a 0.
+ *
+ *  It does not move the default seat: that is setDefaultItemOption's one job, through moveDefault,
+ *  so there is exactly one door that can empty the seat and it is the one that puts it back
+ *  (audit v994 VP3). */
+export async function updateItemOption(input: { optionId: string } & OptionFieldsInput): Promise<OptionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, orgId } = ctx;
@@ -801,9 +899,6 @@ export async function updateItemOption(
   if (readErr) return { ok: false, error: dbError(readErr) };
   const row = rowData as { id: string; item_id: string; vendor: string; label: string | null; is_default: boolean; archived: boolean } | null;
   if (!row) return { ok: false, error: "That vendor isn't on this item any more. Reload the page." };
-  if (input.isDefault && row.archived) {
-    return { ok: false, error: "Restore this vendor first. An archived one can't be what the item prices at." };
-  }
 
   const patch: Record<string, unknown> = { ...cleaned.clean };
   if (typeof patch.vendor === "string") {
@@ -812,13 +907,7 @@ export async function updateItemOption(
     const known = (await knownVendorNamesFor(supabase, orgId)).filter((n) => n !== row.vendor.trim());
     patch.vendor = canonicalVendorName(patch.vendor, known);
   }
-  if (input.isDefault !== undefined) patch.is_default = Boolean(input.isDefault);
   if (Object.keys(patch).length === 0) return { ok: true };
-
-  if (input.isDefault) {
-    const failed = await clearOtherDefaults(supabase, orgId, row.item_id, row.id);
-    if (failed) return { ok: false, error: failed };
-  }
 
   // The refusal sentence has to name what he JUST typed, not what the row used to say — including
   // a label he deliberately cleared, which `??` would have quietly put back.
@@ -835,18 +924,7 @@ export async function updateItemOption(
   if (error) return { ok: false, error: optionWriteRefusal(error, named) };
   if (!data?.length) return { ok: false, error: "Nothing was saved. That vendor may have been removed, so reload the page." };
   revalidatePath("/price-list");
-  // What PRICES this item is the one thing on this form that moves money, so it is said out loud
-  // when it MOVES — both directions, and never when the box was simply left where it was.
-  const promoted = input.isDefault === true && !row.is_default;
-  const demoted = input.isDefault === false && row.is_default;
-  return {
-    ok: true,
-    note: promoted
-      ? defaultVendorNote(optionName(named))
-      : demoted
-        ? "This item is priced at its own number again."
-        : undefined,
-  };
+  return { ok: true };
 }
 
 /**
@@ -913,9 +991,8 @@ export async function archiveItemOption(optionId: string, archived = true): Prom
  * price, which is where every item starts and where most of them stay.
  *
  * Two statements, and they have to be in this order: 0282's one-default index is a real database
- * rule, so the sitting default steps down first and the new one sits down second. There is a
- * blink where the item has no default; if the second statement fails, the refusal says reload,
- * and reloading shows the truth (the item on its own price) rather than a lie.
+ * rule, so the sitting default steps down first and the new one sits down second. moveDefault
+ * puts the old one back when the second does not land, and the refusal names who holds the seat.
  */
 export async function setDefaultItemOption(input: { itemId: string; optionId: string | null }): Promise<OptionResult> {
   const ctx = await requireStaff();
@@ -926,29 +1003,11 @@ export async function setDefaultItemOption(input: { itemId: string; optionId: st
   const owned = await ownItem(supabase, orgId, input.itemId);
   if (typeof owned === "string") return { ok: false, error: owned };
 
-  const failed = await clearOtherDefaults(supabase, orgId, input.itemId, input.optionId);
-  if (failed) return { ok: false, error: failed };
-
-  if (!input.optionId) {
-    revalidatePath("/price-list");
-    return { ok: true, note: "This item is priced at its own number again." };
-  }
-
-  const { data, error } = await supabase
-    .from("price_list_item_options")
-    .update({ is_default: true })
-    .eq("id", input.optionId)
-    .eq("item_id", input.itemId)
-    .eq("org_id", orgId)
-    .eq("archived", false)
-    .select("id, vendor, label");
-  if (error) return { ok: false, error: optionWriteRefusal(error) };
-  if (!data?.length) {
-    return { ok: false, error: "That vendor isn't on this item any more, or it's archived. Reload the page and pick again." };
-  }
+  const moved = await moveDefault(supabase, orgId, input.itemId, input.optionId);
   revalidatePath("/price-list");
-  const picked = (data as { vendor: string; label: string | null }[])[0];
-  return { ok: true, note: defaultVendorNote(optionName(picked)) };
+  if (!moved.ok) return { ok: false, error: moved.error };
+  if (!moved.picked) return { ok: true, note: "This item is priced at its own number again." };
+  return { ok: true, note: defaultVendorNote(optionName(moved.picked)) };
 }
 
 /**

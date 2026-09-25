@@ -177,9 +177,26 @@ async function renameVendor(
       .in("id", ids)
       .eq("org_id", orgId)
       .select("id");
-    if (error) return { ok: false, error: dbError(error) };
-    if ((data?.length ?? 0) !== ids.length) {
-      return { ok: false, error: `Only ${data?.length ?? 0} of ${ids.length} items took the new name. Reload the page, then rename it again.` };
+    if (error || (data?.length ?? 0) !== ids.length) {
+      /* ONE NAME OR THE OTHER, NEVER BOTH (audit v994 VP4). The card already carries the new
+         name, so a failure here used to leave a card with no items and items with no card, and
+         the suggested retry was refused both ways (the new name "is already a vendor", the old
+         one has items). Put back whatever moved, checked, and say nothing was renamed. Only when
+         the put-back itself fails is there a split to name, and then it says exactly which. */
+      const took = ((data ?? []) as { id: string }[]).map((r) => r.id);
+      const optsBack = took.length
+        ? await supabase.from("price_list_item_options").update({ vendor: oldName }).in("id", took).eq("org_id", orgId).select("id")
+        : { data: [] as { id: string }[], error: null };
+      const cardBack = card
+        ? await supabase.from("price_list_vendors").update({ name: oldName }).eq("id", String(card.id)).eq("org_id", orgId).select("id")
+        : { data: [{ id: "none" }], error: null };
+      const restored = !optsBack.error && (optsBack.data?.length ?? 0) === took.length && !cardBack.error && (cardBack.data?.length ?? 0) > 0;
+      const why = error ? dbError(error) : `Only ${data?.length ?? 0} of ${ids.length} items could take the new name.`;
+      if (restored) return { ok: false, error: `${why} Nothing was renamed: ${oldName} is still ${oldName} everywhere. Try again.` };
+      return {
+        ok: false,
+        error: `${why} ${oldName} is now half renamed and could not be put back. Reload the page: rename the ${to} card back to ${oldName}, then rename it again.`,
+      };
     }
   }
   revalidatePath("/price-list");

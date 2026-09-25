@@ -110,6 +110,45 @@ describe("kitLineView — a linked line is LIVE from the item", () => {
   });
 });
 
+describe("kitLineView — a code with a default vendor quotes at that vendor (audit v994 VP2)", () => {
+  const vendor = (over: Record<string, unknown> = {}) => ({
+    id: "opt-marvin",
+    vendor: "Marvin",
+    label: null,
+    part_number: null,
+    unit: null,
+    buy_price: "1610",
+    markup_pct: null,
+    is_default: true,
+    sort_order: 1,
+    archived: false,
+    ...over,
+  });
+  const windows = (opts: unknown[]) =>
+    linked({ code: "830", description: "Windows (Materials) (Allowance)", unit: "ea", buy_price: 830, markup_pct: 0, price_list_item_options: opts as never });
+
+  it("prices, costs and names the default vendor, through the org default and the customer level", () => {
+    const line = windows([vendor(), vendor({ id: "opt-andersen", vendor: "Andersen", buy_price: 900, is_default: false })]);
+    const v = kitLineView(line, { orgDefaultPct: 25 });
+    expect(v.description).toBe("830 — Windows (Materials) (Allowance) (Marvin)");
+    expect(v.cost).toBe(1610);
+    expect(v.unit_price).toBe(2012.5); // 1610 × 1.25, the price the typeahead quotes
+    expect(v.vendor).toBe("Marvin");
+    expect(kitLineView(line, { orgDefaultPct: 25, levelPct: 10 }).unit_price).toBe(1771);
+    expect(kitLineCost(line)).toBe(1610);
+  });
+
+  it("no default, an archived default, or no vendors at all: the item's own number, as before", () => {
+    for (const opts of [[vendor({ is_default: false })], [vendor({ archived: true })], []]) {
+      const v = kitLineView(windows(opts), { orgDefaultPct: 25 });
+      expect(v.description).toBe("830 — Windows (Materials) (Allowance)");
+      expect(v.cost).toBe(830);
+      expect(v.unit_price).toBe(1037.5);
+      expect(v.vendor).toBeNull();
+    }
+  });
+});
+
 describe("sizing lives with the line's source of truth", () => {
   it("a frozen line sizes from its own coefficients", () => {
     const s = kitLineSizing(frozen({ qty_per_sqft: "0.5", qty_min: 4, qty_round: "up" }));
@@ -137,16 +176,20 @@ describe("helpers", () => {
     expect(kitLineCost(null)).toBeNull();
   });
 
-  it("kitsSelectRungs: four rungs, most capable first, all carrying the kit columns", () => {
+  it("kitsSelectRungs: five rungs, most capable first, all carrying the kit columns", () => {
     const rungs = kitsSelectRungs("id, name, category");
-    expect(rungs).toHaveLength(4);
-    expect(rungs[0]).toContain("price_list_items(");
-    expect(rungs[0]).toContain("sized_by"); // 0241 generic pair
+    expect(rungs).toHaveLength(5);
+    // 0282: the vendors under each code, archived carried so the reader can drop them (VP2).
+    expect(rungs[0]).toContain("price_list_item_options(");
+    expect(rungs[0]).toMatch(/price_list_item_options\([^)]*is_default[^)]*archived\)/);
     expect(rungs[1]).toContain("price_list_items(");
-    expect(rungs[1]).not.toContain("sized_by"); // 0240 link, pre-0241
-    expect(rungs[2]).not.toContain("price_list_item");
-    expect(rungs[2]).toContain("qty_per_sqft");
-    expect(rungs[3]).not.toContain("qty_per_sqft");
+    expect(rungs[1]).not.toContain("price_list_item_options");
+    expect(rungs[1]).toContain("sized_by"); // 0241 generic pair
+    expect(rungs[2]).toContain("price_list_items(");
+    expect(rungs[2]).not.toContain("sized_by"); // 0240 link, pre-0241
+    expect(rungs[3]).not.toContain("price_list_item");
+    expect(rungs[3]).toContain("qty_per_sqft");
+    expect(rungs[4]).not.toContain("qty_per_sqft");
     expect(rungs.every((r) => r.startsWith("id, name, category, kit_items("))).toBe(true);
   });
 

@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
-import { firstThatWorks, kitsSelectRungs, kitLineCost, linkedItemOf } from "@/lib/kit-line";
+import { firstThatWorks, kitsSelectRungs, kitLineCost, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -629,9 +629,12 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
       const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       for (const it of kitItems) {
         const item = linkedItemOf(it);
+        // A code with a default vendor is BOUGHT at that vendor (audit v994 VP2): the words name it
+        // and est_cost (kitLineCost) is its cost, the same answer the kit priced the line at.
+        const vendor = item ? kitLineView(it, { orgDefaultPct: 0 }).vendor : null;
         rows.push({
           list_id: list.id,
-          description: `${k.name} — ${item ? item.description : it.description}`,
+          description: `${k.name} — ${item ? `${item.description}${vendor ? ` (${vendor})` : ""}` : it.description}`,
           part_number: item?.code ?? null,
           quantity: Number(it.quantity) || 1,
           unit: item ? item.unit || "ea" : it.unit || "ea",
