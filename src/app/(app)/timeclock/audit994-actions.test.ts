@@ -154,6 +154,40 @@ describe("SW1: twelve hours count from the start of the day, across a Switch Job
   });
 });
 
+describe("A failed shift read is never answered from the piece (shift-chain's law)", () => {
+  // In 13 hours ago on job A, switched 1 hour ago: judged from the piece, a plain tap would close it.
+  const live = { id: LIVE, profile_id: "user-1", clock_in: ago(1), status: "open", split_from: HEAD, lunch_minutes: 0, notes: null, org_id: "org-1" };
+  const failing = (row: any) => (q: Q): Reply => {
+    if (isChainRead(q)) return { error: { message: "boom" } };
+    if (q.table === "time_entries" && q.verb === "select") return { data: row };
+    if (q.table === "organizations") return ORG_TZ;
+    if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
+    if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: LIVE }] };
+  };
+
+  it("a plain Clock Out is refused in words, and nothing is written", async () => {
+    state.client = fakeSupabase(failing(live), calls);
+    const r = await clockOut({ entry_id: LIVE, lunch_minutes: 0, notes: "", gps: null });
+    expect(r).toEqual({ ok: false, error: "I couldn't check how long you've been on the clock. You're still clocked in; try again." });
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("a STATED stop time still closes (the person said when)", async () => {
+    state.client = fakeSupabase(failing(live), calls);
+    const at = new Date(Date.now() - 10 * 60_000).toISOString();
+    const r = await clockOut({ entry_id: LIVE, lunch_minutes: 0, notes: "", gps: null, at, picked: true });
+    expect(r.ok).toBe(true);
+  });
+
+  it("a Switch Job that would cut is refused in words, and nothing is switched", async () => {
+    const running = { ...live, job_id: JOB, job_code: null, rate_override: null, profiles: { full_name: "Brian Taylor" } };
+    state.client = fakeSupabase(failing(running), calls);
+    const r = await switchJob({ entry_id: LIVE, job_id: JOB });
+    expect(r).toEqual({ ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." });
+    expect(calls.some((c) => c.verb === "rpc" || c.verb === "update")).toBe(false);
+  });
+});
+
 describe("SW2: a Switch Job's piece re-arms the geofence in the post-switch window", () => {
   const fix = { lat: 39.8, lng: -120.1, accuracy: 20 };
 
@@ -233,6 +267,21 @@ describe("SW3 + SW6: the finish-your-timecard lunch after a Switch Job", () => {
     expect(calls.filter((c) => c.verb === "update")).toHaveLength(1);
   });
 
+  it("an auto-closed part that already carries a 30 keeps it, and the part before is NOT also docked (one lunch, once)", async () => {
+    // The office set lunch 30 on Brian's running piece after his Switch Job; the geofence closed it.
+    const carrying = { ...autoRow, clock_out: new Date(Date.parse(priorOut) + 2 * H).toISOString(), lunch_minutes: 30 };
+    state.client = fakeSupabase((q) => {
+      if (q.table === "time_entries" && q.verb === "select" && q.cols.includes("notes")) return { data: carrying };
+      return routes(prior)(q);
+    }, calls);
+    const r = await completeAutoClockOut({ entry_id: LIVE, lunch_minutes: 30, lunch_on_prior: true });
+    expect(r).toEqual({ ok: true, warning: "This part already has a 30-minute lunch on it, so it stays here." });
+    const upds = calls.filter((c) => c.verb === "update");
+    expect(upds).toHaveLength(1);
+    expect(upds[0].payload).toEqual({ lunch_minutes: 30, notes: AUTO_CONFIRMED_CRUMB });
+    expect(upds[0].filters).toContainEqual(["eq", "id", LIVE]);
+  });
+
   it("the clock-out's own lunch-before-the-switch never writes onto a paid part (SW6)", async () => {
     const running = { id: LIVE, profile_id: "user-1", clock_in: priorOut, lunch_minutes: 0, status: "open", notes: null, org_id: "org-1", split_from: HEAD };
     state.client = fakeSupabase((q) => {
@@ -267,8 +316,12 @@ describe("SW4: the office's Clock Out on a shift that was switched meanwhile", (
     if (q.table === "organizations") return ORG_TZ;
     if (q.table === "profiles") return { data: { full_name: "Erik Taylor" } };
     if (q.table === "time_entries" && q.verb === "select" && q.cols.includes("paid_at")) return { data: row };
+    // Only a piece of this shift's family (a Switch Job cut from LIVE) answers the running-piece read,
+    // as the database would: a fresh clock-in carries no split_from.
     if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in, job_code"))
-      return { data: { id: NEXT, clock_in: ago(0.1), job_code: null, job: { job_number: "J-012", name: "Rhodesia" } } };
+      return q.filters.some((f) => f[0] === "eq" && f[1] === "split_from" && f[2] === LIVE)
+        ? { data: { id: NEXT, clock_in: ago(0.1), job_code: null, job: { job_number: "J-012", name: "Rhodesia" } } }
+        : { data: null };
     if (q.table === "time_entries" && q.verb === "select") return { data: [] };
     if (q.table === "time_entries" && q.verb === "update") return { data: updated };
     return undefined;
@@ -282,7 +335,33 @@ describe("SW4: the office's Clock Out on a shift that was switched meanwhile", (
     expect(r.error).toMatch(/^Brian switched to Rhodesia at .+ and is still on the clock\. Nothing was changed\. Open that shift to Clock Out Brian\.$/);
     expect(calls.some((c) => c.verb === "update")).toBe(false);
     const look = calls.find((c) => c.cols.startsWith("id, clock_in, job_code"))!;
-    expect(look.filters).toEqual(expect.arrayContaining([["eq", "profile_id", "brian-1"], ["eq", "org_id", "org-1"], ["eq", "status", "open"]]));
+    expect(look.filters).toEqual(
+      expect.arrayContaining([
+        ["eq", "profile_id", "brian-1"],
+        ["eq", "org_id", "org-1"],
+        ["eq", "status", "open"],
+        ["eq", "split_from", LIVE],
+        ["eq", "split_how", "live"],
+      ]),
+    );
+  });
+
+  it("a piece that was itself cut from an earlier one looks for the running piece under the FIRST entry", async () => {
+    state.client = fakeSupabase(routes({ ...closed, split_from: HEAD }), calls);
+    const r = await stopShift({ entry_id: LIVE, clock_out: ago(0.5), lunch_minutes: 0 });
+    expect(r.ok).toBe(false);
+    const look = calls.find((c) => c.cols.startsWith("id, clock_in, job_code"))!;
+    expect(look.filters).toContainEqual(["eq", "split_from", HEAD]);
+  });
+
+  it("a NEW shift after a real clock-out is not a switch: the plain 'already clocked out' answer, no running shift handed back", async () => {
+    // Brian clocked out at 3:30 himself and clocked in fresh at 4:00 for a callback (no split_from).
+    state.client = fakeSupabase(routes({ ...closed, id: NEXT }), calls);
+    const r = await stopShift({ entry_id: NEXT, clock_out: ago(0.5), lunch_minutes: 0 });
+    expect(r.ok).toBe(false);
+    expect(r.still_open_entry_id).toBeUndefined();
+    expect(r.error).toMatch(/^Brian was already clocked out at .+\. Reload to see the times\.$/);
+    expect(r.error).not.toMatch(/switched/);
   });
 
   it("the race (the switch landed between the read and the write) says the same", async () => {

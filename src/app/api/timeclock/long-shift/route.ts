@@ -91,7 +91,7 @@ export async function GET(request: Request) {
       const { data: open, error } = await supabase
         .from("time_entries")
         .select(
-          "id, profile_id, clock_in, split_from, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
+          "id, profile_id, clock_in, split_from, job_code, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
         )
         .eq("org_id", org.id)
         .eq("status", "open")
@@ -105,6 +105,7 @@ export async function GET(request: Request) {
         profile_id: string;
         clock_in: string;
         split_from: string | null;
+        job_code?: string | null;
         long_shift_warned_at: string | null;
         long_shift_nudged_at: string | null;
         shift_start?: string | null;
@@ -167,18 +168,35 @@ export async function GET(request: Request) {
         const job = one(r.job);
         // The SHIFT's start, not the switch's (audit v994 SW1).
         const inAt = new Date(candidateStartMs(r));
-        const since = `${inAt.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${inAt
-          .toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
-          .replace(/ /g, " ")}`; // ICU's narrow no-break space before AM/PM, as a plain space
+        const clock = (d: Date) =>
+          d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " "); // ICU's narrow no-break space before AM/PM, as a plain space
+        const day = (d: Date) => d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" });
+        const since = `${day(inAt)} ${clock(inAt)}`;
         const name = (person?.full_name ?? "").trim();
+        const label = job ? jobLabel(job) : (r.job_code ?? "").trim() || null;
+        const hours = Math.floor((nowMs - inAt.getTime()) / 3_600_000);
+        // AFTER A SWITCH JOB the running piece's job is not where the day began (audit v994): the
+        // start is the shift's and the job is named with the time the switch put him there, the
+        // way the office's Stop Clock sheet words it. "Clocked in Tue 7:00 AM at Job B" was false.
+        const pieceAt = new Date(Date.parse(r.clock_in));
+        const switched = Number.isFinite(pieceAt.getTime()) && pieceAt.getTime() - inAt.getTime() >= 60_000;
+        const switchAt = switched ? (day(pieceAt) === day(inAt) ? clock(pieceAt) : `${day(pieceAt)} ${clock(pieceAt)}`) : "";
         return {
           person,
           crew: !isStaffRole(person?.role ?? ""),
-          label: job ? jobLabel(job) : null,
+          label,
           since,
           first: name.split(/\s+/)[0] || "A crew member",
           door: clockDoorWords(name).clockOut,
-          hours: Math.floor((nowMs - inAt.getTime()) / 3_600_000),
+          hours,
+          /** The office's lead, no closing stop: "Clocked in Thu 7:00 AM at Job A, 10 hours ago". */
+          officeLead: switched
+            ? `On the clock since ${since}, ${hours} hours${label ? `; at ${label} since ${switchAt}` : ""}`
+            : `Clocked in ${since}${label ? ` at ${label}` : ""}, ${hours} hours ago`,
+          /** The crew member's lead, no closing stop: "You've been clocked in at Job A since Thu 7:00 AM". */
+          crewLead: switched
+            ? `You've been on the clock since ${since}${label ? ` (at ${label} since ${switchAt})` : ""}`
+            : `You've been clocked in${label ? ` at ${label}` : ""} since ${since}`,
         };
       };
 
@@ -203,7 +221,7 @@ export async function GET(request: Request) {
           type: "long_shift",
           title: `${f.first} Is Still On The Clock`,
           body:
-            `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago. ` +
+            `${f.officeLead}. ` +
             `If the shift is over, ${f.door} on Timecards.${tail}`,
           url: `/timecards?entry=${r.id}`,
         });
@@ -225,7 +243,7 @@ export async function GET(request: Request) {
 
         if (f.person?.active !== false) {
           const title = "Still On The Clock?";
-          const body = `You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}. Tap to set when you stopped.`;
+          const body = `${f.crewLead}. Tap to set when you stopped.`;
           await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
           // The push has gone, so the claim stays spent (giving it back would push twice); a bell
           // line the database refused is reported by createNotifications and counted here.
@@ -246,7 +264,7 @@ export async function GET(request: Request) {
             } else {
               const who = ((org as { name?: string | null }).name ?? "").trim();
               const text =
-                `${who ? `${who}: ` : ""}You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}, ` +
+                `${who ? `${who}: ` : ""}${f.crewLead}, ` +
                 `more than ${LONG_SHIFT_HOURS} hours. Open Timeclock to set when you stopped.`;
               // A refusal or a dropped connection answers false (sendSms logs why). The catch is the
               // belt: nothing about a text may cost the office its buzz below.
@@ -265,7 +283,7 @@ export async function GET(request: Request) {
           await sendPushToProfiles(to, "long_shift", {
             title: `${f.first} Is Still On The Clock`,
             body:
-              `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago` +
+              f.officeLead +
               `${f.person?.active === false ? " (no longer on your crew)" : `. ${f.first} has been asked when the shift ended`}. ` +
               `${f.door} on Timecards if you know.`,
             url: `/timecards?entry=${r.id}`,

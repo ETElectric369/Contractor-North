@@ -166,7 +166,9 @@ export function StopClockSheet({
       : `on ${dayLabel(shiftStartMs, tz)}`;
   })();
   const first = name.split(/\s+/)[0] || name;
-  const label = entry.job ? jobLabel(entry.job) : null;
+  // A switch onto a time code (Drive, Shop) has no job but has its code (0288): name the code, never
+  // "Switched to no job".
+  const label = entry.job ? jobLabel(entry.job) : (entry.job_code ?? "").trim() || null;
 
   const startMoved = startDate !== seedStartDate || startTime !== seedStartTime;
   const startIso = startMoved ? (startDate && startTime ? tzDateTimeUtc(startDate, startTime, tz) : null) : entry.clock_in;

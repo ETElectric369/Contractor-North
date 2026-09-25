@@ -82,9 +82,11 @@ export function AutoClockoutPrompt({
   const [tookLunch, setTookLunch] = useState(storedLunch > 0);
   const lunchMin = Math.max(storedLunch, lunchMinutesFor(tookLunch));
   // AFTER A SWITCH JOB the lunch was usually taken before it: offered on the part before, by default,
-  // when there is one (audit v994 SW3). A lunch already on this part stays where it is.
-  const [lunchOnPrior, setLunchOnPrior] = useState(!!previousPiece);
-  const onPrior = !!previousPiece && tookLunch && lunchOnPrior && storedLunch <= LUNCH_MIN;
+  // when there is one (audit v994 SW3). A lunch already on this part stays where it is: the choice is
+  // only offered when this part carries none, or the one lunch would be docked on both parts.
+  const canMoveLunch = !!previousPiece && storedLunch === 0;
+  const [lunchOnPrior, setLunchOnPrior] = useState(canMoveLunch);
+  const onPrior = canMoveLunch && tookLunch && lunchOnPrior;
   const priorNext = previousPiece ? Math.max(Number(previousPiece.lunch_minutes) || 0, lunchMin) : 0;
   const lunchFitsHere = lunchFits(entry.clock_in, entry.clock_out, onPrior ? 0 : lunchMin);
   const lunchFitsPrior = !!previousPiece && lunchFits(previousPiece.clock_in, previousPiece.clock_out, priorNext);
@@ -191,7 +193,10 @@ export function AutoClockoutPrompt({
           <LunchCheckbox id="ac-lunch" checked={tookLunch} onChange={setTookLunch} className="border-amber-200 bg-white/60" />
         )}
 
-        {previousPiece && tookLunch && storedLunch <= LUNCH_MIN && (
+        {previousPiece && storedLunch > 0 && storedLunch <= LUNCH_MIN && (
+          <p className="text-xs text-slate-600">{`This part already has a ${storedLunch}-minute lunch on it, so it stays here.`}</p>
+        )}
+        {canMoveLunch && tookLunch && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-1 text-xs text-slate-600">
             <span>
               {onPrior

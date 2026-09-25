@@ -102,7 +102,11 @@ describe("GET /api/timeclock/long-shift after a Switch Job", () => {
     const res = await (await GET(req())).json();
     expect(res).toMatchObject({ bells_due: 1, nudges_due: 0, office_bells: 1 });
     expect(spies.notify).toHaveLength(1);
-    expect(spies.notify[0][2].body).toMatch(/^Clocked in Thu 7:00 AM at Rhodesia, 10 hours ago\. .+ At 12 hours Brian is asked\.$/);
+    // He was on job A at 7:00 AM: the start is the shift's, and Rhodesia is named with the switch.
+    expect(spies.notify[0][2].body).toMatch(
+      /^On the clock since Thu 7:00 AM, 10 hours; at Rhodesia since 3:00 PM\. .+ At 12 hours Brian is asked\.$/,
+    );
+    expect(spies.notify[0][2].body).not.toMatch(/Clocked in Thu 7:00 AM at Rhodesia/);
     const fam = calls.find((c) => c.filters.some((f) => f[0] === "or" && String(f[1]).startsWith("id.in.")))!;
     expect(fam.filters).toContainEqual(["or", `id.in.(${A}),split_from.in.(${A})`]);
     expect(fam.filters).toContainEqual(["eq", "org_id", "org-1"]);
@@ -120,7 +124,8 @@ describe("GET /api/timeclock/long-shift after a Switch Job", () => {
       [["erik-1"], "long_shift"],
     ]);
     expect(spies.push[0][1]).toBe("clock_out");
-    expect(spies.push[0][2].body).toMatch(/since Thu 7:00 AM/);
+    expect(spies.push[0][2].body).toBe("You've been on the clock since Thu 7:00 AM (at Rhodesia since 3:00 PM). Tap to set when you stopped.");
+    expect(spies.push[1][2].body).toMatch(/^On the clock since Thu 7:00 AM, 12 hours; at Rhodesia since 3:00 PM\. Brian has been asked/);
   });
 
   it("a failed family read fails this org's run loudly, and nothing is sent", async () => {

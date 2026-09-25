@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { durationSpan, lunchFits, placeLunch, type LunchPart } from "./close-math";
+import { durationSpan, lunchFits, lunchOnPriorAllowed, placeLunch, type LunchPart } from "./close-math";
 import { pickerInstant, pickerParts } from "./clock-start-picker";
 import { fallbackArmed } from "@/components/geofence-fallback";
 import { summarizeMileage } from "@/lib/mileage-math";
@@ -18,6 +18,30 @@ import { splitPreview } from "@/lib/split-preview";
 const TZ = "America/Los_Angeles";
 // 2001-01-01, a day nobody worked. 7:00 AM Pacific = 15:00Z.
 const T = (h: number, m = 0) => new Date(Date.UTC(2001, 0, 1, 15 + h, m)).toISOString();
+
+describe("lunchOnPriorAllowed: one lunch is docked once, never on both parts (SW3)", () => {
+  it("an auto-closed part that already carries 30 keeps it; the stated lunch is NOT also put on the part before", () => {
+    const r = lunchOnPriorAllowed({ lunchOnPrior: true, lunch: 30, existingHere: 30 });
+    expect(r).toEqual({ onPrior: false, warning: "This part already has a 30-minute lunch on it, so it stays here." });
+    // What completeAutoClockOut then writes: the part before is untouched, this part keeps 30.
+    // Exactly one 30-minute deduction across both parts.
+    const prior: LunchPart = { id: "a", clock_in: T(0), clock_out: T(8), lunch_minutes: 0, paid_at: null };
+    const here = { clock_in: T(8), clock_out: T(10) };
+    const placed = r.onPrior ? placeLunch({ hereLunch: 0, priorLunch: 30, priorId: "a", here, prior, refuse: true }) : null;
+    const priorLunch = placed && placed.ok && placed.prior ? placed.prior.lunch : Number(prior.lunch_minutes) || 0;
+    expect(priorLunch + 30).toBe(30);
+  });
+
+  it("a stored 15 is not topped up on the part before either (45 off for a 30 lunch)", () => {
+    expect(lunchOnPriorAllowed({ lunchOnPrior: true, lunch: 30, existingHere: 15 }).onPrior).toBe(false);
+  });
+
+  it("a part with no lunch lets the stated lunch go on the part before", () => {
+    expect(lunchOnPriorAllowed({ lunchOnPrior: true, lunch: 30, existingHere: 0 })).toEqual({ onPrior: true });
+    expect(lunchOnPriorAllowed({ lunchOnPrior: false, lunch: 30, existingHere: 0 })).toEqual({ onPrior: false });
+    expect(lunchOnPriorAllowed({ lunchOnPrior: true, lunch: 0, existingHere: 0 })).toEqual({ onPrior: false });
+  });
+});
 
 describe("placeLunch: the lunch has to fit the part it lands on (SW3, SW6)", () => {
   // Brian: 7:00-14:30 on Job A, switched, the geofence closed Job B at 14:50.

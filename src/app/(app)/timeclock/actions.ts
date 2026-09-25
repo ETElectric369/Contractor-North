@@ -27,6 +27,7 @@ import {
   lunchFits,
   needsStatedStop,
   placeLunch,
+  lunchOnPriorAllowed,
   stopCrumb,
   withAutoConfirmedCrumb,
   withStopCrumb,
@@ -407,9 +408,15 @@ export async function switchJob(input: {
    */
   // The SHIFT's start (audit v994 SW1): a second switch late in a forgotten day is the same
   // one-tap close at now as the first.
-  const shiftSw = await shiftOf(supabase, entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null });
-  const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
+  const { shift: shiftSw, failed: shiftUnread } = await shiftOf(
+    supabase,
+    entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null },
+  );
   const wouldCut = !!entry.job_id || !!entry.job_code;
+  if (shiftUnread && wouldCut) {
+    return { ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." };
+  }
+  const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
   if (wouldCut && isLongOpenShift(ciMs, Date.now())) {
     const tz = await orgTz(supabase);
     const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz);
@@ -554,24 +561,28 @@ async function touchingPartBefore(
 
 /**
  * The SHIFT this running entry is part of (lib/shift-chain): after a Switch Job, its start is the
- * first piece's clock-in. Null for an entry that never switched (no read is made) or when the read
- * fails (reported; the caller falls back to the entry's own start, what it said before).
+ * first piece's clock-in. `shift` is null for an entry that never switched (no read is made).
+ *
+ * `failed`: the read of a switched entry's family failed (reported). The caller does NOT quietly
+ * judge the day from the piece (shift-chain's own law: a failed read is never an answer); a person
+ * standing there is told in words and nothing is written. Only a door nobody is answering (the
+ * unattended geofence close) or a stated stop time goes on with the piece's own start.
  */
 async function shiftOf(
   supabase: Awaited<ReturnType<typeof createClient>>,
   entry: { id?: string; profile_id?: string | null; clock_in?: string; split_from?: string | null } | null,
-): Promise<ShiftInfo | null> {
-  if (!entry?.id || !entry.clock_in || !entry.split_from) return null;
+): Promise<{ shift: ShiftInfo | null; failed: boolean }> {
+  if (!entry?.id || !entry.clock_in || !entry.split_from) return { shift: null, failed: false };
   try {
     const chains = await loadShiftChains(
       supabase as unknown as SupabaseClient,
       [{ id: entry.id, profile_id: entry.profile_id ?? null, clock_in: entry.clock_in, split_from: entry.split_from }],
       null,
     );
-    return chains.get(entry.id) ?? null;
+    return { shift: chains.get(entry.id) ?? null, failed: false };
   } catch (e) {
     reportError("shift-chain", e, { entryId: entry.id });
-    return null;
+    return { shift: null, failed: true };
   }
 }
 
@@ -662,7 +673,10 @@ export async function clockOut(input: {
     // Switch Job the running entry began at the switch; the forgotten-clock question reads the
     // whole shift (lib/shift-chain). The 18-hour ceiling below stays per entry, as the database
     // enforces it.
-    const shift = await shiftOf(supabase, ent);
+    const { shift, failed: shiftUnread } = await shiftOf(supabase, ent);
+    if (shiftUnread && !picked && !unattended) {
+      return { ok: false, error: "I couldn't check how long you've been on the clock. You're still clocked in; try again." };
+    }
     const shiftStartMs = shift ? shift.startMs : ciMsForStop;
     const shiftStartIso = shift ? shift.startIso : (entClockIn as string);
     if (needsStatedStop({ clockInMs: shiftStartMs, closeMs, nowMs, picked, unattended })) {
@@ -1099,7 +1113,10 @@ export async function completeAutoClockOut(input: {
   let priorWrite: { id: string; lunch: number } | null = null;
   let priorBefore: LunchPart | null = null;
   let lunchWarning: string | undefined;
-  const onPrior = !!input.lunch_on_prior && lunch > 0;
+  // A lunch already on THIS part is the day's lunch: it is never ALSO put on the part before (SW3).
+  const priorRule = lunchOnPriorAllowed({ lunchOnPrior: !!input.lunch_on_prior, lunch, existingHere });
+  const onPrior = priorRule.onPrior;
+  lunchWarning = priorRule.warning;
   // Only a lunch being STATED here is placed: a lunch the part already carried (a Switch Job moved it
   // there) is its own business, and re-placing it could put it on both parts.
   if (entry.clock_out && (onPrior || (lunch > existingHere && !lunchFits(entry.clock_in, entry.clock_out, lunch)))) {
@@ -1114,7 +1131,7 @@ export async function completeAutoClockOut(input: {
     });
     if (!placed.ok) return { ok: false, error: `${placed.error} Nothing was changed.` };
     priorWrite = placed.prior;
-    lunchWarning = placed.warning;
+    lunchWarning = placed.warning ?? lunchWarning;
     // The lunch went on the part before: this part keeps what it already carries.
     hereLunch = placed.here > 0 ? placed.here : existingHere;
   }
@@ -1483,14 +1500,21 @@ export async function stopShift(input: {
    * already clocked out" there made them walk away from a clock that was still running. So a closed
    * entry is checked against the same person's OPEN one, and the answer names the switch and hands
    * back that entry's id for the sheet to open, pre-filled, never applied.
+   *
+   * Only a piece of THE SAME SHIFT counts: the open entry a Switch Job cut from this one carries its
+   * family (split_from = the first piece's id, 0288). A fresh clock-in after a real clock-out has no
+   * family, and calling that a "switch" would send the office to stop a shift that should keep
+   * running; it gets the plain "already clocked out" answer instead.
    */
-  const stillOpen = async (profileId: string, orgId: string, fullName: string, isSelf: boolean, tz: string) => {
+  const stillOpen = async (familyId: string, profileId: string, orgId: string, fullName: string, isSelf: boolean, tz: string) => {
     const { data: next } = await supabase
       .from("time_entries")
       .select("id, clock_in, job_code, job:job_id(job_number, name)")
       .eq("profile_id", profileId)
       .eq("org_id", orgId)
       .eq("status", "open")
+      .eq("split_from", familyId)
+      .eq("split_how", "live")
       .maybeSingle();
     const n = next as { id?: string; clock_in?: string; job_code?: string | null; job?: unknown } | null;
     if (!n?.id || !n.clock_in) return null;
@@ -1507,13 +1531,16 @@ export async function stopShift(input: {
 
   const { data: row } = await supabase
     .from("time_entries")
-    .select("id, profile_id, org_id, clock_in, clock_out, status, job_id, notes, paid_at, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .select(
+      "id, profile_id, org_id, clock_in, clock_out, status, job_id, notes, paid_at, split_from, profiles:profile_id(full_name), job:job_id(job_number, name)",
+    )
     .eq("id", input.entry_id)
     .maybeSingle();
   const stored = row as {
     id: string;
     profile_id: string;
     org_id: string;
+    split_from: string | null;
     clock_in: string;
     clock_out: string | null;
     status: string;
@@ -1530,7 +1557,7 @@ export async function stopShift(input: {
   const said = clockedOutWords(ownerFull, self);
   const tz = await orgTz(supabase);
   if (stored.status !== "open") {
-    const moved = await stillOpen(stored.profile_id, stored.org_id, ownerFull, self, tz);
+    const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
     if (moved) return moved;
     return {
       ok: false,
@@ -1607,7 +1634,7 @@ export async function stopShift(input: {
   // The silent-write law: zero rows means somebody else stopped it first. Nothing here was saved.
   if (!upd?.length) {
     revalidateTime([stored.job_id]);
-    const moved = await stillOpen(stored.profile_id, stored.org_id, ownerFull, self, tz);
+    const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
     if (moved) return moved;
     return { ok: false, error: `${said.subject} ${said.was} clocked out a moment ago somewhere else. Reload to see it.` };
   }

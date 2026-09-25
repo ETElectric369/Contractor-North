@@ -226,6 +226,23 @@ export type LunchPlacement =
   | { ok: false; error: string };
 
 /**
+ * CAN A STATED LUNCH GO ON THE PART BEFORE THE SWITCH? Only when this part carries none (audit v994
+ * SW3). A lunch already on this part (the office set it on the running piece, and the close kept it)
+ * IS the day's lunch: putting the stated one on the part before as well docks the one lunch twice, and
+ * the crew guard can't lower this part's. It stays here, and the answer says so.
+ */
+export function lunchOnPriorAllowed(input: { lunchOnPrior: boolean; lunch: number; existingHere: number }): {
+  onPrior: boolean;
+  warning?: string;
+} {
+  const lunch = Math.max(0, Math.round(Number(input.lunch) || 0));
+  const existing = Math.max(0, Math.round(Number(input.existingHere) || 0));
+  if (!input.lunchOnPrior || lunch === 0) return { onPrior: false };
+  if (existing > 0) return { onPrior: false, warning: `This part already has a ${existing}-minute lunch on it, so it stays here.` };
+  return { onPrior: true };
+}
+
+/**
  * THE LUNCH HAS TO FIT THE PART IT LANDS ON. ONE RULE FOR EVERY DOOR THAT STATES A LUNCH AFTER A
  * SWITCH: the clock-out, and the "finish your timecard" prompt after a geofence close (which used to
  * write the whole day's lunch onto a 20-minute last part, where hoursBetween clamps it to 0 and the
