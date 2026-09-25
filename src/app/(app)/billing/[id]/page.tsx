@@ -33,6 +33,8 @@ import { ProgressReportCard } from "@/components/progress-report-card";
 import { isActualsDraw } from "@/lib/actuals-draw";
 import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
 import { fetchSupplierNames } from "@/lib/supplier-names";
+import { readInvoiceMarkup } from "@/lib/invoice-markup-read";
+import { markupBoxSeed } from "@/lib/invoice-markup";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -117,10 +119,19 @@ export default async function InvoicePage({
      org's default labor rate, never at what they are paid; the row says so, so nobody mistakes it
      for that person's own rate. profile_pay is the staff-scoped view (0215/0286): an owner's figure
      is already folded into bill_rate there, so he is never "unrated". */
-  const [supplierNames, { data: payRows }] = await Promise.all([
+  const hasCostLines = ((items ?? []) as { import_source?: string | null }[]).some((i) => i.import_source === "costs");
+  const [supplierNames, { data: payRows }, markupRead] = await Promise.all([
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
+    /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
+       the marker still shows 15"). The % box beside Materials from Costs starts here - the reading
+       the importer's keepInvoiceMarkup takes, through the same server read - so opening the page
+       and touching the box can never send the customer's usual back over an invoice priced at
+       something else. No materials lines yet: nothing to read, the box starts at the usual. */
+    (inv as any).job_id && hasCostLines ? readInvoiceMarkup(supabase, inv.id, (inv as any).job_id) : Promise.resolve(null),
   ]);
+  const usualMarkup = (inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent;
+  const markupSeed = markupBoxSeed(markupRead ? (markupRead.ok ? markupRead.reading : "unread") : null, usualMarkup);
   const noBillRateIds = ((payRows ?? []) as { id: string; bill_rate: number | string | null }[])
     .filter((r) => !(Number(r.bill_rate) > 0))
     .map((r) => String(r.id));
@@ -350,7 +361,7 @@ export default async function InvoicePage({
         kits={(kits ?? []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
-        materialMarkup={(inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent}
+        markupSeed={markupSeed}
         levelMarkupPct={(inv as any).customers?.pricing_levels?.markup_pct ?? null}
         defaultMarkupPct={orgSettings.default_markup_pct}
         customers={(customers ?? []) as any}

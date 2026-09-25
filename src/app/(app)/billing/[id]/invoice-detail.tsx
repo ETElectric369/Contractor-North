@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet } from "@/lib/invoice-math";
 import { processorFeeLabel } from "@/lib/processor-fee";
+import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
 import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
@@ -45,6 +46,7 @@ import { AddLineItems } from "@/components/add-line-items";
    one written here. It rides inside the "they are holding an older bill" notice so the fix is
    where the problem is said, and nobody has to scroll back up hunting for it. */
 import { EmailButton } from "@/components/email-button";
+import { MarkupBox } from "./markup-box";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
 interface TaxRateLite { id: string; name: string; rate: number; is_default: boolean; }
@@ -137,7 +139,7 @@ export function InvoiceDetail({
   kits = [],
   taxRates = [],
   paymentMethods = [],
-  materialMarkup = 0,
+  markupSeed = { pct: 0, source: "usual", usualPct: 0 },
   levelMarkupPct = null,
   defaultMarkupPct = 0,
   customers = [],
@@ -159,7 +161,8 @@ export function InvoiceDetail({
   kits?: { id: string; name: string; kit_items: unknown[] }[];
   taxRates?: TaxRateLite[];
   paymentMethods?: string[];
-  materialMarkup?: number;
+  /** Where the % box starts, and why (page.tsx: lib/invoice-markup-read + markupBoxSeed). */
+  markupSeed?: MarkupSeed;
   /** The invoice customer's pricing-level markup (null = no level) — feeds effectiveMarkupPct. */
   levelMarkupPct?: number | null;
   defaultMarkupPct?: number;
@@ -360,24 +363,28 @@ export function InvoiceDetail({
   const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | "change_orders" | null>(null);
   /** A draft deliberately waiting — leaves Needs action until this date (0206). */
   const [hold, setHold] = useState<string>((invoice as { hold_until?: string | null }).hold_until ?? "");
-  const [markup, setMarkup] = useState(materialMarkup); // material markup % for the costs import
-  /* ON-THE-SPOT AGAIN — safely this time. The old debounced auto-reprice was removed because the
-     import was a delete-and-rebuild that silently wiped hand edits (the "force feeding"). Since
-     0175 it's an UPSERT that never touches an edited line, so committing a new number here
-     (Enter, or leaving the box) re-prices only the machine-priced cost lines and the toast says
-     exactly what happened. Nothing fires while typing, and an unchanged number is a no-op. */
-  const appliedMarkupRef = useRef(materialMarkup);
-  function applyMarkup() {
-    if (pending || markup === appliedMarkupRef.current) return;
-    appliedMarkupRef.current = markup;
-    if (!items.some((i) => (i as { import_source?: string | null }).import_source === "costs")) return;
-    runImport((id) => importCostsIntoInvoice(id, markup), "Materials", 0, "costs", false);
+  /* THE % BOX STARTS WHERE THE INVOICE IS (2026-09-25). It used to start at the customer's usual
+     markup whatever the lines said, so on INV-078 - moved to 11% - it read 15, and the next touch
+     sent that 15 back over every untouched line. The server now reads what the lines are priced at
+     (lib/invoice-markup-read, the importer's own read) and the box starts there when they give one
+     answer; `applied` starts at the same figure, so opening the page changes nothing. A refresh
+     (after any import) takes the server's new reading only while nothing is typed
+     (markupBoxOnSeed). Since 0175 the import is an UPSERT that never touches an edited line, so
+     applying a new number re-prices only the machine-priced cost lines, and the toast says so. */
+  const [box, setBox] = useState(() => markupBoxStart(markupSeed));
+  const [seenSeed, setSeenSeed] = useState(markupSeed);
+  if (seenSeed.pct !== markupSeed.pct || seenSeed.source !== markupSeed.source || seenSeed.usualPct !== markupSeed.usualPct) {
+    setSeenSeed(markupSeed);
+    setBox((b) => markupBoxOnSeed(b, markupSeed));
   }
-  // The % now applies ONLY when an import button is deliberately tapped — see the block below
-  // where the auto-reapply used to live. It seeds from the customer's pricing level, or the org
-  // default when they have none, which is NOT necessarily what this invoice's existing lines
-  // were billed at: treat the box as "what the next import will use", never as a readout.
   const costsImported = items.some((i) => i.import_source === "costs");
+  /** The lines were just set to `pct` from here (an import that landed). */
+  const markupLanded = (pct: number) => setBox((b) => markupBoxApplied(b, pct));
+  function applyMarkup() {
+    if (pending || !costsImported || !markupBoxTyped(box)) return;
+    const pct = box.value;
+    runImport((id) => importCostsIntoInvoice(id, pct), "Materials", 0, "costs", false, () => markupLanded(pct));
+  }
   /**
    * Every import here is a DELETE-AND-REBUILD of its own line group (the 0156 RPC deletes by
    * import_source, then re-inserts from the job's current state). So it is never additive and it
@@ -394,6 +401,10 @@ export function InvoiceDetail({
     replacing = 0,
     sourceKey: "labor" | "costs" | "quote" | "change_orders" | null = null,
     askFirst = true,
+    /** Runs when the import landed, before the refresh (the % box records the markup it used). */
+    onOk?: () => void,
+    /** One more sentence for the confirm - the markup the materials land at (materialsImportPlan). */
+    confirmNote?: string,
   ) {
     if (replacing > 0 && askFirst) {
       // Truthful since 0175 (imports became additive): hand-edited lines are NEVER overwritten —
@@ -403,6 +414,7 @@ export function InvoiceDetail({
           `This refreshes the ${replacing} ${label.toLowerCase()} line${replacing === 1 ? "" : "s"} ` +
           `already on ${invoice.invoice_number} from whatever the job holds right now. ` +
           `Lines you edited by hand are kept exactly as you set them; anything added to the job since is pulled in.\n\n` +
+          (confirmNote ? `${confirmNote}\n\n` : "") +
           `Current total: ${formatCurrency(Number(invoice.total))}`,
       );
       if (!ok) return;
@@ -455,6 +467,7 @@ export function InvoiceDetail({
       // A money warning is not good news: it rides an info toast, never the green one.
       toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, warn ? "info" : "success");
       setTimeout(() => setImportMsg(null), 5000);
+      onOk?.();
       refresh();
     });
   }
@@ -470,6 +483,8 @@ export function InvoiceDetail({
    *      DEFAULT (page.tsx: `pricing_levels?.markup_pct ?? orgSettings.material_markup_percent`)
    *      — NOT from what this invoice's lines were actually billed at. On INV-050 the customer
    *      has no pricing level, so the box reads 25% over 30 lines that were not billed at 25%.
+   *      (Since 2026-09-25 the box starts at what the lines ARE priced at when they agree - see
+   *      markupSeed above - and says when they don't.)
    *
    * Together: touch the field, wait 700ms, and a customer's invoice silently re-prices with no
    * confirm and no undo. That is the "force feeding" — it doesn't need a button press at all.
@@ -930,14 +945,39 @@ export function InvoiceDetail({
                 <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length, "labor")} disabled={pending}>
                   Labor from Timecards
                 </Button>
-                <div className="flex items-center gap-1.5">
-                  <Button size="sm" variant="outline" onClick={() => runImport((id) => importCostsIntoInvoice(id, markup), "Materials", items.filter((i) => i.import_source === "costs").length, "costs")} disabled={pending}>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      /* A typed number is sent as the decision; otherwise the import keeps the
+                         markup the lines are at and refuses on a failed read, so a box that is
+                         only showing the usual (lines disagree, or the page couldn't read them)
+                         never reprices the invoice to it unnamed (materialsImportPlan). */
+                      const plan = materialsImportPlan(box, markupSeed);
+                      runImport(
+                        (id) => importCostsIntoInvoice(id, plan.pct, plan.keepInvoiceMarkup ? { keepInvoiceMarkup: true } : undefined),
+                        "Materials",
+                        items.filter((i) => i.import_source === "costs").length,
+                        "costs",
+                        true,
+                        () => markupLanded(plan.pct),
+                        plan.confirmNote,
+                      );
+                    }}
+                    disabled={pending}
+                  >
                     Materials from Costs
                   </Button>
-                  <span onBlur={applyMarkup} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLElement).blur(); }}>
-                    <NumberInput value={markup} onValueChange={(v) => setMarkup(v)} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
-                  </span>
-                  <span className="text-xs text-slate-400">% markup</span>
+                  <MarkupBox
+                    value={box.value}
+                    applied={box.applied}
+                    canApply={costsImported}
+                    pending={pending}
+                    words={markupBoxWords(markupSeed, levelMarkupPct != null ? customerName : null)}
+                    onChange={(v) => setBox((b) => ({ ...b, value: v }))}
+                    onApply={applyMarkup}
+                  />
                 </div>
                 {/* APPROVED EXTRAS. Until now a change order's amount was read by nothing in the
                     app — you could raise one, get it signed, mark it approved, and the money
@@ -969,18 +1009,23 @@ export function InvoiceDetail({
                   type="button"
                   disabled={pending}
                   onClick={() => {
+                    const src = stuckSource;
+                    const plan = materialsImportPlan(box, markupSeed);
+                    const pct = plan.pct;
                     if (
                       !confirm(
-                        "Start this import over? Every line from this import is removed and rebuilt from the source — including ones you edited or deleted. Hand-entered lines are untouched.",
+                        "Start this import over? Every line from this import is removed and rebuilt from the source — including ones you edited or deleted. Hand-entered lines are untouched." +
+                          (src === "costs" ? `\n\n${plan.rebuildNote}` : ""),
                       )
                     )
                       return;
-                    const src = stuckSource;
                     runImport(
-                      (id) => reimportFromScratch(id, src, src === "costs" ? markup : undefined),
+                      (id) => reimportFromScratch(id, src, src === "costs" ? pct : undefined),
                       src === "labor" ? "Labor" : src === "costs" ? "Materials" : "Estimate items",
                       0,
                       src,
+                      true,
+                      src === "costs" ? () => markupLanded(pct) : undefined,
                     );
                   }}
                   className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"

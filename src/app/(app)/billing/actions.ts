@@ -28,7 +28,7 @@ import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { planLaborOffer, type OwnLaborLine } from "@/lib/labor-offer";
-import { markupOnInvoice, type InvoiceCostLine } from "@/lib/invoice-markup";
+import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
@@ -1028,47 +1028,8 @@ export async function addInvoiceItem(
  *  estimate line). Another invoice on the job never imports a claimed row. */
 type ImportRow = { import_key: string; description: string; quantity: number; unit: string; unit_price: number; source_ids?: string[] };
 
-/**
- * A BILL'S LINES, WITH THE ONE COLUMN THAT DECIDES WHO PAYS FOR THEM.
- *
- * `billable` (0268) has to be in the projection or the importer cannot tell Erik's Smartwater from
- * his wire — and the projection law says it every time: the failure is always a select list. The
- * retry is the cn-v576 deploy-window shape (a push lands before its migration runs, and a select
- * naming a column that isn't there yet fails the WHOLE read, which would take the materials
- * importer down for those minutes). Falling back leaves `billable` undefined on every row, which
- * the arithmetic reads as billable — exactly the behaviour of the minute before 0268.
- */
-async function billLinesForBills(
-  supabase: { from: (t: string) => any },
-  billIds: string[],
-): Promise<{ lines: any[]; error?: string }> {
-  if (!billIds.length) return { lines: [] };
-  const read = (withBillable: boolean) =>
-    supabase
-      .from("bill_line_items")
-      // THE PROJECTION LAW, ON THE ONE READ THAT DECIDES WHAT A CUSTOMER PAYS (all three reviewers
-      // of cn-v964). This is the ONLY feeder of billItemisation in production. `billed_amount`
-      // (0272) was missing from it, so every split Erik made was invisible here: the Bills card
-      // would say "$13.00 of it billed to this job" and the invoice would import $135.00 for the
-      // whole box - the screen disagreeing with the database, which is the exact bug the last three
-      // nights of work exist to end. It rides on the same rung as `billable` because both are the
-      // receipt line's states and a database missing one is already in the fallback case.
-      .select(`id, bill_id, description, quantity, unit_price, amount, category, sort_order${withBillable ? ", billable, billed_amount" : ""}`)
-      .in("bill_id", billIds)
-      .order("sort_order");
-  let res = await read(true);
-  if (res.error && isMissingColumn(res.error, "billable")) res = await read(false);
-  if (res.error) {
-    // A FAILED READ IS NOT AN EMPTY RECEIPT (audit 8), AND SINCE 0268 IT IS A MONEY QUESTION.
-    // This used to shrug: no rows meant every bill billed as its opaque lump, which was merely
-    // coarse. Now a lost read would silently re-charge the customer for the lines Erik switched
-    // off — the exact leak 0268 closed — so the import refuses instead. Nothing is written, the
-    // retry costs a tap, and an invented figure costs his word to a customer.
-    reportError("materialsImport.billLines", res.error, { bills: billIds.length });
-    return { lines: [], error: "Couldn't read this job's receipts just now, so nothing was imported - try again in a moment." };
-  }
-  return { lines: (res.data ?? []) as any[] };
-}
+// A bill's lines (with 0268 billable / 0272 billed_amount) are read by lib/invoice-markup-read's
+// readBillLines - the same read the invoice page's % box uses to say what the lines are priced at.
 
 /**
  * ADDITIVE import (migration 0175). Matches incoming rows against what is already on the
@@ -1625,8 +1586,9 @@ export async function importCostsIntoInvoice(
  * `keepInvoiceMarkup` is for the doors that bring an EXISTING draft up to date ("Add to INV-078",
  * Request Next Payment, New Invoice landing on a draft): the markup the invoice's own untouched
  * lines are priced at wins over `markupPercent` (lib/invoice-markup), so a % the office typed on
- * the invoice is not quietly put back to the customer's default by the next refresh. The % box on
- * the invoice itself never sets it - there the office is choosing the markup.
+ * the invoice is not quietly put back to the customer's default by the next refresh. On the invoice
+ * itself, Materials from Costs sets it too unless a number was typed in the % box: only a typed
+ * number is the office choosing the markup (lib/invoice-markup materialsImportPlan).
  */
 async function importCostsCore(
   invoiceId: string,
@@ -1694,33 +1656,22 @@ async function importCostsCore(
   // still imports as its lump.
   const [claims, blis] = await Promise.all([
     claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [...((pos ?? []) as any[]).map((p) => String(p.id)), ...billIds]),
-    billLinesForBills(supabase, billIds),
+    readBillLines(supabase, billIds),
   ]);
   if (blis.error) return { ok: false, error: blis.error };
   // THE INVOICE'S OWN MARKUP, READ BACK FROM ITS LINES (see keepInvoiceMarkup above). A lost read
-  // is not "no lines": refuse, nothing written - repricing on a guess is the bug this closes.
+  // is not "no lines": refuse, nothing written - repricing on a guess is the bug this closes. The
+  // read is lib/invoice-markup-read's, the same one the invoice page seeds its % box from, handed
+  // the bills, orders and receipt lines this run is about to price.
   let keptMarkup: number | null = null;
   if (keepInvoiceMarkup) {
-    const [own, tomb] = await Promise.all([
-      supabase.from("invoice_items").select("import_key, source_ids, line_total, edited").eq("invoice_id", invoiceId).eq("import_source", "costs"),
-      supabase.from("invoices").select("dismissed_import_keys").eq("id", invoiceId).maybeSingle(),
-    ]);
-    if (own.error || tomb.error) {
-      reportError("importCosts.invoiceMarkup", own.error ?? tomb.error, { invoiceId });
-      return { ok: false, error: "Couldn't read this invoice's materials lines just now, so nothing was imported - try again in a moment." };
-    }
-    const byBill = new Map<string, any[]>();
-    for (const l of blis.lines) {
-      if (!byBill.has(l.bill_id)) byBill.set(l.bill_id, []);
-      byBill.get(l.bill_id)!.push(l);
-    }
-    const found = markupOnInvoice({
-      lines: (own.data ?? []) as InvoiceCostLine[],
-      dismissed: new Set(((tomb.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []).map(String)),
+    const own = await readInvoiceMarkup(supabase, invoiceId, inv.job_id, {
       bills: ((bills ?? []) as any[]).map((b) => ({ id: String(b.id), amount: b.amount })),
-      linesByBill: byBill,
       pos: ((pos ?? []) as any[]).map((p) => ({ id: String(p.id), total: p.total })),
+      linesByBill: linesByBillId(blis.lines),
     });
+    if (!own.ok) return { ok: false, error: own.error };
+    const found = own.reading.kind === "one" ? own.reading.pct : null;
     if (found !== null && Math.abs(found - (Number(markup) || 0)) > 0.05) {
       keptMarkup = found;
       markup = found;
