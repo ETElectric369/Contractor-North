@@ -8,8 +8,10 @@ import {
   markupBoxWords,
   markupOnInvoice,
   markupReading,
+  materialsImportPlan,
   type InvoiceCostLine,
 } from "./invoice-markup";
+import { billItemisation, type BillLine } from "./bill-itemisation";
 
 /** INV-078's untouched CED bills on 2026-09-24: $199.48 → $229.40, $150.27 → $172.81, $103.99 →
  *  $119.59 - every one at 15.00% (read from Erik's database). */
@@ -129,5 +131,93 @@ describe("the % box's state: opening the page never reprices, a refresh never un
     const typedAgain = markupBoxApplied({ value: 25, applied: 11, appliedHere: false }, 20);
     expect(typedAgain).toEqual({ value: 25, applied: 20, appliedHere: true });
     expect(markupBoxTyped(typedAgain)).toBe(true);
+  });
+});
+
+describe("a receipt that changed after its lines were written is not read as a markup (review of this branch)", () => {
+  // One $100 receipt: $80 of wire and $20 of snacks, imported at 11% as $88.80 and $22.20.
+  const receipt: BillLine[] = [
+    { id: "wire", amount: 80, quantity: 1, category: "Electrical" },
+    { id: "snacks", amount: 20, quantity: 1, category: "Electrical" },
+  ];
+  const imported = billItemisation({ id: "b-1", amount: 100 }, receipt, 11).map(
+    (r): InvoiceCostLine => ({ import_key: r.import_key, source_ids: ["b-1"], line_total: r.quantity * r.unit_price, edited: false }),
+  );
+  const oneBill = (amount: unknown, lines: BillLine[]) => ({
+    lines: imported,
+    dismissed: new Set<string>(),
+    bills: [{ id: "b-1", amount }],
+    linesByBill: new Map([["b-1", lines]]),
+    pos: [] as { id: string; total: unknown }[],
+  });
+
+  it("as imported: 11", () => {
+    expect(markupReading(oneBill(100, receipt))).toEqual({ kind: "one", pct: 11 });
+  });
+
+  it("the snacks switched off after the import: no reading, so the box never seeds 38.7 and re-bills them", () => {
+    const reading = markupReading(oneBill(100, [receipt[0], { ...receipt[1], billable: false }]));
+    expect(reading).toEqual({ kind: "none" });
+    const seed = markupBoxSeed(reading, 15);
+    expect(seed.pct).not.toBe(38.7);
+    expect(seed.source).toBe("usual");
+  });
+
+  it("a supplier credit off the bill's amount after the import: no reading", () => {
+    expect(markupReading(oneBill(90, receipt))).toEqual({ kind: "none" });
+  });
+
+  it("beside bills that did not change, the changed one drops out and the rest still say 11", () => {
+    const other: BillLine[] = [{ id: "o1", amount: 150, quantity: 1, category: "Electrical" }];
+    const otherRows = billItemisation({ id: "b-2", amount: 150 }, other, 11).map(
+      (r): InvoiceCostLine => ({ import_key: r.import_key, source_ids: ["b-2"], line_total: r.quantity * r.unit_price, edited: false }),
+    );
+    expect(
+      markupReading({
+        lines: [...imported, ...otherRows],
+        dismissed: new Set(),
+        bills: [{ id: "b-1", amount: 100 }, { id: "b-2", amount: 150 }],
+        linesByBill: new Map([["b-1", [receipt[0], { ...receipt[1], billable: false }]], ["b-2", other]]),
+        pos: [],
+      }),
+    ).toEqual({ kind: "one", pct: 11 });
+  });
+
+  it("a lump bill whose amount grew reads below zero: that is no markup, never a seed", () => {
+    const reading = markupReading({ ...base, lines: [line("b-1", 110)], bills: [{ id: "b-1", amount: 120 }] });
+    expect(reading).toEqual({ kind: "mixed" });
+    expect(markupBoxSeed(reading, 15).pct).toBe(15);
+  });
+});
+
+describe("what Materials from Costs sends (review of this branch)", () => {
+  it("a failed read: the usual is never sent as a decision - the import keeps the lines' markup or refuses", () => {
+    const seed = markupBoxSeed("unread", 15);
+    const plan = materialsImportPlan(markupBoxStart(seed), seed);
+    expect(plan.pct).toBe(15);
+    expect(plan.keepInvoiceMarkup).toBe(true);
+    expect(plan.confirmNote).toMatch(/couldn't read/);
+    expect(plan.rebuildNote).toMatch(/rebuilt at 15%.*check that figure/);
+  });
+
+  it("lines at different markups: keeps what it can, and the confirm names the percent the rest land at", () => {
+    const seed = markupBoxSeed({ kind: "mixed" }, 15);
+    const plan = materialsImportPlan(markupBoxStart(seed), seed);
+    expect(plan.keepInvoiceMarkup).toBe(true);
+    expect(plan.confirmNote).toBe("Lines are at different markups - this prices every untouched materials line at 15%.");
+  });
+
+  it("INV-078 at 11%, nothing typed: 11, kept", () => {
+    const seed = markupBoxSeed({ kind: "one", pct: 11 }, 15);
+    const plan = materialsImportPlan(markupBoxStart(seed), seed);
+    expect(plan).toMatchObject({ pct: 11, keepInvoiceMarkup: true });
+    expect(plan.confirmNote).toMatch(/stay at 11%/);
+  });
+
+  it("a number the person typed is the one decision sent as-is", () => {
+    const seed = markupBoxSeed("unread", 15);
+    const plan = materialsImportPlan({ ...markupBoxStart(seed), value: 11 }, seed);
+    expect(plan).toMatchObject({ pct: 11, keepInvoiceMarkup: false });
+    expect(plan.confirmNote).toMatch(/repriced at 11%, the markup you typed/);
   });
 });

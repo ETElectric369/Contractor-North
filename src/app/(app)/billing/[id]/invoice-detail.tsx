@@ -14,7 +14,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
 import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet } from "@/lib/invoice-math";
 import { processorFeeLabel } from "@/lib/processor-fee";
-import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, type MarkupSeed } from "@/lib/invoice-markup";
+import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
 import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 import { LineItemText } from "@/components/line-item-text";
 import { CostBreakdown } from "@/components/cost-breakdown";
@@ -377,7 +377,6 @@ export function InvoiceDetail({
     setSeenSeed(markupSeed);
     setBox((b) => markupBoxOnSeed(b, markupSeed));
   }
-  const markup = box.value;
   const costsImported = items.some((i) => i.import_source === "costs");
   /** The lines were just set to `pct` from here (an import that landed). */
   const markupLanded = (pct: number) => setBox((b) => markupBoxApplied(b, pct));
@@ -404,6 +403,8 @@ export function InvoiceDetail({
     askFirst = true,
     /** Runs when the import landed, before the refresh (the % box records the markup it used). */
     onOk?: () => void,
+    /** One more sentence for the confirm - the markup the materials land at (materialsImportPlan). */
+    confirmNote?: string,
   ) {
     if (replacing > 0 && askFirst) {
       // Truthful since 0175 (imports became additive): hand-edited lines are NEVER overwritten —
@@ -413,6 +414,7 @@ export function InvoiceDetail({
           `This refreshes the ${replacing} ${label.toLowerCase()} line${replacing === 1 ? "" : "s"} ` +
           `already on ${invoice.invoice_number} from whatever the job holds right now. ` +
           `Lines you edited by hand are kept exactly as you set them; anything added to the job since is pulled in.\n\n` +
+          (confirmNote ? `${confirmNote}\n\n` : "") +
           `Current total: ${formatCurrency(Number(invoice.total))}`,
       );
       if (!ok) return;
@@ -948,8 +950,20 @@ export function InvoiceDetail({
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      const pct = markup;
-                      runImport((id) => importCostsIntoInvoice(id, pct), "Materials", items.filter((i) => i.import_source === "costs").length, "costs", true, () => markupLanded(pct));
+                      /* A typed number is sent as the decision; otherwise the import keeps the
+                         markup the lines are at and refuses on a failed read, so a box that is
+                         only showing the usual (lines disagree, or the page couldn't read them)
+                         never reprices the invoice to it unnamed (materialsImportPlan). */
+                      const plan = materialsImportPlan(box, markupSeed);
+                      runImport(
+                        (id) => importCostsIntoInvoice(id, plan.pct, plan.keepInvoiceMarkup ? { keepInvoiceMarkup: true } : undefined),
+                        "Materials",
+                        items.filter((i) => i.import_source === "costs").length,
+                        "costs",
+                        true,
+                        () => markupLanded(plan.pct),
+                        plan.confirmNote,
+                      );
                     }}
                     disabled={pending}
                   >
@@ -995,14 +1009,16 @@ export function InvoiceDetail({
                   type="button"
                   disabled={pending}
                   onClick={() => {
+                    const src = stuckSource;
+                    const plan = materialsImportPlan(box, markupSeed);
+                    const pct = plan.pct;
                     if (
                       !confirm(
-                        "Start this import over? Every line from this import is removed and rebuilt from the source — including ones you edited or deleted. Hand-entered lines are untouched.",
+                        "Start this import over? Every line from this import is removed and rebuilt from the source — including ones you edited or deleted. Hand-entered lines are untouched." +
+                          (src === "costs" ? `\n\n${plan.rebuildNote}` : ""),
                       )
                     )
                       return;
-                    const src = stuckSource;
-                    const pct = markup;
                     runImport(
                       (id) => reimportFromScratch(id, src, src === "costs" ? pct : undefined),
                       src === "labor" ? "Labor" : src === "costs" ? "Materials" : "Estimate items",

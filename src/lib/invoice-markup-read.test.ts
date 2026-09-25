@@ -4,6 +4,7 @@ vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
 import { readInvoiceMarkup } from "./invoice-markup-read";
 import { markupBoxSeed, markupBoxStart, markupBoxWords } from "./invoice-markup";
+import { billItemisation } from "./bill-itemisation";
 
 /**
  * THE ONE READ BEHIND "WHAT IS THIS INVOICE PRICED AT" (2026-09-25). The importer's
@@ -59,7 +60,20 @@ const BILLS: { id: string; amount: string; lines: [number, boolean, string][]; i
   { id: "e2380fc9", amount: "323.71", lines: [[32.46, true, "Electrical"], [6.92, true, "Electrical"], [4.22, true, "Electrical"], [184.88, true, "Electrical"], [58.79, true, "Electrical"], [6.64, true, "Electrical"], [3.07, true, "Electrical"], [26.73, true, "Tax"]], inv: [[36.03, false], [7.68, false], [4.68, false], [205.2, false], [65.26, false], [7.37, false], [3.41, false], [29.69, false]] },
 ];
 
-function inv078(overrides: { inv?: (b: (typeof BILLS)[number]) => [number, boolean][] } = {}) {
+/** A bill's rows as the importer writes them at `pct` over its receipt lines as they stand. */
+function importedAt(b: (typeof BILLS)[number], pct: number): Row[] {
+  const lines = b.lines.map(([amount, billable, category], i) => ({ id: `${b.id}-l${i}`, amount, billable, category }));
+  return billItemisation({ id: b.id, amount: b.amount }, lines, pct).map((r) => ({
+    invoice_id: INV,
+    import_source: "costs",
+    import_key: r.import_key,
+    source_ids: [b.id],
+    line_total: Math.round(r.quantity * r.unit_price * 100) / 100,
+    edited: false,
+  }));
+}
+
+function inv078(overrides: { inv?: (b: (typeof BILLS)[number]) => [number, boolean][]; rows?: (b: (typeof BILLS)[number]) => Row[] | null } = {}) {
   const bills: Row[] = [];
   const bill_line_items: Row[] = [];
   const invoice_items: Row[] = [];
@@ -68,6 +82,11 @@ function inv078(overrides: { inv?: (b: (typeof BILLS)[number]) => [number, boole
     b.lines.forEach(([amount, billable, category], i) =>
       bill_line_items.push({ id: `${b.id}-l${i}`, bill_id: b.id, amount, billable, billed_amount: null, category, sort_order: i }),
     );
+    const keyed = overrides.rows?.(b);
+    if (keyed) {
+      invoice_items.push(...keyed);
+      continue;
+    }
     const rows = overrides.inv ? overrides.inv(b) : b.inv;
     rows.forEach(([line_total, edited], i) =>
       invoice_items.push({ invoice_id: INV, import_source: "costs", import_key: i === rows.length - 1 ? `bill:${b.id}:remainder` : `bli:${b.id}-l${i}`, source_ids: [b.id], line_total, edited }),
@@ -109,19 +128,27 @@ describe("readInvoiceMarkup — the importer's read, shared with the % box", () 
   it("bills at different markups: no single answer - the box says so and starts at the customer's level", async () => {
     // Half the untouched bills put back to 15%, half left at 11%.
     const at15 = new Set(["11e96fc3", "15b0e967"]);
-    const { db } = fakeDb(
-      inv078({
-        inv: (b) =>
-          at15.has(b.id)
-            ? [[Math.round(Number(b.amount) * 1.15 * 100) / 100, false]]
-            : b.inv,
-      }),
-    );
+    const { db } = fakeDb(inv078({ rows: (b) => (at15.has(b.id) ? importedAt(b, 15) : null) }));
     const read = await readInvoiceMarkup(db, INV, JOB);
     expect(read).toEqual({ ok: true, reading: { kind: "mixed" } });
     const seed = markupBoxSeed(read.ok ? read.reading : "unread", 15);
     expect(seed).toEqual({ pct: 15, source: "mixed", usualPct: 15 });
     expect(markupBoxWords(seed, "Andrew Cohen").main).toBe("Lines are at different markups");
+  });
+
+  it("a receipt changed after the import has no vote: the rest of INV-078 still reads 11, never the changed bill's ratio", async () => {
+    // 15b0e967's $52.95 line switched off after it was imported at 11%: its row is still on the
+    // invoice, so the bill's rows over its cost now read ~66% - not a markup anyone set.
+    const t = inv078();
+    const off = t.bill_line_items.find((l) => l.id === "15b0e967-l1")!;
+    off.billable = false;
+    const { db } = fakeDb(t);
+    expect(await readInvoiceMarkup(db, INV, JOB)).toEqual({ ok: true, reading: { kind: "one", pct: 11 } });
+    // A supplier credit on another bill's amount, the same.
+    const t2 = inv078();
+    t2.bills.find((b) => b.id === "e2380fc9")!.amount = "283.71";
+    const { db: db2 } = fakeDb(t2);
+    expect(await readInvoiceMarkup(db2, INV, JOB)).toEqual({ ok: true, reading: { kind: "one", pct: 11 } });
   });
 
   it("a lost read is a refusal, never 'no lines'", async () => {

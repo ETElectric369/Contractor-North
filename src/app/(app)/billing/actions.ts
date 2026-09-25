@@ -1586,8 +1586,9 @@ export async function importCostsIntoInvoice(
  * `keepInvoiceMarkup` is for the doors that bring an EXISTING draft up to date ("Add to INV-078",
  * Request Next Payment, New Invoice landing on a draft): the markup the invoice's own untouched
  * lines are priced at wins over `markupPercent` (lib/invoice-markup), so a % the office typed on
- * the invoice is not quietly put back to the customer's default by the next refresh. The % box on
- * the invoice itself never sets it - there the office is choosing the markup.
+ * the invoice is not quietly put back to the customer's default by the next refresh. On the invoice
+ * itself, Materials from Costs sets it too unless a number was typed in the % box: only a typed
+ * number is the office choosing the markup (lib/invoice-markup materialsImportPlan).
  */
 async function importCostsCore(
   invoiceId: string,
