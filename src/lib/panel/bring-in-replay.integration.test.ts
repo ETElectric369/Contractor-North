@@ -72,6 +72,8 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
         panels: [],
         circuits: [],
         photos: [],
+        plans: [],
+        walkthrough: null,
         people: {},
         estimates: offerEstimates(J011, job.customer_id, quotes, []),
       };

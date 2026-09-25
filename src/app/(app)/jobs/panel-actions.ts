@@ -20,11 +20,18 @@ import {
 } from "@/lib/panel/model";
 import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch, type CircuitPatch } from "@/lib/panel/input";
 import { decodeBreaker, decodeCode } from "@/lib/panel/breaker-catalog";
+import { PANEL_SAYS, PLANS_SAY, headerSuggestions, readerSummary, readerSuggestions, walkthroughSaid, type HeaderSaid, type HeaderSuggestion } from "@/lib/panel/readers";
+import { PHOTO_MAX_BYTES, PHOTO_READS_PER_JOB_PER_DAY, photoMime, readPanelPhotoWithModel } from "@/lib/panel/read-panel-photo";
+import { PLAN_MAX_BYTES, PLAN_READS_PER_JOB_PER_DAY, planMedia, readPlanWithModel } from "@/lib/panel/read-plan-circuits";
+import { writeSuggestions } from "@/lib/panel/suggest-write";
+import { getAnthropic } from "@/lib/anthropic";
+import { aiSpendExceeded, modelFor } from "@/lib/ai-cost";
+import { rateLimited } from "@/lib/rate-limit";
 import { lineKey, type BreakerLine, type ListLine, type ShelfLine } from "@/lib/panel/breakers";
 import { normalisePartNumber } from "@/lib/shelf-plan";
 import { formatCurrency } from "@/lib/utils";
 import { addMaterialItem, deleteMaterialItem, ensureJobMaterialList } from "@/app/(app)/materials/actions";
-import type { CircuitKind, CircuitProgress, JobCircuit, JobPanel, QuoteCircuit, SpaceHalf } from "@/lib/types";
+import type { CircuitKind, CircuitProgress, CircuitReadPatch, JobCircuit, JobPanel, QuoteCircuit, SpaceHalf } from "@/lib/types";
 
 /**
  * THE PANEL TAB'S SERVER DOORS (Panel plan, phases 1-2; migration 0333).
@@ -200,6 +207,11 @@ export type PanelLoad =
       /** The office only: estimates this job can bring circuits in from. Never sent to a tech. */
       estimates: PanelEstimate[];
       photos: { id: string; name: string | null; created_at: string }[];
+      /** The office only: the Plan papers Read Circuits From The Plans can read (this job's, and
+       *  its customer's that aren't on another job yet). Never sent to a tech. */
+      plans: { id: string; name: string | null; created_at: string; onCustomer: boolean }[];
+      /** What the walk-through said about the panel, for header suggestions (null when nothing). */
+      walkthrough: { said: HeaderSaid; words: string | null } | null;
       people: Record<string, string>;
     }
   | Fail;
@@ -223,7 +235,11 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
 
   // THE ESTIMATE FINDER RUNS IN AN OFFICE SESSION ONLY: a tech's page never carries it (an estimate
   // is the office's paper), and the door it feeds is the office's.
-  const estimates = m.staff ? await findEstimates(m, job, circuits) : [];
+  const [estimates, plans, walkthrough] = await Promise.all([
+    m.staff ? findEstimates(m, job, circuits) : Promise.resolve([] as PanelEstimate[]),
+    m.staff ? findPlans(m, job) : Promise.resolve([] as { id: string; name: string | null; created_at: string; onCustomer: boolean }[]),
+    walkthroughOf(m, job),
+  ]);
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
   // The viewer rides along, so a mark they make now ("Verified On Site By Brian") has its name.
@@ -239,8 +255,45 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
     circuits,
     estimates,
     photos: ((phRes.data ?? []) as { id: string; name: string | null; created_at: string }[]),
+    plans,
+    walkthrough,
     people,
   };
+}
+
+/** The Plan papers the office can read circuits from: this job's, then its customer's that sit on
+ *  no job (the estimator's Upload Plans keeps them on the customer). Newest first. */
+async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: string | null; created_at: string; onCustomer: boolean }[]> {
+  let q = m.supabase.from("documents").select("id, name, created_at, job_id").eq("org_id", m.orgId).eq("category", "Plan");
+  q = job.customer_id ? q.or(`job_id.eq.${job.id},and(job_id.is.null,customer_id.eq.${job.customer_id})`) : q.eq("job_id", job.id);
+  const { data, error } = await q.order("created_at", { ascending: false }).limit(40);
+  if (error) reportError("panel.findPlans", error, { jobId: job.id });
+  return ((data ?? []) as { id: string; name: string | null; created_at: string; job_id: string | null }[]).map((d) => ({
+    id: d.id,
+    name: d.name,
+    created_at: d.created_at,
+    onCustomer: d.job_id == null,
+  }));
+}
+
+/** What the walk-through's inspector said about the panel (panel_brand, panel_amps, the one-box
+ *  panel_condition), from this job's visits, newest first. Shown as suggestions; never written. */
+async function walkthroughOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid; words: string | null } | null> {
+  const { data, error } = await m.supabase
+    .from("appointments")
+    .select("inspection_answers, starts_at")
+    .eq("org_id", m.orgId)
+    .eq("job_id", job.id)
+    .not("inspection_answers", "is", null)
+    .order("starts_at", { ascending: false })
+    .limit(5);
+  if (error) {
+    reportError("panel.walkthroughOf", error, { jobId: job.id });
+    return null;
+  }
+  const answers = ((data ?? []) as { inspection_answers: Record<string, unknown> | null }[]).map((a) => a.inspection_answers ?? {});
+  const w = walkthroughSaid(answers);
+  return w.words || w.said.brand || w.said.main_amps ? w : null;
 }
 
 /** The office's bar: this job's own estimates, then the same customer's with no job yet (never a
@@ -512,9 +565,25 @@ export type KeepResult = { ok: true; rows: JobCircuit[]; skipped: { id: string; 
 export async function keepSuggestions(jobId: string, ids: string[], keep = true): Promise<KeepResult> {
   const m = await member();
   if ("error" in m) return m;
-  const want = [...new Set((ids ?? []).filter(isUuid))];
+  let want = [...new Set((ids ?? []).filter(isUuid))];
   if (!want.length) return { ok: false, error: "Nothing to keep." };
   if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  // A LABEL CHECK IS NOT A CIRCUIT (lib/panel/readers): kept, it would put the circuit it is about on
+  // the list twice. It is named and left alone; its own doors are Use What It Says and Not This.
+  const skipped: { id: string; error: string }[] = [];
+  if (keep) {
+    const { data: flags } = await m.supabase
+      .from("job_circuits")
+      .select("id, source_row")
+      .in("id", want)
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .not("source_row->>flag_for", "is", null);
+    const flagIds = new Set(((flags ?? []) as { id: string }[]).map((f) => f.id));
+    for (const id of flagIds) skipped.push({ id, error: "That one is a label check, not a circuit. Use What It Says, or Not This." });
+    want = want.filter((id) => !flagIds.has(id));
+    if (!want.length) return { ok: true, rows: [], skipped };
+  }
   const from = keep ? "suggested" : "kept";
   const to = keep ? "kept" : "suggested";
   const batch = await m.supabase
@@ -527,7 +596,6 @@ export async function keepSuggestions(jobId: string, ids: string[], keep = true)
     .is("removed_at", null)
     .select(CIRCUIT_COLS);
   let rows: JobCircuit[] = [];
-  const skipped: { id: string; error: string }[] = [];
   if (!batch.error) {
     rows = (batch.data ?? []) as JobCircuit[];
   } else if (schemaMissing(batch.error)) {
@@ -993,4 +1061,263 @@ export async function placeBoughtBreaker(jobId: string, panelId: string, parts: 
   touched(jobId);
   ringIfCrew(m, jobId);
   return { ok: true, rows, moved, added, problems };
+}
+
+// ── the readers (phase 4): the panel photo, the plans, and the label checks they raise ───────────
+
+export type ReadResult =
+  | {
+      ok: true;
+      rows: JobCircuit[];
+      /** "Read 9 circuits off the photo: 6 New Suggestions, 1 Label Check, 2 Already On Your List." */
+      message: string;
+      /** What the reader couldn't read or count, in plain words: said, never dropped. */
+      notes: string[];
+      /** What it said about the panel itself, each with its own Use (nothing is written by a read). */
+      header: HeaderSuggestion[];
+    }
+  | Fail;
+
+const AI_NOT_SET_UP = "Reading isn't set up on this server yet. Add the circuits by hand below.";
+const SPENT = "This month's AI budget is used up. Add the circuits by hand below; it resets next month.";
+
+/** The model's failure as plain words: a missing key is the server's, anything else is one read. */
+function readFailure(e: unknown, what: string): Fail {
+  const message = e instanceof Error ? e.message : "";
+  if (/ANTHROPIC_API_KEY/i.test(message)) return { ok: false, error: AI_NOT_SET_UP };
+  return { ok: false, error: `${what} couldn't be read this time. Nothing was added. Try again in a minute.` };
+}
+
+/** Every circuit on the job, set-aside ones too: their keys keep a Not This from coming back. */
+async function allCircuits(m: Member, jobId: string): Promise<JobCircuit[] | Fail> {
+  const { data, error } = await m.supabase.from("job_circuits").select(CIRCUIT_COLS).eq("job_id", jobId).eq("org_id", m.orgId);
+  if (error) return fail(error, "The circuits couldn't load.");
+  return (data ?? []) as JobCircuit[];
+}
+
+/**
+ * READ THE PANEL PHOTO (the crew and the office; Erik's decision 1). One photo from this job's
+ * Photos goes to the model; what it reads comes back as SUGGESTIONS on the list (new circuits it saw
+ * that the list doesn't have), LABEL CHECKS (a circuit on the list whose door words, space or amps
+ * the photo says differently: "Panel Says Mini Fridge, Your List Says Fridge"), and header
+ * suggestions for the panel itself. Nothing kept is ever changed by a read.
+ *
+ * THE CAP AND THE COST: three reads per job per day (a few cents each), counted before the model is
+ * called and only after the photo has been found and opened, so a photo that can't be read never
+ * uses one up. The org's monthly AI ceiling is checked first. Both are said in plain words, with the
+ * way forward (add them by hand).
+ */
+export async function readPanelPhoto(jobId: string, documentId: string, panelId: string | null = null): Promise<ReadResult> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  if (!isUuid(documentId)) return { ok: false, error: "Pick the photo from this job's Photos." };
+  const { data: doc } = await m.supabase
+    .from("documents")
+    .select("id, name, file_url, size_bytes")
+    .eq("id", documentId)
+    .eq("job_id", jobId)
+    .eq("org_id", m.orgId)
+    .eq("category", "Photo")
+    .maybeSingle();
+  const d = doc as { id: string; name: string | null; file_url: string | null; size_bytes: number | null } | null;
+  if (!d || !d.file_url) return { ok: false, error: "Pick the photo from this job's Photos." };
+  const mime = photoMime(d.name, d.file_url);
+  if (!mime) return { ok: false, error: "Only a JPG, PNG, WebP or GIF photo can be read. Take the photo again with the camera." };
+
+  let panel: JobPanel | null = null;
+  if (panelId) {
+    if (!isUuid(panelId)) return { ok: false, error: "That panel isn't on this job." };
+    const { data: p } = await m.supabase.from("job_panels").select(PANEL_COLS).eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).maybeSingle();
+    if (!p) return { ok: false, error: "That panel isn't on this job." };
+    panel = p as JobPanel;
+  } else {
+    const only = await onlyPanelOf(m, jobId);
+    if (only) {
+      const { data: p } = await m.supabase.from("job_panels").select(PANEL_COLS).eq("id", only).eq("org_id", m.orgId).maybeSingle();
+      panel = (p as JobPanel | null) ?? null;
+    }
+  }
+
+  const { data: blob, error: dlErr } = await m.supabase.storage.from("documents").download(d.file_url);
+  if (dlErr || !blob) return { ok: false, error: "That photo couldn't be opened. Try another one, or take it again." };
+  if (blob.size > PHOTO_MAX_BYTES) return { ok: false, error: "That photo is too big to read (over 5 MB). Take it again with the camera; the app shrinks new photos." };
+
+  if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
+  if (await rateLimited(`panel-photo:${jobId}`, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
+    return {
+      ok: false,
+      error: `The panel photo has been read ${PHOTO_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow; add the rest by hand below.`,
+    };
+  }
+
+  let reading;
+  try {
+    const r = await readPanelPhotoWithModel({
+      client: getAnthropic(),
+      model: modelFor("reasoning"),
+      mime,
+      base64: Buffer.from(await blob.arrayBuffer()).toString("base64"),
+      orgId: m.orgId,
+    });
+    if (!r.ok) return r;
+    reading = r.reading;
+  } catch (e) {
+    reportError("panel.readPanelPhoto", e, { jobId, documentId });
+    return readFailure(e, "The photo");
+  }
+
+  const circuits = await allCircuits(m, jobId);
+  if (!Array.isArray(circuits)) return circuits;
+  const outcome = readerSuggestions({
+    source: "photo",
+    rows: reading.rows,
+    circuits,
+    panelId: panel?.id ?? null,
+    says: PANEL_SAYS,
+    startSort: 0,
+    stamp: { document_name: d.name },
+  });
+  const wrote = await writeSuggestions(m.supabase, { orgId: m.orgId, jobId, panelId: panel?.id ?? null, documentId: d.id, drafts: outcome.drafts, cols: CIRCUIT_COLS });
+  if (!wrote.ok) return fail({ code: wrote.code, message: wrote.error }, "The suggestions didn't save.");
+  if (wrote.rows.length) touched(jobId);
+  return {
+    ok: true,
+    rows: wrote.rows,
+    message: readerSummary("the photo", reading.rows.length, outcome) + (reading.rows.length ? "" : " Try a closer, straighter photo of the door's list."),
+    notes: reading.unreadable,
+    header: headerSuggestions(panel, reading.header, "The Panel Photo"),
+  };
+}
+
+/**
+ * READ CIRCUITS FROM THE PLANS (the office only). One Plan paper of this job's, or of its customer's
+ * that sits on no job yet (the estimator's Upload Plans keeps them there), read for its panel
+ * schedules and electrical sheets. Its circuits come back as suggestions from the plans; a sheet it
+ * couldn't count is named ("MPE-1 Was Too Dense To Count"). Five reads per job per day.
+ */
+export async function readPlanCircuits(jobId: string, documentId: string): Promise<ReadResult> {
+  const m = await office();
+  if ("error" in m) return m;
+  const job = await jobOf(m, jobId);
+  if (!job) return { ok: false, error: "That job isn't in your book." };
+  if (!isUuid(documentId)) return { ok: false, error: "Pick one of this job's plans." };
+  const { data: doc } = await m.supabase
+    .from("documents")
+    .select("id, name, file_url, size_bytes, job_id, customer_id, category")
+    .eq("id", documentId)
+    .eq("org_id", m.orgId)
+    .maybeSingle();
+  const d = doc as { id: string; name: string | null; file_url: string | null; size_bytes: number | null; job_id: string | null; customer_id: string | null; category: string | null } | null;
+  const belongs = !!d && (d.job_id === jobId || (d.job_id == null && !!job.customer_id && d.customer_id === job.customer_id));
+  if (!d || !belongs || d.category !== "Plan" || !d.file_url) return { ok: false, error: "Pick one of this job's plans." };
+  const media = planMedia(d.name, d.file_url);
+  if (!media) return { ok: false, error: "Only a PDF, or a photo of a sheet, can be read." };
+
+  const { data: blob, error: dlErr } = await m.supabase.storage.from("documents").download(d.file_url);
+  if (dlErr || !blob) return { ok: false, error: "Those plans couldn't be opened. Try another copy." };
+  if (blob.size > PLAN_MAX_BYTES) return { ok: false, error: "Those plans are over 20 MB, the reader's ceiling. Upload the panel schedule and electrical sheets on their own and read those." };
+
+  if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
+  if (await rateLimited(`panel-plans:${jobId}`, PLAN_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
+    return { ok: false, error: `The plans have been read ${PLAN_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow.` };
+  }
+
+  let reading;
+  try {
+    const r = await readPlanWithModel({
+      client: getAnthropic(),
+      model: modelFor("reasoning"),
+      media,
+      base64: Buffer.from(await blob.arrayBuffer()).toString("base64"),
+      name: d.name ?? "plans",
+      orgId: m.orgId,
+    });
+    if (!r.ok) return r;
+    reading = r.reading;
+  } catch (e) {
+    reportError("panel.readPlanCircuits", e, { jobId, documentId });
+    return readFailure(e, "The plans");
+  }
+
+  const circuits = await allCircuits(m, jobId);
+  if (!Array.isArray(circuits)) return circuits;
+  const panelId = await onlyPanelOf(m, jobId);
+  const outcome = readerSuggestions({
+    source: "plan",
+    rows: reading.rows,
+    circuits,
+    panelId,
+    says: PLANS_SAY,
+    startSort: 0,
+    stamp: { document_name: d.name },
+  });
+  const wrote = await writeSuggestions(m.supabase, { orgId: m.orgId, jobId, panelId, documentId: d.id, drafts: outcome.drafts, cols: CIRCUIT_COLS });
+  if (!wrote.ok) return fail({ code: wrote.code, message: wrote.error }, "The suggestions didn't save.");
+  if (wrote.rows.length) touched(jobId);
+  const sheets = reading.sheets.length ? ` Sheets read: ${reading.sheets.join(", ")}.` : "";
+  return {
+    ok: true,
+    rows: wrote.rows,
+    message: readerSummary(d.name ?? "the plans", reading.rows.length, outcome) + sheets,
+    notes: reading.notCounted,
+    header: [],
+  };
+}
+
+export type LabelCheckResult = { ok: true; circuit: JobCircuit; check: JobCircuit; words: string } | (Fail & { current?: JobCircuit });
+
+async function labelCheckOf(m: Member, checkId: string): Promise<{ check: JobCircuit; target: string; use: CircuitReadPatch; was: CircuitReadPatch } | Fail> {
+  const check = await circuitOf(m, checkId);
+  const r = check?.source_row;
+  if (!check || !r?.flag_for || !isUuid(r.flag_for) || !r.use) return { ok: false, error: "That label check is gone. Reload the Panel tab." };
+  const use: CircuitReadPatch = {};
+  const was: CircuitReadPatch = {};
+  for (const k of ["panel_label", "space", "half", "amps"] as const) {
+    if (k in r.use) {
+      (use as Record<string, unknown>)[k] = r.use[k] ?? null;
+      (was as Record<string, unknown>)[k] = r.was?.[k] ?? null;
+    }
+  }
+  if (!Object.keys(use).length) return { ok: false, error: "That check only says something differs. Open the circuit and change it there." };
+  return { check, target: r.flag_for, use, was };
+}
+
+/**
+ * USE WHAT IT SAYS: a label check's change goes onto the circuit it names, but only while that
+ * circuit still says what the reader saw beside it (`was`): a crewmate's newer label is never
+ * overwritten, and the answer says who changed it. Then the check is set aside. Undo is
+ * undoLabelCheck, which puts both back the same careful way.
+ */
+export async function applyLabelCheck(checkId: string): Promise<LabelCheckResult> {
+  const m = await member();
+  if ("error" in m) return m;
+  const lc = await labelCheckOf(m, checkId);
+  if ("error" in lc) return lc;
+  if (lc.check.state !== "suggested" || lc.check.removed_at) return { ok: false, error: "That label check was already used or set aside." };
+  const v = normalizeCircuitPatch(lc.use as Record<string, unknown>);
+  if (!v.ok) return v;
+  const target = await writeCircuit(m, lc.target, v.value, (q) => q.eq("job_id", lc.check.job_id).is("removed_at", null), lc.was as Record<string, unknown>);
+  if (!target.ok) return target;
+  const done = await writeCircuit(m, checkId, { removed_at: new Date().toISOString() }, (q) => q.eq("state", "suggested").is("removed_at", null));
+  if (!done.ok) {
+    return { ok: false, error: `${circuitName(target.row)} was changed, but the check couldn't be set aside: ${done.error} Tap Not This on it.`, current: target.row };
+  }
+  return { ok: true, circuit: target.row, check: done.row, words: `${circuitName(target.row)} now says what the ${lc.check.source === "plan" ? "plans say" : lc.check.source === "nort" ? "check said" : "panel says"}.` };
+}
+
+/** The Undo of Use What It Says: the circuit goes back to what it said, only if it still says what
+ *  the check put there, and the check comes back. */
+export async function undoLabelCheck(checkId: string): Promise<LabelCheckResult> {
+  const m = await member();
+  if ("error" in m) return m;
+  const lc = await labelCheckOf(m, checkId);
+  if ("error" in lc) return lc;
+  const v = normalizeCircuitPatch(lc.was as Record<string, unknown>);
+  if (!v.ok) return v;
+  const target = await writeCircuit(m, lc.target, v.value, (q) => q.eq("job_id", lc.check.job_id), lc.use as Record<string, unknown>);
+  if (!target.ok) return target;
+  const back = await writeCircuit(m, checkId, { removed_at: null }, (q) => q.not("removed_at", "is", null));
+  if (!back.ok) return { ok: false, error: `${circuitName(target.row)} is back as it was, but the check couldn't come back: ${back.error}`, current: target.row };
+  return { ok: true, circuit: target.row, check: back.row, words: `${circuitName(target.row)} is back as it was.` };
 }

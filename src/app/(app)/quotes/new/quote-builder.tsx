@@ -708,13 +708,18 @@ export function QuoteBuilder({
       if (scope.trim()) fd.set("scope", scope.trim());
       if (levelMarkup != null) fd.set("markupPct", String(levelMarkup));
       if (levelRate != null) fd.set("laborRate", String(levelRate));
+      // PLANS ARE KEPT (Erik's decision 3): filed as a Plan on the customer, and on the job when
+      // there is one, so the job's Panel tab can read circuits from them later. The answer says
+      // where, or why not; a supplier quote (the other door) is still deleted on read.
+      if (jobId) fd.set("jobId", jobId);
+      if (customerId) fd.set("customerId", customerId);
       const res = await generateQuoteDraftFromPlan(fd);
       if (!res.ok) {
-        setAiError(res.error);
+        setAiError(res.kept ? `${res.error} ${res.kept.words}` : res.error);
         return;
       }
       applyDraft(res);
-      toast(`Read ${file.name} — review the drafted lines`, "success");
+      toast(`Read ${file.name} — review the drafted lines.${res.kept ? ` ${res.kept.words}` : ""}`, "success", undefined, res.kept && !res.kept.kept ? { sticky: true } : undefined);
     });
   }
 
@@ -940,6 +945,10 @@ export function QuoteBuilder({
                 <span className="text-xs text-slate-400">applies your note above to the plan</span>
               )}
             </div>
+            {/* Nothing silent about where an upload goes: plans stay on file, a supplier's prices don't. */}
+            <p className="text-xs text-slate-500">
+              Plans are kept as Plans on the customer{jobId ? " and this job" : ""}. A supplier quote is read, then deleted, so its prices never sit where the crew can open them.
+            </p>
 
             {/* THE PLANS THEY ALREADY SENT — one tap, no re-upload (Andrew's estimate said
                 "attached but I can't open it" while the PDF sat on the lead). "They", not "the

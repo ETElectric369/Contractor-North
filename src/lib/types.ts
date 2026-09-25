@@ -217,6 +217,28 @@ export interface CircuitSourceRow {
   load?: string | null;
   /** A plain-words flag the reader raised ("The estimate says 15A, but Q120 is a 1P 20A"). */
   check?: string | null;
+  // ── the readers and Nort (phase 4) ──
+  /** What the photo, the plans or Nort said, word for word ("Mini Fridge"). */
+  said?: string | null;
+  /** The sheet a plan row came from ("E-1"), and the paper's name. */
+  sheet?: string | null;
+  document_name?: string | null;
+  /**
+   * A LABEL CHECK, NOT A CIRCUIT: the reader matched a circuit already on the list and something
+   * differs ("Panel Says Mini Fridge, Your List Says Fridge"). It is never kept as a circuit of its
+   * own; Use What It Says applies `use` to that circuit, but only while it still holds `was`.
+   */
+  flag_for?: string | null;
+  use?: CircuitReadPatch | null;
+  was?: CircuitReadPatch | null;
+}
+
+/** The only fields a label check can change on the circuit it names (never the size's poles or type). */
+export interface CircuitReadPatch {
+  panel_label?: string | null;
+  space?: number | null;
+  half?: SpaceHalf | null;
+  amps?: number | null;
 }
 
 export interface JobCircuit {

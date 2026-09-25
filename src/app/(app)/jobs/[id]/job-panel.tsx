@@ -16,6 +16,7 @@ import {
   groupByRoom,
   labelDiffers,
   nextProgress,
+  sourceWords,
   spaceMap,
   titleWords,
 } from "@/lib/panel/model";
@@ -29,11 +30,14 @@ import {
   saveCircuit,
   setAsideSuggestions,
   takeOffCircuit,
+  undoLabelCheck,
   undoTakeOff,
+  applyLabelCheck,
   type PanelLoad,
 } from "../panel-actions";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
 import { JobPanelBreakers } from "./job-panel-breakers";
+import { PanelReaders } from "./job-panel-readers";
 import { PanelSetupSheet } from "./panel-setup-sheet";
 
 /**
@@ -112,6 +116,9 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
 
   const live = circuits.filter((c) => !c.removed_at);
   const suggested = live.filter((c) => c.state === "suggested").sort((a, b) => a.sort_order - b.sort_order);
+  // A label check (a reader's "Panel Says Mini Fridge, Your List Says Fridge") is never kept as a
+  // circuit of its own: Keep All leaves it for its own Use What It Says or Not This.
+  const keepable = suggested.filter((c) => !c.source_row?.flag_for);
   const kept = live.filter((c) => c.state === "kept");
   const takenOff = circuits.filter((c) => c.removed_at);
   const activePanel = panels.find((p) => p.id === activePanelId) ?? null;
@@ -217,6 +224,34 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     }
   }
 
+  /** Use What It Says: the check's change goes onto the circuit it names, only while that circuit
+   *  still says what the reader saw beside it. Undo puts both back the same careful way. */
+  async function applyCheck(c: JobCircuit) {
+    const r = await run(`check:${c.id}`, () => applyLabelCheck(c.id));
+    if (!r || !r.ok) return;
+    upsert([r.circuit, r.check]);
+    toast(r.words, "success", {
+      label: "Undo",
+      onClick: async () => {
+        const u = await run(`check:${c.id}`, () => undoLabelCheck(c.id));
+        if (!u || !u.ok) return;
+        upsert([u.circuit, u.check]);
+        toast(u.words, "success");
+      },
+    });
+  }
+
+  /** A panel added or changed from anywhere on the tab (the setup sheet, or a read's Use). */
+  function panelSaved(row: JobPanel, placed?: { adopted: JobCircuit[]; notAdopted: string[] }) {
+    setPanels((ps) => (ps.some((p) => p.id === row.id) ? ps.map((p) => (p.id === row.id ? row : p)) : [...ps, row]));
+    // The first panel took the circuits already on the list: the door shows them now.
+    if (placed?.adopted.length) upsert(placed.adopted);
+    if (placed?.notAdopted.length) {
+      toast(`${placed.notAdopted.length} couldn't go on ${row.name}. ${placed.notAdopted.join(" ")}`, "info", undefined, { sticky: true });
+    }
+    if (!activePanelId) setActivePanelId(row.id);
+  }
+
   async function tapChip(c: JobCircuit) {
     const r = await run(`chip:${c.id}`, () => advanceProgress(c.id, c.progress));
     if (!r || !r.ok) return;
@@ -291,39 +326,64 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           <h3 className="text-base font-semibold text-slate-900">Suggestions</h3>
           <p className="mt-0.5 text-sm text-slate-500">Nothing counts until you keep it.</p>
           <ul className="mt-3 space-y-2">
-            {suggested.map((c) => (
-              <li key={c.id} className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
-                  <span className="font-medium text-slate-600">{circuitLine(c)}</span>
-                  {c.source_row?.quote_number && (
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">
-                      From {c.source_row.quote_number}
-                    </span>
-                  )}
-                </div>
-                {c.source_row?.load && <div className="mt-0.5 text-xs text-slate-400">{c.source_row.load}</div>}
-                {c.source_row?.check && (
-                  <div className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-800">
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {c.source_row.check}
+            {suggested.map((c) => {
+              const from = sourceWords(c);
+              const aboutId = c.source_row?.flag_for ?? null;
+              const about = aboutId ? circuits.find((x) => x.id === aboutId) ?? null : null;
+              const canUse = !!aboutId && Object.keys(c.source_row?.use ?? {}).length > 0;
+              return (
+                <li key={c.id} className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-500">
+                    <span className="font-medium text-slate-600">{aboutId ? `Label Check: ${about ? circuitName(about) : "A Circuit On Your List"}` : circuitLine(c)}</span>
+                    {from && (
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-500 ring-1 ring-slate-200">{from}</span>
+                    )}
+                    {!aboutId && c.space != null && (
+                      <span className="text-[11px]">
+                        Space {c.space}
+                        {c.half ?? ""}
+                      </span>
+                    )}
+                    {c.source === "plan" && c.source_row?.ckt && <span className="text-[11px]">Plans: Ckt {c.source_row.ckt}</span>}
                   </div>
-                )}
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  <Button onClick={() => keep([c.id], `Kept ${circuitName(c)}.`)} disabled={busy !== null}>
-                    Keep
-                  </Button>
-                  <Button variant="outline" onClick={() => setEditing(c.id)} disabled={busy !== null}>
-                    Change
-                  </Button>
-                  <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
-                    Not This
-                  </Button>
-                </div>
-              </li>
-            ))}
+                  {c.source_row?.load && <div className="mt-0.5 text-xs text-slate-400">{c.source_row.load}</div>}
+                  {c.source_row?.check && (
+                    <div className="mt-1 flex items-start gap-1 text-xs font-medium text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {c.source_row.check}
+                    </div>
+                  )}
+                  {aboutId ? (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Button onClick={() => applyCheck(c)} disabled={busy !== null || !canUse || !about}>
+                        {busy === `check:${c.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Use It
+                      </Button>
+                      <Button variant="outline" onClick={() => about && setEditing(about.id)} disabled={busy !== null || !about}>
+                        Open It
+                      </Button>
+                      <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
+                        Not This
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Button onClick={() => keep([c.id], `Kept ${circuitName(c)}.`)} disabled={busy !== null}>
+                        Keep
+                      </Button>
+                      <Button variant="outline" onClick={() => setEditing(c.id)} disabled={busy !== null}>
+                        Change
+                      </Button>
+                      <Button variant="ghost" onClick={() => remove(c, "notThis")} disabled={busy !== null}>
+                        Not This
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-          {suggested.length > 1 && (
-            <Button className="mt-3 w-full" onClick={() => keep(suggested.map((c) => c.id), `Kept ${suggested.length} circuits.`)} disabled={busy !== null}>
-              <Check className="h-4 w-4" /> Keep All ({suggested.length})
+          {keepable.length > 1 && (
+            <Button className="mt-3 w-full" onClick={() => keep(keepable.map((c) => c.id), `Kept ${keepable.length} circuits.`)} disabled={busy !== null}>
+              <Check className="h-4 w-4" /> Keep All ({keepable.length})
             </Button>
           )}
         </section>
@@ -549,6 +609,18 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         </div>
       </form>
 
+      {/* THE READERS (phase 4): the panel photo (everyone), the plans (the office). Suggestions only. */}
+      <PanelReaders
+        jobId={jobId}
+        staff={staff}
+        photos={initial.photos}
+        plans={initial.plans}
+        panel={activePanel}
+        walkthrough={initial.walkthrough}
+        onRows={upsert}
+        onPanel={panelSaved}
+      />
+
       {/* THE BREAKERS CARD (phase 3): what the new circuits need against what came on the tickets.
           It reads the live list, so a Keep or a Take Off changes the count at once. */}
       <JobPanelBreakers jobId={jobId} circuits={circuits} panel={activePanel} onRows={upsert} onAddPanel={() => setPanelSheet("new")} />
@@ -597,12 +669,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           photos={initial.photos}
           takenNames={panels.filter((p) => p.id !== panelSheet).map((p) => p.name)}
           onSaved={(row, placed) => {
-            setPanels((ps) => (ps.some((p) => p.id === row.id) ? ps.map((p) => (p.id === row.id ? row : p)) : [...ps, row]));
-            // The first panel took the circuits already on the list: the door shows them now.
-            if (placed?.adopted.length) upsert(placed.adopted);
-            if (placed?.notAdopted.length) {
-              toast(`${placed.notAdopted.length} couldn't go on ${row.name}. ${placed.notAdopted.join(" ")}`, "info", undefined, { sticky: true });
-            }
+            panelSaved(row, placed);
             if (panelSheet === "new") {
               setActivePanelId(row.id);
               setPanelSheet(row.id);

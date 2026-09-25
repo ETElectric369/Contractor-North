@@ -161,7 +161,7 @@ function statusLabel(tool: string): string {
   const m: Record<string, string> = {
     list_customers: "Looking up contacts…", get_customer: "Pulling up the contact…",
     list_quotes: "Finding the estimate…", get_quote: "Opening the estimate…",
-    list_jobs: "Checking jobs…", get_job: "Opening the job…",
+    list_jobs: "Checking jobs…", get_job: "Opening the job…", get_job_panel: "Reading the panel…",
     list_invoices: "Checking invoices…", get_invoice: "Opening the invoice…",
     search_price_list: "Checking your price list…", price_material: "Pricing it…", schedule_overview: "Checking the schedule…",
     business_summary: "Crunching the numbers…", hours_summary: "Tallying hours…",

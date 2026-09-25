@@ -28,6 +28,10 @@ vi.mock("../panel-actions", () => ({
   savePanel: vi.fn(),
   takeOffCircuit: vi.fn(),
   undoTakeOff: vi.fn(),
+  applyLabelCheck: vi.fn(),
+  undoLabelCheck: vi.fn(),
+  readPanelPhoto: vi.fn(),
+  readPlanCircuits: vi.fn(),
 }));
 
 import { JobPanel, PanelDoor, type PanelData } from "./job-panel";
@@ -50,6 +54,8 @@ const data = (over: Partial<PanelData> = {}): PanelData => ({
     { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Herringbone", count: 12, created_at: null, onJob: 0, fresh: 12, alsoFrom: null },
   ],
   photos: [],
+  plans: [],
+  walkthrough: null,
   people: {},
   ...over,
 });
@@ -267,5 +273,75 @@ describe("the office bar's words", () => {
   it("one circuit here is singular, and says where it came from", () => {
     const html = render(data({ estimates: [{ ...data().estimates[0], onJob: 1, fresh: 11, alsoFrom: null }] }));
     expect(textOf(html)).toContain("E-017 Has 12 Circuits. 1 Is Here");
+  });
+});
+
+describe("phase 4: the readers and the label checks on the tab", () => {
+  const PHOTO = { id: "ph1", name: "panel.jpg", created_at: "2026-09-25T08:00:00Z" };
+  const PLAN = { id: "pl1", name: "Herringbone E-sheets.pdf", created_at: "2026-09-20T08:00:00Z", onCustomer: true };
+  const fridge = FINAL_MAP.find((c) => c.description === "Fridge")!;
+  const check = circuit({
+    room: fridge.room,
+    description: fridge.description,
+    id: "chk",
+    state: "suggested",
+    source: "photo",
+    amps: 20,
+    source_row: { key: "photo-flag:x", flag_for: fridge.id, check: "Panel Says Mini Fridge, Your List Says Fridge.", use: { panel_label: "Mini Fridge" }, was: { panel_label: null } },
+  });
+  const garage = circuit({ room: "Garage", description: null, panel_label: "Garage", amps: 20, id: "g1", state: "suggested", source: "photo", space: 1, work: "existing", source_row: { key: "photo:g" } });
+
+  it("the crew reads the panel photo (the cap and the cost said before the tap), and never sees the plans door", () => {
+    const html = render(data({ staff: false, estimates: [], photos: [PHOTO], plans: [PLAN] }));
+    const t = textOf(html);
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels).toContain("Read The Panel Photo");
+    expect(t).toContain("Up to 3 reads a day on this job, a few cents each.");
+    expect(labels).not.toContain("Read Circuits From The Plans");
+    expect(t).not.toContain("Herringbone E-sheets.pdf");
+    phoneSafe(html);
+  });
+
+  it("the office reads circuits from the plans, the customer's kept plans among them", () => {
+    const html = render(data({ photos: [PHOTO], plans: [PLAN] }));
+    expect(buttons(html).map((b) => b.text)).toContain("Read Circuits From The Plans");
+    expect(textOf(html)).toContain("Herringbone E-sheets.pdf");
+    expect(textOf(html)).toContain("On The Customer");
+  });
+
+  it("with no photo yet, it says where to take one instead of a dead button", () => {
+    const html = render(data({ staff: false, estimates: [], photos: [] }));
+    expect(buttons(html).map((b) => b.text)).not.toContain("Read The Panel Photo");
+    expect(textOf(html)).toContain("Take a photo of the panel door on the Photos tab first");
+  });
+
+  it("a label check names the kept circuit, says what differs, and offers Use It / Open It / Not This, never Keep; Keep All leaves it out", () => {
+    const html = render(data({ circuits: [...FINAL_MAP, check, garage], estimates: [] }));
+    const t = textOf(html);
+    expect(t).toContain("Label Check: Kitchen Fridge");
+    expect(t).toContain("Panel Says Mini Fridge, Your List Says Fridge.");
+    expect(html.match(/From The Panel Photo/g)).toHaveLength(2);
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels.filter((l) => l === "Use It")).toHaveLength(1);
+    expect(labels.filter((l) => l === "Open It")).toHaveLength(1);
+    expect(labels.filter((l) => l === "Keep")).toHaveLength(1); // the garage circuit only
+    expect(labels.filter((l) => l === "Not This")).toHaveLength(2);
+    expect(labels).not.toContain("Keep All (2)");
+    expect(t).toContain("Space 1");
+    phoneSafe(html);
+    for (const b of buttons(html)) if (b.text) expect(isTitleCase(b.text), b.text).toBe(true);
+  });
+
+  it("the walk-through's panel answer is a suggestion with its own Use, and goes away once the panel says the same", () => {
+    const walk = { said: { brand: "Siemens", main_amps: 200 }, words: "Siemens, 200A, two slots open" };
+    const html = render(data({ walkthrough: walk, estimates: [] }));
+    const t = textOf(html);
+    expect(t).toContain("About The Panel");
+    expect(t).toContain("The walk-through said: “Siemens, 200A, two slots open”");
+    expect(t).toContain("Main: 200A (Yours Says 125A)");
+    expect(t).not.toContain("Brand: Siemens"); // the panel already says Siemens
+    expect(buttons(html).map((b) => b.text)).toContain("Use");
+    const same = render(data({ walkthrough: walk, estimates: [], panels: [{ ...PANEL, main_amps: 200 }] }));
+    expect(textOf(same)).not.toContain("About The Panel");
   });
 });

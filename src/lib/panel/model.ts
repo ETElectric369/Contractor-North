@@ -489,6 +489,34 @@ export function labelDiffers(c: Pick<JobCircuit, "panel_label" | "description">)
   return !!a && !!b && a !== b;
 }
 
+/** The words a label is compared by: case, punctuation and "and"/"+" never count as different. */
+export function labelKey(s: string | null | undefined): string {
+  return squash(s);
+}
+
+/**
+ * Where a suggestion came from, as its chip reads ("From E-017", "From The Panel Photo", "From The
+ * Plans · E-1", "From Nort"), or null for a circuit a person typed.
+ */
+export function sourceWords(c: Pick<JobCircuit, "source" | "source_row">): string | null {
+  const r = c.source_row;
+  if (r?.quote_number) return `From ${r.quote_number}`;
+  switch (c.source) {
+    case "estimate":
+      return "From The Estimate";
+    case "photo":
+      return "From The Panel Photo";
+    case "plan":
+      return `From The Plans${r?.sheet ? ` · ${titleWords(r.sheet)}` : ""}`;
+    case "nort":
+      return "From Nort";
+    case "inspector":
+      return "From The Walk-Through";
+    default:
+      return null;
+  }
+}
+
 /** The plain-words flag for the edit sheet. */
 export function labelDiffersWords(c: Pick<JobCircuit, "panel_label" | "description">): string | null {
   if (!labelDiffers(c)) return null;
