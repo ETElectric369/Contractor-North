@@ -19,6 +19,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { smsReadiness } from "@/lib/sms";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceBalance, isDrawKind, invoiceOverpayment } from "@/lib/invoice-math";
@@ -64,7 +65,7 @@ export default async function InvoicePage({
   // draft, so only pay for those lookups then.
   const isDraft = inv.status === "draft";
 
-  const [{ data: items }, { data: payments }, { data: priceItems }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
+  const [{ data: items }, { data: payments }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoice_items")
@@ -77,8 +78,13 @@ export default async function InvoicePage({
       supabase
         .from("price_list_items")
         // `category` rides along so the shared picker can match on it, exactly as the composer does.
-        .select("id, code, description, category, unit, buy_price, markup_pct")
+        // THE VENDORS UNDER EACH CODE (0282) ride along too, the same embed and the same archived
+        // filter the two quote screens read (THE PROJECTION LAW). Without them every code priced
+        // at its own allowance here while the price list said it priced at its default vendor
+        // (audit v994, VP2): an $830 window billed on the invoice that quoted a $1,610 Marvin.
+        .select(`id, code, description, category, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
         .eq("archived", false)
+        .eq("price_list_item_options.archived", false)
         .order("description")
         .limit(2000),
       // Kits too — the invoice editor never offered them, so a line that exists as a saved list
@@ -323,6 +329,16 @@ export default async function InvoicePage({
             thisAmount={Number(inv.total ?? 0)}
             billingType={fin.billingType}
           />
+        </div>
+      )}
+
+      {/* A FAILED BOOK READ IS SAID wherever the picker is offered (every status but void): an
+          empty picker reads as a broken control, and a code whose vendors did not arrive would add
+          at its allowance. The same sentence the two quote screens show. */}
+      {priceItemsErr && inv.status !== "void" && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-medium text-amber-900">Price list didn&apos;t load</p>
+          <p className="mt-0.5 text-sm text-amber-800">{ITEM_OPTIONS_UNAVAILABLE}</p>
         </div>
       )}
 

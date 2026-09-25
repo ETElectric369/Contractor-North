@@ -1352,8 +1352,11 @@ async function runEstimator(
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
     supabase
       .from("price_list_items")
-      .select("code, description, buy_price, markup_pct, unit, category")
-      .eq("archived", false),
+      // The vendors under each code ride along (THE PROJECTION LAW), so a book line prices at the
+      // org's default vendor through priceBookLine exactly as the quote pickers do (audit v994 VP2).
+      .select(`code, description, buy_price, markup_pct, unit, category, ${ITEM_OPTIONS_EMBED}`)
+      .eq("archived", false)
+      .eq("price_list_item_options.archived", false),
   ]);
   const orgS = getOrgSettings((org as any)?.settings);
   const playbook = orgS.quote_playbook?.trim();

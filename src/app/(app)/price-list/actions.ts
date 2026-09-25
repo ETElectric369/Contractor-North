@@ -9,7 +9,7 @@ import { normalizeUnit } from "@/lib/pricing/units";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { lineDisplayName } from "@/lib/kit-line";
 import { formatCurrency } from "@/lib/utils";
-import { canonicalVendorName, cleanOptionFields, optionName, optionSellPatch, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
+import { canonicalVendorName, cleanOptionFields, defaultVendorNote, optionName, optionSellPatch, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
 import { knownVendorNamesFor } from "./vendor-db";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
@@ -774,8 +774,8 @@ export async function addItemOption(
     if (landed !== wantSell) notes.push(`The closest it can hold is ${formatCurrency(landed)}, a cent or so off what you typed.`);
   }
   // The toast already names what was added, so this note says the CONSEQUENCE rather than the name
-  // again: the item's own number just stopped being the one that prices it.
-  if (input.isDefault) notes.push("This item prices at it now, instead of its own number.");
+  // again, and exactly how far it reaches (kits do not follow a default vendor yet).
+  if (input.isDefault) notes.push(defaultVendorNote());
   return { ok: true, note: notes.length ? notes.join(" ") : undefined };
 }
 
@@ -842,7 +842,7 @@ export async function updateItemOption(
   return {
     ok: true,
     note: promoted
-      ? `${optionName(named)} is now what this item prices at.`
+      ? defaultVendorNote(optionName(named))
       : demoted
         ? "This item is priced at its own number again."
         : undefined,
@@ -948,7 +948,7 @@ export async function setDefaultItemOption(input: { itemId: string; optionId: st
   }
   revalidatePath("/price-list");
   const picked = (data as { vendor: string; label: string | null }[])[0];
-  return { ok: true, note: `${optionName(picked)} is now what this item prices at.` };
+  return { ok: true, note: defaultVendorNote(optionName(picked)) };
 }
 
 /**

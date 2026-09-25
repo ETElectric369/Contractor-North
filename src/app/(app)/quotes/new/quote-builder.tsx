@@ -15,7 +15,8 @@ import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import { formatCurrency } from "@/lib/utils";
-import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
+import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { priceBookLine, type BookPricing } from "@/lib/pricing/item-options";
 import { buildDeckRatesWithMarkup, type DeckRateRow } from "@/lib/estimate/deck";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { useDraft } from "@/lib/use-draft";
@@ -90,13 +91,15 @@ function LineDescInput({
   onText,
   onPick,
   priceItems,
-  priced,
+  pricing,
 }: {
   value: string;
   onText: (v: string) => void;
   onPick: (p: PriceItemLite) => void;
   priceItems: PriceItemLite[];
-  priced: (p: PriceItemLite) => number;
+  /** The document's pricing (customer level + org default): each row shows priceBookLine's price,
+   *  the same number the pick writes. */
+  pricing: BookPricing;
 }) {
   const [open, setOpen] = useState(false);
   // BROWSE, DON'T GUESS — the same rule the Add picker above it runs on (add-line-items.tsx).
@@ -143,7 +146,9 @@ function LineDescInput({
       )}
       {open && priceItems.length > 0 && (
         <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-          {matches.map((p) => (
+          {matches.map((p) => {
+            const line = priceBookLine(p, pricing);
+            return (
             <li key={p.id}>
               <button
                 type="button"
@@ -161,10 +166,16 @@ function LineDescInput({
                 }}
               >
                 <span className="truncate">{p.code ? `${p.code} — ${p.description}` : p.description}</span>
-                <span className="shrink-0 text-slate-500">{formatCurrency(priced(p))}</span>
+                {/* NOTHING SILENT: a code that prices at its default vendor names the vendor
+                    beside the price, so $1,938 next to an $830 allowance is never a mystery. */}
+                <span className="shrink-0 text-slate-500">
+                  {line.isItemOwn ? "" : `${line.makerLabel} `}
+                  {formatCurrency(line.unitPrice)}
+                </span>
               </button>
             </li>
-          ))}
+            );
+          })}
           {matches.length === 0 && (
             // Say it out loud. A dropdown that renders nothing at all reads as a broken control
             // rather than as an answer.
@@ -314,8 +325,11 @@ export function QuoteBuilder({
   // The customer's pricing level can also carry its own labor rate (e.g. Local = $125/hr);
   // when set, the estimator uses it instead of the org default.
   const levelRate = selectedCust?.level_rate;
-  const markupFor = (p: PriceItemLite) =>
-    effectiveMarkupPct({ levelPct: levelMarkup, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct });
+  // THE ONE PRICING INPUT for every door on this screen that turns a book item into a line: the
+  // Add picker's one-tap add and its vendor rows, the kit picker, and the per-line swap below.
+  // `?? null`, never `?? 0`: a level ALWAYS wins, so a 0 here would sell every customer without a
+  // level at net cost.
+  const pricing: BookPricing = { levelPct: levelMarkup ?? null, orgDefaultPct: defaultMarkupPct ?? null };
 
   /* ── WHO'S THIS FOR: one picker, two kinds of person, and it never confuses them ────────── */
   // The attached lead ALWAYS has a row to sit on, even if it's been won/lost or aged out of the
@@ -360,10 +374,7 @@ export function QuoteBuilder({
   // different lead — or to none — they are somebody else's drawings and must stop being offered,
   // rather than quietly taking off a plan for the wrong job.
   const plansForLead = inquiryId && leadId === inquiryId ? leadPlans : [];
-  // The one sell-price rule, shared with the Add picker: sellPrice (lib/pricing/markup.ts), cents.
-  const priced = (p: PriceItemLite) => sellPrice(p.buy_price, markupFor(p));
-
-  // Deck generator rates through the SAME rule as markupFor — D-code lines honor the selected
+  // Deck generator rates through the SAME rule as the book lines — D-code lines honor the selected
   // customer's level + the org default exactly like a hand-picked line, and re-price when the
   // customer changes. (The public configurator deliberately keeps item-markup-only pricing.)
   const deckRates = useMemo(
@@ -1172,7 +1183,7 @@ export function QuoteBuilder({
             <AddLineItems
               priceItems={priceItems}
               kits={kits as never}
-              markupFor={markupFor as never}
+              pricing={pricing}
               measured={measured}
               onAdd={addGeneratedLines}
             />
@@ -1216,15 +1227,15 @@ export function QuoteBuilder({
                               <LineDescInput
                                 value={it.description}
                                 onText={(v) => updateItem(idx, { description: v })}
-                                onPick={(pi) =>
-                                  updateItem(idx, {
-                                    description: pi.code ? `${pi.code} — ${pi.description}` : pi.description,
-                                    unit: pi.unit || "ea",
-                                    unit_price: priced(pi),
-                                  })
-                                }
+                                onPick={(pi) => {
+                                  // THE ONE PRICE (priceBookLine): the vendor the org made the
+                                  // default when there is one, named in the description, else
+                                  // the item's own. It used to be the allowance every time (VP2).
+                                  const line = priceBookLine(pi, pricing);
+                                  updateItem(idx, { description: line.description, unit: line.unit, unit_price: line.unitPrice });
+                                }}
                                 priceItems={priceItems}
-                                priced={priced}
+                                pricing={pricing}
                               />
                               {it.flag && (
                                 <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-800">

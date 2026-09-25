@@ -40,7 +40,6 @@ import {
   deletePayment,
   type ImportStats,
 } from "../actions";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { AddLineItems } from "@/components/add-line-items";
 /* The same Send Invoice the verb row at the top of the page uses — one send door, not a second
    one written here. It rides inside the "they are holding an older bill" notice so the fix is
@@ -835,9 +834,7 @@ export function InvoiceDetail({
         <AddLineItems
           priceItems={priceItems}
           kits={kits as never}
-          markupFor={(p) =>
-            effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })
-          }
+          pricing={{ levelPct: levelMarkupPct ?? null, orgDefaultPct: defaultMarkupPct }}
           onAdd={(lines) =>
             start(async () => {
               for (const l of lines) {
