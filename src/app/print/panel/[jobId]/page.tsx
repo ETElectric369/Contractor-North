@@ -108,7 +108,9 @@ export default async function PanelDirectoryPrintPage({ params }: { params: Prom
   const company = companyFromOrg(o);
   const template = templateFor(o, "panel_directory");
   const tz = getOrgSettings((o as { settings?: unknown } | null)?.settings).timezone;
-  const revised = formatDate(new Date(), tz);
+  // The day it was PRINTED, said as that: the page is drawn fresh every time, so it can't honestly
+  // say when the circuits last changed ("Revised" on every print would claim a change nobody made).
+  const printed = formatDate(new Date(), tz);
   const site = siteLines(pickSite([{ source: "job", parts: j }, { source: "customer", parts: j.customers }]));
   const jobName = j.name?.trim() || site[0] || "This Job";
   const customer = j.customers?.name?.trim() || null;
@@ -134,7 +136,7 @@ export default async function PanelDirectoryPrintPage({ params }: { params: Prom
           <DocHeader
             co={company}
             template={template}
-            meta={{ docType: "Panel Directory", number: d.name, rows: [{ label: "Job", value: jobName }, { label: "Revised", value: revised }] }}
+            meta={{ docType: "Panel Directory", number: d.name, rows: [{ label: "Job", value: jobName }, { label: "Printed", value: printed }] }}
           />
           <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-lg font-bold text-slate-900">{panelHeading(d)}</h2>
@@ -154,7 +156,7 @@ export default async function PanelDirectoryPrintPage({ params }: { params: Prom
           meta={{
             docType: "Circuit Map",
             number: jobName,
-            rows: [...(customer ? [{ label: "Prepared For", value: customer }] : []), { label: "Revised", value: revised }],
+            rows: [...(customer ? [{ label: "Prepared For", value: customer }] : []), { label: "Printed", value: printed }],
           }}
         />
         {site.length ? (

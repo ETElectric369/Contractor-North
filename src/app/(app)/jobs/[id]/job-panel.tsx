@@ -20,6 +20,7 @@ import {
   spaceMap,
   titleWords,
 } from "@/lib/panel/model";
+import { labelCheckApplied } from "@/lib/panel/readers";
 import type { CircuitWork, JobCircuit, JobPanel } from "@/lib/types";
 import {
   addCircuit,
@@ -121,7 +122,10 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
   // circuit of its own: Keep All leaves it for its own Use What It Says or Not This.
   const keepable = suggested.filter((c) => !c.source_row?.flag_for);
   const kept = live.filter((c) => c.state === "kept");
-  const takenOff = circuits.filter((c) => c.removed_at);
+  // What came off, circuits only: a label check that was used or set aside is not a circuit anyone
+  // took off, so it is listed on its own line in plain words below, with its own Undo.
+  const takenOff = circuits.filter((c) => c.removed_at && !c.source_row?.flag_for);
+  const checksDone = circuits.filter((c) => c.removed_at && c.source_row?.flag_for);
   const activePanel = panels.find((p) => p.id === activePanelId) ?? null;
   const placedHere = activePanel ? kept.filter((c) => c.panel_id === activePanel.id && c.space != null) : [];
   const groups = useMemo(() => groupByRoom(kept), [kept]);
@@ -233,13 +237,17 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     upsert([r.circuit, r.check]);
     toast(r.words, "success", {
       label: "Undo",
-      onClick: async () => {
-        const u = await run(`check:${c.id}`, () => undoLabelCheck(c.id));
-        if (!u || !u.ok) return;
-        upsert([u.circuit, u.check]);
-        toast(u.words, "success");
-      },
+      onClick: () => void undoCheck(c),
     });
+  }
+
+  /** The Undo of Use It, from the toast or from Taken Off Or Set Aside: the circuit goes back to
+   *  what it said (only if it still says what the check put there) and the check waits again. */
+  async function undoCheck(c: JobCircuit) {
+    const u = await run(`check:${c.id}`, () => undoLabelCheck(c.id));
+    if (!u || !u.ok) return;
+    upsert([u.circuit, u.check]);
+    toast(u.words, "success");
   }
 
   /** A panel added or changed from anywhere on the tab (the setup sheet, or a read's Use). */
@@ -614,8 +622,11 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
       <PanelReaders
         jobId={jobId}
         staff={staff}
+        orgId={initial.orgId}
         photos={initial.photos}
         plans={initial.plans}
+        photoReadsLeft={initial.photoReadsLeft}
+        planReadsLeft={initial.planReadsLeft}
         panel={activePanel}
         walkthrough={initial.walkthrough}
         onRows={upsert}
@@ -630,11 +641,12 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           office, which puts the printed directory on the customer's Plans And Drawings. */}
       <JobPanelDirectory jobId={jobId} staff={staff} circuits={circuits} />
 
-      {/* WHAT CAME OFF: Take Off and Not This are never the end of a circuit. */}
-      {takenOff.length > 0 && (
+      {/* WHAT CAME OFF: Take Off and Not This are never the end of a circuit. A label check that was
+          used or set aside is said as what it was, never drawn as a circuit someone took off. */}
+      {takenOff.length + checksDone.length > 0 && (
         <section className={card} aria-label="Taken Off">
           <button type="button" onClick={() => setShowOff((v) => !v)} className="flex min-h-[44px] w-full items-center justify-between text-left text-sm font-semibold text-slate-700">
-            <span>Taken Off Or Set Aside ({takenOff.length})</span>
+            <span>Taken Off Or Set Aside ({takenOff.length + checksDone.length})</span>
             {showOff ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>
           {showOff && (
@@ -650,6 +662,30 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
                   </Button>
                 </li>
               ))}
+              {checksDone.map((c) => {
+                const about = circuits.find((x) => x.id === c.source_row?.flag_for) ?? null;
+                const used = labelCheckApplied(about, c.source_row?.use);
+                const name = about ? circuitName(about) : "A Circuit On Your List";
+                return (
+                  <li key={c.id} className="flex items-center justify-between gap-2 py-1">
+                    <span className="min-w-0 text-sm text-slate-500">
+                      <span className="block truncate">
+                        {used ? "Label Check Used" : "Label Check Set Aside"}: {name}
+                      </span>
+                      {c.source_row?.check && <span className="block text-xs text-slate-400">{c.source_row.check}</span>}
+                    </span>
+                    {used ? (
+                      <Button variant="outline" onClick={() => undoCheck(c)} disabled={busy !== null}>
+                        {busy === `check:${c.id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Undo It
+                      </Button>
+                    ) : (
+                      <Button variant="outline" onClick={() => putBack(c)} disabled={busy !== null}>
+                        Put Back
+                      </Button>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

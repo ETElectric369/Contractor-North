@@ -20,14 +20,26 @@ import {
 } from "@/lib/panel/model";
 import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch, type CircuitPatch } from "@/lib/panel/input";
 import { decodeBreaker, decodeCode } from "@/lib/panel/breaker-catalog";
-import { PANEL_SAYS, PLANS_SAY, headerSuggestions, readerSummary, readerSuggestions, walkthroughSaid, type HeaderSaid, type HeaderSuggestion } from "@/lib/panel/readers";
+import {
+  PANEL_SAYS,
+  PLANS_SAY,
+  headerSuggestions,
+  labelCheckApplied,
+  readerSummary,
+  readerSuggestions,
+  readsLeftWords,
+  walkthroughSaid,
+  type HeaderSaid,
+  type HeaderSuggestion,
+} from "@/lib/panel/readers";
 import { PHOTO_MAX_BYTES, PHOTO_READS_PER_JOB_PER_DAY, photoMime, readPanelPhotoWithModel } from "@/lib/panel/read-panel-photo";
 import { PLAN_MAX_BYTES, PLAN_READS_PER_JOB_PER_DAY, planMedia, readPlanWithModel } from "@/lib/panel/read-plan-circuits";
 import { writeSuggestions } from "@/lib/panel/suggest-write";
 import { getAnthropic } from "@/lib/anthropic";
 import { aiSpendExceeded, modelFor } from "@/lib/ai-cost";
-import { rateLimited } from "@/lib/rate-limit";
-import { lineKey, type BreakerLine, type ListLine, type ShelfLine } from "@/lib/panel/breakers";
+import { rateLimitGiveBack, rateLimitLeft, rateLimited } from "@/lib/rate-limit";
+import { CIRCUIT_MAP_FILE_SUFFIX } from "@/lib/panel/directory";
+import { boughtLines, lineKey, type BreakerLine, type ListLine, type ShelfLine } from "@/lib/panel/breakers";
 import { normalisePartNumber } from "@/lib/shelf-plan";
 import { formatCurrency } from "@/lib/utils";
 import { addMaterialItem, deleteMaterialItem, ensureJobMaterialList } from "@/app/(app)/materials/actions";
@@ -198,6 +210,39 @@ async function ringPanelChange(m: Member, jobId: string): Promise<void> {
 // ── reading ─────────────────────────────────────────────────────────────────────────────────────
 
 export type PanelEstimate = EstimateOffer;
+export type PanelPhoto = { id: string; name: string | null; created_at: string; url: string | null };
+
+/** The job's photos for the readers, newest first, with thumbnail links (an hour). */
+async function photosOf(m: Member, jobId: string): Promise<PanelPhoto[] | Fail> {
+  const { data, error } = await m.supabase
+    .from("documents")
+    .select("id, name, created_at, file_url")
+    .eq("job_id", jobId)
+    .eq("org_id", m.orgId)
+    .eq("category", "Photo")
+    .order("created_at", { ascending: false })
+    .limit(60);
+  if (error) return fail(error, "The job's photos couldn't load.");
+  const rows = (data ?? []) as { id: string; name: string | null; created_at: string; file_url: string | null }[];
+  const paths = rows.map((r) => r.file_url).filter(Boolean) as string[];
+  const urls = new Map<string, string>();
+  if (paths.length) {
+    const { data: signed, error: sErr } = await m.supabase.storage.from("documents").createSignedUrls(paths, 3600);
+    if (sErr) reportError("panel.photosOf.sign", sErr, { jobId });
+    for (const x of signed ?? []) if (x.path && x.signedUrl) urls.set(x.path, x.signedUrl);
+  }
+  return rows.map((r) => ({ id: r.id, name: r.name, created_at: r.created_at, url: r.file_url ? (urls.get(r.file_url) ?? null) : null }));
+}
+
+/** The photos again, after Take A Photo on the Panel tab filed a new one. */
+export async function loadPanelPhotos(jobId: string): Promise<{ ok: true; photos: PanelPhoto[] } | Fail> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  const photos = await photosOf(m, jobId);
+  if (!Array.isArray(photos)) return photos;
+  return { ok: true, photos };
+}
 export type PanelLoad =
   | {
       ok: true;
@@ -206,7 +251,14 @@ export type PanelLoad =
       circuits: JobCircuit[];
       /** The office only: estimates this job can bring circuits in from. Never sent to a tech. */
       estimates: PanelEstimate[];
-      photos: { id: string; name: string | null; created_at: string }[];
+      /** The job's photos, newest first, each with a short-lived thumbnail link, so the person SEES
+       *  which photo a read will send before the tap. */
+      photos: PanelPhoto[];
+      /** For Take A Photo on the Panel tab: the job's folder is <org>/<job>/ (uploadJobPhotos). */
+      orgId: string;
+      /** Reads left on this job today: the panel photo (everyone) and the plans (the office). */
+      photoReadsLeft: number | null;
+      planReadsLeft: number | null;
       /** The office only: the Plan papers Read Circuits From The Plans can read (this job's, and
        *  its customer's that aren't on another job yet). Never sent to a tech. */
       plans: { id: string; name: string | null; created_at: string; onCustomer: boolean }[];
@@ -223,10 +275,12 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
   const job = await jobOf(m, jobId);
   if (!job) return { ok: false, error: "That job isn't in your book." };
 
-  const [pRes, cRes, phRes] = await Promise.all([
+  const [pRes, cRes, photos, photoReadsLeft, planReadsLeft] = await Promise.all([
     m.supabase.from("job_panels").select(PANEL_COLS).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).order("created_at"),
     m.supabase.from("job_circuits").select(CIRCUIT_COLS).eq("job_id", jobId).eq("org_id", m.orgId).order("sort_order").order("created_at"),
-    m.supabase.from("documents").select("id, name, created_at").eq("job_id", jobId).eq("org_id", m.orgId).eq("category", "Photo").order("created_at", { ascending: false }).limit(60),
+    photosOf(m, jobId),
+    rateLimitLeft(`panel-photo:${jobId}`, PHOTO_READS_PER_JOB_PER_DAY, 86_400),
+    m.staff ? rateLimitLeft(`panel-plans:${jobId}`, PLAN_READS_PER_JOB_PER_DAY, 86_400) : Promise.resolve(null),
   ]);
   if (pRes.error) return fail(pRes.error, "The panel couldn't load.");
   if (cRes.error) return fail(cRes.error, "The circuits couldn't load.");
@@ -254,7 +308,10 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
     panels,
     circuits,
     estimates,
-    photos: ((phRes.data ?? []) as { id: string; name: string | null; created_at: string }[]),
+    photos: Array.isArray(photos) ? photos : [],
+    orgId: m.orgId,
+    photoReadsLeft,
+    planReadsLeft,
     plans,
     walkthrough,
     people,
@@ -262,9 +319,17 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
 }
 
 /** The Plan papers the office can read circuits from: this job's, then its customer's that sit on
- *  no job (the estimator's Upload Plans keeps them on the customer). Newest first. */
+ *  no job (the estimator's Upload Plans keeps them on the customer). Newest first. NEVER the app's
+ *  own circuit map: Save As Circuit Map files the printed directory as a Plan (its file always ends
+ *  "-Circuit_Map.pdf", panel-portal-actions), and reading it back would spend a read to find the
+ *  list already on the list. */
 async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: string | null; created_at: string; onCustomer: boolean }[]> {
-  let q = m.supabase.from("documents").select("id, name, created_at, job_id").eq("org_id", m.orgId).eq("category", "Plan");
+  let q = m.supabase
+    .from("documents")
+    .select("id, name, created_at, job_id")
+    .eq("org_id", m.orgId)
+    .eq("category", "Plan")
+    .not("file_url", "ilike", `%${CIRCUIT_MAP_FILE_SUFFIX}`);
   q = job.customer_id ? q.or(`job_id.eq.${job.id},and(job_id.is.null,customer_id.eq.${job.customer_id})`) : q.eq("job_id", job.id);
   const { data, error } = await q.order("created_at", { ascending: false }).limit(40);
   if (error) reportError("panel.findPlans", error, { jobId: job.id });
@@ -516,6 +581,16 @@ export async function takeOffCircuit(circuitId: string): Promise<RowResult<JobCi
 export async function undoTakeOff(circuitId: string): Promise<RowResult<JobCircuit>> {
   const m = await member();
   if ("error" in m) return m;
+  // A LABEL CHECK whose change is already on its circuit (Use It) is never reopened as waiting: it
+  // would ask for a change already made. Its own Undo (undoLabelCheck) puts both back.
+  const row = await circuitOf(m, circuitId);
+  const flagFor = row?.source_row?.flag_for;
+  if (row && flagFor && isUuid(flagFor)) {
+    const target = await circuitOf(m, flagFor);
+    if (labelCheckApplied(target, row.source_row?.use)) {
+      return { ok: false, error: `That check's change is already on ${target ? circuitName(target) : "the circuit"}. Use Undo on it to put the circuit back as it was.` };
+    }
+  }
   return writeCircuit(m, circuitId, { removed_at: null }, (q) => q.not("removed_at", "is", null));
 }
 
@@ -771,10 +846,7 @@ export async function loadPanelBreakers(jobId: string): Promise<BreakersLoad> {
   ]);
   const ticketsReady = !fnMissing(boughtRes.error);
   if (boughtRes.error && ticketsReady) return fail(boughtRes.error, "The job's tickets couldn't be read.");
-  const bought: BreakerLine[] = ((boughtRes.data ?? []) as { description: string; qty: number | string }[]).map((r) => ({
-    description: r.description,
-    qty: Number(r.qty),
-  }));
+  const bought: BreakerLine[] = boughtLines(boughtRes.data as { description: string; qty: number | string; credit_qty?: number | string }[] | null);
 
   const listId = (listRes.data as { id?: string } | null)?.id ?? null;
   let list: ListLine[] = [];
@@ -837,7 +909,9 @@ async function officeBreakerExtras(m: Member, jobId: string): Promise<{ tickets:
         bill_number: b.bill_number,
         supplier: b.supplier,
         bill_date: b.bill_date,
-        each: qty > 0 && Number.isFinite(amount) ? Math.round((amount / qty) * 100) / 100 : null,
+        // A cost each only from a line that is plainly a purchase: a credit (negative money, either
+        // way it is stored) is never a price to put in the book.
+        each: qty > 0 && Number.isFinite(amount) && amount > 0 ? Math.round((amount / qty) * 100) / 100 : null,
       });
     }
   }
@@ -1075,17 +1149,36 @@ export type ReadResult =
       notes: string[];
       /** What it said about the panel itself, each with its own Use (nothing is written by a read). */
       header: HeaderSuggestion[];
+      /** How many reads of this kind are left on this job today (null when it can't be said). */
+      readsLeft: number | null;
     }
-  | Fail;
+  | (Fail & { readsLeft?: number | null });
 
-const AI_NOT_SET_UP = "Reading isn't set up on this server yet. Add the circuits by hand below.";
-const SPENT = "This month's AI budget is used up. Add the circuits by hand below; it resets next month.";
+const AI_NOT_SET_UP = "Reading isn't set up on this server yet. Add the circuits by hand with Add A Circuit.";
+const SPENT = "This month's AI budget is used up. Add the circuits by hand with Add A Circuit; it resets next month.";
 
 /** The model's failure as plain words: a missing key is the server's, anything else is one read. */
 function readFailure(e: unknown, what: string): Fail {
   const message = e instanceof Error ? e.message : "";
   if (/ANTHROPIC_API_KEY/i.test(message)) return { ok: false, error: AI_NOT_SET_UP };
   return { ok: false, error: `${what} couldn't be read this time. Nothing was added. Try again in a minute.` };
+}
+
+/**
+ * A read that failed is given back: the cap is counted before the model is called (so two taps
+ * can't both slip past it), and a model error, an overloaded service or a cut-off answer then
+ * hands the read back. What the person is told says which happened, and how many are left.
+ */
+async function failedRead(key: string, limit: number, f: Fail): Promise<Fail & { readsLeft: number | null }> {
+  const back = await rateLimitGiveBack(key);
+  const readsLeft = await rateLimitLeft(key, limit, 86_400);
+  const left = readsLeft == null ? "" : ` ${readsLeftWords(readsLeft, limit)}`;
+  if (f.error === AI_NOT_SET_UP) return { ...f, readsLeft };
+  return {
+    ok: false,
+    error: `${f.error}${back ? " It didn't use up one of today's reads." : " It may have used up one of today's reads."}${left}`,
+    readsLeft,
+  };
 }
 
 /** Every circuit on the job, set-aside ones too: their keys keep a Not This from coming back. */
@@ -1143,11 +1236,13 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
   if (dlErr || !blob) return { ok: false, error: "That photo couldn't be opened. Try another one, or take it again." };
   if (blob.size > PHOTO_MAX_BYTES) return { ok: false, error: "That photo is too big to read (over 5 MB). Take it again with the camera; the app shrinks new photos." };
 
+  const capKey = `panel-photo:${jobId}`;
   if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
-  if (await rateLimited(`panel-photo:${jobId}`, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
+  if (await rateLimited(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
     return {
       ok: false,
-      error: `The panel photo has been read ${PHOTO_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow; add the rest by hand below.`,
+      error: `The panel photo has been read ${PHOTO_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow; add the rest by hand with Add A Circuit.`,
+      readsLeft: 0,
     };
   }
 
@@ -1160,11 +1255,11 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
       base64: Buffer.from(await blob.arrayBuffer()).toString("base64"),
       orgId: m.orgId,
     });
-    if (!r.ok) return r;
+    if (!r.ok) return failedRead(capKey, PHOTO_READS_PER_JOB_PER_DAY, r);
     reading = r.reading;
   } catch (e) {
     reportError("panel.readPanelPhoto", e, { jobId, documentId });
-    return readFailure(e, "The photo");
+    return failedRead(capKey, PHOTO_READS_PER_JOB_PER_DAY, readFailure(e, "The photo"));
   }
 
   const circuits = await allCircuits(m, jobId);
@@ -1187,6 +1282,7 @@ export async function readPanelPhoto(jobId: string, documentId: string, panelId:
     message: readerSummary("the photo", reading.rows.length, outcome) + (reading.rows.length ? "" : " Try a closer, straighter photo of the door's list."),
     notes: reading.unreadable,
     header: headerSuggestions(panel, reading.header, "The Panel Photo"),
+    readsLeft: await rateLimitLeft(capKey, PHOTO_READS_PER_JOB_PER_DAY, 86_400),
   };
 }
 
@@ -1218,9 +1314,10 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
   if (dlErr || !blob) return { ok: false, error: "Those plans couldn't be opened. Try another copy." };
   if (blob.size > PLAN_MAX_BYTES) return { ok: false, error: "Those plans are over 20 MB, the reader's ceiling. Upload the panel schedule and electrical sheets on their own and read those." };
 
+  const capKey = `panel-plans:${jobId}`;
   if (await aiSpendExceeded(m.orgId)) return { ok: false, error: SPENT };
-  if (await rateLimited(`panel-plans:${jobId}`, PLAN_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
-    return { ok: false, error: `The plans have been read ${PLAN_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow.` };
+  if (await rateLimited(capKey, PLAN_READS_PER_JOB_PER_DAY, 86_400, { failClosed: true })) {
+    return { ok: false, error: `The plans have been read ${PLAN_READS_PER_JOB_PER_DAY} times on this job today. The next read opens tomorrow.`, readsLeft: 0 };
   }
 
   let reading;
@@ -1233,11 +1330,11 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
       name: d.name ?? "plans",
       orgId: m.orgId,
     });
-    if (!r.ok) return r;
+    if (!r.ok) return failedRead(capKey, PLAN_READS_PER_JOB_PER_DAY, r);
     reading = r.reading;
   } catch (e) {
     reportError("panel.readPlanCircuits", e, { jobId, documentId });
-    return readFailure(e, "The plans");
+    return failedRead(capKey, PLAN_READS_PER_JOB_PER_DAY, readFailure(e, "The plans"));
   }
 
   const circuits = await allCircuits(m, jobId);
@@ -1262,6 +1359,7 @@ export async function readPlanCircuits(jobId: string, documentId: string): Promi
     message: readerSummary(d.name ?? "the plans", reading.rows.length, outcome) + sheets,
     notes: reading.notCounted,
     header: [],
+    readsLeft: await rateLimitLeft(capKey, PLAN_READS_PER_JOB_PER_DAY, 86_400),
   };
 }
 
@@ -1273,7 +1371,7 @@ async function labelCheckOf(m: Member, checkId: string): Promise<{ check: JobCir
   if (!check || !r?.flag_for || !isUuid(r.flag_for) || !r.use) return { ok: false, error: "That label check is gone. Reload the Panel tab." };
   const use: CircuitReadPatch = {};
   const was: CircuitReadPatch = {};
-  for (const k of ["panel_label", "space", "half", "amps"] as const) {
+  for (const k of ["panel_label", "description", "space", "half", "amps"] as const) {
     if (k in r.use) {
       (use as Record<string, unknown>)[k] = r.use[k] ?? null;
       (was as Record<string, unknown>)[k] = r.was?.[k] ?? null;

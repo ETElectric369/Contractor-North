@@ -36,7 +36,8 @@ function Marks({ c, showNew }: { c: DirectoryCircuit; showNew: boolean }) {
  * THE LIST, IN SPACE ORDER: one line per circuit, as the customer reads it ("7 · Entry Lights ·
  * feeds Kitchen And Living · 15A"). What it feeds shows only when it differs from the door label.
  * Circuits with no space yet come last with a dash. Each line fits a 375px phone: the space in a
- * fixed column, the words wrapping, the size on its own line under them.
+ * column at least 3rem wide that grows with a long space ("25/27/29"), the words wrapping, the size
+ * on its own line under them.
  */
 export function PanelDirectoryList({ panel, showNew = true }: { panel: DirectoryPanel; showNew?: boolean }) {
   return (
@@ -48,7 +49,9 @@ export function PanelDirectoryList({ panel, showNew = true }: { panel: Directory
         <ol className="mt-1.5 divide-y divide-slate-200/70" aria-label={`${panel.name} circuits`}>
           {panel.circuits.map((c, i) => (
             <li key={i} className="flex min-h-[44px] items-start gap-3 py-2" aria-label={directoryLine(c)} data-panel-line={directoryLine(c)}>
-              <span className="w-12 shrink-0 pt-0.5 text-right font-mono text-sm font-semibold text-slate-700">{spaceWords(c)}</span>
+              {/* At least 3rem, and as wide as its words: "25/27/29" or "25B/27B" grows the column
+                  instead of running into the circuit's name at 375px. */}
+              <span className="min-w-[3rem] shrink-0 whitespace-nowrap pt-0.5 text-right font-mono text-sm font-semibold text-slate-700">{spaceWords(c)}</span>
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="break-words text-sm font-medium text-slate-900">{c.label}</span>

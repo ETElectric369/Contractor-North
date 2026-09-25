@@ -42,6 +42,10 @@ export type DirectoryPanel = {
   circuits: DirectoryCircuit[];
 };
 
+/** Every circuit map Save As Circuit Map files ends with this (the job's folder, "<time>-Circuit_Map.pdf"),
+ *  so Read Circuits From The Plans can leave the app's own printout out of its list. */
+export const CIRCUIT_MAP_FILE_SUFFIX = "-Circuit_Map.pdf";
+
 const KINDS: readonly CircuitKind[] = ["standard", "afci", "gfci", "dual_function", "spd"];
 const AMPS = new Set([10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225]);
 
@@ -96,6 +100,15 @@ export function directoryFromRows(
     deadSpaces: [...(panel.dead_spaces ?? [])],
     circuits: rows.map((r) => circuitOf(r.c)),
   };
+}
+
+/**
+ * A directory as the customer's page gets it: 0335 sends no brand, numbering or No Stab spaces, so
+ * normalizePortalPanels fills the defaults. The office's preview ("What Andrew Sees") goes through
+ * this, so it shows exactly that, not the print page's fuller heading.
+ */
+export function asPortalDirectory(d: DirectoryPanel): DirectoryPanel {
+  return { ...d, brand: null, numbering: "top_down", deadSpaces: [] };
 }
 
 /** The circuits on no panel yet, for the printed map (a list can be made before anyone looks in the box). */
@@ -173,8 +186,9 @@ export function spaceWords(c: Pick<DirectoryCircuit, "space" | "half" | "poles">
 
 /** "15A", "2P 30A", with the type: "15A AFCI". */
 export function sizeLine(c: Pick<DirectoryCircuit, "poles" | "amps" | "kind">): string {
-  const amps = c.amps == null ? "?A" : `${c.amps}A`;
-  const base = c.poles > 1 ? `${c.poles}P ${amps}` : amps;
+  // No amps yet reads in words, the way the map's own group says it ("Size Not Set"), never "?A".
+  const amps = c.amps == null ? "Size Not Set" : `${c.amps}A`;
+  const base = c.poles > 1 ? `${c.poles}P${c.amps == null ? ", " : " "}${amps}` : amps;
   return c.kind && c.kind !== "standard" ? `${base} ${KIND_WORDS[c.kind]}` : base;
 }
 

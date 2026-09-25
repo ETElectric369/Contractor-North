@@ -8,7 +8,7 @@ import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatDate } from "@/lib/utils";
-import { directoryFromRows, type DirectoryPanel } from "@/lib/panel/directory";
+import { CIRCUIT_MAP_FILE_SUFFIX, asPortalDirectory, directoryFromRows, type DirectoryPanel } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
 import { filePlan, showPaper, takePaperOff } from "./portal-share-actions";
 
@@ -113,7 +113,9 @@ export async function loadPanelPortal(jobId: string): Promise<PanelPortalLoad> {
   return {
     ok: true,
     panels: panels.map((p) => ({ id: p.id, name: p.name, shown: !!p.shown_on_portal })),
-    preview: panels.map((p) => directoryFromRows(p, circuits)),
+    // In the portal's own shape (asPortalDirectory): no brand, top-down, no No Stab spaces, exactly
+    // what normalizePortalPanels makes of 0335's block.
+    preview: panels.map((p) => asPortalDirectory(directoryFromRows(p, circuits))),
     circuitMap: map,
   };
 }
@@ -206,7 +208,7 @@ export async function saveCircuitMap(jobId: string): Promise<CircuitMapResult> {
   const day = formatDate(new Date(), tz);
   // The job's folder, the way every job file lands (lib/job-file-upload's shape), so the portal's
   // "is it in the job's folder" check holds.
-  const path = `${o.orgId}/${jobId}/${Date.now()}-Circuit_Map.pdf`;
+  const path = `${o.orgId}/${jobId}/${Date.now()}${CIRCUIT_MAP_FILE_SUFFIX}`;
   const up = await o.supabase.storage.from("documents").upload(path, pdf.bytes, { contentType: "application/pdf", upsert: false });
   if (up.error) return { ok: false, error: `The circuit map didn't upload (${up.error.message}). Try again.` };
 

@@ -146,7 +146,8 @@ export function decodeCode(token: string): DecodedBreaker | UnknownBreaker | nul
   // A breaker-family code this table can't read: said, never guessed.
   // The prefixes are narrow on purpose: "BR2" is a bedroom on a materials line and "Q1" a quarter,
   // so a bare family letter needs three digits after it before it is read as a part.
-  if (/^(Q\d{3}|QF\d|QAF?\d|QPF\d|QAFGF|QSA\d|HOMT?\d{3}|QOT?\d{3}|BR\d{3}|BD\d{3}|CHT?\d{3}|THQ[LP]?\d)/.test(t)) {
+  // QT (Siemens' older tandems, QT2020) and QP (QP120) are Siemens breakers this table doesn't list.
+  if (/^(Q\d{3}|QT\d{3}|QP\d{3}|QF\d|QAF?\d|QPF\d|QAFGF|QSA\d|HOMT?\d{3}|QOT?\d{3}|BR\d{3}|BD\d{3}|CHT?\d{3}|THQ[LP]?\d)/.test(t)) {
     return { kind: "unknown", code: t, reason: `Can't Read ${t}. Confirm What Is Inside It.` };
   }
   return null;
@@ -156,8 +157,10 @@ export function decodeCode(token: string): DecodedBreaker | UnknownBreaker | nul
 
 const BREAKER_WORD = /\b(?:CB|BREAKERS?|BRKRS?|BKRS?|CKT\s*BRKR|MINIATURE\s+(?:CIRCUIT|CKT))\b/;
 const LOAD_CENTRE = /\b(?:LOAD\s*CENT(?:ER|RE)|LOADCENT(?:ER|RE)|LD-?\s*CTR|MAIN\s+LUG|MLO)\b|\b\d{1,2}\s*\/\s*\d{1,2}\s*CT\b|\bPN\d{4}/;
+// A disconnect, a contactor, a fuse, a time clock or a relay says poles and amps too ("AC DISCONNECT
+// 60A 2P NON-FUSED"): none of them is a breaker, and counting one would cover a real shortfall.
 const NOT_BREAKER =
-  /\b(?:SWITCH(?:ES)?|SW|SEN|SENSOR|DIMMER|DMR|RECPT|RCPT|RECEPT|RECEPTACLES?|OUTLETS?|PLATE|PLT|FP|BOX|BOXES|WIRE|NMB?|ROMEX|TUBE|SHRINK|HOUSING|HSG|FIXT|FIXTURE|CORD|CONNECTOR|CONN|STRAP|STAPLES?|METER)\b/;
+  /\b(?:SWITCH(?:ES)?|SW|SEN|SENSOR|DIMMER|DMR|RECPT|RCPT|RECEPT|RECEPTACLES?|OUTLETS?|PLATE|PLT|FP|BOX|BOXES|WIRE|NMB?|ROMEX|TUBE|SHRINK|HOUSING|HSG|FIXT|FIXTURE|CORD|CONNECTOR|CONN|STRAP|STAPLES?|METER|DISCONNECTS?|DISC|PULL\s*-?\s*OUTS?|NON\s*-?\s*FUS(?:ED|IBLE)|FUS(?:ED|IBLE)|FUSES?|SAFETY|CONTACTORS?|RELAYS?|TIMERS?|TIME\s*CLOCKS?|SPA\s*PANEL|ENCLOSURES?|ENCL)\b/;
 const KIND_OF_WORDS: [RegExp, CircuitKind][] = [
   [/\bDUAL\s*FUNCTION\b/, "dual_function"],
   [/\b(?:AFCI|AFI|CAFI|ARC\s*FAULT)\b/, "afci"],
@@ -285,14 +288,19 @@ export function decodeBreaker(...texts: (string | null | undefined)[]): BreakerR
 
 // ── WHAT TO ORDER ───────────────────────────────────────────────────────────────────────────────
 
-/** Which family a panel's brand words or a bought code point to. */
+/**
+ * Which family a panel's brand words point to. Only words that NAME the family decide it: a
+ * Homeline and a QO are both "Square D", a BR and a CH are both "Eaton" (or Cutler-Hammer), and
+ * their breakers don't fit each other's panels. A bare "Square D" or "Eaton" is null here, so the
+ * card falls back to what this job's tickets brought (familyOf) or orders by words and a person picks.
+ */
 export function brandOf(text: string | null | undefined): BrandKey | null {
   const t = String(text ?? "").toUpperCase();
   if (/\bSIEM(?:ENS)?\b|\bITE\b|\bMURRAY\b/.test(t)) return "siemens";
   if (/\bHOMELINE\b|\bHOM\b/.test(t)) return "square_d_homeline";
   if (/\bQO\b/.test(t)) return "square_d_qo";
-  if (/\bSQUARE\s*D\b|\bSQD\b/.test(t)) return "square_d_homeline";
-  if (/\bCUTLER|\bEATON\b|\bBR\b/.test(t)) return "eaton_br";
+  if (/\bBR\b/.test(t)) return "eaton_br";
+  if (/\bCH\b/.test(t)) return "eaton_ch";
   if (/\bGE\b|\bGENERAL\s+ELECTRIC\b/.test(t)) return "ge";
   return null;
 }

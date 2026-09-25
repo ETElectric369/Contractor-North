@@ -28,7 +28,7 @@ import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { readBillShelfOff } from "@/lib/job-cost";
-import { breakerCard, groupLabel } from "@/lib/panel/breakers";
+import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
 import type { JobCircuit, JobPanel } from "@/lib/types";
@@ -2698,14 +2698,18 @@ async function readJobPanel(supabase: any, jobRef: unknown): Promise<Record<stri
     const card = breakerCard({
       circuits,
       panel: panels[0] ?? null,
-      bought: ((bought.data ?? []) as { description: string; qty: number | string }[]).map((b) => ({ description: b.description, qty: Number(b.qty) })),
+      bought: boughtLines(bought.data as { description: string; qty: number | string; credit_qty?: number | string }[] | null),
     });
     breakers = {
       need: card.needWords,
       already_in: card.alreadyInWords,
-      verdict: card.check.verdict,
+      // No kept new circuit: nothing is counted, so there is no verdict and nothing is a spare.
+      verdict:
+        card.need.lines.length === 0 && card.need.unsized.length === 0
+          ? "Nothing counted yet: no new circuits are kept on the list. Keep the new circuits on the Panel tab to count what they need."
+          : card.check.verdict,
       came_on_tickets: card.bought.map((g) => `${g.qty} x ${groupLabel(g)}`),
-      cant_read: card.unreadable.map((u) => `${u.qty} x ${u.description}: ${u.reason}`),
+      cant_read: card.unreadable.map((u) => `${u.qty} x ${u.description}: ${u.reason}${u.credit ? " Not counted either way." : ""}`),
       to_order: card.orders.map((o) => `${o.qty} x ${o.description}`),
       or_swap: card.check.swaps.map((s) => `${s.words}${s.warning ? ` (${s.warning})` : ""}${s.ifSpaceTakesQuad ? " Only if a space takes a quad." : ""}`),
     };

@@ -74,6 +74,12 @@ export function BreakersCardView({
     () => breakerCard({ circuits, panel, bought: data.bought, list: data.list, shelf: data.shelf }),
     [circuits, panel, data.bought, data.list, data.shelf],
   );
+  // NOTHING COUNTED YET: no kept new circuit (J-011 before anyone taps Keep). Then there is no
+  // verdict and no spares: "No new breakers needed" and every breaker as a green spare would read,
+  // at the panel, as "you have everything" when nobody has counted anything.
+  const nothingCounted = c.need.lines.length === 0 && c.need.unsized.length === 0;
+  const waiting = circuits.filter((x) => x.state === "suggested" && !x.removed_at && !x.source_row?.flag_for && x.work === "new").length;
+  const keptOld = circuits.some((x) => x.state === "kept" && !x.removed_at);
   const office = data.office;
   const book = useMemo(() => new Map((office?.prices ?? []).map((p) => [p.code, p])), [office]);
   const off = busy !== null;
@@ -143,7 +149,24 @@ export function BreakersCardView({
       </h3>
 
       {/* NEED: the kept, live, NEW circuits, counted by poles and amps. */}
-      <p className="mt-1 text-sm font-medium text-slate-800">{c.needWords || "Give The New Circuits Their Amps To Count Them."}</p>
+      {nothingCounted ? (
+        <>
+          <p className="mt-1 text-sm font-medium text-slate-800">
+            {waiting > 0
+              ? "Nothing Counted Yet. Keep The New Circuits To Count What They Need."
+              : keptOld
+                ? "No New Circuits On The List Yet. Add The New Work To Count Its Breakers."
+                : "Nothing Counted Yet. Add The New Circuits To Count What They Need."}
+          </p>
+          {waiting > 0 && (
+            <p className="text-xs text-slate-500">
+              {countWord(waiting)} {waiting === 1 ? "Suggestion Is" : "Suggestions Are"} Waiting Above.
+            </p>
+          )}
+        </>
+      ) : (
+        <p className="mt-1 text-sm font-medium text-slate-800">{c.needWords || "Give The New Circuits Their Amps To Count Them."}</p>
+      )}
       {c.alreadyInWords && <p className="text-xs text-slate-500">{c.alreadyInWords}</p>}
 
       {!data.ticketsReady ? (
@@ -205,10 +228,11 @@ export function BreakersCardView({
           {c.unreadable.length > 0 && (
             <ul className="mt-2 space-y-1">
               {c.unreadable.map((u) => (
-                <li key={u.description} className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                <li key={`${u.credit ? "credit" : "read"}:${u.description}`} className="flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span className="min-w-0 break-words">
-                    Can&apos;t Read This Breaker: {u.description} ({u.qty}). {u.reason} It isn&apos;t counted.
+                    {u.credit ? "A Credit On A Ticket" : "Can't Read This Breaker"}: {u.description} ({u.qty}). {u.reason} It isn&apos;t counted
+                    {u.credit ? " either way" : ""}.
                   </span>
                 </li>
               ))}
@@ -216,7 +240,7 @@ export function BreakersCardView({
           )}
 
           {/* THE VERDICT, in the words a person says it. */}
-          {(c.need.lines.length > 0 || c.need.unsized.length > 0 || c.bought.length > 0) && (
+          {!nothingCounted && (
             <div
               className={cn(
                 "mt-3 rounded-lg px-3 py-2 text-sm font-semibold",
@@ -260,9 +284,19 @@ export function BreakersCardView({
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {s.warning}
                 </p>
               )}
-              {s.ifSpaceTakesQuad && (
-                <p className="mt-1 text-xs text-slate-500">Only if a space takes a quad. The panel label says which; set them on Edit Panel.</p>
-              )}
+              {s.ifSpaceTakesQuad &&
+                (panel ? (
+                  <p className="mt-1 text-xs text-slate-500">Only if a space takes a quad. The panel label says which; set them on Edit Panel.</p>
+                ) : (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                    <span>Only if a space takes a quad. The panel label says which: add the panel and set its tandem spaces.</span>
+                    {onAddPanel && (
+                      <button type="button" onClick={onAddPanel} className="min-h-[44px] font-semibold text-[rgb(var(--glass-ink))]">
+                        Add The Panel
+                      </button>
+                    )}
+                  </div>
+                ))}
               <Button
                 className="mt-2 w-full"
                 variant="outline"

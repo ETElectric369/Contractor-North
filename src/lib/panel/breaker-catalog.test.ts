@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { decodeBreaker, decodeCode, partFor, promptCodeTable, QUAD_SWAPS, type BreakerReading } from "./breaker-catalog";
+import { brandOf, decodeBreaker, decodeCode, partFor, promptCodeTable, QUAD_SWAPS, type BreakerReading } from "./breaker-catalog";
 
 /**
  * THE DECODER ON ET'S REAL LINES (Panel plan, phase 3). Every breaker line ET Electric's bills carry
@@ -114,6 +114,42 @@ describe("the traps and the unknowns", () => {
     expect(inside(read("QA120AFC"))).toEqual({ code: "QA120AFC", form: "single", slots: ["1P20 afci"] });
     expect(inside(read("QSA2020SPD"))).toEqual({ code: "QSA2020SPD", form: "twin", slots: ["1P20 spd", "1P20 spd"] });
     expect(inside(read("Q22050CT"))).toEqual({ code: "Q22050CT", form: "quad", slots: ["1P20", "1P20", "2P50"] });
+  });
+});
+
+describe("review fixes: what a words-only line is", () => {
+  it("a disconnect, contactor, fuse, time clock or relay that says poles and amps is not a breaker", () => {
+    for (const t of [
+      "AC DISCONNECT 60A 2P NON-FUSED",
+      "60A 2P pullout disconnect",
+      "Eaton DPU222R 60A 2P non-fusible",
+      "2P 30A definite purpose contactor",
+      "FUSE 30A 1P",
+      "Intermatic T104 40A 2P time clock",
+      "30A 2P RELAY",
+      "SQD 60A 2P FUSIBLE SAFETY SW",
+      "GFCI SPA PANEL 50A 2P",
+    ]) {
+      expect(read(t).kind, t).toBe("not_breaker");
+    }
+    // A line that says it IS a breaker is still read.
+    expect(inside(read("2P 60A BREAKER FOR AC DISCONNECT"))).toEqual({ code: null, form: "double", slots: ["2P60"] });
+  });
+
+  it("Siemens QT and QP parts this table doesn't list are named, never dropped", () => {
+    for (const t of ["SIEM QT2020 TANDEM", "SIEM QT2020 20A", "SIEM QP120"]) expect(read(t).kind, t).toBe("unknown");
+  });
+
+  it("a bare Square D or Eaton is no family; Homeline, QO, BR and CH are", () => {
+    expect(brandOf("Square D")).toBeNull();
+    expect(brandOf("SQD")).toBeNull();
+    expect(brandOf("Eaton")).toBeNull();
+    expect(brandOf("Cutler-Hammer")).toBeNull();
+    expect(brandOf("Square D Homeline")).toBe("square_d_homeline");
+    expect(brandOf("Square D QO")).toBe("square_d_qo");
+    expect(brandOf("Eaton BR")).toBe("eaton_br");
+    expect(brandOf("Cutler-Hammer CH")).toBe("eaton_ch");
+    expect(brandOf("Siemens")).toBe("siemens");
   });
 });
 

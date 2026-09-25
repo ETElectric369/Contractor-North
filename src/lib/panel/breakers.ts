@@ -28,8 +28,23 @@ import {
 } from "./model";
 import { brandOf, decodeBreaker, partFor, type BrandKey, type BreakerForm, type BreakerSlot } from "./breaker-catalog";
 
-/** One line to read: a bill line (description, qty), a materials line (part number too), a shelf item. */
-export type BreakerLine = { description: string; part_number?: string | null; qty: number };
+/** One line to read: a bill line (description, qty), a materials line (part number too), a shelf item.
+ *  `credit`: a ticket's credit line nobody can read (a positive count on negative money: a return
+ *  or a price fix?). It is never counted either way; it is named, and a person decides. */
+export type BreakerLine = { description: string; part_number?: string | null; qty: number; credit?: boolean };
+
+/** What breakers_bought_for_job (0334) hands back, as lines: what came, and beside it the credits
+ *  nobody can read (credit_qty). One mapper, so the card, Nort and the replay read it the same way. */
+export function boughtLines(rows: { description: string; qty: number | string | null; credit_qty?: number | string | null }[] | null | undefined): BreakerLine[] {
+  const out: BreakerLine[] = [];
+  for (const r of rows ?? []) {
+    const qty = Number(r.qty ?? 0);
+    const credit = Number(r.credit_qty ?? 0);
+    if (Number.isFinite(qty) && qty !== 0) out.push({ description: r.description, qty });
+    if (Number.isFinite(credit) && credit > 0) out.push({ description: r.description, qty: credit, credit: true });
+  }
+  return out;
+}
 
 export type HaveGroup = {
   /** Same form and pole groups = the same breaker, whichever way the line was written. */
@@ -44,7 +59,10 @@ export type HaveGroup = {
   /** The lines as written, for the person to check against. */
   lines: string[];
 };
-export type Unreadable = { description: string; qty: number; reason: string };
+export type Unreadable = { description: string; qty: number; reason: string; credit?: boolean };
+
+/** Said beside a ticket's credit line: it isn't counted either way until a person looks. */
+export const CREDIT_REASON = "A Ticket Credits It, But Doesn't Say If The Part Went Back Or Was Only Repriced. Check The Ticket.";
 
 const sig = (form: BreakerForm, slots: BreakerSlot[]) =>
   `${form}:${[...slots].map((s) => `${s.poles}P${s.amps}${s.kind ?? ""}`).sort().join("+")}`;
@@ -60,6 +78,14 @@ export function groupBreakers(lines: BreakerLine[]): { groups: HaveGroup[]; unre
     const r = decodeBreaker(l.part_number, l.description);
     if (r.kind === "not_breaker") continue;
     const text = String(l.description ?? "").trim() || String(l.part_number ?? "").trim();
+    if (l.credit) {
+      // Neither came nor went back: named, never counted (0334's credit_qty).
+      const k = `credit:${text}`;
+      const u = unread.get(k) ?? { description: text, qty: 0, reason: CREDIT_REASON, credit: true };
+      u.qty += Math.abs(qty);
+      unread.set(k, u);
+      continue;
+    }
     if (r.kind === "unknown") {
       const u = unread.get(text) ?? { description: text, qty: 0, reason: r.reason };
       u.qty += qty;

@@ -9,9 +9,18 @@
 -- a card that counted from nothing would say every breaker is short.
 --
 -- THE DOOR. breakers_bought_for_job(job) hands back what a tech needs from the job's tickets and
--- nothing else: each breaker-looking line's DESCRIPTION and the QUANTITY that came (a return's
--- negative quantity nets it off). No price, no amount, no supplier, no bill number, no bill id, no
--- date. The office's view adds its sources and prices from its OWN session (bills RLS), and counts
+-- nothing else: each breaker-looking line's DESCRIPTION, the QUANTITY that came (a return's
+-- negative quantity nets it off), and CREDIT_QTY, the count on a credit line nobody can read the
+-- meaning of. No price, no amount, no supplier, no bill number, no bill id, no date.
+--
+-- A CREDIT IS STORED BOTH WAYS on production (checked 2026-09-25, ET): CED's H245ICAT return is
+-- quantity -4 at -11.83, but CED 8802-1108541's "WIRE CONNECTOR (30641J)" is quantity +500 at -0.21,
+-- a price correction on connectors nobody sent back. So a line with a POSITIVE quantity and NEGATIVE
+-- money is neither "came" nor "went back": it could be a return or a price fix. It is never added
+-- to the count (a credit on 2 x Q120 would otherwise read as 2 more Q120), never taken off it (a
+-- price fix on 8 x Q2020 would otherwise erase the eight that came), and handed back on its own as
+-- credit_qty, so the card names it and a person decides. Only a NEGATIVE quantity is a return.
+-- The sign of the money is read here and never returned. The office's view adds its sources and prices from its OWN session (bills RLS), and counts
 -- from this same function, so the crew and the office read the same Have and the same verdict.
 --
 --   * SECURITY DEFINER, stable, search_path pinned (shelf_for_crew's shape, 0302).
@@ -36,13 +45,19 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 
 create or replace function public.breakers_bought_for_job(p_job uuid)
-returns table (description text, qty numeric)
+returns table (description text, qty numeric, credit_qty numeric)
 language sql
 stable
 security definer
 set search_path = public
 as $$
-  select li.description, sum(li.quantity) as qty
+  select li.description,
+         -- What came, less what went back (a negative quantity). A positive quantity on negative
+         -- money is a credit nobody can read: never in this count, and handed back beside it.
+         sum(case when li.quantity > 0 and (coalesce(li.amount, 0) < 0 or coalesce(li.unit_price, 0) < 0)
+                  then 0 else li.quantity end) as qty,
+         sum(case when li.quantity > 0 and (coalesce(li.amount, 0) < 0 or coalesce(li.unit_price, 0) < 0)
+                  then li.quantity else 0 end) as credit_qty
     from public.jobs j
     join public.bills b
       on b.job_id = j.id
@@ -66,12 +81,15 @@ as $$
      and (li.description ~* '(breaker|brkr|bkr|\ycb\y)'
           or li.description !~* '(switch|\ysw\y|sensor|\ysen\y|dimmer|\ydmr\y|recep|rcpt|recpt|outlet|plate|load ?cent|ld-?ctr)')
    group by li.description
-  having sum(li.quantity) <> 0
+  having sum(case when li.quantity > 0 and (coalesce(li.amount, 0) < 0 or coalesce(li.unit_price, 0) < 0)
+                  then 0 else li.quantity end) <> 0
+      or sum(case when li.quantity > 0 and (coalesce(li.amount, 0) < 0 or coalesce(li.unit_price, 0) < 0)
+                  then li.quantity else 0 end) <> 0
    order by li.description;
 $$;
 
 comment on function public.breakers_bought_for_job(uuid) is
-  'What breakers came on a job''s tickets (0334): each breaker-looking line''s description and quantity, never a price, amount, supplier or bill number. Active members of the job''s own org only. The Panel tab''s Breakers card reads it for the crew and the office alike.';
+  'What breakers came on a job''s tickets (0334): each breaker-looking line''s description, quantity and unreadable-credit quantity, never a price, amount, supplier or bill number. Active members of the job''s own org only. The Panel tab''s Breakers card reads it for the crew and the office alike.';
 
 revoke execute on function public.breakers_bought_for_job(uuid) from public, anon;
 grant execute on function public.breakers_bought_for_job(uuid) to authenticated, service_role;
@@ -87,8 +105,8 @@ begin
     into v_result, v_secdef, v_config
     from pg_proc p
    where p.oid = 'public.breakers_bought_for_job(uuid)'::regprocedure;
-  if v_result is distinct from 'TABLE(description text, qty numeric)' then
-    raise exception '0334: breakers_bought_for_job returns % (expected description and qty only).', v_result;
+  if v_result is distinct from 'TABLE(description text, qty numeric, credit_qty numeric)' then
+    raise exception '0334: breakers_bought_for_job returns % (expected description, qty and credit_qty only).', v_result;
   end if;
   if v_result ~* '(price|amount|cost|supplier|bill|vendor)' then
     raise exception '0334: breakers_bought_for_job would hand a tech money or a supplier (%).', v_result;

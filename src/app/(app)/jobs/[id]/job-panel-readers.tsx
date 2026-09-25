@@ -1,13 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { AlertTriangle, Camera, FileText, Loader2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { AlertTriangle, Camera, FileText, ImageOff, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
-import { formatDate } from "@/lib/utils";
-import { PHOTO_READS_PER_JOB_PER_DAY, headerSuggestions, type HeaderSaid, type HeaderSuggestion } from "@/lib/panel/readers";
+import { cn, formatDate } from "@/lib/utils";
+import { PHOTO_READS_PER_JOB_PER_DAY, PLAN_READS_PER_JOB_PER_DAY, headerSuggestions, readsLeftWords, type HeaderSaid, type HeaderSuggestion } from "@/lib/panel/readers";
 import type { JobCircuit, JobPanel } from "@/lib/types";
-import { readPanelPhoto, readPlanCircuits, savePanel } from "../panel-actions";
+import { loadPanelPhotos, readPanelPhoto, readPlanCircuits, savePanel, type PanelPhoto } from "../panel-actions";
+import { uploadJobPhotos } from "./upload-job-photos";
 
 /**
  * THE READERS (Panel plan, phase 4): Read The Panel Photo (the crew and the office) and Read
@@ -31,28 +32,65 @@ const FIELD_WORDS: Record<HeaderSuggestion["field"], string> = { brand: "Brand",
 
 export function PanelReaders({
   jobId,
+  orgId,
   staff,
-  photos,
+  photos: initialPhotos,
   plans,
+  photoReadsLeft = null,
+  planReadsLeft = null,
   panel,
   walkthrough,
   onRows,
   onPanel,
 }: {
   jobId: string;
+  orgId: string;
   staff: boolean;
-  photos: Paper[];
+  photos: PanelPhoto[];
   plans: (Paper & { onCustomer: boolean })[];
+  photoReadsLeft?: number | null;
+  planReadsLeft?: number | null;
   panel: JobPanel | null;
   walkthrough: { said: HeaderSaid; words: string | null } | null;
   onRows: (rows: JobCircuit[]) => void;
   onPanel: (row: JobPanel, placed?: { adopted: JobCircuit[]; notAdopted: string[] }) => void;
 }) {
   const toast = useToast();
-  const [photoId, setPhotoId] = useState<string>(panel?.photo_document_id ?? photos[0]?.id ?? "");
+  const [photos, setPhotos] = useState<PanelPhoto[]>(initialPhotos);
+  // THE NEWEST PHOTO, never the panel's saved one: a tech who takes a closer photo (the app's own
+  // advice) comes back to it, not to the photo already read. The picked photo is always one of the
+  // thumbnails on screen, so what is sent is what is seen.
+  const [photoId, setPhotoId] = useState<string>(initialPhotos[0]?.id ?? "");
   const [planId, setPlanId] = useState<string>(plans[0]?.id ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const [left, setLeft] = useState<{ photo: number | null; plan: number | null }>({ photo: photoReadsLeft, plan: planReadsLeft });
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const picked = photos.find((p) => p.id === photoId) ?? null;
+
+  /** Take A Photo, right here: filed on the job's Photos the same way the Photos tab files one
+   *  (uploadJobPhotos), then picked, so the next Read sends the photo just taken. */
+  async function takePhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (cameraRef.current) cameraRef.current.value = "";
+    if (!files.length) return;
+    setBusy("camera");
+    try {
+      await uploadJobPhotos(orgId, jobId, files.slice(0, 1));
+      const r = await loadPanelPhotos(jobId);
+      if (!r.ok) {
+        toast(`The photo is on the job's Photos, but this list couldn't refresh: ${r.error}`, "error");
+        return;
+      }
+      setPhotos(r.photos);
+      if (r.photos[0]) setPhotoId(r.photos[0].id);
+      toast("Photo added to the job and picked. Tap Read The Panel Photo to read it.", "success");
+    } catch (err) {
+      toast(err instanceof Error && err.message ? err.message : "The photo didn't upload. Try again.", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // The walk-through's suggestions are worked out against the panel as it is now, so each one goes
   // away by itself once the panel says the same.
@@ -69,6 +107,7 @@ export function PanelReaders({
     setBusy(kind);
     try {
       const r = kind === "photo" ? await readPanelPhoto(jobId, id, panel?.id ?? null) : await readPlanCircuits(jobId, id);
+      if (r.readsLeft !== undefined) setLeft((l) => ({ ...l, [kind]: r.readsLeft ?? null }));
       if (!r.ok) {
         toast(r.error, "error", undefined, { sticky: true });
         return;
@@ -139,31 +178,72 @@ export function PanelReaders({
 
       {/* READ THE PANEL PHOTO: the crew and the office. */}
       <div className="mt-3 space-y-2">
+        {/* No `capture`: the phone asks Camera or Photo Library, the same as the dock's Photo button. */}
+        <input ref={cameraRef} type="file" accept="image/*" className="hidden" onChange={(e) => void takePhoto(e)} />
         {photos.length === 0 ? (
-          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Take a photo of the panel door on the Photos tab first, then read it here.
-          </p>
+          <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">No photos on this job yet. Take one of the panel door, then read it.</p>
         ) : (
           <>
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Panel Photo</span>
-              <select className={select} value={photoId} onChange={(e) => setPhotoId(e.target.value)} disabled={busy !== null}>
+            <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">Panel Photo</span>
+            {/* WHAT WILL BE SENT, big enough to check before the tap. */}
+            <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+              {picked?.url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={picked.url} alt={picked.name ?? "The picked photo"} className="h-44 w-full object-contain" />
+              ) : (
+                <div className="flex h-44 items-center justify-center text-slate-400">
+                  <ImageOff className="h-6 w-6" />
+                </div>
+              )}
+              {picked && (
+                <div className="bg-white px-3 py-1.5 text-xs text-slate-600">
+                  {picked.id === panel?.photo_document_id ? "The Panel's Photo · " : ""}
+                  {picked.name || "Photo"} · {formatDate(picked.created_at)}
+                </div>
+              )}
+            </div>
+            {photos.length > 1 && (
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1" role="listbox" aria-label="Pick The Photo To Read">
                 {photos.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id === panel?.photo_document_id ? "The Panel's Photo · " : ""}
-                    {p.name || "Photo"} · {formatDate(p.created_at)}
-                  </option>
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="option"
+                    aria-selected={p.id === photoId}
+                    aria-label={`${p.name || "Photo"}, ${formatDate(p.created_at)}`}
+                    onClick={() => setPhotoId(p.id)}
+                    disabled={busy !== null}
+                    className={cn(
+                      "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 bg-slate-100",
+                      p.id === photoId ? "border-[rgb(var(--glass-ink))]" : "border-transparent",
+                    )}
+                  >
+                    {p.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={p.url} alt="" className="h-full w-full object-cover" loading="lazy" />
+                    ) : (
+                      <ImageOff className="mx-auto h-4 w-4 text-slate-400" />
+                    )}
+                  </button>
                 ))}
-              </select>
-            </label>
-            <Button className="w-full" onClick={() => read("photo")} disabled={busy !== null || !photoId}>
-              {busy === "photo" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Read The Panel Photo
-            </Button>
-            <p className="text-xs text-slate-500">
-              Up to {PHOTO_READS_PER_JOB_PER_DAY} reads a day on this job, a few cents each. A straight, close photo of the door&apos;s list reads best.
-            </p>
+              </div>
+            )}
           </>
         )}
+        <div className={cn("grid gap-2", photos.length ? "grid-cols-[auto_minmax(0,1fr)]" : "grid-cols-1")}>
+          <Button variant="outline" onClick={() => cameraRef.current?.click()} disabled={busy !== null}>
+            {busy === "camera" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take A Photo
+          </Button>
+          {photos.length > 0 && (
+            <Button onClick={() => read("photo")} disabled={busy !== null || !picked || left.photo === 0}>
+              {busy === "photo" ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Read The Panel Photo
+            </Button>
+          )}
+        </div>
+        <p className="text-xs text-slate-500">
+          {left.photo != null ? readsLeftWords(left.photo, PHOTO_READS_PER_JOB_PER_DAY) : `Up to ${PHOTO_READS_PER_JOB_PER_DAY} reads a day on this job.`} A few cents
+          each; a read that fails is given back. A straight, close photo of the door&apos;s list reads best.
+        </p>
       </div>
 
       {/* READ CIRCUITS FROM THE PLANS: the office only (a tech's page never carries the list). */}
@@ -186,10 +266,13 @@ export function PanelReaders({
                   ))}
                 </select>
               </label>
-              <Button variant="outline" className="w-full" onClick={() => read("plan")} disabled={busy !== null || !planId}>
+              <Button variant="outline" className="w-full" onClick={() => read("plan")} disabled={busy !== null || !planId || left.plan === 0}>
                 {busy === "plan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Read Circuits From The Plans
               </Button>
-              <p className="text-xs text-slate-500">Reads the panel schedules and electrical sheets. A sheet it can&apos;t count is named, never skipped quietly.</p>
+              <p className="text-xs text-slate-500">
+                Reads the panel schedules and electrical sheets. A sheet it can&apos;t count is named, never skipped quietly.
+                {left.plan != null ? ` ${readsLeftWords(left.plan, PLAN_READS_PER_JOB_PER_DAY)}` : ""}
+              </p>
             </>
           )}
         </div>

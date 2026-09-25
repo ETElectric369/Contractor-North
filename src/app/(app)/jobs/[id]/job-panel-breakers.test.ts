@@ -133,6 +133,31 @@ describe("the card's other states", () => {
     expect(labels).not.toContain("Place");
     expect(labels).toContain("Add The Panel");
   });
+  it("with no kept new circuit (J-011 before Keep) there is no verdict and nothing is a spare", () => {
+    const suggested = all.map((c) => ({ ...c, state: "suggested" as const }));
+    const html = renderToStaticMarkup(createElement(BreakersCardView, { data: crewData, circuits: suggested, panel: null, ...handlers }));
+    const t = textOf(html);
+    expect(t).toContain("Nothing Counted Yet. Keep The New Circuits To Count What They Need.");
+    expect(t).toMatch(/Suggestions Are Waiting Above\./);
+    expect(t).not.toContain("No new breakers needed");
+    expect(t).not.toContain("Spare");
+    expect(html).not.toContain("bg-emerald-50");
+    // What came is still listed.
+    expect(t).toContain("8 x Q2020");
+    const none = textOf(renderToStaticMarkup(createElement(BreakersCardView, { data: crewData, circuits: [], panel: null, ...handlers })));
+    expect(none).toContain("Nothing Counted Yet. Add The New Circuits To Count What They Need.");
+  });
+  it("a ticket credit nobody can read is named as a credit and not counted either way", () => {
+    const t = textOf(render({ ...crewData, bought: [...BOUGHT, { description: "SP 20A 120/240V CB (Q120)", qty: 2, credit: true }] }));
+    expect(t).toContain("A Credit On A Ticket: SP 20A 120/240V CB (Q120) (2).");
+    expect(t).toContain("It isn't counted either way.");
+    expect(t).toContain("Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare.");
+  });
+  it("with no panel, the quad swap sends the tech to Add The Panel, not an Edit Panel that isn't there", () => {
+    const t = textOf(renderToStaticMarkup(createElement(BreakersCardView, { data: crewData, circuits: all, panel: null, ...handlers })));
+    expect(t).toContain("add the panel and set its tandem spaces");
+    expect(t).not.toContain("set them on Edit Panel");
+  });
   it("before 0334 is on the database the card says so and gives no verdict", () => {
     const t = textOf(render({ ...crewData, ticketsReady: false, bought: [] }));
     expect(t).toContain("can't be read here yet");

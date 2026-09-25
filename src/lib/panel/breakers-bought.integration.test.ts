@@ -3,6 +3,7 @@ import pg from "pg";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { decodeBreaker } from "./breaker-catalog";
+import { boughtLines, groupBreakers } from "./breakers";
 
 /**
  * Migration 0334 — THE CREW SEES WHAT BREAKERS CAME, exercised where the boundary lives.
@@ -67,6 +68,7 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
   let staffId = "";
   let jobId = "";
   let gateJobId = "";
+  let creditJobId = "";
   let otherJobId = "";
 
   const as = async (uid: string) => {
@@ -125,6 +127,7 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
       ]);
     jobId = (await job("J1")).id;
     gateJobId = (await job("J2")).id;
+    creditJobId = (await job("J3")).id;
 
     // J-011's ticket, as CED wrote it.
     await bill(jobId, orgId, { bill_number: "TEST-8802-SO" }, [
@@ -144,6 +147,20 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
     await bill(jobId, orgId, {}, [
       ["SQD HOM120 Miniature Circuit", 3, 23.13],
       ["SQD HOM120 Miniature Circuit", -3, -23.13],
+    ]);
+    // The credit job: credits stored both ways, as production has them (CED's H245ICAT return is
+    // qty -4 at -11.83; CED 8802-1108541's connector credit is qty +500 at -0.21, a price fix).
+    await bill(creditJobId, orgId, {}, [
+      ["SIEM Q2020 SP 20/20A 120/240V CB", 8, 184.88],
+      ["SP 15A 120/240V CB (Q115)", 3, 30.0],
+    ]);
+    await bill(creditJobId, orgId, { bill_number: "TEST-CREDIT" }, [
+      // A price fix on the eight twins: a positive count on negative money.
+      ["SIEM Q2020 SP 20/20A 120/240V CB", 8, -16.0],
+      // Two Q120 credited the same way, with none bought: a return or a price fix? Nobody can say.
+      ["SP 20A 120/240V CB (Q120)", 2, -23.1],
+      // A plain return: a negative count.
+      ["SP 15A 120/240V CB (Q115)", -1, -10.0],
     ]);
     // The gate job: every line the reader knows.
     await bill(gateJobId, orgId, {}, EVERY_LINE.map((l) => [l, 1, 1] as [string, number, number]));
@@ -171,7 +188,7 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
       { description: "SIEM Q21530CT", qty: 1 },
     ]);
     const { fields } = await client.query("select * from public.breakers_bought_for_job($1)", [jobId]);
-    expect(fields.map((f) => f.name)).toEqual(["description", "qty"]);
+    expect(fields.map((f) => f.name)).toEqual(["description", "qty", "credit_qty"]);
     // The door is the only way in: the bills themselves stay the office's.
     const direct = await client.query("select count(*)::int as n from public.bills where job_id = $1", [jobId]);
     expect(direct.rows[0].n).toBe(0);
@@ -182,6 +199,29 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
     expect(await bought(jobId)).toEqual([
       { description: "SIEM Q2020 SP 20/20A 120/240V CB", qty: 8 },
       { description: "SIEM Q21530CT", qty: 1 },
+    ]);
+  });
+
+  it("a credit with a positive count is never counted either way: it comes back on its own, and the card names it", async () => {
+    await as(techId);
+    const rows = (
+      await client.query("select description, qty::float as qty, credit_qty::float as credit_qty from public.breakers_bought_for_job($1) order by description", [creditJobId])
+    ).rows as { description: string; qty: number; credit_qty: number }[];
+    expect(rows).toEqual([
+      { description: "SIEM Q2020 SP 20/20A 120/240V CB", qty: 8, credit_qty: 8 },
+      { description: "SP 15A 120/240V CB (Q115)", qty: 2, credit_qty: 0 },
+      { description: "SP 20A 120/240V CB (Q120)", qty: 0, credit_qty: 2 },
+    ]);
+    const { groups, unreadable } = groupBreakers(boughtLines(rows));
+    // The eight twins stay eight (not sixteen, not none); the Q120 credit adds nothing; the Q115
+    // return takes one off.
+    expect(groups.map((g) => [g.codes.join("/"), g.qty])).toEqual([
+      ["Q115", 2],
+      ["Q2020", 8],
+    ]);
+    expect(unreadable.map((u) => [u.description, u.qty, !!u.credit])).toEqual([
+      ["SIEM Q2020 SP 20/20A 120/240V CB", 8, true],
+      ["SP 20A 120/240V CB (Q120)", 2, true],
     ]);
   });
 

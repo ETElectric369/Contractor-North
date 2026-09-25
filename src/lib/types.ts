@@ -236,6 +236,8 @@ export interface CircuitSourceRow {
 /** The only fields a label check can change on the circuit it names (never the size's poles or type). */
 export interface CircuitReadPatch {
   panel_label?: string | null;
+  /** What it feeds: the plans' and Nort's words (never the photo's, which are the door's). */
+  description?: string | null;
   space?: number | null;
   half?: SpaceHalf | null;
   amps?: number | null;

@@ -23,7 +23,9 @@ import { photoMime } from "./read-panel-photo";
  */
 
 export const PLAN_MAX_BYTES = 20 * 1024 * 1024;
-export const PLAN_READS_PER_JOB_PER_DAY = 5;
+/** Five plan reads per job per day: the number lives with the photo's cap (readers.ts), so the tab
+ *  can say it without pulling the model code into a page. */
+export { PLAN_READS_PER_JOB_PER_DAY } from "./readers";
 export const PLAN_MAX_TOKENS = 6000;
 
 /** How a plan paper goes to the model: a PDF as a document, a photo of a sheet as an image. */

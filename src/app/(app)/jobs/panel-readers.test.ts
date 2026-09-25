@@ -16,6 +16,8 @@ const s = vi.hoisted(() => ({
   capped: false,
   model: null as any,
   capKeys: [] as string[],
+  givenBack: [] as string[],
+  left: 2 as number | null,
 }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => s.client) }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => s.guard) }));
@@ -35,9 +37,14 @@ vi.mock("@/lib/rate-limit", () => ({
     s.capKeys.push(key);
     return s.capped;
   }),
+  rateLimitLeft: vi.fn(async () => s.left),
+  rateLimitGiveBack: vi.fn(async (key: string) => {
+    s.givenBack.push(key);
+    return true;
+  }),
 }));
 
-import { applyLabelCheck, keepSuggestions, readPanelPhoto, readPlanCircuits } from "./panel-actions";
+import { applyLabelCheck, keepSuggestions, readPanelPhoto, readPlanCircuits, undoTakeOff } from "./panel-actions";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "22222222-2222-4222-8222-222222222222";
@@ -121,6 +128,8 @@ beforeEach(() => {
   s.spent = false;
   s.capped = false;
   s.capKeys = [];
+  s.givenBack = [];
+  s.left = 2;
   s.model = null;
 });
 
@@ -168,6 +177,9 @@ describe("readPanelPhoto (the crew and the office)", () => {
     expect(r.message).toBe("Read 2 circuits off the photo: 1 New Suggestion, 1 Label Check. Nothing counts until you keep it.");
     expect(r.notes).toEqual(["Space 9's label is torn off"]);
     expect(r.header.map((h) => h.words)).toEqual(["Spaces: 40 (Yours Says 32)"]);
+    // A read that answered is counted, and the reads left ride with it.
+    expect(r.readsLeft).toBe(2);
+    expect(s.givenBack).toEqual([]);
   });
 
   it("the fourth read of the day is refused in plain words, AFTER the photo is found and BEFORE the model", async () => {
@@ -175,8 +187,37 @@ describe("readPanelPhoto (the crew and the office)", () => {
     s.capped = true;
     as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
     const r = await readPanelPhoto(JOB, PHOTO, PANEL);
-    expect(r).toEqual({ ok: false, error: "The panel photo has been read 3 times on this job today. The next read opens tomorrow; add the rest by hand below." });
+    expect(r).toEqual({
+      ok: false,
+      error: "The panel photo has been read 3 times on this job today. The next read opens tomorrow; add the rest by hand with Add A Circuit.",
+      readsLeft: 0,
+    });
     expect(create).not.toHaveBeenCalled();
+    expect(s.givenBack).toEqual([]);
+  });
+
+  it("a read the model fails, or cuts off, is given back, and the answer says so with the reads left", async () => {
+    s.left = 3;
+    s.model = { messages: { create: vi.fn(async () => { throw new Error("overloaded_error"); }) } };
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
+    const r = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(r).toEqual({
+      ok: false,
+      error: "The photo couldn't be read this time. Nothing was added. Try again in a minute. It didn't use up one of today's reads. 3 Of 3 Reads Left Today.",
+      readsLeft: 3,
+    });
+    expect(s.givenBack).toEqual([`panel-photo:${JOB}`]);
+
+    s.givenBack = [];
+    s.model = {
+      messages: { create: vi.fn(async () => ({ content: [{ type: "text", text: "{" }], stop_reason: "max_tokens", usage: { input_tokens: 10, output_tokens: 10 } })) },
+    };
+    as("tech", { "jobs.select": [job], "documents.select": [photo], "job_panels.select": [{ data: panelRow, error: null }] });
+    const cut = await readPanelPhoto(JOB, PHOTO, PANEL);
+    expect(cut.ok).toBe(false);
+    if (cut.ok) return;
+    expect(cut.error).toMatch(/^The photo had more on it than one read can hold\..* It didn't use up one of today's reads\. 3 Of 3 Reads Left Today\.$/);
+    expect(s.givenBack).toEqual([`panel-photo:${JOB}`]);
   });
 
   it("a used-up AI budget is said, and neither the cap nor the model is touched", async () => {
@@ -310,5 +351,22 @@ describe("label checks", () => {
     if (r.ok) return;
     expect(r.error).toMatch(/^Andrew just changed Kitchen Fridge\./);
     expect(calls.filter((c) => c.verb === "update")).toHaveLength(1);
+  });
+
+  it("Put Back never reopens a check whose change is already on the circuit; one set aside with Not This comes back", async () => {
+    const used = { ...check, removed_at: "2026-09-25T10:00:00Z" };
+    as("tech", {
+      "job_circuits.select": [{ data: used, error: null }, { data: { ...fridge, panel_label: "Mini Fridge" }, error: null }],
+    });
+    const r = await undoTakeOff(CHECK);
+    expect(r).toEqual({ ok: false, error: "That check's change is already on Kitchen Fridge. Use Undo on it to put the circuit back as it was." });
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
+
+    as("tech", {
+      "job_circuits.select": [{ data: used, error: null }, { data: fridge, error: null }],
+      "job_circuits.update": [{ data: { ...check, removed_at: null }, error: null }],
+    });
+    const back = await undoTakeOff(CHECK);
+    expect(back.ok).toBe(true);
   });
 });

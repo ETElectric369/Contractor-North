@@ -54,6 +54,9 @@ const data = (over: Partial<PanelData> = {}): PanelData => ({
     { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Herringbone", count: 12, created_at: null, onJob: 0, fresh: 12, alsoFrom: null },
   ],
   photos: [],
+  orgId: "org",
+  photoReadsLeft: null,
+  planReadsLeft: null,
   plans: [],
   walkthrough: null,
   people: {},
@@ -277,7 +280,7 @@ describe("the office bar's words", () => {
 });
 
 describe("phase 4: the readers and the label checks on the tab", () => {
-  const PHOTO = { id: "ph1", name: "panel.jpg", created_at: "2026-09-25T08:00:00Z" };
+  const PHOTO = { id: "ph1", name: "panel.jpg", created_at: "2026-09-25T08:00:00Z", url: "https://example.test/panel.jpg" };
   const PLAN = { id: "pl1", name: "Herringbone E-sheets.pdf", created_at: "2026-09-20T08:00:00Z", onCustomer: true };
   const fridge = FINAL_MAP.find((c) => c.description === "Fridge")!;
   const check = circuit({
@@ -296,7 +299,10 @@ describe("phase 4: the readers and the label checks on the tab", () => {
     const t = textOf(html);
     const labels = buttons(html).map((b) => b.text);
     expect(labels).toContain("Read The Panel Photo");
-    expect(t).toContain("Up to 3 reads a day on this job, a few cents each.");
+    expect(t).toContain("Up to 3 reads a day on this job. A few cents each; a read that fails is given back.");
+    // What will be sent is on screen before the tap: the picked photo, the newest one.
+    expect(html).toContain('src="https://example.test/panel.jpg"');
+    expect(labels).toContain("Take A Photo");
     expect(labels).not.toContain("Read Circuits From The Plans");
     expect(t).not.toContain("Herringbone E-sheets.pdf");
     phoneSafe(html);
@@ -309,10 +315,24 @@ describe("phase 4: the readers and the label checks on the tab", () => {
     expect(textOf(html)).toContain("On The Customer");
   });
 
-  it("with no photo yet, it says where to take one instead of a dead button", () => {
+  it("with no photo yet, it offers Take A Photo right here instead of a dead button", () => {
     const html = render(data({ staff: false, estimates: [], photos: [] }));
-    expect(buttons(html).map((b) => b.text)).not.toContain("Read The Panel Photo");
-    expect(textOf(html)).toContain("Take a photo of the panel door on the Photos tab first");
+    const labels = buttons(html).map((b) => b.text);
+    expect(labels).not.toContain("Read The Panel Photo");
+    expect(labels).toContain("Take A Photo");
+    expect(textOf(html)).toContain("No photos on this job yet. Take one of the panel door, then read it.");
+  });
+
+  it("the reads left today are said, and a used-up day turns the Read off", () => {
+    const newer = { id: "ph2", name: "closer.jpg", created_at: "2026-09-25T09:00:00Z", url: "https://example.test/closer.jpg" };
+    const html = render(data({ staff: false, estimates: [], photos: [newer, PHOTO], photoReadsLeft: 0 }));
+    expect(textOf(html)).toContain("0 Of 3 Reads Left Today.");
+    const read = buttons(html).find((b) => b.text === "Read The Panel Photo")!;
+    expect(read.markup).toContain('disabled=""');
+    // The newest photo is the one picked (not the panel's saved photo), and every photo is a
+    // thumbnail to pick from.
+    expect(html).toMatch(/<img src="https:\/\/example.test\/closer.jpg" alt="closer.jpg"/);
+    expect(html).toContain('aria-selected="true" aria-label="closer.jpg');
   });
 
   it("a label check names the kept circuit, says what differs, and offers Use It / Open It / Not This, never Keep; Keep All leaves it out", () => {

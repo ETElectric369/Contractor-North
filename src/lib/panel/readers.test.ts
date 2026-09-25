@@ -5,6 +5,7 @@ import {
   PANEL_SAYS,
   PLANS_SAY,
   headerSuggestions,
+  labelCheckApplied,
   matchRead,
   readerSuggestions,
   readerSummary,
@@ -195,6 +196,58 @@ describe("readerSuggestions: checks, the plans and Nort", () => {
     expect(out.drafts).toHaveLength(1);
     expect(out.drafts[0]).toMatchObject({ room: "Garage", description: "Freezer", panel_label: null, amps: 20, poles: 1, state: "suggested", source: "nort" });
     expect(sourceWords({ source: "nort", source_row: out.drafts[0].source_row })).toBe("From Nort");
+  });
+});
+
+describe("review fixes: which circuit a row is, and which field its words are", () => {
+  const lights = circuit({ id: "25a", room: "Bath", panel_label: "Bath Lights", description: null, amps: 15, space: 25, half: "A" });
+  const fan = circuit({ id: "25b", room: "Bath", panel_label: "Bath Fan", description: null, amps: 15, space: 25, half: "B" });
+
+  it("a tandem space read with no half is matched by its words, never by whichever half comes first", () => {
+    const m = matchRead(row({ space: 25, half: null, said: "Bath Fan", amps: 15 }), [lights, fan], null, PANEL_SAYS);
+    expect(m).toMatchObject({ kind: "same", circuit: { id: "25b" } });
+    const out = readerSuggestions({ source: "photo", rows: [row({ space: 25, half: null, said: "Bath Fan", amps: 15 })], circuits: [lights, fan], panelId: null, says: PANEL_SAYS, startSort: 0 });
+    expect(out).toMatchObject({ same: 1, flagged: 0, drafts: [] });
+    // Words that fit neither half are a new suggestion a person decides, never a rename of one half.
+    expect(matchRead(row({ space: 25, half: null, said: "Hall Smoke", amps: 15 }), [lights, fan], null, PANEL_SAYS).kind).toBe("none");
+    // Words near one half only are checked against that half.
+    const near = matchRead(row({ space: 25, half: null, said: "Bath Exhaust Fan", amps: 15 }), [lights, fan], null, PANEL_SAYS);
+    expect(near).toMatchObject({ kind: "differs", circuit: { id: "25b" } });
+  });
+
+  it("the plans' words change what a circuit FEEDS, never the door label", () => {
+    const kitchen = circuit({ id: "k1", room: "Kitchen", panel_label: "Kitchen", description: "Kitchen Counter", amps: 20 });
+    const m = matchRead(row({ said: "Kitchen Receptacles", amps: 20, work: "new", extra: { sheet: "E-1", ckt: "7" } }), [kitchen], null, PLANS_SAY);
+    expect(m.kind).toBe("differs");
+    if (m.kind !== "differs") return;
+    expect(m.words).toEqual(["Plans Say It Feeds Kitchen Receptacles, Your List Says Kitchen Counter."]);
+    expect(m.use).toEqual({ description: "Kitchen Receptacles" });
+    expect(m.was).toEqual({ description: "Kitchen Counter" });
+  });
+
+  it("Nort told the door's words apart checks them against the door label, and says it", () => {
+    const fridge = circuit({ id: "f1", room: "Kitchen", panel_label: "Fridge", description: null, amps: 20, space: 12 });
+    const m = matchRead(row({ said: "Fridge", door: "Mini Fridge", feeds: "Fridge", amps: 20 }), [fridge], null, NORT_SAYS);
+    expect(m.kind).toBe("differs");
+    if (m.kind !== "differs") return;
+    expect(m.words).toEqual(["Nort Heard The Door Says Mini Fridge, Your List's Door Label Says Fridge."]);
+    expect(m.use).toEqual({ panel_label: "Mini Fridge" });
+    const out = readerSuggestions({ source: "nort", rows: [row({ said: "Fridge", door: "Mini Fridge", feeds: "Fridge", amps: 20 })], circuits: [fridge], panelId: null, says: NORT_SAYS, startSort: 0 });
+    expect(out.drafts[0]).toMatchObject({ panel_label: "Mini Fridge", description: null, source_row: { flag_for: "f1" } });
+  });
+
+  it("a used check is known by its change being on the circuit", () => {
+    const fridge = circuit({ id: "f1", room: "Kitchen", panel_label: "Mini Fridge", description: "Fridge" });
+    expect(labelCheckApplied(fridge, { panel_label: "Mini Fridge" })).toBe(true);
+    expect(labelCheckApplied(fridge, { panel_label: "Wine Fridge" })).toBe(false);
+    expect(labelCheckApplied(fridge, { description: "fridge" })).toBe(true);
+    expect(labelCheckApplied(fridge, {})).toBe(false);
+    expect(labelCheckApplied(null, { panel_label: "Mini Fridge" })).toBe(false);
+  });
+
+  it("the walk-through keeps the Square D family when it names one", () => {
+    expect(walkthroughSaid([{ panel_condition: "Homeline 200A, full" }]).said.brand).toBe("Square D Homeline");
+    expect(walkthroughSaid([{ panel_condition: "Square D QO 100 amp" }]).said.brand).toBe("Square D QO");
   });
 });
 

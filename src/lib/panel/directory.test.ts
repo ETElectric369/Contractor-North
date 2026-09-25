@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  asPortalDirectory,
   directoryFromRows,
   directoryLine,
   doorCard,
@@ -7,6 +8,7 @@ import {
   normalizePortalPanels,
   scheduleChips,
   scheduleGroups,
+  sizeLine,
   spaceWords,
   unpanelledFromRows,
 } from "./directory";
@@ -154,5 +156,30 @@ describe("normalizePortalPanels: the customer's road in", () => {
     expect(normalizePortalPanels(undefined)).toEqual([]);
     expect(normalizePortalPanels(null)).toEqual([]);
     expect(normalizePortalPanels([])).toEqual([]);
+  });
+});
+
+describe("review fixes: the preview is the portal, and no size reads as words", () => {
+  it("the office's preview is exactly the portal's shape: no brand, top-down, no No Stab spaces", () => {
+    const rows = directoryFromRows({ ...PANEL, brand: "Siemens", numbering: "bottom_up", dead_spaces: [31] }, FINAL_MAP);
+    const preview = asPortalDirectory(rows);
+    expect(preview).toMatchObject({ brand: null, numbering: "top_down", deadSpaces: [] });
+    expect(preview.circuits).toEqual(rows.circuits);
+    // The same circuits as the portal's own road makes of 0335's block.
+    const block = [
+      {
+        name: rows.name,
+        main_amps: rows.mainAmps,
+        spaces: rows.spaces,
+        circuits: rows.circuits.map((c) => ({ space: c.space, half: c.half, poles: c.poles, amps: c.amps, kind: c.kind, room: c.room, label: c.label, feeds: c.feeds, is_new: c.isNew })),
+      },
+    ];
+    expect(normalizePortalPanels(block)).toEqual([preview]);
+  });
+
+  it("a circuit with no amps says Size Not Set, never ?A", () => {
+    expect(sizeLine({ poles: 1, amps: null, kind: null })).toBe("Size Not Set");
+    expect(sizeLine({ poles: 2, amps: null, kind: null })).toBe("2P, Size Not Set");
+    expect(sizeLine({ poles: 2, amps: 30, kind: null })).toBe("2P 30A");
   });
 });

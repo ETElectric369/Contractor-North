@@ -32,6 +32,13 @@ export type ReaderSource = "photo" | "plan" | "nort";
 /** Erik's cap on Read The Panel Photo: three reads per job per day (a few cents each). Here, not in
  *  the reader, so the tab can say it before the tap without pulling the model code into a page. */
 export const PHOTO_READS_PER_JOB_PER_DAY = 3;
+/** The office's cap on Read Circuits From The Plans: five per job per day. */
+export const PLAN_READS_PER_JOB_PER_DAY = 5;
+
+/** "2 Of 3 Reads Left Today." */
+export function readsLeftWords(left: number, limit: number): string {
+  return `${left} Of ${limit} Reads Left Today.`;
+}
 
 /** One circuit as a reader saw it, cleaned. `said` is the words it read (the door's for a photo,
  *  the schedule's for the plans, the person's for Nort). */
@@ -74,11 +81,13 @@ export type ReaderDraft = {
   sort_order: number;
 };
 
-/** How a reader's words are introduced in a label check. */
-export type Says = { says: string; shows: string };
-export const PANEL_SAYS: Says = { says: "Panel Says", shows: "Panel Shows" };
-export const PLANS_SAY: Says = { says: "Plans Say", shows: "Plans Show" };
-export const NORT_SAYS: Says = { says: "Nort Heard", shows: "Nort Heard" };
+/** How a reader's words are introduced in a label check, and which field its words are: the
+ *  photo reads the DOOR's words; the plans and Nort say what a circuit FEEDS (Nort can also be told
+ *  the door's words apart, ReadRow.door). A check only ever proposes the field the words are. */
+export type Says = { says: string; shows: string; field: "door" | "feeds" };
+export const PANEL_SAYS: Says = { says: "Panel Says", shows: "Panel Shows", field: "door" };
+export const PLANS_SAY: Says = { says: "Plans Say", shows: "Plans Show", field: "feeds" };
+export const NORT_SAYS: Says = { says: "Nort Heard", shows: "Nort Heard", field: "feeds" };
 
 // ── cleaning what a model or a person handed us ───────────────────────────────────────────────────
 
@@ -183,18 +192,42 @@ export function matchRead(row: ReadRow, circuits: Existing[], panelId: string | 
   );
   const said = labelKey(row.said);
 
+  const sameWords = (c: Existing) => !!said && (labelKey(c.panel_label) === said || labelKey(c.description) === said);
+  const mine = wordsOf(said);
+  const specific = mine.some((w) => !GENERIC.has(w));
+  /** Words all inside one circuit's words, or holding all of them ("Mini Fridge" and "Fridge"). */
+  const nearWords = (c: Existing) => {
+    if (!specific) return false;
+    const theirs = wordsOf(labelKey(listWords(c)));
+    if (!theirs.length || !theirs.some((w) => !GENERIC.has(w))) return false;
+    const inside = (a: string[], b: string[]) => a.every((w) => b.includes(w));
+    return inside(mine, theirs) || inside(theirs, mine);
+  };
+
   // 1. The space.
   if (row.space != null) {
     const here = kept.filter((c) =>
       slotsOf(c).some((s) => s.space === row.space && (s.half == null || row.half == null || s.half === row.half)),
     );
-    const c = here.find((x) => x.space === row.space) ?? (here.length === 1 ? here[0] : undefined);
-    if (c) return compare(row, c, says, false);
+    const top = here.filter((x) => x.space === row.space);
+    const pool = top.length ? top : here;
+    if (pool.length === 1) return compare(row, pool[0], says, false);
+    if (pool.length > 1) {
+      // Several circuits on the space (a tandem's two halves, read with no half): only the words can
+      // say which one this is, and never the first one found. The same words are that circuit; one
+      // circuit whose words are near is checked; anything else is a new suggestion a person decides.
+      const exactHere = pool.filter(sameWords);
+      if (exactHere.length === 1) return compare(row, exactHere[0], says, false);
+      if (exactHere.length > 1) return { kind: "same", circuit: exactHere[0] };
+      const near = pool.filter(nearWords);
+      if (near.length === 1) return compare(row, near[0], says, false);
+      return { kind: "none" };
+    }
   }
 
   // 2. The words.
   if (!said) return { kind: "none" };
-  const exact = kept.filter((c) => labelKey(c.panel_label) === said || labelKey(c.description) === said);
+  const exact = kept.filter(sameWords);
   // With spaces on both sides and different spaces, the same words are two circuits (two "Garage").
   const placedElsewhere = (c: Existing) => row.space != null && c.space != null && c.space !== row.space;
   const exactHere = exact.filter((c) => !placedElsewhere(c));
@@ -205,15 +238,8 @@ export function matchRead(row: ReadRow, circuits: Existing[], panelId: string | 
   }
   if (exact.length) return { kind: "none" };
 
-  const mine = wordsOf(said);
-  if (!mine.some((w) => !GENERIC.has(w))) return { kind: "none" };
-  const partial = kept.filter((c) => {
-    if (placedElsewhere(c)) return false;
-    const theirs = wordsOf(labelKey(listWords(c)));
-    if (!theirs.length || !theirs.some((w) => !GENERIC.has(w))) return false;
-    const inside = (a: string[], b: string[]) => a.every((w) => b.includes(w));
-    return inside(mine, theirs) || inside(theirs, mine);
-  });
+  if (!specific) return { kind: "none" };
+  const partial = kept.filter((c) => !placedElsewhere(c) && nearWords(c));
   if (partial.length === 1 && sizeFits(row, partial[0])) return compare(row, partial[0], says, true);
   return { kind: "none" };
 }
@@ -222,12 +248,34 @@ function compare(row: ReadRow, c: Existing, says: Says, byWords: boolean): Match
   const words: string[] = [];
   const use: CircuitReadPatch = {};
   const was: CircuitReadPatch = {};
-  const said = labelKey(row.said);
-  const theirs = listWords(c);
-  if (said && labelKey(c.panel_label) !== said && labelKey(c.description) !== said) {
-    words.push(`${says.says} ${titleWords(row.said)}, Your List Says ${titleWords(theirs) || circuitName(c)}.`);
-    use.panel_label = titleWords(row.said);
-    was.panel_label = c.panel_label ?? null;
+  const matchesList = (v: string) => labelKey(c.panel_label) === v || labelKey(c.description) === v;
+  if (says.field === "door") {
+    // The photo reads the door: its words are the door label.
+    const said = labelKey(row.said);
+    if (said && !matchesList(said)) {
+      words.push(`${says.says} ${titleWords(row.said)}, Your List Says ${titleWords(listWords(c)) || circuitName(c)}.`);
+      use.panel_label = titleWords(row.said);
+      was.panel_label = c.panel_label ?? null;
+    }
+  } else {
+    // The plans and Nort say what a circuit FEEDS: a difference there is proposed for what it feeds,
+    // never written onto the door. The door label only when the words were the door's (Nort told
+    // "the door says Mini Fridge"), checked against the list's own door label.
+    const feedsText = row.feeds !== undefined ? row.feeds : row.door ? null : row.said;
+    const feeds = labelKey(feedsText);
+    if (feeds && !matchesList(feeds)) {
+      words.push(`${says.says} It Feeds ${titleWords(feedsText)}, Your List Says ${titleWords(c.description) || titleWords(c.panel_label) || circuitName(c)}.`);
+      use.description = titleWords(feedsText);
+      was.description = c.description ?? null;
+    }
+    const door = labelKey(row.door);
+    if (door && door !== labelKey(c.panel_label)) {
+      words.push(
+        `${says.says} The Door Says ${titleWords(row.door)}, ${c.panel_label?.trim() ? `Your List's Door Label Says ${titleWords(c.panel_label)}` : "Your List Has No Door Label"}.`,
+      );
+      use.panel_label = titleWords(row.door);
+      was.panel_label = c.panel_label ?? null;
+    }
   }
   if (row.poles !== c.poles) {
     // The same words on a different size are a different circuit, or nobody can tell: a new
@@ -258,7 +306,21 @@ export function readKey(source: ReaderSource, r: Pick<ReadRow, "space" | "half" 
   return `${source}:${ckt}:${r.space ?? "-"}${r.half ?? ""}:${labelKey(r.said)}:${r.poles}P${r.amps ?? "?"}`.slice(0, 380);
 }
 export function flagKey(source: ReaderSource, circuitId: string, use: CircuitReadPatch): string {
-  return `${source}-flag:${circuitId}:${labelKey(use.panel_label)}:${use.space ?? "-"}${use.half ?? ""}:${use.amps ?? "-"}`;
+  const feeds = use.description !== undefined ? `:f=${labelKey(use.description)}` : "";
+  return `${source}-flag:${circuitId}:${labelKey(use.panel_label)}:${use.space ?? "-"}${use.half ?? ""}:${use.amps ?? "-"}${feeds}`;
+}
+
+/** Is a label check's change already on the circuit it names (Use It was tapped, and nobody has
+ *  changed those fields since)? Then putting the check back would ask to make a change already made. */
+export function labelCheckApplied(target: Pick<JobCircuit, "panel_label" | "description" | "space" | "half" | "amps"> | null | undefined, use: CircuitReadPatch | null | undefined): boolean {
+  if (!target || !use) return false;
+  const keys = (["panel_label", "description", "space", "half", "amps"] as const).filter((k) => k in use);
+  if (!keys.length) return false;
+  return keys.every((k) => {
+    const want = use[k] ?? null;
+    const now = target[k] ?? null;
+    return typeof want === "string" || typeof now === "string" ? labelKey(String(want ?? "")) === labelKey(String(now ?? "")) : want === now;
+  });
 }
 
 export type ReaderOutcome = {
@@ -311,7 +373,7 @@ export function readerSuggestions(input: {
       // it has no space of its own (it occupies nothing, and it can never be kept as a circuit).
       draft = {
         room: m.circuit.room,
-        description: m.circuit.description,
+        description: m.use.description ?? m.circuit.description,
         panel_label: m.use.panel_label ?? m.circuit.panel_label,
         amps: m.use.amps ?? m.circuit.amps,
         poles: m.circuit.poles,
@@ -430,7 +492,10 @@ export function headerSuggestions(panel: Pick<JobPanel, "brand" | "main_amps" | 
 
 const BRANDS: [RegExp, string][] = [
   [/\bsiemens\b/i, "Siemens"],
-  [/\bsquare\s*d\b|\bhomeline\b/i, "Square D"],
+  // The family first: a Homeline and a QO are both Square D, and their breakers don't swap.
+  [/\bhomeline\b/i, "Square D Homeline"],
+  [/\bqo\b/i, "Square D QO"],
+  [/\bsquare\s*d\b/i, "Square D"],
   [/\beaton\b|\bcutler[\s-]*hammer\b/i, "Eaton"],
   [/\bge\b|\bgeneral electric\b/i, "GE"],
   [/\bmurray\b/i, "Murray"],

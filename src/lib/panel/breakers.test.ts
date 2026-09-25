@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { breakerCard, candidatesFor, firstPicks, groupBreakers, groupLabel, placementOf } from "./breakers";
+import { boughtLines, breakerCard, candidatesFor, firstPicks, groupBreakers, groupLabel, placementOf } from "./breakers";
 import { spaceMap } from "./model";
 import { FINAL_MAP, PANEL, PHOTO_EXISTING } from "./__fixtures__/herringbone";
 
@@ -126,5 +126,41 @@ describe("adding up tickets", () => {
       { description: "SP 20A 120/240V CB (SIEM Q120)", qty: -2 },
     ]);
     expect(g.groups.map((x) => [x.codes, x.words, x.qty])).toEqual([[["Q120"], "1P 20A", 11]]);
+  });
+
+  it("a credit nobody can read (0334's credit_qty) is named and never counted, either way", () => {
+    const lines = boughtLines([
+      { description: "SIEM Q2020 SP 20/20A 120/240V CB", qty: "8", credit_qty: "8" },
+      { description: "SP 20A 120/240V CB (Q120)", qty: 0, credit_qty: 2 },
+    ]);
+    expect(lines).toEqual([
+      { description: "SIEM Q2020 SP 20/20A 120/240V CB", qty: 8 },
+      { description: "SIEM Q2020 SP 20/20A 120/240V CB", qty: 8, credit: true },
+      { description: "SP 20A 120/240V CB (Q120)", qty: 2, credit: true },
+    ]);
+    const g = groupBreakers(lines);
+    expect(g.groups.map((x) => [x.codes, x.qty])).toEqual([[["Q2020"], 8]]);
+    expect(g.unreadable.map((u) => [u.description, u.qty, u.credit])).toEqual([
+      ["SIEM Q2020 SP 20/20A 120/240V CB", 8, true],
+      ["SP 20A 120/240V CB (Q120)", 2, true],
+    ]);
+    // A 2-column answer (before 0334 carried credit_qty) still reads.
+    expect(boughtLines([{ description: "SIEM Q21530CT", qty: 1 }])).toEqual([{ description: "SIEM Q21530CT", qty: 1 }]);
+  });
+});
+
+describe("the family to order in", () => {
+  it("a bare Square D or Eaton names no family: the tickets' codes decide, or a person does", () => {
+    const one2P20 = all.filter((c) => c.poles === 2 && c.amps === 20);
+    expect(one2P20.length).toBeGreaterThan(0);
+    const bare = breakerCard({ circuits: all, panel: { ...PANEL, brand: "Square D" }, bought: [] });
+    expect(bare.brand).toBeNull();
+    expect(bare.orders.every((o) => o.part === null)).toBe(true);
+    // The ticket brought Siemens codes, so a bare brand falls back to them.
+    const fromTicket = breakerCard({ circuits: all, panel: { ...PANEL, brand: "Eaton" }, bought: TICKET_LINES });
+    expect(fromTicket.brand).toBe("siemens");
+    expect(breakerCard({ circuits: all, panel: { ...PANEL, brand: "Square D QO" }, bought: [] }).brand).toBe("square_d_qo");
+    expect(breakerCard({ circuits: all, panel: { ...PANEL, brand: "Eaton CH" }, bought: [] }).brand).toBe("eaton_ch");
+    expect(breakerCard({ circuits: all, panel: { ...PANEL, brand: "Square D Homeline" }, bought: [] }).brand).toBe("square_d_homeline");
   });
 });
