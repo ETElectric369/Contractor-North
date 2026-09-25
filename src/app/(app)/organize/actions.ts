@@ -17,10 +17,13 @@ import {
   fileRefusal,
   paperTypeLabel,
   paperTypeOfItem,
+  isLinelessReturn,
+  linesPointWithTotal,
   pickedBecause,
   proposalOf,
   readinessOf,
   rematchPaper,
+  RETURN_ON_JOB_NEEDS_LINES,
   storedMarks,
   type NumberMatch,
   type PaperItem,
@@ -43,7 +46,6 @@ import {
   exactAccountFor,
   insertItemizedBill,
   insertPaperRow,
-  linesReadBackwards,
   loadBooks,
   loadMarkContext,
   matchesOnBooks,
@@ -474,8 +476,8 @@ ${MASKED_PRICE_PROMPT_RULE}`,
 
   const aiAmount = parsed.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date ?? "")) ? parsed.date : null;
-  // A return read here (a negative total) keeps its lines pointing the same way (linesReadBackwards).
-  const lines = linesReadBackwards(aiAmount, cleanLines(parsed.line_items));
+  // A return read here (a negative total) keeps its lines pointing the same way (linesPointWithTotal).
+  const lines = linesPointWithTotal(aiAmount, cleanLines(parsed.line_items));
   const vendor = parsed.vendor ? String(parsed.vendor).slice(0, 200) : doc.name || "Receipt";
   const confidence = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
   // Trust the AI's scope only if it's one of THIS job's real scopes (never let it invent one);
@@ -492,6 +494,13 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       ok: false,
       error: "Couldn't read a total on this receipt. Open it and enter the cost manually as a bill.",
     };
+  }
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (audit v994 review; DB4's class). This door writes
+  // straight onto the job, so a return read here with nothing legible under its total would be
+  // credited to the customer in full at markup, even for parts they were never charged for.
+  // insertItemizedBill refuses it too; this says why, in the words this door's person needs.
+  if (isLinelessReturn(amount, lines)) {
+    return { ok: false, error: RETURN_ON_JOB_NEEDS_LINES };
   }
 
   // DOES IT ADD UP? The reader asks the model for a grand total AND every line, then used the

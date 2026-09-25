@@ -205,14 +205,54 @@ export function amountOf(item: { amount?: number | string | null }): number | nu
 export function isReturnWithoutLines(item: PaperItem): boolean {
   const t = paperTypeOfItem(item);
   if (t !== "receipt" && t !== "bill") return false;
-  const total = amountOf(item);
-  if (total === null || !(Math.round(total * 100) < 0)) return false;
-  const lines = Array.isArray(item.line_items) ? item.line_items : [];
-  return !lines.some((l) => l && typeof l === "object" && String((l as { description?: unknown }).description ?? "").trim());
+  return isLinelessReturn(amountOf(item), item.line_items);
+}
+
+/**
+ * A negative total with no described line under it. The one test behind isReturnWithoutLines (the
+ * File It gate) and insertItemizedBill (the write itself), so the rule is held where the bill is
+ * written and not only at the door that happened to ask first.
+ */
+export function isLinelessReturn(total: number | null | undefined, lines: unknown): boolean {
+  if (total === null || total === undefined || !(Math.round(Number(total) * 100) < 0)) return false;
+  const list = Array.isArray(lines) ? lines : [];
+  return !list.some((l) => l && typeof l === "object" && String((l as { description?: unknown }).description ?? "").trim());
+}
+
+/**
+ * A BILL'S LINES POINT THE SAME WAY AS ITS TOTAL (audit v994, DB4 and its review).
+ *
+ * The money readers find a return's parts by their NEGATIVE extensions (returnLinesAgainstPurchases
+ * caps them against the purchase, returnCreditRows credits them) and a charge's parts by positive
+ * ones (billItemisation, the price book). A bill whose total says one thing and whose lines add up
+ * to the other is read as both at once: a -51.58 return with +47.32 of lines skips the cap and
+ * credits the whole return at markup, and a +51.58 charge with -47.32 of lines puts every part on
+ * the customer's invoice as a credit under a doubled lump. That happens whenever the sign is set in
+ * one place and the lines in another: a reader that printed the total as a credit and copied the
+ * lines as printed, or a person who typed the other sign in Fix Details (a return, or It Is A
+ * Charge on a paper read as a credit memo).
+ *
+ * So when the lines add up to the opposite sign from the total, every line is turned around. Lines
+ * that already point with it (a return with a positive restocking fee under it, a receipt with a
+ * discount line) are left exactly as read, and so are lines that add up to nothing. Quantity is
+ * never touched: the extension is the price.
+ */
+export function linesPointWithTotal<T extends { amount?: unknown; unit_price?: unknown }>(total: number | null | undefined, lines: T[]): T[] {
+  if (total === null || total === undefined || !Number.isFinite(Number(total))) return lines;
+  const t = Math.round(Number(total) * 100);
+  if (t === 0 || !lines.length) return lines;
+  const s = Math.round(lines.reduce((acc, l) => acc + (Number(l.amount) || 0), 0) * 100);
+  if (s === 0 || s > 0 === t > 0) return lines;
+  const turn = (v: unknown) => (v === null || v === undefined ? v : -Number(v) || 0);
+  return lines.map((l) => ({ ...l, unit_price: turn(l.unit_price), amount: turn(l.amount) }));
 }
 
 export const RETURN_NEEDS_LINES =
   "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
+
+/** The same refusal where a receipt is read straight onto a job (Snap the Bill, Record as Cost). */
+export const RETURN_ON_JOB_NEEDS_LINES =
+  "This reads as a return, and none of its lines could be read, so on this job it would credit the customer the whole amount, even for parts they were never charged for. Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.";
 
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {

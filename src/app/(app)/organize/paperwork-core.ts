@@ -7,7 +7,9 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
   findSameNumber,
+  isLinelessReturn,
   jobFromPaperMarks,
+  linesPointWithTotal,
   paperTypeOf,
   rematchPaper,
   type MarkJob,
@@ -72,21 +74,6 @@ export function cleanLines(raw: any): BillLine[] {
     .slice(0, 100);
 }
 
-/**
- * A RETURN'S LINES POINT THE SAME WAY AS ITS TOTAL (DB4). A return or credit memo is the purchase
- * read backwards, and the money readers (returnCreditRows, returnLinesAgainstPurchases) find the
- * returned parts by their NEGATIVE extensions. A reader that printed the total as a credit but
- * copied the lines as they appear on the paper (positive) would leave every returned part looking
- * like a charge. So when the total is below zero and the lines add up above it, every line is
- * turned around; lines that already point the right way are left exactly as read.
- */
-export function linesReadBackwards(total: number | null, lines: BillLine[]): BillLine[] {
-  if (total === null || !(Math.round(total * 100) < 0)) return lines;
-  const sum = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
-  if (!(Math.round(sum * 100) > 0)) return lines;
-  return lines.map((l) => ({ ...l, unit_price: -l.unit_price || 0, amount: -l.amount || 0 }));
-}
-
 /** A store receipt is already paid; a supplier bill/invoice is still owed. */
 function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
   return /bill|invoice/i.test(category || "") ? "unpaid" : "paid";
@@ -121,9 +108,25 @@ export async function insertItemizedBill(
     /** 0270: ONLY from an exact alias a person already made. Never a guess. */
     supplier_account_id?: string | null;
   },
-  lines: BillLine[],
+  given: BillLine[],
   status: "paid" | "unpaid" = "unpaid",
 ): Promise<string | null> {
+  // THE LINES POINT WITH THE TOTAL, HERE WHERE THE BILL IS WRITTEN (audit v994 review). The
+  // readers line them up when they read, but the total can change after that (Fix Details, It Is A
+  // Charge) and the lines sit in the row as they were read. Every door that writes a bill from a
+  // paper comes through here, so this is the one place the two cannot disagree.
+  const lines = linesPointWithTotal(bill.amount, given);
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (DB4): the importer would credit the customer the
+  // whole of it at markup, with nothing to hold it to what they were billed. The doors ask first
+  // and say so in their own words (fileRefusal, billJobReceipt); this is the boundary behind them.
+  if (bill.job_id && isLinelessReturn(bill.amount, lines)) {
+    reportError("organize:insertItemizedBill.linelessReturn", new Error("a return with no lines was refused on a job"), {
+      supplier: bill.supplier,
+      jobId: bill.job_id,
+      amount: bill.amount,
+    });
+    return null;
+  }
   // Undefined keys are dropped so a bill that has no number or account writes exactly what it
   // wrote before these existed.
   const row: Record<string, unknown> = { ...bill, status };
@@ -419,7 +422,7 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
    * Andrew was never charged. The lines are what make a return creditable only for what was billed.
    */
   const keepsLines = isCost || doc_type === "credit_memo";
-  const lines = keepsLines ? linesReadBackwards(amount, cleanLines(parsed?.line_items)) : [];
+  const lines = keepsLines ? linesPointWithTotal(amount, cleanLines(parsed?.line_items)) : [];
   const payment = isCost
     ? ((["paid_at_purchase", "on_account", "unknown"].includes(String(parsed?.payment ?? "")) ? String(parsed.payment) : "unknown") as ReadFields["payment"])
     : null;

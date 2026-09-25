@@ -6,7 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { isSha256 } from "@/lib/content-hash";
 import { parseCedDocuments } from "@/lib/ced-invoice-parse";
 import { formatDate } from "@/lib/utils";
-import { paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
+import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 import { cleanDocNumber, insertPaperRow, updateItemTolerant } from "./paperwork-core";
 
@@ -217,6 +217,15 @@ export async function updatePaperwork(
     item_date: itemDate,
     doc_number: cleanDocNumber(fields.doc_number),
   };
+  // THE LINES TURN WITH THE TOTAL A PERSON TYPED (audit v994 review). The reader lined them up with
+  // the total IT read; a person who types the other sign here (a return's -51.58 on a paper read
+  // as a bill, or It Is A Charge on one read as a credit memo) would otherwise leave the row, and
+  // the bill File It makes from it, pointing both ways at once. insertItemizedBill holds the same
+  // rule where the bill is written; this keeps the tray row itself telling the truth.
+  if (amount !== null && Array.isArray(item.line_items) && item.line_items.length) {
+    const turned = linesPointWithTotal(amount, item.line_items as { amount?: unknown; unit_price?: unknown }[]);
+    if (turned !== item.line_items) patch.line_items = turned;
+  }
   if (type) {
     patch.doc_type = type;
     // The kind follows the type, so a paper a person called a bill gets the cost controls.

@@ -41,6 +41,8 @@ vi.mock("@/app/(app)/bills/supplier-import-actions", async (orig) => {
 
 import { aiReviewItem, analyzeAndFile, billJobReceipt, fileItem, readAsCost, tiePaperwork, unarchiveItem, undoPaperwork } from "./actions";
 import { addPaperwork, addSupplierDocuments, updatePaperwork } from "./paperwork-actions";
+import { insertItemizedBill } from "./paperwork-core";
+import { RETURN_ON_JOB_NEEDS_LINES } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 
 type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][] };
@@ -669,6 +671,96 @@ describe("a supplier return through Organize: its lines come with it, or it does
     ]);
   });
 
+  /** Filed to J-046 with whatever lines the row holds; the bill and its lines are what it wrote. */
+  const fileWith = async (row: Record<string, unknown>) => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...PAPER, doc_number: null, vendor: "Consolidated Electrical Dist.", pricing_provisional: false, ...row }, error: null }],
+        "organized_items.update": [
+          { data: [{ id: "oi-9" }], error: null },
+          { data: [{ id: "oi-9" }], error: null },
+        ],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "documents.insert": [{ data: { id: "doc-1" }, error: null }],
+        "bills.insert": [{ data: { id: "bill-x" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "bli-1" }, { id: "bli-2" }], error: null }],
+      },
+      calls,
+    );
+    return fileItem("oi-9", { type: "job", jobId: "job-046" });
+  };
+  const POSITIVE = [
+    { description: "H245ICAT 4 in LED Shallow IC HSG", quantity: 4, unit_price: 11.83, amount: 47.32, category: "Electrical" },
+    { description: "Sales Tax", quantity: 1, unit_price: 4.26, amount: 4.26, category: "Tax" },
+  ];
+  const NEGATIVE = POSITIVE.map((l) => ({ ...l, unit_price: -l.unit_price, amount: -l.amount }));
+
+  it("a bill a person typed negative over positive lines files with its lines negative, so the cap can read them", async () => {
+    const res = await fileWith({ doc_type: "bill", amount: -51.58, line_items: POSITIVE });
+    expect(res).toEqual({ ok: true });
+    expect(did("bills", "insert")!.payload.amount).toBe(-51.58);
+    expect((did("bill_line_items", "insert")!.payload as any[]).map((l) => [l.description, l.quantity, l.unit_price, l.amount])).toEqual([
+      ["H245ICAT 4 in LED Shallow IC HSG", 4, -11.83, -47.32],
+      ["Sales Tax", 1, -4.26, -4.26],
+    ]);
+  });
+
+  it("a credit memo a person called a charge files as a positive bill with positive lines, never credits under a lump", async () => {
+    const res = await fileWith({ doc_type: "bill", amount: 51.58, line_items: NEGATIVE });
+    expect(res).toEqual({ ok: true });
+    expect(did("bills", "insert")!.payload.amount).toBe(51.58);
+    expect((did("bill_line_items", "insert")!.payload as any[]).map((l) => [l.unit_price, l.amount])).toEqual([
+      [11.83, 47.32],
+      [4.26, 4.26],
+    ]);
+  });
+
+  it("the write itself refuses a return with no lines on a job, whichever door calls it", async () => {
+    state.client = fakeSupabase({}, calls);
+    const bill = { job_id: "job-046", supplier: "CED", amount: -51.58, bill_date: null, category: "Bill", notes: "", created_by: "user-1" };
+    expect(await insertItemizedBill(state.client, bill, [])).toBeNull();
+    expect(did("bills", "insert")).toBeUndefined();
+    // The company's own book (no job) is not held to it.
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-oh" }, error: null }] }, calls);
+    expect(await insertItemizedBill(state.client, { ...bill, job_id: null }, [])).toBe("bill-oh");
+  });
+
+  it("Snap the Bill refuses a return read with no legible lines, and writes nothing", async () => {
+    ai.parsed = { vendor: "CED", amount: -51.58, date: "2026-09-15", line_items: [], payment: "on_account", confidence: "high" };
+    state.client = fakeSupabase(
+      {
+        "documents.select": [{ data: { id: "doc-7", name: "r.jpg", file_url: "org-1/x/r.jpg", size_bytes: 10, job_id: "job-1" }, error: null }],
+        "organized_items.select": [{ data: null, error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+      },
+      calls,
+    );
+    const res = await billJobReceipt("doc-7");
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe(RETURN_ON_JOB_NEEDS_LINES);
+    expect(did("bills", "insert")).toBeUndefined();
+    expect(did("organized_items", "insert")).toBeUndefined();
+  });
+
+  it("Snap the Bill writes a return read with positive lines as a negative bill with negative lines", async () => {
+    ai.parsed = { vendor: "CED", amount: -51.58, date: "2026-09-15", line_items: POSITIVE, payment: "on_account", confidence: "high" };
+    state.client = fakeSupabase(
+      {
+        "documents.select": [{ data: { id: "doc-7", name: "r.jpg", file_url: "org-1/x/r.jpg", size_bytes: 10, job_id: "job-1" }, error: null }],
+        "organized_items.select": [{ data: null, error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "supplier_aliases.select": [{ data: [], error: null }],
+        "bills.insert": [{ data: { id: "bill-9" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "bli" }], error: null }],
+        "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+      },
+      calls,
+    );
+    const res = await billJobReceipt("doc-7");
+    expect(res.ok).toBe(true);
+    expect((did("bill_line_items", "insert")!.payload as any[]).map((l) => l.amount)).toEqual([-47.32, -4.26]);
+  });
+
   describe("Fix Details: a credit memo switched to a bill keeps its sign", () => {
     const MEMO = { id: "oi-ret", status: "needs_review", kind: "job_document", doc_type: "credit_memo", amount: -51.58, line_items: [] };
     const fields = (amount: number) => ({ doc_type: "bill", vendor: "CED", amount, item_date: null, doc_number: null, payment: "on_account" });
@@ -701,6 +793,49 @@ describe("a supplier return through Organize: its lines come with it, or it does
       const res = await updatePaperwork("oi-ret", fields(51.58), { creditIsACharge: true });
       expect(res.ok).toBe(true);
       expect(did("organized_items", "update")!.payload).toMatchObject({ doc_type: "bill", amount: 51.58 });
+    });
+
+    it("It Is A Charge turns the credit memo's negative lines positive in the same save", async () => {
+      state.client = fakeSupabase(
+        {
+          "organized_items.select": [{ data: { ...MEMO, line_items: NEGATIVE }, error: null }],
+          "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }],
+        },
+        calls,
+      );
+      const res = await updatePaperwork("oi-ret", fields(51.58), { creditIsACharge: true });
+      expect(res.ok).toBe(true);
+      const patch = did("organized_items", "update")!.payload;
+      expect(patch.amount).toBe(51.58);
+      expect(patch.line_items.map((l: any) => [l.description, l.quantity, l.unit_price, l.amount])).toEqual([
+        ["H245ICAT 4 in LED Shallow IC HSG", 4, 11.83, 47.32],
+        ["Sales Tax", 1, 4.26, 4.26],
+      ]);
+    });
+
+    it("a bill a person types negative has its positive lines turned negative in the same save", async () => {
+      state.client = fakeSupabase(
+        {
+          "organized_items.select": [{ data: { ...MEMO, doc_type: "bill", kind: "receipt", amount: 51.58, line_items: POSITIVE }, error: null }],
+          "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }],
+        },
+        calls,
+      );
+      const res = await updatePaperwork("oi-ret", fields(-51.58));
+      expect(res.ok).toBe(true);
+      expect(did("organized_items", "update")!.payload.line_items.map((l: any) => l.amount)).toEqual([-47.32, -4.26]);
+    });
+
+    it("lines that already point with the total are not rewritten", async () => {
+      state.client = fakeSupabase(
+        {
+          "organized_items.select": [{ data: { ...MEMO, line_items: NEGATIVE }, error: null }],
+          "organized_items.update": [{ data: [{ id: "oi-ret" }], error: null }],
+        },
+        calls,
+      );
+      await updatePaperwork("oi-ret", fields(-51.58));
+      expect(did("organized_items", "update")!.payload).not.toHaveProperty("line_items");
     });
 
     it("an ordinary bill's Fix Details is not asked anything", async () => {
