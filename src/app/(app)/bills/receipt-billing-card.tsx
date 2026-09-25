@@ -23,7 +23,16 @@ import {
   usedCountFromCost,
   type ContainerHint,
 } from "./receipt-billing";
-import { setReceiptLineBillable, setReceiptLineUsage } from "./receipt-billing-actions";
+import { putRestOnShelf, setReceiptLineBillable, setReceiptLineUsage, takeRollOffShelf } from "./receipt-billing-actions";
+import {
+  ShelfCountRow,
+  initialShelfCount,
+  shelfAnswerOf,
+  shelfPieces,
+  useShelfItems,
+  type ShelfCountLine,
+  type ShelfCountValue,
+} from "@/components/shelf-count";
 
 export interface ReceiptBillingLine {
   id: string;
@@ -44,6 +53,22 @@ export interface ReceiptBillingLine {
   billedAmount: number | null;
   /** The container was counted onto the shelf. A label, never money - the money is billedAmount. */
   isStock: boolean;
+  /**
+   * THE ROLL ON THE SHELF FROM THIS LINE (Shop Stock, 0303), when there is one: what went on it,
+   * what it cost off this ticket, and what is left of it now. Null = nothing from it is on the shelf.
+   */
+  shelf?: {
+    lotId: string;
+    itemName: string;
+    pieces: number;
+    unit: string;
+    cost: number;
+    piecesLeft: number;
+    costLeft: number;
+    /** Takes and counts on it. With any, it stays on the shelf as it is (0304). */
+    liveMoves: number;
+    stale: boolean;
+  } | null;
 }
 
 export interface ReceiptForBilling {
@@ -133,6 +158,27 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   useEffect(() => {
     setOverrides((o) => (Object.keys(o).length ? {} : o));
   }, [signature]);
+  /** The line whose rest is being put on the shelf (Shop Stock, Phase 2). */
+  const [shelving, setShelving] = useState<{ receipt: ReceiptForBilling; line: ReceiptBillingLine } | null>(null);
+  const [shelfBusy, setShelfBusy] = useState<string | null>(null);
+
+  function takeOff(line: ReceiptBillingLine) {
+    if (!line.shelf) return;
+    setShelfBusy(line.id);
+    start(async () => {
+      const res = await takeRollOffShelf(line.shelf!.lotId);
+      setShelfBusy(null);
+      if (!res?.ok) {
+        toast(res?.error ?? "That roll didn't come off the shelf. Try again.", "error");
+        return;
+      }
+      toast(
+        `${line.shelf!.pieces} ${line.shelf!.unit} is off the shelf, and its ${formatCurrency(line.shelf!.cost)} is back on the job. What the customer is billed didn't change.`,
+        "success",
+      );
+      router.refresh();
+    });
+  }
 
   function flip(lineId: string, next: boolean) {
     setOverrides((o) => ({ ...o, [lineId]: { ...o[lineId], billable: next } }));
@@ -151,6 +197,8 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
         label: "Undo",
         onClick: () => flip(lineId, !next),
       });
+      // What it did to a roll on the shelf from this ticket, if anything. Said, never swallowed.
+      if (res.note) toast(res.note, "info");
       router.refresh();
     });
   }
@@ -193,7 +241,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   }
 
   return (
-    <Card className="mb-6 p-4">
+    <Card id="receipt-billing" className="mb-6 scroll-mt-20 p-4">
       <div className="mb-3">
         <h2 className="text-base font-semibold text-slate-900">What Your Customers Get Billed</h2>
         <p className="mt-0.5 text-sm text-slate-500">
@@ -382,6 +430,48 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                                 )}
                               </div>
                             )}
+
+                            {/* THE SHELF (Shop Stock, Phase 2). A roll from this line is on the
+                                shelf: say what went there, what it cost off this ticket and what
+                                is left of it. Otherwise any line that shipped something can put
+                                its rest there, on a receipt no customer is holding yet. */}
+                            {l.shelf ? (
+                              <div className="mt-0.5 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900">
+                                <p className="font-medium">
+                                  {r.job_name ? `${formatCurrency(l.billedAmount ?? 0)} billed to ${r.job_name}` : "None billed to a job"} ·{" "}
+                                  {l.shelf.pieces} {l.shelf.unit} on the shelf ({formatCurrency(l.shelf.cost)})
+                                </p>
+                                <p className="text-sky-800">
+                                  {l.shelf.itemName}: {l.shelf.piecesLeft} {l.shelf.unit} left, {formatCurrency(l.shelf.costLeft)}
+                                  {l.shelf.stale ? " · its receipt changed, so its cost is being worked out again" : ""}
+                                </p>
+                                {!locked && l.shelf.liveMoves === 0 && (
+                                  <button
+                                    type="button"
+                                    disabled={shelfBusy === l.id}
+                                    onClick={() => takeOff(l)}
+                                    className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                                  >
+                                    {shelfBusy === l.id ? "Taking It Off…" : "Take It Off The Shelf"}
+                                  </button>
+                                )}
+                                {l.shelf.liveMoves > 0 && (
+                                  <p className="text-sky-800">Pieces of it are on jobs, so it stays on the shelf as it is.</p>
+                                )}
+                              </div>
+                            ) : (
+                              !locked &&
+                              l.amount > 0 &&
+                              !/tax/i.test(String(l.category ?? "")) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShelving({ receipt: r, line: l })}
+                                  className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
+                                >
+                                  Put The Rest On The Shelf
+                                </button>
+                              )
+                            )}
                           </li>
                         );
                       })}
@@ -411,7 +501,123 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
           onSave={(next) => saveUsage(editing.line, next)}
         />
       )}
+
+      {shelving && (
+        <PutTheRestOnTheShelf
+          line={shelving.line}
+          jobName={shelving.receipt.job_name}
+          onClose={() => setShelving(null)}
+          onDone={(message) => {
+            setShelving(null);
+            toast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
     </Card>
+  );
+}
+
+/**
+ * PUT THE REST ON THE SHELF (Shop Stock, Phase 2): "used on this job N, the rest to the shelf".
+ *
+ * Opens on the ticket's own count ("250 ft") and how much of it this job was already billed (none,
+ * when the line was split to $0), so on Herringbone's 8/19 coil it is one tap: 0 used, 250 ft to
+ * the shelf, $180.17 off Herringbone. Before the save it says exactly what will happen to the
+ * customer's bill and to the job's cost, from the same arithmetic the server writes with.
+ */
+function PutTheRestOnTheShelf({
+  line,
+  jobName,
+  onClose,
+  onDone,
+}: {
+  line: ReceiptBillingLine;
+  jobName: string | null;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const { items, loaded, error: itemsError } = useShelfItems(true);
+  const countLine = useMemo<ShelfCountLine>(
+    () => ({ key: line.id, description: line.description, quantity: line.quantity, unitPrice: line.unitPrice, amount: line.amount, category: line.category }),
+    [line],
+  );
+  const [value, setValue] = useState<ShelfCountValue | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!loaded || value) return;
+    const first = initialShelfCount(countLine, items);
+    // What the job was already billed, as a count, when the line was split before: 0 used on a
+    // line split to $0. A line billed in full starts at 0 used too, and the sentence below says
+    // plainly that saving takes it off the customer's bill.
+    const unit = perUnitCost(line.amount, shelfPieces(first));
+    const usedFromBilled = line.billedAmount != null && unit ? usedCountFromCost(line.billedAmount, unit) ?? 0 : 0;
+    setValue({ ...first, used: usedFromBilled });
+  }, [loaded, value, countLine, items, line.amount, line.billedAmount]);
+
+  const pieces = value ? shelfPieces(value) : 0;
+  const used = value ? Number(value.used) || 0 : 0;
+  const per = perUnitCost(line.amount, pieces);
+  const billed = used > 0 ? usedCost(used, per) : 0;
+  const rest = Math.round((pieces - used) * 1000) / 1000;
+
+  function save() {
+    if (!value) return;
+    setSaving(true);
+    setError(null);
+    putRestOnShelf({ lineId: line.id, ...shelfAnswerOf(countLine, value) })
+      .then((res) => {
+        setSaving(false);
+        if (!res?.ok) {
+          setError(res?.error ?? "Nothing went on the shelf. Try again.");
+          return;
+        }
+        onDone(res.message ?? "On the shelf.");
+      })
+      .catch(() => {
+        setSaving(false);
+        setError("Nothing went on the shelf: the connection dropped. Try again.");
+      });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Put The Rest On The Shelf"
+      size="md"
+      dirty={!!value?.confirmed}
+      footer={
+        <ModalActions
+          onCancel={onClose}
+          onSave={save}
+          saving={saving}
+          saveLabel="Put It On The Shelf"
+          disabled={!value || !(pieces > 0) || !(rest > 0) || saving}
+        />
+      }
+    >
+      <div className="space-y-3">
+        {!value ? (
+          <p className="text-sm text-slate-500">Reading the shelf…</p>
+        ) : (
+          <>
+            <ShelfCountRow line={countLine} value={value} onChange={setValue} items={items} showUsed allowNotStock={false} startOpen />
+            {itemsError && <p className="text-xs text-amber-800">{itemsError}</p>}
+            {pieces > 0 && rest > 0 && (
+              <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                {used > 0
+                  ? `${jobName ?? "This job"} is billed ${formatCurrency(billed)} for the ${used} ${value.unit} it used. `
+                  : `${jobName ?? "This job"} is billed nothing for it${line.billedAmount == null ? " (it was billing the whole line)" : ""}. `}
+                The other {rest} {value.unit} go on the shelf, and their share of this ticket, tax included, comes off the job&apos;s cost.
+              </p>
+            )}
+            {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

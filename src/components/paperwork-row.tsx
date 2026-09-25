@@ -24,11 +24,13 @@ import {
   onPaperWords,
   proposalOf,
   readinessOf,
+  shelfRowsOf,
   shownDestination,
   suggestedDestination,
   type NumberMatch,
   type PaperItem,
 } from "@/lib/paperwork";
+import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
 import {
   aiReviewItem,
   archiveItem,
@@ -267,6 +269,8 @@ export function PaperworkRow({
   // server (readAsCost), because it changes what the row IS.
   const [answer, setAnswer] = useState<"photo" | "else" | null>(null);
   const [photoPicked, setPhotoJob] = useState<string | null>(null);
+  /** The Shop Stock sheet: every line counted onto the shelf, or Not Stock, before File It. */
+  const [shelfSheet, setShelfSheet] = useState<{ differentPurchase: boolean } | null>(null);
 
   const r = readinessOf(item);
   const p = proposalOf(item);
@@ -309,6 +313,7 @@ export function PaperworkRow({
       return j ? jobLabel(j) : "a job";
     }
     if (d.type === "overhead") return `Business Cost, ${d.category}`;
+    if (d.type === "stock") return "Shop Stock";
     return "Keep It In Files";
   }
 
@@ -317,6 +322,7 @@ export function PaperworkRow({
     if (!d) return "";
     if (d.type === "job" || d.type === "photo") return `on ${destLabel(value)}`;
     if (d.type === "overhead") return `as a business cost, ${d.category}`;
+    if (d.type === "stock") return "on the shop shelf";
     return "in files";
   }
 
@@ -355,6 +361,8 @@ export function PaperworkRow({
     if (d.type === "keep") return run("keep", () => keepPaperwork(item.id), "Kept in files.");
     if (d.type === "photo")
       return run("photo", () => fileItem(item.id, { type: "photo", jobId: d.jobId }), `Filed as a job photo ${whereSaid(activeDest)}.`);
+    // SHOP STOCK: nothing is filed until every line has a count or Not Stock (the sheet below).
+    if (d.type === "stock") return setShelfSheet({ differentPurchase });
     const where = whereSaid(dest);
     const said = isCost ? `Filed ${where}.` : `Kept ${where}.`;
     run(
@@ -459,13 +467,16 @@ export function PaperworkRow({
           {jobOptions}
         </Select>
         <Select
-          value={dest.startsWith("cost:") ? dest : ""}
+          value={dest.startsWith("cost:") || dest === "stock" ? dest : ""}
           onChange={(e) => setDest(e.target.value)}
           disabled={working}
           className="h-11"
-          aria-label="Or A Business Cost"
+          aria-label="Or Shop Stock Or A Business Cost"
         >
-          <option value="">Or A Business Cost…</option>
+          <option value="">Or Shop Stock Or A Business Cost…</option>
+          {/* THE SHOP SHELF, above the buckets (Shop Stock, Phase 2): a ticket bought for stock is
+              never a job cost and never Tools & Supplies or Other. */}
+          <option value="stock">Shop Stock{prePick === "stock" ? " (On The Paper)" : ""}</option>
           {PAPER_BUCKETS.map((b) => (
             <option key={b} value={`cost:${b}`}>
               {b}
@@ -713,6 +724,42 @@ export function PaperworkRow({
           )}
         </div>
       </div>
+      {shelfSheet && (
+        <ShelfTicketSheet
+          title="File It To The Shelf"
+          lines={shelfRowsOf(item).map(
+            (l): ShelfCountLine => ({
+              key: String(l.index),
+              description: l.description,
+              quantity: l.quantity,
+              unitPrice: l.unit_price,
+              amount: l.amount,
+              category: l.category,
+            }),
+          )}
+          total={item.amount == null || item.amount === "" ? null : Number(item.amount)}
+          fileLabel="File It To The Shelf"
+          onClose={() => setShelfSheet(null)}
+          onFile={async (choices) => {
+            const res = await fileItem(item.id, { type: "stock", lines: choices }, { differentPurchase: shelfSheet.differentPurchase });
+            if (!res.ok) return res;
+            setShelfSheet(null);
+            const sentence = res.message ?? "Filed on the shop shelf.";
+            onFiled({ id: item.id, sentence: `${describePaper(item)}: ${sentence}` });
+            toast(sentence, "success", {
+              label: "Undo",
+              onClick: () => {
+                void undoPaperwork(item.id).then((u) => {
+                  toast(u.ok ? u.message ?? "Undone." : u.error ?? "Couldn't undo.", u.ok ? "success" : "error");
+                  router.refresh();
+                });
+              },
+            });
+            router.refresh();
+            return res;
+          }}
+        />
+      )}
       {fixing && (
         <FixDetails
           item={item}

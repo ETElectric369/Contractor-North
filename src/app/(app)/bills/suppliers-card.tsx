@@ -88,6 +88,8 @@ export interface SuppliersCardActions
    *  as a bill on its job. Without it those rows still name the money and link to the job. */
   recordAsBill?: SupplierInvoiceActions["recordAsBill"];
   tieToBill?: SupplierInvoiceActions["tieToBill"];
+  shelfLines?: SupplierInvoiceActions["shelfLines"];
+  recordToShelf?: SupplierInvoiceActions["recordToShelf"];
 }
 
 const METHOD_LABELS: Record<SupplierPayMethod, string> = {
@@ -1086,7 +1088,13 @@ export function SuppliersCard({
               // The payment sheet lives up here and stays there: a second way to record a payment
               // is a second thing to drift.
               onRecordPayment={account.onAccount ? () => openPay(account) : undefined}
-              actions={{ setInvoiceJob: actions.setInvoiceJob!, recordAsBill: actions.recordAsBill, tieToBill: actions.tieToBill }}
+              actions={{
+                setInvoiceJob: actions.setInvoiceJob!,
+                recordAsBill: actions.recordAsBill,
+                tieToBill: actions.tieToBill,
+                shelfLines: actions.shelfLines,
+                recordToShelf: actions.recordToShelf,
+              }}
             />
           ))}
 

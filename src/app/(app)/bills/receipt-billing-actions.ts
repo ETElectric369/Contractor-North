@@ -5,9 +5,28 @@ import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { billLineCost } from "@/lib/bill-itemisation";
 import { formatCurrency } from "@/lib/utils";
+import { putOnShelf, restampLotsForBill, unshelveLot, type ShelfPick } from "@/lib/stock-ledger";
 import { round2, splitContradictsReceipt } from "./receipt-billing";
 
-export type Result = { ok: boolean; error?: string };
+export type Result = { ok: boolean; error?: string; note?: string };
+
+/**
+ * EVERY BILL-LINE WRITE PATH CALLS THIS AFTER IT WRITES (Shop Stock; 0304's other half). A roll on
+ * the shelf is costed off its ticket's lines, and switching or splitting ANY line moves the tax
+ * share, so every take-less roll from the ticket is worked out again here, and one whose line is
+ * now billed in full comes off the shelf. With no roll on the ticket it is one small read. What it
+ * did is SAID (nothing silent), and a failure is said too: 0304 already marked the roll stale, and
+ * the reconcile view names it until it is put right.
+ */
+async function restampAfterLineWrite(supabase: any, orgId: string | null | undefined, billId: string | null | undefined): Promise<string | null> {
+  if (!orgId || !billId) return null;
+  const r = await restampLotsForBill(supabase, orgId, String(billId));
+  if (!r.ok) return `The line saved, but the roll on the shelf from this ticket couldn't be re-costed: ${r.error}`;
+  if (r.unshelved > 0)
+    return `${r.unshelved === 1 ? "The roll" : `${r.unshelved} rolls`} from this ticket came off the shelf, because the customer is billed all of it now. Its cost is back on the job.`;
+  if (r.restamped > 0) return "The roll on the shelf from this ticket was re-costed to match.";
+  return null;
+}
 
 /**
  * SWITCH ONE RECEIPT LINE OFF THE CUSTOMER'S BILL (migration 0268).
@@ -50,9 +69,10 @@ export async function setReceiptLineBillable(lineId: string, billable: boolean):
   }
 
   const jobId = (line as { bills?: { job_id?: string | null } | null }).bills?.job_id ?? null;
+  const note = await restampAfterLineWrite(supabase, ctx.orgId, (line as { bill_id?: string | null }).bill_id);
   revalidatePath("/bills");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
-  return { ok: true };
+  return note ? { ok: true, note } : { ok: true };
 }
 
 /**
@@ -186,7 +206,75 @@ export async function setReceiptLineUsage(input: {
    * "Put The Rest On The Shelf" (putOnShelf in src/lib/stock-ledger.ts) is the door that puts the
    * rest on the shelf, with its pieces, its unit and what it cost off this receipt (Phase 2).
    */
+  const note = await restampAfterLineWrite(supabase, ctx.orgId, (line as { bill_id?: string | null }).bill_id);
   revalidatePath("/bills");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
+  return note ? { ok: true, note } : { ok: true };
+}
+
+/**
+ * PUT THE REST ON THE SHELF (Shop Stock, Phase 2; Erik: "things like wire and wire nuts i get a
+ * roll and cut off 20' for a job").
+ *
+ * One press, one answer from a person: this line bought N pieces, THIS job used M of them, the rest
+ * is on the shelf. What the job used is billed to it (billed_amount, the same column the split
+ * writes); the rest becomes a roll on the shelf at its share of the ticket, tax included, and comes
+ * off this job's cost. Both land in one transaction (0328), so a job is never billed for less while
+ * nothing went on the shelf.
+ *
+ * Herringbone's 8/19 CED coil: 250 ft, 0 used. The job is billed $0 of it, the shelf holds 250 ft
+ * of 12/2 at $180.17, and Herringbone's cost drops by $180.17.
+ */
+export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsageResult & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const lineId = String(input?.lineId ?? "");
+  if (!lineId) return { ok: false, error: "Couldn't tell which receipt line you meant." };
+  const { data: line } = await ctx.supabase
+    .from("bill_line_items")
+    .select("id, bill_id, bills(job_id, jobs(name))")
+    .eq("id", lineId)
+    .maybeSingle();
+  if (!line) return { ok: false, error: "Couldn't find that receipt line. Reload the page and try again." };
+
+  const res = await putOnShelf({ ...input, lineId });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  const bill = (line as { bill_id?: string; bills?: { job_id?: string | null; jobs?: { name?: string | null } | null } | null }).bills ?? null;
+  const jobId = bill?.job_id ?? null;
+  const jobName = bill?.jobs?.name ?? "The job";
+  // WHAT A DRAFT STILL SHOWS. A draft invoice that already pulled this ticket in still carries the
+  // line it imported until its materials are pulled in again; saying so is the difference between
+  // "it worked" and a man looking at the old row wondering whether it did.
+  let draftNote = "";
+  const billId = String((line as { bill_id?: string }).bill_id ?? "");
+  if (billId) {
+    const { data: drafts } = await ctx.supabase
+      .from("invoice_items")
+      .select("invoices!inner(invoice_number, status)")
+      .contains("source_ids", [billId])
+      .eq("invoices.status", "draft")
+      .limit(5);
+    const numbers = Array.from(new Set(((drafts ?? []) as any[]).map((d) => d?.invoices?.invoice_number).filter(Boolean)));
+    if (numbers.length) draftNote = ` ${numbers.join(", ")} is still a draft that bills this line: pull its materials in again and it follows.`;
+  }
+  const lot = res.lot;
+  const perPiece = lot.pieces > 0 ? lot.cost / lot.pieces : 0;
+  const each = perPiece > 0 && perPiece < 1 ? `about ${Math.round(perPiece * 100)}¢` : formatCurrency(perPiece);
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  return {
+    ok: true,
+    message: `${lot.pieces} ${lot.unit} is on the shelf at ${formatCurrency(lot.cost)} (${each} a ${lot.unit === "ft" ? "foot" : lot.unit}). ${jobName}'s cost drops by ${formatCurrency(lot.cost)}.${draftNote}`,
+  };
+}
+
+/**
+ * TAKE IT OFF THE SHELF: the way back from Put The Rest On The Shelf, while nothing has been taken
+ * from the roll (the database refuses after, naming the takes to undo). The roll's dollars go back
+ * onto the job; what the customer is billed does not move, and Bill The Whole Line is one tap away.
+ */
+export async function takeRollOffShelf(lotId: string): Promise<Result> {
+  const res = await unshelveLot(String(lotId ?? ""));
+  if (!res.ok) return { ok: false, error: res.error };
   return { ok: true };
 }

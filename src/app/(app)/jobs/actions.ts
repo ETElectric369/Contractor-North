@@ -22,6 +22,7 @@ import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
+import { restampLotsForBill } from "@/lib/stock-ledger";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -1156,6 +1157,12 @@ export async function updateBill(
   // deleted in the other tab, closed the modal on a cheerful "Saved" over an amount that never
   // landed. updateJobNotes forty lines down has had this right the whole time.
   if (!data) return { ok: false, error: "Nothing saved. That bill isn't here, or this login can't edit it." };
+  // A ROLL ON THE SHELF FROM THIS TICKET (Shop Stock): a bill edit is a bill money path too, so its
+  // take-less rolls are worked out again (one small read when it has none).
+  if (ctx.orgId) {
+    const restamp = await restampLotsForBill(supabase, ctx.orgId, id);
+    if (!restamp.ok) reportError("updateBill.restamp", new Error(restamp.error), { billId: id });
+  }
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability

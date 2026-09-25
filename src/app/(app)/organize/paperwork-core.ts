@@ -30,7 +30,6 @@ import {
   MASKED_PRICE_PROMPT_RULE,
   looksProvisionallyPriced,
   RECEIPT_LINE_CATEGORY_SCHEMA_HINT,
-  decideReceiptLine,
 } from "@/app/(app)/bills/receipt-billing";
 
 /**
@@ -43,38 +42,10 @@ import {
  * before it gets here.
  */
 
-export interface BillLine {
-  description: string;
-  quantity: number;
-  unit_price: number;
-  amount: number;
-  category: string | null;
-  /** false = the company eats this line; it never reaches the customer's invoice (0268). */
-  billable: boolean;
-}
-
-/** Normalize the AI's line_items into clean BillLine rows. */
-export function cleanLines(raw: any): BillLine[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((l: any) => {
-      const quantity = Number(l?.quantity) || 1;
-      const unit_price = l?.unit_price != null && !isNaN(Number(l.unit_price)) ? Number(l.unit_price) : 0;
-      const amount =
-        l?.amount != null && !isNaN(Number(l.amount)) ? Number(l.amount) : Math.round(quantity * unit_price * 100) / 100;
-      const description = String(l?.description ?? "").slice(0, 300).trim();
-      const stated = l?.category ? String(l.category).slice(0, 60) : null;
-      // WHOSE LINE IS IT (0268). Food and drink arrives switched OFF the customer's bill and
-      // everything else arrives on it; an explicit flag already stored on the row (a tray item's
-      // lines are jsonb, re-read verbatim when it is filed) wins over the default, so re-filing
-      // never re-bills the snacks. decideReceiptLine is the deterministic net under the model's
-      // category: it fills a shrug when the words are plainly food, and never overrules a person.
-      const { category, billable } = decideReceiptLine(description, stated, l?.billable);
-      return { description, quantity, unit_price, amount, category, billable };
-    })
-    .filter((l: BillLine) => l.description.length > 0)
-    .slice(0, 100);
-}
+// The paper's lines as the bill holds them live in src/lib/paper-lines.ts now (pure, so the tray
+// row can key a Shop Stock count to the same index the bill's sort_order gets).
+export { cleanLines, type BillLine } from "@/lib/paper-lines";
+import { cleanLines, type BillLine } from "@/lib/paper-lines";
 
 /** A store receipt is already paid; a supplier bill/invoice is still owed. */
 function billStatusFor(category: string | null | undefined): "paid" | "unpaid" {
@@ -109,6 +80,8 @@ export async function insertItemizedBill(
     bill_number?: string | null;
     /** 0270: ONLY from an exact alias a person already made. Never a guess. */
     supplier_account_id?: string | null;
+    /** 0303: a ticket bought for the shop shelf (job_id must be null). */
+    on_shelf?: boolean;
   },
   given: BillLine[],
   status: "paid" | "unpaid" = "unpaid",
@@ -170,6 +143,11 @@ export async function insertItemizedBill(
         lineCount: lines.length,
       });
     }
+    // NO RESTAMP HERE, AND WHY (Shop Stock, 0304's other half): every bill-line write that can
+    // move a roll's cost calls restampLotsForBill (receipt-billing-actions, updateBill), but these
+    // lines belong to a bill written a moment ago. A roll is keyed to a line id, and these ids did
+    // not exist until this insert, so no roll can be on this bill to restamp. A door that ever
+    // adds lines to an EXISTING bill must restamp after it writes.
   }
   return data.id;
 }

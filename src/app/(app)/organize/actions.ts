@@ -26,11 +26,16 @@ import {
   readinessOf,
   rematchPaper,
   RETURN_ON_JOB_NEEDS_LINES,
+  amountOf,
+  shelfRowsOf,
   storedMarks,
   type NumberMatch,
   type PaperItem,
   type PaperProposal,
 } from "@/lib/paperwork";
+import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib/shelf-plan";
+import { shelveLines } from "@/lib/stock-ledger";
+import { formatCurrency } from "@/lib/utils";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -676,6 +681,12 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 // down below exactly as before.
 export type FileDestination =
   | { type: "job"; jobId: string }
+  /**
+   * THE SHOP SHELF (Shop Stock, Phase 2): the ticket becomes a bill with no job, on_shelf, and
+   * each line a person counted becomes a roll on the shelf. `lines` is a person's answer for every
+   * line by its place on the paper (shelfRowsOf): a count, or Not Stock.
+   */
+  | { type: "stock"; lines: TicketLineChoice[] }
   /** A picture on a job's Photos (Erik, 2026-09-24): a documents row, never a bill. */
   | { type: "photo"; jobId: string }
   | { type: "overhead"; category: string }
@@ -747,7 +758,7 @@ async function whoPicked(
   try {
     const { markJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
     const settled = rematchPaper(item, markJobs, pos, selfNames);
-    const destValue = dest.type === "overhead" ? `cost:${dest.category}` : `${dest.type}:${dest.jobId}`;
+    const destValue = dest.type === "overhead" ? `cost:${dest.category}` : dest.type === "stock" ? "stock" : `${dest.type}:${dest.jobId}`;
     return pickProvenance(settled, destValue);
   } catch (e) {
     reportError("organize:fileItem.whoPicked", e, { itemId: item.id });
@@ -787,9 +798,19 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (dest.type !== "unfiled") {
     const refusal = fileRefusal(
       item,
-      dest.type === "job" || dest.type === "photo" ? { type: dest.type, jobId: dest.jobId } : { type: "overhead", category: dest.category as never },
+      dest.type === "job" || dest.type === "photo"
+        ? { type: dest.type, jobId: dest.jobId }
+        : dest.type === "stock"
+          ? { type: "stock" }
+          : { type: "overhead", category: dest.category as never },
     );
     if (refusal) return { ok: false, error: refusal };
+    // Every line answered, a count or Not Stock, and at least one on the shelf: the same gate the
+    // sheet's button asks, asked again here before anything is claimed or written.
+    if (dest.type === "stock") {
+      const shelfProblem = ticketShelfProblem(shelfRowsOf(item), amountOf(item), dest.lines);
+      if (shelfProblem) return { ok: false, error: shelfProblem };
+    }
   }
 
   // IS THIS PURCHASE ALREADY ON THE BOOKS? Same printed number, same supplier. Asked here, on the
@@ -857,6 +878,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
 
   let documentId: string | null = null;
   let billId: string | null = null;
+  /** What went on the shelf, said after "Filed" (Shop Stock). */
+  let shelfSaid = "";
   let jobId: string | null = null;
   let category: string | null = item.category;
   const paperCategory = billCategoryFor(item);
@@ -963,6 +986,61 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     );
     // A business cost IS its bill; there is no copy on a job to show for it.
     if (!billId) return backToTray("The business cost didn't save, so this receipt is back in Needs Review. Try again.");
+  } else if (dest.type === "stock") {
+    // THE SHOP SHELF (Shop Stock, Phase 2). The ticket is a bill with no job, flagged on_shelf (a
+    // real flag, never a category word: bucketOf would call an unknown word "Other"), so it is
+    // never a job cost and never a business-cost bucket. Then every line a person counted becomes
+    // a roll, in one transaction (shelveLines -> 0328). Anything short of that puts the paper back
+    // in the tray holding nothing: a shelf ticket with no rolls on it is money in no place.
+    category = "Shop Stock";
+    billId = await insertItemizedBill(
+      supabase,
+      {
+        job_id: null,
+        supplier: vendor,
+        amount: item.amount ?? 0,
+        bill_date: item.item_date,
+        category: "Shop Stock",
+        notes: `Shop stock filed by a person from the tray: ${item.title}${decided}`,
+        created_by: ctx.userId,
+        on_shelf: true,
+        ...billFacts,
+      },
+      lines,
+      billStatusFromItem(item),
+    );
+    if (!billId) return backToTray("The ticket didn't save, so it is back in the tray. Try File It again.");
+    const rows = shelfRowsOf(item);
+    const { data: written, error: writtenErr } = await supabase
+      .from("bill_line_items")
+      .select("id, sort_order")
+      .eq("bill_id", billId)
+      .order("sort_order");
+    if (writtenErr || (written ?? []).length !== rows.length)
+      return backToTray("The ticket's lines didn't all save, so nothing went on the shelf and the paper is back in the tray. Try again.");
+    const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
+    const picks: ShelfPick[] = [];
+    for (const c of dest.lines) {
+      if (c.notStock) continue;
+      const lineId = idAt.get(Number(c.index));
+      if (!lineId) return backToTray("A line on this ticket didn't save, so nothing went on the shelf. Try again.");
+      picks.push({
+        lineId,
+        pieces: Number(c.pieces),
+        used: 0,
+        unit: c.unit,
+        bought: c.bought ?? null,
+        itemId: c.itemId ?? null,
+        newItemName: c.newItemName ?? null,
+        keyPart: c.keyPart ?? null,
+      });
+    }
+    const shelved = await shelveLines(supabase, String(ctx.orgId), billId, picks);
+    if (!shelved.ok) return backToTray(`${shelved.error} Nothing was filed; the paper is back in the tray.`);
+    const notStock = dest.lines.filter((c) => c.notStock).length;
+    shelfSaid =
+      ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} on the shelf.` +
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket and never go on the shelf.` : "");
   }
 
   // THE CED DOCUMENT THIS PAPER IS (see linkTo above). 0277 lets one bill cover an invoice, once:
@@ -1015,7 +1093,9 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   revalidatePath("/petty-cash");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
+  revalidatePath("/inventory");
   const linkedSaid = linkTo.length && !linkNote ? ` Linked to CED ${linkTo.map((l) => l.number).join(", ")}.` : "";
+  if (shelfSaid) return { ok: true, message: `Filed on the shop shelf.${shelfSaid}${linkedSaid}${linkNote}` };
   return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
 

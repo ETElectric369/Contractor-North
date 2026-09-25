@@ -41,6 +41,9 @@ export interface NewBillLine {
 
 export interface SupplierBillLines {
   lines: NewBillLine[];
+  /** The supplier's part number for each line, in the same order (null on tax and freight). Record
+   *  To Shelf matches the shelf's items on it (Shop Stock, Phase 2); it is never a bill column. */
+  parts: (string | null)[];
   /** What the lines add up to, in cents-safe dollars. */
   lineSum: number;
   /** The lines say MORE than the supplier is charging: something was read wrong. Do not itemise. */
@@ -54,6 +57,7 @@ export function supplierBillLines(
   doc: { invoiceNumber: string; tax?: unknown; shipping?: unknown; total?: unknown },
 ): SupplierBillLines {
   const lines: NewBillLine[] = [];
+  const parts: (string | null)[] = [];
 
   for (const l of rows ?? []) {
     const amount = money(l?.extension);
@@ -112,6 +116,7 @@ export function supplierBillLines(
      * The door decides; "Materials" is only what a shrug is called on a supplier invoice.
      */
     const decided = decideReceiptLine(description, null, undefined);
+    parts.push(part);
     lines.push({
       description,
       quantity: qty !== 0 ? qty : 1,
@@ -127,6 +132,7 @@ export function supplierBillLines(
   // marked up like a part.
   const tax = money(doc?.tax);
   if (tax) {
+    parts.push(null);
     lines.push({
       description: `Sales Tax (Invoice ${doc.invoiceNumber})`,
       quantity: 1,
@@ -150,6 +156,7 @@ export function supplierBillLines(
    */
   const shipping = money(doc?.shipping);
   if (shipping) {
+    parts.push(null);
     lines.push({
       description: `Shipping (Invoice ${doc.invoiceNumber})`,
       quantity: 1,
@@ -163,5 +170,5 @@ export function supplierBillLines(
   const lineSum = lines.reduce((s, l) => money(s + l.amount), 0);
   const total = money(doc?.total);
   const overshoot = lineSum > total + 0.005;
-  return { lines, lineSum, overshoot, shortfall: overshoot ? 0 : money(total - lineSum) };
+  return { lines, parts, lineSum, overshoot, shortfall: overshoot ? 0 : money(total - lineSum) };
 }

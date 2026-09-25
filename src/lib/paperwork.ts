@@ -18,6 +18,8 @@
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import { billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
+import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
+import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
 
 export { normalizeDocNumber };
 
@@ -188,8 +190,10 @@ export type PaperFiled = {
   jobHint?: string | null;
 };
 
-/** A company-use word on the paper, where it was written, and the bucket it picks (or none). */
-export type CompanyUse = { bucket: BusinessCostBucket | null; from: "po" | "job_name"; words: string };
+/** A company-use word on the paper, where it was written, and the bucket it picks (or none).
+ *  `shelf`: the word names the shop shelf (STOCK, SHOP STOCK, INVENTORY), which suggests the Shop
+ *  Stock destination (Shop Stock, Phase 2) - suggested, never filed on its own. */
+export type CompanyUse = { bucket: BusinessCostBucket | null; from: "po" | "job_name"; words: string; shelf?: boolean };
 
 export type PaperItem = {
   id: string;
@@ -390,13 +394,17 @@ export function readinessOf(item: PaperItem): Readiness {
 export type PaperDestination =
   | { type: "job"; jobId: string }
   | { type: "overhead"; category: BusinessCostBucket }
+  /** The shop shelf (Shop Stock, Phase 2): a ticket bought for stock, never a job cost and never a
+   *  business-cost bucket. Each line is counted onto the shelf by a person, or marked Not Stock. */
+  | { type: "stock" }
   /** A picture filed on a job as a job photo (the job page's Photos), never as a cost. */
   | { type: "photo"; jobId: string }
   | { type: "keep" };
 
-/** The picker's value: "job:<id>", "cost:<bucket>", "photo:<id>", "keep". */
+/** The picker's value: "job:<id>", "cost:<bucket>", "photo:<id>", "stock", "keep". */
 export function destinationValue(d: PaperDestination | null): string {
   if (!d) return "";
+  if (d.type === "stock") return "stock";
   if (d.type === "job") return `job:${d.jobId}`;
   if (d.type === "overhead") return `cost:${d.category}`;
   if (d.type === "photo") return `photo:${d.jobId}`;
@@ -406,6 +414,7 @@ export function destinationValue(d: PaperDestination | null): string {
 export function parseDestination(value: string | null | undefined): PaperDestination | null {
   const v = String(value ?? "");
   if (v === "keep") return { type: "keep" };
+  if (v === "stock") return { type: "stock" };
   if (v.startsWith("job:") && v.length > 4) return { type: "job", jobId: v.slice(4) };
   if (v.startsWith("photo:") && v.length > 6) return { type: "photo", jobId: v.slice(6) };
   if (v.startsWith("cost:")) {
@@ -432,8 +441,25 @@ function markedJob(p: PaperProposal): string | null {
 export function suggestedDestination(item: PaperItem, jobIds: readonly string[]): string {
   const job = markedJob(proposalOf(item));
   if (job) return jobIds.includes(job) ? `job:${job}` : "";
+  if (markedShelf(item)) return "stock";
   const cost = markedCost(item);
   return cost ? `cost:${cost}` : "";
+}
+
+/**
+ * Does the PAPER name the shop shelf? STOCK, SHOP STOCK or INVENTORY as the whole PO or job-name
+ * box (companyUseWord: never the hint, the summary or the lines, so "IN STOCK" and "STOCKTON" can't
+ * trigger it), on a receipt or bill that names no job and says nothing that disagrees, and that is
+ * not money coming back. A suggestion only: the person still counts every line and presses File It.
+ */
+function markedShelf(item: PaperItem): boolean {
+  const p = proposalOf(item);
+  if (!p.companyUse?.shelf) return false;
+  if (markedJob(p) || p.jobConflict) return false;
+  const t = paperTypeOfItem(item);
+  if (t !== "receipt" && t !== "bill") return false;
+  const total = amountOf(item);
+  return !(total !== null && total < 0);
 }
 
 /**
@@ -456,6 +482,7 @@ function markedCost(item: PaperItem): BusinessCostBucket | null {
 export function paperPickOf(item: PaperItem): string {
   const job = markedJob(proposalOf(item));
   if (job) return `job:${job}`;
+  if (markedShelf(item)) return "stock";
   const cost = markedCost(item);
   return cost ? `cost:${cost}` : "";
 }
@@ -503,6 +530,10 @@ export function pickedBecause(item: PaperItem): string | null {
   if (markedJob(p) && p.jobFrom) {
     const words = String(p.jobHint ?? "").trim();
     return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
+  }
+  if (markedShelf(item) && p.companyUse) {
+    const words = String(p.companyUse.words ?? "").trim();
+    return `Shelf picked from the ${JOB_MARK_WORDS[p.companyUse.from]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
   }
   const cost = markedCost(item);
   if (cost && p.companyUse) {
@@ -558,26 +589,30 @@ export function pickProvenance(settled: PaperItem, destValue: string): { filed: 
  * bucket, the same way "13897 HERRINGBONE" is the job). The WHOLE box must be the word: "TOOLS",
  * "Tool", "SHOP TOOLS", "TRUCK 2", "#2 TRUCK", "VAN", "OFFICE". "TOOLS FOR HERRINGBONE" is not.
  *
- * STOCK, SHOP STOCK and INVENTORY say the company's own too, but the thing they name, a shelf the
- * stock sits on until a job uses it, is being built separately. They pick NOTHING; the row says
- * what the paper says, and a person decides. The company's own name and its people's are never
- * here: "ERIK TAYLOR" is on every CED ticket as who it was sold to, job purchases included.
+ * STOCK, SHOP STOCK and INVENTORY say the company's own too, and what they name is the shop shelf
+ * (Shop Stock, Phase 2): no bucket, and `shelf` instead, which SUGGESTS the Shop Stock destination
+ * with the words that picked it. A suggestion like any other: a person counts each line and files
+ * it, or picks something else. The company's own name and its people's are never here: "ERIK
+ * TAYLOR" is on every CED ticket as who it was sold to, job purchases included.
  */
-const COMPANY_WORDS: { re: RegExp; bucket: BusinessCostBucket | null }[] = [
+const COMPANY_WORDS: { re: RegExp; bucket: BusinessCostBucket | null; shelf?: true }[] = [
   { re: /^(SHOP )?TOOLS?$/, bucket: "Tools & Supplies" },
   { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Gas & Truck" },
   { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Gas & Truck" },
   { re: /^OFFICE$/, bucket: "Phone & Office" },
-  { re: /^(SHOP )?STOCK$/, bucket: null },
-  { re: /^INVENTORY$/, bucket: null },
+  { re: /^(SHOP )?STOCK$/, bucket: null, shelf: true },
+  { re: /^INVENTORY$/, bucket: null, shelf: true },
 ];
 
-/** Is this whole box a company-use word? The bucket it picks (null: the word picks nothing). */
-export function companyUseWord(raw: string | null | undefined): { bucket: BusinessCostBucket | null; words: string } | null {
+/** Is this whole box a company-use word? The bucket it picks (null: the word picks no bucket), and
+ *  whether it names the shop shelf. */
+export function companyUseWord(raw: string | null | undefined): { bucket: BusinessCostBucket | null; words: string; shelf?: true } | null {
   const key = wordsKey(raw);
   if (!key) return null;
   const hit = COMPANY_WORDS.find((w) => w.re.test(key));
-  return hit ? { bucket: hit.bucket, words: String(raw ?? "").trim() } : null;
+  if (!hit) return null;
+  const words = String(raw ?? "").trim();
+  return hit.shelf ? { bucket: hit.bucket, words, shelf: true } : { bucket: hit.bucket, words };
 }
 
 export type PaperPlace = { job: JobFromMarks; companyUse: CompanyUse | null };
@@ -607,7 +642,13 @@ export function placeFromMarks(
   // The same box names a job: a job mark beats a company word.
   const same = jobFromPaperMarks(found.from === "po" ? { po: marks.po } : { jobName: marks.jobName }, jobs, pos, selfNames);
   if (same.kind !== "none") return { job, companyUse: null };
-  const companyUse: CompanyUse = { bucket: opts.feeShaped ? null : found.bucket, from: found.from, words: found.words };
+  const companyUse: CompanyUse = {
+    bucket: opts.feeShaped ? null : found.bucket,
+    from: found.from,
+    words: found.words,
+    // A supplier's fee is never stock either: it names the account, not a shelf.
+    ...(found.shelf && !opts.feeShaped ? { shelf: true } : {}),
+  };
   if (job.kind === "one") {
     return {
       job: {
@@ -913,7 +954,12 @@ export function rematchPaper<T extends PaperItem>(
   const had = p.companyUse ?? null;
   const sameUse =
     (!companyUse && !had) ||
-    (!!companyUse && !!had && companyUse.bucket === had.bucket && companyUse.from === had.from && companyUse.words === had.words);
+    (!!companyUse &&
+      !!had &&
+      companyUse.bucket === had.bucket &&
+      companyUse.from === had.from &&
+      companyUse.words === had.words &&
+      !!companyUse.shelf === !!had.shelf);
   if (r.kind === "none" && sameUse) return item;
   // A job a model wrote before marks existed stays offered, as the guess it always was.
   const guessJobId = p.guessJobId ?? (p.jobId && !p.jobFrom ? p.jobId : null);
@@ -950,6 +996,20 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   }
   if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
   if (r.state === "not_read") return "This hasn't been read yet. Press Read Now, or Fix Details and fill it in.";
+  if (dest.type === "stock") {
+    // THE SHOP SHELF (Phase 2): a receipt or bill, with its total, read line by line. A roll on
+    // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
+    if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
+    if (r.state === "later") return NOT_FILED_YET;
+    if (r.state === "supplier_documents") return "These are CED documents. Press Add To CED Documents, then Record To Shelf from there.";
+    const st = paperTypeOfItem(item);
+    if (st !== "receipt" && st !== "bill") return "Only a receipt or a bill can go on the shelf. Change its type in Fix Details if it is one.";
+    if (r.state === "needs_total") return r.sentence;
+    const total = amountOf(item);
+    if (total !== null && total < 0) return SHELF_NO_RETURNS;
+    if (!shelfRowsOf(item).length) return SHELF_NEEDS_LINES;
+    return null;
+  }
   if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
   if (r.state === "later") return NOT_FILED_YET;
   if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are CED documents. Press Add To CED Documents.";
@@ -1072,6 +1132,16 @@ export function findSameNumber(
     });
   }
   return out;
+}
+
+/**
+ * THE LINES A PAPER FILED TO THE SHELF WILL HAVE, in the order its bill will hold them (File It
+ * writes cleanLines, pointed with the total, with sort_order = this index). The tray row counts
+ * each of these and the server keys the answers back by index, so both read them from here.
+ */
+export type ShelfRow = PaperLine & { index: number };
+export function shelfRowsOf(item: PaperItem): ShelfRow[] {
+  return linesPointWithTotal(amountOf(item), cleanLines(item.line_items)).map((l, index) => ({ ...l, index }));
 }
 
 /** The six buckets, re-exported so a picker never needs a second import to list them. */

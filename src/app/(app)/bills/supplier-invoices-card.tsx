@@ -10,6 +10,9 @@ import { Card } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { r2, type SupplierActionResult } from "./supplier-balance";
+import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
+import { companyUseWord } from "@/lib/paperwork";
+import type { TicketLineChoice } from "@/lib/shelf-plan";
 import {
   claimableDiscounts,
   discountReading,
@@ -49,6 +52,13 @@ export interface SupplierInvoiceActions {
    * server re-derives the candidates and writes only the link.
    */
   tieToBill?: (input: { invoiceId: string; billId: string }) => Promise<SupplierActionResult>;
+  /**
+   * RECORD TO SHELF (Shop Stock, Phase 2): the document goes in as a shelf ticket, not a job's,
+   * each line counted onto the shelf by a person or marked Not Stock. `shelfLines` reads the lines
+   * the record will write, in its order; `recordToShelf` is Record It As A Bill with the answers.
+   */
+  shelfLines?: (invoiceId: string) => Promise<{ ok: true; lines: ShelfCountLine[]; total: number } | { ok: false; error: string }>;
+  recordToShelf?: (input: { invoiceId: string; differentPurchase?: boolean; toShelf: TicketLineChoice[] }) => Promise<SupplierActionResult>;
 }
 
 /** How many rows a section shows before it says how many more there are. */
@@ -133,6 +143,31 @@ export function SupplierInvoicesCard({
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   /** The action key of the last refusal, so the row that caused it can say so itself. */
   const [failedAt, setFailedAt] = useState<string | null>(null);
+  /** Record To Shelf's sheet: the document's lines, read from the server, each counted by a person. */
+  const [shelfSheet, setShelfSheet] = useState<{
+    invoiceId: string;
+    number: string;
+    differentPurchase: boolean;
+    lines: ShelfCountLine[];
+    total: number;
+  } | null>(null);
+
+  function openShelf(invoiceId: string, number: string, differentPurchase: boolean) {
+    if (!actions.shelfLines) return;
+    setError(null);
+    setFailedAt(null);
+    setBusy(`shelf:${invoiceId}`);
+    start(async () => {
+      const res = await actions.shelfLines!(invoiceId);
+      setBusy(null);
+      if (!res.ok) {
+        setError(res.error);
+        setFailedAt(`bill:${invoiceId}`);
+        return;
+      }
+      setShelfSheet({ invoiceId, number, differentPurchase, lines: res.lines, total: res.total });
+    });
+  }
 
   // Held steady across renders so the reads below are not redone on every keystroke in a picker -
   // `feed` is a fresh object every time the page re-renders, and forty invoices ranked against
@@ -419,7 +454,7 @@ export function SupplierInvoicesCard({
                 first place. It now says only what is true of the rows he is looking at. */}
             {needBill.rows.some((r) => !r.jobId)
               ? actions.recordAsBill
-                ? ` ${needBill.rows.filter((r) => !r.jobId).length} of them have no job on them here, and a purchase needs a job before its cost can go anywhere. Each one is up in Invoices With No Job as well: answer it on THAT row, and this row gets its button.`
+                ? ` ${needBill.rows.filter((r) => !r.jobId).length} of them have no job on them here, and a purchase needs a job before its cost can go anywhere${actions.recordToShelf ? ", unless it is shop stock: Record To Shelf is on every row" : ""}. Each one is up in Invoices With No Job as well: answer it on THAT row, and this row gets its button.`
                 : " Most of these are on no job here either. Say which job up in Invoices With No Job and the cost can follow it there."
               : ""}
           </p>
@@ -520,6 +555,24 @@ export function SupplierInvoicesCard({
                     above is a link, which is the way forward for a row that HAS a job; for one
                     that does not, the section's own intro says where to go, once, instead of the
                     same sentence repeating down six rows of a phone screen. */}
+                {/* RECORD TO SHELF (Shop Stock, Phase 2): on any row, job or no job, because CED
+                    writing a job on it doesn't stop a person deciding it is stock. "STOCK" in its
+                    job box only says so beside the button; nothing is picked for him. */}
+                {actions.recordToShelf && actions.shelfLines && !(invoice.samePurchase?.length && actions.tieToBill) && (
+                  <div className="mt-2 space-y-1">
+                    {companyUseWord(invoice.jobNameRaw)?.shelf && (
+                      <p className="text-xs text-sky-800">CED wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
+                    )}
+                    <Button
+                      variant="outline"
+                      className="h-11 w-full"
+                      disabled={pending}
+                      onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}
+                    >
+                      {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Shelf"}
+                    </Button>
+                  </div>
+                )}
                 {actions.recordAsBill && invoice.jobId && !(invoice.samePurchase?.length && actions.tieToBill) && (
                   <Button
                     variant="outline"
@@ -760,6 +813,27 @@ export function SupplierInvoicesCard({
           </>
         )}
       </section>
+      {shelfSheet && actions.recordToShelf && (
+        <ShelfTicketSheet
+          title={`Record ${shelfSheet.number} To The Shelf`}
+          lines={shelfSheet.lines}
+          total={shelfSheet.total}
+          fileLabel="Record To Shelf"
+          onClose={() => setShelfSheet(null)}
+          onFile={async (choices) => {
+            const res = await actions.recordToShelf!({
+              invoiceId: shelfSheet.invoiceId,
+              differentPurchase: shelfSheet.differentPurchase,
+              toShelf: choices,
+            });
+            if (!res.ok) return { ok: false, error: res.error };
+            setShelfSheet(null);
+            setDone(res.message ?? `${shelfSheet.number} is on the shop shelf now.`);
+            router.refresh();
+            return { ok: true };
+          }}
+        />
+      )}
     </Card>
   );
 }

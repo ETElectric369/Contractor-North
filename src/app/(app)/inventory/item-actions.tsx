@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
+import { useToast } from "@/components/toast";
 import { updateInventoryItem, deleteInventoryItem } from "./actions";
 import type { InventoryItem } from "@/lib/types";
 
@@ -13,6 +14,7 @@ export function ItemActions({ item }: { item: InventoryItem }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+  const toast = useToast();
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -28,9 +30,12 @@ export function ItemActions({ item }: { item: InventoryItem }) {
   }
 
   function onDelete() {
-    if (!confirm(`Delete "${item.name}" from inventory?`)) return;
+    if (!confirm(`Delete "${item.name}" from Shop Stock?`)) return;
     start(async () => {
-      await deleteInventoryItem(item.id);
+      // NOTHING SILENT: an item with rolls on the shelf's record can't be deleted (0304), and the
+      // refusal says to mark it inactive instead.
+      const res = await deleteInventoryItem(item.id);
+      if (!res.ok) toast(res.error ?? "That item wasn't deleted.", "error");
       router.refresh();
     });
   }
@@ -59,13 +64,13 @@ export function ItemActions({ item }: { item: InventoryItem }) {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="Edit item"
+          title="Edit Item"
           footer={
             <ModalActions
               onCancel={() => setOpen(false)}
               submit
               saving={pending}
-              saveLabel="Save changes"
+              saveLabel="Save Changes"
             />
           }
         >

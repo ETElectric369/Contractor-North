@@ -22,6 +22,8 @@ import { sayMoney } from "@/lib/payroll-math";
 // checkable without a database. It routes category/billable through decideReceiptLine, the one
 // door every other receipt path already passes through.
 import { supplierBillLines } from "./supplier-bill-lines";
+import { SHELF_NEEDS_LINES, ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib/shelf-plan";
+import { shelveLines } from "@/lib/stock-ledger";
 // What a set of invoice lines CLAIMS - both shapes, the `bill:<id>` import key older invoices carry
 // and the source_ids array 0255 added. The Bills page reads claims with this same function, so the
 // sentence an action writes and the sentence the card prints can never drift apart.
@@ -1584,7 +1586,15 @@ export async function recordSupplierInvoiceAsBill(input: {
   invoiceId: string;
   /** A person looked at "maybe already on the books" and said it is a different purchase. */
   differentPurchase?: boolean;
+  /**
+   * RECORD TO SHELF (Shop Stock, Phase 2): a person's answer for every line of the document, by
+   * its place in supplierBillLines' order (a count, or Not Stock). With it the bill has no job
+   * and is the shelf's (on_shelf), whatever job CED or a person put on the document, and every
+   * counted line becomes a roll in the same press. Without it, this is Record It As A Bill.
+   */
+  toShelf?: TicketLineChoice[] | null;
 }): Promise<SupplierActionResult> {
+  const toShelf = Array.isArray(input?.toShelf) ? input.toShelf : null;
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const org = orgOf(ctx);
@@ -1738,7 +1748,7 @@ export async function recordSupplierInvoiceAsBill(input: {
       id: invoiceId,
       invoice_number: text(row.invoice_number),
       supplier_account_id: accountId,
-      job_id: jobId,
+      job_id: toShelf ? null : jobId,
       total: row.total as any,
       invoice_date: text(row.invoice_date),
     });
@@ -1753,7 +1763,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     }
   }
 
-  if (!jobId) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
+  if (!jobId && !toShelf) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
 
   // ── THE LINES ───────────────────────────────────────────────────────────────────────────────
   const { data: lineRows, error: lineErr } = await ctx.supabase
@@ -1781,11 +1791,27 @@ export async function recordSupplierInvoiceAsBill(input: {
     total,
   });
 
+  // THE SHELF NEEDS THE LINES (Shop Stock, Phase 2): a roll IS a line, so a document that can't be
+  // itemised can't go on the shelf, and every line needs a person's answer before anything is
+  // written. Asked here, before the bill, so a refusal writes nothing.
+  if (toShelf) {
+    if (overshoot)
+      return {
+        ok: false,
+        error: `${number}'s lines come to ${sayMoney(lineSum)}, more than the ${sayMoney(total)} ${accountName} is charging, so it can't be itemised onto the shelf. Nothing was written.`,
+      };
+    if (!lines.length) return { ok: false, error: `${number} has no lines on file. ${SHELF_NEEDS_LINES}` };
+    const shelfProblem = ticketShelfProblem(lines, total, toShelf);
+    if (shelfProblem) return { ok: false, error: `${shelfProblem} Nothing was written.` };
+  }
+
   const { data: billRows, error: billErr } = await ctx.supabase
     .from("bills")
     .insert({
       org_id: org.orgId,
-      job_id: jobId,
+      // A document recorded to the shelf is the shelf's, never a job's (0303's check says so too).
+      job_id: toShelf ? null : jobId,
+      ...(toShelf ? { on_shelf: true } : {}),
       supplier: accountName,
       supplier_account_id: accountId,
       supplier_invoice_number: number,
@@ -1795,7 +1821,7 @@ export async function recordSupplierInvoiceAsBill(input: {
       // exists (0273). `closed` is their answer, read out of their own portal.
       status: row.closed ? "paid" : "unpaid",
       bill_date: text(row.invoice_date),
-      category: "Invoice",
+      category: toShelf ? "Shop Stock" : "Invoice",
       // WHAT THE SUPPLIER SAYS IS STILL OWED, when it is not simply all of it. `bills.status` has
       // two states and a part-paid invoice is neither: recorded as unpaid it shows at full value
       // on his Unpaid filter while the card directly above says the supplier is owed ten dollars
@@ -1913,6 +1939,9 @@ export async function recordSupplierInvoiceAsBill(input: {
     // labelled "Materials" and nobody would know why. The sentence stops at what is true: there
     // is no control anywhere in the app for adding a line to a bill, and telling him to open it
     // and add them would be a door that does not exist.
+    // NO RESTAMP HERE, AND WHY (Shop Stock, 0304's other half): these lines belong to the bill
+    // written a moment ago, and a roll is keyed to a line id that did not exist until this insert,
+    // so no roll can be on it yet. Record To Shelf puts its rolls on in shelveRecordedBill below.
     if (writeErr || !wrote?.length) {
       reportError("bills:recordAsBill.lines", writeErr ?? new Error("bill line insert wrote no rows"), { billId, lines: lines.length });
       lineNote = ` Its lines didn't save, so the ${sayMoney(total)} is in as one amount. The cost is right; the invoice will bill it as a single line.${lineNote}`;
@@ -1927,10 +1956,144 @@ export async function recordSupplierInvoiceAsBill(input: {
     lineNote = ` None of it is on a line, so the whole ${sayMoney(total)} bills as one amount.${lineNote}`;
   }
 
+  if (toShelf) return shelveRecordedBill(ctx.supabase, org.orgId, billId, number, total, toShelf, lineNote, !!row.closed);
+
   revalidatePath("/bills");
   revalidatePath(`/jobs/${jobId}`);
   return {
     ok: true,
     message: `${number} is a bill on ${jobLabel} now: ${sayMoney(total)}${row.closed ? ", which the supplier already shows as paid" : ""}.${lineNote}`,
+  };
+}
+
+/**
+ * THE SECOND HALF OF RECORD TO SHELF: the bill and its lines are written; every line a person
+ * counted becomes a roll (shelveLines, one transaction). If the lines didn't all land or the shelf
+ * refuses, the bill comes back out - a shelf ticket with no rolls on it is money in no place - and
+ * the sentence says the document is still not in the books.
+ */
+async function shelveRecordedBill(
+  supabase: any,
+  orgId: string,
+  billId: string,
+  number: string,
+  total: number,
+  choices: TicketLineChoice[],
+  lineNote: string,
+  closed: boolean,
+): Promise<SupplierActionResult> {
+  const takeBack = async (why: string): Promise<SupplierActionResult> => {
+    const { data: removed, error: delErr } = await supabase.from("bills").delete().eq("org_id", orgId).eq("id", billId).select("id");
+    revalidatePath("/bills");
+    if (delErr || !removed?.length) {
+      reportError("bills:recordToShelf.rollback", delErr ?? new Error("rollback delete removed no rows"), { billId, number });
+      return { ok: false, error: `${why} The bill this just wrote for ${number} is still in Bills at ${sayMoney(total)} with nothing on the shelf; delete it there and try again.` };
+    }
+    return { ok: false, error: `${why} ${number} is still not in your books.` };
+  };
+  const { data: written, error: writtenErr } = await supabase
+    .from("bill_line_items")
+    .select("id, sort_order")
+    .eq("bill_id", billId)
+    .eq("org_id", orgId)
+    .order("sort_order");
+  if (writtenErr) return takeBack(`Couldn't read ${number}'s lines back, so nothing went on the shelf.`);
+  const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
+  const picks: ShelfPick[] = [];
+  for (const c of choices) {
+    if (c.notStock) continue;
+    const lineId = idAt.get(Number(c.index));
+    if (!lineId) return takeBack(`${number}'s lines didn't all save, so nothing went on the shelf.`);
+    picks.push({
+      lineId,
+      pieces: Number(c.pieces),
+      used: 0,
+      unit: c.unit,
+      bought: c.bought ?? null,
+      itemId: c.itemId ?? null,
+      newItemName: c.newItemName ?? null,
+      keyPart: c.keyPart ?? null,
+    });
+  }
+  const shelved = await shelveLines(supabase, orgId, billId, picks);
+  if (!shelved.ok) return takeBack(shelved.error);
+  revalidatePath("/bills");
+  revalidatePath("/inventory");
+  const notStock = choices.filter((c) => c.notStock).length;
+  return {
+    ok: true,
+    message:
+      `${number} is on the shop shelf now: ${sayMoney(total)}${closed ? ", which the supplier already shows as paid" : ""}. ` +
+      `${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${sayMoney(l.cost)})`).join(", ")} on the shelf.` +
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket.` : "") +
+      lineNote,
+  };
+}
+
+/** Record To Shelf: Record It As A Bill with a person's answer for every line (Shop Stock, Phase 2). */
+export async function recordSupplierInvoiceToShelf(input: {
+  invoiceId: string;
+  differentPurchase?: boolean;
+  toShelf: TicketLineChoice[];
+}): Promise<SupplierActionResult> {
+  if (!Array.isArray(input?.toShelf)) return { ok: false, error: "Say for every line how many go on the shelf, or tap Not Stock." };
+  return recordSupplierInvoiceAsBill({ invoiceId: input.invoiceId, differentPurchase: input.differentPurchase, toShelf: input.toShelf });
+}
+
+export type SupplierShelfLine = {
+  key: string;
+  description: string;
+  quantity: number;
+  unitPrice: number | null;
+  amount: number;
+  category: string | null;
+  partNumber: string | null;
+};
+
+/**
+ * THE LINES RECORD TO SHELF WILL COUNT, in exactly the order the bill will hold them
+ * (supplierBillLines, the same call the record makes). Office only; the item picker is loaded
+ * separately and carries no cost.
+ */
+export async function supplierInvoiceShelfLines(
+  invoiceId: string,
+): Promise<{ ok: true; lines: SupplierShelfLine[]; total: number } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is office-only." };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+  const { data: inv, error: invErr } = await ctx.supabase
+    .from("supplier_invoices")
+    .select("id, invoice_number, kind, tax, shipping, total")
+    .eq("id", String(invoiceId ?? ""))
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (invErr) return { ok: false, error: dbError(invErr) };
+  if (!inv) return { ok: false, error: "That document isn't here anymore. Reload the page." };
+  const row = inv as { invoice_number?: string | null; kind?: string | null; tax?: unknown; shipping?: unknown; total?: unknown };
+  if (String(row.kind ?? "invoice") !== "invoice") return { ok: false, error: "Only an invoice can go on the shelf." };
+  const { data: lineRows, error: lineErr } = await ctx.supabase
+    .from("supplier_invoice_lines")
+    .select("description, part_number, quantity, unit_price, extension, sort_order")
+    .eq("org_id", org.orgId)
+    .eq("supplier_invoice_id", String(invoiceId))
+    .order("sort_order");
+  if (lineErr) return { ok: false, error: dbError(lineErr) };
+  const total = money(row.total);
+  const built = supplierBillLines((lineRows ?? []) as any[], { invoiceNumber: text(row.invoice_number) ?? "", tax: row.tax, shipping: row.shipping, total });
+  if (built.overshoot) return { ok: false, error: "Its lines come to more than its total, so it can't be itemised onto the shelf." };
+  if (!built.lines.length) return { ok: false, error: `This document has no lines on file. ${SHELF_NEEDS_LINES}` };
+  return {
+    ok: true,
+    total,
+    lines: built.lines.map((l, i) => ({
+      key: String(i),
+      description: l.description,
+      quantity: l.quantity,
+      unitPrice: l.unit_price,
+      amount: l.amount,
+      category: l.category,
+      partNumber: built.parts[i] ?? null,
+    })),
   };
 }

@@ -26,6 +26,7 @@ import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 import { bucketOf } from "@/lib/business-cost-buckets";
+import { isShelfTicket } from "@/lib/shelf-plan";
 import { readBillShelfOff } from "@/lib/job-cost";
 
 /**
@@ -2455,7 +2456,9 @@ export async function runDataTool(
         // NOTHING SILENT: the model is told which figure answers which question, and warned off
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
-          !hasJob
+          !hasJob && isShelfTicket(b)
+            ? "No job: a ticket bought for the shop shelf. It is never a job cost and never a business-cost bucket: owner money counts it as Put On The Shelf in the month it is dated, and pieces taken from its rolls cost the jobs that take them. No customer is billed for it here. amount is the whole receipt, and the supplier is owed all of it."
+            : !hasJob
             ? `No job: this is a business cost in the ${bucketOf(b.category)} bucket, counted before owner's draw. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`
             : shelfAmount
               ? `amount is the WHOLE receipt. $${shelfAmount.toFixed(2)} of it went on the shop shelf (shelf_amount), so the job's cost from this receipt is amount less shelf_amount. billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.`
