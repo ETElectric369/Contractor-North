@@ -28,6 +28,7 @@ import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { planLaborOffer, type OwnLaborLine } from "@/lib/labor-offer";
+import { markupOnInvoice, type InvoiceCostLine } from "@/lib/invoice-markup";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
@@ -532,6 +533,10 @@ export type ImportStats = {
   /** Money the office should look at before sending, one sentence each (materials only, so far):
    *  an edited "Supplies & tax" row left behind by its re-priced parts (INV-074). */
   warnings?: string[];
+  /** What this run did that the counts don't say, one clause each, for a caller that writes its
+   *  own sentence instead of showing `summary` (refreshActualsDraw): a counter-preview price, a
+   *  supplier return not credited or held, the invoice's own markup kept. Also in `summary`. */
+  notes?: string[];
 };
 type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
 type RpcStats = { inserted: number; updated: number; kept_edited: number; removed: number };
@@ -1251,7 +1256,30 @@ async function contractDrawGuard(
   if (trustedActuals || !isDrawKind(inv.invoice_kind)) return null;
   try {
     const shape = await readDraftShape(supabase, { id: inv.id, jobId: inv.job_id, kind: inv.invoice_kind ?? null });
-    return isActualsDraw(shape) ? null : { ok: false, error: contractDrawRefusal(inv.invoice_number, what) };
+    if (!isActualsDraw(shape)) return { ok: false, error: contractDrawRefusal(inv.invoice_number, what) };
+    // AN ACTUALS DRAW DOESN'T TAKE WORK A LATER DEPOSIT WAS MEANT TO COVER (review, 2026-09-24).
+    // Netting happens once, when a progress report is made (createProgressReportInvoice →
+    // resolveDrawCredit → one draw_credit line). A fixed-$ or %-of-estimate draw sent AFTER this
+    // report is netted by the NEXT report - so itemising new hours onto this older one at full rate
+    // leaves that lump un-netted, and the customer pays for the same work twice. So: when the job
+    // carries lump money no bill has taken off (this draw's own credit counts - it is excluded from
+    // the read and added back, because a draft's credit isn't counted by the fetcher), the new work
+    // goes on the next progress report, which nets it.
+    const [lump, own] = await Promise.all([
+      fixedBillingsNotYetNetted(supabase, inv.job_id, inv.id),
+      supabase.from("invoice_items").select("line_total").eq("invoice_id", inv.id).eq("import_source", "draw_credit"),
+    ]);
+    if (own.error) throw own.error;
+    const ownCredit = ((own.data ?? []) as { line_total: unknown }[]).reduce((t, r) => t + Math.abs(Number(r.line_total) || 0), 0);
+    const open = Math.round((lump - ownCredit) * 100) / 100;
+    if (open > 0.005) {
+      const doc = inv.invoice_number || "This progress payment";
+      return {
+        ok: false,
+        error: `${doc} can't take ${what}: ${formatCurrency(open)} of deposit or set-amount billing on this job hasn't been taken off a bill yet, and adding the work here would bill it on top of that. Bill it on the next progress payment instead - that one takes the ${formatCurrency(open)} off.`,
+      };
+    }
+    return null;
   } catch (e) {
     // A lost read is not permission: refuse, say so, nothing written.
     reportError("importGuard.drawShape", e, { invoiceId: inv.id });
@@ -1579,11 +1607,28 @@ async function importChangeOrdersCore(invoiceId: string, trustedActuals: boolean
  *  amber "Start it over" button that is the ONLY way forward on any invoice built before 0175,
  *  forgot it. When it is absent we resolve the customer's real markup here, so the mistake is
  *  no longer reachable from any call site, present or future. */
-export async function importCostsIntoInvoice(invoiceId: string, markupPercent?: number): Promise<ImportResult> {
-  return importCostsCore(invoiceId, markupPercent, false);
+export async function importCostsIntoInvoice(
+  invoiceId: string,
+  markupPercent?: number,
+  opts?: { keepInvoiceMarkup?: boolean },
+): Promise<ImportResult> {
+  return importCostsCore(invoiceId, markupPercent, false, opts?.keepInvoiceMarkup === true);
 }
 
-async function importCostsCore(invoiceId: string, markupPercent: number | undefined, trustedActuals: boolean): Promise<ImportResult> {
+/**
+ * The materials import. `trustedActuals` — see contractDrawGuard; only internal callers set it.
+ * `keepInvoiceMarkup` is for the doors that bring an EXISTING draft up to date ("Add to INV-078",
+ * Request Next Payment, New Invoice landing on a draft): the markup the invoice's own untouched
+ * lines are priced at wins over `markupPercent` (lib/invoice-markup), so a % the office typed on
+ * the invoice is not quietly put back to the customer's default by the next refresh. The % box on
+ * the invoice itself never sets it - there the office is choosing the markup.
+ */
+async function importCostsCore(
+  invoiceId: string,
+  markupPercent: number | undefined,
+  trustedActuals: boolean,
+  keepInvoiceMarkup = false,
+): Promise<ImportResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -1646,6 +1691,35 @@ async function importCostsCore(invoiceId: string, markupPercent: number | undefi
     billLinesForBills(supabase, billIds),
   ]);
   if (blis.error) return { ok: false, error: blis.error };
+  // THE INVOICE'S OWN MARKUP, READ BACK FROM ITS LINES (see keepInvoiceMarkup above). A lost read
+  // is not "no lines": refuse, nothing written - repricing on a guess is the bug this closes.
+  let keptMarkup: number | null = null;
+  if (keepInvoiceMarkup) {
+    const [own, tomb] = await Promise.all([
+      supabase.from("invoice_items").select("import_key, source_ids, line_total, edited").eq("invoice_id", invoiceId).eq("import_source", "costs"),
+      supabase.from("invoices").select("dismissed_import_keys").eq("id", invoiceId).maybeSingle(),
+    ]);
+    if (own.error || tomb.error) {
+      reportError("importCosts.invoiceMarkup", own.error ?? tomb.error, { invoiceId });
+      return { ok: false, error: "Couldn't read this invoice's materials lines just now, so nothing was imported - try again in a moment." };
+    }
+    const byBill = new Map<string, any[]>();
+    for (const l of blis.lines) {
+      if (!byBill.has(l.bill_id)) byBill.set(l.bill_id, []);
+      byBill.get(l.bill_id)!.push(l);
+    }
+    const found = markupOnInvoice({
+      lines: (own.data ?? []) as InvoiceCostLine[],
+      dismissed: new Set(((tomb.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []).map(String)),
+      bills: ((bills ?? []) as any[]).map((b) => ({ id: String(b.id), amount: b.amount })),
+      linesByBill: byBill,
+      pos: ((pos ?? []) as any[]).map((p) => ({ id: String(p.id), total: p.total })),
+    });
+    if (found !== null && Math.abs(found - (Number(markup) || 0)) > 0.05) {
+      keptMarkup = found;
+      markup = found;
+    }
+  }
   // THE DEPLOY WINDOW (0255 not applied): a claim written by id — every labor line, and every cost
   // line since 0255 — is unreadable, so a bill another invoice holds could be billed again here.
   // The same refusal labor gives, for the same few minutes; keys alone are not a boundary.
@@ -1838,10 +1912,18 @@ async function importCostsCore(invoiceId: string, markupPercent: number | undefi
   // hand isn't named (that line carries the office's own typed number, not the counter's). When
   // the read-back itself failed we can't tell, so every flagged receipt is named rather than none:
   // an extra look costs a minute, an unflagged counter price costs his word to a customer.
+  const notes: string[] = [];
+  if (keptMarkup !== null) {
+    const kept = `materials priced at the ${keptMarkup}% markup already on this invoice`;
+    stats.summary += ` · ${kept}`;
+    notes.push(kept);
+  }
   const flagged = after ? provisional.filter((id) => after.has(id)) : provisional;
   if (flagged.length) {
     const n = flagged.length;
-    stats.summary += ` · ${n === 1 ? "one receipt's prices are" : `${n} receipts' prices are`} a counter preview, not your account's pricing - check ${n === 1 ? "it" : "them"} before you send`;
+    const preview = `${n === 1 ? "one receipt's prices are" : `${n} receipts' prices are`} a counter preview, not your account's pricing - check ${n === 1 ? "it" : "them"} before you send`;
+    stats.summary += ` · ${preview}`;
+    notes.push(preview);
   }
   // Returns, said: the credit THIS tap landed (read back and diffed against before, like the claim
   // counts above - a re-import of a draft already holding the credit does not say it twice, and a
@@ -1850,6 +1932,10 @@ async function importCostsCore(invoiceId: string, markupPercent: number | undefi
   const creditedLanded = after ? returnsCredited.filter((r) => after.has(r.billId) && !before?.has(r.billId)) : returnsCredited;
   const returnParts = returnsSummaryParts(creditedLanded, returnsNotCredited, returnsHeld);
   if (returnParts.length) stats.summary += ` · ${returnParts.join(" · ")}`;
+  // The credited return is counted by the caller's own before/after measure; the ones that did NOT
+  // land (nothing on them was the customer's, or held for a bigger invoice) are only said here.
+  notes.push(...returnsSummaryParts([], returnsNotCredited, returnsHeld));
+  if (notes.length) stats.notes = notes;
   const drift = await editedRemainderWarnings(supabase, invoiceId, (bills ?? []) as { id: string; supplier?: string | null; amount?: unknown }[], rows, markup);
   if (drift.length) stats.warnings = drift;
   return { ok: true, stats };
@@ -1963,6 +2049,7 @@ async function refreshActualsDraw(
   jobId: string,
   open: OpenDraft,
   markup: number,
+  asKind: "progress" | "final" = "progress",
 ): Promise<ProgressReportResult> {
   const label = open.number ?? "the open progress payment";
   const measure = () =>
@@ -1973,7 +2060,9 @@ async function refreshActualsDraw(
   const fail = (e: unknown): ImportResult => ({ ok: false, error: String((e as { message?: unknown })?.message ?? e) });
   const before = await measure();
   const lab = await importLaborCore(open.id, true).catch(fail);
-  const cos = await importCostsCore(open.id, markup, true).catch(fail);
+  // keepInvoiceMarkup: a % the office typed on this draw's Materials box stays (lib/invoice-markup);
+  // `markup` is only the answer for a draw with nothing on it to read one from.
+  const cos = await importCostsCore(open.id, markup, true, true).catch(fail);
   const after = await measure();
   revalidatePath(`/jobs/${jobId}`);
   revalidateMoney(open.id);
@@ -1992,8 +2081,14 @@ async function refreshActualsDraw(
   if (before && after) {
     said = pulledIntoSentence(
       label,
-      { hours: Math.max(0, r2(before.hours - after.hours)), bills: Math.max(0, before.billsCount - after.billsCount) },
-      { hours: after.hours, bills: after.billsCount },
+      {
+        hours: Math.max(0, r2(before.hours - after.hours)),
+        bills: Math.max(0, before.billsCount - after.billsCount),
+        returns: Math.max(0, before.returnsCount - after.returnsCount),
+        returnsCredit: Math.max(0, r2(before.returnsCredit - after.returnsCredit)),
+      },
+      { hours: after.hours, bills: after.billsCount, returns: after.returnsCount },
+      formatCurrency,
     );
   } else {
     // The measure failed but the imports ran: speak in the importers' own counts.
@@ -2001,9 +2096,33 @@ async function refreshActualsDraw(
     const bits = [n(lab) ? `${n(lab)} time ${n(lab) === 1 ? "entry" : "entries"}` : "", n(cos) ? `${n(cos)} ${n(cos) === 1 ? "bill" : "bills"}` : ""].filter(Boolean);
     said = bits.length ? `Pulled ${bits.join(" and ")} into ${label}.` : `Nothing new to pull into ${label}.`;
   }
-  // Money the importers want a person to look at (an unconfirmed counter price, an edited tax row).
-  const warnings = [...(lab.ok ? lab.stats?.warnings ?? [] : []), ...(cos.ok ? cos.stats?.warnings ?? [] : [])];
-  if (warnings.length) said += ` ${warnings.join(". ")}.`;
+  // Money the importers want a person to look at: an edited tax row left behind (warnings), and
+  // what the counts don't say (notes) - a counter-preview price to check before sending, a return
+  // not credited or held and why, the invoice's own markup kept.
+  const extra = [
+    ...(lab.ok ? lab.stats?.warnings ?? [] : []),
+    ...(cos.ok ? [...(cos.stats?.notes ?? []), ...(cos.stats?.warnings ?? [])] : []),
+    // An "empty" costs run carries its reason in `error` (e.g. a return held, nothing else to bill).
+    ...(!cos.ok && cos.empty && before && before.returnsCount > 0 && cos.error ? [cos.error.replace(/\.$/, "")] : []),
+  ];
+  if (extra.length) said += ` ${extra.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(". ")}.`;
+  // "Final" chosen on the Progress Payment modal while this report is open: the report becomes the
+  // final one rather than the choice being dropped. Checked (silent-write law); a failure is said.
+  if (asKind === "final" && open.kind !== "final") {
+    const { data: flipped, error: flipErr } = await supabase
+      .from("invoices")
+      .update({ invoice_kind: "final" })
+      .eq("id", open.id)
+      .eq("status", "draft")
+      .select("id");
+    if (flipErr || !flipped?.length) {
+      reportError("refreshActualsDraw.final", flipErr ?? "zero rows", { jobId, invoiceId: open.id });
+      return { ok: true, id: open.id, partial: true, note: `${said} But ${label} couldn't be marked as the final payment just now - it is still a progress payment.${missed.length ? ` And ${missed.join(" and ")} couldn't be pulled in - review the lines before sending.` : ""}` };
+    } else {
+      await supabase.from("invoices").update({ title: "Final invoice" }).eq("id", open.id).eq("title", "Progress payment");
+      said += ` ${label} is now the final payment.`;
+    }
+  }
   if (missed.length) {
     return { ok: true, id: open.id, partial: true, note: `${said} But ${missed.join(" and ")} couldn't be pulled in - review the lines before sending.` };
   }
@@ -2020,6 +2139,7 @@ async function landOnOpenDraw(
   supabase: Awaited<ReturnType<typeof createClient>>,
   jobId: string,
   open: OpenDraft,
+  asKind: "progress" | "final" = "progress",
 ): Promise<ProgressReportResult> {
   const label = open.number ?? "A draft progress payment";
   if (!open.refreshable) {
@@ -2031,7 +2151,7 @@ async function landOnOpenDraw(
   }
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const markup = await customerMaterialMarkupForJob(supabase, jobId, getOrgSettings((org as { settings?: unknown } | null)?.settings).material_markup_percent);
-  return refreshActualsDraw(supabase, jobId, open, markup);
+  return refreshActualsDraw(supabase, jobId, open, markup, asKind);
 }
 
 export async function createProgressReportInvoice(
@@ -2062,7 +2182,7 @@ export async function createProgressReportInvoice(
     reportError("createProgressReportInvoice.openDraft", e, { jobId });
     return { ok: false, error: "Couldn't read this job's invoices just now, so nothing was billed. Try again in a moment." };
   }
-  if (open && isDrawKind(open.kind)) return landOnOpenDraw(supabase, jobId, open);
+  if (open && isDrawKind(open.kind)) return landOnOpenDraw(supabase, jobId, open, kind);
   // H4 (reverse), narrowed (0255): only a DRAFT standard invoice with content blocks — it is the
   // open door new work belongs on. A sent/paid one is finished business; the delta below bills
   // only what it (and every other non-void invoice) doesn't already claim.
@@ -2105,6 +2225,19 @@ export async function createProgressReportInvoice(
       error: (on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.") + owed,
     };
   }
+  // A DEPOSIT THAT STILL COVERS THE WORK IS SAID BEFORE A NUMBER IS TAKEN (review, 2026-09-24). The
+  // decision below (resolveDrawCredit, after the import) used to be the only one: the draw was
+  // inserted - taking the next invoice number - then deleted with "The deposit already covers…",
+  // and every tap on the card's "Create Invoice" burned another number the same way. The new work
+  // before any return comes off is the MOST the import can itemise, so when the lump covers even
+  // that, it certainly covers what would land: refuse here, nothing written.
+  const upFront = resolveDrawCredit(newWork, fixedToNet);
+  if (!upFront.ok && upFront.reason === "covered") {
+    return {
+      ok: false,
+      error: `The ${formatCurrency(fixedToNet)} deposit not yet taken off a bill already covers the ${formatCurrency(newWork)} worked since the last bill — nothing new to bill yet.`,
+    };
+  }
   const settings = getOrgSettings((org as any)?.settings);
   // Seed from the customer's pricing level (falling back to the org default) — the same
   // resolver the manual import box and the work-to-date panel use, so a draw can't bill a
@@ -2126,14 +2259,14 @@ export async function createProgressReportInvoice(
       total: 0,
       due_date: dueDate,
     })
-    .select("id")
+    .select("id, invoice_number")
     .single();
   if (error) {
     if ((error as any).code === "23505") {
       // Lost a race to another tap that opened a draw a moment ago: land on THAT one, the same way
       // the check above would have, instead of a refusal with no door.
       const raced = await openDraftOnJob(supabase, jobId).catch(() => null);
-      if (raced && isDrawKind(raced.kind)) return landOnOpenDraw(supabase, jobId, raced);
+      if (raced && isDrawKind(raced.kind)) return landOnOpenDraw(supabase, jobId, raced, kind);
       return { ok: false, error: "A draft draw is already open on this job — send or delete it before creating another." };
     }
     return { ok: false, error: dbError(error) };
@@ -2217,7 +2350,14 @@ export async function createProgressReportInvoice(
 
   revalidatePath(`/jobs/${jobId}`);
   revalidateMoney();
-  return { ok: true, id: inv.id };
+  // Said, so a click from the job card lands on a new document with the sentence of what it is -
+  // and names the deposit that came off, so a figure below the card's is never a surprise.
+  const num = (inv as { invoice_number?: string | null }).invoice_number ?? "a new progress payment";
+  const note =
+    decision.credit > 0.005
+      ? `Started ${num} for the work not yet billed, less the ${formatCurrency(decision.credit)} deposit not yet taken off a bill.`
+      : `Started ${num} for the work not yet billed - its total is that work.`;
+  return { ok: true, id: inv.id, note };
 }
 
 // ── Payment schedule (Fixed-Bid "payment structure") ────────────────────────────

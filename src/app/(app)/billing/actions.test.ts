@@ -445,7 +445,7 @@ const NEW_DRAW = "0dda0000-0000-4000-8000-00000000000d";
 
 /** Everything createProgressReportInvoice reads before it writes a row. `rpcError` fails the
  *  labor import the way 0260's guard_invoice_item_claim does — a genuine concurrent claim. */
-function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any[] }) {
+function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any[]; lump?: number }) {
   return (q: Q): Reply => {
     if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "Jason Waldow" } };
     if (q.table === "jobs") return { data: null }; // customerLaborRate / customerMaterialMarkup
@@ -453,7 +453,9 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
     if (q.table === "payment_milestones") return { data: null };
     if (q.table === "invoices" && q.verb === "select") {
       if (q.cols === "invoice_number") return { data: null };                       // no open draft draw
-      if (q.cols.includes("invoice_items(import_source")) return { data: [] };      // fixedBillingsNotYetNetted
+      if (q.cols.includes("invoice_items(import_source")) {                         // fixedBillingsNotYetNetted
+        return { data: opts.lump ? [{ id: "dep-1", status: "paid", invoice_kind: "deposit", invoice_items: [{ import_source: null, line_total: opts.lump }] }] : [] };
+      }
       if (q.cols.includes("invoice_items(import_key")) return { data: [] };         // claimedSourcesOnJob
       if (q.cols.includes("total, invoice_kind")) return { data: [] };              // standardBillingBlockerOnJob
       if (q.cols.includes("invoice_kind") && q.cols.includes("job_id") && q.single) return { data: { id: NEW_DRAW, job_id: JOB, invoice_kind: "progress" } };
@@ -464,7 +466,8 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols.includes("sent_at")) return { data: { sent_at: null } };
       if (q.cols.includes("tax_rate")) return { data: { tax_rate: 0, status: "draft" } };
     }
-    if (q.table === "invoices" && q.verb === "insert") return { data: { id: NEW_DRAW } };
+    if (q.table === "invoices" && q.verb === "insert") return { data: { id: NEW_DRAW, invoice_number: "INV-081" } };
+    if (q.table === "invoice_items" && q.verb === "insert") return { data: null }; // the draw_credit line
     if (q.table === "invoices" && q.verb === "update") return { data: null };
     if (q.table === "invoices" && q.verb === "delete") return { data: null };
     if (q.table === "time_entries") return { data: [{ id: "te-1", clock_in: "2026-09-15T15:00:00Z", clock_out: "2026-09-15T22:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: "p-1", full_name: "Erik" } }] };
@@ -493,6 +496,25 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
     return undefined;
   };
 }
+
+describe("createProgressReportInvoice — a deposit that covers the work is said before a number is taken", () => {
+  it("refuses with no insert when the un-netted deposit covers all the new work", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(drawRoute({ lump: 1000 }), calls); // 7 hr = $665 of work
+    const res: any = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(false);
+    expect(String(res.error)).toMatch(/already covers the \$665\.00/);
+    expect(calls.some((c) => c.table === "invoices" && (c.verb === "insert" || c.verb === "delete"))).toBe(false);
+  });
+
+  it("a partly covered report says the deposit came off", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(drawRoute({ lump: 200 }), calls);
+    const res: any = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(true);
+    expect(res.note).toBe("Started INV-081 for the work not yet billed, less the $200.00 deposit not yet taken off a bill.");
+  });
+});
 
 describe("createProgressReportInvoice — a lost import is never a quiet one (0260)", () => {
   it("refuses out loud and deletes the half-built draw when the labor import fails", async () => {
@@ -637,7 +659,7 @@ const B_NEW = "b1000000-0000-4000-8000-000000000002";
  * and a new $323.71 bill. Otherwise INV-080, a contract draw with one hand line. `schedule` puts a
  * payment schedule on the job. The claims move as the RPC writes, so the before/after measure is real.
  */
-function openDrawRoute(opts: { actuals: boolean; schedule?: boolean }) {
+function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: number; oldBillLine?: number }) {
   const drawId = opts.actuals ? OPEN_DRAW : CONTRACT_DRAW;
   const number = opts.actuals ? "INV-078" : "INV-080";
   const landed = new Set<string>();
@@ -657,6 +679,10 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean }) {
     if (q.table === "invoices" && q.verb === "select") {
       if (q.cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) {
         return { data: [{ id: drawId, invoice_number: number, invoice_kind: "progress", dismissed_import_keys: [] }] }; // openDraftOnJob
+      }
+      // fixedBillingsNotYetNetted: a $X deposit sent after this report was made, never netted.
+      if (q.cols.includes("invoice_items(import_source")) {
+        return { data: opts.lump ? [{ id: "dep-1", status: "sent", invoice_kind: "deposit", invoice_items: [{ import_source: null, line_total: opts.lump }] }] : [] };
       }
       if (q.cols.includes("invoice_items(import_key")) {
         return { data: [{ id: drawId, invoice_number: number, status: "draft", created_at: "2026-08-02T00:00:00Z", job_id: JOB, invoice_items: drawItems() }] };
@@ -698,6 +724,11 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean }) {
       if (q.cols === "line_total") return { data: [] };
       if (q.cols === "import_key, line_total, edited") return { data: [] };
       if (q.cols === "import_source, import_key, line_total, edited") return { data: [] };
+      // The draw's own materials lines, for the markup it is already priced at (lib/invoice-markup):
+      // last month's $100 bill, at 15% unless the test says the office re-priced it.
+      if (q.cols === "import_key, source_ids, line_total, edited") {
+        return { data: opts.actuals ? [{ import_key: `bill:${B_OLD}`, source_ids: [B_OLD], line_total: opts.oldBillLine ?? 115, edited: false }] : [] };
+      }
     }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
@@ -770,6 +801,37 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")!;
     expect(rpc.payload.p_invoice_id).toBe(OPEN_DRAW);
     expect(rpc.payload.p_rows[0].unit_price).toBe(388.45); // $323.71 at the box's 20%
+  });
+
+  it("'Add to INV-078' keeps the markup the office typed on the draw (20%), not the customer's 15%", async () => {
+    spies.reportError = () => {};
+    // Last month's $100 bill sits on INV-078 at $120: Erik used the % box. The refresh reads that
+    // back from the lines and prices the new $323.71 bill at 20% too - and says so.
+    state.client = fakeSupabase(openDrawRoute({ actuals: true, oldBillLine: 120 }), calls);
+    const res = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(true);
+    const costs = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items" && c.payload.p_source === "costs")!;
+    expect(costs.payload.p_rows[0].unit_price).toBe(388.45);
+    expect(res.note).toContain("20% markup already on this invoice");
+  });
+
+  it("the invoice's own % box still sets the markup (it is the office choosing it)", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(openDrawRoute({ actuals: true, oldBillLine: 120 }), calls);
+    const cos: any = await importCostsIntoInvoice(OPEN_DRAW, 10);
+    expect(cos.ok).toBe(true);
+    const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")!;
+    expect(rpc.payload.p_rows[0].unit_price).toBe(356.08); // $323.71 at 10%
+  });
+
+  it("an actuals draw refuses new work while a later deposit is un-netted (it would bill on top of it)", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(openDrawRoute({ actuals: true, lump: 2000 }), calls);
+    const lab: any = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(lab.ok).toBe(false);
+    expect(String(lab.error)).toMatch(/\$2,000\.00 of deposit/);
+    expect(String(lab.error)).toMatch(/next progress payment/);
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
   });
 
   it("From Estimate never lands on a draw", async () => {

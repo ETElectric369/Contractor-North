@@ -50,6 +50,7 @@ export function UnbilledCard({
   view,
   viewerIsStaff,
   openDraft,
+  lumpToNet = 0,
 }: {
   jobId: string;
   /** Presets the customer on the /billing New Invoice door (the "nothing new" sentence's link). */
@@ -61,6 +62,10 @@ export function UnbilledCard({
    *  openDraftOnJob — the server's own rule). Undefined = the page didn't read it: the card falls
    *  back to "the newest invoice is a draft", which is only right when that draft is standard. */
   openDraft?: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
+  /** Deposit / set-amount draw money no bill has taken off yet (the page reads
+   *  fixedBillingsNotYetNetted). With no draft open, the next bill nets it, so the button names the
+   *  net - or no button, when the deposit still covers the work. */
+  lumpToNet?: number;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -134,6 +139,7 @@ export function UnbilledCard({
     returns,
     total: w.total,
     newWork,
+    lumpToNet,
     money: formatCurrency,
   });
   // THE DOOR THAT WORKS when there is nothing new: the job's own New Invoice (this card's button,
@@ -266,6 +272,11 @@ export function UnbilledCard({
                 {`${heldDraft} is an open draft for a set part of the contract, so this can't go on it. Send it (or delete it), then bill this on the next progress payment.`}
               </p>
             )}
+            {(door?.kind === "covered" || (door?.kind === "create" && door.note)) && (
+              // THE DEPOSIT, SAID (review, 2026-09-24): the figure on the button is the work less
+              // what the next bill takes off, or there is no button because the deposit covers it.
+              <p className="mt-1 text-sm text-slate-500">{door.note}</p>
+            )}
             {owedBack && (
               <p className="mt-1 text-sm text-slate-500">
                 {draft
@@ -285,7 +296,7 @@ export function UnbilledCard({
             <Button type="button" onClick={() => router.push(door.href)} className="shrink-0">
               <FileText /> {door.label}
             </Button>
-          ) : door ? (
+          ) : door && door.kind !== "covered" ? (
             <Button type="button" onClick={go} disabled={pending} className="shrink-0">
               <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Opening…") : door.label}
             </Button>

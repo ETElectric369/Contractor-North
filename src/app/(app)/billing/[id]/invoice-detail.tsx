@@ -116,6 +116,7 @@ export function InvoiceDetail({
   customerHoldsOlderCopy = false,
   runningClocks = [],
   importMode,
+  importHeld = null,
   textReady = true,
   tz = "America/Los_Angeles",
 }: {
@@ -141,6 +142,9 @@ export function InvoiceDetail({
    *  "actuals" = a draw built from actuals, refreshed like an invoice (no From Estimate); "none" = a
    *  draw billing a slice of the contract. Absent = by kind, the rule before J-011. */
   importMode?: "standard" | "actuals" | "none";
+  /** Why an actuals draw's Import row is closed (a deposit not yet taken off a bill) - said where
+   *  the row would be. */
+  importHeld?: string | null;
   /** Shifts still running on this invoice's job (page.tsx reads them). Their hours bill nothing
    *  until somebody stops the clock, so the card says so. */
   /** `door` is the trigger's words ("Clock Out Brian"; "Clock Out" on the viewer's own clock). */
@@ -869,6 +873,9 @@ export function InvoiceDetail({
             standard invoice (Labor, Materials with the % box, Change Orders); From Estimate stays
             off every draw; a draw billing a slice of the contract gets no row. The server's
             importers hold the same line (contractDrawGuard), so this is not the boundary. */}
+        {!linesLocked && importHeld && importRow === "none" && (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5 text-xs text-slate-500">{importHeld}</p>
+        )}
         {!linesLocked &&
           (invoice.job_id || (invoice as any).quote_id) &&
           importRow !== "none" && (

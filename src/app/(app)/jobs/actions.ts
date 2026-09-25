@@ -164,8 +164,10 @@ async function pullNewWorkInto(
     }
   };
   if (want.labor) take(await importLaborIntoInvoice(invoiceId).catch(fail), ["time entry", "time entries"], "labor", "labor");
-  // ALWAYS pass the org markup — importing costs at markup 0 bills materials at cost.
-  if (want.costs) take(await importCostsIntoInvoice(invoiceId, markup).catch(fail), ["bill", "bills"], "materials", "costs");
+  // ALWAYS pass the org markup — importing costs at markup 0 bills materials at cost. And keep the
+  // markup the draft is already priced at: a % typed on the invoice's Materials box must not be put
+  // back to the customer's default by the next New Invoice (lib/invoice-markup).
+  if (want.costs) take(await importCostsIntoInvoice(invoiceId, markup, { keepInvoiceMarkup: true }).catch(fail), ["bill", "bills"], "materials", "costs");
   if (want.changeOrders) take(await importChangeOrdersIntoInvoice(invoiceId).catch(fail), ["change order", "change orders"], "change orders", "changeOrders");
   revalidatePath(`/jobs/${jobId}`); // the Overview running total moves with the claims
   return out;
@@ -295,7 +297,11 @@ export async function createInvoiceForJob(
   // for $X" on the Overview card after INV-078 went out would be the same dead door. On a job that
   // bills its actuals (no live quote), the next bill is a progress report of exactly the unclaimed
   // work, which is what the card priced. A quoted job keeps the refusal: its draws are the contract.
-  if (!draft && !quote) {
+  // A STANDARD draft beside a live draw is not a door either (every importer refuses content on it -
+  // H4), so it doesn't stop this: the draw door is the one that works (openDraftOnJob agrees, and
+  // the card offers "Create Invoice", not "Add to" that draft). The draw door still refuses beside
+  // a standard draft that carries content, in the shared words that name it.
+  if (!quote) {
     const { data: liveDraw, error: drawErr } = await supabase
       .from("invoices")
       .select("id")
@@ -580,9 +586,48 @@ export async function finishJob(
     .order("created_at", { ascending: false })
     .limit(1);
   if (draws && draws.length) {
+    // SAY WHAT IS TRUE OF THIS JOB (review, 2026-09-24). "It bills on a payment schedule" was said of
+    // every draw-billed job, including a time-and-materials job billed through progress reports
+    // (J-011 / INV-078) that has no schedule at all - a sentence naming a door that isn't there.
+    const [{ data: sched }, openRead] = await Promise.all([
+      supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1),
+      openDraftOnJob(supabase, jobId).then(
+        (d) => ({ draft: d }),
+        (e) => {
+          reportError("finishJob.openDraft", e, { jobId });
+          return { draft: null as OpenDraft | null };
+        },
+      ),
+    ]);
+    // An open report built from the job's actuals takes the last hours and bills now, the same door
+    // the Overview card's "Add to" uses - the job is done, so what it bills is the whole of it.
+    const draft = openRead.draft;
+    const pulled = !(sched ?? []).length && draft && isDrawKind(draft.kind) && draft.refreshable ? await createInvoiceForJob(jobId) : null;
     const done = await complete();
     if (!done.ok) return done;
-    return { ok: true, id: draws[0].id, speak: "Job finished. It bills on a payment schedule — the Final draw is requested from Billing." };
+    if ((sched ?? []).length) {
+      return { ok: true, id: draws[0].id, speak: "Job finished. It bills on a payment schedule — the Final draw is requested from Billing." };
+    }
+    if (pulled) {
+      if (pulled.ok && pulled.id) {
+        return {
+          ok: true,
+          id: pulled.id,
+          speak: pulled.importWarning && !pulled.partial ? `Job finished. ${pulled.importWarning}` : `Job finished — ${draft?.number ?? "its progress payment"} is ready to review.`,
+          ...(pulled.partial && pulled.importWarning ? { warning: pulled.importWarning } : {}),
+        };
+      }
+      return { ok: true, id: draft?.id ?? draws[0].id, speak: "Job finished.", warning: pulled.error ?? `The new work couldn't be added to ${draft?.number ?? "the open progress payment"} - open it and bring it up to date before sending.` };
+    }
+    if (draft && isDrawKind(draft.kind)) {
+      return {
+        ok: true,
+        id: draft.id,
+        speak: `Job finished. ${draft.number ?? "A progress payment"} is still a draft - ${draft.refreshable ? "bring it up to date and send it" : "send it (or delete it), then bill the rest as the final progress payment"}.`,
+      };
+    }
+    // No open draft (or it couldn't be read - then no draft is named, only the door that is there).
+    return { ok: true, id: draws[0].id, speak: "Job finished. It bills with progress payments — bill what's left with Progress Payment → Final on the job." };
   }
 
   // createInvoiceForJob does the imports (labor at rate, materials WITH org markup), honoring the

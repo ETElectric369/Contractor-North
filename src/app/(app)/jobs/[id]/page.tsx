@@ -36,7 +36,7 @@ import {
 import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
-import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -353,6 +353,7 @@ export default async function JobDetailPage({
     unbilled,
     { data: pettyRows },
     openDraft,
+    lumpToNet,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -436,6 +437,17 @@ export default async function JobDetailPage({
           return d ? ({ id: d.id, number: d.invoice_number ?? null, kind: d.invoice_kind ?? "standard", refreshable: !isDrawKind(d.invoice_kind) } as OpenDraft) : null;
         })
       : Promise.resolve(null as OpenDraft | null),
+    // THE DEPOSIT THE NEXT BILL TAKES OFF (review, 2026-09-24). On a job with a draw, the card's
+    // "Create Invoice" is a progress report, and that report nets any deposit or set-amount draw no
+    // bill has taken off yet (resolveDrawCredit). The card names the net - or says the deposit still
+    // covers it - instead of a figure the click won't bill. A lost read is logged and counts $0:
+    // the button then shows the gross, and the server still nets and says so.
+    viewerIsStaff && billsActuals && (invoices ?? []).some((i: any) => i.status !== "void" && isDrawKind(i.invoice_kind))
+      ? fixedBillingsNotYetNetted(supabase, id).catch((e) => {
+          reportError("jobs.[id].lumpToNet", e, { jobId: id });
+          return 0;
+        })
+      : Promise.resolve(0),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -724,7 +736,7 @@ export default async function JobDetailPage({
               that bills it. T&M jobs only (billsActuals — the door's own rule); a tech's card is
               hours only (unbilledView is projected above). */}
           {billsActuals && (
-            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} />
+            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} />
           )}
           <Card>
             <CardContent className="space-y-4 py-5">

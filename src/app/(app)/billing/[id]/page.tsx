@@ -9,7 +9,7 @@ import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
 import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
 import { clockDoorWords } from "@/lib/long-shift";
 import { InvoiceDetail } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
@@ -30,6 +30,7 @@ import { listCustomerOptions } from "@/lib/schedule-options";
 import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { isActualsDraw } from "@/lib/actuals-draw";
+import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -117,7 +118,7 @@ export default async function InvoicePage({
      it is refreshed exactly like a standard invoice, and it was the only one that couldn't be.
      Any other draw bills a slice of the contract: no imports (the server refuses them too). The
      rule is the server's own; a failed schedule read counts as "scheduled", which only hides. */
-  const importMode: "standard" | "actuals" | "none" = !isDrawKind(drawKind)
+  let importMode: "standard" | "actuals" | "none" = !isDrawKind(drawKind)
     ? "standard"
     : isActualsDraw({
           invoiceKind: drawKind,
@@ -127,6 +128,25 @@ export default async function InvoicePage({
         })
       ? "actuals"
       : "none";
+  /* A DEPOSIT NOT YET TAKEN OFF A BILL CLOSES THE ROW ON AN ACTUALS DRAW (the server's same rule,
+     contractDrawGuard): new work itemised here would sit on top of a lump that only the NEXT
+     progress report nets. Said where the row would be, never a row that vanished in silence. A lost
+     read closes it too - it only hides a door the server may refuse. */
+  let importHeld: string | null = null;
+  if (importMode === "actuals" && (inv as any).job_id) {
+    const ownCredit = ((items ?? []) as { import_source?: string | null; line_total?: unknown }[])
+      .filter((i) => i.import_source === "draw_credit")
+      .reduce((t, i) => t + Math.abs(Number(i.line_total) || 0), 0);
+    const lump = await fixedBillingsNotYetNetted(supabase, (inv as any).job_id, id).catch(() => null);
+    const open = lump === null ? null : Math.round((lump - ownCredit) * 100) / 100;
+    if (open === null || open > 0.005) {
+      importMode = "none";
+      importHeld =
+        open === null
+          ? "Couldn't check this job's deposits just now, so new work can't be added here - reload in a moment."
+          : `${formatCurrency(open)} of deposit or set-amount billing on this job hasn't been taken off a bill yet, so new hours and bills go on the next progress payment (which takes it off), not on this one.`;
+    }
+  }
 
   /* A CLOCK STILL RUNNING ON THIS JOB IS HOURS THIS INVOICE DOES NOT HAVE (2026-09-24). Erik: "I
      had no way to stop it to set the time for the invoice". An open shift bills nothing (the labor
@@ -308,6 +328,7 @@ export default async function InvoicePage({
         customerName={inv.customers?.name ?? null}
         runningClocks={runningClocks}
         importMode={importMode}
+        importHeld={importHeld}
         textReady={textReady}
         tz={orgSettings.timezone}
         customerHoldsOlderCopy={customerHoldsOlderCopy(

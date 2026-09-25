@@ -111,6 +111,9 @@ export function ProgressInvoiceButton({
   const [errorDoor, setErrorDoor] = useState<{ id: string; number: string } | null>(null);
   // An open actuals draw is where "Actual T&M" lands (the server brings it up to date, J-011).
   const addsToDraft = billMode === "actuals" && !!openDraft?.refreshable;
+  // ANY OTHER NEW DRAW WHILE A DRAFT DRAW IS OPEN IS REFUSED (one open draft draw per job), so the
+  // button says so up front and goes there - never "Create Invoice" for a click the server refuses.
+  const opensDraft = mode === "invoice" && !!openDraft && !addsToDraft;
 
   function pickInvoice(id: string) {
     setPayInvoice(id);
@@ -121,7 +124,9 @@ export function ProgressInvoiceButton({
   const canSave =
     mode === "payment"
       ? payAmount > 0 && !!payInvoice
-      : billMode === "actuals"
+      : opensDraft
+        ? true
+        : billMode === "actuals"
         ? worked > 0
         : newAmount > 0;
 
@@ -137,6 +142,11 @@ export function ProgressInvoiceButton({
         setOpen(false);
         router.refresh();
       } else {
+        if (opensDraft && openDraft) {
+          setOpen(false);
+          router.push(`/billing/${openDraft.id}`);
+          return;
+        }
         if (billMode === "actuals") {
           const res = await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind);
           if (!res.ok || !res.id) {
@@ -198,7 +208,9 @@ export function ProgressInvoiceButton({
                 ? "Record Payment"
                 : addsToDraft
                   ? `Add to ${openDraft?.number ?? "the Open Draft"}`
-                  : `Create ${kind === "deposit" ? "Deposit" : kind === "final" ? "Final Invoice" : "Invoice"}`
+                  : opensDraft
+                    ? `Open ${openDraft?.number ?? "the Open Draft"}`
+                    : `Create ${kind === "deposit" ? "Deposit" : kind === "final" ? "Final Invoice" : "Invoice"}`
             }
             disabled={!canSave}
           />
@@ -334,6 +346,20 @@ export function ProgressInvoiceButton({
                     ]
                 ).filter((i) => i.id !== "percent" || canPercent)}
               />
+
+              {opensDraft && openDraft ? (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {`${openDraft.number ?? "A progress payment"} is still an open draft on this job, and only one draft payment can be open at a time${
+                    openDraft.refreshable ? "" : " - it bills a set part of the contract, so new hours and bills can't go on it"
+                  }. Open it to send it (or delete it), then start the next one.`}
+                </p>
+              ) : addsToDraft ? (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  {`The hours and bills not yet on any invoice go on ${openDraft?.number ?? "the open draft"}, the progress payment already open on this job${
+                    kind === "final" ? `, and it becomes the final payment` : ""
+                  }.`}
+                </p>
+              ) : null}
 
               {billMode === "actuals" ? (
                 <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">

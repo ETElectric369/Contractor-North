@@ -88,6 +88,22 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
     expect(unbilledCardDoor({ ...base, workPending: false, total: 0, newWork: 0, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toBeNull();
   });
 
+  it("with no draft, a deposit not yet taken off a bill is netted the way the server nets it", () => {
+    // Covered: no button, the card says why (the server would mint and delete a draw).
+    expect(unbilledCardDoor({ ...base, openDraft: null, lumpToNet: 2000 })).toEqual({
+      kind: "covered",
+      note: "The $2,000.00 deposit not yet taken off a bill still covers this, so there is nothing new to bill yet.",
+    });
+    // Partly covered: the button names the net, and the note names the deposit.
+    expect(unbilledCardDoor({ ...base, openDraft: null, lumpToNet: 500 })).toEqual({
+      kind: "create",
+      label: "Create Invoice for $1,072.27",
+      note: "That is $1,572.27 of work less the $500.00 deposit not yet taken off a bill.",
+    });
+    // An open draft already netted its deposit when it was made: "Add to" is unchanged.
+    expect(unbilledCardDoor({ ...base, openDraft: { id: "x", number: "INV-078", refreshable: true }, lumpToNet: 500 })?.kind).toBe("add");
+  });
+
   it("a pending return alone reaches an open draft that takes it, never mints one", () => {
     const ret = { ...base, workPending: false, returns: 1, total: -40, newWork: 0 };
     expect(unbilledCardDoor({ ...ret, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toEqual({ kind: "add", label: "Add to INV-078" });
@@ -104,9 +120,20 @@ describe("pulledIntoSentence — says what landed, in hours and bills", () => {
     expect(pulledIntoSentence("INV-078", { hours: 5.25, bills: 0 })).toBe("Pulled 5.25 hours into INV-078.");
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 })).toBe("Nothing new to pull into INV-078.");
   });
-  it("what stayed off is said, never silent", () => {
+  it("what stayed off is said, never silent - and names the button that says why (the row is blank until tapped)", () => {
     expect(pulledIntoSentence("INV-078", { hours: 6, bills: 1 }, { hours: 6, bills: 0 })).toBe(
-      "Pulled 6 hours and 1 bill into INV-078. Still not on it: 6 hours - the Import row on INV-078 says why.",
+      "Pulled 6 hours and 1 bill into INV-078. Still not on it: 6 hours - open INV-078 and tap Labor from Timecards to see what is holding them back.",
+    );
+    expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 }, { hours: 1, bills: 1 })).toBe(
+      "Nothing new to pull into INV-078. Still not on it: 1 hour and 1 bill - open INV-078 and tap Labor from Timecards or Materials from Costs to see what is holding them back.",
+    );
+  });
+  it("a credited supplier return is counted, never 'Nothing new'", () => {
+    expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0, returns: 1, returnsCredit: 59.32 }, { hours: 0, bills: 0 }, formatCurrency)).toBe(
+      "Pulled a supplier return credit ($59.32 back to the customer) into INV-078.",
+    );
+    expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 }, { hours: 0, bills: 0, returns: 1 })).toBe(
+      "Nothing new to pull into INV-078. Still not on it: a supplier return - open INV-078 and tap Materials from Costs to see what is holding it back.",
     );
   });
 });

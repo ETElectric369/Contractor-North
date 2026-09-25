@@ -31,7 +31,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { isDrawKind } from "./invoice-math";
+import { isDrawKind, resolveDrawCredit, DRAW_KINDS } from "./invoice-math";
 
 /** Line sources only the actuals importers (and the report's own prior-billings credit) write. */
 const ACTUALS_SOURCES = new Set(["labor", "costs", "draw_credit"]);
@@ -101,7 +101,24 @@ export async function openDraftOnJob(supabase: SupabaseClient, jobId: string): P
   const pick = rows.find((r) => isDrawKind(r.invoice_kind)) ?? rows[0];
   if (!pick) return null;
   const kind = pick.invoice_kind ?? "standard";
-  if (!isDrawKind(kind)) return { id: pick.id, number: pick.invoice_number, kind, refreshable: true };
+  if (!isDrawKind(kind)) {
+    // A STANDARD DRAFT BESIDE A LIVE DRAW IS NOT A DOOR (review, 2026-09-24). Every importer refuses
+    // content on a standard invoice once the job carries a non-void draw (H4, standardInvoiceOnDrawJob),
+    // so "Add to INV-0xx" onto it would come back "couldn't be pulled in". The state is reachable: an
+    // EMPTY standard draft never blocks a draw from being made. Such a job's next bill is a progress
+    // report (createInvoiceForJob routes it there), so this reports no open draft - the card then
+    // offers "Create Invoice", which is the door that works.
+    const { data: draws, error: drawErr } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("job_id", jobId)
+      .neq("status", "void")
+      .in("invoice_kind", [...DRAW_KINDS])
+      .limit(1);
+    if (drawErr) throw drawErr;
+    if ((draws ?? []).length) return null;
+    return { id: pick.id, number: pick.invoice_number, kind, refreshable: true };
+  }
   const shape = await readDraftShape(supabase, { id: pick.id, jobId, kind, dismissedKeys: pick.dismissed_import_keys });
   return { id: pick.id, number: pick.invoice_number, kind, refreshable: isActualsDraw(shape) };
 }
@@ -135,7 +152,11 @@ export async function readDraftShape(
 export type CardDoor =
   | { kind: "add"; label: string }
   | { kind: "open"; label: string; href: string }
-  | { kind: "create"; label: string }
+  /** `note` names a deposit the new bill takes off, so the figure on the button is explained. */
+  | { kind: "create"; label: string; note?: string }
+  /** No button: a deposit (or a set-amount draw) not yet taken off a bill still covers the work.
+   *  `note` is the sentence the card shows instead. */
+  | { kind: "covered"; note: string }
   | null;
 
 /**
@@ -154,9 +175,14 @@ export function unbilledCardDoor(input: {
   total: number;
   /** Hours + bills alone, before a return comes off. */
   newWork: number;
+  /** Deposit / set-amount draw money no bill has taken off yet (fixedBillingsNotYetNetted). The
+   *  next progress report nets it (resolveDrawCredit), so a "Create Invoice" figure that ignored it
+   *  would promise more than the click bills - or a click that bills nothing. */
+  lumpToNet?: number;
   money: (n: number) => string;
 }): CardDoor {
   const { openDraft, workPending, returns, total, newWork, money } = input;
+  const lump = Math.max(0, Number(input.lumpToNet) || 0);
   if (openDraft) {
     const name = openDraft.number ?? "the Open Draft";
     if (!openDraft.refreshable) {
@@ -166,7 +192,25 @@ export function unbilledCardDoor(input: {
     return { kind: "add", label: total > 0.005 ? `Add to ${name} (${money(total)})` : `Add to ${name}` };
   }
   if (!workPending) return null;
-  return { kind: "create", label: `Create Invoice for ${money(total > 0.005 ? total : newWork)}` };
+  const figure = total > 0.005 ? total : newWork;
+  if (lump > 0.005) {
+    // The server's own decision (createProgressReportInvoice → resolveDrawCredit), made here first.
+    const d = resolveDrawCredit(figure, lump);
+    if (!d.ok) {
+      return {
+        kind: "covered",
+        note: `The ${money(lump)} deposit not yet taken off a bill still covers this, so there is nothing new to bill yet.`,
+      };
+    }
+    if (d.credit > 0.005) {
+      return {
+        kind: "create",
+        label: `Create Invoice for ${money(Math.round((figure - d.credit) * 100) / 100)}`,
+        note: `That is ${money(figure)} of work less the ${money(d.credit)} deposit not yet taken off a bill.`,
+      };
+    }
+  }
+  return { kind: "create", label: `Create Invoice for ${money(figure)}` };
 }
 
 // ── What a refresh says ──────────────────────────────────────────────────────────────────────
@@ -179,21 +223,48 @@ const hoursWord = (h: number) => {
 /**
  * "Pulled 12 hours and 1 bill into INV-078." The office's nouns, measured from the job's own
  * unbilled picture before and after (so an hour a deleted line holds back is never counted as
- * pulled). `left` names what is still not on it and where the reason is, so nothing is silent.
+ * pulled). A supplier return the refresh credited is counted too - "Nothing new" after a click
+ * that wrote a credit onto the draw would be false. `left` names what is still not on it and
+ * WHERE THE REASON IS SAID: the Import row is blank until one of its buttons is tapped, so the
+ * sentence names the button, never "the Import row says why".
  */
 export function pulledIntoSentence(
   number: string,
-  pulled: { hours: number; bills: number },
-  left?: { hours: number; bills: number } | null,
+  pulled: { hours: number; bills: number; returns?: number; returnsCredit?: number },
+  left?: { hours: number; bills: number; returns?: number } | null,
+  money?: (n: number) => string,
 ): string {
   const parts: string[] = [];
   if (pulled.hours > 0.005) parts.push(hoursWord(pulled.hours));
   if (pulled.bills > 0) parts.push(`${pulled.bills} ${pulled.bills === 1 ? "bill" : "bills"}`);
-  const head = parts.length ? `Pulled ${parts.join(" and ")} into ${number}.` : `Nothing new to pull into ${number}.`;
+  const r = pulled.returns ?? 0;
+  if (r > 0) {
+    const amt = money && (pulled.returnsCredit ?? 0) > 0.005 ? ` (${money(pulled.returnsCredit ?? 0)} back to the customer)` : "";
+    parts.push(`${r === 1 ? "a supplier return credit" : `${r} supplier return credits`}${amt}`);
+  }
+  const head = parts.length ? `Pulled ${joinParts(parts)} into ${number}.` : `Nothing new to pull into ${number}.`;
   const rest: string[] = [];
-  if (left && left.hours > 0.005) rest.push(hoursWord(left.hours));
-  if (left && left.bills > 0) rest.push(`${left.bills} ${left.bills === 1 ? "bill" : "bills"}`);
+  const doors: string[] = [];
+  if (left && left.hours > 0.005) {
+    rest.push(hoursWord(left.hours));
+    doors.push("Labor from Timecards");
+  }
+  if (left && left.bills > 0) {
+    rest.push(`${left.bills} ${left.bills === 1 ? "bill" : "bills"}`);
+    doors.push("Materials from Costs");
+  }
+  if (left && (left.returns ?? 0) > 0) {
+    const n = left.returns ?? 0;
+    rest.push(n === 1 ? "a supplier return" : `${n} supplier returns`);
+    if (!doors.includes("Materials from Costs")) doors.push("Materials from Costs");
+  }
   return rest.length
-    ? `${head} Still not on it: ${rest.join(" and ")} - the Import row on ${number} says why.`
+    ? `${head} Still not on it: ${joinParts(rest)} - open ${number} and tap ${doors.join(" or ")} to see what is holding ${rest.length === 1 && !/s$/.test(rest[0]) ? "it" : "them"} back.`
     : head;
+}
+
+/** "a, b and c" - the office's list phrasing. */
+function joinParts(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
 }

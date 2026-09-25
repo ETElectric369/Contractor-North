@@ -52,9 +52,11 @@ function fake(answer: (table: string, cols: string, single: boolean) => any) {
   };
 }
 
-function jobWithDraft(draft: { id: string; number: string; kind: string; sources: (string | null)[] }) {
+function jobWithDraft(draft: { id: string; number: string; kind: string; sources: (string | null)[] }, liveDraw = false) {
   return fake((table, cols, single) => {
     if (table === "payment_milestones") return single ? null : [];
+    // Any non-void draw on the job (openDraftOnJob beside a standard draft; the draw-job route).
+    if (table === "invoices" && cols === "id") return liveDraw || draft.kind !== "standard" ? [{ id: "inv-077" }] : [];
     if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) {
       return [{ id: draft.id, invoice_number: draft.number, invoice_kind: draft.kind, dismissed_import_keys: [] }];
     }
@@ -94,6 +96,14 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", partial: true, note: "Pulled 1 bill into INV-078. But the hours (…) couldn't be pulled in" });
     const res = await createInvoiceForJob(JOB);
     expect(res.partial).toBe(true);
+  });
+
+  it("an EMPTY standard draft beside a sent draw is not the door (every importer refuses it): the draw door bills the work", async () => {
+    state.client = jobWithDraft({ id: "inv-079", number: "INV-079", kind: "standard", sources: [] }, true);
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-081", note: "Started INV-081 for the work not yet billed - its total is that work." });
+    const res = await createInvoiceForJob(JOB);
+    expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
+    expect(res).toMatchObject({ ok: true, id: "inv-081" });
   });
 
   it("an open STANDARD draft stays this door's business, as before", async () => {
