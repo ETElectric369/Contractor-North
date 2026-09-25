@@ -47,6 +47,9 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
   let jobB = "";
   let jobC = "";
   let seq = 0;
+  /** Fixture numbers carry this run's token: a row some other run left behind (a TEST-SPLIT-B job
+   *  was found committed in a live org on 2026-09-24) must not fail every later run on a unique key. */
+  const run = Math.random().toString(36).slice(2, 8).toUpperCase();
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
 
@@ -125,7 +128,7 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
       )
     ).id;
   const invoice = async (status: string, job = jobA): Promise<{ id: string; number: string }> => {
-    const number = `TEST-SPLIT-${++seq}`;
+    const number = `TEST-SPLIT-${run}-${++seq}`;
     const r = await one(
       `insert into public.invoices (org_id, job_id, invoice_number, status, total, amount_paid)
        values ($1, $2, $3, $4, 100, $5) returning id`,
@@ -225,7 +228,7 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         await one(
           `insert into public.jobs (org_id, name, job_number, status, billing_type)
            values ($1, $2, $3, 'scheduled', 'tm') returning id`,
-          [orgId, `TEST split job ${n}`, `TEST-SPLIT-${n}`],
+          [orgId, `TEST split job ${n}`, `TEST-SPLIT-${n}-${run}`],
         )
       ).id;
     jobA = await job("A");
@@ -539,8 +542,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
         const jobX = (
           await one(
             `insert into public.jobs (org_id, name, job_number, status, billing_type)
-             values ($1, 'TEST split job X', 'TEST-SPLIT-X', 'scheduled', 'tm') returning id`,
-            [orgId],
+             values ($1, 'TEST split job X', $2, 'scheduled', 'tm') returning id`,
+            [orgId, `TEST-SPLIT-X-${run}`],
           )
         ).id;
         const id = await entry({ in: "2001-01-15T16:00:00Z", out: "2001-01-15T22:00:00Z", job: jobX });
