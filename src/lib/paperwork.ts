@@ -537,10 +537,18 @@ export function jobFromPaperMarks(
     const s = streetParts(raw);
     return s ? jobs.filter((j) => sameStreet(s, jobStreets.get(j.id) ?? null)).map((j) => j.id) : [];
   };
-  /** A job's name, exactly, never the company's own name or one of its people. */
+  /**
+   * A job's name, exactly, never the company's own name or one of its people. A job named after
+   * its customer ("Jackie Burks") is also that customer's name, so the same words name every open
+   * job of that customer too: with more than one, the name is not decisive and nothing is picked
+   * (the customer mark reads those words the same way).
+   */
   const byName = (raw: string | null | undefined): string[] => {
     const k = wordsKey(raw);
-    return k.length >= 3 && !self.has(k) ? jobs.filter((j) => wordsKey(j.name) === k).map((j) => j.id) : [];
+    if (k.length < 3 || self.has(k)) return [];
+    const named = jobs.filter((j) => wordsKey(j.name) === k).map((j) => j.id);
+    if (!named.length) return [];
+    return [...named, ...jobs.filter((j) => (j.customerNames ?? []).some((c) => wordsKey(c) === k)).map((j) => j.id)];
   };
 
   const jobNumber = compactKey(marks.jobNumber);

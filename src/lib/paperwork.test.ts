@@ -318,6 +318,25 @@ describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
     expect(jobFromPaperMarks({ customer: "ERIK TAYLOR", po: "13897 HERRINGBONE" }, eriksJob, [], SELF)).toMatchObject({ kind: "one", jobId: "j11" });
   });
 
+  it("a job named after its customer is not decisive when that customer has other open jobs", () => {
+    // ET live: J-014 "5659 Rhodesia", J-034 "5659 Rhodesia - Panel Upgrade" and J-047 "Jackie Burks"
+    // are all open, all for Jackie Burks. "JACKIE BURKS" in the PO box names her, not J-047.
+    const burks: MarkJob[] = [
+      ...JOBS,
+      { id: "j14", job_number: "J-014", name: "5659 Rhodesia", address: "5659 Rhodesia Rd", customerNames: ["Jackie Burks"] },
+      { id: "j34", job_number: "J-034", name: "5659 Rhodesia - Panel Upgrade", address: "5659 Rhodesia Rd", customerNames: ["Jackie Burks"] },
+      { id: "j47", job_number: "J-047", name: "Jackie Burks", address: null, customerNames: ["Jackie Burks"] },
+    ];
+    expect(jobFromPaperMarks({ po: "JACKIE BURKS" }, burks, [], SELF)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ jobName: "Jackie Burks" }, burks, [], SELF)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "JACKIE BURKS", customer: "Jackie Burks" }, burks, [], SELF)).toEqual({ kind: "none" });
+    // A job number still decides, and the name agrees with it.
+    expect(jobFromPaperMarks({ po: "JACKIE BURKS", jobNumber: "J-034" }, burks, [], SELF)).toMatchObject({ kind: "one", jobId: "j34" });
+    // Her only open job, named after her, is still picked by her name.
+    const onlyOne = burks.filter((j) => j.id !== "j14" && j.id !== "j34");
+    expect(jobFromPaperMarks({ po: "JACKIE BURKS" }, onlyOne, [], SELF)).toMatchObject({ kind: "one", jobId: "j47", from: "po" });
+  });
+
   it("the reader's hint gives up its street, and only its street", () => {
     expect(addressInHint("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE")).toBe("13897 HERRINGBONE");
     expect(addressInHint("PO 4471 13897 HERRINGBONE WAY")).toBe("13897 HERRINGBONE WAY");

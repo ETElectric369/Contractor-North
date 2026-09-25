@@ -307,7 +307,7 @@ Respond with ONLY a JSON object (no prose):
   "destination": "job" | "overhead" | "unsure" — "job" if the purchase is materials for a specific job; "overhead" if it is clearly a company expense NOT tied to one job (gas station, truck, shop supplies, small tools, phone, office, insurance, licenses); "unsure" otherwise,
   "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
   "job_marks": what is PRINTED OR WRITTEN on it that names a job, copied exactly as it appears, each null when it is not there: {"address": the job, ship-to or delivery street address (house number and street only; never the store's or supplier's own address, never the address of the company this is billed or sold to), "job_name": a job name or job reference, "job_number": a job number, "customer": the customer or homeowner the work is for (never the store, never the company this is billed or sold to)},
-  "job_hint": the words on the paper that point to a job (a job name, address or customer), or null,
+  "job_hint": the words on the paper that point to a job (a job name, address or customer; never the store's or supplier's own address, never the name or address of the company this is billed or sold to), or null,
   "confidence": "low" | "medium" | "high"
 }
 
