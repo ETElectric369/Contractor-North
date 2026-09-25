@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,15 +17,17 @@ import { E017 } from "./panel/__fixtures__/herringbone";
  * other org around them, and rolls the whole transaction back. Read-back is the assertion, never
  * the absence of an error (the silent-write law).
  *
- * 0333 IS NOT ON PRODUCTION YET, so the suite applies it inside its own transaction (rolled back).
- * Creating the tables takes a SHARE ROW EXCLUSIVE lock on the tables they reference (jobs, quotes,
- * documents, profiles, organizations) until the rollback, so writes to those wait for this suite:
- * it takes its locks with a 3-second lock_timeout, runs one short pass, and rolls back. Once 0333 is
- * applied the migration step is skipped and nothing is locked.
+ * UNTIL 0333 IS APPLIED THE SUITE WAITS, IN CI ABOVE ALL. Applying 0333 inside the test's own
+ * transaction takes a SHARE ROW EXCLUSIVE lock on the tables it references (jobs, quotes,
+ * documents, profiles, organizations) until the rollback, so every write to those, the other DB
+ * suites' running in parallel and real users' alike, would queue behind it on every CI push. So
+ * the in-transaction apply is opt-in: PANEL_APPLY_0333=1, set only for a local run with
+ * --no-file-parallelism (3-second lock_timeout, one short pass, rolled back). Without it, and with
+ * 0333 not yet on the database, every case skips and says why. Once 0333 is applied it simply runs.
  *
  * Same creds gate as the other DB suites; skips cleanly without them.
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
+const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, PANEL_APPLY_0333 } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 
 d("the job's panel: the crew and the office boundary (0333)", () => {
@@ -40,6 +42,13 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
   let quoteId = ""; // this org's estimate with circuits
   let otherQuoteId = ""; // another org's estimate
   let panelId = "";
+  /** 0333 isn't on the database and applying it here wasn't asked for: every case skips. */
+  let waiting = false;
+  const it = (name: string, fn: () => Promise<void>) =>
+    vitestIt(name, async (ctx) => {
+      if (waiting) return ctx.skip();
+      await fn();
+    });
 
   const as = async (uid: string) => {
     await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: uid, role: "authenticated" })]);
@@ -66,11 +75,17 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
   beforeAll(async () => {
     client = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await client.connect();
+    // Asked before anything is locked: no transaction, no DDL.
+    const { rows: [has] } = await client.query("select to_regclass('public.job_circuits') is not null as yes");
+    if (!has.yes && PANEL_APPLY_0333 !== "1") {
+      waiting = true;
+      console.warn("[panel] 0333 is not on this database yet; the suite waits for it (PANEL_APPLY_0333=1 applies it in a rolled-back transaction, locally only).");
+      return;
+    }
     await client.query("begin");
     await client.query("set local lock_timeout = '3s'");
     await client.query("set local statement_timeout = '15s'");
 
-    const { rows: [has] } = await client.query("select to_regclass('public.job_circuits') is not null as yes");
     if (!has.yes) {
       await client.query(readFileSync(fileURLToPath(new URL("../../supabase/migrations/0333_the_job_knows_its_panel.sql", import.meta.url)), "utf8"));
       console.warn("[panel] 0333 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
@@ -178,6 +193,14 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
     expect(est?.message).toContain("Only the office brings in circuits");
     const plan = await refused("insert into job_circuits (job_id, description, source) values ($1, 'From the plans', 'plan')", [jobId]);
     expect(plan?.code).toBe("42501");
+    // Nor dress another source up as the estimate's: the link rides only on source 'estimate'.
+    const forged = await refused("insert into job_circuits (job_id, description, source, source_quote_id, source_row) values ($1, 'x', 'nort', $2, '{\"key\":\"f\"}')", [
+      jobId,
+      quoteId,
+    ]);
+    expect(forged?.code).toBe("42501");
+    const handRow = await refused("insert into job_circuits (job_id, description, source_row) values ($1, 'x', '{\"key\":\"f\",\"quote_number\":\"E-017\"}')", [jobId]);
+    expect(handRow?.code).toBe("42501");
     const photo = await one("insert into job_circuits (job_id, panel_label, source, state) values ($1, 'Garage', 'photo', 'kept') returning state", [jobId]);
     expect(photo.state).toBe("suggested");
   });
@@ -274,6 +297,28 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
     // Two circuits on one space is a WARNING in TypeScript, not a refusal here.
     await one("insert into job_circuits (job_id, panel_id, description, amps, space) values ($1, $2, 'A', 20, 5) returning id", [jobId, panelId]);
     await one("insert into job_circuits (job_id, panel_id, description, amps, space) values ($1, $2, 'B', 20, 5) returning id", [jobId, panelId]);
+  });
+
+  it("the panel can't be changed under a kept circuit, and a routine tap is never refused over where it sits", async () => {
+    await as(techId);
+    const underIt = await refused("update job_panels set dead_spaces = '{5,9}' where id = $1", [panelId]);
+    expect(underIt?.code).toBe("23514");
+    expect(underIt?.message).toContain("Space 5 has the");
+    // (With No Stab 9 the panel can't be cut to 4 spaces anyway; clear it to reach the circuit rule.)
+    expect((await one("update job_panels set dead_spaces = '{}' where id = $1 returning dead_spaces", [panelId])).dead_spaces).toEqual([]);
+    const smaller = await refused("update job_panels set spaces = 4 where id = $1", [panelId]);
+    expect(smaller?.code).toBe("23514");
+    expect(smaller?.message).toContain("Space 5 has the");
+    // A space nobody is on can still be marked No Stab.
+    const free = await one("update job_panels set dead_spaces = '{9,11}' where id = $1 returning dead_spaces", [panelId]);
+    expect(free.dead_spaces).toEqual([9, 11]);
+    // Roughed and a relabel on a placed circuit say nothing about its space: they land.
+    const a = await one("select id from job_circuits where panel_id = $1 and description = 'A' and state = 'kept'", [panelId]);
+    const rough = await one("update job_circuits set progress = 'roughed', panel_label = 'A Right' where id = $1 returning progress", [a.id]);
+    expect(rough.progress).toBe("roughed");
+    // Moving it onto a No Stab space is still refused.
+    const moved = await refused("update job_circuits set space = 11 where id = $1", [a.id]);
+    expect(moved?.code).toBe("23514");
   });
 
   it("carries no money, part number or supplier column, and anon can read nothing", async () => {

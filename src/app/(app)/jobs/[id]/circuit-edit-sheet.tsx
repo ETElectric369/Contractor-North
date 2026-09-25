@@ -5,6 +5,7 @@ import { AlertTriangle, RotateCcw, ShieldCheck } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
 import { AMP_SIZES } from "@/lib/panel/input";
@@ -20,10 +21,21 @@ import { markVerified, saveCircuit } from "../panel-actions";
  *
  * A suggestion's sheet is how "Change" works: fix what the estimate got wrong, then Keep (or Not
  * This). Nothing counts until kept.
+ *
+ * NOTHING TYPED IS LOST ON THE WAY OUT. A text field saves when it is left, but a tap on the X, the
+ * backdrop, back, Keep, Done or Take Off may not leave it first (an iOS button tap doesn't take
+ * focus). So every way out first writes what is still typed, and only closes once it is saved; a
+ * refused write keeps the sheet open with the reason on it. Writes run one at a time, in order, and
+ * each names what the editor saw, so a crewmate's newer value is shown, never overwritten. A write
+ * that answers after the sheet has gone still reaches the list (and a failure still reaches a toast).
  */
 
 type Patch = Record<string, unknown>;
-type Undo = { label: string; patch: Patch } | null;
+/** One write: what changes, what the editor saw for those fields (the undo), and its name. */
+type Change = { patch: Patch; prev: Patch; label: string };
+type Undo = { label: string; patch: Patch; seen: Patch } | null;
+const TEXT_KEYS = ["description", "panel_label", "room", "wire", "wire_tag", "space"] as const;
+type TextKey = (typeof TEXT_KEYS)[number];
 
 /** A 44px choice pill: the sheet's segmented control, sized for a thumb. */
 function Choice<T extends string>({
@@ -99,77 +111,179 @@ export function CircuitEditSheet({
   onNotThis: (c: JobCircuit) => void;
   onTakeOff: (c: JobCircuit) => void;
 }) {
-  const [row, setRow] = useState(circuit);
-  const [text, setText] = useState({
-    panel_label: circuit.panel_label ?? "",
-    description: circuit.description ?? "",
-    room: circuit.room ?? "",
-    wire: circuit.wire ?? "",
-    wire_tag: circuit.wire_tag ?? "",
-    space: circuit.space == null ? "" : String(circuit.space),
-  });
+  const toast = useToast();
+  const [row, setRowState] = useState(circuit);
+  const [text, setTextState] = useState(() => textOf(circuit, TEXT_KEYS as unknown as string[]) as Record<TextKey, string>);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [undo, setUndo] = useState<Undo>(null);
   const alive = useRef(true);
   useEffect(() => () => void (alive.current = false), []);
+  // The latest row and text, for writes queued behind another one and for the way out.
+  const rowRef = useRef(circuit);
+  const textRef = useRef(text);
+  const setRow = (r: JobCircuit) => {
+    rowRef.current = r;
+    setRowState(r);
+  };
+  const setText = (f: (t: Record<TextKey, string>) => Record<TextKey, string>) => {
+    textRef.current = f(textRef.current);
+    setTextState(textRef.current);
+  };
+  const queue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const pending = useRef(0);
+  const lastFailed = useRef(false);
 
   // The row the list holds may move under us (the chip, Keep): follow it.
-  useEffect(() => setRow(circuit), [circuit]);
+  useEffect(() => {
+    rowRef.current = circuit;
+    setRowState(circuit);
+  }, [circuit]);
 
-  async function apply(patch: Patch, label: string, prev: Patch) {
-    setSaving(true);
-    setError(null);
-    const res = await saveCircuit(row.id, patch);
-    if (!alive.current) return;
-    setSaving(false);
-    if (!res.ok) {
-      setError(res.error);
-      // The field shows what the database holds, not what was refused.
-      setText((t) => ({ ...t, ...textOf(row, Object.keys(patch)) }));
-      return;
+  /** Write one change against the row as it is now. True when it saved. */
+  async function write(c: Change, asUndo = false): Promise<boolean> {
+    if (alive.current) {
+      setSaving(true);
+      setError(null);
     }
-    setRow(res.row);
+    let res: Awaited<ReturnType<typeof saveCircuit>>;
+    try {
+      res = await saveCircuit(rowRef.current.id, c.patch, c.prev);
+    } catch {
+      res = { ok: false, error: "That didn't save. Check your connection and try again." };
+    }
+    lastFailed.current = !res.ok;
+    if (!res.ok) {
+      const current = "current" in res ? res.current : undefined;
+      if (current) onSaved(current); // the list shows what is there now
+      if (!alive.current) {
+        toast(`${circuitName(rowRef.current)}: ${res.error}`, "error");
+        return false;
+      }
+      setSaving(false);
+      setError(res.error);
+      if (current) setRow(current);
+      // The field shows what the database holds, not what was refused.
+      const src = current ?? rowRef.current;
+      setText((t) => ({ ...t, ...(textOf(src, Object.keys(c.patch)) as Partial<Record<TextKey, string>>) }));
+      return false;
+    }
+    // The parent's list is still there when the sheet has gone: the saved row always reaches it.
     onSaved(res.row);
-    setSaved(`Saved ${label}.`);
-    setUndo({ label, patch: prev });
+    if (!alive.current) return true;
+    setSaving(false);
+    setRow(res.row);
+    // The field shows what was stored (the database tidies spaces), so leaving it again sends nothing.
+    setText((t) => ({ ...t, ...(textOf(res.row, Object.keys(c.patch)) as Partial<Record<TextKey, string>>) }));
+    if (asUndo) {
+      setSaved(`Put ${c.label} back.`);
+      setUndo(null);
+    } else {
+      setSaved(`Saved ${c.label}.`);
+      const after: Patch = {};
+      for (const k of Object.keys(c.prev)) after[k] = (res.row as unknown as Record<string, unknown>)[k] ?? null;
+      setUndo({ label: c.label, patch: c.prev, seen: after });
+    }
+    return true;
   }
 
-  async function undoLast() {
+  /** Run writes one at a time, each built when its turn comes (so it compares against the latest row). */
+  function enqueue(build: () => Change | null, asUndo = false): Promise<boolean> {
+    pending.current++;
+    const p = queue.current
+      .then(() => {
+        const c = build();
+        return c ? write(c, asUndo) : true;
+      })
+      .finally(() => void pending.current--);
+    queue.current = p.catch(() => false);
+    return p;
+  }
+
+  /** A pick (amps, poles, type, panel, half, work, progress): the value, what it was, its name. */
+  function apply(patch: Patch, label: string) {
+    void enqueue(() => {
+      const r = rowRef.current as unknown as Record<string, unknown>;
+      const prev: Patch = {};
+      for (const k of Object.keys(patch)) prev[k] = r[k] ?? null;
+      return { patch, prev, label };
+    });
+  }
+
+  function undoLast() {
     if (!undo) return;
     const u = undo;
     setUndo(null);
-    setSaving(true);
-    const res = await saveCircuit(row.id, u.patch);
-    if (!alive.current) return;
-    setSaving(false);
-    if (!res.ok) return setError(res.error);
-    setRow(res.row);
-    setText((t) => ({ ...t, ...textOf(res.row, Object.keys(u.patch)) }));
-    onSaved(res.row);
-    setSaved(`Put ${u.label} back.`);
+    void enqueue(() => ({ patch: u.patch, prev: u.seen, label: u.label }), true);
   }
 
-  function blurText(k: keyof typeof text, label: string) {
-    const v = text[k].trim();
-    const cur = k === "space" ? (row.space == null ? "" : String(row.space)) : String((row as unknown as Record<string, unknown>)[k] ?? "");
-    if (v === cur) return;
-    const prev = { [k]: (row as unknown as Record<string, unknown>)[k] ?? null };
-    void apply({ [k]: v === "" ? null : k === "space" ? Number(v) : v }, label, prev);
+  /** What a text field holds that the row doesn't, as a write (null when they agree). */
+  function textChange(k: TextKey, label: string): Change | null {
+    const v = textRef.current[k].trim();
+    const r = rowRef.current;
+    const cur = k === "space" ? (r.space == null ? "" : String(r.space)) : String((r as unknown as Record<string, unknown>)[k] ?? "");
+    if (v === cur) return null;
+    // Clearing the space clears the half with it, so the undo puts both back (7B stays 7B).
+    const prev: Patch = k === "space" ? { space: r.space, half: r.half } : { [k]: (r as unknown as Record<string, unknown>)[k] ?? null };
+    return { patch: { [k]: v === "" ? null : k === "space" ? Number(v) : v }, prev, label };
   }
 
-  async function toggleVerified() {
-    setSaving(true);
-    setError(null);
-    const res = await markVerified(row.id, !row.verified);
-    if (!alive.current) return;
-    setSaving(false);
-    if (!res.ok) return setError(res.error);
-    setRow(res.row);
-    onSaved(res.row);
-    setSaved(res.row.verified ? "Marked Verified On Site." : "Took the verified mark off.");
-    setUndo(null);
+  function blurText(k: TextKey, label: string) {
+    void enqueue(() => textChange(k, label));
+  }
+
+  const TEXT_LABELS: Record<TextKey, string> = {
+    description: "What It Feeds",
+    panel_label: "Door Label",
+    room: "Room",
+    wire: "Wire",
+    wire_tag: "Wire Tag",
+    space: "Space",
+  };
+
+  /** Every way out: write whatever is still typed, then go. A refused write keeps the sheet open. */
+  async function thenLeave(go: (latest: JobCircuit) => void) {
+    // A write still on its way when the tap came: if it is refused, stay and show why.
+    const hadPending = pending.current > 0;
+    for (const k of TEXT_KEYS) {
+      const ok = await enqueue(() => textChange(k, TEXT_LABELS[k]));
+      if (!ok) return;
+    }
+    if (hadPending && lastFailed.current) return;
+    go(rowRef.current);
+  }
+  const leave = () => void thenLeave(() => onClose());
+
+  function toggleVerified() {
+    void (queue.current = queue.current.then(async () => {
+      if (!alive.current) return true;
+      setSaving(true);
+      setError(null);
+      try {
+        const res = await markVerified(rowRef.current.id, !rowRef.current.verified);
+        if (!res.ok) {
+          if (alive.current) {
+            setSaving(false);
+            setError(res.error);
+          }
+          return false;
+        }
+        onSaved(res.row);
+        if (!alive.current) return true;
+        setSaving(false);
+        setRow(res.row);
+        setSaved(res.row.verified ? "Marked Verified On Site." : "Took the verified mark off.");
+        setUndo(null);
+        return true;
+      } catch {
+        if (alive.current) {
+          setSaving(false);
+          setError("That didn't save. Check your connection and try again.");
+        }
+        return false;
+      }
+    }));
   }
 
   const suggested = row.state === "suggested";
@@ -179,24 +293,24 @@ export function CircuitEditSheet({
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={leave}
       title={circuitName(row)}
       size="md"
       footer={
         <ModalActions
-          onCancel={onClose}
+          onCancel={leave}
           cancelLabel="Close"
           hideCancel={!suggested}
-          onSave={() => (suggested ? onKeep(row) : onClose())}
+          onSave={() => void thenLeave((latest) => (suggested ? onKeep(latest) : onClose()))}
           saveLabel={suggested ? "Keep" : "Done"}
           saving={saving}
           extra={
             suggested ? (
-              <Button type="button" variant="ghost" onClick={() => onNotThis(row)} disabled={saving}>
+              <Button type="button" variant="ghost" onClick={() => void thenLeave((latest) => onNotThis(latest))} disabled={saving}>
                 Not This
               </Button>
             ) : (
-              <Button type="button" variant="outline" className="text-red-700" onClick={() => onTakeOff(row)} disabled={saving}>
+              <Button type="button" variant="outline" className="text-red-700" onClick={() => void thenLeave((latest) => onTakeOff(latest))} disabled={saving}>
                 Take Off
               </Button>
             )
@@ -276,7 +390,7 @@ export function CircuitEditSheet({
             <select
               className={selectCls}
               value={row.amps ?? ""}
-              onChange={(e) => void apply({ amps: e.target.value === "" ? null : Number(e.target.value) }, "Amps", { amps: row.amps })}
+              onChange={(e) => apply({ amps: e.target.value === "" ? null : Number(e.target.value) }, "Amps")}
               disabled={saving}
             >
               <option value="">Not Said</option>
@@ -291,7 +405,7 @@ export function CircuitEditSheet({
             <select
               className={selectCls}
               value={row.poles}
-              onChange={(e) => void apply({ poles: Number(e.target.value) }, "Poles", { poles: row.poles })}
+              onChange={(e) => apply({ poles: Number(e.target.value) }, "Poles")}
               disabled={saving}
             >
               <option value={1}>1P</option>
@@ -305,7 +419,7 @@ export function CircuitEditSheet({
           <select
             className={selectCls}
             value={row.kind ?? ""}
-            onChange={(e) => void apply({ kind: e.target.value || null }, "Type", { kind: row.kind })}
+            onChange={(e) => apply({ kind: e.target.value || null }, "Type")}
             disabled={saving}
           >
             <option value="">Not Said</option>
@@ -338,12 +452,14 @@ export function CircuitEditSheet({
           </Field>
         </div>
 
-        {panels.length > 1 && (
+        {/* With one panel the circuit is on it; the picker shows when there is a choice, or when this
+            circuit is on no panel yet (so it can always be put on one). */}
+        {(panels.length > 1 || (panels.length > 0 && row.panel_id == null)) && (
           <Field label="Panel">
             <select
               className={selectCls}
               value={row.panel_id ?? ""}
-              onChange={(e) => void apply({ panel_id: e.target.value || null }, "Panel", { panel_id: row.panel_id })}
+              onChange={(e) => apply({ panel_id: e.target.value || null }, "Panel")}
               disabled={saving}
             >
               <option value="">No Panel Yet</option>
@@ -379,7 +495,7 @@ export function CircuitEditSheet({
               ]}
               value={row.half ?? "full"}
               disabled={saving || row.space == null}
-              onPick={(v) => void apply({ half: v === "full" ? null : v }, "Half", { half: row.half })}
+              onPick={(v) => apply({ half: v === "full" ? null : v }, "Half")}
             />
           </div>
         </div>
@@ -391,7 +507,7 @@ export function CircuitEditSheet({
             options={(Object.keys(WORK_WORDS) as CircuitWork[]).map((w) => ({ id: w, label: WORK_WORDS[w] }))}
             value={row.work}
             disabled={saving}
-            onPick={(v) => void apply({ work: v }, "Work", { work: row.work })}
+            onPick={(v) => apply({ work: v }, "Work")}
           />
         </div>
 
@@ -403,7 +519,7 @@ export function CircuitEditSheet({
               options={(Object.keys(PROGRESS_WORDS) as CircuitProgress[]).map((p) => ({ id: p, label: PROGRESS_WORDS[p] }))}
               value={row.progress}
               disabled={saving}
-              onPick={(v) => void apply({ progress: v }, "Progress", { progress: row.progress })}
+              onPick={(v) => apply({ progress: v }, "Progress")}
             />
           </div>
         )}
@@ -431,7 +547,7 @@ export function CircuitEditSheet({
 }
 
 /** The text fields' strings as the row holds them, for putting a refused or undone edit back. */
-function textOf(row: JobCircuit, keys: string[]): Partial<Record<string, string>> {
+function textOf(row: JobCircuit, keys: readonly string[]): Partial<Record<string, string>> {
   const out: Partial<Record<string, string>> = {};
   for (const k of keys) {
     if (!["panel_label", "description", "room", "wire", "wire_tag", "space"].includes(k)) continue;

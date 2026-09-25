@@ -32,6 +32,7 @@ vi.mock("../panel-actions", () => ({
 
 import { JobPanel, PanelDoor, type PanelData } from "./job-panel";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
+import { freePanelName } from "./panel-setup-sheet";
 import { quoteCircuitsToSuggestions } from "@/lib/panel/model";
 import { E017, E017_ID, FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/herringbone";
 import type { JobCircuit } from "@/lib/types";
@@ -46,7 +47,7 @@ const data = (over: Partial<PanelData> = {}): PanelData => ({
   panels: [PANEL],
   circuits: FINAL_MAP,
   estimates: [
-    { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Herringbone", count: 12, created_at: null, onJob: 0 },
+    { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", address: "13897 Herringbone", count: 12, created_at: null, onJob: 0, fresh: 12, alsoFrom: null },
   ],
   photos: [],
   people: {},
@@ -118,7 +119,7 @@ describe("the Panel tab for the office, with E-017 not yet brought in", () => {
 });
 
 describe("after Bring In E-017: twelve dimmed suggestions", () => {
-  const html = render(data({ circuits: [...FINAL_MAP, ...suggestions], estimates: [{ ...data().estimates[0], onJob: 12 }] }));
+  const html = render(data({ circuits: [...FINAL_MAP, ...suggestions], estimates: [{ ...data().estimates[0], onJob: 12, fresh: 0 }] }));
   const t = textOf(html);
 
   it("names each one From E-017, with Keep / Change / Not This and a Keep All", () => {
@@ -224,5 +225,47 @@ describe("the circuit sheet", () => {
     expect(labels).toContain("Keep");
     expect(labels).toContain("Not This");
     expect(labels).not.toContain("Take Off");
+  });
+});
+
+describe("a circuit listed before the panel was added", () => {
+  const noop = () => {};
+  it("can always be put on a panel: the sheet shows the Panel picker when it is on none, even with one panel", () => {
+    const loose = circuit({ room: "Kitchen", description: "Outlets Right", amps: 20, panel_id: null });
+    const t = textOf(
+      renderToStaticMarkup(
+        createElement(CircuitEditSheet, { circuit: loose, panels: [PANEL], people: {}, onSaved: noop, onClose: noop, onKeep: noop, onNotThis: noop, onTakeOff: noop }),
+      ),
+    );
+    expect(t).toContain("No Panel Yet");
+    expect(t).toContain("Main Panel");
+    // On the only panel, there is nothing to pick.
+    const placed = textOf(
+      renderToStaticMarkup(
+        createElement(CircuitEditSheet, { circuit: FINAL_MAP[0], panels: [PANEL], people: {}, onSaved: noop, onClose: noop, onKeep: noop, onNotThis: noop, onTakeOff: noop }),
+      ),
+    );
+    expect(placed).not.toContain("No Panel Yet");
+  });
+
+  it("once on the panel with a space, the Positions switch appears", () => {
+    const placed = circuit({ room: "Kitchen", description: "Outlets Right", amps: 20, space: 7 });
+    const labels = buttons(render(data({ circuits: [placed], estimates: [] }))).map((b) => b.text);
+    expect(labels).toContain("Positions");
+  });
+});
+
+describe("Add Another Panel", () => {
+  it("starts with a free name, never a second Main Panel", () => {
+    expect(freePanelName([])).toBe("Main Panel");
+    expect(freePanelName(["Main Panel"])).toBe("Sub Panel");
+    expect(freePanelName(["main panel", "Sub Panel"])).toBe("Panel 2");
+  });
+});
+
+describe("the office bar's words", () => {
+  it("one circuit here is singular, and says where it came from", () => {
+    const html = render(data({ estimates: [{ ...data().estimates[0], onJob: 1, fresh: 11, alsoFrom: null }] }));
+    expect(textOf(html)).toContain("E-017 Has 12 Circuits. 1 Is Here");
   });
 });

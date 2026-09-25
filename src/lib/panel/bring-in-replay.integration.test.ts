@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import pg from "pg";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { newSuggestionsOnly, quoteCircuitsToSuggestions, rankEstimateCandidates } from "./model";
+import { newSuggestionsOnly, offerEstimates, quoteCircuitsToSuggestions, rankEstimateCandidates } from "./model";
 import type { JobCircuit, QuoteCircuit } from "@/lib/types";
 
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
@@ -73,7 +73,7 @@ d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
         circuits: [],
         photos: [],
         people: {},
-        estimates: candidates.map((x) => ({ ...x, onJob: 0 })),
+        estimates: offerEstimates(J011, job.customer_id, quotes, []),
       };
       const labels = (html: string) => [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
       const office = renderToStaticMarkup(createElement(JobPanel, { jobId: J011, initial: { ...panelData, staff: true } }));

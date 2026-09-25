@@ -11,6 +11,7 @@ import {
   needSentence,
   newSuggestionsOnly,
   nextProgress,
+  offerEstimates,
   parseQuoteBreaker,
   quadSpaceFree,
   quoteCircuitsToSuggestions,
@@ -100,6 +101,10 @@ describe("reading the estimate", () => {
     expect(parseQuoteBreaker("Q120")).toEqual({ poles: 1, amps: 20, check: null });
     expect(parseQuoteBreaker("")).toBeNull();
     expect(parseQuoteBreaker("see panel")).toBeNull();
+    // A 240V circuit is two hot legs: a 2P when the words don't say the poles.
+    expect(parseQuoteBreaker("30A 240V")).toEqual({ poles: 2, amps: 30, check: null });
+    expect(parseQuoteBreaker("30A/240V")).toEqual({ poles: 2, amps: 30, check: null });
+    expect(parseQuoteBreaker("1P 20A 240V")).toEqual({ poles: 1, amps: 20, check: null }); // the words win
   });
 
   it("says out loud when the words and the Siemens part disagree (E-017's SP 15A [Q120])", () => {
@@ -131,8 +136,47 @@ describe("reading the estimate", () => {
   it("a second Bring In adds nothing, and a Not This stays set aside", () => {
     const drafts = quoteCircuitsToSuggestions({ id: E017_ID, quote_number: "E-017", circuits: E017 });
     const onJob = drafts.map((d, i) => ({ source_quote_id: d.source_quote_id, source_row: d.source_row, removed_at: i === 2 ? "2026-09-25T09:00:00Z" : null }));
-    expect(newSuggestionsOnly(drafts, onJob)).toEqual({ fresh: [], already: 11, setAside: 1 });
+    expect(newSuggestionsOnly(drafts, onJob)).toEqual({ fresh: [], already: 11, setAside: 1, elsewhere: 0, elsewhereFrom: null });
     expect(newSuggestionsOnly(drafts, []).fresh).toHaveLength(12);
+  });
+
+  it("two identical rows are two circuits, and each comes in once", () => {
+    const rows = [
+      { ckt: "", description: "Bedroom outlets", breaker: "20A", wire: "12/2", load: null },
+      { ckt: "", description: "Bedroom outlets", breaker: "20A", wire: "12/2", load: null },
+    ];
+    const drafts = quoteCircuitsToSuggestions({ id: "q", quote_number: "E-020", circuits: rows as never });
+    expect(drafts).toHaveLength(2);
+    expect(new Set(drafts.map((d) => d.source_row.key)).size).toBe(2);
+    expect(newSuggestionsOnly(drafts, []).fresh).toHaveLength(2);
+    const onJob = drafts.map((d) => ({ source_quote_id: d.source_quote_id, source_row: d.source_row, removed_at: null }));
+    expect(newSuggestionsOnly(drafts, onJob)).toMatchObject({ fresh: [], already: 2 });
+  });
+
+  it("a copy of E-017 is never a second Bring In of the same twelve", () => {
+    const e017 = quoteCircuitsToSuggestions({ id: E017_ID, quote_number: "E-017", circuits: E017 });
+    const onJob = e017.map((d) => ({ source_quote_id: d.source_quote_id, source_row: d.source_row, removed_at: null }));
+    const copy = quoteCircuitsToSuggestions({ id: "copy", quote_number: "E-021", circuits: E017 });
+    expect(newSuggestionsOnly(copy, onJob)).toEqual({ fresh: [], already: 0, setAside: 0, elsewhere: 12, elsewhereFrom: "E-017" });
+    // The bar: E-017 is all here, and the copy offers nothing either; a revision offers only its new row.
+    const revised = [...E017.slice(0, 11), { ...E017[11], breaker: "2P 40A" }];
+    const offers = offerEstimates(J011, "cust", [
+      { id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", circuits: E017, created_at: "2026-09-01" },
+      { id: "copy", quote_number: "E-021", job_id: null, customer_id: "cust", circuits: E017, created_at: "2026-09-02" },
+      { id: "rev", quote_number: "E-022", job_id: null, customer_id: "cust", circuits: revised, created_at: "2026-09-03" },
+    ], onJob);
+    expect(offers.map((o) => [o.quote_number, o.count, o.onJob, o.fresh, o.alsoFrom])).toEqual([
+      ["E-022", 12, 11, 1, "E-017"],
+      ["E-021", 12, 12, 0, "E-017"],
+      ["E-017", 12, 12, 0, null],
+    ]);
+  });
+
+  it("counts only what Bring In would bring, so the bar can clear", () => {
+    const rows = [...E017, { ckt: "13", description: "", breaker: "Spare", wire: null, load: null }];
+    const [o] = offerEstimates(J011, "cust", [{ id: E017_ID, quote_number: "E-017", job_id: null, customer_id: "cust", circuits: rows as never }], []);
+    expect(o.count).toBe(12);
+    expect(o.fresh).toBe(12);
   });
 
   it("finds the job's own estimate first, then the customer's unattached ones, only with circuits", () => {

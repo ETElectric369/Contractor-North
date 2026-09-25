@@ -7,9 +7,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *    with the running count, and nobody is buzzed again. A Keep All batch is one call, one notice.
  */
 
-type Row = { id: string; org_id: string; user_id: string; type: string; title: string; body: string | null; url: string; created_at: string };
+type Row = { id: string; org_id: string; user_id: string; type: string; title: string; body: string | null; url: string; created_at: string; read_at: string | null };
 let table: Row[] = [];
 let seq = 0;
+let failReads = false;
 
 function builder() {
   const filters: ((r: Row) => boolean)[] = [];
@@ -22,11 +23,12 @@ function builder() {
     in: (k: keyof Row, vs: unknown[]) => (filters.push((r) => vs.includes(r[k])), api),
     limit: () => api,
     update: (p: Partial<Row>) => ((op = "update"), (patch = p), api),
-    insert: async (rows: Omit<Row, "id" | "created_at">[]) => {
-      for (const r of rows) table.push({ ...r, id: `n${++seq}`, created_at: new Date().toISOString() } as Row);
+    insert: async (rows: Omit<Row, "id" | "created_at" | "read_at">[]) => {
+      for (const r of rows) table.push({ ...r, id: `n${++seq}`, created_at: new Date().toISOString(), read_at: null } as Row);
       return { error: null };
     },
     then: (res: (v: unknown) => void) => {
+      if (op === "select" && failReads) return res({ data: null, error: { message: "read failed" } });
       const hit = table.filter((r) => filters.every((f) => f(r)));
       if (op === "update") for (const r of hit) Object.assign(r, patch);
       res({ data: hit.map((r) => ({ id: r.id })), error: null });
@@ -46,6 +48,7 @@ const base = { type: "panel_changed", url: "/jobs/j1?tab=panel", windowMinutes: 
 
 beforeEach(() => {
   table = [];
+  failReads = false;
   push.mockClear();
 });
 
@@ -57,6 +60,15 @@ describe("the panel ring: one notice per job per hour", () => {
     expect(await ringOffice("org", ["erik", "office"], { ...base, title: "Brian changed 5 circuits on J-011 13897 Herringbone" })).toBe("refreshed");
     expect(table).toHaveLength(2);
     expect(table.map((r) => r.title)).toEqual(["Brian changed 5 circuits on J-011 13897 Herringbone", "Brian changed 5 circuits on J-011 13897 Herringbone"]);
+    expect(push).toHaveBeenCalledTimes(1);
+  });
+
+  it("a change after the office read the line brings the line back unread (still no second buzz)", async () => {
+    await ringOffice("org", ["erik"], { ...base, title: "Brian changed 1 circuit on J-011 13897 Herringbone" });
+    table[0].read_at = "2026-09-25T09:05:00Z";
+    expect(await ringOffice("org", ["erik"], { ...base, title: "Brian changed 9 circuits on J-011 13897 Herringbone" })).toBe("refreshed");
+    expect(table).toHaveLength(1);
+    expect(table[0]).toMatchObject({ title: "Brian changed 9 circuits on J-011 13897 Herringbone", read_at: null });
     expect(push).toHaveBeenCalledTimes(1);
   });
 
@@ -80,5 +92,17 @@ describe("the materials ring: every add on the bell, one push per 15 minutes", (
     expect(await ringOffice("org", ["erik"], { ...m, body: "2 ea — faceplates" })).toBe("bell_only");
     expect(table.map((r) => r.body)).toEqual(["1 ea — Q220", "2 ea — faceplates"]);
     expect(push).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("when the window can't be read", () => {
+  it("the bell line is still written (never dropped) and nobody is buzzed", async () => {
+    failReads = true;
+    const m = { type: "materials_added", url: "/jobs/j1?tab=materials", windowMinutes: 15, mode: "bell_each_push_once" as const, title: "Brian added to Herringbone materials" };
+    expect(await ringOffice("org", ["erik", "office"], { ...m, body: "1 ea — Q220" })).toBe("bell_only");
+    expect(table).toHaveLength(2);
+    expect(await ringOffice("org", ["erik"], { ...base, title: "Brian changed 2 circuits" })).toBe("bell_only");
+    expect(table).toHaveLength(3);
+    expect(push).not.toHaveBeenCalled();
   });
 });

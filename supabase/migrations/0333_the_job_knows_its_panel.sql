@@ -13,7 +13,10 @@
 -- worked out in TypeScript (src/lib/panel/model.ts), where a collision or an odd tandem is a
 -- WARNING a person reads, never a database refusal: the app suggests, a person decides. The only
 -- electrical rule the database holds is the one nobody can talk their way past: a kept circuit may
--- not sit on a crimped space (No Stab) or run off the end of the panel.
+-- not sit on a crimped space (No Stab) or run off the end of the panel. It is held from BOTH sides:
+-- a circuit can't be placed there, and a panel can't be changed (a new No Stab space, fewer
+-- spaces) under a kept circuit already there. The circuit side runs only when the placement
+-- changes, so a Roughed tap or a relabel is never refused over where the circuit sits.
 --
 -- WHO MAY DO WHAT (Erik's decision 1, and the tech job access law of 2026-09-11):
 --   * Every active member of the org reads, adds and edits circuits and panels on the org's jobs:
@@ -29,9 +32,11 @@
 -- WHAT THE TRIGGER STAMPS, SO NO CLIENT CAN SAY IT: org_id (from the job; a panel or a source
 -- from another job or org is refused, 0173's law), created_by/at, updated_by/at, removed_by, and
 -- verified_by/at, which move only when the verified flag flips. Provenance (source, the source
--- quote / document / row) is fixed at insert. A circuit from any machine source (estimate, plan,
--- photo, nort, inspector) lands as a SUGGESTION whatever the request said: nothing counts until a
--- person keeps it.
+-- quote / document / row) is fixed at insert, and has to match its source: an estimate link only on
+-- a circuit from an estimate (so only the office can say "From E-017"), a document only on one from
+-- the plans or a photo, no source row on one a person typed. A circuit from any machine source
+-- (estimate, plan, photo, nort, inspector) lands as a SUGGESTION whatever the request said:
+-- nothing counts until a person keeps it.
 --
 -- NOT APPLIED BY THE AUTHOR. Nothing here touches existing rows; the J-011 seed is never in a
 -- migration (Erik taps Bring In E-017 in the app).
@@ -139,6 +144,7 @@ declare
   v_job_org uuid;
   v_panel   public.job_panels%rowtype;
   v_slot    int;
+  v_name    text;
   i         int;
 begin
   -- A CASCADE IS NOT AN EDIT. When a quote, document or profile a row points at is deleted, the
@@ -211,6 +217,28 @@ begin
     if exists (select 1 from unnest(new.dead_spaces || new.twin_spaces) x where x < 1 or x > coalesce(new.spaces, 84)) then
       raise exception 'A No Stab or tandem space is outside this panel''s % spaces.', coalesce(new.spaces, 84) using errcode = '23514';
     end if;
+    -- THE HARD RULE FROM THE PANEL'S SIDE: a new No Stab space, or fewer spaces, can't land under a
+    -- kept, live circuit. It is named, so the person knows which one to move first.
+    if tg_op = 'UPDATE' and new.removed_at is null
+       and (new.dead_spaces is distinct from old.dead_spaces or new.spaces is distinct from old.spaces) then
+      select s.slot, coalesce(nullif(btrim(c.description), ''), nullif(btrim(c.panel_label), ''), 'a circuit')
+        into v_slot, v_name
+        from public.job_circuits c
+        cross join lateral generate_series(0, c.poles - 1) g(i)
+        cross join lateral (select c.space + 2 * g.i as slot) s
+       where c.panel_id = new.id and c.state = 'kept' and c.removed_at is null and c.space is not null
+         and (s.slot = any (new.dead_spaces) or (new.spaces is not null and s.slot > new.spaces))
+       order by s.slot
+       limit 1;
+      if found then
+        if v_slot = any (new.dead_spaces) then
+          raise exception 'Space % has the % circuit on it. Move it before marking the space No Stab.', v_slot, v_name
+            using errcode = '23514';
+        end if;
+        raise exception 'Space % has the % circuit on it, past % spaces. Move it before making the panel smaller.', v_slot, v_name, new.spaces
+          using errcode = '23514';
+      end if;
+    end if;
     return new;
   end if;
 
@@ -224,6 +252,18 @@ begin
   else
     if not v_office and new.source in ('estimate', 'plan') then
       raise exception 'Only the office brings in circuits from an estimate or the plans.' using errcode = '42501';
+    end if;
+    -- Provenance matches its source, so "From E-017" is only ever the office's Bring In: an
+    -- estimate link rides only on source 'estimate' (which is the office's), a document only on
+    -- the plans or a photo, and a circuit a person typed carries no source row at all.
+    if new.source_quote_id is not null and new.source <> 'estimate' then
+      raise exception 'Only a circuit brought in from an estimate can say which estimate.' using errcode = '42501';
+    end if;
+    if new.source_document_id is not null and new.source not in ('plan', 'photo') then
+      raise exception 'Only a circuit read off the plans or a photo can say which document.' using errcode = '42501';
+    end if;
+    if new.source_row is not null and (new.source = 'hand' or (new.source <> 'estimate' and new.source_row ? 'quote_number')) then
+      raise exception 'A circuit typed in by hand has no source row, and only an estimate''s names its estimate.' using errcode = '42501';
     end if;
     -- The app suggests, a person decides: a machine's circuit is a suggestion until someone keeps it.
     if new.source <> 'hand' then
@@ -263,7 +303,17 @@ begin
 
   -- THE ONE HARD ELECTRICAL RULE: a kept, live circuit may not sit on a No Stab space or run off the
   -- end of the panel. A 1P covers its space; a 2P covers s and s+2 on the same side; a 3P s, s+2, s+4.
-  if new.panel_id is not null and new.space is not null and new.state = 'kept' and new.removed_at is null then
+  -- Checked when the placement is made or changes (insert; space, half, poles, panel, kept, or put
+  -- back), never on a Roughed tap, a Verified mark or a relabel: those say nothing about where it sits,
+  -- and the panel side (above) keeps a panel change from stranding it.
+  if new.panel_id is not null and new.space is not null and new.state = 'kept' and new.removed_at is null
+     and (tg_op = 'INSERT'
+          or new.space is distinct from old.space
+          or new.half is distinct from old.half
+          or new.poles is distinct from old.poles
+          or new.panel_id is distinct from old.panel_id
+          or new.state is distinct from old.state
+          or new.removed_at is distinct from old.removed_at) then
     for i in 0 .. new.poles - 1 loop
       v_slot := new.space + 2 * i;
       if v_panel.spaces is not null and v_slot > v_panel.spaces then
@@ -281,8 +331,9 @@ end $$;
 comment on function public.job_panel_guard() is
   'Before insert/update on job_panels and job_circuits (0333): org from the job (a foreign job, panel, '
   'quote or document is refused), trigger-stamped created/updated/removed/verified, provenance fixed at '
-  'insert, machine sources land as suggestions, the office-only doors (shown_on_portal, panel removal, '
-  'source estimate/plan), and the No Stab / end-of-panel refusal for a kept circuit.';
+  'insert and matched to its source, machine sources land as suggestions, the office-only doors '
+  '(shown_on_portal, panel removal, source estimate/plan), and the No Stab / end-of-panel refusal for a '
+  'kept circuit, from the circuit side when it is placed and from the panel side when the panel changes.';
 
 -- A trigger function has no business being callable by a request; firing it never checks EXECUTE.
 revoke execute on function public.job_panel_guard() from public, anon, authenticated;

@@ -133,6 +133,9 @@ export function parseQuoteBreaker(text: string | null | undefined): ParsedBreake
     if (poles == null) poles = code.poles;
   }
   if (amps == null && poles == null) return null;
+  // A 240V (or 208V) circuit is two hot legs: a 2P breaker when the words don't say the poles.
+  // "30A 240V" was read as a 1P 30A with no check line, a wrong breaker stated as fact.
+  if (poles == null && /\b(?:240|208|230|250)\s*v(?:olts?|ac)?\b/i.test(words)) poles = 2;
   return { poles: poles ?? 1, amps, check };
 }
 
@@ -195,10 +198,17 @@ export function quoteCircuitsToSuggestions(
 ): CircuitDraft[] {
   const rows = Array.isArray(quote.circuits) ? quote.circuits : [];
   const out: CircuitDraft[] = [];
+  // TWO IDENTICAL ROWS ARE TWO CIRCUITS (two blank-numbered "20A · Bedroom Outlets" lines are two
+  // runs). The second one's key carries "#2", so it is neither collapsed into the first here nor
+  // refused by the one-per-source-row index; a single row's key is unchanged.
+  const times = new Map<string, number>();
   rows.forEach((c, index) => {
     const description = String(c?.description ?? "").trim() || null;
     const breaker = parseQuoteBreaker(c?.breaker);
     if (!description && !breaker) return;
+    const base = sourceKey(c);
+    const n = (times.get(base) ?? 0) + 1;
+    times.set(base, n);
     out.push({
       room: roomFromWords(c.description, c.load),
       description,
@@ -212,7 +222,7 @@ export function quoteCircuitsToSuggestions(
       source: "estimate",
       source_quote_id: quote.id,
       source_row: {
-        key: sourceKey(c),
+        key: n === 1 ? base : `${base}#${n}`,
         quote_number: quote.quote_number,
         index,
         ckt: c.ckt ?? null,
@@ -229,19 +239,27 @@ export function quoteCircuitsToSuggestions(
 }
 
 /** Split a Bring In into what is new and what is already on the job (kept, suggested, or set aside
- *  with Not This: a set-aside row stays set aside). */
+ *  with Not This: a set-aside row stays set aside). `existing` is EVERY circuit on the job: a row
+ *  that is already here from another estimate (a copy of E-017, or a revision with one line
+ *  changed) is not new either, so a copied estimate never lands its twelve a second time.
+ *  `elsewhere` counts those, and `elsewhereFrom` names the estimate they are here from. */
 export function newSuggestionsOnly(
   drafts: CircuitDraft[],
   existing: Pick<JobCircuit, "source_quote_id" | "source_row" | "removed_at">[],
-): { fresh: CircuitDraft[]; already: number; setAside: number } {
+): { fresh: CircuitDraft[]; already: number; setAside: number; elsewhere: number; elsewhereFrom: string | null } {
   const have = new Map<string, boolean>();
+  const anyQuote = new Map<string, string | null>();
   for (const e of existing) {
     const k = e.source_row?.key;
-    if (e.source_quote_id && k) have.set(`${e.source_quote_id}|${k}`, !!e.removed_at);
+    if (!e.source_quote_id || !k) continue;
+    have.set(`${e.source_quote_id}|${k}`, !!e.removed_at);
+    if (!anyQuote.has(k)) anyQuote.set(k, e.source_row?.quote_number ?? null);
   }
   const fresh: CircuitDraft[] = [];
   let already = 0;
   let setAside = 0;
+  let elsewhere = 0;
+  let elsewhereFrom: string | null = null;
   const seen = new Set<string>();
   for (const d of drafts) {
     const k = `${d.source_quote_id}|${d.source_row.key}`;
@@ -250,11 +268,16 @@ export function newSuggestionsOnly(
       else already++;
       continue;
     }
+    if (anyQuote.has(d.source_row.key)) {
+      elsewhere++;
+      elsewhereFrom ??= anyQuote.get(d.source_row.key) ?? null;
+      continue;
+    }
     if (seen.has(k)) continue;
     seen.add(k);
     fresh.push(d);
   }
-  return { fresh, already, setAside };
+  return { fresh, already, setAside, elsewhere, elsewhereFrom };
 }
 
 /** The estimates a job's Panel tab can bring in, best first: the job's own, then the same
@@ -280,7 +303,9 @@ export function rankEstimateCandidates(
       job_id: q.job_id,
       customer_id: q.customer_id,
       address: q.address ?? null,
-      count: Array.isArray(q.circuits) ? (q.circuits as unknown[]).length : 0,
+      // What Bring In would bring (a row with no words and no size is never brought in), not the
+      // raw array length: a count Bring In can never reach kept the bar up forever.
+      count: quoteCircuitsToSuggestions({ id: q.id, quote_number: q.quote_number, circuits: q.circuits as QuoteCircuit[] | null }).length,
       created_at: q.created_at ?? null,
     }))
     .filter((q) => q.count > 0 && (q.job_id === jobId || (q.job_id == null && customerId != null && q.customer_id === customerId)));
@@ -288,6 +313,26 @@ export function rankEstimateCandidates(
     (a, b) =>
       Number(b.job_id === jobId) - Number(a.job_id === jobId) || String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")),
   );
+}
+
+/** One estimate the office's bar offers: how many circuits Bring In would bring (count), how many
+ *  of those are already on the job, from it or from another estimate (onJob), and how many are
+ *  still new (fresh). The bar shows only while fresh > 0, so a copied or revised estimate whose
+ *  rows are already here never offers them twice, and a bar never stays up doing nothing. */
+export type EstimateOffer = EstimateCandidate & { onJob: number; fresh: number; alsoFrom: string | null };
+export function offerEstimates(
+  jobId: string,
+  customerId: string | null,
+  quotes: { id: string; quote_number: string | null; job_id: string | null; customer_id: string | null; circuits: unknown; address?: string | null; created_at?: string | null }[],
+  onJob: Pick<JobCircuit, "source_quote_id" | "source_row" | "removed_at">[],
+): EstimateOffer[] {
+  const byId = new Map(quotes.map((q) => [q.id, q]));
+  return rankEstimateCandidates(jobId, customerId, quotes).map((c) => {
+    const q = byId.get(c.id)!;
+    const drafts = quoteCircuitsToSuggestions({ id: q.id, quote_number: q.quote_number, circuits: q.circuits as QuoteCircuit[] | null });
+    const r = newSuggestionsOnly(drafts, onJob);
+    return { ...c, onJob: c.count - r.fresh.length, fresh: r.fresh.length, alsoFrom: r.elsewhere ? r.elsewhereFrom : null };
+  });
 }
 
 // ── where circuits sit ──────────────────────────────────────────────────────────────────────────

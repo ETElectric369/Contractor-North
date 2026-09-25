@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, ChevronRight, LayoutGrid, List, Loader2, Pencil, Plus, ShieldCheck, Sparkles, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,7 @@ import {
   dismissSuggestion,
   keepSuggestions,
   saveCircuit,
+  setAsideSuggestions,
   takeOffCircuit,
   undoTakeOff,
   type PanelLoad,
@@ -117,14 +118,22 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
   const groups = useMemo(() => groupByRoom(kept), [kept]);
   const rooms = useMemo(() => [...new Set(kept.map((c) => titleWords(c.room)).filter(Boolean))].sort(), [kept]);
   const editingRow = circuits.find((c) => c.id === editing) ?? null;
-  const offers = estimates.filter((e) => e.onJob < e.count);
+  // An estimate is offered while Bring In would still bring something (offerEstimates): a copy
+  // whose rows are already here, or one whose every row is here or set aside, offers nothing.
+  const offers = estimates.filter((e) => e.fresh > 0);
+  const adding = useRef(false);
 
   /** Run one write; show its answer; hand back the result. */
   async function run<T extends { ok: boolean }>(key: string, fn: () => Promise<T>): Promise<T | null> {
     setBusy(key);
     try {
       const r = await fn();
-      if (!r.ok) toast((r as unknown as { error: string }).error, "error");
+      if (!r.ok) {
+        toast((r as unknown as { error: string }).error, "error");
+        // Someone changed it first: show the row as it is now, never the stale one.
+        const current = (r as unknown as { current?: JobCircuit }).current;
+        if (current) upsert([current]);
+      }
       return r;
     } catch {
       toast("That didn't save. Check your connection and try again.", "error");
@@ -138,8 +147,28 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     const r = await run(`bring:${quoteId}`, () => bringInEstimateCircuits(jobId, quoteId));
     if (!r || !r.ok) return;
     upsert(r.rows);
-    setEstimates((es) => es.map((e) => (e.id === quoteId ? { ...e, onJob: e.onJob + r.added } : e)));
-    toast(r.message || `Brought in from ${label}.`, "info", undefined, r.added ? undefined : { sticky: true });
+    setEstimates(r.estimates);
+    if (!r.added) {
+      toast(r.message || `Nothing new from ${label}.`, "info", undefined, { sticky: true });
+      return;
+    }
+    // A wrong Bring In is one tap to take back, not twelve Not This taps.
+    const ids = r.rows.map((x) => x.id);
+    toast(r.message || `Brought in from ${label}.`, "info", {
+      label: "Undo",
+      onClick: async () => {
+        const u = await run("unbring", () => setAsideSuggestions(jobId, ids, true));
+        if (!u || !u.ok) return;
+        upsert(u.rows);
+        toast(`Set aside the ${u.rows.length} from ${label}.`, "success", {
+          label: "Undo",
+          onClick: async () => {
+            const b = await run("rebring", () => setAsideSuggestions(jobId, ids, false));
+            if (b && b.ok) upsert(b.rows);
+          },
+        });
+      },
+    });
   }
 
   async function keep(ids: string[], words: string) {
@@ -195,7 +224,8 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     toast(`${circuitName(c)}: ${PROGRESS_WORDS[r.row.progress]}.`, "success", {
       label: "Undo",
       onClick: async () => {
-        const u = await run(`chip:${c.id}`, () => saveCircuit(c.id, { progress: from }));
+        // Only if it still says what this tap made it: a crewmate's later tap is never rolled back.
+        const u = await run(`chip:${c.id}`, () => saveCircuit(c.id, { progress: from }, { progress: r.row.progress }));
         if (u && u.ok) upsert([u.row]);
       },
     });
@@ -203,6 +233,10 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
 
   async function quickAdd(e: React.FormEvent) {
     e.preventDefault();
+    // The keyboard's Go submits the form even while the button is disabled: one add at a time, or
+    // a double press with a glove on makes two identical circuits.
+    if (adding.current || busy !== null) return;
+    adding.current = true;
     const q = { ...quick, room: titleWords(quick.room) };
     const r = await run("add", () =>
       addCircuit(jobId, {
@@ -213,7 +247,9 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         work: q.work,
         panel_id: activePanelId,
       }),
-    );
+    ).finally(() => {
+      adding.current = false;
+    });
     if (!r || !r.ok) return;
     upsert([r.row]);
     setQuick(q);
@@ -238,7 +274,7 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
             <div className="min-w-0 flex-1 text-sm">
               <div className="font-semibold text-slate-900">
                 {e.quote_number ?? "The Estimate"} Has {e.count} Circuit{e.count === 1 ? "" : "s"}
-                {e.onJob ? `. ${e.onJob} Are Here` : ""}
+                {e.onJob ? `. ${e.onJob} ${e.onJob === 1 ? "Is" : "Are"} Here${e.alsoFrom ? ` From ${e.alsoFrom}` : ""}` : ""}
               </div>
               {e.address && <div className="truncate text-xs text-slate-500">{e.address}</div>}
             </div>
@@ -554,8 +590,14 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
           jobId={jobId}
           panel={panelSheet === "new" ? null : panels.find((p) => p.id === panelSheet) ?? null}
           photos={initial.photos}
-          onSaved={(row) => {
+          takenNames={panels.filter((p) => p.id !== panelSheet).map((p) => p.name)}
+          onSaved={(row, placed) => {
             setPanels((ps) => (ps.some((p) => p.id === row.id) ? ps.map((p) => (p.id === row.id ? row : p)) : [...ps, row]));
+            // The first panel took the circuits already on the list: the door shows them now.
+            if (placed?.adopted.length) upsert(placed.adopted);
+            if (placed?.notAdopted.length) {
+              toast(`${placed.notAdopted.length} couldn't go on ${row.name}. ${placed.notAdopted.join(" ")}`, "info", undefined, { sticky: true });
+            }
             if (panelSheet === "new") {
               setActivePanelId(row.id);
               setPanelSheet(row.id);

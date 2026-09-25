@@ -10,14 +10,15 @@ import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
 import {
+  circuitName,
   countWord,
   newSuggestionsOnly,
   nextProgress,
+  offerEstimates,
   quoteCircuitsToSuggestions,
-  rankEstimateCandidates,
-  type EstimateCandidate,
+  type EstimateOffer,
 } from "@/lib/panel/model";
-import { isUuid, normalizeCircuitPatch, normalizePanelPatch } from "@/lib/panel/input";
+import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch } from "@/lib/panel/input";
 import type { CircuitProgress, JobCircuit, JobPanel, QuoteCircuit } from "@/lib/types";
 
 /**
@@ -27,11 +28,14 @@ import type { CircuitProgress, JobCircuit, JobPanel, QuoteCircuit } from "@/lib/
  * door — add, relabel, set the space, Planned / Roughed / Done, Verified On Site, Take Off with Undo,
  * Keep / Not This — because the crew are the ones standing at the panel and nothing here carries a
  * price. Only the office brings circuits in from an estimate (requireStaff, re-checked here, and the
- * database refuses source 'estimate' from anyone else) or takes a panel off a job.
+ * database refuses source 'estimate' from anyone else). Taking a panel off a job is the office's in
+ * the database too, but it has no door yet: it comes with the phase that moves its circuits.
  *
  * HOW: every write names a row of the caller's own org, whitelists its fields (lib/panel/input),
  * and reads back what it wrote — a zero-row update is a 204, not a save (the silent-write law). The
  * row that comes back is what the tab shows, so the screen is the database's answer, not a guess.
+ * A field edit names what the editor SAW (`seen`): if a crewmate changed that field in between,
+ * nothing is overwritten, and the answer says who changed it and carries the row as it is now.
  * There is no Save button: each field saves when it changes, and every removal is soft, so Undo
  * puts it back exactly (the not-annoying law).
  *
@@ -47,7 +51,8 @@ const CIRCUIT_COLS =
 
 type Member = { supabase: SupabaseClient; userId: string; orgId: string; staff: boolean; name: string };
 type Fail = { ok: false; error: string };
-type RowResult<T> = { ok: true; row: T } | Fail;
+/** A refused edit may carry the row as it is now (someone changed it first), so the screen can show it. */
+type RowResult<T> = { ok: true; row: T } | (Fail & { current?: T });
 
 const NOT_READY = "The Panel tab isn't switched on for this database yet. It turns on with the next update.";
 
@@ -102,6 +107,36 @@ async function circuitOf(m: Member, id: string): Promise<JobCircuit | null> {
 
 const touched = (jobId: string) => revalidatePath(`/jobs/${jobId}`);
 
+/** The job's one live panel, or null when it has none or several (then a person picks). */
+async function onlyPanelOf(m: Member, jobId: string): Promise<string | null> {
+  const { data } = await m.supabase.from("job_panels").select("id").eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).limit(2);
+  const ids = ((data ?? []) as { id: string }[]).map((r) => r.id);
+  return ids.length === 1 ? ids[0] : null;
+}
+
+/**
+ * WHAT THE EDITOR SAW, AS A CONDITION ON THE WRITE. Each field the edit changes must still hold the
+ * value the editor was looking at; a crewmate's newer value is never overwritten without a word.
+ * Only the fields a person edits can be named (a condition on anything else is dropped).
+ */
+function matchSeen<Q>(q: Q, seen: Record<string, unknown> | undefined, allowed: readonly string[]): Q {
+  let out = q as any;
+  for (const [k, v] of Object.entries(seen ?? {})) {
+    if (!allowed.includes(k)) continue;
+    if (v == null) out = out.is(k, null);
+    else if (Array.isArray(v)) out = out.eq(k, `{${v.map(Number).filter(Number.isFinite).join(",")}}`);
+    else out = out.eq(k, v);
+  }
+  return out as Q;
+}
+
+async function nameOf(m: Member, id: string | null): Promise<string> {
+  if (!id) return "Someone";
+  if (id === m.userId) return "You";
+  const { data } = await m.supabase.from("profiles").select("full_name").eq("id", id).maybeSingle();
+  return (data as { full_name?: string | null } | null)?.full_name?.trim() || "Someone";
+}
+
 /** A crew change rings the office once per job per hour, with a running count ("Brian changed 3
  *  circuits on J-011 13897 Herringbone"). Only a crew change is news; the office edits its own list
  *  all day. Everything it needs is resolved in request scope and handed to after(). */
@@ -150,7 +185,7 @@ async function ringPanelChange(m: Member, jobId: string): Promise<void> {
 
 // ── reading ─────────────────────────────────────────────────────────────────────────────────────
 
-export type PanelEstimate = EstimateCandidate & { onJob: number };
+export type PanelEstimate = EstimateOffer;
 export type PanelLoad =
   | {
       ok: true;
@@ -183,21 +218,7 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
 
   // THE ESTIMATE FINDER RUNS IN AN OFFICE SESSION ONLY: a tech's page never carries it (an estimate
   // is the office's paper), and the door it feeds is the office's.
-  let estimates: PanelEstimate[] = [];
-  if (m.staff) {
-    let q = m.supabase
-      .from("quotes")
-      .select("id, quote_number, job_id, customer_id, circuits, address, created_at")
-      .eq("org_id", m.orgId)
-      .not("circuits", "is", null);
-    q = job.customer_id ? q.or(`job_id.eq.${jobId},and(job_id.is.null,customer_id.eq.${job.customer_id})`) : q.eq("job_id", jobId);
-    const { data: qs, error: qErr } = await q.order("created_at", { ascending: false }).limit(20);
-    if (qErr) reportError("panel.loadJobPanel.estimates", qErr, { jobId });
-    estimates = rankEstimateCandidates(jobId, job.customer_id, (qs ?? []) as never).map((c) => ({
-      ...c,
-      onJob: circuits.filter((x) => x.source_quote_id === c.id).length,
-    }));
-  }
+  const estimates = m.staff ? await findEstimates(m, job, circuits) : [];
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
   // The viewer rides along, so a mark they make now ("Verified On Site By Brian") has its name.
@@ -217,10 +238,49 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
   };
 }
 
+/** The office's bar: this job's own estimates, then the same customer's with no job yet (never a
+ *  declined one), each with what Bring In would still bring. A copy of an estimate whose rows are
+ *  already here offers nothing (offerEstimates). */
+async function findEstimates(
+  m: Member,
+  job: JobRow,
+  circuits: Pick<JobCircuit, "source_quote_id" | "source_row" | "removed_at">[],
+): Promise<PanelEstimate[]> {
+  let q = m.supabase
+    .from("quotes")
+    .select("id, quote_number, job_id, customer_id, circuits, address, created_at, status")
+    .eq("org_id", m.orgId)
+    .not("circuits", "is", null)
+    .neq("status", "declined");
+  q = job.customer_id ? q.or(`job_id.eq.${job.id},and(job_id.is.null,customer_id.eq.${job.customer_id})`) : q.eq("job_id", job.id);
+  const { data: qs, error: qErr } = await q.order("created_at", { ascending: false }).limit(20);
+  if (qErr) reportError("panel.findEstimates", qErr, { jobId: job.id });
+  return offerEstimates(job.id, job.customer_id, (qs ?? []) as never, circuits);
+}
+
 // ── the panel ───────────────────────────────────────────────────────────────────────────────────
 
-/** Add The Panel (panelId null) or change one of its fields. The crew and the office alike. */
-export async function savePanel(jobId: string, panelId: string | null, patch: Record<string, unknown>): Promise<RowResult<JobPanel>> {
+export type PanelSaveResult =
+  | { ok: true; row: JobPanel; adopted: JobCircuit[]; notAdopted: string[] }
+  | (Fail & { current?: JobPanel });
+
+/**
+ * Add The Panel (panelId null) or change one of its fields. The crew and the office alike. `seen`
+ * is what the editor was looking at for the fields it changes (see matchSeen).
+ *
+ * THE FIRST PANEL TAKES THE CIRCUITS ALREADY ON THE LIST. Circuits listed before anyone looked in
+ * the box (Bring In, Keep All, Add A Circuit, then Add The Panel: J-011's planned order) have no
+ * panel. With one panel on the job there is no picker to attach them, so the job's only panel
+ * adopts them here, and from then on the door shows them and the No Stab refusal covers them. One
+ * the database won't place (a kept circuit on a space this panel marks No Stab) stays panel-less,
+ * and is named, never dropped.
+ */
+export async function savePanel(
+  jobId: string,
+  panelId: string | null,
+  patch: Record<string, unknown>,
+  seen?: Record<string, unknown>,
+): Promise<PanelSaveResult> {
   const m = await member();
   if ("error" in m) return m;
   const v = normalizePanelPatch(patch);
@@ -240,34 +300,41 @@ export async function savePanel(jobId: string, panelId: string | null, patch: Re
   if (panelId && !isUuid(panelId)) return { ok: false, error: "That panel isn't on this job." };
   if (panelId && !Object.keys(v.value).length) return { ok: false, error: "Nothing to save." };
   const q = panelId
-    ? m.supabase.from("job_panels").update(v.value).eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null)
+    ? matchSeen(m.supabase.from("job_panels").update(v.value).eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null), seen, PANEL_FIELDS)
     : m.supabase.from("job_panels").insert({ job_id: jobId, ...v.value });
   const { data, error } = await q.select(PANEL_COLS).maybeSingle();
   if (error) return fail(error, "The panel didn't save.");
-  if (!data) return { ok: false, error: "The panel didn't save. It may have been taken off this job. Reload and try again." };
+  if (!data) {
+    if (panelId && seen && Object.keys(seen).length) {
+      const { data: now } = await m.supabase.from("job_panels").select(PANEL_COLS).eq("id", panelId).eq("org_id", m.orgId).is("removed_at", null).maybeSingle();
+      if (now) {
+        const who = await nameOf(m, (now as JobPanel).updated_by);
+        return { ok: false, error: `${who} just changed this panel. It shows what's there now; change it again if it still needs it.`, current: now as JobPanel };
+      }
+    }
+    return { ok: false, error: "The panel didn't save. It may have been taken off this job. Reload and try again." };
+  }
+  const row = data as JobPanel;
+  let adopted: JobCircuit[] = [];
+  const notAdopted: string[] = [];
+  if (!panelId && (await onlyPanelOf(m, jobId)) === row.id) {
+    const loose = m.supabase.from("job_circuits").update({ panel_id: row.id }).eq("job_id", jobId).eq("org_id", m.orgId).is("panel_id", null);
+    const all = await loose.select(CIRCUIT_COLS);
+    if (!all.error) {
+      adopted = (all.data ?? []) as JobCircuit[];
+    } else {
+      // One of them sits on a space this panel marks No Stab (or past its end): place the rest.
+      const { data: each } = await m.supabase.from("job_circuits").select("id, room, description, panel_label, amps, poles").eq("job_id", jobId).eq("org_id", m.orgId).is("panel_id", null);
+      for (const c of (each ?? []) as Pick<JobCircuit, "id" | "room" | "description" | "panel_label" | "amps" | "poles">[]) {
+        const one = await m.supabase.from("job_circuits").update({ panel_id: row.id }).eq("id", c.id).eq("org_id", m.orgId).is("panel_id", null).select(CIRCUIT_COLS).maybeSingle();
+        if (one.data) adopted.push(one.data as JobCircuit);
+        else notAdopted.push(`${circuitName(c)}: ${one.error ? dbError(one.error) : "it changed while the panel was added."}`);
+      }
+    }
+  }
   touched(jobId);
   ringIfCrew(m, jobId);
-  return { ok: true, row: data as JobPanel };
-}
-
-/** Take a panel off the job (the office only; the database says so too). Its circuits stay on the
- *  job with no panel, and Put Back returns it. */
-export async function setPanelRemoved(jobId: string, panelId: string, removed: boolean): Promise<RowResult<JobPanel>> {
-  const m = await office();
-  if ("error" in m) return m;
-  if (!isUuid(panelId) || !(await jobOf(m, jobId))) return { ok: false, error: "That panel isn't on this job." };
-  const { data, error } = await m.supabase
-    .from("job_panels")
-    .update({ removed_at: removed ? new Date().toISOString() : null })
-    .eq("id", panelId)
-    .eq("job_id", jobId)
-    .eq("org_id", m.orgId)
-    .select(PANEL_COLS)
-    .maybeSingle();
-  if (error) return fail(error, "The panel didn't change.");
-  if (!data) return { ok: false, error: "That panel isn't on this job any more. Reload and try again." };
-  touched(jobId);
-  return { ok: true, row: data as JobPanel };
+  return { ok: true, row, adopted, notAdopted };
 }
 
 // ── circuits ────────────────────────────────────────────────────────────────────────────────────
@@ -279,6 +346,8 @@ export async function addCircuit(jobId: string, input: Record<string, unknown>):
   const v = normalizeCircuitPatch(input);
   if (!v.ok) return v;
   if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  // No panel named and the job has exactly one: it goes on that one (nothing else would attach it).
+  if (v.value.panel_id == null) v.value.panel_id = await onlyPanelOf(m, jobId);
   const { data: last } = await m.supabase
     .from("job_circuits")
     .select("sort_order")
@@ -305,27 +374,53 @@ export async function addCircuit(jobId: string, input: Record<string, unknown>):
   return { ok: true, row: data as JobCircuit };
 }
 
-async function writeCircuit(m: Member, id: string, fields: Record<string, unknown>, guard?: (q: any) => any): Promise<RowResult<JobCircuit>> {
+async function writeCircuit(
+  m: Member,
+  id: string,
+  fields: Record<string, unknown>,
+  guard?: (q: any) => any,
+  seen?: Record<string, unknown>,
+): Promise<RowResult<JobCircuit>> {
   if (!isUuid(id)) return { ok: false, error: "That circuit isn't on this job." };
-  let q = m.supabase.from("job_circuits").update(fields).eq("id", id).eq("org_id", m.orgId);
+  let q = matchSeen(m.supabase.from("job_circuits").update(fields).eq("id", id).eq("org_id", m.orgId), seen, CIRCUIT_FIELDS);
   if (guard) q = guard(q);
   const { data, error } = await q.select(CIRCUIT_COLS).maybeSingle();
   if (error) return fail(error, "The circuit didn't save.");
-  if (!data) return { ok: false, error: "That circuit changed or went away while you were on it. Reload and try again." };
+  if (!data) {
+    if (seen && Object.keys(seen).length) {
+      const now = await circuitOf(m, id);
+      if (now) {
+        const who = await nameOf(m, now.updated_by);
+        return { ok: false, error: `${who} just changed ${circuitName(now)}. It shows what's there now; change it again if it still needs it.`, current: now };
+      }
+    }
+    return { ok: false, error: "That circuit changed or went away while you were on it. Reload and try again." };
+  }
   const row = data as JobCircuit;
   touched(row.job_id);
   ringIfCrew(m, row.job_id);
   return { ok: true, row };
 }
 
-/** One field (or a few) saved as it changes. */
-export async function saveCircuit(circuitId: string, patch: Record<string, unknown>): Promise<RowResult<JobCircuit>> {
+/**
+ * One field (or a few) saved as it changes. `seen` is what the editor was looking at for those
+ * fields: a crewmate's newer value is never overwritten silently (the answer carries it instead).
+ * A space set on a circuit with no panel lands on the job's panel when the job has exactly one.
+ */
+export async function saveCircuit(circuitId: string, patch: Record<string, unknown>, seen?: Record<string, unknown>): Promise<RowResult<JobCircuit>> {
   const m = await member();
   if ("error" in m) return m;
   const v = normalizeCircuitPatch(patch);
   if (!v.ok) return v;
   if (!Object.keys(v.value).length) return { ok: false, error: "Nothing to save." };
-  return writeCircuit(m, circuitId, v.value);
+  if (v.value.space != null && !("panel_id" in v.value)) {
+    const c = await circuitOf(m, circuitId);
+    if (c && c.panel_id == null) {
+      const only = await onlyPanelOf(m, c.job_id);
+      if (only) v.value.panel_id = only;
+    }
+  }
+  return writeCircuit(m, circuitId, v.value, undefined, seen);
 }
 
 /** The progress chip: one tap moves it on from what the tapper SAW, so a double tap or a crewmate's
@@ -339,7 +434,8 @@ export async function advanceProgress(circuitId: string, from: CircuitProgress):
   const now = await circuitOf(m, circuitId);
   if (now && now.progress !== from) {
     const words = { planned: "Planned", roughed: "Roughed", done: "Done" }[now.progress];
-    return { ok: false, error: `Someone just changed this one. It's ${words} now.` };
+    const who = await nameOf(m, now.updated_by);
+    return { ok: false, error: `${who} just changed this one. It's ${words} now.`, current: now };
   }
   return r;
 }
@@ -371,6 +467,33 @@ export async function dismissSuggestion(circuitId: string): Promise<RowResult<Jo
   const m = await member();
   if ("error" in m) return m;
   return writeCircuit(m, circuitId, { removed_at: new Date().toISOString() }, (q) => q.eq("state", "suggested").is("removed_at", null));
+}
+
+/**
+ * Set aside (aside=true) or put back a batch of suggestions: Bring In's Undo, and the Undo of that.
+ * Only suggestions, only this job's; a set-aside suggestion keeps its place in Bring In's memory.
+ */
+export async function setAsideSuggestions(jobId: string, ids: string[], aside = true): Promise<{ ok: true; rows: JobCircuit[] } | Fail> {
+  const m = await member();
+  if ("error" in m) return m;
+  const want = [...new Set((ids ?? []).filter(isUuid))];
+  if (!want.length) return { ok: false, error: "Nothing to set aside." };
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  let q = m.supabase
+    .from("job_circuits")
+    .update({ removed_at: aside ? new Date().toISOString() : null })
+    .in("id", want)
+    .eq("job_id", jobId)
+    .eq("org_id", m.orgId)
+    .eq("state", "suggested");
+  q = aside ? q.is("removed_at", null) : q.not("removed_at", "is", null);
+  const { data, error } = await q.select(CIRCUIT_COLS);
+  if (error) return fail(error, aside ? "They weren't set aside." : "They weren't put back.");
+  const rows = (data ?? []) as JobCircuit[];
+  if (!rows.length) return { ok: false, error: aside ? "Those were already kept or set aside." : "Those were already back." };
+  touched(jobId);
+  ringIfCrew(m, jobId);
+  return { ok: true, rows };
 }
 
 export type KeepResult = { ok: true; rows: JobCircuit[]; skipped: { id: string; error: string }[] } | Fail;
@@ -433,7 +556,7 @@ export async function keepSuggestions(jobId: string, ids: string[], keep = true)
 }
 
 export type BringInResult =
-  | { ok: true; rows: JobCircuit[]; added: number; already: number; setAside: number; message: string }
+  | { ok: true; rows: JobCircuit[]; added: number; already: number; setAside: number; message: string; estimates: PanelEstimate[] }
   | Fail;
 
 /**
@@ -470,7 +593,10 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
   const nextSort = existing.reduce((mx, r) => Math.max(mx, Number(r.sort_order ?? 0)), -1) + 1;
   const drafts = quoteCircuitsToSuggestions({ id: q.id, quote_number: q.quote_number, circuits: q.circuits }, nextSort);
   if (!drafts.length) return { ok: false, error: `${label} has no circuits to bring in.` };
-  const { fresh, already, setAside } = newSuggestionsOnly(drafts, existing.filter((e) => e.source_quote_id === q.id));
+  // Every circuit on the job, not only this estimate's: a row already here from a copy or an
+  // earlier version of the estimate is not brought in twice.
+  const { fresh, already, setAside, elsewhere, elsewhereFrom } = newSuggestionsOnly(drafts, existing);
+  const fromElsewhere = elsewhere ? ` ${countWord(elsewhere)} ${elsewhere === 1 ? "is" : "are"} already here from ${elsewhereFrom ?? "another estimate"}.` : "";
   if (!fresh.length) {
     return {
       ok: true,
@@ -478,12 +604,15 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
       added: 0,
       already,
       setAside,
-      message: `Nothing new: all ${drafts.length} from ${label} are already here${setAside ? ` (${setAside} set aside with Not This)` : ""}.`,
+      message: `Nothing new: all ${drafts.length} from ${label} are already here${setAside ? ` (${setAside} set aside with Not This)` : ""}.${fromElsewhere}`,
+      estimates: await findEstimates(m, job, existing),
     };
   }
+  // With one panel on the job, the suggestions land on it (nothing else would attach them).
+  const panelId = await onlyPanelOf(m, jobId);
   const { data, error } = await m.supabase
     .from("job_circuits")
-    .insert(fresh.map((d) => ({ ...d, job_id: jobId })))
+    .insert(fresh.map((d) => ({ ...d, job_id: jobId, panel_id: panelId })))
     .select(CIRCUIT_COLS);
   if (error) {
     // Two taps racing: the unique index held, so nothing doubled. Say so rather than a raw error.
@@ -504,6 +633,7 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
     added: rows.length,
     already,
     setAside,
-    message: `Brought in ${rows.length} from ${label} as suggestions. Nothing counts until you keep it.${more}`,
+    message: `Brought in ${rows.length} from ${label} as suggestions. Nothing counts until you keep it.${more}${fromElsewhere}`,
+    estimates: await findEstimates(m, job, [...existing, ...rows]),
   };
 }

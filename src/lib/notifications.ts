@@ -74,8 +74,9 @@ export type RingInput = NotificationInput & {
    * bell_each_push_once (the materials ring): every event lands on the bell, the PUSH waits out the
    *   window. Keyed on type + url + title, so each person's adds debounce on their own.
    * once_per_window (the panel ring): ONE bell line and one push per job per window. Inside the
-   *   window the line already on the bell is refreshed with the new words (a running count), and
-   *   nobody is buzzed again. Keyed on type + url, whoever made the change.
+   *   window the line already on the bell is refreshed with the new words (a running count) and
+   *   comes back UNREAD, so a change after the office read the line is never silent; nobody is
+   *   buzzed again. Keyed on type + url, whoever made the change.
    */
   mode: "bell_each_push_once" | "once_per_window";
 };
@@ -89,6 +90,8 @@ export type RingInput = NotificationInput & {
  * one), always inside the actor's org.
  *
  * Never throws: a notification must never unsave the change that caused it. Returns what it did.
+ * If the window can't be read, the bell line is still written (the line is never dropped) and the
+ * push is skipped, since it can't be known whether the office was just buzzed.
  */
 export async function ringOffice(
   orgId: string | null | undefined,
@@ -110,22 +113,23 @@ export async function ringOffice(
       .gte("created_at", since);
     if (n.mode === "bell_each_push_once") q = q.eq("title", n.title);
     const { data: recent, error: rErr } = await q.limit(50);
-    if (rErr) throw rErr;
+    if (rErr) reportError("ringOffice.window", rErr, { orgId, type: n.type });
     const inWindow = (recent ?? []) as { id: string }[];
 
-    if (n.mode === "once_per_window" && inWindow.length) {
-      const { error } = await sb
+    if (!rErr && n.mode === "once_per_window" && inWindow.length) {
+      const { data: refreshed, error } = await sb
         .from("notifications")
-        .update({ title: n.title, body: n.body ?? null })
+        .update({ title: n.title, body: n.body ?? null, read_at: null })
         .in("id", inWindow.map((r) => r.id))
         .select("id");
       if (error) throw error;
-      return "refreshed";
+      // Every line in the window had gone (cleared from the bell): write a new one.
+      if ((refreshed ?? []).length) return "refreshed";
     }
 
     const wrote = await createNotifications(orgId, ids, { type: n.type, title: n.title, body: n.body, url: n.url });
     if (!wrote) return "failed";
-    if (inWindow.length) return "bell_only";
+    if (rErr || inWindow.length) return "bell_only";
     // "assigned" is the push kind for "something landed that is yours to deal with", so it respects
     // the same per-boss toggle requestMaterials's ask does.
     await sendPushToProfiles(ids, "assigned", { title: n.title, body: n.body ?? "", url: n.url }).catch(() => {});
