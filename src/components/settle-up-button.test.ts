@@ -141,9 +141,10 @@ describe("every way to the reader goes through doorFor", () => {
 describe("a PaymentIntent nobody can reach is cancelled, not left open on the tenant's Stripe", () => {
   it("every mint in this file self-cancels when the sheet closed under it", () => {
     const mints = [...SRC.matchAll(/createTapPaymentIntent\(/g)].map((m) => m.index ?? 0);
-    // Two: the open-time pre-mint (Apple 5.6) and doorFor's, which is the one the press, the
-    // job/appointment tap and the post-terms retry all come through.
-    expect(mints).toHaveLength(2);
+    // Three: the open-time pre-mint (Apple 5.6), doorFor's (the press, the job/appointment tap and
+    // the post-terms retry all come through it), and the yes to "Send INV-078 as the bill first?"
+    // asked by the open-time mint on a draft (sendAndGo), which sends it and holds the door.
+    expect(mints).toHaveLength(3);
     for (const at of mints) {
       // Within the handful of lines after the mint resolves, the closed-sheet branch has to let
       // the intent go. Before this wave doorFor's mint just `return`ed and the intent stayed

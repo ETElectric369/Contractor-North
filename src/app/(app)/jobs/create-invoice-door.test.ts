@@ -56,7 +56,9 @@ function jobWithDraft(draft: { id: string; number: string; kind: string; sources
   return fake((table, cols, single) => {
     if (table === "payment_milestones") return single ? null : [];
     // Any non-void draw on the job (openDraftOnJob beside a standard draft; the draw-job route).
-    if (table === "invoices" && cols === "id") return liveDraw || draft.kind !== "standard" ? [{ id: "inv-077" }] : [];
+    if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) {
+      return liveDraw || draft.kind !== "standard" ? [{ id: "inv-077", invoice_number: "INV-077" }] : [];
+    }
     if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) {
       return [{ id: draft.id, invoice_number: draft.number, invoice_kind: draft.kind, dismissed_import_keys: [] }];
     }
@@ -104,6 +106,44 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     const res = await createInvoiceForJob(JOB);
     expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
     expect(res).toMatchObject({ ok: true, id: "inv-081" });
+  });
+
+  it("Tao J-002: a quoted job whose paid deposit came from the estimate and whose draws bill actuals goes to the progress report — the paid deposit is never reopened", async () => {
+    const createInvoiceFromQuote = (await import("../billing/actions")).createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
+    createInvoiceFromQuote.mockReset();
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return []; // no open draft
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return []; // no standard invoices
+      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      if (table === "invoices" && cols === "id") return [{ id: "inv-00006" }]; // the deposit carries the quote_id
+      if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00028", invoice_number: "INV-00028" }, { id: "inv-00006", invoice_number: "INV-00006" }];
+      if (table === "invoice_items" && cols === "id") return [{ id: "li-labor" }]; // INV-00028 carries labor lines
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-new", note: "Started a progress payment for 19.5 hours." });
+    const res = await createInvoiceForJob(JOB);
+    expect(createInvoiceFromQuote).not.toHaveBeenCalled();
+    expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
+    expect(res).toMatchObject({ ok: true, id: "inv-new" });
+  });
+
+  it("a quoted job billed only by contract draws is told the door, with the latest draw — never a reopened bill, never actuals behind its back", async () => {
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+      if (table === "quotes") return [{ id: "q-1", status: "accepted" }];
+      if (table === "invoices" && cols === "id") return [{ id: "dep-1" }];
+      if (table === "invoices" && cols === "id, invoice_number") return [{ id: "dep-1", invoice_number: "INV-090" }];
+      if (table === "invoice_items" && cols === "id") return []; // no labor/costs lines on any draw
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    const res = await createInvoiceForJob(JOB);
+    expect(state.drawDoor).not.toHaveBeenCalled();
+    expect(res.ok).toBe(false);
+    expect(res.billedOn).toEqual({ id: "dep-1", number: "INV-090" });
+    expect(res.error).toMatch(/Progress Payment/);
   });
 
   it("an open STANDARD draft stays this door's business, as before", async () => {

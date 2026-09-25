@@ -4,7 +4,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { draftPromotionOnPayment } from "@/lib/tap-settlement";
+import { paymentReachedDraft } from "@/lib/tap-settlement";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
@@ -136,29 +136,12 @@ export async function POST(req: Request) {
     eventId: string,
     paymentIntent: string | null,
     connectedAccount: string | null,
-    // WHICH DOOR THE MONEY CAME THROUGH — the ledger note, the words of the office push, and
-    // whether that door is one that may move a draft (see promotesDraft below). Defaulted so the
-    // Checkout branch reads exactly as it always has; Tap to Pay passes its own. One writer, one
-    // extra parameter — NOT a second insert path (the double-record class this helper closed).
-    via: {
-      note: string;
-      said: string;
-      /**
-       * THE PAY DOOR'S DEED, AND ONLY AT THE DEED (INV-069, 2026-09-18).
-       *
-       * True for a door that takes money WITHOUT ever putting a bill in front of the customer —
-       * today only Tap to Pay on iPhone, a card_present charge across the counter. Such a door may
-       * be opened on a draft, so the draft has to move when the money lands: paidStatus()
-       * deliberately never advances a draft, and a paid draft would otherwise sit on 'draft' with
-       * money on it forever. See draftPromotionOnPayment for the whole rule and what it must not
-       * touch (sent_at — this is a payment, not a delivery).
-       *
-       * False (the default) for the public link door: /api/pay only ever opens on a bill the
-       * customer was already handed, and collectArtifacts promoted it at that handing. Its
-       * promotion belongs to the delivery, not to this webhook.
-       */
-      promotesDraft?: boolean;
-    } = { note: "Online payment", said: "paid online" },
+    // WHICH DOOR THE MONEY CAME THROUGH — the ledger note and the words of the office push.
+    // Defaulted so the Checkout branch reads exactly as it always has; Tap to Pay passes its own.
+    // One writer, one extra parameter — NOT a second insert path (the double-record class this
+    // helper closed). No door moves a status here any more (lib/tap-settlement): a draft becomes a
+    // bill when a person sends it, and every pay door asks first.
+    via: { note: string; said: string } = { note: "Online payment", said: "paid online" },
   ) {
     if (!invoiceId || !orgId || amount <= 0) return;
     /**
@@ -191,10 +174,9 @@ export async function POST(req: Request) {
     }
     const { data: target } = await supabase
       .from("invoices")
-      // status rides along because the promotion below has to know whether this is a draft, and
-      // the projection law says you cannot notice what you did not select. It is read INSIDE the
-      // org-scoped lookup on purpose: the promotion is a write, and it must stand behind exactly
-      // the same tenant boundary the payment row does.
+      // status rides along because a draft reaching this door has to be SAID (see below), and the
+      // projection law says you cannot notice what you did not select. Read inside the org-scoped
+      // lookup, behind the same tenant boundary the payment row stands behind.
       .select("id, status")
       .eq("id", invoiceId)
       .eq("org_id", orgId)
@@ -206,57 +188,30 @@ export async function POST(req: Request) {
       });
       return;
     }
-    const promoteTo = draftPromotionOnPayment((target as { status?: string | null }).status, via.promotesDraft === true);
+    /**
+     * A DRAFT IS SETTLED, NEVER SENT, AND ALWAYS SAID (Connected North Phase 1).
+     *
+     * Every pay door asks "Send INV-078 as the bill first?" and sends it on the yes before a card
+     * can be charged, so money arriving on a draft means something slipped past that question (a
+     * PaymentIntent minted before it shipped, a bill put back to Draft under an open sheet). It is
+     * recorded and recalced like a cash deposit on a draft - the money lands, the draft stays a
+     * draft (paidStatus never advances one) - and an error_events row makes a person look. This
+     * webhook never writes a status and never stamps sent_at (lib/tap-settlement).
+     */
+    const onDraft = paymentReachedDraft((target as { status?: string | null }).status);
 
     /**
-     * SETTLE = PROMOTE, RECALC, REFRESH — in that order, because each one needs the one before it.
+     * SETTLE = RECALC, THEN REFRESH.
      *
-     * PROMOTE FIRST (INV-069). paidStatus() never advances a draft, so a draft recalced with money
-     * on it comes back a draft: the tap would be charged, booked, and the invoice would still read
-     * Draft with $6,412 sitting on it. Moving the row off 'draft' before the recalc is what lets
-     * the shared math do its normal job and land on 'paid'. Nothing here writes sent_at — the
-     * customer was handed no bill, and sent_at is the demotion guard's evidence (0267).
-     *
-     * THEN REFRESH. The other half of the incident was that the pay door's write told no screen
-     * anything: Erik sat looking at a Draft badge and live draft controls over a database that had
-     * already moved. revalidateMoney is the one nerve every money mutation in the app uses; a
-     * webhook is a Route Handler, so it is legal here, and the invoice page, the billing board, AR
-     * and the My Day money line all re-read instead of disagreeing with the row.
+     * revalidateMoney is the one nerve every money mutation in the app uses; a webhook is a Route
+     * Handler, so it is legal here, and the invoice page, the billing board, AR and the My Day money
+     * line all re-read instead of disagreeing with the row (the other half of INV-069: a pay door's
+     * write that told no screen anything).
      *
      * Returns false when the money did NOT come to rest, so the caller can throw and let Stripe
      * retry the same event id — the insert then hits 23505 and the heal branch settles it.
      */
-    const settle = async (id: string, org: string, promotion: "sent" | null): Promise<boolean> => {
-      if (promotion) {
-        const { data: promoted, error: promoteErr } = await supabase
-          .from("invoices")
-          .update({ status: promotion })
-          .eq("id", id)
-          .eq("org_id", org)
-          // Guarded on it still being a draft so a retry, or a person who sent it by hand in the
-          // same second, cannot be overwritten by this.
-          .eq("status", "draft")
-          .select("id");
-        if (promoteErr) {
-          reportError("stripe:webhook:promote-paid-draft", promoteErr, { invoiceId: id, orgId: org });
-          return false;
-        }
-        if (!promoted?.length) {
-          // A zero-row UPDATE is a 204 (the silent-write law). Either somebody else moved it off
-          // draft in the same breath — fine, the row is where it needs to be — or the write went
-          // nowhere, which would leave a paid invoice stuck on Draft. Look, and only accept the
-          // first reading.
-          const { data: again } = await supabase.from("invoices").select("status").eq("id", id).maybeSingle();
-          if (String((again as { status?: string | null } | null)?.status ?? "") === "draft") {
-            reportError(
-              "stripe:webhook:paid-draft-not-promoted",
-              new Error("zero-row update promoting a paid draft off 'draft'"),
-              { invoiceId: id, orgId: org },
-            );
-            return false;
-          }
-        }
-      }
+    const settle = async (id: string): Promise<boolean> => {
       if (!(await recalcInvoice(supabase, id))) return false;
       try {
         revalidateMoney(id);
@@ -289,7 +244,7 @@ export async function POST(req: Request) {
         // invoice header still reading $0 owed-in-full (audit 8). recalc is idempotent, so
         // running it on every benign retry is free and it heals the crashed case. Deliberately
         // NOT the push: that one isn't idempotent and the duplicate is usually benign.
-        if (!(await settle(invoiceId, orgId, promoteTo))) {
+        if (!(await settle(invoiceId))) {
           // Still not settled — let Stripe retry rather than acking a lie (see below).
           throw new Error(`settling invoice ${invoiceId} failed on retry`);
         }
@@ -311,8 +266,16 @@ export async function POST(req: Request) {
     // re-runs recalc. So throw: the handler answers 500, Stripe retries the same event id,
     // the insert hits 23505 and the heal branch above settles it. Recalc is idempotent, so
     // the retry is free; a swallowed failure is not.
-    if (!(await settle(invoiceId, orgId, promoteTo))) {
+    if (!(await settle(invoiceId))) {
       throw new Error(`settling invoice ${invoiceId} failed after recording the payment`);
+    }
+    if (onDraft) {
+      reportError("stripe:webhook:payment-on-draft", new Error("card money landed on a draft invoice; settled, not sent"), {
+        invoiceId,
+        orgId,
+        door: via.note,
+        paymentIntent,
+      });
     }
     const { data: inv } = await supabase
       .from("invoices")
@@ -633,16 +596,12 @@ export async function POST(req: Request) {
      * subscription PIs on the platform account — falls through untouched. The checkout branch
      * is not changed by this.
      *
-     * ── AND THIS IS WHERE A DRAFT BECOMES A BILL (INV-069, 2026-09-18) ────────────────────────
+     * ── A DRAFT DOES NOT BECOME A BILL HERE (Connected North Phase 1) ─────────────────────────
      *
-     * A tap can be taken on a draft: it is a card across the counter, not a link in the
-     * customer's hand, so nothing about opening the door was ever a reason to move the row — and
-     * moving it on the OPEN is exactly what cost Erik a half-built $6,412 invoice. The row moves
-     * here instead, at the deed, because paidStatus() deliberately never advances a draft and a
-     * paid draft would sit with money on it forever. `promotesDraft` below carries that, and the
-     * promotion rides inside recordInvoicePayment so it stands behind the same org↔account and
-     * invoice↔org checks the money does, and cannot double-fire (the row is guarded on still
-     * being a draft, and a retry re-reads the status first).
+     * cn-v961 moved the draft's promotion here, "at the money", after opening the sheet had sent
+     * Erik's half-built $6,412 INV-069. It was the same silent send one step later. A draft
+     * becomes a bill when a person sends it: the tap door asks first and sends it on the yes
+     * (createTapPaymentIntent), so this branch only settles, like every other.
      */
     case "payment_intent.succeeded": {
       const pi = event.data.object as Stripe.PaymentIntent;
@@ -662,12 +621,9 @@ export async function POST(req: Request) {
           event.id,
           pi.id,
           eventAccount,
-          // promotesDraft: THE TAP DOOR IS THE ONE THAT MOVES A DRAFT, AND ONLY HERE (INV-069).
-          // Minting the PaymentIntent used to do it, on the sheet's open, before a card existed —
-          // that is the write that promoted Erik's half-built $6,412 invoice and locked it. A
-          // card_present charge hands the customer nothing, so a draft is payable across the
-          // counter and the door opening is not an event on the row; this, the money landing, is.
-          { note: "Tap to Pay on iPhone", said: "paid by card in person", promotesDraft: true },
+          // Settles, never sends: createTapPaymentIntent mints on a draft only after the person said
+          // yes to "Send INV-078 as the bill first?" and it was sent (lib/pay-door-send).
+          { note: "Tap to Pay on iPhone", said: "paid by card in person" },
         );
       }
       break;

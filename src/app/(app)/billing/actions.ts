@@ -13,6 +13,8 @@ import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
 import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { needsSendRefusal, sendDraftForPayment } from "@/lib/pay-door-send";
+import { jobBillForPayment, type JobBillRow } from "@/lib/job-bill-for-payment";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
 import { billItemisation, editedRemainderDrift, editedRemainderSentence } from "@/lib/bill-itemisation";
 import { isReturnBill, returnCreditRows, returnLinesAgainstPurchases, returnsSummaryParts, returnsThatFit, type ReturnOutcome } from "@/lib/supplier-returns";
@@ -697,13 +699,27 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
   // void row back opened a dead document and made the estimate unbillable for good.
   const { data: existingInv } = await supabase
     .from("invoices")
-    .select("id")
+    .select("id, invoice_number, status, invoice_kind")
     .eq("quote_id", quoteId)
     .neq("status", "void")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (existingInv) return { ok: true, id: existingInv.id };
+  if (existingInv) {
+    // REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tao Zhu J-002). Handing back a bill
+    // that already went out made "New Invoice" open Tao's PAID $10,000 deposit as the place for new
+    // work. A draft is still being built - open it. One that went out is said, with where to go.
+    const ex = existingInv as { id: string; invoice_number: string | null; status: string | null; invoice_kind: string | null };
+    if (ex.status === "draft") return { ok: true, id: ex.id };
+    const label = ex.invoice_number ?? "an invoice that already went out";
+    return {
+      ok: false,
+      id: ex.id,
+      error: isDrawKind(ex.invoice_kind)
+        ? `This estimate is billed with progress payments - ${label} came from it. Bill the next part with Progress Payment on the job's Invoices tab.`
+        : `This estimate is already billed on ${label}. Open it from Billing, or bill anything extra as a change order.`,
+    };
+  }
 
   // H4: a job already on the draw path can't also be billed by a standard invoice
   // carrying the full quoted amount (no import step would ever credit the draws).
@@ -3521,12 +3537,17 @@ export async function settleUp(input: {
    *  checkout on the customer's phone is about to settle it, and recording it twice would be the
    *  double-payment this action exists to prevent. */
   collect?: "record" | "later";
-}): Promise<Result & { invoiceId?: string }> {
+  /** The person said yes to "Send INV-0xx as the bill first?" (a card on the job's open draft). */
+  sendIt?: boolean;
+}): Promise<Result & { invoiceId?: string; needsSend?: true; invoiceNumber?: string | null }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   const amount = Number(input.amount);
-  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, error: "Enter what they paid." };
+  // "later" with no amount is Pay Now's card door: it lands on a bill that already says what is
+  // owed, and only a bill it has to WRITE needs a figure (asked again just before minting).
+  const noFigure = input.collect === "later" && (!Number.isFinite(amount) || amount <= 0);
+  if (!noFigure && (!Number.isFinite(amount) || amount <= 0)) return { ok: false, error: "Enter what they paid." };
   if (amount > 9_999_999) return { ok: false, error: "That amount is too large." };
 
   // ── What was the work, and who pays for it ─────────────────────────────────────────────────
@@ -3614,18 +3635,74 @@ export async function settleUp(input: {
       .maybeSingle();
     if (existing) return settleExisting(existing.id, Number(existing.total ?? 0), Number(existing.amount_paid ?? 0));
   } else if (jobId) {
-    const { data: recent } = await supabase
+    /**
+     * THE JOB'S OPEN BILL IS THE DOOR (Connected North Phase 1; J-052, J-028).
+     *
+     * This used to look only for a same-total bill minted in the last five minutes (a re-tap), and
+     * otherwise wrote a NEW one-line invoice for whatever was typed - beside INV-074, sent and open
+     * for $624.49, so the customer would owe the same work twice. Now the job's one open bill takes
+     * the payment (jobBillForPayment); two are named and the person picks; a card on a DRAFT asks
+     * "Send INV-0xx as the bill first?" and sends it properly only on the yes. With no open bill at
+     * all, the settle-up bill is written as before. A lost read is not "no bill": refuse, nothing
+     * written.
+     */
+    // TAPPED TWICE IS SETTLED ONCE: the settle-up bill this same tap wrote a moment ago is already
+    // paid (so not "open" below) - find it first, and its zero balance ends the re-tap there.
+    if (!noFigure) {
+      const { data: recent } = await supabase
+        .from("invoices")
+        .select("id, created_at, total, amount_paid")
+        .eq("job_id", jobId)
+        .eq("total", amount)
+        .is("appointment_id", null) // never trip on another visit's settle-up bill
+        .neq("status", "void")
+        .neq("status", "draft") // a coincidental same-total DRAFT from another door is not this tap
+        .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
+        .limit(1)
+        .maybeSingle();
+      if (recent) return settleExisting(recent.id, Number(recent.total ?? 0), Number(recent.amount_paid ?? 0));
+    }
+    const { data: jobBills, error: billsErr } = await supabase
       .from("invoices")
-      .select("id, created_at, total, amount_paid")
+      .select("id, invoice_number, status, total, amount_paid")
       .eq("job_id", jobId)
-      .eq("total", amount)
-      .is("appointment_id", null) // never trip on another visit's settle-up bill
       .neq("status", "void")
-      .neq("status", "draft") // a coincidental same-total DRAFT from another door is not this tap
-      .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
-      .limit(1)
-      .maybeSingle();
-    if (recent) return settleExisting(recent.id, Number(recent.total ?? 0), Number(recent.amount_paid ?? 0));
+      .order("created_at", { ascending: true });
+    if (billsErr) return { ok: false, error: "Couldn't read this job's bills just now, so nothing was recorded. Try again in a moment." };
+    const choice = jobBillForPayment((jobBills ?? []) as JobBillRow[], { card: paymentMethodKey(input.method || "") === "card" });
+    if (choice.kind === "ambiguous") {
+      return {
+        ok: false,
+        error: `This job has ${choice.bills.length} open bills: ${choice.bills.map((b) => `${b.number} (${formatCurrency(b.balance)} left)`).join(", ")}. Take the payment from the bill they're paying, on the job's Invoices tab.`,
+      };
+    }
+    if (choice.kind === "needsSend" && !input.sendIt) {
+      return { ...needsSendRefusal(choice.bill.invoice_number), invoiceId: choice.bill.id };
+    }
+    if (choice.kind === "needsSend" || choice.kind === "land") {
+      const bill = choice.bill;
+      const label = bill.invoice_number ?? "The job's open bill";
+      if (input.collect !== "later" && amount > choice.balance + 0.005) {
+        // Never cap it silently: the difference would vanish from the record.
+        return {
+          ok: false,
+          invoiceId: bill.id,
+          error: `${label} has ${formatCurrency(choice.balance)} left, less than the ${formatCurrency(amount)} they paid. Record ${formatCurrency(choice.balance)} on ${label}, then put the rest on a new invoice.`,
+        };
+      }
+      if (choice.kind === "needsSend") {
+        const sent = await sendDraftForPayment(supabase, bill.id);
+        if (!sent.ok) return { ok: false, invoiceId: bill.id, error: sent.error };
+      }
+      return settleExisting(bill.id, Number(bill.total ?? 0), Number(bill.amount_paid ?? 0));
+    }
+  }
+  // Pay Now's card door with no figure lands only on a bill that exists; there is none to land on.
+  if (noFigure) {
+    return {
+      ok: false,
+      error: "There's no open bill here to pay by card. Record Payment writes one for what they paid, or make the invoice from the job's Invoices tab first.",
+    };
   }
 
   // A job on the draw path is billed by draws — same guard as every standard-invoice creator.
@@ -3780,9 +3857,12 @@ export async function invoiceCollectStatus(invoiceId: string): Promise<{
   return { ok: true, total: Number(data.total ?? 0), amountPaid: Number(data.amount_paid ?? 0), status: String(data.status ?? "") };
 }
 
-export async function collectArtifacts(invoiceId: string, collectAmount?: number): Promise<{
+export async function collectArtifacts(invoiceId: string, collectAmount?: number, opts?: { sendIt?: boolean }): Promise<{
   ok: boolean;
   error?: string;
+  /** The invoice is a draft and no one has said to send it: nothing was built or written. The
+   *  sheet asks "Send INV-078 as the bill first?" and calls again with `sendIt` on the yes. */
+  needsSend?: true;
   balance?: number;
   invoiceNumber?: string | null;
   /** Stripe door — present only when the org can actually accept card payments. */
@@ -3820,16 +3900,22 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
   // them this door reproduced INV-069 exactly — a draft carrying a deposit flipped to 'sent'
   // (where paidStatus says 'partial') while the open page kept its draft props and went on
   // offering controls the server had just locked.
+  //
+  // AND ONLY ON A PERSON'S YES (Connected North Phase 1). Opening the Pay Now sheet on a draft built
+  // this QR - and so SENT the bill - on the spot, with no one saying so: on INV-078, Andrew's
+  // running draft, that is the whole bill going out by accident. Now a draft answers needsSend and
+  // nothing is written; the sheet asks "Send INV-078 as the bill first?" and only its yes
+  // (`sendIt`) sends it, through the one send stamp, with the recalc and the refresh.
+  let row = inv as { total?: number | null; amount_paid?: number | null };
   if ((inv as { status?: string }).status === "draft") {
-    const sent = await markInvoiceSent(supabase, invoiceId);
-    if (!sent.ok) {
-      return { ok: false, error: "Couldn't send this invoice, so there's nothing for them to pay yet." };
-    }
-    await recalcInvoice(supabase, invoiceId);
-    revalidateMoney(invoiceId);
+    if (!opts?.sendIt) return { ...needsSendRefusal(inv.invoice_number), needsSend: true };
+    const sent = await sendDraftForPayment(supabase, invoiceId);
+    if (!sent.ok) return { ok: false, error: sent.error };
+    const { data: again } = await supabase.from("invoices").select("total, amount_paid").eq("id", invoiceId).maybeSingle();
+    if (again) row = again as typeof row;
   }
 
-  const balance = invoiceBalance(inv.total, inv.amount_paid);
+  const balance = invoiceBalance(row.total, row.amount_paid);
   const out: Awaited<ReturnType<typeof collectArtifacts>> = {
     ok: true,
     balance,

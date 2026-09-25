@@ -79,8 +79,8 @@ const toDateInput = (iso?: string | null) => {
 /** What the office is told about a line that the customer never sees (audit v994 PL1/PL2). */
 type LineNotes = { suppliers: ReadonlySet<string>; noBillRate: ReadonlySet<string> };
 
-/** The person a labor line bills: its key is `labor:<personId>` (or `labor:<personId>:2` for the
- *  hours after a negotiated line, lib/labor-offer). */
+/** The person a labor line bills: its key is `labor:<personId>` (or a legacy `labor:<personId>:2`, from
+ *  before new hours joined the person's own line - lib/labor-offer). */
 function laborPersonId(importKey: unknown): string | null {
   const m = /^labor:([^:]+)/.exec(String(importKey ?? ""));
   return m ? m[1] : null;

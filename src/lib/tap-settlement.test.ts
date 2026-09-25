@@ -1,106 +1,110 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { draftPromotionOnPayment } from "@/lib/tap-settlement";
-import { paidStatus, recalcTotals } from "@/lib/invoice-math";
+import { paymentReachedDraft } from "@/lib/tap-settlement";
+import { recalcTotals } from "@/lib/invoice-math";
+import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 
 /**
- * INV-069, 2026-09-18 — "its not sent its in draft mode thats partially why this is confusing".
+ * NO PAY DOOR SENDS A DRAFT WITHOUT A PERSON SAYING SO (Connected North Phase 1; the 0267 law).
  *
- * Pay Now promoted a DRAFT invoice to 'sent' the moment it built the card door: Erik opened the
- * sheet on a $6,412.64 invoice he was still building, no card was ever tapped, and the bill was
- * promoted for good — onto a status paidStatus() calls 'partial', with a $200 cash deposit on it
- * that then barred the way back to Draft.
- *
- * Two halves are pinned here. The OPEN must move nothing (the tap door is a read and a Stripe
- * call), and the DEED must move the draft, because paidStatus() never advances a draft on its own
- * and money would otherwise sit on one forever.
+ * INV-069 (2026-09-18): opening Pay Now sent a $6,412 invoice Erik was still building. cn-v961
+ * moved the promotion to the webhook, "at the money" - the same silent send one step later: a tap
+ * on Andrew's INV-078 would have charged its whole balance and flipped the running draft to sent
+ * with no send date. Now every pay door ASKS ("Send INV-078 as the bill first?") and sends it
+ * properly (sent_at) only on the yes; the webhook only settles.
  */
-describe("draftPromotionOnPayment — the pay door's deed, and only at the deed", () => {
-  it("a settled tap on a draft promotes it to sent", () => {
-    expect(draftPromotionOnPayment("draft", true)).toBe("sent");
+describe("the settlement only settles", () => {
+  it("money on a draft is SAID (an error_events row), never a status change", () => {
+    expect(paymentReachedDraft("draft")).toBe(true);
+    for (const s of ["sent", "partial", "paid", "overdue", "void", "", null, undefined]) expect(paymentReachedDraft(s)).toBe(false);
   });
 
-  it("a door that hands the customer a bill of its own promotes nothing here", () => {
-    // The public link door (/api/pay, the QR) promoted at the handing over; a second promotion in
-    // the webhook would be a rule living in two places.
-    expect(draftPromotionOnPayment("draft", false)).toBeNull();
-  });
-
-  it("an invoice that already left draft is left exactly where it is", () => {
-    for (const status of ["sent", "partial", "paid", "overdue"]) {
-      expect(draftPromotionOnPayment(status, true)).toBeNull();
-    }
-  });
-
-  it("a void invoice is never quietly un-voided by money arriving on it (the 0259 boundary)", () => {
-    expect(draftPromotionOnPayment("void", true)).toBeNull();
-  });
-
-  it("a missing status is not a draft — nothing is written on a guess", () => {
-    expect(draftPromotionOnPayment(null, true)).toBeNull();
-    expect(draftPromotionOnPayment(undefined, true)).toBeNull();
-    expect(draftPromotionOnPayment("", true)).toBeNull();
-  });
-});
-
-describe("the INV-069 chain: a draft taken across the counter ends up paid, not stuck", () => {
-  const lines = [6412.64];
-  const deposit = 200;
-
-  it("WITHOUT the promotion a settled draft stays a draft with money on it (the bug pointing the other way)", () => {
-    // paidStatus deliberately never advances a draft (Erik 7/24: a deposit recorded on a draft
-    // must not silently lock its lines), so the recalc alone cannot finish the job.
-    const after = recalcTotals(lines, [deposit, 6212.64], 0, "draft");
+  it("a draft that is paid stays a draft with the money on it, like a deposit on a draft (Erik 7/24)", () => {
+    const after = recalcTotals([6412.64], [200, 6212.64], 0, "draft");
     expect(after.amountPaid).toBe(6412.64);
     expect(after.status).toBe("draft");
   });
+});
 
-  it("WITH the promotion first, the same recalc lands on paid", () => {
-    const promoted = draftPromotionOnPayment("draft", true);
-    expect(promoted).toBe("sent");
-    const after = recalcTotals(lines, [deposit, 6212.64], 0, promoted!);
-    expect(after.status).toBe("paid");
-  });
-
-  it("a partial tap on a promoted draft reads 'partial' — the status the stored row disagreed with", () => {
-    // INV-069's stored 'sent' with $200 on it was the one row in the table paidStatus contradicted.
-    expect(paidStatus(6412.64, deposit, "sent")).toBe("partial");
+describe("the question the pay doors ask", () => {
+  it("names the bill, and says what sending does before the yes", () => {
+    expect(sendFirstQuestion("INV-078")).toBe("Send INV-078 as the bill first?");
+    expect(sendFirstQuestion(null)).toBe("Send this invoice as the bill first?");
+    expect(sendFirstDetail("INV-078")).toMatch(/INV-078 is still a draft/);
+    expect(sendFirstDetail("INV-078")).toMatch(/Nothing is emailed or texted/);
   });
 });
 
 /**
- * THE TWO WRITES THAT MUST NOT COME BACK, read off the source itself.
- *
- * Neither is reachable from a pure function, and both are absences — the kind of thing that
- * reappears quietly in a later edit and that no runtime test would notice until an owner's
- * half-built invoice is sent again. Same tool as 0207's trigger pin (pdf-restamp.test.ts).
+ * THE WRITES THAT MUST NOT COME BACK, read off the source itself. Each is an absence - the kind of
+ * thing that reappears quietly in a later edit and that no runtime test would notice until an
+ * owner's half-built invoice is sent again.
  */
-describe("the tap door opens onto nothing (tap-actions.ts)", () => {
-  const src = readFileSync("src/app/(app)/billing/tap-actions.ts", "utf8");
+const body = (src: string, start: RegExp): string => {
+  const i = src.search(start);
+  expect(i).toBeGreaterThanOrEqual(0);
+  const next = src.slice(i + 1).search(/\nexport (async )?function /);
+  return next < 0 ? src.slice(i) : src.slice(i, i + 1 + next);
+};
 
-  it("never updates an invoice — minting a PaymentIntent is a read and a Stripe call", () => {
-    // `.from("invoices")` may only ever be SELECTed from in this file.
+describe("Tap to Pay (tap-actions.ts) sends only on the yes", () => {
+  const src = readFileSync("src/app/(app)/billing/tap-actions.ts", "utf8");
+  const mint = body(src, /export async function createTapPaymentIntent\(/);
+
+  it("never writes an invoice itself — the one send stamp does, through sendDraftForPayment", () => {
     expect(src).not.toMatch(/from\("invoices"\)[\s\S]{0,200}?\.update\(/);
+    expect(src).not.toMatch(/markInvoiceSent\(/);
   });
 
-  it("carries no 'send' option and no draft refusal to re-grow the promotion around", () => {
-    expect(src).not.toMatch(/opts\?\.\s*send/);
-    expect(src).not.toMatch(/still a draft/i);
+  it("a draft without sendIt is refused with needsSend BEFORE anything is sent or minted", () => {
+    const refuse = mint.indexOf("if (!opts?.sendIt) return needsSendRefusal(");
+    const send = mint.indexOf("sendDraftForPayment(");
+    const stripe = mint.indexOf("paymentIntents.create(");
+    expect(refuse).toBeGreaterThan(0);
+    expect(send).toBeGreaterThan(refuse);
+    expect(stripe).toBeGreaterThan(send);
   });
 });
 
-describe("the webhook promotes at the money, and never claims a delivery (route.ts)", () => {
+describe("the Pay Now QR (collectArtifacts) sends only on the yes", () => {
+  const src = readFileSync("src/app/(app)/billing/actions.ts", "utf8");
+  const qr = body(src, /export async function collectArtifacts\(/);
+
+  it("asks on a draft, and the send it does make is the checked one", () => {
+    const refuse = qr.indexOf("if (!opts?.sendIt) return");
+    const send = qr.indexOf("sendDraftForPayment(");
+    expect(refuse).toBeGreaterThan(0);
+    expect(send).toBeGreaterThan(refuse);
+    expect(qr).not.toMatch(/markInvoiceSent\(/);
+  });
+});
+
+describe("the job header's Pay Now (settleUp) lands on the job's bill and sends only on the yes", () => {
+  const src = readFileSync("src/app/(app)/billing/actions.ts", "utf8");
+  const settle = body(src, /export async function settleUp\(/);
+
+  it("a card on the job's open draft asks first", () => {
+    const ask = settle.indexOf('choice.kind === "needsSend" && !input.sendIt');
+    const send = settle.indexOf("sendDraftForPayment(");
+    expect(ask).toBeGreaterThan(0);
+    expect(send).toBeGreaterThan(ask);
+  });
+});
+
+describe("the webhook settles and never claims a delivery (route.ts)", () => {
   const src = readFileSync("src/app/api/stripe/webhook/route.ts", "utf8");
 
-  it("the tap branch is the door allowed to move a draft", () => {
-    expect(src).toMatch(/promotesDraft:\s*true/);
-    expect(src).toMatch(/draftPromotionOnPayment\(/);
+  it("no door may move a draft here any more", () => {
+    expect(src).not.toMatch(/promotesDraft/);
+    expect(src).not.toMatch(/from\("invoices"\)[\s\S]{0,120}?\.update\(\{\s*status/);
   });
 
-  it("never stamps sent_at — a counter payment is not a delivery (0267)", () => {
-    // The comments above the promotion name the column on purpose; what must never appear is it
-    // being WRITTEN, which in a PostgREST update is always `sent_at:` in the object literal.
+  it("never stamps sent_at — a payment is not a delivery (0267)", () => {
     expect(src).not.toMatch(/sent_at\s*:/);
+  });
+
+  it("money on a draft is logged for a person", () => {
+    expect(src).toMatch(/stripe:webhook:payment-on-draft/);
   });
 
   it("every settle refreshes the money surfaces, so no screen can disagree with the row", () => {

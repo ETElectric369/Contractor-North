@@ -6,6 +6,7 @@ import { dbError } from "@/lib/db-error";
 import { getStripe, billingEnabled } from "@/lib/stripe";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { needsSendRefusal, sendDraftForPayment, type NeedsSend } from "@/lib/pay-door-send";
 import { reportError } from "@/lib/observe";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
 import { STAFF_ROLES } from "@/lib/actions/perms";
@@ -529,7 +530,10 @@ export type TapPaymentIntentResult =
       /** Who minted it (identityStamp) — the bridge keys its caches to this. */
       identity: string;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; needsSend?: undefined }
+  /** The invoice is a draft: nothing was minted, nothing was written. The sheet asks "Send INV-078
+   *  as the bill first?" and calls again with `sendIt` only on the person's yes. */
+  | NeedsSend;
 
 /**
  * MINT THE PAYMENTINTENT THE PHONE WILL COLLECT — on the tenant's account, for the full balance.
@@ -558,15 +562,16 @@ export type TapPaymentIntentResult =
  * paidStatus() calls 'partial' while his open page went on showing a Draft badge and live draft
  * controls — and his own $200 deposit then barred the way back to Draft.
  *
- * A TAP NEEDS NO BILL IN THE CUSTOMER'S HAND. This is a `card_present` PaymentIntent on the
- * tenant's connected account: no public link, no email, no text, nothing that could reach the
- * customer's phone — the public_token this file never reads is the QR door's business, and only
- * the QR door (collectArtifacts) hands a bill over and promotes on the spot. So a draft is a
- * perfectly payable thing over the counter, minting the door is not an event on the invoice, and
- * the status moves where the money does: the webhook's payment_intent.succeeded branch promotes
- * the draft before the recalc (the rule is draftPromotionOnPayment in src/lib/tap-settlement.ts).
+ * cn-v961 then reasoned that a tap needs no bill in the customer's hand and let the WEBHOOK promote
+ * the draft when the card landed. That was the same silent send, one step later: Andrew's INV-078
+ * would have been charged its whole balance and flipped to 'sent' with no send date, by nobody.
+ *
+ * NOW (Connected North Phase 1): opening the sheet still changes nothing, and a DRAFT mints
+ * nothing either. It answers needsSend; the sheet asks "Send INV-078 as the bill first?"; only the
+ * yes (`sendIt`) sends it - through the one send stamp, sent_at and all - and then mints on the
+ * balance the recalc left. The webhook only settles (src/lib/tap-settlement.ts).
  */
-export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaymentIntentResult> {
+export async function createTapPaymentIntent(invoiceId: string, opts?: { sendIt?: boolean }): Promise<TapPaymentIntentResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   const orgId = ctx.orgId;
@@ -587,7 +592,32 @@ export async function createTapPaymentIntent(invoiceId: string): Promise<TapPaym
   const status = String((inv as { status?: string }).status ?? "");
   if (status === "void") return { ok: false, error: "This invoice is void — there's nothing to collect." };
 
-  const balance = invoiceBalance((inv as { total?: number | null }).total, (inv as { amount_paid?: number | null }).amount_paid);
+  /**
+   * A DRAFT IS ASKED ABOUT, NEVER SENT BY THIS DOOR (Connected North Phase 1).
+   *
+   * cn-v961 stopped this mint from promoting a draft and moved the promotion to the webhook, where
+   * the money lands - so a tap on INV-078 would have charged Andrew's whole $2,830.89 and quietly
+   * flipped the bill to sent with no send date. A charge is taken on a bill, and a draft becomes a
+   * bill when a person sends it. So on a draft nothing is minted: the sheet asks "Send INV-078 as
+   * the bill first?", and only its yes (`sendIt`) sends it - the one send stamp, sent_at and all -
+   * before the PaymentIntent exists. The balance is read AFTER the send, from the recalc.
+   */
+  let row = inv as { total?: number | null; amount_paid?: number | null };
+  if (status === "draft") {
+    if (!opts?.sendIt) return needsSendRefusal((inv as { invoice_number?: string | null }).invoice_number);
+    const sent = await sendDraftForPayment(supabase, invoiceId);
+    if (!sent.ok) return { ok: false, error: sent.error ?? "Couldn't send this invoice, so there's nothing for them to pay yet." };
+    const { data: again, error: againErr } = await supabase
+      .from("invoices")
+      .select("total, amount_paid")
+      .eq("id", invoiceId)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (againErr || !again) return { ok: false, error: againErr ? dbError(againErr) : "Invoice not found." };
+    row = again as typeof row;
+  }
+
+  const balance = invoiceBalance(row.total, row.amount_paid);
   if (balance <= 0) return { ok: false, error: "This invoice is already paid in full." };
   // Stripe refuses a card charge under fifty cents (the same floor /api/pay applies).
   if (balance < 0.5) return { ok: false, error: "The balance is under $0.50 — too small for a card. Record it another way." };
