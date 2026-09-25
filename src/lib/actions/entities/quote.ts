@@ -134,7 +134,7 @@ export const quoteActions: Record<string, ActionDef> = {
     handler: async (i) => {
       const r = await duplicateQuote(i.id);
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, data: { id: r.id }, speak: "Quote duplicated as a new draft." };
+      return { ok: true, data: { id: r.id }, speak: r.warning ? `Quote duplicated as a new draft. ${r.warning}` : "Quote duplicated as a new draft." };
     },
   },
   "quote.attachJob": {

@@ -29,6 +29,30 @@ import type { Quote, QuoteLineItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * THE JOB THAT KEEPS THIS ESTIMATE'S CIRCUITS NOW (Panel plan, phase 2). The estimate's circuit
+ * schedule is the proposal the customer signs; once a job exists, the job keeps its own list on its
+ * Panel tab. That job is the estimate's own job, or else the job whose Panel brought these circuits
+ * in (E-017 has no job of its own; J-011 brought it in). Only when the estimate has circuits. A
+ * database without 0333 simply answers with no job, and the card says nothing extra.
+ */
+async function panelJobFor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  q: { id: string; job_id?: string | null; circuits?: unknown },
+): Promise<{ id: string; label: string } | null> {
+  if (!Array.isArray(q.circuits) || q.circuits.length === 0) return null;
+  let jobId = q.job_id ?? null;
+  if (!jobId) {
+    const { data, error } = await supabase.from("job_circuits").select("job_id").eq("source_quote_id", q.id).limit(1).maybeSingle();
+    if (error || !data) return null;
+    jobId = (data as { job_id: string }).job_id;
+  }
+  const { data: job } = await supabase.from("jobs").select("id, job_number, name").eq("id", jobId).maybeSingle();
+  if (!job) return null;
+  const j = job as { id: string; job_number: string | null; name: string | null };
+  return { id: j.id, label: [j.job_number, j.name].filter(Boolean).join(" ") || "the job" };
+}
+
 export default async function QuoteDetailPage({
   params,
 }: {
@@ -227,7 +251,7 @@ export default async function QuoteDetailPage({
         // worse bug than the one this fixes.
         levelMarkupPct={(quote as any)?.customers?.pricing_levels?.markup_pct ?? null}
       />
-      <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} />
+      <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} panelJob={await panelJobFor(supabase, q)} />
     </div>
   );
 }

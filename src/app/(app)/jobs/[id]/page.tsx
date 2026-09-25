@@ -12,7 +12,7 @@ import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat, typ
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
   LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye,
+  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye, Zap,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
 import { acceptedQuoteTotal } from "@/lib/payment-schedule-math";
@@ -43,6 +43,7 @@ import { reportError } from "@/lib/observe";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
 import { JobCustomerPage } from "./job-customer-page";
+import { JobPanelLoader } from "./job-panel-loader";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
@@ -94,7 +95,7 @@ export const dynamic = "force-dynamic";
 // lead in this order; everything else clusters into the More chip in this order.
 const JOB_TAB_ORDER = [
   "job", "time", "materials", "costs", "invoices", "photos", "tasks", "appointments",
-  "notes", "quotes", "change-orders", "permits", "wos", "customer",
+  "notes", "quotes", "change-orders", "permits", "panel", "wos", "customer",
 ];
 // THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
 // seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
@@ -130,6 +131,9 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   "change-orders": { group: "Money", icon: FileDiff },
   notes: { group: "Docs", icon: StickyNote },
   permits: { group: "Docs", icon: Stamp },
+  // THE PANEL (0333): the job's circuits. Not pinned and not staff-only — the crew works it at the
+  // panel (Erik's decision 1, 2026-09-25) and nothing on it carries a price.
+  panel: { group: "Docs", icon: Zap },
   customer: { group: "Money", icon: Eye },
 };
 
@@ -362,6 +366,7 @@ export default async function JobDetailPage({
     { data: pettyRows },
     openDraft,
     lumpToNet,
+    panelCount,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -456,6 +461,19 @@ export default async function JobDetailPage({
           return 0;
         })
       : Promise.resolve(0),
+    // THE PANEL CHIP'S COUNT: one head-only count of the job's kept, live circuits, riding this wave
+    // (no round trip of its own). A database without 0333 yet answers with an error: no count, and
+    // the tab says so itself when opened.
+    supabase
+      .from("job_circuits")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", id)
+      .eq("state", "kept")
+      .is("removed_at", null)
+      .then(
+        (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
+        () => undefined,
+      ),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -1055,6 +1073,13 @@ export default async function JobDetailPage({
           </CardContent>
         </Card>
       ),
+    },
+    {
+      // THE PANEL (Panel plan, phase 2): the job's own circuit list, loaded when the tab opens.
+      id: "panel",
+      label: "Panel",
+      count: panelCount,
+      content: <JobPanelLoader jobId={j.id} />,
     },
     {
       id: "time",

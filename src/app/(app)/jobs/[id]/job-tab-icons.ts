@@ -25,4 +25,6 @@ export {
   FileDiff,
   // The Customer Page tab (what the customer sees on this job).
   Eye,
+  // The Panel tab (the job's circuits, and the door as it hangs).
+  Zap,
 } from "lucide-react";
