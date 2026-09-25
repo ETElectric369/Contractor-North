@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
-import { loadBooks, matchesOnBooks, OPEN_JOBS_FOR_PAPER } from "./paperwork-core";
+import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, rematchTray } from "./paperwork-core";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,8 @@ export default async function OrganizePage() {
   // The org row feeds the "already on the books" read, which rides in the same breath as the rest
   // (a serial hop on a page read is the phone-lag class, audit v921).
   const orgRead = supabase.from("organizations").select("id").limit(1).maybeSingle();
-  const [{ data: org }, { data: items }, { data: jobs }, books] = await Promise.all([
+  const orgIdOf = (r: { data: unknown }) => (r.data as { id?: string } | null)?.id ?? null;
+  const [{ data: org }, { data: items }, { data: jobs }, books, markCtx] = await Promise.all([
     orgRead,
     supabase
       .from("organized_items")
@@ -28,13 +29,16 @@ export default async function OrganizePage() {
       // The same open jobs the reader matches the paper against, so a job it picked is in the list.
       .limit(OPEN_JOBS_FOR_PAPER),
     // Every printed number already on the books, for "Same Purchase: Tie Them" (0295).
-    Promise.resolve(orgRead).then((r) => loadBooks(supabase, (r.data as { id?: string } | null)?.id ?? null)),
+    Promise.resolve(orgRead).then((r) => loadBooks(supabase, orgIdOf(r))),
+    // The open jobs, POs and the company's own names, so a paper already waiting is matched again
+    // by the rules it was read before (rematchTray: in memory, no model, nothing written).
+    Promise.resolve(orgRead).then((r) => loadMarkContext(supabase, orgIdOf(r))),
   ]);
 
   // ONE signing call for the page (2026-09-08 phone-lag sweep) — this used to open a Storage
   // connection per row. Voice/typed notes have no file and are skipped, not sent as null.
   const urls = await signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url));
-  const withUrls: OrganizedItemRow[] = ((items ?? []) as any[]).map((i) => ({
+  const withUrls: OrganizedItemRow[] = rematchTray((items ?? []) as any[], markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && urls.get(i.file_url)) || null,
   }));

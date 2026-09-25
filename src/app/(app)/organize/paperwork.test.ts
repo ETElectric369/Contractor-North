@@ -137,7 +137,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     const res = await analyzeAndFile({ path: "org-1/organize/1-ced.jpg", name: "ced.jpg", mime: "image/jpeg", size: 1000, sha256: "a".repeat(64) });
     expect(res.ok).toBe(true);
     expect(res.item).toMatchObject({ status: "needs_review", destination: "none", job_id: null });
-    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the address on the bill" });
+    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the address on the bill: 518 CRATER LAKE RD" });
     expect(res.item?.suggestion?.jobLabel).toContain("J-046");
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("documents", "insert")).toBeUndefined();
@@ -240,7 +240,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
       calls,
     );
     const res = await analyzeAndFile({ path: "org-1/organize/6.jpg", name: "6.jpg", mime: "image/jpeg", size: 1000 });
-    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the PO number on the receipt" });
+    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the PO on the receipt: PO-0012" });
     expect(did("purchase_orders", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
     expect(did("bills", "insert")).toBeUndefined();
   });
@@ -295,6 +295,49 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     await analyzeAndFile({ path: "org-1/organize/3.pdf", name: "3.pdf", mime: "application/pdf", size: 1000 });
     expect(ai.systems[0]).toContain("You read paperwork for a deck builder.");
     expect(ai.systems[0]).not.toContain("electrical contractor");
+  });
+
+  it("a PO box holding the job's street picks it, the owner's name beside it is ignored, and the marks are kept on the row", async () => {
+    ai.parsed = {
+      paper_type: "bill",
+      kind: "receipt",
+      vendor: "Consolidated Electrical Dist.",
+      amount: 323.71,
+      document_number: "8802-SO-257555",
+      po_number: "13897 HERRINGBONE",
+      payment: "on_account",
+      job_marks: { address: null, job_name: null, job_number: null, customer: "ERIK TAYLOR" },
+      job_hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE",
+      confidence: "high",
+    };
+    state.client = fakeSupabase(
+      {
+        "organized_items.insert": [{ data: { id: "oi-h" }, error: null }],
+        "jobs.select": [
+          {
+            data: [
+              { id: "job-011", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } },
+              { id: "job-099", job_number: "J-099", name: "Shop", address: null, customers: { name: "Erik Taylor" } },
+            ],
+            error: null,
+          },
+        ],
+        "profiles.select": [{ data: [{ full_name: "Erik Taylor", organizations: { name: "ET Electric" } }], error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-h" }], error: null }],
+      },
+      calls,
+    );
+    const res = await analyzeAndFile({ path: "org-1/organize/h.jpg", name: "h.jpg", mime: "image/jpeg", size: 1000 });
+    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the PO on the bill: 13897 HERRINGBONE" });
+    const proposal = did("organized_items", "update")!.payload.proposal;
+    expect(proposal).toMatchObject({
+      jobId: "job-011",
+      jobFrom: "po",
+      jobConflict: null,
+      marks: { po: "13897 HERRINGBONE", customer: "ERIK TAYLOR", hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" },
+    });
+    expect(did("profiles", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
 
   it("the same file twice is refused by the database's unique index, said as 'already in'", async () => {
@@ -685,6 +728,86 @@ describe("AI Suggest never takes money out of the tray", () => {
     await aiReviewItem("oi-1");
     expect(ai.systems[0]).toContain("for a deck builder");
     expect(ai.systems[0]).not.toContain("electrical contractor");
+  });
+});
+
+describe("AI Suggest on the 13897 HERRINGBONE ticket (Erik, 2026-09-24)", () => {
+  // ET's live row 12962a84 as it is stored: read before the PO box counted as the job.
+  const HERRINGBONE_ROW = {
+    id: "oi-h",
+    kind: "receipt",
+    status: "needs_review",
+    doc_type: "bill",
+    category: "Bill",
+    title: "Consolidated Electrical Dist. — $323.71",
+    vendor: "Consolidated Electrical Dist.",
+    amount: "323.71",
+    doc_number: "8802-SO-257555",
+    summary: "Sales order for electrical materials: 1P sensor switch, flexbox two gang, 20/20A circuit breakers.",
+    line_items: [{ description: "Q21530CT", amount: 41.2 }],
+    org_id: "org-1",
+    proposal: {
+      po: "13897 HERRINGBONE",
+      jobId: null,
+      bucket: null,
+      jobFrom: null,
+      jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE",
+      guessJobId: null,
+      jobConflict: null,
+    },
+  };
+  const OPEN = {
+    data: [
+      { id: "job-011", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } },
+      { id: "job-046", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", customers: { name: "Jason Waldow" } },
+    ],
+    error: null,
+  };
+
+  it("the rules answer first: the PO names J-011, said plainly, with no model call and nothing written", async () => {
+    state.client = fakeSupabase({ "organized_items.select": [{ data: HERRINGBONE_ROW, error: null }], "jobs.select": [OPEN] }, calls);
+    const res = await aiReviewItem("oi-h");
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("J-011 13897 Herringbone");
+    expect(res.message).toContain("Job picked from the PO on the bill: 13897 HERRINGBONE");
+    expect(ai.systems).toHaveLength(0);
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  it("when the rules can't settle it, the model is handed what the reader found and every open job", async () => {
+    ai.parsed = { action: "file_job", job_id: "job-011", reason: "The PO box names Herringbone." };
+    const unsettled = { ...HERRINGBONE_ROW, proposal: { ...HERRINGBONE_ROW.proposal, po: "HERRINGBONE", jobHint: "HERRINGBONE JOB" } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: unsettled, error: null }],
+        "jobs.select": [OPEN],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-h" }], error: null }],
+      },
+      calls,
+    );
+    const res = await aiReviewItem("oi-h");
+    expect(ai.systems[0]).toContain("J-011 13897 Herringbone; address: 13897 Herringbone Way; customer: Andrew Cohen");
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(/^A guess: J-011 13897 Herringbone/);
+    expect(did("organized_items", "update")!.payload.proposal).toMatchObject({ guessJobId: "job-011" });
+  });
+
+  it("nothing to suggest is a plain note, not an error", async () => {
+    ai.parsed = { action: "unsure", reason: "Materials receipt lacks a job reference to attribute it to a specific job." };
+    const bare = { ...HERRINGBONE_ROW, proposal: { po: null, jobHint: null } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: bare, error: null }],
+        "jobs.select": [OPEN],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+      },
+      calls,
+    );
+    const res = await aiReviewItem("oi-h");
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(/^No suggestion\./);
+    expect(did("organized_items", "update")).toBeUndefined();
   });
 });
 

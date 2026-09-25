@@ -119,6 +119,13 @@ export type PaperProposal = {
   jobConflict?: string | null;
   /** A model's guess at the job (the reader's job_id, or AI Suggest). Offered as a chip, never picked. */
   guessJobId?: string | null;
+  /**
+   * What the reader copied off the paper that names a job, kept on the row (2026-09-24). Before
+   * this only the PO and the hint survived the read, so a paper already in the tray could never be
+   * matched again once the rules learned something. The tray re-runs the exact match from these
+   * (rematchPaper) without asking a model again.
+   */
+  marks?: PaperMarks | null;
   /** A business-cost bucket a model guesses. Offered as a chip, never picked. Never Fees. */
   bucket?: string | null;
   /** The reader says this is a plain picture (a job site, a panel, a label), not paperwork. */
@@ -341,13 +348,14 @@ function paperWord(item: PaperItem): string {
 }
 
 /**
- * WHY THE JOB IS ALREADY PICKED, in a few words: "Job picked from the address on the receipt".
- * Null when the paper picked nothing.
+ * WHY THE JOB IS ALREADY PICKED, in a few words, with the words on the paper that picked it: "Job
+ * picked from the PO on the bill: 13897 HERRINGBONE". Null when the paper picked nothing.
  */
 export function pickedBecause(item: PaperItem): string | null {
   const p = proposalOf(item);
   if (!markedJob(p) || !p.jobFrom) return null;
-  return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}`;
+  const words = String(p.jobHint ?? "").trim();
+  return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
 }
 
 // ── WHICH JOB THE PAPER NAMES (exact, never fuzzy) ─────────────────────────────────────────
@@ -358,7 +366,7 @@ export type JobMarkKind = (typeof JOB_MARK_KINDS)[number];
 
 const JOB_MARK_WORDS: Record<JobMarkKind, string> = {
   job_number: "job number",
-  po: "PO number",
+  po: "PO",
   address: "address",
   job_name: "job name",
   customer: "customer name",
@@ -371,6 +379,12 @@ export type PaperMarks = {
   jobNumber?: string | null;
   po?: string | null;
   customer?: string | null;
+  /**
+   * The reader's job_hint: the words on the paper that point to a job, often a label, a name and
+   * a street run together ("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE"). Only the street
+   * in it is used (addressInHint), and only when the reader gave no address of its own.
+   */
+  hint?: string | null;
 };
 
 /** An open job, as the matcher sees it. */
@@ -411,17 +425,16 @@ const STREET_TYPE: Record<string, string> = {
 };
 const DIRECTION: Record<string, string> = { NORTH: "N", SOUTH: "S", EAST: "E", WEST: "W" };
 
+/** A street as printed: its house number, its own words, and its street type when one is written. */
+export type StreetParts = { number: string; words: string[]; type: string | null };
+
 /**
- * THE STREET, SPELLED ONE WAY: the house number, the street's own words and its street type, in
- * one spelling. "518 Crater Lake Rd, Chilcoot CA" and "518 CRATER LAKE ROAD" are both "518 CRATER
- * LAKE RD". This is spelling, not likeness: the same house number, the same words in the same
- * order and the same street type. "13631 Northwoods" is never "13466 Northwoods", "518 Crater Lake
- * Dr" is never "518 Crater Lake Rd", and a street written with no type is only ever the same as
- * another written with no type. A unit on a shared street (300 W Lake Blvd #11) is cut off after
- * the street type, so four jobs there are four matches and nothing is picked. No house number, no
- * key: a street alone places nothing.
+ * THE STREET, TAKEN APART ONE WAY: the house number, the street's own words and its street type,
+ * each in one spelling. "518 Crater Lake Rd, Chilcoot CA" and "518 CRATER LAKE ROAD" are both 518 /
+ * CRATER LAKE / RD. A unit on a shared street (300 W Lake Blvd #11) is cut off after the street
+ * type. No house number, or no word after it: no street, and a street alone places nothing.
  */
-export function streetKey(raw: string | null | undefined): string | null {
+export function streetParts(raw: string | null | undefined): StreetParts | null {
   const first = String(raw ?? "").split(",")[0];
   const tokens = first
     .toUpperCase()
@@ -431,18 +444,61 @@ export function streetKey(raw: string | null | undefined): string | null {
     .filter(Boolean)
     .map((t) => DIRECTION[t] ?? t);
   if (tokens.length < 2 || !/^\d+[A-Z]?$/.test(tokens[0])) return null;
-  const out: string[] = [tokens[0]];
+  const words: string[] = [];
+  let type: string | null = null;
   for (let i = 1; i < tokens.length; i += 1) {
     // A street type after at least one word of the street's own name ends the street, and is kept
     // in its one spelling.
-    const type = STREET_TYPE[tokens[i]];
-    if (type && out.length >= 2) {
-      out.push(type);
+    const t = STREET_TYPE[tokens[i]];
+    if (t && words.length >= 1) {
+      type = t;
       break;
     }
-    out.push(tokens[i]);
+    words.push(tokens[i]);
   }
-  return out.length >= 2 ? out.join(" ") : null;
+  return words.length ? { number: tokens[0], words, type } : null;
+}
+
+/**
+ * THE STREET, SPELLED ONE WAY: "518 CRATER LAKE RD". The same house number, the same words in the
+ * same order and the same street type are one key; "13631 Northwoods" is never "13466 Northwoods"
+ * and "518 Crater Lake Dr" is never "518 Crater Lake Rd".
+ */
+export function streetKey(raw: string | null | undefined): string | null {
+  const s = streetParts(raw);
+  return s ? [s.number, ...s.words, ...(s.type ? [s.type] : [])].join(" ") : null;
+}
+
+/**
+ * THE SAME STREET? The same house number and exactly the same street words, and the same street
+ * type when BOTH are written. A paper that leaves the type off ("13897 HERRINGBONE", in a
+ * supplier's PO box) does not disagree with a job at "13897 Herringbone Way": it just didn't
+ * write it (Erik, 2026-09-24). Two written types that differ are two streets: Dr is never Rd.
+ * This is still spelling, not likeness; a street with no type on a road that has two (a Way and a
+ * Court at the same number) matches both jobs, and two matches pick nothing.
+ */
+export function sameStreet(a: StreetParts | null, b: StreetParts | null): boolean {
+  if (!a || !b) return false;
+  if (a.number !== b.number || a.words.length !== b.words.length) return false;
+  if (a.words.some((w, i) => w !== b.words[i])) return false;
+  return !a.type || !b.type || a.type === b.type;
+}
+
+/**
+ * THE STREET IN THE READER'S HINT. The hint is the reader's own run-together of what points to a
+ * job: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" (a label, the name on the account, the
+ * street). The street starts at the first house number followed by a word, and runs to a comma or
+ * the end. Only that is taken; the words before it (a label, a person's name) are never read as a
+ * customer. Null when there is no house number followed by a word.
+ */
+export function addressInHint(hint: string | null | undefined): string | null {
+  // The leftmost house number that a word follows: a number followed by another number (a PO
+  // written before the street) is passed over.
+  for (const part of String(hint ?? "").split(",")) {
+    const m = /(?:^|[^A-Za-z0-9#])(\d{1,6}[A-Za-z]?\s+[A-Za-z].*)$/.exec(part);
+    if (m && m[1].trim()) return m[1].trim();
+  }
+  return null;
 }
 
 /**
@@ -450,8 +506,13 @@ export function streetKey(raw: string | null | undefined): string | null {
  * by its number or its name (resolveJobId: exactly one match decides, several ask). No likeness,
  * no nearest, no score.
  *
- *   · each mark finds the open jobs it names exactly: a job number, or a PO against job numbers
- *     and this org's own purchase orders; an address by its street; a job name; a customer;
+ *   · each mark finds the open jobs it names exactly: a job number; a PO against job numbers,
+ *     this org's own purchase orders, AND the jobs' names and streets (a contractor writes the
+ *     JOB in a supplier's PO box: "13897 HERRINGBONE", "561 RHODESIA", Erik on every CED ticket);
+ *     an address by its street (sameStreet: a type left off is not a different street); a job
+ *     name, by name or by street; a customer;
+ *   · the company's own name and its people's names (selfNames) are never a customer or a job
+ *     name: they are on every paper as who it was sold to;
  *   · a mark that names exactly one job is decisive, and every mark that names anything must
  *     include that job. Otherwise the paper names two jobs, and NOTHING is picked (said, not
  *     hidden);
@@ -461,13 +522,33 @@ export function jobFromPaperMarks(
   marks: PaperMarks | null | undefined,
   jobs: readonly MarkJob[],
   pos: readonly MarkPo[] = [],
+  selfNames: readonly (string | null | undefined)[] = [],
 ): JobFromMarks {
   if (!marks) return { kind: "none" };
   const openIds = new Set(jobs.map((j) => j.id));
+  const self = new Set(selfNames.map((n) => wordsKey(n)).filter((n) => n.length >= 3));
   const found: { kind: JobMarkKind; words: string; ids: Set<string> }[] = [];
   const add = (kind: JobMarkKind, words: string | null | undefined, ids: string[]) => {
     const set = new Set(ids.filter((id) => openIds.has(id)));
     if (set.size) found.push({ kind, words: String(words ?? "").trim(), ids: set });
+  };
+  const jobStreets = new Map(jobs.map((j) => [j.id, streetParts(j.address)] as const));
+  const onStreet = (raw: string | null | undefined): string[] => {
+    const s = streetParts(raw);
+    return s ? jobs.filter((j) => sameStreet(s, jobStreets.get(j.id) ?? null)).map((j) => j.id) : [];
+  };
+  /**
+   * A job's name, exactly, never the company's own name or one of its people. A job named after
+   * its customer ("Jackie Burks") is also that customer's name, so the same words name every open
+   * job of that customer too: with more than one, the name is not decisive and nothing is picked
+   * (the customer mark reads those words the same way).
+   */
+  const byName = (raw: string | null | undefined): string[] => {
+    const k = wordsKey(raw);
+    if (k.length < 3 || self.has(k)) return [];
+    const named = jobs.filter((j) => wordsKey(j.name) === k).map((j) => j.id);
+    if (!named.length) return [];
+    return [...named, ...jobs.filter((j) => (j.customerNames ?? []).some((c) => wordsKey(c) === k)).map((j) => j.id)];
   };
 
   const jobNumber = compactKey(marks.jobNumber);
@@ -475,20 +556,23 @@ export function jobFromPaperMarks(
     add("job_number", marks.jobNumber, jobs.filter((j) => compactKey(j.job_number) === jobNumber).map((j) => j.id));
 
   const po = compactKey(marks.po);
+  const poIds: string[] = [];
   if (po.length >= 3 && /\d/.test(po))
-    add("po", marks.po, [
+    poIds.push(
       ...jobs.filter((j) => compactKey(j.job_number) === po).map((j) => j.id),
       ...pos.filter((x) => x.job_id && compactKey(x.po_number) === po).map((x) => String(x.job_id)),
-    ]);
+    );
+  poIds.push(...byName(marks.po), ...onStreet(marks.po));
+  add("po", marks.po, poIds);
 
-  const street = streetKey(marks.address);
-  if (street) add("address", marks.address, jobs.filter((j) => streetKey(j.address) === street).map((j) => j.id));
+  // The reader's own address, else the street inside its hint.
+  const address = marks.address ?? addressInHint(marks.hint);
+  add("address", address, onStreet(address));
 
-  const name = wordsKey(marks.jobName);
-  if (name.length >= 3) add("job_name", marks.jobName, jobs.filter((j) => wordsKey(j.name) === name).map((j) => j.id));
+  add("job_name", marks.jobName, [...byName(marks.jobName), ...onStreet(marks.jobName)]);
 
   const customer = wordsKey(marks.customer);
-  if (customer.length >= 3)
+  if (customer.length >= 3 && !self.has(customer))
     add(
       "customer",
       marks.customer,
@@ -507,6 +591,40 @@ export function jobFromPaperMarks(
     };
   }
   return { kind: "one", jobId: pick, from: decisive[0].kind, words: decisive[0].words };
+}
+
+/** What a stored row says the paper named: the reader's marks, else (a row read before marks were
+ *  kept) the PO and the hint that were. */
+export function storedMarks(p: PaperProposal): PaperMarks {
+  const m = p.marks && typeof p.marks === "object" ? p.marks : {};
+  return { ...m, po: m.po ?? p.po ?? null, hint: m.hint ?? p.jobHint ?? null };
+}
+
+/**
+ * THE TRAY MATCHES AGAIN, IN MEMORY (2026-09-24). A paper read before the rules learned that a PO
+ * box holds the job, or that a street's type can be left off, sat in the tray asking "Where does
+ * this go?" with "13897 HERRINGBONE" printed on it. On every load, each waiting paper the paper
+ * itself has not already settled (no pick, no conflict said) is matched again from what was
+ * stored: the same exact rules, no model call, and NOTHING WRITTEN. The row shows the pick and why,
+ * and a person still presses File It. A paper a person has filed, set aside, or that already
+ * carries a pick or a conflict is returned as it is.
+ */
+export function rematchPaper<T extends PaperItem>(
+  item: T,
+  jobs: readonly MarkJob[],
+  pos: readonly MarkPo[] = [],
+  selfNames: readonly (string | null | undefined)[] = [],
+): T {
+  if (item.status && item.status !== "needs_review") return item;
+  const p = proposalOf(item);
+  if (markedJob(p) || p.jobConflict || p.ced) return item;
+  if (!isRead(item)) return item;
+  const r = jobFromPaperMarks(storedMarks(p), jobs, pos, selfNames);
+  if (r.kind === "none") return item;
+  // A job a model wrote before marks existed stays offered, as the guess it always was.
+  const guessJobId = p.guessJobId ?? (p.jobId && !p.jobFrom ? p.jobId : null);
+  if (r.kind === "conflict") return { ...item, proposal: { ...p, jobId: null, jobFrom: null, guessJobId, jobConflict: r.sentence } };
+  return { ...item, proposal: { ...p, jobId: r.jobId, jobFrom: r.from, jobHint: r.words || p.jobHint || null, guessJobId } };
 }
 
 /**
