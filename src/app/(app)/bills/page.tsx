@@ -62,6 +62,8 @@ import {
   voidSupplierPayment,
   setSupplierInvoiceJob,
   recordSupplierInvoiceAsBill,
+  recordSupplierInvoiceToShelf,
+  supplierInvoiceShelfLines,
   tieSupplierInvoiceToBill,
   updateSupplierAccount,
 } from "./supplier-actions";
@@ -103,7 +105,7 @@ function isMissingColumn(err: unknown): boolean {
 
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   const read = (o: BillColumns) =>
     supabase.from("bills").select(columns(o)).order("created_at", { ascending: false });
 
@@ -171,6 +173,8 @@ export default async function BillsPage({
     { data: paperRows },
     books,
     markCtx,
+    shelfLotsRead,
+    shelfItemsRead,
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -253,6 +257,18 @@ export default async function BillsPage({
     loadBooks(supabase, orgId),
     // What a waiting paper names, matched again by today's rules (rematchTray: no model, no write).
     loadMarkContext(supabase, orgId),
+    // THE ROLLS ON THE SHELF, by the receipt line each came off (Shop Stock, Phase 2): the receipt
+    // card says "220 ft on the shelf ($158.55)" beside the line. Small (one row per roll) and
+    // dependent on nothing above, so it rides in this breath. Staff-only by RLS; a database before
+    // 0303 answers with an error, which reads as no rolls.
+    supabase
+      .from("stock_lot_balance")
+      .select("lot_id, bill_line_id, item_id, pieces, unit, cost, pieces_left, cost_left, live_moves, cost_stale")
+      .eq("live", true)
+      .not("bill_line_id", "is", null)
+      .limit(5000),
+    // The items' names, for the same sentence (a view embed is PostgREST's guess; this is not).
+    supabase.from("inventory_items").select("id, name").limit(5000),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
@@ -352,6 +368,26 @@ export default async function BillsPage({
   );
   const docs = (docRows ?? []).map((d: any) => ({ ...d, signedUrl: (d.file_url && signed.get(d.file_url)) || null }));
 
+  // Each live roll by the receipt line it came off. A read that failed leaves this empty, and the
+  // card then offers Put The Rest On The Shelf on a line whose roll is already there - which the
+  // server refuses in words ("already on the shelf"), so the wrong is a sentence, never a double.
+  const itemNames = new Map<string, string>(((shelfItemsRead?.data ?? []) as any[]).map((i) => [String(i.id), String(i.name ?? "")]));
+  const shelfByLine = new Map<string, NonNullable<ReceiptForBilling["lines"][number]["shelf"]>>();
+  for (const r of ((shelfLotsRead?.error ? [] : shelfLotsRead?.data) ?? []) as any[]) {
+    if (!r?.bill_line_id) continue;
+    shelfByLine.set(String(r.bill_line_id), {
+      lotId: String(r.lot_id),
+      itemName: itemNames.get(String(r.item_id)) ?? "On the shelf",
+      pieces: Number(r.pieces) || 0,
+      unit: String(r.unit ?? ""),
+      cost: Number(r.cost) || 0,
+      piecesLeft: Number(r.pieces_left) || 0,
+      costLeft: Number(r.cost_left) || 0,
+      liveMoves: Number(r.live_moves) || 0,
+      stale: r.cost_stale === true,
+    });
+  }
+
   const receiptsForBilling: ReceiptForBilling[] = receiptBills.map((b: any) => ({
     id: String(b.id),
     supplier: b.supplier ?? "Receipt",
@@ -359,7 +395,10 @@ export default async function BillsPage({
     job_id: b.job_id ?? null,
     job_name: b.jobs?.name ?? null,
     amount: Number(b.amount) || 0,
-    billedOn: billedOn.get(String(b.id)) ?? null,
+    // A receipt whose ORDER is already billed is held too (review of Phase 2): the importer skips
+    // it (the customer paid for the delivery through the PO line), so its lines are as settled as
+    // a claimed receipt's, and Put The Rest On The Shelf on it would put a paid-for coil on the shelf.
+    billedOn: billedOn.get(String(b.id)) ?? (b.po_id ? billedOn.get(String(b.po_id)) ?? null : null),
     lines: (b.line_items ?? []).map((l: any) => ({
       id: String(l.id),
       description: String(l.description ?? ""),
@@ -381,6 +420,7 @@ export default async function BillsPage({
       // means and keeps meaning.
       billedAmount: l.billed_amount == null ? null : Number(l.billed_amount),
       isStock: l.is_stock === true,
+      shelf: shelfByLine.get(String(l.id)) ?? null,
     })),
   }));
 
@@ -1019,6 +1059,10 @@ export default async function BillsPage({
             // Same Purchase: Tie Them (audit v994, DB1): the answer to "maybe already in your
             // books" on the same card, so a counter ticket and CED's invoice for it can be one.
             tieToBill: tieSupplierInvoiceToBill,
+            // Record To Shelf (Shop Stock, Phase 2): a CED document in as shop stock, each line
+            // counted by a person. Both halves passed, or the button does not render.
+            shelfLines: supplierInvoiceShelfLines,
+            recordToShelf: recordSupplierInvoiceToShelf,
           }}
         />
       )}

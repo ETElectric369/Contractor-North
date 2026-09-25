@@ -155,9 +155,9 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(holds(m.totals)).toBe(true);
   });
 
-  it("a STOCK ticket is Put On The Shelf in its month, never a business cost, and the month's total cost is unchanged", () => {
+  it("a STOCK ticket is Put On The Shelf in its month, never Materials, and the month's total cost is unchanged", () => {
     const asJob = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
-    const lots = [{ lot_id: "L1", bill_id: "s1", cost: 180.17, cost_left: 180.17, lost_cost: 0, live: true }];
+    const lots = [{ lot_id: "L1", bill_id: "s1", cost: 199.48, cost_left: 199.48, lost_cost: 0, live: true }];
     const asStock = computeOwnerMoney(inputs([{ ...stockTicket, on_shelf: true }], lots), AUG, TZ, TODAY);
     expect(asStock.totals.putOnShelf).toBe(199.48);
     expect(asStock.totals.businessCostsTotal).toBe(0);
@@ -165,9 +165,23 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(asStock.totals.materialsAndBills).toBe(0);
     expect(costOf(asStock.totals)).toBe(costOf(asJob.totals));
     expect(asStock.totals.left).toBe(asJob.totals.left);
-    expect(asStock.onShelfNow).toBe(180.17);
+    expect(asStock.onShelfNow).toBe(199.48);
     expect(holds(asStock.totals)).toBe(true);
     for (const x of asStock.months) expect(holds(x)).toBe(true);
+  });
+
+  it("only a STOCK ticket's ROLLS are Put On The Shelf: its Not Stock lines and their tax are Tools & Supplies, so the shelf adds up", () => {
+    // 199.48 ticket; the counted coil is a $180.17 roll, the Not Stock line and its tax $19.31.
+    const asJob = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
+    const lots = [{ lot_id: "L1", bill_id: "s1", cost: 180.17, cost_left: 180.17, lost_cost: 0, live: true }];
+    const asStock = computeOwnerMoney(inputs([{ ...stockTicket, on_shelf: true }], lots), AUG, TZ, TODAY);
+    expect(asStock.totals.putOnShelf).toBe(180.17);
+    expect(asStock.onShelfNow).toBe(180.17); // nothing drawn, nothing lost: the two agree
+    expect(asStock.totals.businessCosts["Tools & Supplies"]).toBe(19.31);
+    expect(asStock.totals.businessCosts.Other).toBe(0);
+    expect(asStock.totals.materialsAndBills).toBe(0);
+    expect(costOf(asStock.totals)).toBe(costOf(asJob.totals));
+    expect(holds(asStock.totals)).toBe(true);
   });
 
   it("the shelf's part of a JOB ticket leaves Materials & Bills for Put On The Shelf, same month, same total", () => {

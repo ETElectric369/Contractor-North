@@ -6,6 +6,7 @@ import { generateNortReviewsForAllOrgs } from "@/lib/nort/review";
 import { sweepOrphanedUploads } from "@/lib/storage-sweep";
 import { backfillProcessorFees } from "@/lib/processor-fee-capture";
 import { reportError } from "@/lib/observe";
+import { findShelfProblems } from "@/lib/stock-reconcile-check";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,20 @@ export async function GET(request: Request) {
   } catch (e: any) {
     result.nort_reviews_error = e?.message ?? "failed";
     reportError("cron-nort-review", e);
+  }
+
+  try {
+    // THE SHELF ADDS UP (Shop Stock, Phase 2). stock_reconcile_problems plus the lot-cost drift the
+    // view can't see; empty is the only healthy answer. Each problem goes to error_events, where
+    // the morning ops review reads it. Read only.
+    const shelf = await findShelfProblems(supabase);
+    for (const p of shelf.problems) {
+      reportError("cron-stock-reconcile", new Error(`${p.problem}: ${p.detail}`), { orgId: p.orgId, lotId: p.lotId, billId: p.billId });
+    }
+    result.stock_reconcile = shelf.skipped ? { skipped: shelf.skipped } : { problems: shelf.problems.length };
+  } catch (e: any) {
+    result.stock_reconcile_error = e?.message ?? "failed";
+    reportError("cron-stock-reconcile", e);
   }
 
   try {

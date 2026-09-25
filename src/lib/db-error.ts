@@ -46,6 +46,10 @@ const BY_CONSTRAINT: Record<string, string> = {
   // 0300: the customer's page. share-input says these first; the database says them if a door didn't.
   job_stretches_dates_in_order: "The stretch ends before it starts. Check the two dates.",
   job_picks_file_is_its_own: "That file isn't filed on this job's picks.",
+  // 0303: the shop shelf. An item is matched on its part number; one roll per receipt line.
+  bills_on_shelf_has_no_job: "This ticket is on the shop shelf, so it can't go on a job. Undo it from the tray first, then file it on the job.",
+  inventory_items_org_key_part_uidx: "An item with that part number is already on the shelf. Pick it instead of making a new one.",
+  stock_lots_one_live_per_line: "A roll from that line is already on the shelf. Take it off the shelf first to count it again.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */

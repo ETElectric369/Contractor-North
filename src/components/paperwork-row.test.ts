@@ -52,9 +52,11 @@ describe("PaperworkRow", () => {
     expect(html).toMatch(/>Where does this go\?<\/p>/);
     // Both choices, side by side, neither picked.
     expect(html).toMatch(/<select[^>]*aria-label="A Job"/);
-    expect(html).toMatch(/<select[^>]*aria-label="Or A Business Cost"/);
+    expect(html).toMatch(/<select[^>]*aria-label="Or Shop Stock Or A Business Cost"/);
     expect(html).toContain("A Job…");
-    expect(html).toContain("Or A Business Cost…");
+    expect(html).toContain("Or Shop Stock Or A Business Cost…");
+    // The shelf sits above the buckets, never picked for a paper that doesn't say STOCK.
+    expect(html).toContain('<option value="stock">Shop Stock</option>');
     expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
     expect(html).not.toContain("Job picked from");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Pick where it goes first/);

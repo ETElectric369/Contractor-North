@@ -21,6 +21,7 @@ import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
 import { jobLabel } from "@/lib/schedule-options";
 import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
+import { isShelfTicket } from "@/lib/shelf-plan";
 
 interface JobOption {
   id: string;
@@ -321,7 +322,7 @@ export function BillsReceipts({
                       <div className="text-xs text-slate-400">
                         {b.bill_number ? `#${b.bill_number} · ` : ""}
                         {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : b.job_id ? "Job" : `Business Cost · ${bucketOf(b.category)}`}
+                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`}
                         {(b.line_items?.length ?? 0) > 0 ? ` · ${b.line_items!.length} items` : ""}
                       </div>
                     </div>
@@ -538,7 +539,7 @@ function BillEditModal({
       <div className="space-y-3">
         {billedNote && (
           <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm leading-relaxed text-amber-800">
-            <div className="font-semibold">Saved. One thing about the invoice:</div>
+            <div className="font-semibold">Saved. One thing to know:</div>
             <div className="mt-1">{billedNote}</div>
             <Button variant="outline" size="sm" onClick={onClose} className="mt-2 h-11">
               Got It

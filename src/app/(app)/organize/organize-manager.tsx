@@ -46,6 +46,7 @@ import {
 } from "./actions";
 import { fingerprintSeen } from "./paperwork-actions";
 import { bucketOf } from "@/lib/business-cost-buckets";
+import { isShelfTicket } from "@/lib/shelf-plan";
 import { jobLabel } from "@/lib/schedule-options";
 import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
@@ -281,6 +282,8 @@ export function OrganizeManager({
     if (item.job_id && item.jobs) return <Badge tone="blue">{jobLabel(item.jobs)}</Badge>;
     // A bill with no job is a business cost. bucketOf reads an old word ("Fuel") as its bucket, so
     // the archive and the Bills page name the same cost the same way.
+    // A shelf ticket is never a business cost (Shop Stock, Phase 2): its bucket would read "Other".
+    if (item.bill_id && !item.job_id && isShelfTicket({ category: item.category })) return <Badge tone="indigo">Shop Stock</Badge>;
     if (item.bill_id && !item.job_id) return <Badge tone="purple">Business Cost · {bucketOf(item.category)}</Badge>;
     if (item.category === "Petty cash") return <Badge tone="indigo">Petty cash</Badge>;
     if (item.category === "Task") return <Badge tone="green">Task</Badge>;

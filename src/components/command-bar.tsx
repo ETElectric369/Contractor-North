@@ -28,7 +28,7 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/timecards": ["hours", "timesheet"],
   "/schedule": ["calendar", "dispatch", "appointments"],
   "/jobs?status=in_progress": ["projects", "work"],
-  "/inventory": ["stock", "warehouse", "parts"],
+  "/inventory": ["stock", "shop stock", "shelf", "inventory", "warehouse", "parts"],
   "/compliance": ["osha", "liability", "regulations"],
   "/insurance": ["workers comp", "coverage", "liability"],
   "/safety": ["osha", "incident", "hazard"],

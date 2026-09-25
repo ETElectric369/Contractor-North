@@ -3,8 +3,18 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
-import { billLineCost, isTaxLine, shelfLotCost, type BillLine } from "@/lib/bill-itemisation";
+import { type BillLine } from "@/lib/bill-itemisation";
 import { isMissingShelf } from "@/lib/job-cost";
+import {
+  SHELF_NEEDS_LINES,
+  matchItem,
+  planShelving,
+  restampPayload,
+  restampPlan,
+  type ShelfPick,
+  type ShelfPickerItem,
+  type StoredLineLot,
+} from "@/lib/shelf-plan";
 
 /**
  * THE SHOP SHELF, AS A LEDGER (Shop Stock, Phase 1; migrations 0303 + 0304).
@@ -30,285 +40,169 @@ import { isMissingShelf } from "@/lib/job-cost";
  *  · Only stock_draw takes pieces. A tech reaches it through takeFromStock and gets quantities
  *    back, never a cost.
  *
- * In Phase 1 NOTHING CALLS THE SERVER HALF YET: the doors that put a roll on the shelf (Phase 2)
- * and take a piece off it (Phase 3) arrive with their screens. It ships now, with zero lots, so
- * every job-cost reader could be switched and proven unchanged to the cent first.
+ * Phase 2 wires the doors that put a roll ON the shelf (shelveLines: the receipt card, the tray,
+ * Record To Shelf) and the office's Count It; the doors that take a piece OFF it (takeFromStock)
+ * arrive with their screens in Phase 3.
  *
  * This is deliberately NOT a "use server" module (same reason as bill-itemisation.ts): the pure
  * half has to be importable by tests. Call the server functions from your own action.
  */
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════
-   THE PURE PART. Nothing below this line touches Supabase until THE SERVER PART.
+   THE PURE PART lives in src/lib/shelf-plan.ts (Phase 2): the tray row, the receipt card and the
+   Record To Shelf sheet are client components and need the same unit guess and item match the
+   server uses, and this file is server-only. Re-exported here so every existing import holds.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 
-const cents = (n: number) => Math.round(n * 100) / 100;
-const qty3 = (n: number) => Math.round(n * 1000) / 1000;
-
-/**
- * round(take x cost / pieces, 2) EXACTLY as Postgres rounds a numeric: on the exact quotient, half
- * away from zero. Float arithmetic cannot do that: 36 of a 40-piece lot costing $0.15 is exactly
- * 13.5 cents, which Postgres rounds to $0.14 and Math.round over binary floats rounds to $0.13. So
- * the three figures are scaled to integers (pieces to the thousandth, dollars to the cent, which is
- * all either column holds) and divided in BigInt. Every input here is non-negative.
- */
-export function proRataCents(take: number, cost: number, pieces: number): number {
-  const t = BigInt(Math.round(take * 1000));
-  const c = BigInt(Math.round(cost * 100));
-  const p = BigInt(Math.round(pieces * 1000));
-  if (p <= BigInt(0)) return 0;
-  // floor((2tc + p) / 2p) = the quotient t*c/p rounded half up, in cents.
-  const q = (BigInt(2) * t * c + p) / (BigInt(2) * p);
-  return Number(q) / 100;
-}
-
-/**
- * A part number with its punctuation taken off: "30-641", "30 641" and "30641" are one part, and
- * every supply house writes it a different way. Letters are kept (a "4S-1/2" box is not a "4S"),
- * so this only ever collapses SEPARATORS, never content. (Moved from stock-flow.ts.)
- */
-export function normalisePartNumber(raw: string | null | undefined): string | null {
-  const key = String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-  return key.length ? key : null;
-}
-
-/**
- * A description reduced to its letters, digits and single spaces, for exact comparison only.
- * Digits are KEPT because they are the whole difference between a 341-Tan nut and a 342-Red one;
- * this is a case-and-punctuation fold, not a similarity score. (Moved from stock-flow.ts.)
- */
-export function normaliseName(raw: string | null | undefined): string {
-  return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
-}
-
-/** A stock item, in the only shape the matcher needs to see it. */
-export type ItemCandidate = {
-  id: string;
-  name: string;
-  /** The normalised supplier part number or price-list code (0303). */
-  key_part?: string | null;
-  /** Legacy part number typed on the item; read as a key when key_part is empty. */
-  part_number?: string | null;
-  price_item_id?: string | null;
-  created_at?: string | null;
-};
-
-export type ItemMatch = { kind: "match"; id: string; why: string } | { kind: "create"; why: string };
-
-/**
- * WHICH ITEM ON THE SHELF THIS PURCHASE BELONGS TO, OR NONE.
- *
- * The second box of the same wire nuts must land on the SAME item, or the count is split across
- * twins. But merging two DIFFERENT parts into one item is the worse failure: a twin is visible on
- * the page, a bad merge is one row quietly holding the sum of two products. So:
- *   1. same part number (key_part, or the legacy part_number) -> that item;
- *   2. same price-list item -> that item;
- *   3. an item whose OWN part number disagrees is never matched on anything else: the part numbers
- *      disagreeing is the product telling us it is a different product;
- *   4. otherwise the exact normalised name;
- *   5. anything else -> create.
- * Several items sharing a key are already twins: the oldest wins, deterministically.
- */
-export function matchItem(
-  candidates: ItemCandidate[],
-  key: { partNumber?: string | null; priceItemId?: string | null; description: string },
-): ItemMatch {
-  const wantPart = normalisePartNumber(key.partNumber);
-  const wantName = normaliseName(key.description);
-  const partOf = (c: ItemCandidate) => normalisePartNumber(c.key_part) ?? normalisePartNumber(c.part_number);
-  const oldest = (rows: ItemCandidate[]) =>
-    [...rows].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) || a.id.localeCompare(b.id))[0];
-
-  if (wantPart) {
-    const samePart = candidates.filter((c) => partOf(c) === wantPart);
-    if (samePart.length) return { kind: "match", id: oldest(samePart).id, why: "same part number" };
-  }
-  if (key.priceItemId) {
-    const samePrice = candidates.filter((c) => c.price_item_id && c.price_item_id === key.priceItemId);
-    if (samePrice.length) return { kind: "match", id: oldest(samePrice).id, why: "same price-list item" };
-  }
-  if (wantName) {
-    // A candidate carrying a DIFFERENT part number is a different product whatever it is called.
-    const sameName = candidates.filter((c) => normaliseName(c.name) === wantName && (!wantPart || !partOf(c)));
-    if (sameName.length) {
-      return {
-        kind: "match",
-        id: oldest(sameName).id,
-        why: wantPart ? "same name, and that item carries no part number to disagree with this one" : "same name",
-      };
-    }
-  }
-  return { kind: "create", why: wantPart ? "nothing on the shelf carries this part number" : "nothing on the shelf goes by this name" };
-}
-
-export type UnitGuess = {
-  /** "ft" or "ea", or null when the description says nothing a person could not say better. */
-  unit: "ft" | "ea" | null;
-  /** Pieces in ONE of what the line bought (250 for a 250 ft coil), or null. */
-  perContainer: number | null;
-  why: string;
-};
-
-/**
- * WHAT A RECEIPT LINE IS COUNTED IN, AS A SUGGESTION ONLY.
- *
- * Order: the price list's own unit for this part (a person typed it once), then what the
- * description spells out - a length in feet (250 FT, 250', a COIL or REEL of so many feet), or a
- * pack count (PK100, 100PK). Anything else is null and the person says. It never reads the line's
- * quantity column: a scanner put 500 there out of the product NAME on the Twister line, and the
- * "1000' REEL, qty 55" counter cut is the trap splitContradictsReceipt exists for.
- */
-export function guessUnit(description: string | null | undefined, priceListUnit?: string | null): UnitGuess {
-  const pl = String(priceListUnit ?? "").trim().toLowerCase();
-  if (pl === "ft" || pl === "feet" || pl === "foot") return { unit: "ft", perContainer: null, why: "the price list counts it in feet" };
-  if (pl === "ea" || pl === "each") return { unit: "ea", perContainer: null, why: "the price list counts it each" };
-
-  const d = String(description ?? "").toUpperCase();
-  const feet =
-    d.match(/(\d[\d,]*)\s*(?:FT\b|FEET\b|')/) ?? d.match(/\b(?:COIL|REEL)\s*(?:OF\s*)?(\d[\d,]*)\b/) ?? null;
-  if (feet) {
-    const n = Number(feet[1].replace(/,/g, ""));
-    if (Number.isFinite(n) && n > 0) return { unit: "ft", perContainer: n, why: `the description says ${n} ft` };
-  }
-  if (/\b(COIL|REEL)\b/.test(d)) return { unit: "ft", perContainer: null, why: "a coil or reel is counted in feet" };
-  const pack = d.match(/\bPK\s*(\d+)\b/) ?? d.match(/\b(\d+)\s*PK\b/);
-  if (pack) {
-    const n = Number(pack[1]);
-    if (Number.isFinite(n) && n > 0) return { unit: "ea", perContainer: n, why: `the description says a pack of ${n}` };
-  }
-  return { unit: null, perContainer: null, why: "the description doesn't say; ask" };
-}
-
-/** A live lot, as the FIFO walk sees it. */
-export type LotForTake = {
-  id: string;
-  bought_on: string | null;
-  created_at: string | null;
-  pieces: number;
-  cost: number;
-  piecesLeft: number;
-  costLeft: number;
-};
-
-export type PlannedTake = { lotId: string; qty: number; cost: number };
-
-/**
- * THE TAKE, WORKED OUT THE WAY THE DATABASE STAMPS IT (stock_draw + stamp_stock_move, 0303), for a
- * preview and for tests. Oldest lot first; one take per lot touched; a take that empties a lot
- * takes its exact remaining dollars, any other is qty x cost / pieces rounded to the cent and never
- * more than is left; what the shelf cannot cover is a SHORT at $0 - never a cost invented at the
- * newest lot's rate.
- */
-export function planFifoTake(lots: LotForTake[], qty: number): { takes: PlannedTake[]; short: number; cost: number } {
-  let rem = qty3(Number(qty) || 0);
-  const takes: PlannedTake[] = [];
-  const ordered = [...lots].sort(
-    (a, b) =>
-      String(a.bought_on ?? "").localeCompare(String(b.bought_on ?? "")) ||
-      String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")) ||
-      a.id.localeCompare(b.id),
-  );
-  for (const l of ordered) {
-    if (rem <= 0) break;
-    const left = qty3(l.piecesLeft);
-    if (!(left > 0)) continue;
-    const take = Math.min(left, rem);
-    const cost = take === left ? cents(l.costLeft) : Math.min(proRataCents(take, l.cost, l.pieces), cents(l.costLeft));
-    takes.push({ lotId: l.id, qty: take, cost });
-    rem = qty3(rem - take);
-  }
-  return { takes, short: rem > 0 ? rem : 0, cost: cents(takes.reduce((s, t) => s + t.cost, 0)) };
-}
-
-/** A stored lot on a line, for the checks below. */
-export type StoredLineLot = { lot_id: string; bill_line_id: string | null; cost: unknown; live?: boolean; live_moves?: unknown };
-
-/**
- * WHAT EACH LIVE LOT ON ONE BILL SHOULD COST TODAY: shelfLotCost over the bill's lines as they
- * stand. The pure half of restampLotsForBill, and of the daily drift check.
- *   · a lot whose line is gone, is a tax line, or no longer has a positive extension comes OFF
- *     the shelf (a $0.00 extension shipped nothing), and so does one whose line the job now bills
- *     in full (its share is $0: nothing of it is left for a shelf);
- *   · a lot with takes on it is never restamped - 0304 froze its bill, so it cannot have drifted,
- *     and a stamped take's cost never moves after the fact. Its step is "keep" with cost null: it
- *     was not checked, so nothing may call it right (restampLotsForBill leaves its stale flag).
- */
-export function restampPlan(
-  lots: StoredLineLot[],
-  lines: (BillLine & { id: string })[],
-): { lotId: string; action: "keep" | "restamp" | "unshelve"; cost: number | null }[] {
-  return lots
-    .filter((l) => l.live !== false && l.bill_line_id)
-    .map((l) => {
-      const line = lines.find((x) => String(x.id) === String(l.bill_line_id));
-      if (Number(l.live_moves) > 0) return { lotId: l.lot_id, action: "keep" as const, cost: null };
-      if (!line || isTaxLine(line) || !(billLineCost(line) > 0)) return { lotId: l.lot_id, action: "unshelve" as const, cost: null };
-      const want = shelfLotCost(line, lines);
-      if (!(want > 0)) return { lotId: l.lot_id, action: "unshelve" as const, cost: null };
-      return cents(Number(l.cost)) === want
-        ? { lotId: l.lot_id, action: "keep" as const, cost: want }
-        : { lotId: l.lot_id, action: "restamp" as const, cost: want };
-    });
-}
-
-/** Lots whose stored cost is not what shelfLotCost gives today: the TypeScript half of
- *  stock_reconcile_problems, for the daily ops check. Empty is the only healthy answer. */
-export function lotCostDrift(
-  lots: StoredLineLot[],
-  lines: (BillLine & { id: string })[],
-): { lotId: string; stored: number; today: number }[] {
-  const out: { lotId: string; stored: number; today: number }[] = [];
-  for (const l of lots) {
-    if (l.live === false || !l.bill_line_id) continue;
-    const line = lines.find((x) => String(x.id) === String(l.bill_line_id));
-    if (!line) continue;
-    const today = shelfLotCost(line, lines);
-    const stored = cents(Number(l.cost));
-    if (stored !== today) out.push({ lotId: l.lot_id, stored, today });
-  }
-  return out;
-}
-
-/** The sentence a put-on-shelf refuses with, or null to go ahead. */
-export function putOnShelfProblem(input: { pieces: unknown; unit: unknown; lineAmount: unknown; isTax: boolean; share: number }): string | null {
-  const pieces = Number(input.pieces);
-  if (!Number.isFinite(pieces) || pieces <= 0) return "Say how many pieces go on the shelf.";
-  if (pieces > 1_000_000) return "That count looks too big for one roll. Check it and try again.";
-  if (!String(input.unit ?? "").trim()) return "Say what it's counted in (ft, ea).";
-  if (input.isTax) return "Sales tax isn't a thing on a shelf. It rides with the lines it was charged on.";
-  if (!(Number(input.lineAmount) > 0)) return "That line's extension is $0.00, which means nothing shipped, so nothing from it can go on the shelf.";
-  if (!(input.share > 0))
-    return "This whole line is still billed to the job. Say how much this job used first, so the rest can go on the shelf.";
-  return null;
-}
+export * from "@/lib/shelf-plan";
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════
-   THE SERVER PART. Not wired to any screen in Phase 1.
+   THE SERVER PART.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
-
-export type ShelfResult = { ok: true; id: string } | { ok: false; error: string };
 
 type Sb = { from: (t: string) => any; rpc?: (fn: string, args?: Record<string, unknown>) => any };
 
+/** 0328 not on this database yet: said in words, never a raw "function does not exist". */
+export const SHELF_NEEDS_0328 =
+  "Putting things on the shelf needs one more database update (0328) that hasn't been applied yet. Nothing was changed.";
+
+/** PostgREST's answer for an RPC the database doesn't have. */
+export function isMissingShelfRpc(err: unknown): boolean {
+  const code = String((err as { code?: string } | null)?.code ?? "");
+  const msg = String((err as { message?: string } | null)?.message ?? "");
+  return code === "PGRST202" || code === "42883" || /could not find the function/i.test(msg) || /function .* does not exist/i.test(msg);
+}
+
+const LINE_COLUMNS = "id, description, quantity, unit_price, amount, category, billable, billed_amount";
+
+export type ShelvedLot = { lotId: string; itemId: string; lineId: string; cost: number; pieces: number; unit: string; billedAmount: number };
+export type ShelveResult = { ok: true; lots: ShelvedLot[]; billId: string } | { ok: false; error: string };
+
 /**
- * PUT WHAT A JOB DID NOT USE OF A RECEIPT LINE ON THE SHELF, as one lot.
+ * PUT ONE TICKET'S ROLLS ON THE SHELF: the one server door every Phase 2 screen goes through (the
+ * receipt card, the tray, Record To Shelf).
  *
- * The line's billed_amount (0272) must already say what the job used: the lot is the REST, costed
- * by shelfLotCost over the bill's lines as they stand. `pieces` and `unit` are what a person
- * confirmed (guessUnit only suggests). The item is either given, or created in the same unit.
+ *   1. read the ticket's lines, and the rolls already on the shelf from it;
+ *   2. an item named new is matched first, exactly (part number, then name, never fuzzy), so the
+ *      second coil of 12/2 lands on the SAME item rather than a twin; a match counted in another
+ *      unit is refused in words;
+ *   3. planShelving works out, in memory, what each job used and what each roll costs over the
+ *      lines as they will stand; the rolls already on the ticket are restamped to their new share
+ *      in the same breath (tax is re-shared once more lines come off);
+ *   4. shelve_bill_lines (0328) writes all of it in one transaction, capped at the paper again.
+ *
+ * Takes the caller's client: every write runs as the signed-in person, under the tables' own rules.
  */
-export async function putOnShelf(input: {
-  lineId: string;
-  pieces: number;
-  unit: string;
-  itemId?: string | null;
-  newItem?: { name: string; keyPart?: string | null; priceItemId?: string | null } | null;
-}): Promise<ShelfResult> {
+export async function shelveLines(supabase: Sb, orgId: string, billId: string, picks: ShelfPick[]): Promise<ShelveResult> {
+  if (!supabase.rpc) return { ok: false, error: "This connection can't put things on the shelf." };
+  const [{ data: lines, error: linesErr }, { data: lots, error: lotsErr }] = await Promise.all([
+    supabase.from("bill_line_items").select(LINE_COLUMNS).eq("bill_id", billId).eq("org_id", orgId).order("sort_order"),
+    supabase.from("stock_lot_balance").select("lot_id, bill_line_id, cost, live, live_moves").eq("org_id", orgId).eq("bill_id", billId).eq("live", true),
+  ]);
+  if (linesErr) return { ok: false, error: dbError(linesErr) };
+  if (lotsErr) return { ok: false, error: isMissingShelf(lotsErr) ? SHELF_NEEDS_0328 : dbError(lotsErr) };
+  const all = (lines ?? []) as (BillLine & { id: string })[];
+  if (!all.length) return { ok: false, error: SHELF_NEEDS_LINES };
+  const live = (lots ?? []) as StoredLineLot[];
+  for (const p of picks) {
+    if (live.some((l) => String(l.bill_line_id) === String(p.lineId)))
+      return { ok: false, error: "A roll from that line is already on the shelf. Take it off the shelf first to count it again." };
+  }
+
+  // Exact matches only, and only for an item a person named new: a picked item is theirs.
+  const named = picks.filter((p) => !p.itemId);
+  let resolved = picks;
+  if (named.length) {
+    const { data: items, error: itemsErr } = await supabase
+      .from("inventory_items")
+      .select("id, name, unit, key_part, part_number, price_item_id, created_at")
+      .eq("org_id", orgId);
+    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+    const candidates = (items ?? []) as ShelfPickerItem[];
+    const out: ShelfPick[] = [];
+    for (const p of picks) {
+      if (p.itemId) {
+        const it = candidates.find((c) => c.id === p.itemId);
+        if (it && String(it.unit).trim().toLowerCase() !== String(p.unit).trim().toLowerCase())
+          return { ok: false, error: `${it.name} is counted in ${it.unit}. Count this in ${it.unit}, or make a new item for ${p.unit}.` };
+        out.push(p);
+        continue;
+      }
+      const m = matchItem(candidates, { partNumber: p.keyPart ?? null, description: String(p.newItemName ?? "") });
+      if (m.kind === "match") {
+        const it = candidates.find((c) => c.id === m.id)!;
+        if (String(it.unit).trim().toLowerCase() !== String(p.unit).trim().toLowerCase())
+          return {
+            ok: false,
+            error: `${it.name} is already on the shelf, counted in ${it.unit} (${m.why}). Count this in ${it.unit}, or give it a different name.`,
+          };
+        out.push({ ...p, itemId: it.id, newItemName: null });
+      } else out.push(p);
+    }
+    resolved = out;
+  } else {
+    // Picked items still have to be this company's and in this unit; the database says so too.
+    const ids = Array.from(new Set(picks.map((p) => String(p.itemId))));
+    const { data: items, error: itemsErr } = await supabase.from("inventory_items").select("id, name, unit").eq("org_id", orgId).in("id", ids);
+    if (itemsErr) return { ok: false, error: dbError(itemsErr) };
+    for (const p of picks) {
+      const it = ((items ?? []) as { id: string; name: string; unit: string }[]).find((i) => i.id === p.itemId);
+      if (!it) return { ok: false, error: "That item isn't on this company's shelf any more. Reload and pick again." };
+      if (String(it.unit).trim().toLowerCase() !== String(p.unit).trim().toLowerCase())
+        return { ok: false, error: `${it.name} is counted in ${it.unit}. Count this in ${it.unit}, or make a new item for ${p.unit}.` };
+    }
+  }
+
+  const plan = planShelving(all, resolved);
+  if (!plan.ok) return plan;
+  const restamp = restampPayload(live, plan.patched);
+
+  const { data, error } = await supabase.rpc("shelve_bill_lines", {
+    p_bill: billId,
+    p_lines: plan.lots.map((l) => ({
+      line_id: l.lineId,
+      billed_amount: l.billedAmount,
+      pieces: l.pieces,
+      unit: l.unit,
+      cost: l.cost,
+      item_id: l.itemId,
+      item_name: l.newItemName,
+      key_part: l.keyPart,
+    })),
+    p_restamp: restamp,
+  });
+  if (error) return { ok: false, error: isMissingShelfRpc(error) ? SHELF_NEEDS_0328 : dbError(error) };
+  const wrote = ((data as { lots?: { lot_id: string; item_id: string; line_id: string }[] } | null)?.lots ?? []) as {
+    lot_id: string;
+    item_id: string;
+    line_id: string;
+  }[];
+  if (wrote.length !== plan.lots.length) return { ok: false, error: "The shelf didn't take every roll. Reload to see where it stands." };
+  // Anything the plan did not restamp (a roll whose line itself changed) is put right the usual way.
+  await restampLotsForBill(supabase, orgId, billId);
+  revalidatePath("/inventory");
+  revalidatePath("/bills");
+  return {
+    ok: true,
+    billId,
+    lots: plan.lots.map((l) => {
+      const w = wrote.find((x) => String(x.line_id) === l.lineId);
+      return { lotId: String(w?.lot_id ?? ""), itemId: String(w?.item_id ?? ""), lineId: l.lineId, cost: l.cost, pieces: l.pieces, unit: l.unit, billedAmount: l.billedAmount };
+    }),
+  };
+}
+
+export type ShelfResult = { ok: true; id: string; lot: ShelvedLot } | { ok: false; error: string };
+
+/**
+ * PUT THE REST ON THE SHELF, for one receipt line (the receipt card's door): `used` of `pieces` went
+ * into this job and is billed to it; the rest goes on the shelf at its share of the ticket.
+ */
+export async function putOnShelf(input: ShelfPick): Promise<ShelfResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is staff-only." };
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company, so there's no shelf to put this on." };
-
   const { data: line, error: lineErr } = await supabase
     .from("bill_line_items")
     .select("id, bill_id")
@@ -317,58 +211,55 @@ export async function putOnShelf(input: {
     .maybeSingle();
   if (lineErr) return { ok: false, error: dbError(lineErr) };
   if (!line) return { ok: false, error: "That receipt line isn't there any more. Reload and try again." };
-  const { data: lines, error: linesErr } = await supabase
-    .from("bill_line_items")
-    .select("id, description, quantity, unit_price, amount, category, billable, billed_amount")
-    .eq("bill_id", (line as { bill_id: string }).bill_id)
-    .eq("org_id", orgId);
-  if (linesErr) return { ok: false, error: dbError(linesErr) };
-  const all = (lines ?? []) as (BillLine & { id: string })[];
-  const me = all.find((l) => String(l.id) === String(input.lineId));
-  if (!me) return { ok: false, error: "That receipt line isn't there any more. Reload and try again." };
-  const share = shelfLotCost(me, all);
-  const problem = putOnShelfProblem({ pieces: input.pieces, unit: input.unit, lineAmount: billLineCost(me), isTax: isTaxLine(me), share });
-  if (problem) return { ok: false, error: problem };
+  const res = await shelveLines(supabase, orgId, String((line as { bill_id: string }).bill_id), [input]);
+  if (!res.ok) return res;
+  return { ok: true, id: res.lots[0].lotId, lot: res.lots[0] };
+}
 
-  let itemId = input.itemId ?? null;
-  if (!itemId) {
-    const name = String(input.newItem?.name ?? me.description ?? "").trim().slice(0, 200);
-    if (!name) return { ok: false, error: "Name the item this goes on the shelf as." };
-    const { data: made, error: makeErr } = await supabase
-      .from("inventory_items")
-      .insert({
-        org_id: orgId,
-        name,
-        unit: String(input.unit).trim(),
-        key_part: normalisePartNumber(input.newItem?.keyPart),
-        price_item_id: input.newItem?.priceItemId ?? null,
-        quantity_on_hand: 0,
-        reorder_point: 0,
-      })
-      .select("id");
-    if (makeErr) return { ok: false, error: dbError(makeErr) };
-    itemId = (made?.[0]?.id as string | undefined) ?? null;
-    if (!itemId) return { ok: false, error: "That item didn't save. Nothing went on the shelf - try again." };
-  }
+/** Why a roll off a ticket bought for the shelf has no Take It Off The Shelf. */
+export const SHELF_TICKET_ROLL_STAYS =
+  "This roll came in on a ticket bought for the shelf, so there's no job for it to go back to. Undo that ticket from the tray to take it back, or Count It if the pieces are gone.";
 
+/**
+ * TAKE A ROLL BACK OFF THE SHELF, before anything has been taken from it (0304 refuses after, and
+ * says which takes to undo). The roll stays in the shelf's history as taken off; its dollars go
+ * back onto the job whose ticket it came off. What that job's customer is billed does not move.
+ */
+export async function unshelveLot(lotId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is staff-only." };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company." };
+  // A ROLL OFF A SHELF TICKET HAS NO JOB TO GO BACK TO (review of Phase 2). Its ticket was bought
+  // for the shelf, so "back where it came from" is nowhere: the roll would leave the shelf and its
+  // dollars would sit on a ticket no screen can put back. The way back for that roll is the
+  // ticket's own Undo in the tray, or Count It when the pieces are gone.
   const { data: lot, error: lotErr } = await supabase
-    .from("stock_lots")
-    .insert({
-      org_id: orgId,
-      item_id: itemId,
-      kind: "line",
-      bill_line_id: input.lineId,
-      pieces: qty3(Number(input.pieces)),
-      unit: String(input.unit).trim(),
-      cost: share,
-    })
-    .select("id");
+    .from("stock_lot_balance")
+    .select("lot_id, bill_id")
+    .eq("lot_id", lotId)
+    .eq("org_id", orgId)
+    .maybeSingle();
   if (lotErr) return { ok: false, error: dbError(lotErr) };
-  const id = lot?.[0]?.id as string | undefined;
-  if (!id) return { ok: false, error: "That roll didn't go on the shelf. Nothing changed - try again." };
+  if (!lot) return { ok: false, error: "That roll isn't on this company's shelf. Reload to see where it stands." };
+  const billId = (lot as { bill_id?: string | null }).bill_id;
+  if (billId) {
+    const { data: bill, error: billErr } = await supabase.from("bills").select("on_shelf").eq("id", billId).eq("org_id", orgId).maybeSingle();
+    if (billErr) return { ok: false, error: dbError(billErr) };
+    if ((bill as { on_shelf?: boolean | null } | null)?.on_shelf === true) return { ok: false, error: SHELF_TICKET_ROLL_STAYS };
+  }
+  const { data, error } = await supabase
+    .from("stock_lots")
+    .update({ unshelved_at: new Date().toISOString() })
+    .eq("id", lotId)
+    .eq("org_id", orgId)
+    .is("unshelved_at", null)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That roll is already off the shelf. Reload to see where it stands." };
   revalidatePath("/inventory");
   revalidatePath("/bills");
-  return { ok: true, id };
+  return { ok: true };
 }
 
 /**

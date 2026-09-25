@@ -31,10 +31,14 @@ import { isMissingShelf } from "@/lib/job-cost";
  *                         when money was handed over. See THE FROZEN-GROSS RULE below.
  *   · crew mileage      = human-typed settlement amounts only (kind='mileage' runs, 0095). Never a
  *                         rate times miles, and never folded into crew pay (the two-bucket law).
- *   · put on the shelf  = SHOP STOCK (0303, Erik's decision 1, 2026-09-24): a ticket bought for the
- *                         shelf (bills.on_shelf), and the part of a job's ticket that went on the
- *                         shelf (its live lots' cost), count in the MONTH THE TICKET IS DATED - the
- *                         cash is already gone - never in Materials & Bills or a business bucket.
+ *   · put on the shelf  = SHOP STOCK (0303, Erik's decision 1, 2026-09-24): the rolls that went on
+ *                         the shelf off a ticket (its live lots' cost), whether the ticket was
+ *                         bought for the shelf (bills.on_shelf) or for a job, count in the MONTH THE
+ *                         TICKET IS DATED - the cash is already gone - never in Materials & Bills or
+ *                         a business bucket. ONLY THE ROLLS: the rest of a shelf ticket (its Not
+ *                         Stock lines, their tax, freight, any part of the total no line covers)
+ *                         has no roll behind it, so it is a business cost in Tools & Supplies, not
+ *                         shelf money On The Shelf Now could never show (review of Phase 2).
  *                         A piece taken off the shelf later moves cost onto a job's PROFIT only; it
  *                         never adds to a month again. "On The Shelf Now" rides beside it.
  *   · shop stock lost   = the part of those same rolls written off or counted short, shown in the
@@ -510,15 +514,12 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
   // which is Put On The Shelf in the same month (decision 1: the month the ticket is dated).
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
+  // THE SAME RULE FOR EVERY TICKET, shelf ticket or job ticket: Put On The Shelf is the live rolls'
+  // cost and nothing else, so Put On The Shelf - drawn - lost = On The Shelf Now holds to the cent.
+  // A shelf ticket used to count its whole amount here, and its Not Stock lines, their tax and any
+  // part of the total no line covered were shelf money with no roll behind them.
   const shelfPart = (b: any, a: Acc): number => {
     const s = shelfByBill.get(String(b.id));
-    if (b.on_shelf === true) {
-      // A ticket bought for the shelf is the shelf's, all of it; its lost rolls are named as lost.
-      const lost = s?.lost ?? 0;
-      a.shelf += toCents(b.amount) - lost;
-      a.lost += lost;
-      return toCents(b.amount);
-    }
     if (!s) return 0;
     a.shelf += s.cost - s.lost;
     a.lost += s.lost;
@@ -542,15 +543,16 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     if (pc.job_id) a.materials += toCents(pc.amount);
     else a.buckets[bucketOf(pc.category)] += toCents(pc.amount);
   }
-  // BUSINESS COSTS: bills with no job, in their bucket - except a ticket bought for the shelf,
-  // which is never a business cost (bucketOf would call its category "Other").
+  // BUSINESS COSTS: bills with no job, in their bucket. A ticket bought for the shelf is its rolls
+  // (Put On The Shelf, above); whatever of it has no roll behind it (Not Stock lines, their tax,
+  // freight, a roll taken back off) is supplies the business used, in Tools & Supplies - named,
+  // never "Other" (bucketOf would call the category "Shop Stock" that).
   for (const b of liveBills) {
     if (b.job_id) continue;
     const a = at(monthOfDay(recordDay(b.bill_date, b.created_at, tz)));
     if (!a) continue;
     const rest = toCents(b.amount) - shelfPart(b, a);
-    if (b.on_shelf === true) continue;
-    a.buckets[bucketOf(b.category)] += rest;
+    a.buckets[b.on_shelf === true ? "Tools & Supplies" : bucketOf(b.category)] += rest;
   }
 
   // CREW PAY: earned, by the month the hours were worked (the frozen-gross rule above).

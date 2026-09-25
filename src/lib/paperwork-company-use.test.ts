@@ -65,8 +65,8 @@ describe("companyUseWord: the whole box, exactly", () => {
     expect(companyUseWord(word)).toEqual({ bucket, words: word });
   });
 
-  it.each(["STOCK", "SHOP STOCK", "INVENTORY"])("%s is the company's own and picks nothing (the shelf is a later update)", (word) => {
-    expect(companyUseWord(word)).toEqual({ bucket: null, words: word });
+  it.each(["STOCK", "SHOP STOCK", "INVENTORY"])("%s names the shop shelf and picks no bucket (Shop Stock, Phase 2)", (word) => {
+    expect(companyUseWord(word)).toEqual({ bucket: null, words: word, shelf: true });
   });
 
   it.each(["TOOLS FOR HERRINGBONE", "SHOP", "ERIK TAYLOR", "ET ELECTRIC", "WILL CALL", "13897 HERRINGBONE", "", null])("%s is not a company word", (word) => {
@@ -125,16 +125,16 @@ describe("Paper A in the tray, replayed from its stored row", () => {
     expect(suggestedDestination(permit, ["j11"])).toBe("");
   });
 
-  it("STOCK picks nothing, and the row says what the paper says", () => {
+  it("STOCK suggests the shelf, and says the words that picked it (Shop Stock, Phase 2)", () => {
     const stock = rematchPaper(paperA({ ...LIVE_A, po: "STOCK", bucket: null }), JOBS, [], SELF);
-    expect(suggestedDestination(stock, ["j11"])).toBe("");
-    expect(pickedBecause(stock)).toBeNull();
+    expect(suggestedDestination(stock, ["j11"])).toBe("stock");
+    expect(pickedBecause(stock)).toMatch(/^Shelf picked from the PO on the (bill|receipt|invoice): STOCK$/);
     expect(onPaperWords({ ...LIVE_A, po: "STOCK" }, SELF)).toBe("PO STOCK");
   });
 });
 
 describe("a stored company word is placed again on every load, like any other row", () => {
-  const STOCK_USE = { bucket: null, from: "po", words: "STOCK" };
+  const STOCK_USE = { bucket: null, from: "po", words: "STOCK", shelf: true };
   const TOOLS_USE = { bucket: "Tools & Supplies", from: "po", words: "TOOLS" };
 
   it("the same answer returns the row untouched", () => {

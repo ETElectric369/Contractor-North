@@ -228,7 +228,7 @@ export const DOCK: DockSection[] = [
       // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring/Petty cash) was promoted
       // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
-      { id: "ma-stock", label: "Inventory", icon: Boxes, href: "/inventory", staffOnly: true },
+      { id: "ma-stock", label: "Shop Stock", icon: Boxes, href: "/inventory", staffOnly: true },
       // Diagnostics. Settings is NO LONGER a link here (zero-duplication law): it lives
       // behind the avatar (the predictable phone-app door, cn-v326). Office no longer OWNS
       // /settings either — Settings is its own territory now, owned by no dock section, so
