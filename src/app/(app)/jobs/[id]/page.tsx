@@ -37,6 +37,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { JobPhotos } from "./job-photos";
@@ -351,6 +352,7 @@ export default async function JobDetailPage({
     { data: refundRows },
     unbilled,
     { data: pettyRows },
+    openDraft,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -422,6 +424,18 @@ export default async function JobDetailPage({
     viewerIsStaff
       ? supabase.from("petty_cash").select("amount, kind").eq("job_id", id)
       : Promise.resolve({ data: [] as any[] }),
+    // THE OPEN DRAFT AND WHETHER NEW WORK CAN GO ON IT (lib/actuals-draw, J-011). The Overview
+    // card's button and the Progress Payment modal both read it, so neither offers a door the
+    // server refuses: an actuals draw says "Add to INV-078", a contract draw says "Open INV-0xx".
+    // Staff only (a tech's card has no button) and only when a draft exists at all. A failed read
+    // falls back to the invoices already in hand, treating any draw as one to open, not add to.
+    viewerIsStaff && (invoices ?? []).some((i: any) => i.status === "draft")
+      ? openDraftOnJob(supabase, id).catch((e) => {
+          reportError("jobs.[id].openDraft", e, { jobId: id });
+          const d = ((invoices ?? []) as any[]).find((i) => i.status === "draft");
+          return d ? ({ id: d.id, number: d.invoice_number ?? null, kind: d.invoice_kind ?? "standard", refreshable: !isDrawKind(d.invoice_kind) } as OpenDraft) : null;
+        })
+      : Promise.resolve(null as OpenDraft | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -710,7 +724,7 @@ export default async function JobDetailPage({
               that bills it. T&M jobs only (billsActuals — the door's own rule); a tech's card is
               hours only (unbilledView is projected above). */}
           {billsActuals && (
-            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} />
+            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} />
           )}
           <Card>
             <CardContent className="space-y-4 py-5">
@@ -1318,7 +1332,7 @@ export default async function JobDetailPage({
               only do Progress payment) next to the progress/payment hub. */}
           <div className="flex flex-wrap justify-end gap-2">
             {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} />
           </div>
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">

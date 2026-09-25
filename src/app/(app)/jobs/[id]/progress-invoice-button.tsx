@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Percent } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -36,6 +37,7 @@ export function ProgressInvoiceButton({
   paid = 0,
   openInvoices = [],
   scheduleActive = false,
+  openDraft = null,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
@@ -47,6 +49,10 @@ export function ProgressInvoiceButton({
   /** True when the job uses a payment schedule — draws come from there, so this
    *  button is restricted to recording payments (prevents a parallel draw path). */
   scheduleActive?: boolean;
+  /** The job's open DRAFT draw, if any (lib/actuals-draw openDraftOnJob). An actuals one takes the
+   *  new work - the Save button says "Add to INV-078" - and a contract one is named with its door,
+   *  because a second draft draw is refused (one open draft draw per job). */
+  openDraft?: { id: string; number: string | null; refreshable: boolean } | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -101,6 +107,10 @@ export function ProgressInvoiceButton({
 
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  /** The document a refusal points at ("Open INV-078"), so the error box is never a dead end. */
+  const [errorDoor, setErrorDoor] = useState<{ id: string; number: string } | null>(null);
+  // An open actuals draw is where "Actual T&M" lands (the server brings it up to date, J-011).
+  const addsToDraft = billMode === "actuals" && !!openDraft?.refreshable;
 
   function pickInvoice(id: string) {
     setPayInvoice(id);
@@ -117,6 +127,7 @@ export function ProgressInvoiceButton({
 
   function go() {
     setError(null);
+    setErrorDoor(null);
     start(async () => {
       if (mode === "payment") {
         if (!payInvoice) return setError("No open invoice to apply a payment to.");
@@ -126,14 +137,26 @@ export function ProgressInvoiceButton({
         setOpen(false);
         router.refresh();
       } else {
-        const res =
-          billMode === "actuals"
-            ? await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind)
-            : await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
-        if (!res.ok || !res.id) return setError(res.error ?? "Could not create the invoice.");
-        // The actuals draw's total IS the unbilled work (not the modal's rough gauge) — say so; a
-        // percent / fixed draw is the amount typed, nothing to explain.
-        toast(billMode === "actuals" ? "Draft created — its total is the work not yet billed" : "Draft created", "success");
+        if (billMode === "actuals") {
+          const res = await createProgressReportInvoice(jobId, kind === "deposit" ? "progress" : kind);
+          if (!res.ok || !res.id) {
+            setErrorDoor(res.openDraft ?? null);
+            return setError(res.error ?? "Could not create the invoice.");
+          }
+          // Landing on the open draw says what it pulled ("Pulled 12 hours and 1 bill into
+          // INV-078."); a new draw's total IS the unbilled work (not the modal's rough gauge).
+          if (res.note) toast(res.note, res.partial ? "error" : "info");
+          else toast("Draft created — its total is the work not yet billed", "success");
+          router.push(`/billing/${res.id}`);
+          return;
+        }
+        const res = await createProgressInvoice(jobId, { kind, mode: billMode, value: billMode === "percent" ? pct : fixed });
+        if (!res.ok || !res.id) {
+          // Refused because a draft draw is already open: that draft is the door.
+          setErrorDoor(openDraft?.number ? { id: openDraft.id, number: openDraft.number } : null);
+          return setError(res.error ?? "Could not create the invoice.");
+        }
+        toast("Draft created", "success");
         router.push(`/billing/${res.id}`);
       }
     });
@@ -170,13 +193,31 @@ export function ProgressInvoiceButton({
             onCancel={() => setOpen(false)}
             onSave={go}
             saving={pending}
-            saveLabel={mode === "payment" ? "Record Payment" : `Create ${kind === "deposit" ? "Deposit" : kind === "final" ? "Final Invoice" : "Invoice"}`}
+            saveLabel={
+              mode === "payment"
+                ? "Record Payment"
+                : addsToDraft
+                  ? `Add to ${openDraft?.number ?? "the Open Draft"}`
+                  : `Create ${kind === "deposit" ? "Deposit" : kind === "final" ? "Final Invoice" : "Invoice"}`
+            }
             disabled={!canSave}
           />
         }
       >
         <div className="space-y-4">
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && (
+            <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+              {errorDoor && (
+                <>
+                  {" "}
+                  <Link href={`/billing/${errorDoor.id}`} className="font-medium underline">
+                    Open {errorDoor.number}
+                  </Link>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-x-3 gap-y-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-3 text-center sm:grid-cols-3">
             {stats.map((s) => (

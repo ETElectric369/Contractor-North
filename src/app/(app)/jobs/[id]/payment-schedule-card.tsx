@@ -8,6 +8,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import { scheduleStatus, defaultSchedule, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { setPaymentSchedule, requestNextPayment } from "../../billing/actions";
@@ -56,6 +57,7 @@ export function PaymentScheduleCard({
   drawsBilled?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -67,11 +69,17 @@ export function PaymentScheduleCard({
     setError(null);
     start(async () => {
       const res = await requestNextPayment(jobId);
-      if (!res.ok || !(res as { id?: string }).id) {
+      if (!res.ok || !res.id) {
+        // A refusal that names the open draw carries it, so the way out is one tap, not a hunt.
+        const door = res.openDraft;
         setError(res.error ?? "Could not create the payment.");
+        if (door) toast(res.error ?? "", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
         return;
       }
-      router.push(`/billing/${(res as { id: string }).id}`);
+      // Landing on an open time-and-materials draw says what it pulled ("Pulled 12 hours and 1 bill
+      // into INV-078."); a brand-new draw has nothing to add.
+      if (res.note) toast(res.note, res.partial ? "error" : "info");
+      router.push(`/billing/${res.id}`);
     });
   }
 

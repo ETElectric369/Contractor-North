@@ -31,6 +31,8 @@ vi.mock("@/lib/observe", () => ({ reportError: vi.fn((...a: any[]) => spies.repo
 
 import {
   importCostsIntoInvoice,
+  importLaborIntoInvoice,
+  importQuoteItemsIntoInvoice,
   createProgressReportInvoice,
   setInvoiceDescription,
   setInvoiceTitle,
@@ -617,5 +619,163 @@ describe("the scope block, the title and the due date are revisions (0269)", () 
       expect(res.error).toBe("That didn't save - check your access and try again.");
       expect(stampedOn(calls)).toBe(0); // a stamp never follows a write that did not land
     }
+  });
+});
+
+// ── J-011: a draw built from actuals is refreshed like an invoice; a contract draw refuses ──────
+
+const OPEN_DRAW = "0dda0000-0000-4000-8000-000000000078"; // INV-078
+const CONTRACT_DRAW = "0dda0000-0000-4000-8000-000000000080"; // INV-080, "50% of remaining estimate"
+const TE_OLD = "7e000000-0000-4000-8000-000000000001";
+const TE_NEW = "7e000000-0000-4000-8000-000000000002";
+const B_OLD = "b1000000-0000-4000-8000-000000000001";
+const B_NEW = "b1000000-0000-4000-8000-000000000002";
+
+/**
+ * A job with ONE open draft draw. `actuals`: INV-078 — an edited labor line (Andrew's rate) holding
+ * last month's shift and a materials line holding last month's bill; since then a new 6-hour shift
+ * and a new $323.71 bill. Otherwise INV-080, a contract draw with one hand line. `schedule` puts a
+ * payment schedule on the job. The claims move as the RPC writes, so the before/after measure is real.
+ */
+function openDrawRoute(opts: { actuals: boolean; schedule?: boolean }) {
+  const drawId = opts.actuals ? OPEN_DRAW : CONTRACT_DRAW;
+  const number = opts.actuals ? "INV-078" : "INV-080";
+  const landed = new Set<string>();
+  const drawItems = () =>
+    opts.actuals
+      ? [
+          { import_key: "labor:p-1", source_ids: [TE_OLD] },
+          { import_key: `bill:${B_OLD}`, source_ids: [B_OLD] },
+          ...[...landed].map((id) => ({ import_key: `landed:${id}`, source_ids: [id] })),
+        ]
+      : [{ import_key: null, source_ids: null }];
+  return (q: Q): Reply => {
+    if (q.table === "jobs" && q.cols.includes("customer_id")) return { data: { customer_id: "cust-1", name: "13897 Herringbone" } };
+    if (q.table === "jobs") return { data: { customers: { pricing_levels: { markup_pct: 15, labor_rate: null } } } };
+    if (q.table === "organizations") return { data: { settings: { default_labor_rate: 95, material_markup_percent: 25, invoice_due_days: 30 } } };
+    if (q.table === "payment_milestones") return { data: opts.schedule ? (q.single ? { id: "m-1" } : [{ id: "m-1" }]) : q.single ? null : [] };
+    if (q.table === "invoices" && q.verb === "select") {
+      if (q.cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) {
+        return { data: [{ id: drawId, invoice_number: number, invoice_kind: "progress", dismissed_import_keys: [] }] }; // openDraftOnJob
+      }
+      if (q.cols.includes("invoice_items(import_key")) {
+        return { data: [{ id: drawId, invoice_number: number, status: "draft", created_at: "2026-08-02T00:00:00Z", job_id: JOB, invoice_items: drawItems() }] };
+      }
+      if (q.cols.includes("invoice_kind") && q.cols.includes("job_id") && q.single) {
+        return { data: { id: drawId, job_id: JOB, invoice_kind: "progress", invoice_number: number, quote_id: null } };
+      }
+      if (q.cols === "status") return { data: { status: "draft" } };
+      if (q.cols === "dismissed_import_keys") return { data: { dismissed_import_keys: [] } };
+      if (q.cols.includes("sent_at")) return { data: { sent_at: null } };
+      if (q.cols.includes("tax_rate")) return { data: { tax_rate: 0, status: "draft" } };
+    }
+    if (q.table === "invoices" && q.verb === "update") return { data: null };
+    if (q.table === "time_entries") {
+      return {
+        data: [
+          { id: TE_OLD, clock_in: "2026-08-01T15:00:00Z", clock_out: "2026-08-01T23:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: "p-1", full_name: "Erik" } },
+          { id: TE_NEW, clock_in: "2026-09-22T15:00:00Z", clock_out: "2026-09-22T21:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: "p-1", full_name: "Erik" } },
+        ],
+      };
+    }
+    if (q.table === "job_codes") return { data: [] };
+    if (q.table === "profile_pay") return { data: [{ id: "p-1", hourly_rate: 45, bill_rate: 115 }] };
+    if (q.table === "purchase_orders") return { data: [] };
+    if (q.table === "bills") {
+      return {
+        data: [
+          { id: B_OLD, supplier: "CED", bill_number: "1", amount: "100.00", po_id: null, pricing_provisional: false, bill_line_items: [] },
+          { id: B_NEW, supplier: "CED", bill_number: "2", amount: "323.71", po_id: null, pricing_provisional: false, bill_line_items: [] },
+        ],
+      };
+    }
+    if (q.table === "bill_line_items") return { data: [] };
+    if (q.table === "invoice_items" && q.verb === "select") {
+      if (q.cols === "import_source") return { data: opts.actuals ? [{ import_source: "labor" }, { import_source: "costs" }] : [{ import_source: null }] };
+      if (q.cols === "source_ids, import_key, edited") return { data: opts.actuals ? [{ import_key: "labor:p-1", edited: true, source_ids: [TE_OLD] }] : [] };
+      if (q.cols.includes("invoices!inner")) return { data: [] };
+      if (q.cols.includes("import_key, edited")) return { data: drawItems().map((i) => ({ ...i, edited: false })) };
+      if (q.cols === "line_total") return { data: [] };
+      if (q.cols === "import_key, line_total, edited") return { data: [] };
+      if (q.cols === "import_source, import_key, line_total, edited") return { data: [] };
+    }
+    if (q.table === "payments") return { data: [] };
+    if (q.table === "customer_credits") return { data: [] };
+    if (q.table === "rpc:upsert_imported_invoice_items") {
+      for (const r of q.payload?.p_rows ?? []) for (const id of r.source_ids ?? []) landed.add(id);
+      return { data: { inserted: 1, updated: 0, kept_edited: q.payload?.p_source === "labor" ? 1 : 0, removed: 0 } };
+    }
+    return undefined;
+  };
+}
+
+describe("J-011 — a draw built from actuals takes new work; a contract draw refuses it (server)", () => {
+  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours beside the negotiated line, says what it pulled", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
+    const res = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(true);
+    expect(res.id).toBe(OPEN_DRAW);
+    // No new draw was minted and nothing was deleted or promoted.
+    expect(calls.some((c) => c.table === "invoices" && c.verb === "insert")).toBe(false);
+    expect(calls.some((c) => c.table === "invoices" && c.verb === "delete")).toBe(false);
+    // recalc rewrites the totals; the status it writes back is the draft's own.
+    const statuses = calls.filter((c) => c.table === "invoices" && c.verb === "update" && c.payload && "status" in c.payload).map((c) => c.payload.status);
+    expect(statuses.every((s) => s === "draft")).toBe(true);
+    const rpcs = calls.filter((c) => c.table === "rpc:upsert_imported_invoice_items");
+    expect(rpcs.every((c) => c.payload.p_invoice_id === OPEN_DRAW)).toBe(true);
+    const labor = rpcs.find((c) => c.payload.p_source === "labor")!;
+    // The new 6-hour shift rides its own line beside the edited one, at Erik's bill rate.
+    const overflow = labor.payload.p_rows.find((r: any) => r.import_key === "labor:p-1:2");
+    expect(overflow).toMatchObject({ quantity: 6, unit_price: 115, source_ids: [TE_NEW] });
+    const costs = rpcs.find((c) => c.payload.p_source === "costs")!;
+    expect(costs.payload.p_rows.flatMap((r: any) => r.source_ids)).toEqual([B_NEW]); // the old bill is not offered again
+    expect(costs.payload.p_rows[0].unit_price).toBe(372.27); // $323.71 at the customer's 15%
+    expect(res.note).toBe("Pulled 6 hours and 1 bill into INV-078.");
+  });
+
+  it("an open CONTRACT draw is named with its door, not a dead end, and nothing is written", async () => {
+    state.client = fakeSupabase(openDrawRoute({ actuals: false }), calls);
+    const res = await createProgressReportInvoice(JOB, "progress");
+    expect(res.ok).toBe(false);
+    expect(res.openDraft).toEqual({ id: CONTRACT_DRAW, number: "INV-080" });
+    expect(String(res.error)).toContain("INV-080");
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items" || c.verb === "insert")).toBe(false);
+  });
+
+  it("the importers themselves refuse actuals on a contract draw (H4 held on the server, not by a hidden button)", async () => {
+    state.client = fakeSupabase(openDrawRoute({ actuals: false }), calls);
+    const lab: any = await importLaborIntoInvoice(CONTRACT_DRAW);
+    const cos: any = await importCostsIntoInvoice(CONTRACT_DRAW, 15);
+    for (const r of [lab, cos]) {
+      expect(r.ok).toBe(false);
+      expect(r.empty).toBeUndefined();
+      expect(String(r.error)).toMatch(/INV-080 bills a set part of the contract/);
+    }
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("…and on a draw on a SCHEDULED job, even one carrying labor lines", async () => {
+    state.client = fakeSupabase(openDrawRoute({ actuals: true, schedule: true }), calls);
+    const lab: any = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(lab.ok).toBe(false);
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("the invoice page's Materials from Costs on INV-078 imports (the markup box reaches a draw built from actuals)", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
+    const cos: any = await importCostsIntoInvoice(OPEN_DRAW, 20);
+    expect(cos.ok).toBe(true);
+    const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")!;
+    expect(rpc.payload.p_invoice_id).toBe(OPEN_DRAW);
+    expect(rpc.payload.p_rows[0].unit_price).toBe(388.45); // $323.71 at the box's 20%
+  });
+
+  it("From Estimate never lands on a draw", async () => {
+    state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
+    const res: any = await importQuoteItemsIntoInvoice(OPEN_DRAW);
+    expect(res.ok).toBe(false);
+    expect(String(res.error)).toMatch(/estimate/);
   });
 });

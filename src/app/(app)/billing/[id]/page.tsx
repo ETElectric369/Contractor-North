@@ -29,6 +29,7 @@ import { listCustomerOptions } from "@/lib/schedule-options";
    client component and the rule does not. */
 import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { ProgressReportCard } from "@/components/progress-report-card";
+import { isActualsDraw } from "@/lib/actuals-draw";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -105,7 +106,27 @@ export default async function InvoicePage({
   // so the payment request doubles as a running-balance statement.
   const drawKind = (inv as any).invoice_kind as string | undefined;
   const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
-  const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
+  const [fin, scheduleRows] = isDraw
+    ? await Promise.all([
+        jobProgressFinancials(supabase, (inv as any).job_id),
+        supabase.from("payment_milestones").select("id").eq("job_id", (inv as any).job_id).limit(1),
+      ])
+    : [null, null];
+  /* WHAT THE IMPORT ROW MAY OFFER (lib/actuals-draw, J-011). A standard invoice: everything, as
+     always. A draw built from actuals (INV-078): Labor, Materials with the % box, Change Orders -
+     it is refreshed exactly like a standard invoice, and it was the only one that couldn't be.
+     Any other draw bills a slice of the contract: no imports (the server refuses them too). The
+     rule is the server's own; a failed schedule read counts as "scheduled", which only hides. */
+  const importMode: "standard" | "actuals" | "none" = !isDrawKind(drawKind)
+    ? "standard"
+    : isActualsDraw({
+          invoiceKind: drawKind,
+          scheduleActive: !scheduleRows || !!scheduleRows.error || (scheduleRows.data ?? []).length > 0,
+          lineSources: ((items ?? []) as { import_source?: string | null }[]).map((i) => i.import_source ?? null),
+          dismissedKeys: (inv as { dismissed_import_keys?: string[] | null }).dismissed_import_keys ?? [],
+        })
+      ? "actuals"
+      : "none";
 
   /* A CLOCK STILL RUNNING ON THIS JOB IS HOURS THIS INVOICE DOES NOT HAVE (2026-09-24). Erik: "I
      had no way to stop it to set the time for the invoice". An open shift bills nothing (the labor
@@ -286,6 +307,7 @@ export default async function InvoicePage({
            about their copy being older says "Dave Gove", not "the customer". */
         customerName={inv.customers?.name ?? null}
         runningClocks={runningClocks}
+        importMode={importMode}
         textReady={textReady}
         tz={orgSettings.timezone}
         customerHoldsOlderCopy={customerHoldsOlderCopy(

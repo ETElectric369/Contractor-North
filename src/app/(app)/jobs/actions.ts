@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
-import { DRAW_KINDS } from "@/lib/invoice-math";
+import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
+import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
@@ -28,7 +29,9 @@ import {
   importLaborIntoInvoice,
   importCostsIntoInvoice,
   importChangeOrdersIntoInvoice,
+  createProgressReportInvoice,
   emailInvoice,
+  type ProgressReportResult,
 } from "../billing/actions";
 
 /** `warning` is the "it saved, AND here is what you now have to deal with" slot: a write that
@@ -188,6 +191,14 @@ async function unclaimedChangeOrderLines(supabase: SupabaseClient, jobId: string
   return changeOrderLines(free).length;
 }
 
+/** The draw door's answer in this door's shape: its sentence is THE note the caller shows (tone
+ *  from `partial`), and a refusal that names a document becomes `billedOn`, so the card's toast
+ *  and Nort offer "Open INV-0xx" instead of a dead end. */
+function fromDrawDoor(r: ProgressReportResult): CreateInvoiceForJobResult {
+  if (r.ok && r.id) return { ok: true, id: r.id, ...(r.note ? { importWarning: r.note } : {}), ...(r.partial ? { partial: true as const } : {}) };
+  return { ok: false, error: r.error ?? "Could not bill the new work.", ...(r.openDraft ? { billedOn: r.openDraft } : {}) };
+}
+
 /** Create an invoice for a job — from its quote if it has one, else blank — carrying only the
  *  work not already on another invoice. */
 export async function createInvoiceForJob(
@@ -214,6 +225,22 @@ export async function createInvoiceForJob(
     .maybeSingle();
   if (milestone)
     return { ok: false, error: "This job bills on a payment schedule — request the next draw from Billing instead." };
+
+  // THE OPEN DRAFT IS THE DOOR, WHATEVER ITS KIND (J-011, 2026-09-24). This used to look for a
+  // STANDARD draft only, so on a job whose open draft is a time-and-materials progress report
+  // (INV-078) it found none, tried to mint a standard invoice, and the H4 guard refused: "Draft
+  // INV-078 is still open on this job — send or delete that draw instead of billing on a standard
+  // invoice." The Overview card had offered "Add to INV-078 ($1,572.27)". An open DRAW is handled
+  // by the draw's own door (createProgressReportInvoice): an actuals draw is brought up to date
+  // like any draft, a contract draw answers with itself so the caller can offer "Open INV-0xx".
+  let openDraft: OpenDraft | null;
+  try {
+    openDraft = await openDraftOnJob(supabase, jobId);
+  } catch (e) {
+    reportError("createInvoiceForJob.openDraft", e, { jobId });
+    return { ok: false, error: "Couldn't read this job's invoices just now, so nothing was billed. Try again in a moment." };
+  }
+  if (openDraft && isDrawKind(openDraft.kind)) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
 
   // ONLY A DRAFT CAPTURES THE CLICK (85 Whitney, 2026-09-11). cn-v479 handed back the newest
   // non-void standard invoice whatever its status, so once INV-061 was PAID every "New Invoice"
@@ -262,6 +289,23 @@ export async function createInvoiceForJob(
   // caller deliberately asks), never the quote lines a second time.
   const quoteBilled = !!quote && standards.some((r) => r.quote_id === quote.id);
   const fromQuote = !!quote && !quoteBilled;
+
+  // A JOB BILLED WITH DRAWS TAKES ITS NEXT BILL AS A DRAW. With no draft open and a draw already on
+  // the job, a standard invoice is refused (H4, blockStandardCreateOnDrawJob) — so "Create Invoice
+  // for $X" on the Overview card after INV-078 went out would be the same dead door. On a job that
+  // bills its actuals (no live quote), the next bill is a progress report of exactly the unclaimed
+  // work, which is what the card priced. A quoted job keeps the refusal: its draws are the contract.
+  if (!draft && !quote) {
+    const { data: liveDraw, error: drawErr } = await supabase
+      .from("invoices")
+      .select("id")
+      .eq("job_id", jobId)
+      .neq("status", "void")
+      .in("invoice_kind", [...DRAW_KINDS])
+      .limit(1);
+    if (drawErr) return { ok: false, error: dbError(drawErr) };
+    if ((liveDraw ?? []).length) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
+  }
 
   // THE contract-vs-actuals switch. FinishJobButton already initialised its toggles to
   // !hasQuote — this makes that rule structural, so the three entry points that pass no

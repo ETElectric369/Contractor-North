@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import type { UnbilledWork } from "@/lib/unbilled-work";
 import { createInvoiceForJob } from "../actions";
+import { unbilledCardDoor, type OpenDraft } from "@/lib/actuals-draw";
 
 /**
  * What this card is allowed to know, by role. The page builds it (projection law): staff get
@@ -48,6 +49,7 @@ export function UnbilledCard({
   customerId,
   view,
   viewerIsStaff,
+  openDraft,
 }: {
   jobId: string;
   /** Presets the customer on the /billing New Invoice door (the "nothing new" sentence's link). */
@@ -55,6 +57,10 @@ export function UnbilledCard({
   view: UnbilledView | null;
   /** Only read when `view` is null: the fallback sentence must name a tab THIS role has. */
   viewerIsStaff: boolean;
+  /** The job's open draft of ANY kind and whether new work can go on it (lib/actuals-draw,
+   *  openDraftOnJob — the server's own rule). Undefined = the page didn't read it: the card falls
+   *  back to "the newest invoice is a draft", which is only right when that draft is standard. */
+  openDraft?: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -103,14 +109,33 @@ export function UnbilledCard({
   // THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
   // open draft when there is one — one draft per job, never a second racing the first for the
   // same rows — and pulls what's new into it. Said up front, "Add to INV-062 ($X)", not "Create
-  // Invoice": a click that then opens INV-062 must never read as "it made a new one". The draft
-  // is known from the SAME read the figure came from — the job's newest non-void invoice — and
-  // that is enough here because this card mounts only where every invoice on the job is a
-  // standard one (no draws without a schedule) and the door keeps a single open draft, so
-  // newest-is-draft IS "there is a draft". $X stays true either way: a draft claims its rows
-  // like any non-void invoice, so the total is exactly what the draft doesn't hold yet — what
-  // the click adds to it, or what the next invoice would carry.
-  const draft = w.lastInvoiceStatus === "draft" ? (w.lastInvoiceNumber ?? "the open draft") : null;
+  // Invoice": a click that then opens INV-062 must never read as "it made a new one". $X stays
+  // true either way: a draft claims its rows like any non-void invoice, so the total is exactly
+  // what the draft doesn't hold yet — what the click adds to it, or what the next bill carries.
+  //
+  // WHICH DRAFT, AND WHETHER IT TAKES NEW WORK, IS THE SERVER'S ANSWER (J-011, 2026-09-24). This
+  // used to assume "this card mounts only where every invoice on the job is a standard one (no
+  // draws without a schedule)". False: a time-and-materials progress report is a draw with no
+  // schedule, and INV-078 is one. The card said "Add to INV-078 ($1,572.27)" and the server said
+  // "send or delete that draw". Now the page hands over openDraftOnJob's answer: an actuals draw
+  // takes the work like a standard draft; a contract draw (a %, a fixed $) can't, so the button
+  // says "Open INV-0xx" and goes there (unbilledCardDoor).
+  const fallbackDraft =
+    w.lastInvoiceStatus === "draft" ? { id: "", number: w.lastInvoiceNumber, refreshable: true } : null;
+  const theDraft = openDraft === undefined ? fallbackDraft : openDraft;
+  // Named only when new work GOES on it — the sentences below that say "is on {draft}" are true
+  // only of a draft that takes it.
+  const draft = theDraft?.refreshable ? (theDraft.number ?? "the open draft") : null;
+  /** An open draft that bills a set part of the contract: the work waits for the next bill. */
+  const heldDraft = theDraft && !theDraft.refreshable ? (theDraft.number ?? "the open draft") : null;
+  const door = unbilledCardDoor({
+    openDraft: theDraft,
+    workPending,
+    returns,
+    total: w.total,
+    newWork,
+    money: formatCurrency,
+  });
   // THE DOOR THAT WORKS when there is nothing new: the job's own New Invoice (this card's button,
   // the Invoices tab's) is createInvoiceForJob, which refuses a second invoice with nothing to
   // carry — by design (never mint an empty invoice silently). A blank invoice for something else
@@ -146,7 +171,13 @@ export function UnbilledCard({
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
           <div className="min-w-0">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {draft ? `Not yet on ${draft} (draft)` : since ? `Unbilled since ${since}` : "Unbilled — no invoice yet"}
+              {draft
+                ? `Not yet on ${draft} (draft)`
+                : heldDraft
+                  ? "Not on a bill yet"
+                  : since
+                    ? `Unbilled since ${since}`
+                    : "Unbilled — no invoice yet"}
             </div>
             <div className="mt-1 text-2xl font-bold text-slate-900">{formatCurrency(w.total)}</div>
             {nothingNew && draft ? (
@@ -228,6 +259,13 @@ export function UnbilledCard({
                 )}
               </dl>
             )}
+            {heldDraft && (workPending || returns > 0) && (
+              // WHY THE BUTTON OPENS INSTEAD OF ADDS. Said, so "Open" never reads as the card
+              // giving up: the server would refuse to put hours on a slice of the contract.
+              <p className="mt-1 text-sm text-slate-500">
+                {`${heldDraft} is an open draft for a set part of the contract, so this can't go on it. Send it (or delete it), then bill this on the next progress payment.`}
+              </p>
+            )}
             {owedBack && (
               <p className="mt-1 text-sm text-slate-500">
                 {draft
@@ -243,18 +281,15 @@ export function UnbilledCard({
               work is real and unbilled. The open draft takes a pending return too (it may already
               bill enough to hold it). With no draft, a credit alone never mints an invoice. The
               figure is named only when it is what the click bills. */}
-          {(workPending || (draft && returns > 0)) && (
-            <Button type="button" onClick={go} disabled={pending} className="shrink-0">
-              <FileText />{" "}
-              {pending
-                ? draft ? "Adding…" : "Opening…"
-                : draft
-                  ? w.total > 0.005
-                    ? `Add to ${draft} (${formatCurrency(w.total)})`
-                    : `Add to ${draft}`
-                  : `Create Invoice for ${formatCurrency(w.total > 0.005 ? w.total : newWork)}`}
+          {door?.kind === "open" ? (
+            <Button type="button" onClick={() => router.push(door.href)} className="shrink-0">
+              <FileText /> {door.label}
             </Button>
-          )}
+          ) : door ? (
+            <Button type="button" onClick={go} disabled={pending} className="shrink-0">
+              <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Opening…") : door.label}
+            </Button>
+          ) : null}
         </div>
       </CardContent>
     </Card>
