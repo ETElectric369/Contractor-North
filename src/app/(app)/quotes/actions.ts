@@ -42,6 +42,7 @@ import { createMaterialListFromQuote } from "../materials/actions";
 import { visibleCustomerIdOrNull } from "@/lib/job-visibility";
 import { docLabel, type QuoteDocType } from "@/lib/doc-label";
 import type { QuoteCircuit } from "@/lib/types";
+import { promptCodeTable } from "@/lib/panel/breaker-catalog";
 
 /* Built from the ORG's settings, not NEXT_PUBLIC_SITE_URL — see orgDocUrl in lib/org-settings.
    Both callers below already fetch the org row, so this costs no extra query. */
@@ -2054,10 +2055,11 @@ export async function generateCircuitSchedule(
       system:
         "You are a master electrician laying out a residential branch-circuit (panel) schedule from an estimate's line items. " +
         "Use the BREAKER lines to determine how many circuits and their sizes, and the WIRE lines for conductor sizes. " +
-        // THE PART NUMBER IS THE SIZE (Panel plan, phase 0). E-017 read a Q120 line as "SP 15A": a
-        // Siemens Q1xx is ONE pole and the digits after the 1 are the amps. This short table stops
-        // that; the full decoder (src/lib/panel/breaker-catalog.ts) replaces it in phase 3.
-        "Siemens breaker codes: Q115 = 1-pole 15A, Q120 = 1-pole 20A, Q2xx = 2-pole (Q220 = 2P 20A, Q230 = 2P 30A, Q250 = 2P 50A), Q1515 = twin (two 1-pole 15A), Q2020 = twin (two 1-pole 20A), Q21530CT = quad (two 1-pole 15A plus one 2P 30A), Q22020CT = quad (two 1-pole 20A plus one 2P 20A); Q22020CT2 is NOT a quad with 1-poles, it is two 2P 20A. A twin or quad is several circuits in one part: count each pole group as its own circuit. " +
+        // THE PART NUMBER IS THE SIZE (Panel plan, phase 0; phase 3). E-017 read a Q120 line as
+        // "SP 15A": a Siemens Q1xx is ONE pole and the digits after the 1 are the amps. The table
+        // comes from the Breakers card's own decoder (src/lib/panel/breaker-catalog.ts), so the
+        // estimate and the card can never disagree about what a Q2020 is.
+        promptCodeTable() +
         "Group loads the way an electrician actually wires them: kitchen small-appliance (two 20A), dishwasher, disposal, refrigerator/freezer, general receptacles, lighting (15A on 14 AWG), bath, laundry/dryer, range, EACH mini-split on its own circuit, bath fan, smoke/CO. Low-voltage (data/Cat6/coax/thermostat/doorbell) is NOT a breaker — leave it out. " +
         'Respond with ONLY a JSON ARRAY, one object per circuit: {"ckt": string, "description": string, "wire": string, "breaker": string, "load": string}. ' +
         'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3","6/3". breaker = e.g. "20A","2P 30A","2P 50A". load = a short note (room/appliance or estimated VA). Number circuits sequentially, matching the breaker counts in the line items. No prose outside the JSON array.',

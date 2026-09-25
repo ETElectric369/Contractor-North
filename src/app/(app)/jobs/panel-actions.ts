@@ -18,8 +18,13 @@ import {
   quoteCircuitsToSuggestions,
   type EstimateOffer,
 } from "@/lib/panel/model";
-import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch } from "@/lib/panel/input";
-import type { CircuitProgress, JobCircuit, JobPanel, QuoteCircuit } from "@/lib/types";
+import { CIRCUIT_FIELDS, PANEL_FIELDS, isUuid, normalizeCircuitPatch, normalizePanelPatch, type CircuitPatch } from "@/lib/panel/input";
+import { decodeBreaker, decodeCode } from "@/lib/panel/breaker-catalog";
+import { lineKey, type BreakerLine, type ListLine, type ShelfLine } from "@/lib/panel/breakers";
+import { normalisePartNumber } from "@/lib/shelf-plan";
+import { formatCurrency } from "@/lib/utils";
+import { addMaterialItem, deleteMaterialItem, ensureJobMaterialList } from "@/app/(app)/materials/actions";
+import type { CircuitKind, CircuitProgress, JobCircuit, JobPanel, QuoteCircuit, SpaceHalf } from "@/lib/types";
 
 /**
  * THE PANEL TAB'S SERVER DOORS (Panel plan, phases 1-2; migration 0333).
@@ -636,4 +641,356 @@ export async function bringInEstimateCircuits(jobId: string, quoteId: string): P
     message: `Brought in ${rows.length} from ${label} as suggestions. Nothing counts until you keep it.${more}${fromElsewhere}`,
     estimates: await findEstimates(m, job, [...existing, ...rows]),
   };
+}
+
+// ── the breakers (phase 3; migration 0334) ──────────────────────────────────────────────────────
+
+export type OfficeTicketLine = {
+  /** The card group this line counts toward (lib/panel/breakers lineKey), or null if unreadable. */
+  key: string | null;
+  description: string;
+  qty: number;
+  bill_number: string | null;
+  supplier: string | null;
+  bill_date: string | null;
+  /** What one cost on this ticket: the line's amount over its quantity (the extension is the
+   *  price), or null when the line has no quantity to divide by. */
+  each: number | null;
+};
+export type BookPrice = { id: string; code: string; buy_price: number };
+export type BreakersLoad =
+  | {
+      ok: true;
+      staff: boolean;
+      /** False while 0334 isn't on the database: the card says the tickets can't be read yet. */
+      ticketsReady: boolean;
+      bought: BreakerLine[];
+      list: ListLine[];
+      listId: string | null;
+      shelf: ShelfLine[];
+      /** The office only (never serialised to a tech): which tickets, what they cost, the book. */
+      office: { tickets: OfficeTicketLine[]; prices: BookPrice[] } | null;
+    }
+  | Fail;
+
+const fnMissing = (e: { code?: string; message?: string } | null | undefined) =>
+  !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function|function .* does not exist/i.test(String(e.message ?? "")));
+
+/**
+ * What the Breakers card counts from. THE SAME HAVE FOR EVERYONE: the tickets are read through
+ * breakers_bought_for_job (0334), which a tech may call and which carries no price, so the crew's
+ * card and the office's card count the same breakers. The materials list is the job's one list (the
+ * newest, as every reader picks it) and the shelf is shelf_for_crew (names and counts, no cost).
+ * The office's session then adds, from its own RLS, which tickets they came on and the price book.
+ */
+export async function loadPanelBreakers(jobId: string): Promise<BreakersLoad> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+
+  const [boughtRes, listRes, shelfRes] = await Promise.all([
+    m.supabase.rpc("breakers_bought_for_job", { p_job: jobId }),
+    m.supabase
+      .from("material_lists")
+      .select("id")
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    m.supabase.rpc("shelf_for_crew"),
+  ]);
+  const ticketsReady = !fnMissing(boughtRes.error);
+  if (boughtRes.error && ticketsReady) return fail(boughtRes.error, "The job's tickets couldn't be read.");
+  const bought: BreakerLine[] = ((boughtRes.data ?? []) as { description: string; qty: number | string }[]).map((r) => ({
+    description: r.description,
+    qty: Number(r.qty),
+  }));
+
+  const listId = (listRes.data as { id?: string } | null)?.id ?? null;
+  let list: ListLine[] = [];
+  if (listId) {
+    const { data: items, error: iErr } = await m.supabase
+      .from("material_list_items")
+      .select("description, part_number, quantity, purchased")
+      .eq("list_id", listId)
+      .eq("org_id", m.orgId)
+      .order("sort_order");
+    if (iErr) reportError("panel.loadPanelBreakers.list", iErr, { jobId });
+    list = ((items ?? []) as { description: string; part_number: string | null; quantity: number | string; purchased: boolean | null }[])
+      .map((i) => ({ description: i.description, part_number: i.part_number, qty: Number(i.quantity), purchased: !!i.purchased }))
+      .filter((i) => decodeBreaker(i.part_number, i.description).kind !== "not_breaker");
+  }
+  if (shelfRes.error && !fnMissing(shelfRes.error)) reportError("panel.loadPanelBreakers.shelf", shelfRes.error, { jobId });
+  const shelf: ShelfLine[] = ((shelfRes.data ?? []) as { name: string; on_hand: number | string | null }[])
+    .map((s) => ({ name: s.name, on_hand: Number(s.on_hand ?? 0) }))
+    .filter((s) => s.on_hand > 0 && decodeBreaker(s.name).kind === "breaker");
+
+  // THE OFFICE'S HALF. Staff-only reads (bills and the book are money); a tech's load never runs it.
+  const office = m.staff ? await officeBreakerExtras(m, jobId) : null;
+  return { ok: true, staff: m.staff, ticketsReady, bought, list, listId, shelf, office };
+}
+
+async function officeBreakerExtras(m: Member, jobId: string): Promise<{ tickets: OfficeTicketLine[]; prices: BookPrice[] }> {
+  const tickets: OfficeTicketLine[] = [];
+  const { data: bills, error: bErr } = await m.supabase
+    .from("bills")
+    .select("id, bill_number, supplier, bill_date, status, is_statement, on_shelf")
+    .eq("job_id", jobId)
+    .eq("org_id", m.orgId)
+    .is("superseded_by_bill_id", null);
+  if (bErr) reportError("panel.officeBreakerExtras.bills", bErr, { jobId });
+  // The same tickets 0334 counts: not replaced, not a statement, not a shelf ticket, not void.
+  type BillRow = { id: string; bill_number: string | null; supplier: string | null; bill_date: string | null; status: string | null; is_statement: boolean | null; on_shelf: boolean | null };
+  const live = ((bills ?? []) as BillRow[]).filter((b) => !b.is_statement && !b.on_shelf && b.status !== "void");
+  if (live.length) {
+    const { data: lines, error: lErr } = await m.supabase
+      .from("bill_line_items")
+      .select("bill_id, description, quantity, amount, is_stock")
+      .in(
+        "bill_id",
+        live.map((b) => b.id),
+      )
+      .eq("org_id", m.orgId);
+    if (lErr) reportError("panel.officeBreakerExtras.lines", lErr, { jobId });
+    const byId = new Map(live.map((b) => [b.id, b]));
+    type LineRow = { bill_id: string; description: string | null; quantity: number | string | null; amount: number | string | null; is_stock: boolean | null };
+    for (const l of (lines ?? []) as LineRow[]) {
+      if (l.is_stock || !l.description) continue;
+      if (decodeBreaker(l.description).kind === "not_breaker") continue;
+      const b = byId.get(l.bill_id)!;
+      const qty = Number(l.quantity ?? 0);
+      const amount = Number(l.amount ?? 0);
+      tickets.push({
+        key: lineKey(l.description),
+        description: l.description,
+        qty,
+        bill_number: b.bill_number,
+        supplier: b.supplier,
+        bill_date: b.bill_date,
+        each: qty > 0 && Number.isFinite(amount) ? Math.round((amount / qty) * 100) / 100 : null,
+      });
+    }
+  }
+  // The book's breaker rows: anything whose code reads as a breaker this app knows.
+  const { data: book, error: pErr } = await m.supabase
+    .from("price_list_items")
+    .select("id, code, buy_price")
+    .eq("org_id", m.orgId)
+    .eq("archived", false)
+    .or("code.ilike.Q%,code.ilike.HOM%,code.ilike.BR%,code.ilike.CH%,code.ilike.THQ%")
+    .limit(2000);
+  if (pErr) reportError("panel.officeBreakerExtras.book", pErr, { jobId });
+  const prices: BookPrice[] = ((book ?? []) as { id: string; code: string | null; buy_price: number | string | null }[])
+    .filter((r) => r.code && decodeCode(r.code)?.kind === "breaker")
+    .map((r) => ({ id: r.id, code: normalisePartNumber(r.code)!, buy_price: Number(r.buy_price ?? 0) }));
+  return { tickets, prices };
+}
+
+/**
+ * Add To Materials (the crew and the office): the missing breaker goes on the job's ONE materials
+ * list as a line to buy, with its part number, so the next count reads a code. It goes through the
+ * same two doors material.addLine wraps (ensureJobMaterialList + addMaterialItem): the list is found
+ * or started, a tech's line carries no money, and a crew addition rings the office.
+ */
+export async function addBreakerToMaterials(
+  jobId: string,
+  input: { part: string | null; description: string; qty: number },
+): Promise<{ ok: true; id: string; listId: string; words: string } | Fail> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  const description = String(input?.description ?? "").replace(/\s+/g, " ").trim();
+  if (!description || description.length > 200) return { ok: false, error: "Say what the breaker is, in under 200 characters." };
+  const qty = Number(input?.qty);
+  if (!Number.isInteger(qty) || qty < 1 || qty > 99) return { ok: false, error: "The count has to be a whole number from 1 to 99." };
+  const part = input?.part ? normalisePartNumber(input.part) : null;
+  if (part && decodeCode(part)?.kind !== "breaker") return { ok: false, error: `${part} isn't a breaker this app can read.` };
+  const list = await ensureJobMaterialList(jobId);
+  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "The job's materials list couldn't be opened." };
+  const added = await addMaterialItem(list.id, { description, part_number: part, quantity: qty, unit: "ea", vendor: null, est_cost: null });
+  if (!added.ok || !added.id) return { ok: false, error: added.error ?? "The line didn't save." };
+  touched(jobId);
+  revalidatePath("/materials");
+  return { ok: true, id: added.id, listId: list.id, words: `${qty} x ${description}` };
+}
+
+/** The Undo of Add To Materials: that one line, by its id. */
+export async function removeBreakerFromMaterials(jobId: string, itemId: string, listId: string): Promise<{ ok: true } | Fail> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!isUuid(itemId) || !isUuid(listId)) return { ok: false, error: "That line isn't on this job's list." };
+  const r = await deleteMaterialItem(itemId, listId);
+  if (!r.ok) return { ok: false, error: r.error ?? "The line didn't come off." };
+  touched(jobId);
+  return { ok: true };
+}
+
+const BRAND_WORDS: Record<string, string> = {
+  siemens: "Siemens",
+  square_d_homeline: "Square D Homeline",
+  square_d_qo: "Square D QO",
+  eaton_br: "Eaton BR",
+  eaton_ch: "Eaton CH",
+  ge: "GE",
+};
+
+/**
+ * Add To Price Book (the office only, never silent): a breaker code the tickets or the card name
+ * that the book doesn't have yet (Q115, Q2020, Q21530CT, Q22020CT on ET's book). The person sees and
+ * can change the cost before it is written; the ticket's each-price is only what the box starts at.
+ */
+export async function addBreakerToPriceBook(input: {
+  code: string;
+  buy_price: number;
+  supplier: string | null;
+}): Promise<{ ok: true; row: BookPrice; words: string } | Fail> {
+  const m = await office();
+  if ("error" in m) return m;
+  const code = normalisePartNumber(input?.code);
+  const d = code ? decodeCode(code) : null;
+  if (!code || d?.kind !== "breaker") return { ok: false, error: "That isn't a breaker part number this app can read." };
+  const price = Number(input?.buy_price);
+  if (!Number.isFinite(price) || price <= 0 || price > 100000) return { ok: false, error: "Put in what one costs, more than $0." };
+  const supplier = input?.supplier ? String(input.supplier).replace(/\s+/g, " ").trim().slice(0, 120) || null : null;
+
+  const { data: same } = await m.supabase
+    .from("price_list_items")
+    .select("id, code, buy_price")
+    .eq("org_id", m.orgId)
+    .eq("archived", false)
+    .ilike("code", `${code.slice(0, 2)}%`)
+    .limit(1000);
+  const dup = ((same ?? []) as { id: string; code: string | null; buy_price: number | string | null }[]).find((r) => normalisePartNumber(r.code) === code);
+  if (dup) return { ok: false, error: `${code} is already in your price book at ${formatCurrency(Number(dup.buy_price ?? 0))}.` };
+
+  const description = `${d.brand ? `${BRAND_WORDS[d.brand]} ` : ""}${code} ${d.words} Breaker`;
+  const { data, error } = await m.supabase
+    .from("price_list_items")
+    .insert({ code, description, category: null, supplier, unit: "ea", buy_price: Math.round(price * 100) / 100, markup_pct: 0 })
+    .select("id, code, buy_price")
+    .maybeSingle();
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data) return { ok: false, error: "Nothing was saved. Try again." };
+  revalidatePath("/price-list");
+  const row = { id: (data as { id: string }).id, code, buy_price: Number((data as { buy_price: number | string }).buy_price) };
+  return { ok: true, row, words: `Added ${code} to your price book at ${formatCurrency(row.buy_price)}.` };
+}
+
+/** The Undo of Add To Price Book: the row leaves the book (archived, the book's own Undo). */
+export async function takeBreakerOutOfPriceBook(id: string): Promise<{ ok: true } | Fail> {
+  const m = await office();
+  if ("error" in m) return m;
+  if (!isUuid(id)) return { ok: false, error: "That item isn't in your book." };
+  const { data, error } = await m.supabase.from("price_list_items").update({ archived: true }).eq("id", id).eq("org_id", m.orgId).eq("archived", false).select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "It was already out of the book." };
+  revalidatePath("/price-list");
+  return { ok: true };
+}
+
+export type PlaceInput = {
+  /** An unplaced kept circuit this pole group is, or null for a new circuit. */
+  circuit_id: string | null;
+  space: number;
+  half: SpaceHalf | null;
+  poles: number;
+  amps: number;
+  kind: CircuitKind | null;
+  room?: string | null;
+  description?: string | null;
+};
+export type PlaceResult =
+  | { ok: true; rows: JobCircuit[]; moved: { id: string; space: number }[]; added: string[]; problems: string[] }
+  | Fail;
+
+/**
+ * Place From What Was Bought (the crew and the office): a bought breaker goes in at a space, and each
+ * of its pole groups becomes a circuit on the panel. A person has already picked, part by part,
+ * which circuit on the list it is (or A New Circuit), and tapped to confirm; this writes exactly
+ * that. An existing circuit only moves if it still has no space and is still that size, so a
+ * crewmate's placement in the same minute is never overwritten. The No Stab refusal is the
+ * database's; anything it refuses is named, never dropped.
+ */
+export async function placeBoughtBreaker(jobId: string, panelId: string, parts: PlaceInput[]): Promise<PlaceResult> {
+  const m = await member();
+  if ("error" in m) return m;
+  if (!(await jobOf(m, jobId))) return { ok: false, error: "That job isn't in your book." };
+  if (!isUuid(panelId)) return { ok: false, error: "Pick the panel it goes in." };
+  const { data: panel } = await m.supabase.from("job_panels").select("id").eq("id", panelId).eq("job_id", jobId).eq("org_id", m.orgId).is("removed_at", null).maybeSingle();
+  if (!panel) return { ok: false, error: "That panel isn't on this job." };
+  if (!Array.isArray(parts) || parts.length < 1 || parts.length > 3) return { ok: false, error: "A breaker is one to three circuits." };
+  const ids = parts.map((p) => p?.circuit_id).filter(Boolean) as string[];
+  if (new Set(ids).size !== ids.length) return { ok: false, error: "Each part of the breaker has to be a different circuit." };
+
+  const clean: { p: PlaceInput; v: CircuitPatch }[] = [];
+  for (const p of parts) {
+    if (p?.circuit_id != null && !isUuid(p.circuit_id)) return { ok: false, error: "That circuit isn't on this job." };
+    const v = normalizeCircuitPatch({
+      space: p.space,
+      half: p.half,
+      poles: p.poles,
+      amps: p.amps,
+      kind: p.kind ?? null,
+      ...(p.circuit_id ? {} : { room: p.room ?? null, description: p.description ?? null }),
+    });
+    if (!v.ok) return v;
+    if (v.value.space == null || v.value.amps == null) return { ok: false, error: "Each part needs its space and amps." };
+    clean.push({ p, v: v.value });
+  }
+
+  const rows: JobCircuit[] = [];
+  const moved: { id: string; space: number }[] = [];
+  const problems: string[] = [];
+  for (const { p, v } of clean) {
+    if (!p.circuit_id) continue;
+    let q = m.supabase
+      .from("job_circuits")
+      .update({ panel_id: panelId, space: v.space, half: v.half ?? null })
+      .eq("id", p.circuit_id)
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .eq("state", "kept")
+      .is("removed_at", null)
+      .is("space", null)
+      .eq("poles", v.poles!)
+      .eq("amps", v.amps!);
+    q = v.kind && v.kind !== "standard" ? q.eq("kind", v.kind) : q.or("kind.is.null,kind.eq.standard");
+    const { data, error } = await q.select(CIRCUIT_COLS).maybeSingle();
+    const name = `Space ${v.space}${v.half ?? ""}`;
+    if (error) problems.push(`${name}: ${dbError(error)}`);
+    else if (!data) problems.push(`${name}: that circuit was placed or changed by someone else first.`);
+    else {
+      rows.push(data as JobCircuit);
+      moved.push({ id: (data as JobCircuit).id, space: v.space! });
+    }
+  }
+  const fresh = clean.filter(({ p }) => !p.circuit_id);
+  const added: string[] = [];
+  if (fresh.length) {
+    const { data: last } = await m.supabase
+      .from("job_circuits")
+      .select("sort_order")
+      .eq("job_id", jobId)
+      .eq("org_id", m.orgId)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    let sort = Number((last as { sort_order?: number } | null)?.sort_order ?? -1) + 1;
+    const { data, error } = await m.supabase
+      .from("job_circuits")
+      .insert(fresh.map(({ v }) => ({ job_id: jobId, panel_id: panelId, ...v, work: "new", state: "kept", source: "hand", sort_order: sort++ })))
+      .select(CIRCUIT_COLS);
+    if (error) problems.push(`The new ${fresh.length === 1 ? "circuit" : "circuits"}: ${dbError(error)}`);
+    else if ((data ?? []).length !== fresh.length) problems.push(`Only ${(data ?? []).length} of ${fresh.length} new circuits saved. Reload and check.`);
+    for (const r of (data ?? []) as JobCircuit[]) {
+      rows.push(r);
+      added.push(r.id);
+    }
+  }
+  if (!rows.length) return { ok: false, error: problems.join(" ") || "Nothing was placed." };
+  touched(jobId);
+  ringIfCrew(m, jobId);
+  return { ok: true, rows, moved, added, problems };
 }

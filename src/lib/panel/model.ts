@@ -20,6 +20,7 @@ import type {
   QuoteCircuit,
   SpaceHalf,
 } from "@/lib/types";
+import { QUAD_SWAPS } from "./breaker-catalog";
 
 // ── words ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -571,6 +572,8 @@ export type Swap = {
   /** Said beside the option, because the lookalike part is a different breaker. */
   warning: string | null;
   words: string;
+  /** Nobody has set which spaces take a tandem yet: the swap holds only if the label allows one. */
+  ifSpaceTakesQuad: boolean;
 };
 export type BreakerCheck = {
   ok: boolean;
@@ -582,21 +585,19 @@ export type BreakerCheck = {
   verdict: string;
 };
 
-/** The Siemens CT quads that trade a twin for a twin-plus-2-pole: outer 1P amps, inner 2P amps.
- *  Phase 3's breaker-catalog.ts owns the full table; this is the part of it the swap needs. */
-const QUADS: { outer: number; inner: number; part: string; trap?: string; trapWords?: string }[] = [
-  { outer: 20, inner: 20, part: "Q22020CT", trap: "Q22020CT2", trapWords: "Not Q22020CT2, That Is Two 2-Pole 20s" },
-  { outer: 15, inner: 20, part: "Q21520CT" },
-  { outer: 15, inner: 30, part: "Q21530CT" },
-];
+/** The Siemens CT quads that trade a twin for a twin-plus-2-pole: outer 1P amps, inner 2P amps, and
+ *  the lookalike said beside the one that has one. breaker-catalog.ts owns the table (phase 3). */
+const QUADS = QUAD_SWAPS;
 
 /**
  * Need against Have, in plain words. Specific types (dual function, AFCI, GFCI, SPD) are matched
- * first so a plain need never uses up the only AFCI. The quad swap is offered only when a
- * tandem-rated pair of spaces is free (quadSpaceFree), and never silently: it is an option beside
- * the shortfall, not a change to the count.
+ * first so a plain need never uses up the only AFCI. The quad swap is offered when a tandem-rated
+ * pair of spaces is free (quadSpaceFree true), or when nobody has told the app which spaces take a
+ * tandem yet ("unknown": then the swap says so, `ifSpaceTakesQuad`, and a person checks the label).
+ * It is never offered when the label is known and no pair is free, and never silently: it is an
+ * option beside the shortfall, not a change to the count.
  */
-export function breakerCheck(need: Need, have: HaveItem[], opts: { quadSpaceFree?: boolean } = {}): BreakerCheck {
+export function breakerCheck(need: Need, have: HaveItem[], opts: { quadSpaceFree?: boolean | "unknown" } = {}): BreakerCheck {
   // Every pole group you have, one entry per breaker-worth.
   const pool: (PoleGroup & { used: boolean; from: HaveItem })[] = [];
   for (const h of have) {
@@ -634,6 +635,7 @@ export function breakerCheck(need: Need, have: HaveItem[], opts: { quadSpaceFree
   short.sort((a, b) => a.poles - b.poles || a.amps - b.amps);
 
   const swaps: Swap[] = [];
+  const unknownSpace = opts.quadSpaceFree === "unknown";
   if (opts.quadSpaceFree) {
     for (const s of short) {
       if (s.poles !== 2 || s.kind) continue;
@@ -646,6 +648,7 @@ export function breakerCheck(need: Need, have: HaveItem[], opts: { quadSpaceFree
           covers: { poles: 2, amps: s.amps, kind: null },
           warning: q.trapWords ?? null,
           words: `Or Swap One ${twin.label ?? `Twin 1P ${q.outer}A`} For A ${q.part}: the same two 1P ${q.outer}A plus the 2P ${q.inner}A, in a tandem space.`,
+          ifSpaceTakesQuad: unknownSpace,
         });
       }
     }
