@@ -129,10 +129,14 @@ export async function saveVendorField(input: {
     if (refusal) return { ok: false, error: refusal };
   }
   const previous = card ? ((card[input.field] as string | null) ?? null) : null;
+  // A saved map link belongs to the address it was found with. An address typed by hand drops it,
+  // so View On Map searches the new address instead of opening the old place. (Only when the card
+  // has one, which means 0341 is on this database.)
+  const staleMap = input.field === "address" && !!card?.maps_url && value !== previous;
   if (card) {
     const { data, error } = await supabase
       .from("price_list_vendors")
-      .update({ [input.field]: value })
+      .update(staleMap ? { [input.field]: value, maps_url: null } : { [input.field]: value })
       .eq("id", String(card.id))
       .eq("org_id", orgId)
       .select("id");
@@ -148,6 +152,36 @@ export async function saveVendorField(input: {
   }
   revalidatePath("/price-list");
   return { ok: true, previous, name: input.name.trim() };
+}
+
+/**
+ * A PERSON, NOT A COMPANY (0341's is_person), set on the vendor's sheet. An import guesses it from
+ * the name; this is where a wrong guess is put right. It only changes Look Up: a person's name is
+ * never picked for anyone, and the lookup is told the name is a person's. Returns the old value
+ * for Undo. The vendor needs a card (a vendor only on items has nothing to mark).
+ */
+export async function saveVendorIsPerson(input: { name: string; isPerson: boolean }): Promise<VendorResult & { previous?: boolean }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  if (!vendorKey(input?.name)) return { ok: false, error: "No vendor was named. Reload the page." };
+  const found = await cardOfVendor(supabase, orgId, input.name);
+  if ("error" in found) return { ok: false, error: cardsMissing(found.error) ? CARDS_NOT_READY : dbError(found.error) };
+  const card = found.card;
+  if (!card) return { ok: false, error: "Add a phone or email for this vendor first, then mark it as a person." };
+  if (!("is_person" in card)) return { ok: false, error: KINDS_NOT_READY };
+  const previous = card.is_person === true;
+  const { data, error } = await supabase
+    .from("price_list_vendors")
+    .update({ is_person: input.isPerson === true })
+    .eq("id", String(card.id))
+    .eq("org_id", orgId)
+    .select("id");
+  if (error) return { ok: false, error: kindsMissing(error) ? KINDS_NOT_READY : dbError(error) };
+  if (!data?.length) return { ok: false, error: "Nothing was saved. That vendor may have been removed, so reload the page." };
+  revalidatePath("/price-list");
+  return { ok: true, previous };
 }
 
 type Db = Extract<Awaited<ReturnType<typeof requireStaff>>, { supabase: unknown }>["supabase"];
@@ -375,12 +409,19 @@ export async function restoreVendor(input: {
 
 export type ImportVendorRow = VendorCardInput & { name: string };
 
+/** A card an import brought back from the archive: the stamp it carried when it did, and what the
+ *  row's values replaced on it, so Undo can put the card back exactly as it was. */
+export type RestoredCard = { id: string; name: string; stamp: string; previous: Record<string, string | boolean | null> };
+
+/** The columns an import may write onto a card it brings back, and so the ones Undo puts back. */
+const RESTORE_COLUMNS = ["contact_name", "phone", "email", "website", "address", "notes", "kind", "trade", "is_person", "source_url", "maps_url", "looked_up_at"] as const;
+
 export type ImportResult = VendorResult & {
   /** Cards this press created. */
   added?: number;
   /** Archived cards this press brought back, with the stamp each carried when it did, so Undo can
    *  tell a card nobody has touched since from one somebody has. */
-  restored?: { id: string; name: string; stamp: string }[];
+  restored?: RestoredCard[];
   /** Rows not added, each with the reason, by name. */
   refused?: { name: string; why: string }[];
 };
@@ -431,7 +472,7 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
 
   const refused: { name: string; why: string }[] = [];
   const inserts: (VendorCardClean & { name: string; looked_up_at?: string })[] = [];
-  const restores: { id: string; name: string; patch: Record<string, unknown> }[] = [];
+  const restores: { id: string; name: string; patch: Record<string, unknown>; previous: RestoredCard["previous"] }[] = [];
   const seen = new Set<string>();
   for (const raw of list) {
     const typed = String(raw?.name ?? "").trim() || "A row with no name";
@@ -463,7 +504,10 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
     if (card) {
       const patch: Record<string, unknown> = { archived: false, import_batch: batchId, ...lookedUp };
       for (const [k, v] of Object.entries(cleaned.clean)) if (v !== null && v !== undefined && k !== "name") patch[k] = v;
-      restores.push({ id: String(card.id), name: String(card.name), patch });
+      // What this press replaces, read off the card as it is now, for Undo.
+      const previous: RestoredCard["previous"] = {};
+      for (const k of RESTORE_COLUMNS) if (k in patch) previous[k] = (card[k] as string | boolean | null | undefined) ?? null;
+      restores.push({ id: String(card.id), name: String(card.name), patch, previous });
       continue;
     }
     inserts.push({ ...cleaned.clean, ...lookedUp, name });
@@ -494,7 +538,7 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
     }
   }
 
-  const restored: { id: string; name: string; stamp: string }[] = [];
+  const restored: RestoredCard[] = [];
   for (const r of restores) {
     const { data, error } = await supabase
       .from("price_list_vendors")
@@ -506,7 +550,7 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
       refused.push({ name: r.name, why: `It's archived and couldn't be brought back${error ? ` (${dbError(error)})` : ""}. Open Show Archived and try again.` });
       continue;
     }
-    restored.push({ id: r.id, name: r.name, stamp: String((data[0] as { updated_at: string }).updated_at) });
+    restored.push({ id: r.id, name: r.name, stamp: String((data[0] as { updated_at: string }).updated_at), previous: r.previous });
   }
 
   if (added || restored.length) revalidatePath("/price-list");
@@ -523,6 +567,28 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
   };
 }
 
+/** A brought-back card's previous values, as Undo writes them: each through the same whitelist as
+ *  a typed value (they came back from the browser), anything else dropped. Null = not undoable. */
+function cleanPrevious(previous: unknown): Record<string, unknown> | null {
+  if (!previous || typeof previous !== "object") return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(previous as Record<string, unknown>)) {
+    if (!(RESTORE_COLUMNS as readonly string[]).includes(k)) continue;
+    if (k === "is_person") {
+      out[k] = v === true;
+      continue;
+    }
+    if (k === "looked_up_at") {
+      out[k] = typeof v === "string" && !Number.isNaN(Date.parse(v)) ? v : null;
+      continue;
+    }
+    const c = cleanVendorCard({ [k]: v ?? "" } as VendorCardInput, "update");
+    if ("error" in c) return null;
+    out[k] = (c.clean as Record<string, unknown>)[k] ?? null;
+  }
+  return out;
+}
+
 /**
  * UNDO AN IMPORT: archive exactly that press's cards, in this org, and ONLY the ones nobody has
  * touched since. A card someone has edited, renamed or put on an item since the import is left
@@ -530,18 +596,24 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
  *
  * Untouched means: a card this press CREATED still has updated_at = created_at (0296's touch
  * trigger fires on update only); a card this press BROUGHT BACK still carries the stamp the
- * restore gave it. Nothing is deleted: archive, with Show Archived as the way back.
+ * restore gave it. "Put on an item since" means an item option for that name changed after the
+ * card was made or brought back: a name that was ALREADY on items when the import gave it a card
+ * is not work done since, and Undo takes that card away again.
+ *
+ * A card brought back from the archive goes back with what it said before (the phone, the kind,
+ * everything the row's values replaced), not with the row's values. Nothing is deleted: archive,
+ * with Show Archived as the way back.
  */
 export async function undoVendorImport(input: {
   batchId: string;
-  restored?: { id: string; stamp: string }[];
+  restored?: { id: string; stamp: string; previous?: Record<string, string | boolean | null> }[];
 }): Promise<VendorResult & { archived?: number; leftAlone?: string[] }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: NO_ORG };
   if (!UUID.test(String(input?.batchId ?? ""))) return { ok: false, error: "That import can't be found to undo." };
-  const stamps = new Map((input.restored ?? []).slice(0, BATCH_MAX).map((r) => [String(r.id), String(r.stamp)]));
+  const back = new Map((input.restored ?? []).slice(0, BATCH_MAX).map((r) => [String(r.id), r]));
 
   const { data, error } = await supabase
     .from("price_list_vendors")
@@ -555,49 +627,67 @@ export async function undoVendorImport(input: {
 
   const { data: optRows, error: optErr } = await supabase
     .from("price_list_item_options")
-    .select("vendor, archived")
+    .select("vendor, archived, updated_at")
     .eq("org_id", orgId)
     .limit(5000);
   if (optErr) return { ok: false, error: dbError(optErr) };
-  const onItems = new Set(((optRows ?? []) as { vendor: string; archived: boolean }[]).filter((o) => !o.archived).map((o) => vendorKey(o.vendor)));
+  // The latest time an option for each name changed (added, or brought back from the archive).
+  const optionTouched = new Map<string, number>();
+  for (const o of (optRows ?? []) as { vendor: string; archived: boolean; updated_at?: string | null }[]) {
+    if (o.archived) continue;
+    const k = vendorKey(o.vendor);
+    const t = Date.parse(String(o.updated_at ?? ""));
+    optionTouched.set(k, Math.max(optionTouched.get(k) ?? -Infinity, Number.isNaN(t) ? Infinity : t));
+  }
 
-  const untouched = batch.filter((c) => {
-    if (onItems.has(vendorKey(c.name))) return false;
-    const stamp = stamps.get(c.id);
-    return stamp !== undefined ? c.updated_at === stamp : c.updated_at === c.created_at;
-  });
-  const leftAlone = batch.filter((c) => !untouched.includes(c)).map((c) => c.name);
+  const changed: string[] = [];
+  const putOnItems: string[] = [];
+  const toArchive: { id: string; stamp: string; previous: Record<string, unknown> }[] = [];
+  for (const c of batch) {
+    const r = back.get(c.id);
+    const since = Date.parse(r ? r.stamp : c.created_at);
+    const touched = optionTouched.get(vendorKey(c.name));
+    if (touched !== undefined && !(touched < since)) {
+      putOnItems.push(c.name);
+      continue;
+    }
+    const untouched = r ? c.updated_at === r.stamp : c.updated_at === c.created_at;
+    const previous = r ? cleanPrevious(r.previous) : {};
+    if (!untouched || previous === null) {
+      changed.push(c.name);
+      continue;
+    }
+    toArchive.push({ id: c.id, stamp: c.updated_at, previous });
+  }
 
   let archived = 0;
-  if (untouched.length) {
-    const ids = untouched.map((c) => c.id);
+  const raced: string[] = [];
+  for (const c of toArchive) {
+    // Card by card, each only while it still carries the stamp read above: an edit that lands in
+    // between leaves that card alone instead of being archived over.
     const { data: done, error: upErr } = await supabase
       .from("price_list_vendors")
-      .update({ archived: true })
-      .in("id", ids)
+      .update({ ...c.previous, archived: true })
+      .eq("id", c.id)
       .eq("org_id", orgId)
       .eq("import_batch", input.batchId)
+      .eq("updated_at", c.stamp)
       .select("id");
-    if (upErr) return { ok: false, error: dbError(upErr) };
-    archived = done?.length ?? 0;
-    if (archived !== ids.length) {
-      revalidatePath("/price-list");
-      return {
-        ok: false,
-        archived,
-        leftAlone,
-        error: `Only ${archived} of ${ids.length} were archived. Reload the page to see which are still there.`,
-      };
+    if (upErr) {
+      if (archived) revalidatePath("/price-list");
+      return { ok: false, archived, error: `${dbError(upErr)} ${archived} of ${toArchive.length} were archived; reload the page to see which.` };
     }
-    revalidatePath("/price-list");
+    if (done?.length) archived++;
+    else raced.push(batch.find((b) => b.id === c.id)?.name ?? "");
   }
+  if (archived) revalidatePath("/price-list");
+  changed.push(...raced.filter(Boolean));
+
+  const list = (names: string[]) => `${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""}`;
   const bits = [`Archived ${archived} vendor${archived === 1 ? "" : "s"} from that import.`];
-  if (leftAlone.length) {
-    bits.push(
-      `Left alone because ${leftAlone.length === 1 ? "it has" : "they have"} been changed since: ${leftAlone.slice(0, 5).join(", ")}${leftAlone.length > 5 ? ` and ${leftAlone.length - 5} more` : ""}.`,
-    );
-  }
-  return { ok: true, archived, leftAlone, note: bits.join(" ") };
+  if (changed.length) bits.push(`Left alone because ${changed.length === 1 ? "it has" : "they have"} been changed since: ${list(changed)}.`);
+  if (putOnItems.length) bits.push(`Left alone because ${putOnItems.length === 1 ? "it has" : "they have"} been put on an item since: ${list(putOnItems)}.`);
+  return { ok: true, archived, leftAlone: [...changed, ...putOnItems], note: bits.join(" ") };
 }
 
 /* ── A LOOKED-UP CHOICE, SAVED ONTO A CARD (Look Up, Phase 2) ─────────────────────────────── */
@@ -627,7 +717,10 @@ export async function saveLookedUp(input: {
   fields: Partial<Record<LookedUpField, string>>;
   source_url: string;
   maps_url?: string | null;
-}): Promise<VendorResult & { undo?: LookedUpUndo }> {
+  /** What the card said for each ticked field when the person chose (null = empty). A field whose
+   *  stored value has changed since (a box typed while the lookup ran) is not written over. */
+  expected?: Partial<Record<LookedUpField, string | null>>;
+}): Promise<VendorResult & { undo?: LookedUpUndo; now?: Partial<Record<LookedUpField, string | null>> }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, orgId, userId } = ctx;
@@ -640,7 +733,12 @@ export async function saveLookedUp(input: {
     if (typeof v === "string" && v.trim()) picked[f] = v;
   }
   if (!Object.keys(picked).length) return { ok: false, error: "Nothing is ticked, so nothing was saved." };
-  const cleaned = cleanVendorCard({ ...picked, source_url: input.source_url, maps_url: input.maps_url ?? null }, "update");
+  // The map link goes with the address it was found with: only when the address is taken (a new
+  // address with no map link clears the old one). Otherwise the card's own link is left alone.
+  const cleaned = cleanVendorCard(
+    { ...picked, source_url: input.source_url, ...(picked.address ? { maps_url: input.maps_url ?? null } : {}) },
+    "update",
+  );
   if ("error" in cleaned) return { ok: false, error: cleaned.error };
   if (!cleaned.clean.source_url) return { ok: false, error: "A looked-up detail has to say where it was found. Look it up again." };
 
@@ -650,6 +748,27 @@ export async function saveLookedUp(input: {
   const key = vendorKey(input.name);
   const card = cards.rows.find((c) => vendorKey(String(c.name ?? "")) === key) ?? null;
   const patch: Record<string, unknown> = { ...cleaned.clean, looked_up_at: new Date().toISOString() };
+
+  // CHANGED SINCE THE PICK? The person saw old → new against what the card said then. A field
+  // somebody saved in between (typed into its box while the lookup ran) is not written over
+  // unseen: nothing is saved, and the screen shows what it says now, unticked, to choose again.
+  if (input.expected && typeof input.expected === "object") {
+    const norm = (v: unknown) => String(v ?? "").trim() || null;
+    const now: Partial<Record<LookedUpField, string | null>> = {};
+    for (const f of Object.keys(picked) as LookedUpField[]) {
+      if (!(f in input.expected)) continue;
+      const stored = card ? norm(card[f]) : null;
+      if (stored !== norm(input.expected[f])) now[f] = stored;
+    }
+    if (Object.keys(now).length) {
+      const names = Object.keys(now);
+      return {
+        ok: false,
+        now,
+        error: `The ${names.join(" and ")} on ${String(card?.name ?? input.name).trim()} changed since you picked, so nothing was saved. Check the ticks and save again.`,
+      };
+    }
+  }
 
   if (!card) {
     const { data, error } = await supabase

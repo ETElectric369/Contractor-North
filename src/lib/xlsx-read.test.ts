@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
-import { InflateUnavailable, readXlsx, sharedStringsOf, sheetRowsOf, xmlText } from "./xlsx-read";
+import { InflateTooBig, InflateUnavailable, readXlsx, sharedStringsOf, sheetRowsOf, xmlText } from "./xlsx-read";
 
 /**
  * The zero-dependency .xlsx reader behind Import A List (vendor import, Phase 1).
@@ -11,7 +11,7 @@ import { InflateUnavailable, readXlsx, sharedStringsOf, sheetRowsOf, xmlText } f
  * stored parts, a first sheet that isn't called sheet1.xml, inline strings, gaps between columns.
  */
 
-type Part = { name: string; text: string; stored?: boolean };
+type Part = { name: string; text: string; stored?: boolean; /** A size the zip CLAIMS, whatever the part really is. */ declaredSize?: number };
 
 /** A minimal, valid zip (CRCs left 0: the reader trusts the central directory, never the CRC). */
 function zip(parts: Part[]): Uint8Array {
@@ -30,7 +30,7 @@ function zip(parts: Part[]): Uint8Array {
     local.writeUInt16LE(method, 8);
     local.writeUInt32LE(0, 14);
     local.writeUInt32LE(data.length, 18);
-    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt32LE(p.declaredSize ?? raw.length, 22);
     local.writeUInt16LE(name.length, 26);
     local.writeUInt16LE(0, 28);
     chunks.push(local, name, data);
@@ -42,7 +42,7 @@ function zip(parts: Part[]): Uint8Array {
     cd.writeUInt16LE(method, 10);
     cd.writeUInt32LE(0, 16);
     cd.writeUInt32LE(data.length, 20);
-    cd.writeUInt32LE(raw.length, 24);
+    cd.writeUInt32LE(p.declaredSize ?? raw.length, 24);
     cd.writeUInt16LE(name.length, 28);
     cd.writeUInt32LE(offset, 42);
     central.push(cd, name);
@@ -105,7 +105,15 @@ function workbook(
 }
 
 const MADE_UP = ["Acme, Inc.", "Granite Peak Plumbing", "Lakeside Windows", "Pine & Oak Door Co", "Maria Delgado", "Zephyr Labs, Inc."];
-const inflate = (b: Uint8Array) => new Uint8Array(inflateRawSync(b));
+/** zlib's inflate, capped the way readXlsx asks: it stops past maxBytes instead of inflating it all. */
+const inflate = (b: Uint8Array, maxBytes: number) => {
+  try {
+    return new Uint8Array(inflateRawSync(b, { maxOutputLength: maxBytes + 1 }));
+  } catch (e) {
+    if (e instanceof RangeError) throw new InflateTooBig("too-big");
+    throw e;
+  }
+};
 
 describe("readXlsx: the first sheet, as rows of text", () => {
   it("reads a deflated workbook: the heading and every made-up name, commas and ampersands intact", async () => {
@@ -198,5 +206,26 @@ describe("every refusal names the file and says what to do", () => {
       throw new Error("invalid stored block lengths");
     }, "Broken.xlsx");
     expect(!res.ok && res.error).toMatch(/^Broken\.xlsx wouldn't open as an Excel file\./);
+  });
+});
+
+describe("a zip bomb is stopped while it inflates, not after", () => {
+  it("a part that CLAIMS 100 bytes but inflates past 40 MB is refused by name, and the inflate is capped", async () => {
+    const good = workbook(["Acme, Inc."]);
+    expect((await readXlsx(good, inflate, "ok.xlsx")).ok).toBe(true);
+    const bomb = zip([
+      { name: "_rels/.rels", text: '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: "xl/workbook.xml", text: "<".padEnd(41 * 1024 * 1024, " "), declaredSize: 100 },
+    ]);
+    expect(bomb.length).toBeLessThan(2 * 1024 * 1024);
+    let biggest = 0;
+    const watched = (b: Uint8Array, max: number) => {
+      const out = inflate(b, max);
+      biggest = Math.max(biggest, out.length);
+      return out;
+    };
+    const res = await readXlsx(bomb, watched, "Vendors.xlsx");
+    expect(res).toEqual({ ok: false, error: "Vendors.xlsx is too large inside to be a vendor list. Save just the list as its own .xlsx or CSV." });
+    expect(biggest).toBeLessThanOrEqual(40 * 1024 * 1024);
   });
 });

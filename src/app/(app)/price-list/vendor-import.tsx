@@ -9,6 +9,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { DropTarget } from "@/components/drop-target";
 import { useToast } from "@/components/toast";
 import { parseCSV } from "@/lib/csv";
+import { prepareImageForUpload } from "@/lib/image-prep";
 import { readPdfText } from "@/lib/pdf-text";
 import { canInflateRawHere, inflateRawInBrowser, readXlsx } from "@/lib/xlsx-read";
 import { vendorKey, vendorKindOf } from "./item-options-math";
@@ -56,25 +57,30 @@ import {
  * left behind.
  */
 
-export const IMPORT_ACCEPT = ".xlsx,.xls,.csv,.txt,.pdf,image/*,.heic,.heif";
+// HEIC stays: an iPhone photo is turned into a JPEG here before it's sent (prepareImageForUpload).
+export const IMPORT_ACCEPT = ".xlsx,.xls,.csv,.txt,.tsv,text/tab-separated-values,.pdf,image/*,.heic,.heif";
 const FILE_MAX = 10 * 1024 * 1024;
+/** A phone photo before it's shrunk: the camera's original can be well over 10 MB. */
+const PHOTO_MAX = 40 * 1024 * 1024;
 
 type Read = { ok: true; table: string[][] } | { ok: false; error: string; offer?: "photo" | "scan" };
-const READ_MAX = 8 * 1024 * 1024;
+/** What can be SENT to be read: under the ~4.5 MB a server function accepts (site-chat's upload
+ *  door holds the same 4 MB), and under the model's 5 MB for one picture. A photo is shrunk to
+ *  2200px JPEG first, which is far under it; a scanned PDF goes as it is. */
+const SEND_MAX = 4 * 1024 * 1024;
 
 /** A file → rows of cells, or the sentence naming why not. */
 async function readList(file: File): Promise<Read> {
   const name = file.name || "That file";
   const lower = name.toLowerCase();
   const type = (file.type || "").toLowerCase();
-  if (file.size > FILE_MAX) return { ok: false, error: `${name} is over 10 MB. Save just the vendor list as .xlsx or CSV and drop that.` };
   if (type.startsWith("image/") || /\.(heic|heif|jpe?g|png|gif|webp)$/.test(lower)) {
-    if (/heic|heif/.test(type) || /\.(heic|heif)$/.test(lower)) {
-      return { ok: false, error: `${name} is a HEIC photo, which can't be read yet. Take a screenshot of it and drop that.` };
-    }
-    if (file.size > READ_MAX) return { ok: false, error: `${name} is over 8 MB, too big to read. Take a screenshot of the list and drop that.` };
+    // A photo is shrunk (and a HEIC turned into a JPEG) just before it's sent, so its size here is
+    // only a sanity check.
+    if (file.size > PHOTO_MAX) return { ok: false, error: `${name} is over 40 MB. Take a screenshot of the list and drop that.` };
     return { ok: false, error: "", offer: "photo" };
   }
+  if (file.size > FILE_MAX) return { ok: false, error: `${name} is over 10 MB. Save just the vendor list as .xlsx or CSV and drop that.` };
   if (/\.xlsx?$/.test(lower) || type.includes("spreadsheetml") || type === "application/vnd.ms-excel") {
     if (/\.xlsx$/.test(lower) && !canInflateRawHere()) return { ok: false, error: `This device can't open .xlsx. Save ${name} as CSV and drop that.` };
     const res = await readXlsx(new Uint8Array(await file.arrayBuffer()), inflateRawInBrowser, name);
@@ -84,7 +90,9 @@ async function readList(file: File): Promise<Read> {
     const res = await readPdfText(await file.arrayBuffer(), name);
     if (!res.ok) {
       if (!/no text in it/.test(res.error)) return res;
-      if (file.size > READ_MAX) return { ok: false, error: `${name} has no text in it and is over 8 MB, too big to read. Save the list as Excel or CSV.` };
+      if (file.size > SEND_MAX) {
+        return { ok: false, error: `${name} has no text in it and is over 4 MB, too big to send to be read. Split it into smaller parts, or save the list as Excel or CSV.` };
+      }
       return { ok: false, error: "", offer: "scan" };
     }
     return { ok: true, table: tableFromLines(res.text) };
@@ -150,14 +158,35 @@ export function VendorImport({ existing, disabled }: { existing: ExistingVendor[
     setError(null);
     setReading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await readVendorList(fd);
+      let send: File = file;
+      if (offer.kind === "photo") {
+        // Shrink to 2200px and turn a HEIC into a JPEG here, as the bills drop and the inspector do.
+        // A photo this device can't open comes back as it was.
+        send = await prepareImageForUpload(file).catch(() => file);
+        const heic = /heic|heif/.test((file.type || "").toLowerCase()) || /\.(heic|heif)$/i.test(file.name);
+        if (send === file && heic) {
+          return setError(`${file.name} couldn't be opened on this device. Take a screenshot of the list and drop that.`);
+        }
+      }
+      // Too big to send is said in words, never sent and blamed on the connection.
+      if (send.size > SEND_MAX) {
+        return setError(
+          offer.kind === "photo"
+            ? `${file.name} is over 4 MB even after shrinking, too big to send to be read. Take a screenshot of the list and drop that.`
+            : `${file.name} is over 4 MB, too big to send to be read. Split it into smaller parts, or save the list as Excel or CSV.`,
+        );
+      }
+      let res: Awaited<ReturnType<typeof readVendorList>>;
+      try {
+        const fd = new FormData();
+        fd.append("file", send);
+        res = await readVendorList(fd);
+      } catch {
+        return setError(`${file.name} couldn't be sent to be read. Check the connection and try again.`);
+      }
       if (!res.ok) return setError(res.error);
       setOffer(null);
       open(file.name, res.table, res.note);
-    } catch {
-      setError(`${file.name} couldn't be sent to be read. Check the connection and try again.`);
     } finally {
       setReading(false);
     }
@@ -338,6 +367,21 @@ function ImportPreview({
     setRun(null);
   }
 
+  /** A new name drops a pick found for the old one: another vendor's phone and address never ride
+   *  into Add under this name. The choices stay on screen, marked as found for the old name, with
+   *  Look Up Again for the new one. */
+  function rename(r: PreviewRow, name: string) {
+    const look = looks[r.id];
+    const stale = !!r.pick && look?.status === "done" && vendorKey(look.asName) !== vendorKey(name);
+    patch(r.id, stale ? { name, pick: null } : { name });
+  }
+  /** Look one row up again (it failed, found nothing, or its name has changed): its old pick goes. */
+  function again(r: PreviewRow) {
+    if (run) return;
+    patch(r.id, { pick: null });
+    void lookUp([{ ...r, pick: null }]);
+  }
+
   function choose(r: PreviewRow, choice: LookupChoice) {
     patch(r.id, { pick: pickFor(r, choice) });
     setLooks((ls) => {
@@ -371,7 +415,7 @@ function ImportPreview({
       return setError([res.error ?? "Couldn't add those vendors.", why].filter(Boolean).join(" "));
     }
     const done = (res.added ?? 0) + (res.restored?.length ?? 0);
-    const restored = (res.restored ?? []).map((r) => ({ id: r.id, stamp: r.stamp }));
+    const restored = (res.restored ?? []).map((r) => ({ id: r.id, stamp: r.stamp, previous: r.previous }));
     toast(`Added ${done} vendor${done === 1 ? "" : "s"}.${res.note ? ` ${res.note}` : ""}`, "success", {
       label: "Undo",
       onClick: async () => {
@@ -479,7 +523,7 @@ function ImportPreview({
                     />
                   </label>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <Input value={r.name} onChange={(e) => patch(r.id, { name: e.target.value })} aria-label="Vendor Name" autoComplete="off" />
+                    <Input value={r.name} onChange={(e) => rename(r, e.target.value)} aria-label="Vendor Name" autoComplete="off" />
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                       <div>
                         <Select
@@ -494,7 +538,9 @@ function ImportPreview({
                             </option>
                           ))}
                         </Select>
-                        {r.kindGuessed && <span className="mt-0.5 block text-xs text-slate-500">Guessed From The Name</span>}
+                        {r.kindGuessed && (
+                          <span className="mt-0.5 block text-xs text-slate-500">{r.kind ? "Guessed From The Name" : "Couldn't Tell From The Name"}</span>
+                        )}
                       </div>
                       <Input
                         className="h-11"
@@ -533,6 +579,7 @@ function ImportPreview({
                       busy={!!run}
                       blocked={blocked}
                       onLookUp={() => void lookUp([r])}
+                      onAgain={() => again(r)}
                       onPick={(c) => choose(r, c)}
                       onNone={() => none(r)}
                       onReopen={() => reopen(r.id)}
@@ -560,12 +607,14 @@ function RowLookup({
   onNone,
   onReopen,
   onTake,
+  onAgain,
 }: {
   row: PreviewRow;
   look: LookState | undefined;
   busy: boolean;
   blocked: boolean;
   onLookUp: () => void;
+  onAgain: () => void;
   onPick: (c: LookupChoice) => void;
   onNone: () => void;
   onReopen: () => void;
@@ -590,9 +639,18 @@ function RowLookup({
     );
   }
   const renamed = vendorKey(look.asName) !== vendorKey(r.name);
+  const canAgain = !blocked && !!vendorKey(r.name) && (renamed || !look.answer.found);
   return (
     <div className="space-y-2">
       {renamed && <p className="text-xs text-amber-800">Looked up as &apos;{look.asName}&apos;, before the name was changed.</p>}
+      {canAgain && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={onAgain} disabled={busy} aria-label={`Look Up ${r.name.trim()} Again, ${lookupPrice(1)}`}>
+            <Search className="h-4 w-4" /> Look Up Again
+          </Button>
+          <span className="text-xs text-slate-500">{lookupPrice(1)}</span>
+        </div>
+      )}
       {look.hidden ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <span>{look.answer.found ? "None of the choices were used." : "Left blank."}</span>

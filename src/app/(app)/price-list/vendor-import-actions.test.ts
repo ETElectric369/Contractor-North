@@ -200,7 +200,8 @@ describe("Add N Vendors: one press, checked on the server, whatever the preview 
     expect(res.added).toBe(0);
     const back = db.tables.price_list_vendors.find((r) => r.id === "v-arch")!;
     expect(back).toMatchObject({ archived: false, kind: "supplier", phone: "5305550101", import_batch: BATCH });
-    expect(res.restored).toEqual([{ id: "v-arch", name: "Lakeside Windows", stamp: back.updated_at }]);
+    // What the row's values replaced, for Undo to put back.
+    expect(res.restored).toEqual([{ id: "v-arch", name: "Lakeside Windows", stamp: back.updated_at, previous: { phone: null, kind: "brand", is_person: null } }]);
     expect(res.note).toBe("1 was archived and came back: Lakeside Windows.");
   });
 
@@ -282,17 +283,47 @@ describe("Undo: archives exactly that press's cards, and only the ones nobody ha
     expect(db.tables.price_list_vendors.find((r) => r.id === "v-arch")?.archived).toBe(true);
   });
 
+  it("a brought-back card goes back to the archive AS IT WAS: the phone and kind the import replaced are put back", async () => {
+    const arch = db.tables.price_list_vendors.find((r) => r.id === "v-arch")!;
+    arch.phone = "(530) 555-0111";
+    arch.email = "old@lakesidewindows.example";
+    const res = await addVendorsBatch([{ name: "Lakeside Windows", kind: "supplier", phone: "(530) 555-0222" }], BATCH);
+    expect(arch).toMatchObject({ archived: false, phone: "(530) 555-0222", kind: "supplier" });
+    const undo = await undoVendorImport({ batchId: BATCH, restored: res.restored });
+    expect(undo).toMatchObject({ ok: true, archived: 1, leftAlone: [] });
+    expect(arch).toMatchObject({ archived: true, phone: "(530) 555-0111", kind: "brand", email: "old@lakesidewindows.example" });
+  });
+
+  it("a restored card's previous values are checked like typed ones: a forged kind leaves it alone", async () => {
+    const res = await addVendorsBatch([{ name: "Lakeside Windows", kind: "supplier" }], BATCH);
+    const forged = res.restored!.map((r) => ({ ...r, previous: { ...r.previous, kind: "overlord" } }));
+    const undo = await undoVendorImport({ batchId: BATCH, restored: forged });
+    expect(undo).toMatchObject({ ok: true, archived: 0, leftAlone: ["Lakeside Windows"] });
+    expect(db.tables.price_list_vendors.find((r) => r.id === "v-arch")).toMatchObject({ archived: false, kind: "supplier" });
+  });
+
+  it("a name ALREADY on items when the import gave it a card: Undo takes that card away (nobody touched it)", async () => {
+    db.tables.price_list_item_options[0].updated_at = "2026-09-25T19:00:00.000000+00:00";
+    const res = await addVendorsBatch([{ name: "Harbor Door Co", kind: "supplier" }], BATCH);
+    expect(res.added).toBe(1);
+    const undo = await undoVendorImport({ batchId: BATCH });
+    expect(undo).toMatchObject({ ok: true, archived: 1, leftAlone: [] });
+    // The item's price is untouched: archiving a card never touches item options.
+    expect(db.tables.price_list_item_options[0]).toMatchObject({ vendor: "Harbor Door Co", archived: false });
+  });
+
   it("without its stamp, a brought-back card is left alone (never guessed at)", async () => {
     await addVendorsBatch([{ name: "Lakeside Windows" }], BATCH);
     const undo = await undoVendorImport({ batchId: BATCH });
     expect(undo).toMatchObject({ ok: true, archived: 0, leftAlone: ["Lakeside Windows"] });
   });
 
-  it("a card put on an item since the import is left alone", async () => {
+  it("a card put on an item since the import is left alone, and says so in its own words", async () => {
     await addVendorsBatch([{ name: "Ridge Glass", kind: "supplier" }], BATCH);
-    db.tables.price_list_item_options.push({ id: "o-2", org_id: "org-1", item_id: "item-830", vendor: "Ridge Glass", label: null, archived: false, is_default: false });
+    db.tables.price_list_item_options.push({ id: "o-2", org_id: "org-1", item_id: "item-830", vendor: "Ridge Glass", label: null, archived: false, is_default: false, updated_at: stamp() });
     const undo = await undoVendorImport({ batchId: BATCH });
     expect(undo).toMatchObject({ ok: true, archived: 0, leftAlone: ["Ridge Glass"] });
+    expect(undo.note).toBe("Archived 0 vendors from that import. Left alone because it has been put on an item since: Ridge Glass.");
   });
 
   it("a tech can't undo", async () => {

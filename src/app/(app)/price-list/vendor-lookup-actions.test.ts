@@ -23,6 +23,8 @@ const db = vi.hoisted(() => ({
   calls: [] as { model: string; tools?: any[]; messages: any[] }[],
   respond: null as null | ((p: any, n: number) => any),
   noKey: false,
+  /** rate_limit_hit's counters, by key: incremented on every hit, as 0169's function does. */
+  hits: {} as Record<string, number>,
 }));
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -115,6 +117,13 @@ vi.mock("@/lib/staff-guard", () => ({
     db.staff ? { supabase: tenantClient(), orgId: db.orgId, userId: "user-1" } : { error: "This action is staff-only." },
   ),
 }));
+vi.mock("@/lib/rate-limit", () => ({
+  rateLimited: vi.fn(async (key: string, limit: number) => (db.hits[key] = (db.hits[key] ?? 0) + 1) > limit),
+  rateLimitGiveBack: vi.fn(async (key: string) => {
+    db.hits[key] = Math.max(0, (db.hits[key] ?? 0) - 1);
+    return true;
+  }),
+}));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => serviceClient(), createClient: async () => tenantClient() }));
 vi.mock("@/lib/anthropic", () => ({
   getAnthropic: () => {
@@ -133,7 +142,7 @@ vi.mock("@/lib/anthropic", () => ({
 
 import { costOf } from "@/lib/ai-cost";
 import { lookUpVendors, readVendorList } from "./vendor-lookup-actions";
-import { addVendorsBatch, saveLookedUp, undoLookedUp } from "./vendor-actions";
+import { addVendorsBatch, saveLookedUp, saveVendorField, undoLookedUp } from "./vendor-actions";
 import { rowsFromTable } from "./vendor-import-math";
 import { autoPick } from "./vendor-lookup-math";
 
@@ -165,6 +174,7 @@ beforeEach(() => {
   db.ledger = [];
   db.noKey = false;
   db.respond = null;
+  db.hits = {};
   db.tables = {
     organizations: [
       // Vivian's shape: public city Truckee, public state empty, the mailing address in Reno, NV.
@@ -235,6 +245,21 @@ describe("Look Up: refused before any money is spent", () => {
     const res = await lookUpVendors({ names: [{ name: "A Co" }, { name: "B Co" }] });
     expect(res).toMatchObject({ ok: true, leftToday: 98 });
     expect(db.calls.length).toBe(2);
+  });
+
+  it("THE SLOTS ARE RESERVED ATOMICALLY: presses in flight (not on the ledger yet) count, and a press past 100 gives its hits back", async () => {
+    db.respond = () => reply({ json: { candidates: [] } });
+    // 97 lookups running in other tabs right now: reserved, but none has reached the ledger.
+    db.hits[`vendor-lookup:org-1:${today()}`] = 97;
+    const res = await lookUpVendors({ names: ["A Co", "B Co", "C Co", "D Co", "E Co"].map((name) => ({ name })) });
+    expect(res).toMatchObject({ ok: false, leftToday: 0 });
+    expect(!res.ok && res.error).toMatch(/at today's most of 100 lookups \(counting ones still running\)/);
+    expect(db.calls).toEqual([]);
+    // Every hit this press made was given back: 3 are still free for the next one.
+    expect(db.hits[`vendor-lookup:org-1:${today()}`]).toBe(97);
+    const three = await lookUpVendors({ names: ["A Co", "B Co", "C Co"].map((name) => ({ name })) });
+    expect(three.ok).toBe(true);
+    expect(db.hits[`vendor-lookup:org-1:${today()}`]).toBe(100);
   });
 
   it("no API key: said in words, nothing called", async () => {
@@ -454,10 +479,42 @@ describe("a pick is saved only when a person presses Add or Save", () => {
     expect(card.looked_up_at).toBeTruthy();
     // Another company's card with the same name is untouched.
     expect(db.tables.price_list_vendors.find((r) => r.id === "v-other")).toMatchObject({ phone: "(541) 555-0100" });
-    expect(res.undo).toMatchObject({ cardId: "v-1", created: false, previous: { phone: null, website: null, source_url: null, maps_url: null, looked_up_at: null } });
+    // No address taken: the map link is not written (it belongs to the address it was found with).
+    expect(res.undo).toEqual(expect.objectContaining({ cardId: "v-1", created: false, previous: { phone: null, website: null, source_url: null, looked_up_at: null } }));
+    expect(card.maps_url).toBeUndefined();
 
     expect(await undoLookedUp(res.undo!)).toEqual({ ok: true });
     expect(db.tables.price_list_vendors.find((r) => r.id === "v-1")).toMatchObject({ phone: null, website: null, source_url: null, looked_up_at: null, email: "bids@granitepeakplumbing.example" });
+  });
+
+  it("the map link is saved with a taken address, and an address typed later drops it", async () => {
+    const res = await saveLookedUp({ name: "Granite Peak Plumbing", fields: { address: "10200 Pioneer Trl, Truckee, CA 96161" }, ...LOOKED });
+    expect(res.ok).toBe(true);
+    const card = db.tables.price_list_vendors.find((r) => r.id === "v-1")!;
+    expect(card.maps_url).toBe(LOOKED.maps_url);
+    const typed = await saveVendorField({ name: "Granite Peak Plumbing", field: "address", value: "1 New Rd, Truckee, CA" });
+    expect(typed.ok).toBe(true);
+    expect(card).toMatchObject({ address: "1 New Rd, Truckee, CA", maps_url: null });
+  });
+
+  it("a box saved while the lookup ran is NOT written over: nothing is saved, and it says what the card says now", async () => {
+    // The person saw an empty phone and picked; meanwhile the phone box saved their own number.
+    db.tables.price_list_vendors.find((r) => r.id === "v-1")!.phone = "(530) 555-0100";
+    const res = await saveLookedUp({
+      name: "Granite Peak Plumbing",
+      fields: { phone: "(530) 555-0142", website: "https://granitepeakplumbing.example/" },
+      expected: { phone: null, website: null },
+      ...LOOKED,
+    });
+    expect(res).toEqual({
+      ok: false,
+      now: { phone: "(530) 555-0100" },
+      error: "The phone on Granite Peak Plumbing changed since you picked, so nothing was saved. Check the ticks and save again.",
+    });
+    expect(db.tables.price_list_vendors.find((r) => r.id === "v-1")).toMatchObject({ phone: "(530) 555-0100", website: null });
+    // With what it says now in front of them, the save goes through.
+    const again = await saveLookedUp({ name: "Granite Peak Plumbing", fields: { website: "https://granitepeakplumbing.example/" }, expected: { website: null }, ...LOOKED });
+    expect(again.ok).toBe(true);
   });
 
   it("Undo leaves a card alone once somebody has changed it since", async () => {

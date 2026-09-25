@@ -363,7 +363,12 @@ export function notesFor(row: Pick<PreviewRow, "id" | "name" | "is_person" | "co
   const name = row.name.trim();
   const key = vendorKey(name);
   if (name.length > NAME_MAX) notes.push({ kind: "too-long", text: `That name is over ${NAME_MAX} characters. Shorten it to add it.` });
-  if (row.is_person) notes.push({ kind: "person", text: `${name} looks like a person, not a company. They'll be saved as their own contact.` });
+  if (row.is_person) {
+    notes.push({
+      kind: "person",
+      text: `${name} looks like a person, not a company, so a lookup won't pick for you. Untick A Person if it's a company; it can be changed later on the vendor's sheet.`,
+    });
+  }
   if (row.copies > 1) notes.push({ kind: "twice", text: row.copies === 2 ? "In your file twice. It's added once." : `In your file ${row.copies} times. It's added once.` });
 
   const exact = existing.find((e) => vendorKey(e.name) === key);

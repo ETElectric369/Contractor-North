@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Archive, ExternalLink, Mail, MapPin, Phone, Plus, Search, X } from "lucide-react";
 import { FoundChanges, LookupChoices } from "./vendor-choices";
 import { lookUpVendors } from "./vendor-lookup-actions";
-import { autoPick, changesFor, lookupPrice, type FoundField, type LookupAnswer, type LookupChoice } from "./vendor-lookup-math";
+import { autoPick, changesFor, lookupPrice, pickLinks, type FoundField, type LookupAnswer, type LookupChoice } from "./vendor-lookup-math";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -32,7 +32,7 @@ import {
   type VendorSummary,
 } from "./item-options-math";
 import type { PriceItem } from "./price-list-math";
-import { addVendor, archiveVendor, restoreVendor, saveLookedUp, saveVendorField, undoLookedUp } from "./vendor-actions";
+import { addVendor, archiveVendor, restoreVendor, saveLookedUp, saveVendorField, saveVendorIsPerson, undoLookedUp } from "./vendor-actions";
 import { VendorImport } from "./vendor-import";
 import { KIND_CHOICES, KIND_LABEL, type ExistingVendor } from "./vendor-import-math";
 import { ArchivedVendorRow, VendorPriceRow, useOptionWrites } from "./vendor-price-row";
@@ -210,7 +210,12 @@ function VendorTile({ vendor: v, showKind, onOpen }: { vendor: VendorSummary; sh
             {v.defaults ? ` · default on ${v.defaults}` : ""}
           </span>
         </div>
-        {showKind && <p className="mt-0.5 text-xs font-medium text-slate-600">{kindLine(listedKind(v), card?.trade)}</p>}
+        {showKind && (
+          <p className="mt-0.5 text-xs font-medium text-slate-600">
+            {kindLine(listedKind(v), card?.trade)}
+            {card?.is_person ? " · A Person" : ""}
+          </p>
+        )}
         <ContactLine card={card} />
         {v.items.length > 0 && (
           <p className="mt-1 truncate text-xs text-slate-500">
@@ -485,6 +490,29 @@ function VendorSheet({
     return true;
   }
 
+  async function savePerson(box: HTMLInputElement) {
+    const on = box.checked;
+    setBusy(true);
+    await saveQueue.current;
+    const res = await saveVendorIsPerson({ name: nameRef.current, isPerson: on });
+    setBusy(false);
+    if (!res.ok) {
+      box.checked = !on;
+      return toast(res.error ?? "Couldn't save that.", "error");
+    }
+    const was = res.previous === true;
+    toast(on ? "Marked as a person" : "Marked as a company", "success", {
+      label: "Undo",
+      onClick: async () => {
+        const back = await saveVendorIsPerson({ name: nameRef.current, isPerson: was });
+        if (!back.ok) return toast(back.error ?? "Couldn't undo that.", "error");
+        toast("Undone", "success");
+        startRefresh(() => router.refresh());
+      },
+    });
+    startRefresh(() => router.refresh());
+  }
+
   async function archiveAll() {
     setBusy(true);
     // Let any contact detail still saving land first, so the archive sees the finished card.
@@ -566,6 +594,20 @@ function VendorSheet({
                   }}
                 />
               </div>
+              {card && (
+                <label key={`${vendor.key}:person:${card.is_person ? 1 : 0}`} className="flex min-h-11 cursor-pointer items-center gap-2 text-sm text-slate-700 sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    defaultChecked={card.is_person === true}
+                    disabled={busy}
+                    onChange={(e) => void savePerson(e.currentTarget)}
+                  />
+                  <span>
+                    A Person <span className="text-xs text-slate-500">(not a company: Look Up won&apos;t pick for you)</span>
+                  </span>
+                </label>
+              )}
             </div>
           )}
           <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -780,8 +822,17 @@ function CardLookup({
   const [error, setError] = useState<string | null>(null);
   const [look, setLook] = useState<{ answer: LookupAnswer; auto: boolean; hidden: boolean } | null>(null);
   const [pick, setPick] = useState<{ choice: LookupChoice; take: FoundField[] } | null>(null);
+  /** What the server said a field holds now, when it changed after the pick (a box saved while the
+   *  lookup ran). It overrides the card until the page catches up. */
+  const [fresh, setFresh] = useState<Partial<Record<FoundField, string | null>>>({});
   const isPerson = card?.is_person === true;
-  const current = { phone: card?.phone ?? null, email: card?.email ?? null, website: card?.website ?? null, address: card?.address ?? null };
+  const current = {
+    phone: card?.phone ?? null,
+    email: card?.email ?? null,
+    website: card?.website ?? null,
+    address: card?.address ?? null,
+    ...fresh,
+  };
 
   const pickOf = (choice: LookupChoice) => ({ choice, take: changesFor(current, choice).filter((c) => c.take).map((c) => c.field) });
 
@@ -789,6 +840,7 @@ function CardLookup({
     if (busy) return;
     setBusy(true);
     setError(null);
+    setFresh({});
     try {
       const res = await lookUpVendors({ names: [{ name, isPerson }] });
       if (!res.ok) return setError(res.error);
@@ -811,9 +863,22 @@ function CardLookup({
     if (!Object.keys(fields).length) return;
     setBusy(true);
     await beforeSave();
-    const res = await saveLookedUp({ name, fields, source_url: pick.choice.source_url, maps_url: pick.choice.maps_url });
+    // What the person saw for each ticked field: the server writes over a field only while it still
+    // says that, so a box typed while the lookup ran is never replaced unseen.
+    const expected: Partial<Record<FoundField, string | null>> = {};
+    for (const f of Object.keys(fields) as FoundField[]) expected[f] = current[f] ?? null;
+    const links = pickLinks(pick.choice, Object.keys(fields) as FoundField[]);
+    const res = await saveLookedUp({ name, fields, source_url: links.source_url ?? pick.choice.source_url, maps_url: links.maps_url, expected });
     setBusy(false);
-    if (!res.ok) return toast(res.error ?? "Couldn't save that.", "error");
+    if (!res.ok) {
+      if (res.now) {
+        // Show old → new against what it says now, with those ticks off, to choose again.
+        const now = res.now;
+        setFresh((cur) => ({ ...cur, ...now }));
+        setPick((p) => (p ? { ...p, take: p.take.filter((f) => !(f in now)) } : p));
+      }
+      return toast(res.error ?? "Couldn't save that.", "error");
+    }
     const n = Object.keys(fields).length;
     const undo = res.undo;
     toast(`Saved ${n} detail${n === 1 ? "" : "s"} for ${name}.`, "success", undo
@@ -829,6 +894,7 @@ function CardLookup({
       : undefined);
     setLook(null);
     setPick(null);
+    setFresh({});
     onSaved();
   }
 
@@ -850,6 +916,10 @@ function CardLookup({
               Show Choices Again
             </Button>
           )}
+          <Button variant="ghost" onClick={() => void run()} disabled={busy}>
+            {busy ? "Looking Up…" : "Look Up Again"}
+          </Button>
+          <span>{lookupPrice(1)}</span>
         </div>
       ) : (
         <LookupChoices
@@ -867,6 +937,14 @@ function CardLookup({
             setLook({ ...look, auto: false, hidden: true });
           }}
         />
+      )}
+      {look && !look.hidden && !look.answer.found && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => void run()} disabled={busy}>
+            <Search className="h-4 w-4" /> {busy ? "Looking Up…" : "Look Up Again"}
+          </Button>
+          <span className="text-xs text-slate-500">{lookupPrice(1)}</span>
+        </div>
       )}
       {pick && (
         <div className="space-y-2 rounded-lg border border-slate-200 px-3 py-2">

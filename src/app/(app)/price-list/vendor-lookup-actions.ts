@@ -5,6 +5,7 @@ import { parseAiJson } from "@/lib/ai-json";
 import { getAnthropic } from "@/lib/anthropic";
 import { isPdfBytes } from "@/lib/pdf-text";
 import { reportError } from "@/lib/observe";
+import { rateLimitGiveBack, rateLimited } from "@/lib/rate-limit";
 import { requireStaff } from "@/lib/staff-guard";
 import { createServiceClient } from "@/lib/supabase/server";
 import { LOOKUP_SURFACE, lookUpVendor } from "./vendor-lookup";
@@ -72,8 +73,10 @@ async function pool<T, R>(items: T[], limit: number, run: (t: T) => Promise<R>):
  *
  * In order: staff, the org, the names (1 to 5, each named), the month's allowance, then today's
  * count against the daily cap of 100. A request that would go past the cap is refused whole, saying
- * how many are left today. (Two presses at the same instant can each pass the check and overshoot
- * by a few lookups; each is bounded at 3 searches, so that is cents.)
+ * how many are left today. Then THE SLOTS ARE RESERVED, atomically, before anything is spent: the
+ * ledger is written only when a lookup finishes, so two tabs (or a script calling this action)
+ * could each read the same count and each pass. One rate_limit_hit per name, keyed to the ledger's
+ * UTC day, closes that: a press that would pass 100 gives its hits back and is refused whole.
  */
 export async function lookUpVendors(input: {
   names: { name: string; isPerson?: boolean }[];
@@ -114,6 +117,20 @@ export async function lookUpVendors(input: {
     return { ok: false, error: NOT_ON };
   }
 
+  const capKey = `vendor-lookup:${orgId}:${ledgerDay()}`;
+  let hits = 0;
+  for (let i = 0; i < list.length; i++) {
+    hits++;
+    if (await rateLimited(capKey, LOOKUP_PER_DAY, 86_400, { failClosed: true })) {
+      for (let j = 0; j < hits; j++) await rateLimitGiveBack(capKey);
+      return {
+        ok: false,
+        leftToday: 0,
+        error: `Your company is at today's most of ${LOOKUP_PER_DAY} lookups (counting ones still running), so these ${list.length} weren't looked up and nothing was charged. Look up fewer, or the rest tomorrow.`,
+      };
+    }
+  }
+
   const { data: org } = await supabase.from("organizations").select("settings, city, state").eq("id", orgId).maybeSingle();
   const o = (org ?? {}) as { settings?: { public_city?: unknown; public_state?: unknown } | null; city?: unknown; state?: unknown };
   const place = lookupPlace(o.settings ?? null, o);
@@ -135,9 +152,12 @@ export async function lookUpVendors(input: {
 
 // Not exported: a "use server" file may export only async functions.
 const READ_SURFACE = "vendor-list-read";
-const READ_LIMIT = 8 * 1024 * 1024;
+// Under the ~4.5 MB a server function accepts and the model's 5 MB for one picture. The browser
+// shrinks a photo to a 2200px JPEG before it gets here, so this is a scan's limit in practice.
+const READ_LIMIT = 4 * 1024 * 1024;
 const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const READ_ROWS = 200;
+const READS_PER_HOUR = 20;
 
 /** The picture format by its first bytes, whatever the file calls itself. */
 function imageKind(b: Uint8Array): string | null {
@@ -190,9 +210,9 @@ export async function readVendorList(form: FormData): Promise<{ ok: true; table:
   if (/\.(heic|heif)$/.test(lower) || /heic|heif/.test(type)) {
     return { ok: false, error: `${name} is a HEIC photo, which can't be read yet. Take a screenshot of it and drop that.` };
   }
-  if (f.size > READ_LIMIT) return { ok: false, error: `${name} is over 8 MB, too big to read. Take a screenshot of the list and drop that.` };
+  if (f.size > READ_LIMIT) return { ok: false, error: `${name} is over 4 MB, too big to read. Take a screenshot of the list, or save it as Excel or CSV, and drop that.` };
   const bytes = new Uint8Array(await f.arrayBuffer());
-  if (bytes.byteLength > READ_LIMIT) return { ok: false, error: `${name} is over 8 MB, too big to read. Take a screenshot of the list and drop that.` };
+  if (bytes.byteLength > READ_LIMIT) return { ok: false, error: `${name} is over 4 MB, too big to read. Take a screenshot of the list, or save it as Excel or CSV, and drop that.` };
 
   let block: Record<string, unknown>;
   const pic = imageKind(bytes);
@@ -207,6 +227,13 @@ export async function readVendorList(form: FormData): Promise<{ ok: true; table:
   }
 
   if (await aiSpendExceeded(orgId)) return { ok: false, error: ALLOWANCE.replace("looked up", "read") };
+  // A per-company ceiling on paid reads, atomic, before the spend.
+  if (await rateLimited(`vendor-list-read:${orgId}`, READS_PER_HOUR, 3600, { failClosed: true })) {
+    return {
+      ok: false,
+      error: `Your company has read ${READS_PER_HOUR} photos or scans of lists in the last hour, the most in an hour. Nothing was read or charged. Try again later, or save the list as Excel or CSV.`,
+    };
+  }
 
   let client;
   try {

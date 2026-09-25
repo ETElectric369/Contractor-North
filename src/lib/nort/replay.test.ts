@@ -332,3 +332,33 @@ describe("markCacheTail", () => {
     expect("cache_control" in (onlyThinking[0].content as unknown as Ev[])[0]).toBe(false);
   });
 });
+
+describe("a streamed round that searched the web is metered with its searches", () => {
+  it("takes server_tool_use and the input tokens from the closing message_delta, so costOf counts the searches", async () => {
+    const { costOf, WEB_SEARCH_USD } = await import("@/lib/ai-cost");
+    const searched: Ev[] = [
+      ...ROUND_TWO.slice(0, -2),
+      {
+        type: "message_delta",
+        delta: { stop_reason: "end_turn", stop_sequence: null },
+        usage: { input_tokens: 5000, output_tokens: 42, server_tool_use: { web_search_requests: 3 } },
+      },
+      { type: "message_stop" },
+    ];
+    const { client } = scriptedClient([searched]);
+    const { final } = await runRound(client, [{ role: "user", content: "Look up Acme Test Supply" }]);
+    const u = final.usage as unknown as { input_tokens: number; output_tokens: number; server_tool_use?: { web_search_requests?: number } };
+    expect(u.server_tool_use?.web_search_requests).toBe(3);
+    expect(u.input_tokens).toBe(5000);
+    expect(u.output_tokens).toBe(42);
+    const without = costOf("claude-opus-4-8", { input_tokens: 5000, output_tokens: 42 });
+    expect(costOf("claude-opus-4-8", u)).toBeCloseTo(without + 3 * WEB_SEARCH_USD, 6);
+  });
+
+  it("keeps the early usage when the closing one leaves a field out", async () => {
+    const { client } = scriptedClient([ROUND_TWO]);
+    const { final } = await runRound(client, [{ role: "user", content: "hi" }]);
+    expect(final.usage.input_tokens).toBe(10);
+    expect(final.usage.output_tokens).toBe(42);
+  });
+});

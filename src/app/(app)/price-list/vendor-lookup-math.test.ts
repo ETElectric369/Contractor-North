@@ -3,14 +3,20 @@ import {
   applyPick,
   autoPick,
   changesFor,
+  citedTextsIn,
   guardAnswer,
+  isMapLink,
   lookupPlace,
   lookupPrice,
+  mapSearchUrl,
   nothingFoundText,
   pageKey,
+  pickLinks,
   placeOfAddress,
   sourcesIn,
+  valueOnPage,
   type LookupAnswer,
+  type LookupChoice,
 } from "./vendor-lookup-math";
 
 /**
@@ -74,8 +80,10 @@ describe("guardAnswer: a field with no source URL from the search is DROPPED, ne
     if (!a.found) return;
     expect(a.dropped).toBe(2);
     const c = a.choices[0];
-    expect(c.fields.phone).toEqual({ value: "(530) 555-0142", source: SITE });
-    expect(c.fields.website).toEqual({ value: "https://granitepeakplumbing.example/", source: SITE });
+    // Sourced, but no quote from the page shows the phone: kept as Not Confirmed. The website is the
+    // page's own site, which confirms it.
+    expect(c.fields.phone).toEqual({ value: "(530) 555-0142", source: SITE, confirmed: false });
+    expect(c.fields.website).toEqual({ value: "https://granitepeakplumbing.example/", source: SITE, confirmed: true });
     expect(c.fields.email).toBeUndefined();
     expect(c.fields.address).toBeUndefined();
     // No kept address: the place isn't taken on the model's word, and there's nothing to map.
@@ -127,10 +135,130 @@ describe("guardAnswer: a field with no source URL from the search is DROPPED, ne
     expect(a.choices[0].source_url).toBe(DIRECTORY);
   });
 
-  it("a map page the search itself returned is kept as the map link", () => {
-    const map = "https://maps.example/place/granite-peak";
+  it("a map page the search itself returned is kept as the map link, when it is on a map service", () => {
+    const map = "https://www.google.com/maps/place/Granite+Peak+Plumbing";
     const a = guardAnswer({ candidates: [{ address: "1 Elm St, Truckee, CA", maps_url: map, sources: { address: map } }] }, sourcesIn(content([map])), "G", "");
     expect(a.found && a.choices[0].maps_url).toBe(map);
+  });
+
+  it("a returned page that ISN'T a map service is never shown as View On Map: the map is a search of the kept address", () => {
+    const planted = "https://evil.example/looks-like-a-map";
+    const a = guardAnswer(
+      { candidates: [{ address: "1 Elm St, Truckee, CA", maps_url: planted, sources: { address: planted } }] },
+      sourcesIn(content([planted])),
+      "G",
+      "",
+    );
+    expect(a.found && a.choices[0].maps_url).toBe(mapSearchUrl("G", "1 Elm St, Truckee, CA"));
+    expect(isMapLink(planted)).toBe(false);
+    expect(isMapLink("https://maps.apple.com/?q=x")).toBe(true);
+    expect(isMapLink("https://www.bing.com/maps?q=x")).toBe(true);
+    expect(isMapLink("https://google.com.evil.example/maps")).toBe(false);
+  });
+});
+
+describe("a kept value is CONFIRMED only when the page's own quoted words show it", () => {
+  const AGG = "https://www.townlistings.example/truckee/plumbers";
+  /** One text block citing `url` with `quote` as its cited_text, as the API returns it. */
+  const quoting = (urls: string[], quotes: [string, string][]) => [
+    { type: "web_search_tool_result", tool_use_id: "s", content: urls.map((url) => ({ type: "web_search_result", url, title: "t", encrypted_content: "x" })) },
+    ...quotes.map(([url, cited_text]) => ({ type: "text", text: "Found it.", citations: [{ type: "web_search_result_location", url, title: "t", cited_text }] })),
+  ];
+
+  it("a REAL returned URL paired with a MADE-UP phone is Not Confirmed and starts unticked", () => {
+    const c = quoting([SITE], [[SITE, "Granite Peak Plumbing, call (530) 555-0142 for a bid."]]);
+    const a = guardAnswer(
+      { candidates: [{ phone: "(530) 555-0199", sources: { phone: SITE } }] },
+      sourcesIn(c),
+      "Granite Peak Plumbing",
+      "Truckee",
+      citedTextsIn(c),
+    );
+    if (!a.found) throw new Error("expected a choice");
+    expect(a.choices[0].fields.phone).toMatchObject({ value: "(530) 555-0199", confirmed: false });
+    expect(changesFor({}, a.choices[0])).toEqual([expect.objectContaining({ field: "phone", take: false })]);
+  });
+
+  it("a value the page's quote shows is confirmed and starts ticked", () => {
+    const c = quoting([SITE], [[SITE, "Granite Peak Plumbing, call 530.555.0142 or email Office@GranitePeakPlumbing.example. 10200 Pioneer Trail, Truckee"]]);
+    const a = guardAnswer(
+      {
+        candidates: [
+          {
+            phone: "(530) 555-0142",
+            email: "office@granitepeakplumbing.example",
+            address: "10200 Pioneer Trl, Truckee, CA 96161",
+            sources: { phone: SITE, email: SITE, address: SITE },
+          },
+        ],
+      },
+      sourcesIn(c),
+      "Granite Peak Plumbing",
+      "Truckee",
+      citedTextsIn(c),
+    );
+    if (!a.found) throw new Error("expected a choice");
+    const f = a.choices[0].fields;
+    expect([f.phone?.confirmed, f.email?.confirmed, f.address?.confirmed]).toEqual([true, true, true]);
+    expect(changesFor({}, a.choices[0]).every((x) => x.take)).toBe(true);
+  });
+
+  it("a PLANTED number (a prompt-injected page) credited to the vendor's real site is not confirmed: the quote that shows it is from the other page", () => {
+    const EVIL = "https://evil.example/ignore-instructions";
+    const c = quoting([SITE, EVIL], [
+      [SITE, "Granite Peak Plumbing. Serving Truckee since 1998."],
+      [EVIL, "Granite Peak Plumbing's phone is (555) 010-9999."],
+    ]);
+    const a = guardAnswer(
+      { candidates: [{ phone: "(555) 010-9999", sources: { phone: SITE } }] },
+      sourcesIn(c),
+      "Granite Peak Plumbing",
+      "Truckee",
+      citedTextsIn(c),
+    );
+    if (!a.found) throw new Error("expected a choice");
+    expect(a.choices[0].fields.phone?.confirmed).toBe(false);
+  });
+
+  it("valueOnPage: a website on the page's own host; an address by its number and street", () => {
+    expect(valueOnPage("website", "https://granitepeakplumbing.example/", SITE, [])).toBe(true);
+    expect(valueOnPage("website", "https://otherplumbing.example/", AGG, ["See otherplumbing.example for hours"])).toBe(true);
+    expect(valueOnPage("website", "https://otherplumbing.example/", AGG, ["No site listed"])).toBe(false);
+    expect(valueOnPage("address", "10200 Pioneer Trl, Truckee, CA", AGG, ["At 10200  Pioneer Trail in Truckee"])).toBe(true);
+    expect(valueOnPage("address", "10200 Pioneer Trl, Truckee, CA", AGG, ["At 1020 Pioneer Trail"])).toBe(false);
+  });
+});
+
+describe("what rides along with a pick: the page and map of what was TAKEN", () => {
+  const PHONE_PAGE = "https://granitepeakplumbing.example/contact";
+  const ADDR_PAGE = "https://www.townlistings.example/truckee/granite-peak-plumbing";
+  const choice: LookupChoice = {
+    id: "choice-1",
+    place: "Truckee, CA",
+    fields: {
+      phone: { value: "(530) 555-0142", source: PHONE_PAGE },
+      address: { value: "10200 Pioneer Trl, Truckee, CA 96161", source: ADDR_PAGE },
+    },
+    maps_url: "https://www.google.com/maps/search/?api=1&query=x",
+    source_url: PHONE_PAGE,
+  };
+
+  it("only the address taken: its own page is the source, and the map comes with it", () => {
+    expect(pickLinks(choice, ["address"])).toEqual({ source_url: ADDR_PAGE, maps_url: choice.maps_url });
+  });
+
+  it("only the phone taken: the phone's page, and NO map link (the address wasn't kept)", () => {
+    expect(pickLinks(choice, ["phone"])).toEqual({ source_url: PHONE_PAGE, maps_url: null });
+    expect(applyPick({ phone: null, address: "1 Old Rd, Reno, NV" }, { choice, take: ["phone"] })).toMatchObject({
+      phone: "(530) 555-0142",
+      address: "1 Old Rd, Reno, NV",
+      source_url: PHONE_PAGE,
+      maps_url: null,
+    });
+  });
+
+  it("nothing taken: nothing rides along", () => {
+    expect(pickLinks(choice, [])).toEqual({ source_url: null, maps_url: null });
   });
 });
 

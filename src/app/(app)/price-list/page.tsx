@@ -11,10 +11,15 @@ import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
-import { knownVendorNames, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
+import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
 import type { ExistingVendor } from "./vendor-import-math";
 
 export const dynamic = "force-dynamic";
+// Look Up and Read With Nort are server actions on this page that call the model (a lookup is up
+// to three rounds with web searches, three names at a time). The page's own time, not the
+// platform's default, decides when they give up (audit v994, SI4), so a slow chunk is not cut off
+// before its lookups reach the ledger.
+export const maxDuration = 60;
 
 // Every NEW column (0240) is requested FIRST and the query RETRIED without it — a deploy lands
 // before its migration, and naming an absent column fails the whole query rather than degrading,
@@ -147,7 +152,15 @@ export default async function PriceListPage() {
     archived: Boolean(c.archived),
     // 0341. Absent (undefined) before it, so every card reads as the brand it was added as.
     ...(cardsRes.kindsAvailable
-      ? { kind: vendorKindOf(c.kind) ?? null, trade: (c.trade as string | null) ?? null, is_person: Boolean(c.is_person) }
+      ? {
+          kind: vendorKindOf(c.kind) ?? null,
+          trade: (c.trade as string | null) ?? null,
+          is_person: Boolean(c.is_person),
+          // Look Up's provenance: THE PROJECTION LAW, or View On Map never sees the saved link.
+          source_url: linkOf(c.source_url) ?? null,
+          maps_url: linkOf(c.maps_url) ?? null,
+          looked_up_at: (c.looked_up_at as string | null) ?? null,
+        }
       : {}),
   }));
   const vendors = summarizeVendors(options, allItems, cards, defaultMarkupPct);

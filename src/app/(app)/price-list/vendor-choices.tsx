@@ -55,7 +55,7 @@ export function LookupChoices({
     <div className="space-y-2 rounded-lg bg-slate-50 px-3 py-2">
       <p className="text-xs text-slate-600">
         {n === 1 ? "One choice found" : `${n} choices found`}
-        {answer.near ? ` near ${answer.near}` : ""}. Found On means where it was found, not that it&apos;s been checked.
+        {answer.near ? ` near ${answer.near}` : ""}. Found On means that page&apos;s words show it, not that it&apos;s been checked. Not Confirmed means the page was named but its words weren&apos;t quoted, so it isn&apos;t ticked unless you tick it.
         {answer.dropped > 0 && ` ${answer.dropped} detail${answer.dropped === 1 ? " was" : "s were"} left out because no page backed ${answer.dropped === 1 ? "it" : "them"} up.`}
       </p>
       {autoPicked && pickedId && <p className="text-xs font-medium text-slate-700">Picked because it&apos;s the only one found. Change it with None Of These.</p>}
@@ -81,7 +81,7 @@ export function LookupChoices({
                   <li key={f} className="flex flex-wrap items-center gap-x-2 text-sm text-slate-700">
                     <span className="text-xs text-slate-500">{FOUND_LABEL[f]}</span>
                     <span className="break-all">{c.fields[f]!.value}</span>
-                    <FoundOnLink url={c.fields[f]!.source} />
+                    <FoundOnLink url={c.fields[f]!.source} confirmed={c.fields[f]!.confirmed !== false} />
                   </li>
                 ))}
               </ul>
@@ -106,22 +106,26 @@ export function LookupChoices({
   );
 }
 
-function FoundOnLink({ url }: { url: string }) {
+function FoundOnLink({ url, confirmed }: { url: string; confirmed: boolean }) {
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer nofollow"
-      className="inline-flex min-h-11 items-center gap-1 text-xs text-brand hover:underline"
-    >
-      <ExternalLink className="h-3 w-3" /> Found On {foundOn(url)}
-    </a>
+    <>
+      {!confirmed && <span className="text-xs font-medium text-amber-700">Not Confirmed</span>}
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        className="inline-flex min-h-11 items-center gap-1 text-xs text-brand hover:underline"
+      >
+        <ExternalLink className="h-3 w-3" /> {confirmed ? "Found On" : "Check It On"} {foundOn(url)}
+      </a>
+    </>
   );
 }
 
 /**
  * WHICH FOUND DETAILS TO TAKE. An empty field starts ticked; a field somebody typed shows old → new
- * and starts unticked, so nothing a person wrote is replaced without them choosing it.
+ * and starts unticked, so nothing a person wrote is replaced without them choosing it. A detail the
+ * page's words didn't confirm starts unticked too, and says Not Confirmed.
  */
 export function FoundChanges({
   changes,
@@ -148,6 +152,7 @@ export function FoundChanges({
               ) : (
                 <span className="break-all">{c.found.value}</span>
               )}
+              {c.found.confirmed === false && <span className="ml-1 text-xs font-medium text-amber-700">Not Confirmed</span>}
             </span>
           </label>
         </li>

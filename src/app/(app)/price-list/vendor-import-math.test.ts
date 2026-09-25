@@ -190,7 +190,9 @@ describe("the preview: notes in plain words, ticks that leave the deciding to a 
   it("the person flag: a guess, with a note in plain words, and a person can untick it", () => {
     const rows = buildPreview(raw(["Maria Delgado"]), []);
     expect(rows[0]).toMatchObject({ is_person: true, kind: null, kindGuessed: true, ticked: true });
-    expect(notesFor(rows[0], rows, [])[0].text).toBe("Maria Delgado looks like a person, not a company. They'll be saved as their own contact.");
+    expect(notesFor(rows[0], rows, [])[0].text).toBe(
+      "Maria Delgado looks like a person, not a company, so a lookup won't pick for you. Untick A Person if it's a company; it can be changed later on the vendor's sheet.",
+    );
     rows[0].is_person = false;
     expect(notesFor(rows[0], rows, [])).toEqual([]);
   });

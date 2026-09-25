@@ -19,8 +19,10 @@
  *   · a device whose browser can't inflate (older WebKit): "Save it as CSV".
  */
 
-/** Inflate raw DEFLATE data (no zlib header). May be sync (zlib) or async (DecompressionStream). */
-export type InflateRaw = (bytes: Uint8Array) => Uint8Array | Promise<Uint8Array>;
+/** Inflate raw DEFLATE data (no zlib header). May be sync (zlib) or async (DecompressionStream).
+ *  It must stop once the output passes `maxBytes` and throw InflateTooBig: the sizes a zip declares
+ *  are written by whoever made the file, so only counting while inflating stops a zip bomb. */
+export type InflateRaw = (bytes: Uint8Array, maxBytes: number) => Uint8Array | Promise<Uint8Array>;
 
 export type XlsxResult =
   | { ok: true; rows: string[][]; sheetName: string | null }
@@ -33,6 +35,8 @@ const PART_MAX_BYTES = 40 * 1024 * 1024;
 
 /** Thrown by an InflateRaw that can't run on this device, so the reader can say so by name. */
 export class InflateUnavailable extends Error {}
+/** Thrown by an InflateRaw whose output passed its maxBytes: stopped mid-inflate, never held whole. */
+export class InflateTooBig extends Error {}
 
 const u16 = (b: Uint8Array, o: number) => b[o] | (b[o + 1] << 8);
 const u32 = (b: Uint8Array, o: number) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
@@ -82,8 +86,16 @@ async function readEntry(b: Uint8Array, e: ZipEntry, inflate: InflateRaw): Promi
   const data = b.subarray(start, start + e.compSize);
   let raw: Uint8Array;
   if (e.method === 0) raw = data;
-  else if (e.method === 8) raw = await inflate(data);
-  else throw new XlsxRefusal("broken");
+  else if (e.method === 8) {
+    // A DEFLATE stream can grow about 1,032 times at most; a part that claims more is lying.
+    if (e.compSize === 0 && e.size > 0) throw new XlsxRefusal("broken");
+    try {
+      raw = await inflate(data, PART_MAX_BYTES);
+    } catch (err) {
+      if (err instanceof InflateTooBig) throw new XlsxRefusal("too-big");
+      throw err;
+    }
+  } else throw new XlsxRefusal("broken");
   if (raw.length > PART_MAX_BYTES) throw new XlsxRefusal("too-big");
   return new TextDecoder().decode(raw);
 }
@@ -298,10 +310,31 @@ export function canInflateRawHere(): boolean {
   }
 }
 
-/** The browser's inflate, for readXlsx. Throws InflateUnavailable on a device that has none. */
-export async function inflateRawInBrowser(bytes: Uint8Array): Promise<Uint8Array> {
+/** The browser's inflate, for readXlsx. Throws InflateUnavailable on a device that has none, and
+ *  InflateTooBig (after cancelling the stream) the moment the output passes maxBytes, so a zip
+ *  bomb never fills a phone's memory. */
+export async function inflateRawInBrowser(bytes: Uint8Array, maxBytes: number): Promise<Uint8Array> {
   if (!canInflateRawHere()) throw new InflateUnavailable("deflate-raw");
   const copy = new Uint8Array(bytes); // a plain ArrayBuffer-backed copy for the Blob
   const stream = new Blob([copy]).stream().pipeThrough(new DecompressionStream("deflate-raw" as CompressionFormat));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new InflateTooBig("too-big");
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.byteLength;
+  }
+  return out;
 }

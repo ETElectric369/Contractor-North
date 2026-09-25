@@ -41,6 +41,11 @@ export const FOUND_LABEL: Record<FoundField, string> = { phone: "Phone", email: 
 export interface Found {
   value: string;
   source: string;
+  /** The page's own quoted words (a citation's cited_text for that page) show this value. False
+   *  when the model named the page but no quote from it carries the value: then the detail is
+   *  shown as Not Confirmed and starts UNTICKED, so it is never taken unless a person ticks it.
+   *  Absent is read as confirmed (a choice built by hand). */
+  confirmed?: boolean;
 }
 
 export interface LookupChoice {
@@ -48,8 +53,9 @@ export interface LookupChoice {
   /** Where this one is: "Truckee, CA", read off its own kept address, or "Place Not Found". */
   place: string;
   fields: Partial<Record<FoundField, Found>>;
-  /** A map link: the search's own map page when one was returned, else a map search of the kept
-   *  address. Null when there is no address to map. */
+  /** A map link: the search's own map page when one was returned AND it is on a map service
+   *  (Google, Apple or Bing maps), else a map search of the kept address. Null when there is no
+   *  address to map. */
   maps_url: string | null;
   /** The page most of this choice came from, saved on the card with the pick. */
   source_url: string;
@@ -105,6 +111,28 @@ export function sourcesIn(content: unknown[]): Map<string, string> {
   return out;
 }
 
+/**
+ * The page's own words, per page: every citation's cited_text on a text block, keyed by the
+ * citation's pageKey. Search results themselves carry only encrypted content, so a citation's
+ * quote is the only page text this code can read, and what a kept value is checked against.
+ */
+export function citedTextsIn(content: unknown[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const b of Array.isArray(content) ? content : []) {
+    const block = b as { type?: string; citations?: unknown };
+    if (block?.type !== "text" || !Array.isArray(block.citations)) continue;
+    for (const c of block.citations as { url?: unknown; cited_text?: unknown }[]) {
+      const k = pageKey(c?.url);
+      const t = typeof c?.cited_text === "string" ? c.cited_text : "";
+      if (!k || !t.trim()) continue;
+      const list = out.get(k) ?? [];
+      list.push(t);
+      out.set(k, list);
+    }
+  }
+  return out;
+}
+
 /* ── THE GUARD ───────────────────────────────────────────────────────────────────────────── */
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -121,6 +149,58 @@ function cleanValue(field: FoundField, raw: unknown): string | null {
   if (field === "email") return v.length <= 200 && EMAIL.test(v) ? v : null;
   if (field === "website") return v.length <= 300 ? websiteHref(v) : null;
   return v.length <= 300 && /[A-Za-z]/.test(v) ? v : null;
+}
+
+/** The last ten digits of every phone-shaped run in a text. */
+function phonesIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(/(?:\+?1[\s.-]*)?\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}/g)) out.push(m[0].replace(/\D/g, "").slice(-10));
+  return out;
+}
+
+function hostOf(url: string): string | null {
+  const k = pageKey(websiteHref(url) ?? url);
+  return k ? k.split("/")[0] : null;
+}
+
+/**
+ * Do the page's own quoted words show this value? A phone's ten digits as one phone-shaped run; an
+ * email exactly (any case); a website's host, or the website IS the page's own site; an address's
+ * street number and the first word of its street (or, with no number, its first part whole).
+ */
+export function valueOnPage(field: FoundField, value: string, sourceUrl: string, quotes: string[] | undefined): boolean {
+  const text = (quotes ?? []).join(" \n ").replace(/\s+/g, " ").toLowerCase();
+  if (field === "website") {
+    const host = hostOf(value);
+    if (!host) return false;
+    if (host === hostOf(sourceUrl)) return true;
+    return !!text && text.includes(host);
+  }
+  if (!text) return false;
+  if (field === "phone") {
+    const digits = value.replace(/\D/g, "").slice(-10);
+    return digits.length === 10 && phonesIn(text).includes(digits);
+  }
+  if (field === "email") return text.includes(value.trim().toLowerCase());
+  const addr = value.replace(/\s+/g, " ").trim().toLowerCase();
+  const street = addr.match(/^(\d+[a-z]?)\s+([a-z0-9]+)/);
+  if (street) return new RegExp(`\\b${street[1]}\\s+${street[2].replace(/[^a-z0-9]/g, "")}`).test(text);
+  const first = addr.split(",")[0].trim();
+  return first.length >= 4 && text.includes(first);
+}
+
+/** The map services a model-given map link may point at. Any other page is not shown as a map. */
+export function isMapLink(url: string | null | undefined): boolean {
+  try {
+    const u = new URL(String(url ?? ""));
+    if (u.protocol !== "https:") return false;
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    if (host === "maps.google.com" || host === "maps.apple.com") return true;
+    if (host === "google.com" || host === "bing.com") return u.pathname.startsWith("/maps");
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 /** "Truckee, CA" off an address written the usual way, "10200 Pioneer Trl, Truckee, CA 96161": the
@@ -154,12 +234,23 @@ type RawCandidate = Partial<Record<FoundField | "place_label" | "maps_url", unkn
  *  · A field is kept only when its sources[field] is a page in `sources` (this response's search
  *    results and citations), and its value is well-formed (formatPhone to ten digits, an email
  *    with a domain, a web address). It is shown with THAT page as its "Found On" link.
+ *  · A kept field is CONFIRMED only when that page's own quoted words (`cited`, the citations'
+ *    cited_text) show the value (valueOnPage). The model naming a real page is not proof the value
+ *    is on it: an unconfirmed field is shown as Not Confirmed and starts unticked.
+ *  · The model's map link is used only when it is a returned page on a map service; otherwise the
+ *    map link is a search of the kept address, built here.
  *  · A choice with no field left is removed; at most 3 are kept; two choices with the same phone,
  *    website or address are one.
  *  · The place label is read off the choice's own kept address, never taken on the model's word.
  *  · Nothing left → found: false. "unsourced" when the model offered details no page backed.
  */
-export function guardAnswer(parsed: unknown, sources: Map<string, string>, name: string, near: string): LookupAnswer {
+export function guardAnswer(
+  parsed: unknown,
+  sources: Map<string, string>,
+  name: string,
+  near: string,
+  cited: Map<string, string[]> = new Map(),
+): LookupAnswer {
   const list = Array.isArray((parsed as { candidates?: unknown } | null)?.candidates)
     ? ((parsed as { candidates: unknown[] }).candidates as RawCandidate[])
     : [];
@@ -180,7 +271,7 @@ export function guardAnswer(parsed: unknown, sources: Map<string, string>, name:
         dropped++;
         continue;
       }
-      fields[f] = { value, source: page };
+      fields[f] = { value, source: page, confirmed: valueOnPage(f, value, page, cited.get(key as string)) };
     }
     const kept = FOUND_FIELDS.filter((f) => fields[f]);
     if (!kept.length) continue;
@@ -194,7 +285,7 @@ export function guardAnswer(parsed: unknown, sources: Map<string, string>, name:
     if (choices.length >= LOOKUP_MAX_CHOICES) continue;
     const mapKey = pageKey(cand.maps_url);
     const mapPage = mapKey ? sources.get(mapKey) : undefined;
-    const maps = linkOf(mapPage) || (fields.address ? mapSearchUrl(name, fields.address.value) : null);
+    const maps = (isMapLink(mapPage) ? linkOf(mapPage) : null) || (fields.address ? mapSearchUrl(name, fields.address.value) : null);
     const first = (["phone", "address", "website", "email"] as FoundField[]).map((f) => fields[f]).find(Boolean) as Found;
     choices.push({
       id: `choice-${choices.length + 1}`,
@@ -241,13 +332,31 @@ export function changesFor(current: Partial<Record<FoundField, string | null | u
     if (!found) continue;
     const now = String(current[f] ?? "").trim() || null;
     if (now && same(f, now, found.value)) continue;
-    out.push({ field: f, current: now, found, take: !now });
+    out.push({ field: f, current: now, found, take: !now && found.confirmed !== false });
   }
   return out;
 }
 
+/** The order a choice's details are named in when one page has to stand for them. */
+const SOURCE_ORDER: FoundField[] = ["phone", "address", "website", "email"];
+
+/**
+ * The links that ride along with a pick, from what was TAKEN: the source is the page of the first
+ * detail actually taken (not of a detail left behind), and the map link only when the address was
+ * taken (a map of a branch whose address wasn't kept would open the wrong place).
+ */
+export function pickLinks(choice: LookupChoice, take: FoundField[]): { source_url: string | null; maps_url: string | null } {
+  const taken = SOURCE_ORDER.filter((f) => take.includes(f) && choice.fields[f]);
+  if (!taken.length) return { source_url: null, maps_url: null };
+  const src = choice.fields[taken[0]]!.source;
+  return {
+    source_url: linkOf(src) ?? src.slice(0, 500),
+    maps_url: taken.includes("address") ? choice.maps_url : null,
+  };
+}
+
 /** The values a preview row adds with, once its pick is applied: the ticked found fields replace
- *  what the row said, and the pick's source and map link ride along only when something was taken. */
+ *  what the row said, and the source and map link of what was taken ride along (pickLinks). */
 export function applyPick<T extends Partial<Record<FoundField, string | null>>>(
   row: T,
   pick: { choice: LookupChoice; take: FoundField[] } | null | undefined,
@@ -257,8 +366,9 @@ export function applyPick<T extends Partial<Record<FoundField, string | null>>>(
   const taken = pick.take.filter((f) => pick.choice.fields[f]);
   if (!taken.length) return out;
   for (const f of taken) (out as Record<string, unknown>)[f] = pick.choice.fields[f]!.value;
-  out.source_url = pick.choice.source_url;
-  out.maps_url = pick.choice.maps_url;
+  const links = pickLinks(pick.choice, taken);
+  out.source_url = links.source_url;
+  out.maps_url = links.maps_url;
   return out;
 }
 
