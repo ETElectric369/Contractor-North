@@ -4,8 +4,7 @@
 
 import type { DraftLineItem } from "@/app/(app)/quotes/actions";
 import { subtotalTaxTotal } from "@/lib/invoice-math";
-import { sellPrice } from "@/lib/pricing/markup";
-import { kitLineView, linkedItemOf, type KitLineRaw, type KitLinkedItem, type KitPricing } from "@/lib/kit-line";
+import { kitLineView, linkedItemOf, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
 
 /** One row in the Kit Picker: a kit item plus its in-picker state (checked + edits). */
 export interface KitPickerRow {
@@ -31,14 +30,13 @@ export interface KitPickerRow {
  *  may arrive as strings from PostgREST; the 0166/0240 columns are absent on an older row. */
 export type KitItemRaw = KitLineRaw;
 
-/** How the picker prices a LINKED line. `orgDefaultPct` + `levelPct` feed THE rule directly
- *  (effectiveMarkupPct via kitLineView). `markupFor` is for a caller that already owns the rule
- *  as a function — AddLineItems' markupFor, the same closure its price-list typeahead uses — so
- *  the two "add" doors on one page can never price the same item differently. When given, it
- *  wins for linked lines. */
-export type KitPickerPricing = KitPricing & {
-  markupFor?: (item: KitLinkedItem) => number;
-};
+/** How the picker prices a LINKED line: `orgDefaultPct` + `levelPct`, fed to THE rule directly
+ *  (effectiveMarkupPct via kitLineView). The SAME two numbers AddLineItems prices its typeahead
+ *  and vendor rows from, so the two "add" doors on one page can never price one item differently.
+ *  (There was also a `markupFor` closure here that beat the numbers; audit v994 VP1 took the
+ *  closure out of AddLineItems, the one caller that passed it, because two inputs for one rule is
+ *  how a screen hands over one and forgets the other.) */
+export type KitPickerPricing = KitPricing;
 
 /** Stable order by sort_order (input order breaks ties) — the kit's authored order wins,
  *  and two items with the same sort_order (legacy rows all default 0) keep their DB order. */
@@ -71,9 +69,7 @@ export function kitItemsToPickerRows(items: KitItemRaw[], pricing?: KitPickerPri
       const quantity = missing ? 1 : num;
       const view = kitLineView(it, ctx);
       const item = view.linked ? linkedItemOf(it) : null;
-      // The caller's own rule beats the numbers when it has one (see KitPickerPricing).
-      const unit_price =
-        item && pricing?.markupFor ? sellPrice(view.cost ?? 0, pricing.markupFor(item)) : view.unit_price;
+      const unit_price = view.unit_price;
       return {
         id: it.id,
         description: view.description,

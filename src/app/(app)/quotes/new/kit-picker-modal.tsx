@@ -40,7 +40,7 @@ export function KitPickerModal({
    *  numbers rather than zeros. Typing a measurement a second time is how the two copies drift. */
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   /** 0240: how a LINKED kit line prices for THIS customer — the org default plus the selected
-   *  customer's level (or the caller's own markupFor). Before this, a kit line was a frozen copy
+   *  customer's level. Before this, a kit line was a frozen copy
    *  and ignored the customer's level entirely. */
   pricing?: KitPickerPricing;
   onClose: () => void;

@@ -1,6 +1,7 @@
 import { searchPriceBook, LOOSE_RUNGS } from "./price-book-search";
 import { searchPaidPrices } from "./learned-prices";
 import { effectiveMarkupPct } from "./markup";
+import { describeChoice, normalizeItemOptions, priceBookLine, type OptionedPriceItem } from "./item-options";
 
 /**
  * ONE CALL THAT PRICES A MATERIAL — the sourcing ladder as CODE instead of prose.
@@ -34,6 +35,9 @@ export type PricedMaterial = {
   unit: string | null;
   /** Catalog code, when the book matched. Belongs on the quote line as [CODE]. */
   code: string | null;
+  /** The vendor the book row priced at: the org's DEFAULT vendor under that code (0282), named
+   *  in `description` too. Null when the code priced at its own number. */
+  vendor?: string | null;
   source: PriceSource;
   markup_pct_used: number;
   /** Which markup rule won, in plain words — so the readback can say it. */
@@ -68,19 +72,26 @@ export async function priceMaterial(
   // ── RUNG 1: the price book ────────────────────────────────────────────────
   const hit = await searchPriceBook(supabase, description, 5);
   const top = hit.rows[0];
-  if (top && Number(top.buy_price) > 0) {
+  // THE ONE PRICE (priceBookLine): the default vendor under the code when the org made one, else
+  // the code's own number, through the same rule and the same two inputs as every quote picker.
+  // This read the item's own buy_price and markup directly, so Nort quoted an 830 Windows at its
+  // $830 allowance while the picker quoted the Marvin the org had made the default (VP2).
+  const line = top ? priceBookLine(top as unknown as OptionedPriceItem, { levelPct: args.levelPct, orgDefaultPct: args.orgDefaultPct }) : null;
+  if (top && line && line.buyPrice > 0) {
     const itemPct = Number(top.markup_pct) || 0;
-    const pct = effectiveMarkupPct({ levelPct: args.levelPct, itemPct, orgDefaultPct: args.orgDefaultPct });
     const loose = hit.matched_by ? LOOSE_RUNGS.has(hit.matched_by) : false;
     return {
-      description: top.description ?? description,
-      buy_price: money(top.buy_price),
-      sell_price: money(Number(top.buy_price) * (1 + pct / 100)),
-      unit: top.unit ?? null,
+      description: describeChoice(top.description ?? description, top as unknown as OptionedPriceItem, line),
+      buy_price: money(line.buyPrice),
+      sell_price: line.unitPrice,
+      unit: line.isItemOwn ? top.unit ?? null : line.unit,
       code: top.code ?? null,
+      vendor: line.isItemOwn ? null : line.makerLabel,
       source: "book",
-      markup_pct_used: pct,
-      markup_basis: markupBasis(args.levelPct, itemPct),
+      markup_pct_used: line.markupPct,
+      markup_basis: line.isItemOwn
+        ? markupBasis(args.levelPct, itemPct)
+        : `${markupBasis(args.levelPct, itemPct, vendorStatesMarkup(top as unknown as OptionedPriceItem, line.id))}, on ${line.makerLabel}, the default vendor for this code`,
       // A loose rung found SOMETHING word-shaped; it may not be the right part. Cheap to confirm,
       // expensive to discover on the invoice.
       flagged: loose,
@@ -130,8 +141,16 @@ export async function priceMaterial(
   };
 }
 
-function markupBasis(levelPct: number | null, itemPct: number): string {
+function markupBasis(levelPct: number | null, itemPct: number, vendorStated = false): string {
   if (levelPct != null && levelPct >= 0) return "the customer's pricing level"; // a 0% level is a real level
+  if (vendorStated) return "the vendor's own markup";
   if (itemPct > 0) return "this item's own book markup";
   return "the org default markup";
+}
+
+/** Did the vendor row type its own markup? A blank falls through to the item, then the org
+ *  default, which is how optionMarkupPct prices it. Only for the words in markup_basis. */
+function vendorStatesMarkup(item: OptionedPriceItem, optionId: string): boolean {
+  const raw = normalizeItemOptions(item.price_list_item_options).find((o) => o.id === optionId)?.markup_pct;
+  return raw !== null && raw !== undefined && raw !== "" && Number.isFinite(Number(raw));
 }

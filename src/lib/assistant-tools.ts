@@ -12,7 +12,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { hasItemOptions, itemOptionChoices, priceBookLine, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { searchPriceBook } from "@/lib/pricing/price-book-search";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { getJobFinancials, getJobBudgetVsActual, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
@@ -1874,20 +1874,35 @@ export async function runDataTool(
         // tools find the same part. Two lookups with two search implementations is how one part
         // ends up with two prices on two quotes.
         const { matched_by, rows } = await searchPriceBook(supabase, String(input.search ?? ""), lim);
-        const items = rows.map((r) => ({
-          code: r.code,
-          description: r.description,
-          category: r.category,
-          unit: r.unit,
-          buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
-          markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
-          // Sell at the effective DEFAULT markup (item markup > 0 → org default). A CUSTOMER's
-          // pricing-level markup still overrides it — use price_material to get that applied for you.
-          default_sell_price: money(
-            Number(r.buy_price) * (1 + effectiveMarkupPct({ itemPct: Number(r.markup_pct), orgDefaultPct }) / 100),
-          ),
-          supplier: r.supplier,
-        }));
+        // THE ONE PRICE (priceBookLine), with no customer: the default vendor under the code when
+        // the org made one, else the code's own number, through the same rule every picker uses.
+        // This priced every code at its own allowance, so Nort said $830 for a window the org had
+        // made a $1,610 Marvin by default (audit v994, VP2). A CUSTOMER's pricing level still
+        // overrides it; price_material applies that for you.
+        const noCustomer = { levelPct: null, orgDefaultPct };
+        const items = rows.map((r) => {
+          const item = r as unknown as OptionedPriceItem;
+          const line = priceBookLine(item, noCustomer);
+          const vendors = hasItemOptions(item)
+            ? itemOptionChoices(item, noCustomer)
+                .filter((c) => !c.isItemOwn)
+                .map((c) => ({ vendor: c.makerLabel, is_default: c.isDefault, buy_price: c.buyPrice, default_sell_price: c.unitPrice }))
+            : undefined;
+          return {
+            code: r.code,
+            description: r.description,
+            category: r.category,
+            unit: line.isItemOwn ? r.unit : line.unit,
+            // The company's REAL net cost for what this code quotes at: the default vendor's when
+            // there is one, else the item's own.
+            buy_price: money(line.buyPrice),
+            markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
+            default_sell_price: line.unitPrice,
+            ...(line.isItemOwn ? {} : { priced_at_vendor: line.makerLabel, own_buy_price: money(r.buy_price) }),
+            ...(vendors ? { vendors } : {}),
+            supplier: r.supplier,
+          };
+        });
         if (!items.length) {
           return JSON.stringify({
             count: 0,

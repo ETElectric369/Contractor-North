@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { AddLineItems, type PriceItemLite } from "@/components/add-line-items";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -302,10 +301,9 @@ export function QuoteItemsEditor({
             // THE CUSTOMER'S LEVEL, which this picker was ignoring (audit 6). /quotes/new applies
             // it; this one did not — so the same part landed at two different prices depending on
             // whether it was added while composing or after saving, on the screen you are most
-            // likely to be using in front of the customer.
-            markupFor={(p) =>
-              effectiveMarkupPct({ levelPct: levelMarkupPct, itemPct: p.markup_pct, orgDefaultPct: defaultMarkupPct })
-            }
+            // likely to be using in front of the customer. Its vendor rows ignored it too, and the
+            // org default with it, until the picker took ONE pricing input (audit v994, VP1).
+            pricing={{ levelPct: levelMarkupPct ?? null, orgDefaultPct: defaultMarkupPct }}
             onAdd={(lines) =>
               start(async () => {
                 setError(null);

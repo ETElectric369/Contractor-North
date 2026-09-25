@@ -4,18 +4,17 @@ import { useMemo, useState } from "react";
 import { ListPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
-import { sellPrice } from "@/lib/pricing/markup";
 import {
   hasItemOptions,
   pickerChoices,
   pickerSummary,
+  priceBookLine,
+  type BookPricing,
   type ItemOptionChoice,
-  type OptionPricing,
   type PriceItemOptionRow,
 } from "@/lib/pricing/item-options";
 import { KitPickerModal, type KitForPicker } from "@/app/(app)/quotes/new/kit-picker-modal";
 import type { KitPickerPricing } from "@/lib/kit-picker";
-import type { KitLinkedItem } from "@/lib/kit-line";
 import type { DraftLineItem } from "@/lib/estimate/line-map";
 
 /**
@@ -78,11 +77,15 @@ export type PriceItemLite = {
 export function AddLineItems({
   priceItems = [],
   kits = [],
-  /** The effective markup for a book item — the caller owns THE markup rule (customer level →
-   *  item → org default), because only it knows which customer is selected. */
-  markupFor,
-  orgDefaultPct,
-  levelPct,
+  /** WHO THIS DOCUMENT IS PRICED FOR: the customer's pricing level (null = none) and the org
+   *  default markup. ONE input, required, and every price this component shows or adds comes out
+   *  of it: the one-tap add, each vendor row, and the kit picker alike.
+   *
+   *  It used to take a `markupFor` closure for the book rows AND two optional numbers for the
+   *  vendor rows, and no caller ever passed the two numbers (audit v994, VP1): the book row sold at
+   *  $115 for a Local customer while a vendor under the same code sold at its $100 net cost. Two
+   *  inputs for one rule is how a page hands over one and forgets the other. */
+  pricing,
   /** Measurements from the walk-through, so a self-sizing kit opens with real numbers. */
   measured,
   onAdd,
@@ -90,11 +93,7 @@ export function AddLineItems({
 }: {
   priceItems?: PriceItemLite[];
   kits?: KitForPicker[];
-  markupFor?: (p: PriceItemLite) => number;
-  /** Optional plain numbers for the kit picker's linked lines (0240); when `markupFor` is given
-   *  it wins, so a caller that already owns THE rule need not pass these. */
-  orgDefaultPct?: number;
-  levelPct?: number | null;
+  pricing: BookPricing;
   measured?: { sqft?: number | null; linearFt?: number | null; byKey?: Record<string, number | null> | null };
   onAdd: (lines: DraftLineItem[]) => void;
   className?: string;
@@ -106,27 +105,12 @@ export function AddLineItems({
    *  places is a list nobody can read. */
   const [makersFor, setMakersFor] = useState<string | null>(null);
 
-  const markup = (p: PriceItemLite) => (markupFor ? markupFor(p) : p.markup_pct || 0);
-
   // KITS PRICE THE WAY THE TYPEAHEAD DOES (0240). A linked kit line is a price-list item, so it
-  // runs through the SAME markupFor the book picker above uses — the two "add" doors on one page
-  // cannot quote the same item at two prices. This is the gap kits had: a frozen copy that
-  // ignored the customer's pricing level.
+  // runs on the SAME two numbers the book picker above uses (kitLineView puts them to THE markup
+  // rule), and the two "add" doors on one page cannot quote the same item at two prices.
   const kitPricing: KitPickerPricing = {
-    orgDefaultPct: orgDefaultPct ?? 0,
-    levelPct: levelPct ?? null,
-    markupFor: markupFor
-      ? (item: KitLinkedItem) =>
-          markupFor({
-            id: item.id,
-            code: item.code ?? null,
-            description: item.description,
-            category: item.category ?? null,
-            unit: item.unit ?? "ea",
-            buy_price: Number(item.buy_price) || 0,
-            markup_pct: Number(item.markup_pct) || 0,
-          })
-      : undefined,
+    orgDefaultPct: pricing.orgDefaultPct ?? 0,
+    levelPct: pricing.levelPct,
   };
 
   // BROWSE ON EMPTY. Tapping the box with nothing typed shows the book rather than an empty
@@ -140,19 +124,11 @@ export function AddLineItems({
     return pool.slice(0, q ? 25 : 200);
   }, [query, priceItems]);
 
-  /** THE MAKER RULE'S TWO RUNGS, from the props this component already takes. An option that
-   *  states its own markup answers for the item; a customer's pricing level outranks both. */
-  const optionPricing: OptionPricing = { levelPct: levelPct ?? null, orgDefaultPct: orgDefaultPct ?? null };
-
+  /** A code with no vendors adds on the first tap, at THE price (priceBookLine): the same function
+   *  and the same inputs as every vendor row below it. */
   const addOne = (p: PriceItemLite) => {
-    onAdd([
-      {
-        description: p.code ? `${p.code} — ${p.description}` : p.description,
-        quantity: 1,
-        unit: p.unit || "ea",
-        unit_price: sellPrice(p.buy_price, markup(p)),
-      },
-    ]);
+    const line = priceBookLine(p, pricing);
+    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice }]);
     setQuery("");
     setOpen(false);
   };
@@ -193,7 +169,7 @@ export function AddLineItems({
               {matches.map((p) => {
                 const makers = hasItemOptions(p);
                 const openMakers = makers && makersFor === p.id;
-                const summary = makers ? pickerSummary(p, optionPricing) : null;
+                const summary = makers ? pickerSummary(p, pricing) : null;
                 return (
                   <li key={p.id}>
                     {/* A CODE WITH MAKERS ASKS WHICH ONE; every other code adds on the first tap,
@@ -224,13 +200,13 @@ export function AddLineItems({
                             </span>
                           </span>
                         ) : (
-                          formatCurrency(sellPrice(p.buy_price, markup(p)))
+                          formatCurrency(priceBookLine(p, pricing).unitPrice)
                         )}
                       </span>
                     </button>
                     {openMakers && (
                       <ul className="border-t border-slate-100 bg-slate-50/60">
-                        {pickerChoices(p, optionPricing).map((choice) => (
+                        {pickerChoices(p, pricing).map((choice) => (
                           <li key={choice.id || "own"}>
                             <button
                               type="button"

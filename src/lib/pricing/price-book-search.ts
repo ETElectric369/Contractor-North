@@ -1,4 +1,5 @@
 import { escapeLike } from "@/lib/utils";
+import { ITEM_OPTIONS_EMBED, type PriceItemOptionRow } from "@/lib/pricing/item-options";
 
 /**
  * THE FUZZY LADDER — find a part in the company's price book however it was phrased.
@@ -21,6 +22,9 @@ export type PriceBookRow = {
   buy_price: number | string | null;
   markup_pct: number | string | null;
   supplier: string | null;
+  /** THE VENDORS UNDER THE CODE (0282), so a caller can price the row through priceBookLine and
+   *  quote the default vendor the way every picker does (audit v994, VP2), not the allowance. */
+  price_list_item_options?: PriceItemOptionRow[] | null;
 };
 
 /** Strip characters that would break a PostgREST `.or()` filter expression. */
@@ -50,8 +54,10 @@ export async function searchPriceBook(supabase: Client, search: string, limit = 
   const baseQuery = () =>
     supabase
       .from("price_list_items")
-      .select("code, description, category, unit, buy_price, markup_pct, supplier")
+      .select(`code, description, category, unit, buy_price, markup_pct, supplier, ${ITEM_OPTIONS_EMBED}`)
       .eq("archived", false)
+      // A vendor the org retired is not offered, same filter as every picker's read.
+      .eq("price_list_item_options.archived", false)
       .order("description")
       .limit(limit);
 
