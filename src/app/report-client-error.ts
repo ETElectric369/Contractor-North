@@ -53,6 +53,9 @@ const CLIENT_SOURCES = new Set([
   // A hard navigation that fails inside the iOS shell leaves the old page running with every
   // native listener wiped. Reported so a dead-listener session is visible, not inferred.
   "shell-navigation",
+  // The in-browser camera modal (Erik 2026-09-24, "camera was black"): a camera that won't open,
+  // never sends a picture, or sends a black one. Error name and camera count only, never a picture.
+  "camera",
 ]);
 
 /** Well above a real crash loop on a bad deploy, well below "the log is now useless". */
