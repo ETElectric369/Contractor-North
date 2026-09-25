@@ -34,7 +34,7 @@ vi.mock("../panel-actions", () => ({
   readPlanCircuits: vi.fn(),
 }));
 
-import { JobPanel, PanelDoor, type PanelData } from "./job-panel";
+import { JobPanel, PanelDoor, carryQuick, type PanelData } from "./job-panel";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
 import { freePanelName } from "./panel-setup-sheet";
 import { quoteCircuitsToSuggestions } from "@/lib/panel/model";
@@ -363,5 +363,17 @@ describe("phase 4: the readers and the label checks on the tab", () => {
     expect(buttons(html).map((b) => b.text)).toContain("Use");
     const same = render(data({ walkthrough: walk, estimates: [], panels: [{ ...PANEL, main_amps: 200 }] }));
     expect(textOf(same)).not.toContain("About The Panel");
+  });
+});
+
+describe("Add A Circuit carries only the room and the amps (J-011, 2026-09-25)", () => {
+  it("a 2-pole never carries into the next add: the floor heat made three outlets 2-poles", () => {
+    expect(carryQuick({ room: "Living", amps: "20", poles: "2", work: "new" })).toEqual({ room: "Living", amps: "20", poles: "1", work: "new" });
+  });
+  it("Existing or Reused is a one-off too", () => {
+    expect(carryQuick({ room: "Kitchen", amps: "50", poles: "2", work: "existing" })).toEqual({ room: "Kitchen", amps: "50", poles: "1", work: "new" });
+  });
+  it("nothing stored starts on the defaults", () => {
+    expect(carryQuick(null)).toEqual({ room: "", amps: "20", poles: "1", work: "new" });
   });
 });

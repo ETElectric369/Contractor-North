@@ -62,12 +62,23 @@ const QUICK_KEY = (jobId: string) => `cn-panel-quick-add:${jobId}`;
 type Quick = { room: string; amps: string; poles: string; work: CircuitWork };
 const QUICK_DEFAULT: Quick = { room: "", amps: "20", poles: "1", work: "new" };
 
+/** What Add A Circuit carries to the next add: the room and the amps only. A 2-pole (the floor heat,
+ *  the dryer) and an Existing or Reused circuit are one-offs: carried forward, the next three 120 V
+ *  outlets went in as 2-poles (J-011, 2026-09-25). Every add starts on 1-pole and New. */
+export function carryQuick(v: Partial<Quick> | null | undefined): Quick {
+  return {
+    ...QUICK_DEFAULT,
+    room: typeof v?.room === "string" ? v.room : "",
+    amps: typeof v?.amps === "string" && v.amps ? v.amps : QUICK_DEFAULT.amps,
+  };
+}
+
 function readQuick(jobId: string): Quick {
   try {
     const raw = typeof window !== "undefined" ? window.localStorage.getItem(QUICK_KEY(jobId)) : null;
     if (!raw) return QUICK_DEFAULT;
     const v = JSON.parse(raw) as Partial<Quick>;
-    return { ...QUICK_DEFAULT, ...v, work: (["new", "existing", "reused", "removed"] as CircuitWork[]).includes(v.work as CircuitWork) ? (v.work as CircuitWork) : "new" };
+    return carryQuick(v);
   } catch {
     return QUICK_DEFAULT;
   }
@@ -297,8 +308,9 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
     });
     if (!r || !r.ok) return;
     upsert([r.row]);
-    setQuick(q);
-    writeQuick(jobId, q);
+    const next = carryQuick(q);
+    setQuick(next);
+    writeQuick(jobId, next);
     setFeeds("");
     toast(`Added ${circuitLine(r.row)}.`, "success", {
       label: "Undo",
@@ -551,8 +563,8 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
         </section>
       )}
 
-      {/* ADD A CIRCUIT: remembers the room, amps, poles and work you used last, so sixteen twenties go
-          in as sixteen lines of "what it feeds" and a tap. */}
+      {/* ADD A CIRCUIT: remembers the room and amps you used last, so sixteen twenties go in as
+          sixteen lines of "what it feeds" and a tap. Poles and New/Existing reset to 1-pole and New. */}
       <form onSubmit={quickAdd} className={card} aria-label="Add A Circuit">
         <h3 className="text-base font-semibold text-slate-900">Add A Circuit</h3>
         <div className="mt-2 grid grid-cols-[minmax(0,1fr)_5.5rem_4.5rem] gap-2">
