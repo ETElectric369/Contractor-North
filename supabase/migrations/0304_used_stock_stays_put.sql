@@ -11,14 +11,18 @@
 --   · no line of that bill may change amount, quantity, billable, billed_amount, is_stock, category
 --     or bill_id, and none may be added or deleted (category because the tax share is decided by
 --     it: a line that becomes "Tax" or stops being tax moves every lot's share);
---   · the bill may not be deleted, moved to another job, taken off or put on the shelf, or set
---     aside as replaced by another bill;
+--   · the bill may not be deleted, moved to another job, change its total (bills.amount is what
+--     job cost reads), be taken off or put on the shelf, or be set aside as replaced by another bill;
 --   · the lot may not change its pieces or cost, or come off the shelf.
 -- Every refusal names the way out ("Undo the 3 takes from this roll first").
 --
 -- With NO takes yet, a money change to any line of a bill with lots marks those lots cost_stale,
 -- so nothing goes silent: restampLotsForBill (src/lib/stock-ledger.ts) recomputes and clears it,
 -- and stock_reconcile_problems names a stale lot until it does.
+--
+-- With no takes, a ticket's total may still change, but never below the rolls on the shelf from it.
+-- Every check here first locks the ticket and its live rolls (lock_stock_bill), so an edit and a
+-- take on the same ticket happen one after the other, never both on a stale count.
 --
 -- Two more: a bill that still has rolls on the shelf may not be set aside as replaced (job cost
 -- would net its roll off a bill nobody counts any more; take the roll off first), and a stock item
@@ -57,6 +61,26 @@ as $$
 $$;
 revoke execute on function public.stock_takes_phrase(integer) from public, anon, authenticated;
 
+-- The ticket's shelf lock, then its live rolls, oldest first (the order a take locks them).
+create or replace function public.lock_stock_bill(p_bill uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if p_bill is null then
+    return;
+  end if;
+  perform pg_advisory_xact_lock(hashtext('cn.stock_bill:' || p_bill::text));
+  perform 1 from public.stock_lots l
+   where l.unshelved_at is null
+     and l.bill_line_id in (select bli.id from public.bill_line_items bli where bli.bill_id = p_bill)
+   order by l.bought_on, l.created_at, l.id
+     for update;
+end $$;
+revoke execute on function public.lock_stock_bill(uuid) from public, anon, authenticated;
+
 -- ── a receipt line of a used ticket is frozen; of an unused one, its rolls go stale ─────────────
 create or replace function public.freeze_used_stock_line()
 returns trigger
@@ -90,6 +114,12 @@ begin
     end if;
   end if;
 
+  -- ONE AT A TIME WITH A TAKE. A take locks its roll (stamp_stock_move); this locks the ticket's
+  -- live rolls before counting, and takes the ticket's shelf lock guard_stock_lot takes, so a
+  -- receipt edit and a take (or a new roll) on the same ticket run one after the other and the
+  -- second sees the first: the edit is refused, or the take is refused because the roll went stale.
+  perform public.lock_stock_bill(v_bill);
+  perform public.lock_stock_bill(v_other_bill);
   v_takes := public.stock_takes_on_bill(v_bill) + coalesce(public.stock_takes_on_bill(v_other_bill), 0);
   if v_takes > 0 then
     raise exception 'Pieces from this ticket''s roll are already on a job, so its lines can''t change. Undo % from this roll first, then change the ticket.',
@@ -126,24 +156,47 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare v_takes integer;
+declare
+  v_takes integer;
+  v_rolls numeric;
 begin
+  -- bills.amount is the number job cost reads (bills - off_shelf + from_shelf) and owner money
+  -- splits into Materials and Put On The Shelf, so it is frozen with the lines. The date is not:
+  -- a ticket re-dated carries its shelf part to the new month with it, and no take moves.
   if tg_op = 'UPDATE'
      and new.job_id is not distinct from old.job_id
      and new.on_shelf is not distinct from old.on_shelf
      and new.superseded_by_bill_id is not distinct from old.superseded_by_bill_id
-     and new.org_id is not distinct from old.org_id then
+     and new.org_id is not distinct from old.org_id
+     and new.amount is not distinct from old.amount then
     return new;
   end if;
 
+  perform public.lock_stock_bill(old.id);
   v_takes := public.stock_takes_on_bill(old.id);
   if v_takes > 0 then
     if tg_op = 'DELETE' then
       raise exception 'Pieces from this ticket''s roll are already on a job, so the ticket can''t be deleted. Undo % from this roll first.',
         public.stock_takes_phrase(v_takes) using errcode = 'P0001';
     end if;
+    if new.amount is distinct from old.amount then
+      raise exception 'Pieces from this ticket''s roll are already on a job, so its total can''t change. Undo % from this roll first, then change the ticket.',
+        public.stock_takes_phrase(v_takes) using errcode = 'P0001';
+    end if;
     raise exception 'Pieces from this ticket''s roll are already on a job, so the ticket stays where it is. Undo % from this roll first.',
       public.stock_takes_phrase(v_takes) using errcode = 'P0001';
+  end if;
+
+  -- With no takes yet: a ticket may not shrink below the rolls on the shelf from it, or the job
+  -- that bought it would carry less than nothing (the same ceiling guard_stock_lot puts on a roll).
+  if tg_op = 'UPDATE' and new.amount is distinct from old.amount then
+    select coalesce(sum(l.cost), 0) into v_rolls
+      from public.stock_lots l join public.bill_line_items bli on bli.id = l.bill_line_id
+     where bli.bill_id = old.id and l.unshelved_at is null;
+    if v_rolls > 0 and new.amount < v_rolls then
+      raise exception 'The rolls on the shelf from this ticket cost $%, more than a $% ticket. Take a roll off the shelf first, then change the total.', v_rolls, new.amount
+        using errcode = 'P0001';
+    end if;
   end if;
 
   if tg_op = 'UPDATE' and new.superseded_by_bill_id is not null and old.superseded_by_bill_id is null

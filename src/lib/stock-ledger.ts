@@ -46,6 +46,23 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 const qty3 = (n: number) => Math.round(n * 1000) / 1000;
 
 /**
+ * round(take x cost / pieces, 2) EXACTLY as Postgres rounds a numeric: on the exact quotient, half
+ * away from zero. Float arithmetic cannot do that: 36 of a 40-piece lot costing $0.15 is exactly
+ * 13.5 cents, which Postgres rounds to $0.14 and Math.round over binary floats rounds to $0.13. So
+ * the three figures are scaled to integers (pieces to the thousandth, dollars to the cent, which is
+ * all either column holds) and divided in BigInt. Every input here is non-negative.
+ */
+export function proRataCents(take: number, cost: number, pieces: number): number {
+  const t = BigInt(Math.round(take * 1000));
+  const c = BigInt(Math.round(cost * 100));
+  const p = BigInt(Math.round(pieces * 1000));
+  if (p <= BigInt(0)) return 0;
+  // floor((2tc + p) / 2p) = the quotient t*c/p rounded half up, in cents.
+  const q = (BigInt(2) * t * c + p) / (BigInt(2) * p);
+  return Number(q) / 100;
+}
+
+/**
  * A part number with its punctuation taken off: "30-641", "30 641" and "30641" are one part, and
  * every supply house writes it a different way. Letters are kept (a "4S-1/2" box is not a "4S"),
  * so this only ever collapses SEPARATORS, never content. (Moved from stock-flow.ts.)
@@ -196,7 +213,7 @@ export function planFifoTake(lots: LotForTake[], qty: number): { takes: PlannedT
     const left = qty3(l.piecesLeft);
     if (!(left > 0)) continue;
     const take = Math.min(left, rem);
-    const cost = take === left ? cents(l.costLeft) : Math.min(cents((take * l.cost) / l.pieces), cents(l.costLeft));
+    const cost = take === left ? cents(l.costLeft) : Math.min(proRataCents(take, l.cost, l.pieces), cents(l.costLeft));
     takes.push({ lotId: l.id, qty: take, cost });
     rem = qty3(rem - take);
   }
@@ -210,9 +227,11 @@ export type StoredLineLot = { lot_id: string; bill_line_id: string | null; cost:
  * WHAT EACH LIVE LOT ON ONE BILL SHOULD COST TODAY: shelfLotCost over the bill's lines as they
  * stand. The pure half of restampLotsForBill, and of the daily drift check.
  *   · a lot whose line is gone, is a tax line, or no longer has a positive extension comes OFF
- *     the shelf (a $0.00 extension shipped nothing);
+ *     the shelf (a $0.00 extension shipped nothing), and so does one whose line the job now bills
+ *     in full (its share is $0: nothing of it is left for a shelf);
  *   · a lot with takes on it is never restamped - 0304 froze its bill, so it cannot have drifted,
- *     and a stamped take's cost never moves after the fact.
+ *     and a stamped take's cost never moves after the fact. Its step is "keep" with cost null: it
+ *     was not checked, so nothing may call it right (restampLotsForBill leaves its stale flag).
  */
 export function restampPlan(
   lots: StoredLineLot[],
@@ -225,6 +244,7 @@ export function restampPlan(
       if (Number(l.live_moves) > 0) return { lotId: l.lot_id, action: "keep" as const, cost: null };
       if (!line || isTaxLine(line) || !(billLineCost(line) > 0)) return { lotId: l.lot_id, action: "unshelve" as const, cost: null };
       const want = shelfLotCost(line, lines);
+      if (!(want > 0)) return { lotId: l.lot_id, action: "unshelve" as const, cost: null };
       return cents(Number(l.cost)) === want
         ? { lotId: l.lot_id, action: "keep" as const, cost: want }
         : { lotId: l.lot_id, action: "restamp" as const, cost: want };
@@ -383,6 +403,9 @@ export async function restampLotsForBill(
   let unshelved = 0;
   for (const step of restampPlan(lots as StoredLineLot[], (lines ?? []) as (BillLine & { id: string })[])) {
     if (step.action === "keep") {
+      // A lot with takes was never checked (cost null): its stale flag, if any, stays for the
+      // reconcile view to name. Only a lot the paper was just checked against is called right.
+      if (step.cost == null) continue;
       // Right already; only the stale flag may need clearing.
       const { error } = await supabase.from("stock_lots").update({ cost_stale: false }).eq("id", step.lotId).eq("org_id", orgId).eq("cost_stale", true).select("id");
       if (error) return { ok: false, error: dbError(error) };

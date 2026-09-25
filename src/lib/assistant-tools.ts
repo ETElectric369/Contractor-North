@@ -424,7 +424,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inventory",
     description:
-      "List the SHOP SHELF's items by name (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record (rolls and boxes put on the shelf, less pieces taken), never typed. Use for 'what's running low', 'how many breakers do I have', 'what's on the shelf'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+      "List the SHOP SHELF's items by name (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record, never typed. There is no way yet to put a roll on the shelf or take pieces off it in the app (it comes in the next update), so never offer to add or adjust stock. Use for 'what's running low', 'how many breakers do I have', 'what's on the shelf'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
   },
   {

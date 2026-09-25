@@ -573,6 +573,203 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
     });
   });
 
+  // ── review of Phase 1: the holes the first cut left ──────────────────────────────────────────
+  it("a used ticket's total is frozen with its lines; an unused one may change, never below its rolls", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      const t = await coilTicket(jobA, "2001-08-19"); // $199.48, the coil's roll $180.17
+      await lot(it1, t, 1, 250);
+      await as(staffId);
+      // Job A's cost is bills - off_shelf: a $19.31 ticket would carry -$160.86.
+      expect((await refusal(() => c.query("update public.bills set amount = 19.31 where id = $1", [t.id])))?.message).toContain("more than a $19.31 ticket");
+      await c.query("update public.bills set amount = 199.50 where id = $1", [t.id]);
+      await asServer();
+      await draw(staffId, it1, jobB, 60);
+      await as(staffId);
+      expect((await refusal(() => c.query("update public.bills set amount = 199.48 where id = $1", [t.id])))?.message).toContain(
+        "its total can't change. Undo the take from this roll first",
+      );
+      // The date is not money on a job: a re-dated ticket carries its shelf part to the new month.
+      await c.query("update public.bills set bill_date = '2001-08-20', notes = 'TEST re-dated' where id = $1", [t.id]);
+    });
+  });
+
+  it("a roll comes off what the job does not bill, and the rolls off one ticket never add up past it", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item("TEST breaker", "ea");
+      const t = await bill(jobA, "2001-08-19", [
+        { description: "TEST breaker box A", amount: 100, billed_amount: 0 },
+        { description: "TEST breaker box B", amount: 100, billed_amount: 0 },
+        { description: "TEST panel, billed in full", amount: 50 },
+        { description: "TEST Sales Tax", amount: 16, category: "Tax" },
+      ]);
+      const ins = (lineId: string, cost: number) => async () => {
+        await as(staffId);
+        return one(
+          "insert into public.stock_lots (org_id, item_id, kind, bill_line_id, pieces, unit, cost) values ($1, $2, 'line', $3, 10, 'ea', $4) returning id",
+          [orgId, it1, lineId, cost],
+        );
+      };
+      // Each $116 roll is under its own line plus the tax; the two together ($232) are over the $216
+      // the ticket holds that the job doesn't bill.
+      await ins(t.lineIds[0], 116)();
+      await asServer();
+      const second = await refusal(ins(t.lineIds[1], 116));
+      expect(second?.message).toContain("the rolls from this ticket would come to $232.00");
+      expect(second?.message).toContain("$216.00");
+      // A line the customer is billed for in full has nothing for a shelf.
+      expect((await refusal(ins(t.lineIds[2], 1)))?.message).toContain("still billed to the job");
+      await asServer();
+      // A later edit of what the job used (no takes yet) marks the roll stale AND names it over its paper.
+      await as(staffId);
+      await c.query("update public.bill_line_items set billed_amount = 90 where id = $1", [t.lineIds[0]]);
+      await asServer();
+      const problems = (await c.query("select problem from public.stock_reconcile_problems where bill_id = $1", [t.id])).rows.map((r) => r.problem);
+      expect(problems).toEqual(expect.arrayContaining(["lot_cost_stale", "lot_over_its_paper"]));
+    });
+  });
+
+  it("a stale roll is never priced from: a direct take is refused, and Took From Stock steps over it to a short", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      const t = await coilTicket(jobA, "2001-08-19");
+      const l = await lot(it1, t, 1, 250);
+      await as(staffId);
+      await c.query("update public.bill_line_items set amount = 6.47 where id = $1", [t.lineIds[3]]); // the tax was mis-scanned
+      expect((await refusal(() => c.query("insert into public.stock_moves (org_id, item_id, lot_id, kind, qty) values ($1, $2, $3, 'write_off', 1)", [orgId, it1, l.id])))?.message).toContain(
+        "Restamp it",
+      );
+      await asServer();
+      const r = await draw(techId, it1, jobB, 10);
+      expect(r.moves).toEqual([]);
+      expect(num(r.short)).toBe(10);
+      expect((await one("select count(*)::int as n from public.stock_moves where lot_id = $1", [l.id])).n).toBe(0);
+    });
+  });
+
+  it("a short is settled, and a take undone, only through their functions", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      await lot(it1, await coilTicket(jobA, "2001-08-19"), 1, 250);
+      const r = await draw(staffId, it1, jobB, 270);
+      await as(staffId);
+      // A made-up settlement would take 20 ft out of on hand and out of the reconcile view.
+      expect((await refusal(() => c.query("update public.stock_moves set settled_by = gen_random_uuid() where id = $1", [r.short_id])))?.message).toContain(
+        "settled with Settle",
+      );
+      await asServer();
+      await lot(it1, await coilTicket(jobA, "2001-09-04"), 1, 250);
+      await as(staffId);
+      const s = (await one("select public.settle_short($1) as r", [r.short_id])).r;
+      // The settlement's draws can't be undone on their own, however it is attempted.
+      expect((await refusal(() => c.query("update public.stock_moves set undone_at = now() where draw_group = $1", [s.draw_group])))?.message).toContain(
+        "undone with Undo",
+      );
+      expect((await refusal(() => c.query("select public.stock_undo($1)", [s.draw_group])))?.message).toContain("settle an earlier take");
+      // Who undid it is whoever is signed in, never what the client says.
+      const u = (await one("select public.stock_undo($1) as r", [r.draw_group])).r;
+      expect(u.undone).toBeGreaterThan(0);
+      await asServer();
+      const who = await one("select count(*) filter (where undone_by = $2)::int as mine, count(*)::int as n from public.stock_moves where draw_group in ($1, $3)", [
+        r.draw_group,
+        staffId,
+        s.draw_group,
+      ]);
+      expect(who.mine).toBe(who.n);
+      // And a settlement that points at nothing is named (written here as the server, past the guard).
+      const r2 = await draw(staffId, it1, jobB, 600);
+      await c.query("update public.stock_moves set settled_by = gen_random_uuid() where id = $1", [r2.short_id]);
+      const named = (await c.query("select problem from public.stock_reconcile_problems where move_id = $1", [r2.short_id])).rows.map((x) => x.problem);
+      expect(named).toContain("short_settled_by_nothing");
+    });
+  });
+
+  it("a tech undoes their own take, but not once the office has settled part of it", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      await lot(it1, await coilTicket(jobA, "2001-08-19"), 1, 250);
+      const mine = await draw(techId, it1, jobB, 5);
+      await as(techId);
+      expect((await one("select public.stock_undo($1) as r", [mine.draw_group])).r.undone).toBe(1);
+      await asServer();
+      const r = await draw(techId, it1, jobB, 270);
+      await lot(it1, await coilTicket(jobA, "2001-09-04"), 1, 250);
+      await as(staffId);
+      await c.query("select public.settle_short($1)", [r.short_id]);
+      await asServer();
+      await as(techId);
+      expect((await refusal(() => c.query("select public.stock_undo($1)", [r.draw_group])))?.code).toBe("42501");
+      await asServer();
+      await as(staffId);
+      expect((await one("select public.stock_undo($1) as r", [r.draw_group])).r.undone).toBe(2);
+    });
+  });
+
+  it("undoing a found piece can't strand cents on an empty roll; counting it down can", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item("TEST 3-pack", "ea");
+      const t = await bill(jobA, "2001-08-19", [{ description: "TEST 3-pack", amount: 10, quantity: 3, billed_amount: 0 }]);
+      const l = await lot(it1, t, 0, 3, "ea");
+      await as(staffId);
+      const found = await one("insert into public.stock_moves (org_id, item_id, lot_id, kind, qty) values ($1, $2, $3, 'recount_up', 3) returning id", [orgId, it1, l.id]);
+      await asServer();
+      for (let i = 0; i < 3; i++) await draw(staffId, it1, jobB, 1); // $3.33 each
+      const left = await lotLeft(l.id);
+      expect([num(left.pieces_left), num(left.cost_left)]).toEqual([3, 0.01]);
+      await as(staffId);
+      expect((await refusal(() => c.query("update public.stock_moves set undone_at = now() where id = $1", [found.id])))?.message).toContain("empty with $0.01");
+      await c.query("insert into public.stock_moves (org_id, item_id, lot_id, kind, qty) values ($1, $2, $3, 'recount_down', 3)", [orgId, it1, l.id]);
+      await asServer();
+      const after = await lotLeft(l.id);
+      expect([num(after.pieces_left), num(after.cost_left)]).toEqual([0, 0]);
+    });
+  });
+
+  it("who may write the shelf is settled before any receipt figure is read; a price link stays in the company", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      const t = await coilTicket(jobA, "2001-08-19");
+      const direct = (uid: string) => async () => {
+        await as(uid);
+        await c.query(
+          "insert into public.stock_lots (org_id, item_id, kind, bill_line_id, pieces, unit, cost) values ($1, $2, 'line', $3, 1, 'ft', 999999)",
+          [orgId, it1, t.lineIds[1]],
+        );
+      };
+      for (const who of [techId, otherStaffId]) {
+        const r = await refusal(direct(who));
+        expect(r?.code).toBe("42501");
+        expect(r?.message).not.toContain("$");
+        await asServer();
+      }
+      const foreign = await one("select id from public.price_list_items where org_id <> $1 limit 1", [orgId]);
+      if (foreign) {
+        await as(staffId);
+        expect((await refusal(() => c.query("update public.inventory_items set price_item_id = $2 where id = $1", [it1, foreign.id])))?.code).toBe("42501");
+        await asServer();
+      }
+    });
+  });
+
+  it("on hand holds what the ledger holds, to the thousandth", async () => {
+    if (!needs()) return;
+    await step(async () => {
+      const it1 = await item();
+      await lot(it1, await coilTicket(jobA, "2001-08-19"), 1, 12.125);
+      expect(await onHand(it1)).toBe(12.125);
+      await draw(staffId, it1, jobB, 0.5);
+      expect(await onHand(it1)).toBe(11.625);
+      expect((await c.query("select * from public.stock_reconcile_problems where item_id = $1", [it1])).rows).toEqual([]);
+    });
+  });
+
   it("stock_reconcile_problems is empty for every fixture this suite leaves standing", async () => {
     if (!needs()) return;
     await step(async () => {

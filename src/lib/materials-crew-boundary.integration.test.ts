@@ -187,8 +187,10 @@ d("material lists: the crew boundary (0254)", () => {
     otherBareJobId = obare.id;
 
     // THE SHELF'S HALF OF THE BOUNDARY (0302). If the migration is not on this database yet it is
-    // applied here, inside this transaction, which is rolled back: it only swaps one read policy on
-    // an empty table and adds one function, so it takes no lock anyone waits on.
+    // applied here, inside this transaction, which is rolled back. It swaps one read policy and adds
+    // one function, but DROP/CREATE POLICY holds an ACCESS EXCLUSIVE lock on inventory_items until
+    // the rollback, so every read of that table (the office's /inventory and Nort's list_inventory)
+    // waits for this whole suite. Applying 0302 to production turns this into a no-op.
     const { rows: [has0302] } = await client.query("select to_regprocedure('public.shelf_for_crew()') is not null as yes");
     if (!has0302.yes) {
       await client.query(

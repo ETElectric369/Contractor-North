@@ -12,6 +12,7 @@ import {
   normaliseName,
   normalisePartNumber,
   planFifoTake,
+  proRataCents,
   putOnShelfProblem,
   restampLotsForBill,
   restampPlan,
@@ -143,6 +144,19 @@ describe("planFifoTake: the take the database stamps, worked out for a preview",
   it("skips an emptied lot, and an empty shelf is all short", () => {
     expect(planFifoTake([lot("F", "2026-08-01", 10, 5, 0, 0)], 4)).toEqual({ takes: [], short: 4, cost: 0 });
   });
+
+  it("rounds an exact half cent UP, the way Postgres rounds a numeric, not the way a float happens to fall", () => {
+    // Each of these is exactly x.5 cents; binary floats put them a hair under and Math.round went down.
+    expect(proRataCents(36, 0.15, 40)).toBe(0.14); // 13.5 cents
+    expect(proRataCents(30, 0.18, 40)).toBe(0.14); // 13.5 cents
+    expect(proRataCents(145, 0.2, 200)).toBe(0.15); // 14.5 cents
+    expect(planFifoTake([lot("G", "2026-08-01", 40, 0.15)], 36).takes[0].cost).toBe(0.14);
+    // And the everyday figures are unchanged: 60 ft of the $180.17 coil, 240 ft of it.
+    expect(proRataCents(60, 180.17, 250)).toBe(43.24);
+    expect(proRataCents(240, 180.17, 250)).toBe(172.96);
+    expect(proRataCents(1, 1, 3)).toBe(0.33);
+    expect(proRataCents(0.125, 10, 12.125)).toBe(0.1);
+  });
 });
 
 /** Herringbone's 8/19 ticket, with the 12/2 coil at 0 used: the lot is $180.17. */
@@ -177,6 +191,14 @@ describe("restampPlan and lotCostDrift: a lot's stored cost against the paper as
     ]);
   });
 
+  it("unshelves a lot whose line the job now bills in full: nothing of it is left for a shelf", () => {
+    const lines = ticket();
+    lines[1] = { ...lines[1], billed_amount: null };
+    expect(restampPlan([{ lot_id: "L", bill_line_id: "b", cost: "180.17", live: true, live_moves: 0 }], lines)).toEqual([
+      { lotId: "L", action: "unshelve", cost: null },
+    ]);
+  });
+
   it("unshelves a lot whose line's extension went to $0.00: nothing shipped", () => {
     const lines = ticket();
     lines[1] = { ...lines[1], amount: 0 };
@@ -202,6 +224,50 @@ describe("putOnShelfProblem: the refusals, each one a sentence he can act on", (
     expect(putOnShelfProblem({ ...ok, isTax: true })).toContain("tax");
     expect(putOnShelfProblem({ ...ok, lineAmount: 0 })).toContain("$0.00");
     expect(putOnShelfProblem({ ...ok, share: 0 })).toContain("still billed to the job");
+  });
+});
+
+describe("restampLotsForBill never calls an unchecked roll right", () => {
+  it("leaves the stale flag on a roll with takes, and clears it on a roll the paper was just checked against", async () => {
+    const writes: { table: string; patch: any; id?: string }[] = [];
+    const lots = [
+      { lot_id: "used", bill_line_id: "b", cost: "170.00", live: true, live_moves: 2 },
+      { lot_id: "ok", bill_line_id: "b2", cost: "0.00", live: true, live_moves: 0 },
+    ];
+    const lines = ticket();
+    // A second, identical coil line so both rolls have a line; "ok" gets whatever the paper says.
+    lines.push({ ...lines[1], id: "b2" });
+    const { shelfLotCost } = await import("@/lib/bill-itemisation");
+    lots[1].cost = String(shelfLotCost(lines[4], lines));
+    const sb = {
+      from: (table: string) => {
+        const w: { table: string; patch: any; id?: string } = { table, patch: null };
+        const b: any = {
+          select: () => b,
+          eq: (col: string, v: string) => {
+            if (col === "id") w.id = v;
+            return b;
+          },
+          update: (patch: any) => {
+            w.patch = patch;
+            writes.push(w);
+            return b;
+          },
+          then: (ok: any) =>
+            Promise.resolve(
+              table === "stock_lot_balance"
+                ? { data: lots, error: null }
+                : table === "bill_line_items"
+                  ? { data: lines, error: null }
+                  : { data: [{ id: w.id }], error: null },
+            ).then(ok),
+        };
+        return b;
+      },
+    };
+    expect(await restampLotsForBill(sb, "org", "bill")).toEqual({ ok: true, restamped: 0, unshelved: 0 });
+    expect(writes.map((x) => x.id)).toEqual(["ok"]);
+    expect(writes[0].patch).toEqual({ cost_stale: false });
   });
 });
 

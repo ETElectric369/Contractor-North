@@ -8,7 +8,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
-import { NewItemButton } from "./new-item-button";
 import { ItemActions } from "./item-actions";
 import { sanitizeSearch } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
@@ -31,6 +30,11 @@ export const dynamic = "force-dynamic";
  * OFFICE ONLY, ON THE SERVER (Shop Stock, 0302). The dock hid this page from a tech, and the table
  * behind it let any member read it: a hidden link is a convention, not a refusal. requireStaff is
  * the refusal, and 0302 made the table itself staff-only to read.
+ *
+ * NO DOOR IN YET, SO NO BUTTON THAT PRETENDS ONE (review of Shop Stock Phase 1). Until Phase 2 ships
+ * Put On The Shelf, nothing in the app can move an item's count, so New Item is not offered: an item
+ * made now would sit at 0 on hand (and read "Reorder" forever if it had a reorder point). The page
+ * says the limit in words instead. new-item-button.tsx comes back with the Phase 2 door.
  *
  * WHAT IT IS WORTH COMES FROM THE SHELF'S RECORD (0303). On hand is the ledger's (rolls in, pieces
  * out) and never typed; value is every live roll's dollars left, to the cent, straight off the
@@ -101,9 +105,7 @@ export default async function InventoryPage({
       <PageHeader
         title="Inventory"
         description="What's on hand, what it cost, and what's running low."
-      >
-        <NewItemButton />
-      </PageHeader>
+      />
 
       {items.length > 0 && (
         <div className="mb-4 grid grid-cols-3 gap-3 sm:max-w-lg sm:gap-4">
@@ -162,15 +164,13 @@ export default async function InventoryPage({
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Rolls and boxes you keep for more than one job live here, with what they cost. You can add an item by name now; what is on hand comes from what goes on the shelf, never a typed number."
+                : "Rolls and boxes you keep for more than one job will live here, with what they cost. Putting a roll on the shelf from a receipt comes in the next update; until then there is nothing to add here."
           }
         >
-          {lowOnly || q ? (
+          {(lowOnly || q) && (
             <Link href={withQuery({})} className={`${linkClass} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>
               Show All
             </Link>
-          ) : (
-            <NewItemButton />
           )}
         </EmptyState>
       ) : (
@@ -257,7 +257,7 @@ export default async function InventoryPage({
           <p className="mt-3 max-w-2xl text-xs text-slate-400">
             {lotsReadFailed
               ? "The value of what is on the shelf couldn't be read just now, so none is shown. Reload to try again."
-              : "Stock value is what the rolls and boxes on the shelf cost, off their receipts to the cent, less what has been taken off them."}
+              : "Stock value is what the rolls and boxes on the shelf cost, off their receipts to the cent, less what has been taken off them. Putting rolls on the shelf and taking pieces off it come in the next update; until then these counts don't move."}
           </p>
         </>
       )}
