@@ -165,6 +165,96 @@ export interface QuoteCircuit {
   load?: string | null;
 }
 
+// ── The job's panel (0333) ────────────────────────────────────────────────────────────────────────
+// The estimate's circuits above are the PROPOSAL the customer signs; these are the JOB's own list,
+// which the crew works at the panel. No price, part number or supplier on either row, ever.
+export type CircuitKind = "standard" | "afci" | "gfci" | "dual_function" | "spd";
+/** new = a new breaker for new work; existing = in the panel already, untouched; reused = an
+ *  existing breaker or circuit the new work uses; removed = coming out. */
+export type CircuitWork = "new" | "existing" | "reused" | "removed";
+export type CircuitProgress = "planned" | "roughed" | "done";
+/** suggested = a machine (the estimate, the plans, the photo, Nort) put it there; nothing counts
+ *  until a person keeps it. */
+export type CircuitState = "suggested" | "kept";
+export type CircuitSource = "estimate" | "plan" | "photo" | "hand" | "nort" | "inspector";
+export type PanelNumbering = "top_down" | "bottom_up";
+export type SpaceHalf = "A" | "B";
+
+export interface JobPanel {
+  id: string;
+  org_id: string;
+  job_id: string;
+  name: string;
+  brand: string | null;
+  bus_amps: number | null;
+  main_amps: number | null;
+  spaces: number | null;
+  numbering: PanelNumbering;
+  /** A crimped bus with no stab: a kept circuit may not sit here (the database refuses). */
+  dead_spaces: number[];
+  /** Where the panel label allows tandems (twins / quads): a warning only. */
+  twin_spaces: number[];
+  photo_document_id: string | null;
+  notes: string | null;
+  shown_on_portal: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+  removed_at: string | null;
+  removed_by: string | null;
+}
+
+/** The raw row a circuit was brought in from ("From E-017"). `key` makes Bring In idempotent. */
+export interface CircuitSourceRow {
+  key: string;
+  quote_number?: string | null;
+  index?: number;
+  ckt?: string | null;
+  description?: string | null;
+  wire?: string | null;
+  breaker?: string | null;
+  load?: string | null;
+  /** A plain-words flag the reader raised ("The estimate says 15A, but Q120 is a 1P 20A"). */
+  check?: string | null;
+}
+
+export interface JobCircuit {
+  id: string;
+  org_id: string;
+  job_id: string;
+  panel_id: string | null;
+  room: string | null;
+  /** What it feeds ("Kitchen And Living"). */
+  description: string | null;
+  /** What the panel door says ("Entry Lights"). */
+  panel_label: string | null;
+  amps: number | null;
+  poles: number;
+  kind: CircuitKind | null;
+  wire: string | null;
+  wire_tag: string | null;
+  space: number | null;
+  half: SpaceHalf | null;
+  work: CircuitWork;
+  progress: CircuitProgress;
+  state: CircuitState;
+  source: CircuitSource;
+  source_quote_id: string | null;
+  source_document_id: string | null;
+  source_row: CircuitSourceRow | null;
+  verified: boolean;
+  verified_by: string | null;
+  verified_at: string | null;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+  removed_at: string | null;
+  removed_by: string | null;
+}
+
 export interface Quote {
   id: string;
   quote_number: string;

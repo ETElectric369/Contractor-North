@@ -1,6 +1,8 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
+import { isStaffRole } from "@/lib/actions/perms";
+import { sendPushToProfiles } from "@/lib/push";
 
 export type NotificationInput = {
   type?: string;
@@ -45,5 +47,91 @@ export async function createNotifications(
     // Best-effort: a notification must never break the caller. But not silent.
     reportError("createNotifications", e, { orgId, type: n.type ?? "general" });
     return false;
+  }
+}
+
+/**
+ * WHO HEARS ABOUT A CREW CHANGE: every OTHER active staff member of the actor's org, read through the
+ * caller's own session client (so RLS keeps it to one org), exactly the set requestMaterials rings.
+ */
+export async function officeRecipients(
+  // The caller's cookie-bound client. Typed loosely so this file doesn't pull the server client in.
+  supabase: { from: (t: string) => any },
+  actorId: string,
+): Promise<string[]> {
+  const { data: staff } = await supabase.from("profiles").select("id, role").neq("id", actorId).eq("active", true);
+  return ((staff ?? []) as { id: string; role?: string | null }[])
+    .filter((p) => isStaffRole(p.role ?? ""))
+    .map((p) => p.id);
+}
+
+export type RingInput = NotificationInput & {
+  type: string;
+  url: string;
+  /** How long one ring covers. */
+  windowMinutes: number;
+  /**
+   * bell_each_push_once (the materials ring): every event lands on the bell, the PUSH waits out the
+   *   window. Keyed on type + url + title, so each person's adds debounce on their own.
+   * once_per_window (the panel ring): ONE bell line and one push per job per window. Inside the
+   *   window the line already on the bell is refreshed with the new words (a running count), and
+   *   nobody is buzzed again. Keyed on type + url, whoever made the change.
+   */
+  mode: "bell_each_push_once" | "once_per_window";
+};
+
+/**
+ * THE OFFICE HEARS ABOUT A CREW CHANGE, WITHOUT BEING BUZZED FOR EACH ONE (pulled out of
+ * materials/actions.ts for the Panel tab, 2026-09-25). A man walking a panel and relabelling eight
+ * circuits is one event to the boss, not eight (NOT-ANNOYING); nothing is lost, because the bell
+ * line is always there to read. The ledger for the window is the notifications table itself, read
+ * with the service client (a notification is readable only by its recipient, and the actor is not
+ * one), always inside the actor's org.
+ *
+ * Never throws: a notification must never unsave the change that caused it. Returns what it did.
+ */
+export async function ringOffice(
+  orgId: string | null | undefined,
+  recipients: string[],
+  n: RingInput,
+): Promise<"rang" | "refreshed" | "bell_only" | "nobody" | "failed"> {
+  try {
+    const ids = Array.from(new Set(recipients.filter(Boolean)));
+    if (!orgId || !ids.length) return "nobody";
+    const since = new Date(Date.now() - n.windowMinutes * 60 * 1000).toISOString();
+    const sb = createServiceClient();
+    // Look for the window's ring BEFORE this event's rows land, or the check would find itself.
+    let q = sb
+      .from("notifications")
+      .select("id")
+      .eq("org_id", orgId)
+      .eq("type", n.type)
+      .eq("url", n.url)
+      .gte("created_at", since);
+    if (n.mode === "bell_each_push_once") q = q.eq("title", n.title);
+    const { data: recent, error: rErr } = await q.limit(50);
+    if (rErr) throw rErr;
+    const inWindow = (recent ?? []) as { id: string }[];
+
+    if (n.mode === "once_per_window" && inWindow.length) {
+      const { error } = await sb
+        .from("notifications")
+        .update({ title: n.title, body: n.body ?? null })
+        .in("id", inWindow.map((r) => r.id))
+        .select("id");
+      if (error) throw error;
+      return "refreshed";
+    }
+
+    const wrote = await createNotifications(orgId, ids, { type: n.type, title: n.title, body: n.body, url: n.url });
+    if (!wrote) return "failed";
+    if (inWindow.length) return "bell_only";
+    // "assigned" is the push kind for "something landed that is yours to deal with", so it respects
+    // the same per-boss toggle requestMaterials's ask does.
+    await sendPushToProfiles(ids, "assigned", { title: n.title, body: n.body ?? "", url: n.url }).catch(() => {});
+    return "rang";
+  } catch (e) {
+    reportError("ringOffice", e, { orgId, type: n.type });
+    return "failed";
   }
 }

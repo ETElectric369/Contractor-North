@@ -3,7 +3,7 @@ import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
@@ -12,7 +12,7 @@ import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { isStaffRole } from "@/lib/actions/perms";
-import { createNotifications } from "@/lib/notifications";
+import { createNotifications, officeRecipients, ringOffice } from "@/lib/notifications";
 import { reportError } from "@/lib/observe";
 import { sendPushToProfiles } from "@/lib/push";
 import { createTask } from "@/app/(app)/tasks/actions";
@@ -272,10 +272,7 @@ async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: strin
 
     // The same recipients requestMaterials picks — every OTHER active staff member — so a tech's
     // ask and a tech's add reach the same desks.
-    const { data: staff } = await supabase.from("profiles").select("id, role").neq("id", actor.id).eq("active", true);
-    const bosses = (staff ?? [])
-      .filter((p) => isStaffRole((p as { role?: string }).role ?? ""))
-      .map((p) => (p as { id: string }).id);
+    const bosses = await officeRecipients(supabase, actor.id);
     if (!bosses.length) return;
 
     const title = `${actor.name} added to ${label} materials`;
@@ -283,22 +280,9 @@ async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: strin
     const body = `${qty} ${(item.unit || "ea").trim()} — ${item.description.trim()}`.slice(0, 140);
     const url = `/jobs/${jobId}?tab=materials`;
 
-    // Look for the last push BEFORE this add's rows land, or the check would always find itself.
-    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-    const { data: recent } = await createServiceClient()
-      .from("notifications")
-      .select("id")
-      .eq("org_id", actor.orgId)
-      .eq("type", "materials_added")
-      .eq("url", url)
-      .eq("title", title)
-      .gte("created_at", since)
-      .limit(1);
-
-    await createNotifications(actor.orgId, bosses, { type: "materials_added", title, body, url });
-    // "assigned" is the kind for "something landed that is yours to deal with" — the same kind the
-    // ask uses, so it respects the same per-boss push toggle.
-    if (!recent?.length) await sendPushToProfiles(bosses, "assigned", { title, body, url }).catch(() => {});
+    // Every add lands on the bell; the push waits out 15 minutes per (person, job) — the ring the
+    // Panel tab shares (src/lib/notifications.ts ringOffice).
+    await ringOffice(actor.orgId, bosses, { type: "materials_added", title, body, url, windowMinutes: 15, mode: "bell_each_push_once" });
     // Still lands from behind after(): Next 15.5 runs after-callbacks under the request's work
     // store (withExecuteRevalidates), so the job tab's list refreshes the same as before.
     revalidatePath(`/jobs/${jobId}`);

@@ -50,6 +50,11 @@ const BY_CONSTRAINT: Record<string, string> = {
   bills_on_shelf_has_no_job: "This ticket is on the shop shelf, so it can't go on a job. Undo it from the tray first, then file it on the job.",
   inventory_items_org_key_part_uidx: "An item with that part number is already on the shelf. Pick it instead of making a new one.",
   stock_lots_one_live_per_line: "A roll from that line is already on the shelf. Take it off the shelf first to count it again.",
+  // 0333: the job's panel. The guard's own refusals (No Stab, past the end, office-only doors) are
+  // already plain words and pass through as the database says them.
+  job_panels_one_name_per_job: "This job already has a panel with that name. Give this one another name (Sub Panel, Garage Panel).",
+  job_circuits_one_per_source_row: "That circuit from the estimate is already on this job.",
+  job_circuits_half_needs_a_space: "Pick the space before the half (A or B).",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */
