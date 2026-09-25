@@ -17,8 +17,7 @@
  * Receipts & Documents) and the typed door (Add Cost).
  */
 
-import { createClient } from "@/lib/supabase/client";
-import { prepareImageForUpload } from "@/lib/image-prep";
+import { uploadJobFile } from "@/lib/job-file-upload";
 import { formatCurrency } from "@/lib/utils";
 import { addDocument } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
@@ -87,24 +86,15 @@ export async function fileReceiptDocument(o: {
   /** documents.category — "Receipt" unless the door filed it as something else. */
   category?: string;
 }): Promise<FiledReceipt> {
-  // Prep is best-effort: it hands back the original when it can't decode, and if it throws the
-  // server's own refusal is the honest explanation, so the raw file still goes up.
-  let file = o.file;
-  try {
-    file = await prepareImageForUpload(o.file);
-  } catch {
-    file = o.file;
-  }
-  const name = file.name || o.file.name || "receipt.jpg";
-  const safe = name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = `${o.orgId}/${o.jobId}/${Date.now()}-${safe}`;
-  const { error: upErr } = await createClient().storage.from("documents").upload(path, file, { upsert: false });
-  if (upErr) return { ok: false, error: `didn't upload (${upErr.message})` };
+  // Prep → path → bucket: the one upload step every job file takes (lib/job-file-upload).
+  const up = await uploadJobFile({ orgId: o.orgId, jobId: o.jobId, file: o.file, fallbackName: "receipt.jpg" });
+  if (!up.ok) return up;
+  const { path, name, size } = up;
   // The filing is what makes the reader's idempotency link (organized_items.document_id) and
   // "Record as Cost" possible — a file in storage with no row is invisible to both.
-  const doc = await addDocument({ job_id: o.jobId, name, category: o.category || "Receipt", file_url: path, size_bytes: file.size });
+  const doc = await addDocument({ job_id: o.jobId, name, category: o.category || "Receipt", file_url: path, size_bytes: size });
   if (!doc.ok || !doc.id) return { ok: false, error: `uploaded but couldn't be filed on the job (${doc.error ?? "no row came back"})` };
-  return { ok: true, docId: doc.id, name, size: file.size };
+  return { ok: true, docId: doc.id, name, size };
 }
 
 /**

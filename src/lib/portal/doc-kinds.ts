@@ -114,3 +114,41 @@ export function titleFromName(name: string | null | undefined): string {
     .trim();
   return t.slice(0, 120);
 }
+
+/** The words cameras, phones and scanners name files with, which say nothing about the paper. */
+const NOISE_WORDS = new Set([
+  "img", "image", "images", "dsc", "dscn", "dscf", "dcim", "pxl", "mvimg", "photo", "photos", "pic", "picture",
+  "scan", "scanned", "screenshot", "screen", "shot", "capture", "document", "doc", "file", "untitled", "receipt",
+  "attachment", "download", "upload", "camera", "cam", "new", "copy", "edited", "at", "am", "pm", "pdf", "jpeg", "jpg",
+]);
+
+/**
+ * THE TITLE A NEW PAPER STARTS WITH on the Show On Portal sheet: its file name, cleaned, or the
+ * fallback when the name says nothing ("Plan, Sep 25, 2026"). A person reads and can change it
+ * before anything shows; this is only the suggestion.
+ *
+ * Cleaned: the extension off, underscores and word-joining hyphens to spaces (a date's hyphens
+ * stay). Noise: a name made only of camera words and numbers (IMG_1234, IMG_E1234 2, DSC00012,
+ * PXL_20260925_101530, photo-1727312345678, Screenshot 2026-09-25 at 10.15.30 AM, Scan 3, image),
+ * a name with no letters at all, or a long hex id.
+ */
+export function cleanPaperTitle(name: string | null | undefined, fallback: string): string {
+  const t = titleFromName(name)
+    .replace(/_+/g, " ")
+    .replace(/(?<=[A-Za-z])-+|-+(?=[A-Za-z])/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t || !/[A-Za-z]/.test(t)) return fallback;
+  if (/^[0-9a-f]{8}[- ]?[0-9a-f]{4}/i.test(t)) return fallback;
+  const words = t.split(/[\s.,:()[\]]+/).filter(Boolean);
+  // Every word is a camera word, a number, or a camera counter (DSC00012, iOS's edited E1234). A
+  // plan sheet's number is NOT noise: E1, A101 and E-2 keep their names.
+  const noise = words.every((w) => {
+    const m = /^([A-Za-z]*)(\d[\d-]*)?$/.exec(w);
+    if (!m) return false;
+    const letters = m[1].toLowerCase();
+    const digits = (m[2] ?? "").replace(/-/g, "");
+    return letters === "" || NOISE_WORDS.has(letters) || (letters.length === 1 && digits.length >= 4);
+  });
+  return noise ? fallback : t.slice(0, 120);
+}
