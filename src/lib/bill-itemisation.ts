@@ -231,11 +231,52 @@ const notBilledCost = (l: BillLine) => Math.round((billLineCost(l) - billLineBil
  * got wrong once per layer, which is why there is exactly one copy of it.
  */
 export function excludedReceiptCost(allLines: BillLine[]): number {
+  // THE SUM OF THE PER-LINE SHARES, and nothing else (Shop Stock, 0303). The arithmetic lives once,
+  // in excludedShareCents below; this is its total, and shelfLotCost is one of its parts, so a roll
+  // on the shelf and the receipt it came off can never disagree about a cent of tax.
+  return excludedShareCents(allLines).reduce((s, c) => s + c, 0) / 100;
+}
+
+/**
+ * THE SHELF'S SHARE OF ONE RECEIPT LINE (Shop Stock, migration 0303): what a roll put on the shelf
+ * from this line cost the company. It is this line's part of excludedReceiptCost - the dollars of
+ * the line the job did not bill, plus that share of the untouched sales tax - and nothing else:
+ * excludedReceiptCost is the SUM of these parts, so there is exactly one copy of the tax arithmetic
+ * (the rule this file has got wrong once per layer). On every bill, the job's part plus its rolls
+ * equals the whole receipt to the cent.
+ *
+ * Herringbone's 8/19 CED ticket: the 12/2 coil is $165.29 and the ticket's tax is $16.47. With the
+ * coil switched to "0 used", this line's share is $165.29 plus its proportional share of the tax.
+ *
+ * THE CENT THAT ROUNDING WOULD LOSE. excludedReceiptCost rounds the shared tax ONCE per bill. Rounding
+ * each line's share on its own can miss that figure by a cent on a bill with three excluded lines, so
+ * the shared tax is split in whole cents by largest remainder: the parts always add up to the bill's
+ * figure exactly. Ties go to the earlier line, so the split is the same every time it is computed.
+ *
+ * `line` is matched by identity first and then by id, so a caller may pass the row it holds or a
+ * copy of it. A line that is not on the receipt has no share: 0.
+ */
+export function shelfLotCost(line: BillLine, allLines: BillLine[]): number {
+  let i = allLines.indexOf(line);
+  if (i < 0) i = allLines.findIndex((l) => String(l.id) === String(line.id));
+  if (i < 0) return 0;
+  return excludedShareCents(allLines)[i] / 100;
+}
+
+/** Whole cents, from a figure this file has already rounded to cents. */
+const centsOf = (n: number) => Math.round(n * 100);
+
+/**
+ * Each line's share of what the receipt does not bill, in whole cents, in the order the lines were
+ * given. Tax a person acted on is its own line's share; untouched tax is shared across the purchased
+ * lines in proportion to what each did not bill, split by largest remainder so the parts sum to the
+ * once-per-bill rounding exactly.
+ */
+function excludedShareCents(allLines: BillLine[]): number[] {
   const purchased = allLines.filter((l) => !isTaxLine(l));
   const purchasedCost = sumBy(purchased, billLineCost);
   const excludedPurchasedCost = sumBy(purchased, notBilledCost);
   const taxLines = allLines.filter(isTaxLine);
-  const excludedTaxDirect = sumBy(taxLines, notBilledCost);
   /**
    * A TAX LINE A PERSON HAS ACTED ON IS ALREADY EXACT (review of cn-v966).
    *
@@ -259,7 +300,27 @@ export function excludedReceiptCost(allLines: BillLine[]): number {
   const sharedTax = sumBy(untouchedTax, billLineCost);
   const excludedShare = purchasedCost > 0 ? excludedPurchasedCost / purchasedCost : 0;
   const excludedTaxShare = Math.round(sharedTax * excludedShare * 100) / 100;
-  return Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
+
+  // Every line starts at what it does not bill: the purchased line's own dollars, or the tax line a
+  // person split or switched off (its direct share; untouched tax does not bill-exclude itself).
+  const out = allLines.map((l) => centsOf(notBilledCost(l)));
+  // The untouched tax that comes off, shared over the purchased lines by what each did not bill.
+  const taxCents = centsOf(excludedTaxShare);
+  const weights = allLines.map((l, i) => (isTaxLine(l) ? 0 : out[i]));
+  const weightSum = weights.reduce((s, w) => s + w, 0);
+  if (taxCents !== 0 && weightSum !== 0) {
+    const exact = weights.map((w) => (taxCents * w) / weightSum);
+    // Floor with a hair of tolerance, so 12.999999999 of float dust is 13 and not 12.
+    const floors = exact.map((x) => Math.floor(x + 1e-9));
+    let short = taxCents - floors.reduce((s, f) => s + f, 0);
+    const order = exact
+      .map((x, i) => ({ i, rem: weights[i] === 0 ? -1 : x - floors[i] }))
+      .filter((o) => o.rem >= 0)
+      .sort((a, b) => b.rem - a.rem || a.i - b.i);
+    for (let k = 0; short > 0 && order.length; k = (k + 1) % order.length, short--) floors[order[k].i] += 1;
+    for (let i = 0; i < out.length; i++) out[i] += floors[i];
+  }
+  return out;
 }
 
 /**
