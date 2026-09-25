@@ -126,6 +126,10 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
       ).ok as boolean;
     ready = await probe();
     if (!ready && TEST_APPLY_PENDING === "1") {
+      // 0326 stands on 0323 (it rebuilds 0323's job_shared_photo_state): practice-run it first.
+      if (!(await one("select to_regprocedure('public.job_shared_photo_state(uuid)') is not null as ok")).ok) {
+        await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0323_the_portal_home_knows_the_running_bill.sql"), "utf8"));
+      }
       await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0326_the_customer_sees_the_latest_drawing.sql"), "utf8"));
       ready = await probe();
     }
@@ -512,6 +516,34 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
       });
     } finally {
       await c.query("rollback to savepoint pinned");
+      await asServer();
+    }
+  });
+
+  it("the office's photo check (0323) lists shown photos only: a shown plan, or a photo taken down, is never a changed photo", async () => {
+    if (!needs()) return;
+    await c.query("savepoint photostate");
+    try {
+      const photo = await doc(jobA, "test-0326-state-photo.jpg", "Photo");
+      const plan = await doc(jobA, "test-0326-state-plan.pdf", "Plan");
+      const gone = await doc(jobA, "test-0326-state-gone.jpg", "Photo");
+      await as(staffId);
+      await show(photo, jobA, { kind: "photo" });
+      await show(plan, jobA, { kind: "plan" });
+      await show(gone, jobA, { kind: "photo" });
+      await c.query("update public.job_shared_documents set removed_at = now() where document_id = $1", [gone]);
+      const state = async () =>
+        (await c.query("select document_id, still_shown from public.job_shared_photo_state($1) order by document_id", [jobA])).rows as {
+          document_id: string;
+          still_shown: boolean;
+        }[];
+      const mine = (await state()).filter((r) => [photo, plan, gone].includes(r.document_id));
+      expect(mine).toEqual([{ document_id: photo, still_shown: true }]);
+      // Its file re-pointed by the office: now it reads changed, as the portal hides it.
+      await c.query("update public.documents set file_url = $2 where id = $1", [photo, `${orgId}/${jobA}/test-0326-state-photo-v2.jpg`]);
+      expect((await state()).filter((r) => r.document_id === photo)).toEqual([{ document_id: photo, still_shown: false }]);
+    } finally {
+      await c.query("rollback to savepoint photostate");
       await asServer();
     }
   });

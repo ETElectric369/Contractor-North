@@ -63,7 +63,16 @@
 -- SELF-CHECK: every portal job page that opens today is read before and after. The only change
 -- allowed is the new 'documents' key (empty today: production has no share rows). Plus the grants.
 --
--- ORDER: after 0300, 0301 and 0315 (all applied). Deploy-safe either way: the old app build keeps
+-- INTEGRATION (feat/portal-wave): 0323 (feat/portal-split) wrote job_shared_photo_state() over
+-- job_shared_photos. Renamed here, that name becomes the compatibility view: every live row of
+-- every kind, so a shown plan would read as a photo that "changed" and the office's Photos tab
+-- would say so. Section 5b rebuilds it from 0323's body (the file, applied in the same practice
+-- transaction; not live in production when this was written) to read job_shared_documents,
+-- photos only, live rows only, with the money-paper rule the portal now applies. A photo a newer
+-- paper REPLACES still reads as shown there: it did not change, and the Photos switch already says
+-- which paper stands in for it. Section 0 therefore refuses unless 0323 is applied first.
+--
+-- ORDER: after 0300, 0301 and 0315 (all applied), and after 0323. Deploy-safe either way: the old app build keeps
 -- working through the job_shared_photos view, and the new build reads the portal's documents block
 -- only when it is there (no section until then) and says "not ready" on the office's controls.
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -76,6 +85,10 @@ begin
   end if;
   if to_regprocedure('public.portal_job_view(text, uuid)') is null then
     raise exception '0326: portal_job_view (0301) is not on this database. Apply 0301 first. Nothing was changed.';
+  end if;
+  -- 0323 first: applied after this file, 0323 would put job_shared_photo_state back on the view.
+  if to_regprocedure('public.job_shared_photo_state(uuid)') is null then
+    raise exception '0326: job_shared_photo_state (0323) is not on this database. Apply 0323 first. Nothing was changed.';
   end if;
 end $$;
 
@@ -492,6 +505,39 @@ $$;
 revoke execute on function public.job_share_shows(uuid, uuid, uuid) from public, anon, authenticated;
 grant execute on function public.job_share_shows(uuid, uuid, uuid) to service_role;
 
+-- ── 5b. the office's Photos tab asks the same rows (0323's job_shared_photo_state, rebuilt) ─────
+-- 0323's body, with its source moved from job_shared_photos (now a view of every live paper) to
+-- job_shared_documents: photos only, live rows only. still_shown is job_share_shows() without its
+-- "replaced by a newer paper" clause: the file is the one shown, in the job's folder, the same
+-- stored version, still a Photo on this job, and not money paper. Same grants as 0323.
+create or replace function public.job_shared_photo_state(p_job_id uuid)
+returns table (document_id uuid, still_shown boolean)
+language sql stable security definer set search_path = public as $$
+  select s.document_id,
+         coalesce(
+           d.id is not null
+           and d.job_id = s.job_id
+           and d.org_id = s.org_id
+           and d.category = 'Photo'
+           and not public.document_is_money_paper(d.id)
+           and d.file_url = s.file_url_at_share
+           and d.file_url like (s.org_id::text || '/' || s.job_id::text || '/%')
+           and d.file_url !~ '\.\.'
+           and public.documents_object_version(d.file_url) is not distinct from s.object_version_at_share,
+           false) as still_shown
+    from public.job_shared_documents s
+    left join public.documents d on d.id = s.document_id
+   where s.job_id = p_job_id
+     and s.kind = 'photo'
+     and s.removed_at is null
+     and s.org_id = public.auth_org_id()
+     and public.is_org_staff();
+$$;
+comment on function public.job_shared_photo_state(uuid) is
+  'For each photo the office shows a customer on a job: does the customer''s page still show its file (0323, audit v994 PL4; 0326 reads job_shared_documents, photos and live rows only). Office staff of the caller''s own org only; a photo whose file changed after it was shown reads false.';
+revoke execute on function public.job_shared_photo_state(uuid) from public, anon;
+grant execute on function public.job_shared_photo_state(uuid) to authenticated, service_role;
+
 -- ── 6. the portal reads it ──────────────────────────────────────────────────────────────────────
 do $$
 declare
@@ -573,6 +619,10 @@ begin
      or has_function_privilege('anon', 'public.portal_job_view(text, uuid)', 'execute')
      or has_function_privilege('authenticated', 'public.portal_job_view(text, uuid)', 'execute') then
     raise exception '0326: a portal rule became callable without the service role. Nothing was changed.';
+  end if;
+  if position('job_shared_documents' in pg_get_functiondef('public.job_shared_photo_state(uuid)'::regprocedure)) = 0
+     or has_function_privilege('anon', 'public.job_shared_photo_state(uuid)', 'execute') then
+    raise exception '0326: job_shared_photo_state still reads the old name, or anon can call it. Nothing was changed.';
   end if;
   if not exists (select 1 from pg_trigger where tgrelid = 'public.documents'::regclass
                     and tgname = 'documents_keep_customer_share' and not tgisinternal) then

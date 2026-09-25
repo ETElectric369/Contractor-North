@@ -96,6 +96,10 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
     // Practice runs only (TEST_APPLY_PENDING=1): 0326 renames the share table and rewrites the
     // door; every case below must still hold through it, inside this rolled-back transaction.
     if (process.env.TEST_APPLY_PENDING === "1" && !(await one("select to_regclass('public.job_shared_documents') is not null as ok")).ok) {
+      // 0326 stands on 0323 (it rebuilds 0323's job_shared_photo_state): practice-run it first.
+      if (!(await one("select to_regprocedure('public.job_shared_photo_state(uuid)') is not null as ok")).ok) {
+        await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0323_the_portal_home_knows_the_running_bill.sql"), "utf8"));
+      }
       await c.query(fs.readFileSync(path.join(process.cwd(), "supabase", "migrations", "0326_the_customer_sees_the_latest_drawing.sql"), "utf8"));
     }
     ready = (

@@ -181,7 +181,9 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
     expect(await lookAs(() => as(staffId), photoState)).toEqual([{ document_id: photo, still_shown: true }]);
     await c.query("savepoint changed");
     try {
-      await c.query("update public.job_shared_photos set object_version_at_share = 'test-0323-other-file' where document_id = $1", [photo]);
+      // The document re-pointed at another file (as the server, which may): the share still names
+      // the file that was shown. Not a rewrite of the share row, which 0326's stamp pins.
+      await c.query("update public.documents set file_url = $2 where id = $1", [photo, `${orgId}/${jobA}/test-0323-other-file.jpg`]);
       expect(await lookAs(() => as(staffId), photoState)).toEqual([{ document_id: photo, still_shown: false }]);
     } finally {
       await c.query("rollback to savepoint changed");
