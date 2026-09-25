@@ -26,7 +26,7 @@ import { CedPdfPicker } from "./ced-pdf-picker";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
-import { loadBooks, matchesOnBooks } from "@/app/(app)/organize/paperwork-core";
+import { loadBooks, loadMarkContext, matchesOnBooks, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import {
@@ -159,6 +159,7 @@ export default async function BillsPage({
     { data: billLinkRows },
     { data: paperRows },
     books,
+    markCtx,
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -239,6 +240,8 @@ export default async function BillsPage({
       .limit(200),
     // Every printed number already on the books, for "Same Purchase: Tie Them".
     loadBooks(supabase, orgId),
+    // What a waiting paper names, matched again by today's rules (rematchTray: no model, no write).
+    loadMarkContext(supabase, orgId),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
 
@@ -330,7 +333,7 @@ export default async function BillsPage({
     paperUrls = await signDocumentUrls(supabase, papers.map((i) => i.file_url));
   };
   await Promise.all([signPaths(), readClaims(), signPapers()]);
-  const paperItems: PaperRowItem[] = papers.map((i) => ({ ...i, signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null }));
+  const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({ ...i, signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
   const activeStatuses = ACTIVE_JOB_STATUSES as readonly string[];
   const paperJobs = ((jobs ?? []) as { id: string; job_number: string; name: string; status?: string | null }[]).filter(

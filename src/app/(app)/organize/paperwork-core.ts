@@ -3,11 +3,13 @@ import "server-only";
 import { reportError } from "@/lib/observe";
 import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
   findSameNumber,
   jobFromPaperMarks,
   paperTypeOf,
+  rematchPaper,
   type MarkJob,
   type MarkPo,
   type PaperMarks,
@@ -205,6 +207,74 @@ export function cleanDocNumber(raw: unknown): string | null {
  */
 export const OPEN_JOBS_FOR_PAPER = 500;
 
+/** Everything the exact job match needs, read once: the open jobs, the org's POs, and who the
+ *  company itself is. */
+export type MarkContext = { markJobs: MarkJob[]; pos: MarkPo[]; selfNames: string[] };
+
+/**
+ * The open jobs (with their number, name, street and customer) for the exact match of what is
+ * printed on the paper (jobFromPaperMarks). The reader model never sees them (paperReaderSystem).
+ * The same open jobs, and as many, as the Organize row's picker offers (OPEN_JOBS_FOR_PAPER).
+ *
+ * Beside them, and never able to fail the read: this org's purchase orders (a printed PO number
+ * finds its job), and SELF NAMES, the company's own name and its people's (Erik, 2026-09-24: a CED
+ * ticket prints "ERIK TAYLOR" as who it was sold to, on every ticket, and that is never the
+ * customer). A read that fails is an empty list: no PO match, no names set aside.
+ */
+export async function loadMarkContext(supabase: any, orgId: string | null | undefined): Promise<MarkContext> {
+  let jq = supabase.from("jobs").select("id, job_number, name, address, customers(name, company_name)");
+  if (orgId) jq = jq.eq("org_id", orgId);
+  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
+  const rows = (jobs ?? []) as any[];
+  let pos: MarkPo[] = [];
+  let selfNames: string[] = [];
+  await Promise.all([
+    (async () => {
+      try {
+        let pq = supabase.from("purchase_orders").select("po_number, job_id");
+        if (orgId) pq = pq.eq("org_id", orgId);
+        const { data, error } = await pq.not("job_id", "is", null).limit(2000);
+        if (!error) pos = ((data ?? []) as MarkPo[]).filter((p) => p?.po_number && p?.job_id);
+      } catch {
+        pos = [];
+      }
+    })(),
+    (async () => {
+      if (!orgId) return;
+      try {
+        const { data, error } = await supabase.from("profiles").select("full_name, organizations(name)").eq("org_id", orgId).limit(500);
+        if (error) return;
+        const names = new Set<string>();
+        for (const r of (data ?? []) as any[]) {
+          if (r?.full_name) names.add(String(r.full_name));
+          const org = Array.isArray(r?.organizations) ? r.organizations[0] : r?.organizations;
+          if (org?.name) names.add(String(org.name));
+        }
+        selfNames = [...names];
+      } catch {
+        selfNames = [];
+      }
+    })(),
+  ]);
+  return {
+    markJobs: rows.map((j) => ({
+      id: String(j.id),
+      job_number: j.job_number ?? null,
+      name: j.name ?? null,
+      address: j.address ?? null,
+      customerNames: [j.customers?.name, j.customers?.company_name],
+    })),
+    pos,
+    selfNames,
+  };
+}
+
+/** Every waiting paper matched again from what it stored (rematchPaper): in memory, no model, no
+ *  write. */
+export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkContext): T[] {
+  return items.map((i) => rematchPaper(i, ctx.markJobs, ctx.pos, ctx.selfNames));
+}
+
 /**
  * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Drop Paperwork). It reads and classifies; it does
  * not decide where anything goes.
@@ -226,7 +296,7 @@ Respond with ONLY a JSON object (no prose):
   "title": short label, e.g. "Home Depot — $84.12" or "Note: call inspector Tuesday",
   "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
   "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
-  "po_number": a PO or customer order number printed on it, or null,
+  "po_number": what is printed or written in its PO, customer order or job box, copied exactly as it appears (a contractor often writes the job's name or street there instead of a number), or null,
   "line_items": receipts and bills ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] otherwise,
   "vendor": store/supplier name or null,
   "amount": total in dollars as a number, or null,
@@ -281,6 +351,7 @@ function marksOf(parsed: any): PaperMarks {
     jobNumber: s(m.job_number),
     customer: s(m.customer),
     po: s(parsed?.po_number),
+    hint: s(parsed?.job_hint),
   };
 }
 
@@ -289,6 +360,8 @@ export type ReaderOptions = {
   markJobs?: MarkJob[];
   /** This org's purchase orders, so a printed PO number finds its job. */
   pos?: MarkPo[];
+  /** The company's own name and its people's: never a customer or a job name on the paper. */
+  selfNames?: string[];
   /** A person answered "Bill Or Receipt" to "What is this?": it is a cost, whatever the model says. */
   personSaysCost?: boolean;
 };
@@ -336,7 +409,7 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   // the row as a chip, never picked. A bucket only for a cost the reader called overhead, never
   // Fees, never anything fee-shaped.
   const marks = marksOf(parsed);
-  const byMarks = jobFromPaperMarks(marks, opts.markJobs ?? [], opts.pos ?? []);
+  const byMarks = jobFromPaperMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? []);
   const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
   const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;
@@ -348,6 +421,8 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
     guessJobId: null,
     bucket: isCost && bucketRead && !feeShaped ? bucketRead : null,
     po: cleanDocNumber(parsed?.po_number),
+    // Kept, so the tray can match this paper again when the rules learn something (rematchPaper).
+    marks,
     ...(picture ? { picture: true } : {}),
   };
   return {

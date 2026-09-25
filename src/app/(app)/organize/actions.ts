@@ -4,7 +4,6 @@ import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { requireStaff } from "@/lib/staff-guard";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { modelFor, recordAiUsage } from "@/lib/ai-cost";
@@ -16,13 +15,15 @@ import { isSha256 } from "@/lib/content-hash";
 import {
   billCategoryFor,
   fileRefusal,
+  paperTypeLabel,
   paperTypeOfItem,
   pickedBecause,
   proposalOf,
   readinessOf,
-  type MarkJob,
-  type MarkPo,
+  rematchPaper,
+  storedMarks,
   type NumberMatch,
+  type PaperItem,
   type PaperProposal,
 } from "@/lib/paperwork";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
@@ -43,12 +44,12 @@ import {
   insertItemizedBill,
   insertPaperRow,
   loadBooks,
+  loadMarkContext,
   matchesOnBooks,
   paperReaderSystem,
   readerFields,
   tradeOf,
   updateItemTolerant,
-  OPEN_JOBS_FOR_PAPER,
 } from "./paperwork-core";
 
 export type Result = { ok: boolean; error?: string };
@@ -86,39 +87,6 @@ const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const READ_LIMIT = 8 * 1024 * 1024;
 
 /**
- * The open jobs (with their number, name, street and customer) for the exact match of what is
- * printed on the paper (jobFromPaperMarks). The model never sees them (paperReaderSystem). The same
- * open jobs, and as many, as the Organize row's picker offers (OPEN_JOBS_FOR_PAPER). One read of
- * jobs; the purchase orders ride beside it, and a PO read that fails is no PO match, never a
- * failed read.
- */
-async function readerJobs(supabase: any, orgId: string | null): Promise<{ markJobs: MarkJob[]; pos: MarkPo[] }> {
-  let jq = supabase.from("jobs").select("id, job_number, name, address, customers(name, company_name)");
-  if (orgId) jq = jq.eq("org_id", orgId);
-  const { data: jobs } = await jq.in("status", ACTIVE_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
-  const rows = (jobs ?? []) as any[];
-  let pos: MarkPo[] = [];
-  try {
-    let pq = supabase.from("purchase_orders").select("po_number, job_id");
-    if (orgId) pq = pq.eq("org_id", orgId);
-    const { data, error } = await pq.not("job_id", "is", null).limit(2000);
-    if (!error) pos = ((data ?? []) as MarkPo[]).filter((p) => p?.po_number && p?.job_id);
-  } catch {
-    pos = [];
-  }
-  return {
-    markJobs: rows.map((j) => ({
-      id: String(j.id),
-      job_number: j.job_number ?? null,
-      name: j.name ?? null,
-      address: j.address ?? null,
-      customerNames: [j.customers?.name, j.customers?.company_name],
-    })),
-    pos,
-  };
-}
-
-/**
  * READ ONE PAPER INTO ITS ROW, AND STOP THERE (Erik, 2026-09-24: "Organize photos wait for File
  * It").
  *
@@ -141,7 +109,7 @@ async function readInto(
   opts: { personSaysCost?: boolean } = {},
 ): Promise<OrganizedResult> {
   const supabase = ctx.supabase;
-  const { markJobs, pos } = await readerJobs(supabase, ctx.orgId);
+  const { markJobs, pos, selfNames } = await loadMarkContext(supabase, ctx.orgId);
 
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
   if (dlErr || !blob) {
@@ -198,7 +166,7 @@ async function readInto(
     return { ok: false, error: `${e?.message ?? "AI could not read this file."} It is saved and waiting; press Read Now to try again.` };
   }
 
-  const f = readerFields(parsed, file.name, { markJobs, pos, personSaysCost: opts.personSaysCost });
+  const f = readerFields(parsed, file.name, { markJobs, pos, selfNames, personSaysCost: opts.personSaysCost });
   // A picture never keeps itself as a note: it waits for a person to say what it is.
   const keepsItself = f.kind === "note" && f.amount === null && !opts.personSaysCost && !f.proposal.picture;
   const { error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
@@ -1261,9 +1229,23 @@ export async function unarchiveItem(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
- *  bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
- *  or keep a reference note. Returns what it did. */
+/**
+ * Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
+ * bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
+ * or keep a reference note. Returns what it did.
+ *
+ * THE RULES GO FIRST, THE MODEL ONLY FOR WHAT THEY CANNOT SETTLE (Erik, 2026-09-24: a CED sales
+ * order with "13897 HERRINGBONE" in its PO box came back from AI Suggest, in a red box, as
+ * "Materials receipt lacks a job reference"). The model was handed the title and a one-line
+ * summary and nothing the reader had already copied off the paper: not the PO, not the hint, not
+ * the lines, and only 40 jobs. Now:
+ *   · the exact match (rematchPaper, the same rules the tray runs) is asked first; a paper that
+ *     names one open job answers with that job and why, and no model is called;
+ *   · otherwise the model sees everything the reader found (type, vendor, total, number, PO, hint,
+ *     marks, lines) and every open job the picker offers (number, name, street, customer), with
+ *     the company's own names marked as never the customer;
+ *   · "nothing to suggest" is an answer, said as a plain note, never styled as an error.
+ */
 export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: string }> {
   const supabase = await createClient();
   const {
@@ -1273,18 +1255,60 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
   if (!item) return { ok: false, message: "Item not found." };
 
-  const { data: jobs } = await supabase
-    .from("jobs")
-    .select("id, job_number, name, address, customers(name)")
-    .in("status", ACTIVE_JOB_STATUSES)
-    .order("created_at", { ascending: false })
-    .limit(40);
-  const jobList = (jobs ?? []).map((j: any) => ({
-    id: j.id,
-    label: `${j.job_number} — ${j.name}${j.customers?.name ? ` (${j.customers.name})` : ""}${j.address ? `, ${j.address}` : ""}`,
-  }));
-
   const orgId = (item as { org_id?: string }).org_id ?? null;
+  const { markJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
+  const jobLabelOf = (jobId: string) => {
+    const j = markJobs.find((x) => x.id === jobId);
+    return j ? `${j.job_number ?? ""}${j.name ? ` ${j.name}` : ""}`.trim() || "that job" : "that job";
+  };
+
+  // THE PAPER FIRST: the same exact rules the tray runs. Nothing is written; the tray shows the
+  // pick from the same rules on every load.
+  const settled = rematchPaper(item as PaperItem, markJobs, pos, selfNames);
+  const sp = proposalOf(settled);
+  const paperJob = sp.jobId && sp.jobFrom && !sp.jobConflict && markJobs.some((j) => j.id === sp.jobId) ? sp.jobId : null;
+  if (paperJob) {
+    const because = pickedBecause(settled);
+    return {
+      ok: true,
+      message: `The paper names the job: ${jobLabelOf(paperJob)}.${because ? ` ${because}.` : ""} It's picked on the row; press File It if that's right.`,
+    };
+  }
+
+  const p = proposalOf(item);
+  const marks = storedMarks(p);
+  const fact = (label: string, v: unknown) => {
+    const t = String(v ?? "").trim();
+    return t ? `${label}: ${t}` : null;
+  };
+  const lines = Array.isArray((item as { line_items?: unknown }).line_items) ? ((item as { line_items: any[] }).line_items as any[]) : [];
+  const paperFacts = [
+    fact("Paper type", paperTypeLabel(paperTypeOfItem(item))),
+    fact("Title", item.title),
+    fact("Vendor", item.vendor),
+    fact("Total", item.amount),
+    fact("Date", item.item_date),
+    fact("Number printed on it", item.doc_number),
+    fact("PO / job box", marks.po),
+    fact("Job words the reader found", marks.hint),
+    fact("Address on it", marks.address),
+    fact("Job name on it", marks.jobName),
+    fact("Job number on it", marks.jobNumber),
+    fact("Customer on it", marks.customer),
+    sp.jobConflict ? `Note: ${sp.jobConflict}` : null,
+    fact("What it is", item.summary),
+    lines.length
+      ? `Lines:\n${lines
+          .slice(0, 40)
+          .map((l) => `- ${String(l?.description ?? "").slice(0, 120)}${l?.amount != null ? ` ($${l.amount})` : ""}`)
+          .join("\n")}`
+      : null,
+  ].filter(Boolean);
+  const jobLines = markJobs.map((j) => {
+    const customer = (j.customerNames ?? []).filter(Boolean).join(" / ");
+    return `${j.id} — ${j.job_number ?? ""} ${j.name ?? ""}${j.address ? `; address: ${j.address}` : ""}${customer ? `; customer: ${customer}` : ""}`;
+  });
+
   const trade = await tradeOf(supabase, orgId);
   let parsed: any;
   try {
@@ -1303,21 +1327,21 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   "task_category": "office" | "operations" | "sales",
   "reason": one short sentence
 }
-Rules: "file_job" ONLY if the content clearly points to a job in the list. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
-
-Jobs (id — label):
-${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
+Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "13897 HERRINGBONE" is the job at 13897 Herringbone Way), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+${selfNames.length ? `These names are the company itself and its people, printed as who the paper was sold to; they are never the customer or the job: ${selfNames.join(", ")}.\n` : ""}
+Open jobs (id — number name; address; customer):
+${jobLines.join("\n") || "(none)"}`,
       messages: [
         {
           role: "user",
-          content: `kind=${item.kind}; title="${item.title}"; amount=${item.amount ?? "none"}; vendor=${item.vendor ?? "none"}. Content: ${item.summary ?? item.title}`,
+          content: `kind=${item.kind}\n${paperFacts.join("\n")}`,
         },
       ],
     });
     // METER (0162): receipt/document reads are a real cost centre, not just chat.
-    void recordAiUsage({ orgId: (item as { org_id?: string }).org_id, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
+    void recordAiUsage({ orgId, model: (msg as { model?: string }).model ?? DEFAULT_MODEL, surface: "organize", usage: msg.usage as never });
     const block = msg.content.find((b) => b.type === "text") as { text: string } | undefined;
-    parsed = await parseAiJson(client, block?.text ?? "", (item as { org_id?: string }).org_id);
+    parsed = await parseAiJson(client, block?.text ?? "", orgId);
   } catch (e: any) {
     return {
       ok: false,
@@ -1343,8 +1367,8 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
     // A GUESS, NOT A PICK (Erik, 2026-09-24). A job it likes is written as guessJobId: a chip on
     // the row a person can tap, never the picker's value. Only what is printed on the paper picks
     // a job (jobId + jobFrom, from the reader), and a model's second look never overwrites that.
-    if (action === "file_job" && jobList.some((j) => j.id === parsed.job_id)) {
-      const label = jobList.find((j) => j.id === parsed.job_id)?.label;
+    if (action === "file_job" && markJobs.some((j) => j.id === parsed.job_id)) {
+      const label = jobLabelOf(String(parsed.job_id));
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, why: reason || null },
       });
@@ -1375,7 +1399,7 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
         };
       if (cat === "Fees" || looksLikeSupplierFee(item.title, item.vendor, item.summary))
         return {
-          ok: false,
+          ok: true,
           message:
             "This looks like a fee or a supplier's late charge, so nothing was suggested. A supplier's late interest comes in with that supplier's own paperwork. If it is a different fee, pick Business Cost: Fees yourself.",
         };
@@ -1425,7 +1449,12 @@ ${jobList.map((j) => `${j.id} — ${j.label}`).join("\n") || "(none)"}`,
       revalidatePath("/organize");
       return { ok: true, message: `Kept as a note in your archive. ${reason}`.trim() };
     }
-    return { ok: false, message: reason || "Not sure where this goes — pick a destination yourself." };
+    // NOTHING TO SUGGEST IS AN ANSWER, NOT A FAILURE (Erik, 2026-09-24): said as a plain note on the
+    // row, never in the red box an error gets.
+    return {
+      ok: true,
+      message: `No suggestion. ${reason || "Nothing on this paper points to one job or a business cost."} Pick where it goes yourself.`.trim(),
+    };
   } catch (e: any) {
     return { ok: false, message: e?.message ?? "Couldn't apply the suggestion." };
   }
