@@ -70,7 +70,7 @@ export async function emailPortalLink(customerId: string): Promise<ActionResult>
     company: { name: org?.name ?? "Contractor North", brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint), phone: org?.phone, email: org?.email },
     customerName: c.name,
     heading: "Your customer portal",
-    message: "Here's your private link to view your invoices, contracts, quotes, and project status anytime — no password needed. Bookmark it for easy access.",
+    message: "Here's your private link to your jobs: the work and payments day by day, your picks and photos, and your invoices, contracts and quotes. It's up to date every time you open it, no password needed. Bookmark it for easy access.",
     cta: { label: "Open my portal", link },
   });
   const res = await sendEmail({

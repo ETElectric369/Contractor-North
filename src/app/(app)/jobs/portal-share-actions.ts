@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { normalizePick, normalizeStretch, type PickPatch } from "@/lib/portal/share-input";
+import { getOrgSettings, orgDocUrl } from "@/lib/org-settings";
 
 /**
  * THE OFFICE'S CONTROLS FOR WHAT THE CUSTOMER SEES ON A JOB (0300): the stretches of work, the
@@ -390,4 +391,39 @@ export async function jobShareState(jobId: string): Promise<
     brands: [...brandSet.values()].sort((a, b) => a.localeCompare(b)),
     options,
   };
+}
+
+// ── the office's own look at the customer's job page ───────────────────────────────────────────
+
+/**
+ * The link to this job's page as the customer opens it, for the office's See What They See and
+ * Copy The Link. Office only: the token lives in customer_portal_access (0298), which a tech's
+ * session reads nothing from, and requireStaff refuses before it is asked. The link is built on the
+ * org's own public host (orgDocUrl), the same host the portal email sends.
+ */
+export async function jobPortalLink(jobId: string): Promise<
+  | { ok: true; url: string | null; enabled: boolean; customerId: string | null; customerName: string | null }
+  | { ok: false; error: string }
+> {
+  const s = await staff();
+  if ("error" in s) return { ok: false, error: s.error };
+  if (!UUID.test(jobId)) return { ok: false, error: "That job isn't in your book." };
+  const { data: job } = await s.supabase
+    .from("jobs")
+    .select("id, customer_id, customers(name)")
+    .eq("id", jobId)
+    .eq("org_id", s.orgId)
+    .maybeSingle();
+  const j = job as { id: string; customer_id: string | null; customers: { name: string | null } | null } | null;
+  if (!j) return { ok: false, error: "That job isn't in your book." };
+  if (!j.customer_id) return { ok: true, url: null, enabled: false, customerId: null, customerName: null };
+  const [{ data: access }, { data: org }] = await Promise.all([
+    s.supabase.from("customer_portal_access").select("token, enabled").eq("customer_id", j.customer_id).eq("org_id", s.orgId).maybeSingle(),
+    s.supabase.from("organizations").select("settings").eq("id", s.orgId).maybeSingle(),
+  ]);
+  const a = access as { token: string; enabled: boolean } | null;
+  const url = a?.token
+    ? `${orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "portal", a.token)}/jobs/${j.id}`
+    : null;
+  return { ok: true, url, enabled: !!a?.enabled, customerId: j.customer_id, customerName: j.customers?.name ?? null };
 }
