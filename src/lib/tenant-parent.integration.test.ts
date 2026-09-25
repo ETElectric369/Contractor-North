@@ -107,8 +107,8 @@ d("a row names only its own org's parent (0339, 0340)", () => {
     expect(await refused("insert into bills (supplier, amount, job_id) values ('TEST 0340', 1, $1)", [theirJob])).toBe("42501");
     expect(await refused("insert into documents (name, job_id) values ('TEST 0340', $1)", [myJob])).toBeNull();
     expect(await refused("insert into documents (name, job_id) values ('TEST 0340', $1)", [theirJob])).toBe("42501");
-    expect(await refused("insert into organized_items (job_id, created_by) values ($1, $2)", [myJob, staffId])).toBeNull();
-    expect(await refused("insert into organized_items (job_id, created_by) values ($1, $2)", [theirJob, staffId])).toBe("42501");
+    expect(await refused("insert into organized_items (job_id, created_by, title) values ($1, $2, 'TEST 0340')", [myJob, staffId])).toBeNull();
+    expect(await refused("insert into organized_items (job_id, created_by, title) values ($1, $2, 'TEST 0340')", [theirJob, staffId])).toBe("42501");
     await asServer();
   });
 });
