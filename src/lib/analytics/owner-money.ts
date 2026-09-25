@@ -5,6 +5,7 @@ import { attachRates, payRateMapRead, type PayRates } from "@/lib/profile-column
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytics/money-metrics";
+import { isMissingShelf } from "@/lib/job-cost";
 
 /**
  * LEFT FOR YOU: what the business kept for its owner (migration 0286's other half).
@@ -15,6 +16,7 @@ import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytic
  * what is left for him. That one subtraction, done honestly, is this module.
  *
  *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - business_costs
+ *               - put_on_the_shelf - shop_stock_lost
  *
  * EVERY LINE COMES FROM A RULE THAT ALREADY EXISTS, never a new definition:
  *   · received          = computeCollected (money-metrics), the /analytics "Collected" rule:
@@ -29,6 +31,15 @@ import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytic
  *                         when money was handed over. See THE FROZEN-GROSS RULE below.
  *   · crew mileage      = human-typed settlement amounts only (kind='mileage' runs, 0095). Never a
  *                         rate times miles, and never folded into crew pay (the two-bucket law).
+ *   · put on the shelf  = SHOP STOCK (0303, Erik's decision 1, 2026-09-24): a ticket bought for the
+ *                         shelf (bills.on_shelf), and the part of a job's ticket that went on the
+ *                         shelf (its live lots' cost), count in the MONTH THE TICKET IS DATED - the
+ *                         cash is already gone - never in Materials & Bills or a business bucket.
+ *                         A piece taken off the shelf later moves cost onto a job's PROFIT only; it
+ *                         never adds to a month again. "On The Shelf Now" rides beside it.
+ *   · shop stock lost   = the part of those same rolls written off or counted short, shown in the
+ *                         roll's month instead of Put On The Shelf. The month's total does not
+ *                         move (the cash went when the roll was bought); only its name does.
  *   · business costs    = bills and petty cash with no job, in the six buckets
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
@@ -41,7 +52,8 @@ import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytic
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
  * existing readers use, so the chart the next build puts on top of this cannot disagree with the
  * card. Everything is summed in integer CENTS so the invariant holds to the cent, per month and in
- * total: received = materials_and_bills + crew_pay + crew_mileage_paid + business_costs + left.
+ * total: received = materials_and_bills + crew_pay + crew_mileage_paid + business_costs
+ *                   + put_on_the_shelf + shop_stock_lost + left.
  */
 
 // ── Windows ──────────────────────────────────────────────────────────────────
@@ -194,6 +206,10 @@ export type OwnerMoneyFigures = {
   businessCostsTotal: number;
   /** Stripe's real card/bank fees on payments received in the period (already inside Fees). */
   processorFees: number;
+  /** Shop stock bought in the period (0303): on-shelf tickets, and the shelf's part of job tickets. */
+  putOnShelf: number;
+  /** The part of those rolls since written off or counted short (0303), in the roll's month. */
+  shopStockLost: number;
   left: number;
   ownerHours: number;
   /** left / ownerHours, or null when the owner logged no hours. */
@@ -219,6 +235,9 @@ export type OwnerMoney = {
   caveats: OwnerMoneyCaveat[];
   /** The owners whose hours are counted (paid by owner's draw). */
   owners: { id: string; name: string }[];
+  /** What is on the shelf right now, at cost (every live lot's dollars left). Not a window
+   *  figure: it is the shelf as of the read, shown beside Put On The Shelf. */
+  onShelfNow: number;
 };
 
 export type OwnerMoneyPerson = { name: string; paidByDraw: boolean; hourlyRate: number | null };
@@ -259,6 +278,9 @@ export type OwnerMoneyInputs = {
   /** supplier_invoices whose kind is 'service_charge' and that no bill covers: late interest the
    *  supplier charged that is not on the books as a cost. total, invoice_date, created_at. */
   unbilledServiceCharges?: any[];
+  /** stock_lot_balance rows (0303): lot_id, bill_id, cost, cost_left, lost_cost, live. Every lot,
+   *  so a roll's lost part and the shelf's value now come from the same read. Absent = no lots. */
+  shelfLots?: any[];
 };
 
 // ── Arithmetic helpers (cents) ───────────────────────────────────────────────
@@ -317,9 +339,11 @@ type Acc = {
   mileage: number;
   buckets: Record<BusinessCostBucket, number>;
   fees: number;
+  shelf: number;
+  lost: number;
   ownerHours: number; // hundredths of an hour, summed from hoursBetween's 2-decimal hours
 };
-const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, ownerHours: 0 });
+const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, ownerHours: 0 });
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
 /**
@@ -470,12 +494,40 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     }
   }
 
-  // MATERIALS & BILLS: exactly the job-cost inputs job profit uses.
+  // THE SHELF'S PART OF EACH TICKET (0303): its live rolls' cost, and what of them was since lost.
+  const shelfByBill = new Map<string, { cost: number; lost: number }>();
+  let onShelfNow = 0;
+  for (const l of inp.shelfLots ?? []) {
+    if (!l || l.live === false) continue;
+    onShelfNow += toCents(l.cost_left);
+    if (!l.bill_id) continue;
+    const s = shelfByBill.get(String(l.bill_id)) ?? { cost: 0, lost: 0 };
+    s.cost += toCents(l.cost);
+    s.lost += toCents(l.lost_cost);
+    shelfByBill.set(String(l.bill_id), s);
+  }
+
+  // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
+  // which is Put On The Shelf in the same month (decision 1: the month the ticket is dated).
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
+  const shelfPart = (b: any, a: Acc): number => {
+    const s = shelfByBill.get(String(b.id));
+    if (b.on_shelf === true) {
+      // A ticket bought for the shelf is the shelf's, all of it; its lost rolls are named as lost.
+      const lost = s?.lost ?? 0;
+      a.shelf += toCents(b.amount) - lost;
+      a.lost += lost;
+      return toCents(b.amount);
+    }
+    if (!s) return 0;
+    a.shelf += s.cost - s.lost;
+    a.lost += s.lost;
+    return s.cost;
+  };
   for (const b of liveBills) {
     if (!b.job_id) continue;
     const a = at(monthOfDay(recordDay(b.bill_date, b.created_at, tz)));
-    if (a) a.materials += toCents(b.amount);
+    if (a) a.materials += toCents(b.amount) - shelfPart(b, a);
   }
   // Live POs over ALL live bills: a PO is superseded by its bill whatever month the bill is in.
   for (const p of livePurchaseOrders((inp.pos ?? []) as any[], liveBills as any[])) {
@@ -490,11 +542,15 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     if (pc.job_id) a.materials += toCents(pc.amount);
     else a.buckets[bucketOf(pc.category)] += toCents(pc.amount);
   }
-  // BUSINESS COSTS: bills with no job, in their bucket.
+  // BUSINESS COSTS: bills with no job, in their bucket - except a ticket bought for the shelf,
+  // which is never a business cost (bucketOf would call its category "Other").
   for (const b of liveBills) {
     if (b.job_id) continue;
     const a = at(monthOfDay(recordDay(b.bill_date, b.created_at, tz)));
-    if (a) a.buckets[bucketOf(b.category)] += toCents(b.amount);
+    if (!a) continue;
+    const rest = toCents(b.amount) - shelfPart(b, a);
+    if (b.on_shelf === true) continue;
+    a.buckets[bucketOf(b.category)] += rest;
   }
 
   // CREW PAY: earned, by the month the hours were worked (the frozen-gross rule above).
@@ -535,7 +591,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     const buckets = { ...a.buckets };
     buckets.Fees += a.fees;
     const bizCents = BUSINESS_COST_BUCKETS.reduce((s, b) => s + buckets[b], 0);
-    const leftCents = a.received - a.materials - a.crewPay - a.mileage - bizCents;
+    const leftCents = a.received - a.materials - a.crewPay - a.mileage - bizCents - a.shelf - a.lost;
     const hours = a.ownerHours / 100;
     return {
       received: fromCents(a.received),
@@ -545,6 +601,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
       businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, fromCents(buckets[b])])) as BucketAmounts,
       businessCostsTotal: fromCents(bizCents),
       processorFees: fromCents(a.fees),
+      putOnShelf: fromCents(a.shelf),
+      shopStockLost: fromCents(a.lost),
       left: fromCents(leftCents),
       ownerHours: hours,
       perOwnerHour: hours > 0 ? Math.round((leftCents / 100 / hours) * 100) / 100 : null,
@@ -557,6 +615,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     total.crewPay += a.crewPay;
     total.mileage += a.mileage;
     total.fees += a.fees;
+    total.shelf += a.shelf;
+    total.lost += a.lost;
     total.ownerHours += a.ownerHours;
     for (const b of BUSINESS_COST_BUCKETS) total.buckets[b] += a.buckets[b];
   }
@@ -655,6 +715,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     months: months.map((m) => ({ month: m, ...figures(acc.get(m)!) })),
     caveats,
     owners: [...owners.values()],
+    onShelfNow: fromCents(onShelfNow),
   };
 }
 
@@ -802,7 +863,7 @@ export async function readOwnerMoneyInputs(
   // A locked period can start up to a month before the window and still spread pay into it.
   const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -823,15 +884,8 @@ export async function readOwnerMoneyInputs(
         .range(f, t),
     ),
     // Every live bill (0271: a superseded one is a duplicate): the window's are costs, and every
-    // one of them can supersede a purchase order.
-    readEvery<any>("bills", (f, t) =>
-      supabase
-        .from("bills")
-        .select("id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id")
-        .is("superseded_by_bill_id", null)
-        .order("id")
-        .range(f, t),
-    ),
+    // one of them can supersede a purchase order. on_shelf (0303) says a ticket is the shelf's.
+    readBills(supabase),
     readEvery<any>("purchase orders", (f, t) =>
       supabase.from("purchase_orders").select("id, job_id, total, status, ordered_at, created_at").order("id").range(f, t),
     ),
@@ -881,10 +935,12 @@ export async function readOwnerMoneyInputs(
       supabase.from("payments").select("paid_at").order("paid_at", { ascending: true }).limit(1),
       supabase.from("time_entries").select("clock_in").order("clock_in", { ascending: true }).limit(1),
     ]),
+    // THE SHELF (0303): every lot, for the shelf's part of each ticket and what is on it now.
+    readShelfLots(supabase),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos].map((r) => r.problem).find(Boolean) ??
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots].map((r) => r.problem).find(Boolean) ??
     ratesRead.problem ??
     ((names as any)?.error ? "the names could not be read" : null);
   if (problem) return { inputs: null, problem };
@@ -921,7 +977,58 @@ export async function readOwnerMoneyInputs(
       people,
       recordsStart,
       firstPaymentDay,
+      shelfLots: shelfLots.rows,
     },
     problem: null,
   };
+}
+
+/**
+ * Every live bill, with on_shelf (0303). A database the migration has not reached yet has no such
+ * column, and there no ticket can be the shelf's: the read falls back to the columns before it,
+ * the same deploy-window shape as readJobBillsWithLines. Any other failure is a lost read.
+ */
+async function readBills(supabase: any): Promise<{ rows: any[]; problem: string | null }> {
+  const cols = "id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id";
+  let withShelf = true;
+  const out: any[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from("bills")
+      .select(withShelf ? `${cols}, on_shelf` : cols)
+      .is("superseded_by_bill_id", null)
+      .order("id")
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) {
+      // Only the column not being there yet earns a second try, and only before any row was read.
+      if (withShelf && from === 0 && isMissingShelf(error)) {
+        withShelf = false;
+        i -= 1;
+        continue;
+      }
+      return { rows: [], problem: "the bills could not be read" };
+    }
+    if (!Array.isArray(data)) return { rows: [], problem: "the bills could not be read" };
+    if (!data.length) return { rows: out, problem: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], problem: "there are too many bills to read at once" };
+}
+
+/** Every lot's balance. No view yet (a database before 0303) means no lots, never a lost read. */
+async function readShelfLots(supabase: any): Promise<{ rows: any[]; problem: string | null }> {
+  const out: any[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from("stock_lot_balance")
+      .select("lot_id, bill_id, cost, cost_left, lost_cost, live")
+      .order("lot_id")
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) return isMissingShelf(error) ? { rows: [], problem: null } : { rows: [], problem: "the shop stock could not be read" };
+    if (!Array.isArray(data) || !data.length) return { rows: out, problem: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], problem: "there is too much shop stock to read at once" };
 }

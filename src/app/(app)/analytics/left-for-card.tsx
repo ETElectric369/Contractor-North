@@ -89,6 +89,10 @@ export function LeftForCard({
               {row("Materials & Bills", cost(t.materialsAndBills))}
               {row("Crew Pay", cost(t.crewPay))}
               {Math.abs(t.crewMileagePaid) >= 0.005 && row("Crew Mileage", cost(t.crewMileagePaid))}
+              {/* SHOP STOCK (0303, decision 1): what was bought for the shelf counts in the month it
+                  was bought, because the cash is already gone. Said only when there is some. */}
+              {Math.abs(t.putOnShelf) >= 0.005 && row("Put On The Shelf", cost(t.putOnShelf))}
+              {Math.abs(t.shopStockLost) >= 0.005 && row("Shop Stock Lost", cost(t.shopStockLost))}
               <details className="group">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-4 py-1.5 [&::-webkit-details-marker]:hidden">
                   <span className="flex items-center gap-1 text-sm text-slate-600">
@@ -127,6 +131,13 @@ export function LeftForCard({
                 </p>
               )}
             </div>
+
+            {(Math.abs(money.onShelfNow) >= 0.005 || Math.abs(t.putOnShelf) >= 0.005) && (
+              <p className="mt-3 text-xs text-slate-500">
+                On The Shelf Now: {formatCurrency(money.onShelfNow)} at cost. It moves onto a job&apos;s profit as pieces are taken,
+                and never counts against the draw twice.
+              </p>
+            )}
 
             {(notCounted || countedNotPaid) && (
               <p className="mt-3 text-xs leading-relaxed text-slate-400">

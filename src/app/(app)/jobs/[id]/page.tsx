@@ -82,6 +82,7 @@ import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount"
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
+import { readJobShelfNet, splitJobMaterialCost } from "@/lib/job-cost";
 import type { Customer } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -167,6 +168,10 @@ export default async function JobDetailPage({
   if (jobErr) throw jobErr; // a real failure shouldn't masquerade as 404
   if (!job) notFound();
   const j = job as any;
+
+  // THE SHELF'S PART OF THIS JOB'S MATERIALS (Shop Stock, 0303), started beside the reads below.
+  // Staff only through RLS: a tech reads no rows here, and reads no bills either.
+  const shelfNetP = readJobShelfNet(supabase, id);
 
   const [
     { data: quotes },
@@ -559,11 +564,19 @@ export default async function JobDetailPage({
    * pay for the Kettle Chips and for the whole box of wire nuts, whoever ends up using them. So
    * the full amount stands here, and the gap between the two numbers is real rather than a bug.
    *
-   * The open question Erik has not answered yet is the shelf: the unused $88 of a wire-nut box is
-   * on the job that bought it and belongs to the van. That is a stock-ledger decision, his to
-   * make, and not something this line should quietly pre-empt by netting it off.
+   * THE SHELF IS THE ONE EXCEPTION, AND IT IS NOT A NETTING (Shop Stock, 0303). What went on the
+   * shelf from this job's tickets was bought for the van, not for this job, so its cost comes off
+   * here and lands on whichever job takes the pieces, at what they cost: job material cost =
+   * tickets - off_shelf + from_shelf (src/lib/job-cost.ts, the same view /analytics and Nort
+   * read). With nothing on the shelf, that is the tickets' total to the cent, as it always was.
    */
-  const billsCost = (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0);
+  const shelf = await shelfNetP;
+  if (shelf.error) throw shelf.error;
+  const jobMaterials = splitJobMaterialCost(
+    (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0),
+    shelf.byJob.get(id),
+  );
+  const billsCost = jobMaterials.total;
   // Billable work to date + the progress rollups — via the extracted computeJobProgress
   // SSOT (the exact rollup the draw modal / print report use: estimate = accepted contract
   // via contractTotalFromQuotes, invoiced = non-void non-draft, collected = non-void
@@ -1176,7 +1189,17 @@ export default async function JobDetailPage({
                     <div><div className="text-base font-semibold text-slate-700">{formatDuration(ownerHours)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{ownerVoice.hoursLabel}</div></div>
                   )}
                   <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div></div>
+                  <div>
+                    <div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div>
+                    {/* Said only when the shelf touched this job: its own tickets less what went on
+                        the shelf, and what it took from the shelf. */}
+                    {jobMaterials.shelfTouched && (
+                      <div className="text-[11px] text-slate-500">
+                        Tickets {formatCurrency(jobMaterials.tickets)} · From Stock {formatCurrency(jobMaterials.fromStock)}
+                      </div>
+                    )}
+                  </div>
                   {Math.abs(pettyCost) > 0.005 && (
                     <div><div className="text-base font-semibold text-slate-700">{formatCurrency(pettyCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Petty Cash</div></div>
                   )}

@@ -156,12 +156,9 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   }
 
   /**
-   * Save what this job used, or put the whole line back on the bill (`billedAmount` null).
-   *
-   * The shelf can fail while the money succeeds - stockFromReceiptLine refuses a line it has
-   * already counted, so a second save moves the dollars and adds nothing to the van. That refusal
-   * comes back as a `note` and it is SAID, not swallowed: the money moved, and he is told exactly
-   * what did not.
+   * Save what this job used, or put the whole line back on the bill (`billedAmount` null). This
+   * moves the MONEY only (0303): the shelf is its own door now, and a `note` from the server, if
+   * one ever comes back, is SAID, not swallowed.
    */
   function saveUsage(
     line: ReceiptBillingLine,
@@ -174,7 +171,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   ) {
     setOverrides((o) => ({
       ...o,
-      [line.id]: { ...o[line.id], billedAmount: next.billedAmount, isStock: next.billedAmount != null || line.isStock },
+      [line.id]: { ...o[line.id], billedAmount: next.billedAmount },
     }));
     setEditing(null);
     start(async () => {
@@ -202,7 +199,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
         <p className="mt-0.5 text-sm text-slate-500">
           Every line off a scanned receipt, and whether it lands on the customer&apos;s invoice. Snacks and
           drinks start out on you. Everything else, tools included, starts out billed. A box or a spool you
-          bought whole can bill just what this job used, and the rest goes in your stock.
+          bought whole can bill just what this job used, and the rest is not billed to this customer.
         </p>
       </div>
 
@@ -328,7 +325,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
                                   ) : part == null ? (
                                     <span className="text-slate-400">Billed to the customer</span>
                                   ) : part === 0 ? (
-                                    <span className="font-medium text-sky-700">In your stock, none billed here</span>
+                                    <span className="font-medium text-sky-700">{l.isStock ? "On the shelf, none billed here" : "None of it billed here"}</span>
                                   ) : (
                                     <span className="font-medium text-sky-700">
                                       {formatCurrency(part)} of it billed to this job
@@ -688,25 +685,19 @@ function UsedOnThisJob({
           <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
             This job is billed {formatCurrency(amount)} of {formatCurrency(cost)}, with your markup on top. The other{" "}
             {formatCurrency(round2(cost - amount))}{" "}
-            {/* COPY MUST NOT PROMISE A BUTTON THAT DOES NOT EXIST — or a shelf that does not get
-                stocked. Stock is counted in units, so with no container count there is nothing to
-                put on it and this sentence must not say otherwise. It says what happens instead,
-                and how to get the other thing, which is the difference between a limit and a dead
-                end. */}
-            {pieces > 0
-              ? "goes in your stock."
-              : "stays on you. Say how many are in one of them and it goes in your stock instead."}
+            {/* COPY MUST NOT PROMISE A SHELF THAT DOES NOT GET STOCKED (0303). This door moves the
+                money only; putting the rest on the shelf, with its pieces and its cost, is its own
+                door. So the sentence says what this save does, and nothing it does not. */}
+            is not billed to this customer.
           </p>
         )}
 
         {line.isStock && (
-          /* Said once, where the second save happens. The shelf count is only added the first
-             time - there is no stock movement ledger yet, so a later change moves the money and
-             leaves the count where a person put it. Telling him it also fixed his stock would be
-             the promise this app does not make. */
+          /* A roll from this line is on the shelf (0303: is_stock is true only while one is). The
+             split moves what the customer is billed; once pieces of the roll are on a job, the
+             database refuses a change here and says which takes to undo first. */
           <p className="text-xs text-slate-500">
-            This container is already counted in your stock. Changing the split here moves what the customer
-            is billed; the count on the shelf stays as it is.
+            Part of this line is on the shelf. Changing the split here moves what the customer is billed.
           </p>
         )}
       </div>

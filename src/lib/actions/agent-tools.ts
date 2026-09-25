@@ -70,10 +70,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "inquiry.contact",
   "inquiry.convert",
   "permit.create",
-  // Mycelium: the office/field nodes — log petty cash (confirm-gated, money), adjust stock,
-  // log a safety record. All reversible tier-1 except pettyCash.add (confirm:financial).
+  // Mycelium: the office/field nodes — log petty cash (confirm-gated, money), log a safety
+  // record. All reversible tier-1 except pettyCash.add (confirm:financial). (inventory.adjust was
+  // retired with 0303: the shelf's count is its own record's, never a typed delta.)
   "pettycash.add",
-  "inventory.adjust",
   "safety.log",
   "compliance.create",
   "lien.update",

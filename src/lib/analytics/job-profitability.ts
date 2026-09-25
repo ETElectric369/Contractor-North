@@ -2,6 +2,7 @@ import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { laborCostForJob } from "@/lib/labor-billing";
 import { jobProgressFinancials } from "@/lib/job-financials";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
+import { readBillShelfOff, readJobShelfNet, type JobShelfNetRow } from "@/lib/job-cost";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -58,6 +59,10 @@ export type ProfitInputs = {
   /** Job-linked petty-cash EXPENSES. Real money out of the tin, spent on a job, and until now
    *  counted by nothing — see addMat below. */
   pettyCash: any[];
+  /** job_shelf_net rows (Shop Stock, 0303): what went on the shelf from each job's own tickets
+   *  and what each job took from it. REQUIRED for the same reason pettyCash is: /analytics builds
+   *  its own inputs, and the compiler is what finds a caller that forgot. Empty = no lots. */
+  shelfNet: JobShelfNetRow[];
 };
 
 /** Pure — the exact per-job rows /analytics renders, sorted most-profitable first. Callers slice. */
@@ -80,6 +85,10 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   // would double-count the same dollars as they move.
   for (const pc of inp.pettyCash ?? [])
     if ((pc as any).kind !== "replenish") addMat((pc as any).job_id, Number((pc as any).amount) || 0);
+  // THE SHELF (0303): job material cost = bills - off_shelf + from_shelf (src/lib/job-cost.ts). A
+  // roll put on the shelf from this job's ticket comes off it; pieces this job took from the shelf
+  // land on it at the cost the database stamped. With no lots there are no rows and nothing moves.
+  for (const r of inp.shelfNet ?? []) addMat(r.job_id, (Number(r.from_shelf) || 0) - (Number(r.off_shelf) || 0));
 
   const refundByJob = new Map<string, number>();
   for (const r of inp.jobRefunds ?? []) {
@@ -156,7 +165,7 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
     ? supabase.from("petty_cash").select("job_id, amount, kind").eq("job_id", jobId)
     : supabase.from("petty_cash").select("job_id, amount, kind").not("job_id", "is", null).limit(50000);
 
-  const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: petty }, { data: jobRefunds }, { data: entries }] =
+  const [{ data: jobs }, { data: payments }, { data: pos }, { data: bills }, { data: petty }, { data: jobRefunds }, { data: entries }, shelf] =
     await Promise.all([
       jobsQ,
       paymentsQ,
@@ -173,7 +182,10 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
         // read more profitable than it is, and unstably so with no ORDER BY.
         .order("clock_in", { ascending: false })
         .limit(50000),
+      // The shelf's part of each job's material cost (0303). A lost read is refused, never zero.
+      readJobShelfNet(supabase, jobId),
     ]);
+  if (shelf.error) throw shelf.error;
   // Labor rates: merged from the staff-scoped `profile_pay` view onto the embedded profile by
   // its id. 0215/0216 revoke those columns from the `authenticated` role — RLS cannot restrict
   // columns — so a PostgREST embed can no longer carry them for anyone. Office staff get the
@@ -189,6 +201,7 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
     pettyCash: petty ?? [],
     jobRefunds: jobId ? ((jobRefunds ?? []) as any[]).filter((r) => r.invoices?.job_id === jobId) : (jobRefunds ?? []),
     entries: entries ?? [],
+    shelfNet: shelf.rows,
   };
 }
 
@@ -313,7 +326,7 @@ export type ActualCategory = { category: string; actual: number };
  *  match the estimate's (quote_line_items.category), so this joins to getJobBudgetByCategory. */
 export async function getJobActualByCategory(supabase: any, jobId: string): Promise<ActualCategory[]> {
   const [{ data: bills }, { data: pos }, { data: entries }, { data: petty }] = await Promise.all([
-    supabase.from("bills").select("amount, scope_category, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
+    supabase.from("bills").select("id, amount, scope_category, po_id").eq("job_id", jobId).is("superseded_by_bill_id", null),
     supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
     // THE HALF THAT WAS NEVER COUNTED. Through laborCostForJob — the same pay-rate helper
     // computeJobProfitRows uses.
@@ -337,11 +350,23 @@ export async function getJobActualByCategory(supabase: any, jobId: string): Prom
       .limit(50000),
     supabase.from("petty_cash").select("amount, kind").eq("job_id", jobId),
   ]);
+  // THE SHELF (0303), by bill and by job, so this breakdown sums to the same job material cost as
+  // computeJobProfitRows: a roll put on the shelf comes off the scope of the ticket it came from,
+  // and pieces taken from the shelf carry no scope of their own, so they land in Uncategorized
+  // beside purchase orders and petty cash.
+  const [shelfOff, shelfNet] = await Promise.all([
+    readBillShelfOff(supabase, ((bills ?? []) as any[]).map((b) => String(b.id))),
+    readJobShelfNet(supabase, jobId),
+  ]);
+  if (shelfOff.error) throw shelfOff.error;
+  if (shelfNet.error) throw shelfNet.error;
   const map = new Map<string, number>();
   for (const b of (bills ?? []) as any[]) {
     const cat = String(b.scope_category ?? "").trim() || "Uncategorized";
-    map.set(cat, (map.get(cat) ?? 0) + (Number(b.amount) || 0));
+    map.set(cat, (map.get(cat) ?? 0) + (Number(b.amount) || 0) - (shelfOff.byBill.get(String(b.id)) ?? 0));
   }
+  const fromShelf = shelfNet.byJob.get(jobId)?.fromShelf ?? 0;
+  if (fromShelf) map.set("Uncategorized", (map.get("Uncategorized") ?? 0) + fromShelf);
   // Same live-PO rule as every other cost sum, so budget-vs-actual can't show a
   // materials overrun that only exists because a delivery was entered twice.
   const poTotal = livePurchaseOrders((pos ?? []) as any[], (bills ?? []) as any[]).reduce(

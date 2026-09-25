@@ -4,9 +4,8 @@ import { revalidatePath } from "next/cache";
 import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { billLineCost } from "@/lib/bill-itemisation";
-import { drawStockForJob, stockFromReceiptLine } from "@/lib/stock-flow";
 import { formatCurrency } from "@/lib/utils";
-import { perUnitCost, round2, splitContradictsReceipt, usedCountFromCost } from "./receipt-billing";
+import { round2, splitContradictsReceipt } from "./receipt-billing";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -75,11 +74,8 @@ export async function setReceiptLineBillable(lineId: string, billable: boolean):
  * are how he got to the dollars; the dollars are what is stored, because that is what the invoice
  * bills and a second money column is how two screens end up disagreeing about one dollar.
  *
- * `is_stock` IS NOT WRITTEN HERE ON PURPOSE. stockFromReceiptLine claims the line itself - it
- * flips `is_stock` false → true as its guard against counting one box onto the shelf twice - so
- * setting the flag here would make that claim find zero rows and refuse. The money is written
- * first regardless: if the shelf write fails, the customer is still billed correctly and the
- * refusal is said out loud, which is the right way round for the two to fail.
+ * `is_stock` IS NOT WRITTEN HERE. Since 0303 it is a mirror the database keeps: true only while a
+ * roll from this line is on the shelf (stock_lots). Putting the rest on the shelf is its own door.
  */
 export type ReceiptLineUsageResult = { ok: boolean; error?: string; note?: string };
 
@@ -167,11 +163,9 @@ export async function setReceiptLineUsage(input: {
   // NOTHING SILENT. bill_line_items is staff-only behind RLS, so a non-staff or cross-org caller
   // gets a zero-row UPDATE, and a zero-row UPDATE is a 204 that looks exactly like success.
   //
-  // Clearing the split does NOT clear `is_stock`, and that is deliberate: the flag records that
-  // this container was counted onto the shelf, which is a thing that HAPPENED. Un-saying it would
-  // let the same box be counted a second time the next time he splits the line. The money goes
-  // back to billing the whole line, which is what he asked for; the shelf count is corrected on
-  // Stock, where the count lives.
+  // `is_stock` is not this door's to touch: since 0303 the database keeps it true exactly while a
+  // roll from this line is on the shelf. Once pieces of that roll are on a job, 0304 freezes this
+  // line and the refusal says which takes to undo first.
   let write = supabase.from("bill_line_items").update({ billed_amount: amount }).eq("id", lineId);
   if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
   const { data, error } = await write.select("id");
@@ -184,58 +178,15 @@ export async function setReceiptLineUsage(input: {
   const jobId = bill?.job_id ?? null;
 
   /**
-   * ── THE SHELF (Owner C's seam, src/lib/stock-flow.ts) ───────────────────────────────────────
-   * The rest of the box did not evaporate: it went back in the van. stockFromReceiptLine is the
-   * one door onto `inventory_items` and it claims the line as its own guard, so this is called
-   * exactly once per line - a later change to the split moves the MONEY and leaves the shelf
-   * count alone, because there is no stock movement ledger to correct against yet and inventing
-   * a correction would be worse than leaving the count where a person put it.
-   *
-   * A shelf failure never undoes the money. It comes back as a note the card says out loud.
+   * ── THE SHELF IS NOT WRITTEN FROM HERE ANY MORE (Shop Stock, 0303) ──────────────────────────
+   * This used to count the rest of the box onto inventory_items (stock-flow.ts) as a bare number
+   * with no cost and no history. That count is now a cache of the shelf's own ledger, which the
+   * database refuses to have typed over, and a line is marked is_stock only while a roll from it
+   * is on the shelf. So this door moves the MONEY (what this job is billed) and nothing else;
+   * "Put The Rest On The Shelf" (putOnShelf in src/lib/stock-ledger.ts) is the door that puts the
+   * rest on the shelf, with its pieces, its unit and what it cost off this receipt (Phase 2).
    */
-  let note: string | undefined;
-  /** PIECES, not containers. `stockFromReceiptLine` stores this as `quantity_on_hand` and divides
-   *  the line cost by it for `unit_cost`, so on a two box line the old container count halved both
-   *  the shelf and the price book at once. The name says which figure it is now. */
-  const pieces = Number(input.containerCount) || 0;
-  if (amount != null && pieces > 0 && line.is_stock !== true) {
-    const added = await stockFromReceiptLine({
-      lineId,
-      description: String(line.description ?? ""),
-      // What the whole LINE cost on the receipt - $108.36 for the box, not 21 cents for a nut.
-      // Paired with the piece count above, that is what makes the stored per-unit right.
-      unitCost: cost,
-      containerCount: pieces,
-      vendor: bill?.supplier ?? null,
-      // There is no part-number column on a receipt line. The catalogue number is inside the
-      // description ("IDEAL 30641 Twister 341-Tan 500") and parsing one out of it would be a
-      // guess at which token is the part - so nothing is passed rather than something invented.
-      partNumber: null,
-    });
-    if (!added.ok) {
-      note = added.error;
-    } else if (amount > 0) {
-      // WHAT LEAVES THE SHELF. The count he typed when he counted them; otherwise the count his
-      // dollars work out to. That derived figure is a QUANTITY and never money - the invoice
-      // bills the dollars he typed, to the cent, and no rounded count is printed anywhere a
-      // customer will read it.
-      const used =
-        input.usedQuantity != null && Number(input.usedQuantity) > 0
-          ? Math.round(Number(input.usedQuantity) * 100) / 100
-          : usedCountFromCost(amount, perUnitCost(cost, pieces));
-      if (used && used > 0) {
-        const drew = await drawStockForJob({
-          inventoryItemId: added.inventoryItemId,
-          quantity: used,
-          note: `${String(line.description ?? "Receipt line")} - ${formatCurrency(amount)} used on this job`,
-        });
-        if (!drew.ok) note = drew.error;
-      }
-    }
-  }
-
   revalidatePath("/bills");
-  revalidatePath("/inventory");
   if (jobId) revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, note };
+  return { ok: true };
 }

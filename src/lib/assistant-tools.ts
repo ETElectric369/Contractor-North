@@ -24,6 +24,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
+import { readBillShelfOff } from "@/lib/job-cost";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -423,7 +424,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inventory",
     description:
-      "List INVENTORY items (part, category, quantity on hand vs reorder point, location). Use for 'what's running low', 'how many breakers do I have', 'inventory for X'.",
+      "List the SHOP SHELF's items by name (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record (rolls and boxes put on the shelf, less pieces taken), never typed. Use for 'what's running low', 'how many breakers do I have', 'what's on the shelf'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
   },
   {
@@ -1105,16 +1106,30 @@ export async function runDataTool(
       case "list_inventory": {
         const lim = clampLimit(input.limit, 30);
         const s = sanitize(input.search);
+        // THE NAME IS THE ITEM (Shop Stock, 0302/0303). This selected no name at all, so Nort could
+        // only ever answer with a part number or a category, and searched neither by what anyone
+        // calls the thing. Staff-only since 0302: a tech's session reads no rows here.
         let q = supabase
           .from("inventory_items")
-          .select("id, part_number, category, quantity_on_hand, reorder_point, unit, location")
-          .order("part_number")
+          .select("id, name, part_number, category, quantity_on_hand, reorder_point, unit, location")
+          .eq("active", true)
+          .order("name")
           .limit(lim);
-        if (s) q = q.or(`part_number.ilike.%${s}%,category.ilike.%${s}%`);
+        if (s) q = q.or(`name.ilike.%${s}%,part_number.ilike.%${s}%,category.ilike.%${s}%`);
         const { data, error } = await q;
         if (error) throw error;
+        if (!data?.length) {
+          return JSON.stringify({
+            count: 0,
+            items: [],
+            note: s
+              ? `Nothing on the shelf matches "${s}". Say so; do not guess.`
+              : "Nothing is on the shelf's record yet. Say so plainly: there is no shop stock to report, and nothing here should be read as a count.",
+          });
+        }
         let rows = (data ?? []).map((it: any) => ({
           id: it.id,
+          name: it.name,
           part: it.part_number,
           category: it.category,
           on_hand: it.quantity_on_hand,
@@ -2348,6 +2363,17 @@ export async function runDataTool(
         if (!bill) return JSON.stringify({ found: false, message: "Bill not found." });
         const b = bill as any;
         const lines = (b.bill_line_items ?? []) as any[];
+        // ON THE SHELF MEANS A ROLL IS THERE (0303). is_stock alone used to be read as "kept as shop
+        // stock", with nothing behind it; now a line is on the shelf only when a live lot from it
+        // exists, and what it cost comes off the job's cost (src/lib/job-cost.ts).
+        const { byBill: shelfByBill, error: shelfErr } = await readBillShelfOff(supabase, [String(b.id)]);
+        if (shelfErr) throw shelfErr;
+        const shelfAmount = shelfByBill.get(String(b.id)) ?? 0;
+        const { data: lotRows, error: lotErr } = shelfAmount
+          ? await supabase.from("stock_lot_balance").select("bill_line_id, cost, pieces, pieces_left, unit").eq("bill_id", b.id).eq("live", true)
+          : { data: [], error: null };
+        if (lotErr) throw lotErr;
+        const lotByLine = new Map<string, any>(((lotRows ?? []) as any[]).map((r) => [String(r.bill_line_id), r]));
         /**
          * TWO NUMBERS BECAUSE THERE ARE TWO QUESTIONS, AND THEY ARE NOT THE SAME NUMBER.
          *
@@ -2368,7 +2394,9 @@ export async function runDataTool(
         // NOTHING SILENT: the model is told which figure answers which question, and warned off
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
-          "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
+          shelfAmount
+            ? `amount is the WHOLE receipt. $${shelfAmount.toFixed(2)} of it went on the shop shelf (shelf_amount), so the job's cost from this receipt is amount less shelf_amount. billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.`
+            : "amount is the WHOLE receipt (the job's cost; nothing from it is on the shop shelf). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
         ];
         if (b.pricing_provisional === true)
           moneyNote.push(
@@ -2385,6 +2413,7 @@ export async function runDataTool(
           bill_number: b.bill_number,
           amount: money(b.amount),
           billable_amount: billableAmount,
+          ...(shelfAmount ? { shelf_amount: shelfAmount } : {}),
           pricing_provisional: b.pricing_provisional === true,
           superseded: b.superseded_by_bill_id != null,
           status: b.status,
@@ -2406,7 +2435,14 @@ export async function runDataTool(
             // line can never say one thing here and another on the invoice.
             billable: it.billable !== false,
             billed_to_customer: money(billLineBilledCost(it)),
-            is_stock: it.is_stock === true,
+            // True only while a roll from this line is on the shelf (a live lot), with what it cost.
+            on_the_shelf: lotByLine.has(String(it.id)),
+            ...(lotByLine.has(String(it.id))
+              ? {
+                  shelf_cost: money(lotByLine.get(String(it.id)).cost),
+                  shelf_left: `${Number(lotByLine.get(String(it.id)).pieces_left)} of ${Number(lotByLine.get(String(it.id)).pieces)} ${lotByLine.get(String(it.id)).unit}`,
+                }
+              : {}),
           })),
           // Keyed `money_note` and not `note` on purpose: `notes` right above is the bill's OWN
           // typed note, and two keys a letter apart would get quoted back as each other.

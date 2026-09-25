@@ -3,10 +3,10 @@ import { updatePurchaseOrder, receiveItem } from "@/app/(app)/purchasing/actions
 import type { ActionDef } from "../types";
 
 // Purchase orders. The header edit (vendor / job link) is a reversible tier-1 write.
-// Receiving a line is also tier-1: it mirrors inventory.adjust (a reversible stock move) —
-// receiveItem() recomputes the receiving line, flows the delta into inventory_items by part
-// number, and recomputes the PO status (received/partial/sent). Each entry WRAPS the existing
-// server action; no new business logic here (the inventory + status recompute live in the action).
+// Receiving a line is also tier-1 — receiveItem() records how many arrived and recomputes the PO
+// status (received/partial/sent). It no longer touches the shop shelf (0303): a job's delivery is
+// the job's, and the shelf holds only what a person puts on it. Each entry WRAPS the existing
+// server action; no new business logic here.
 export const purchaseOrderActions: Record<string, ActionDef> = {
   "purchaseorder.update": {
     name: "purchaseorder.update",

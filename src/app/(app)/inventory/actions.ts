@@ -9,12 +9,17 @@ export type Result = { ok: boolean; error?: string; id?: string };
 
 /** Every write here org-scopes by id AND asks for the row back.
  *
+ *  WHAT THESE NO LONGER WRITE (Shop Stock, 0303): quantity_on_hand, which the shelf's record keeps
+ *  (a typed number is refused by the database), and unit_cost, which lives per purchase on the lots
+ *  now, to the cent. An item is its name, part number, category, unit, reorder point, vendor and
+ *  where it lives.
+ *
  *  THE SILENT-WRITE LAW, and why this file needed it. A PostgREST update that matches no row is a
  *  204: no error, no rows, and the code above reads it as saved. Before cn-v964 all four actions
  *  checked only `error`, so an item belonging to another org (or one deleted in another tab) came
  *  back from "Save changes" looking saved and was not. That mattered little while the table had
- *  zero rows in it; stock now ARRIVES from receipts (lib/stock-flow.ts), so these counts are about
- *  to be numbers Erik orders against. `.select("id")` on every write, zero rows is a failure. */
+ *  zero rows in it; the shelf now keeps real counts and real costs (lib/stock-ledger.ts, 0303), so
+ *  these are about to be numbers Erik orders against. `.select("id")` on every write, zero rows is a failure. */
 const NO_ORG = "Your sign-in isn't attached to a company yet, so there's no stock list to change.";
 
 export async function createInventoryItem(formData: FormData): Promise<Result> {
@@ -33,9 +38,7 @@ export async function createInventoryItem(formData: FormData): Promise<Result> {
       part_number: emptyToNull(formData.get("part_number")),
       category: emptyToNull(formData.get("category")),
       unit: String(formData.get("unit") ?? "ea") || "ea",
-      quantity_on_hand: Number(formData.get("quantity_on_hand")) || 0,
       reorder_point: Number(formData.get("reorder_point")) || 0,
-      unit_cost: numOrNull(formData.get("unit_cost")),
       vendor: emptyToNull(formData.get("vendor")),
       location: emptyToNull(formData.get("location")),
     })
@@ -64,7 +67,6 @@ export async function updateInventoryItem(id: string, formData: FormData): Promi
       category: emptyToNull(formData.get("category")),
       unit: String(formData.get("unit") ?? "ea") || "ea",
       reorder_point: Number(formData.get("reorder_point")) || 0,
-      unit_cost: numOrNull(formData.get("unit_cost")),
       vendor: emptyToNull(formData.get("vendor")),
       location: emptyToNull(formData.get("location")),
     })
@@ -94,58 +96,10 @@ export async function deleteInventoryItem(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Adjust quantity on hand by a delta (+ received, − used), or set it after a recount.
- *
- *  IT REFUSES TO GO BELOW ZERO RATHER THAN CLAMPING TO IT. `Math.max(0, ...)` was the app deciding
- *  the shelf was right and the person was wrong, without saying so - and the count it wrote was
- *  then a number nobody had chosen. Same rule as drawStockForJob in lib/stock-flow.ts: say the
- *  real number and let him decide. */
-export async function adjustQuantity(id: string, delta: number): Promise<Result> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const { supabase, orgId } = ctx;
-  if (!orgId) return { ok: false, error: NO_ORG };
-  if (!Number.isFinite(delta)) return { ok: false, error: "That count isn't a number." };
+/*
+ * adjustQuantity IS GONE (Shop Stock, 0303). What is on hand is a cache the shelf's own record keeps
+ * (rolls in, pieces out), and the database refuses a typed-over count, so a door that typed one
+ * would only ever say no. Counting the shelf comes back as Count It (a recount move, Phase 2), the
+ * one way a count can change without a number nobody can trace.
+ */
 
-  const { data: item, error: readErr } = await supabase
-    .from("inventory_items")
-    .select("quantity_on_hand")
-    .eq("id", id)
-    .eq("org_id", orgId)
-    .maybeSingle();
-  if (readErr) return { ok: false, error: dbError(readErr) };
-  if (!item) return { ok: false, error: "That item isn't there any more. Reload the page and try again." };
-
-  // Untyped client: coerce before doing arithmetic on it.
-  const onHand = Number(item.quantity_on_hand ?? 0);
-  if (!Number.isFinite(onHand)) return { ok: false, error: "This item's count didn't come through as a number." };
-  const next = Math.round((onHand + delta) * 100) / 100;
-  if (next < 0) {
-    return {
-      ok: false,
-      error: `There ${onHand === 1 ? "is" : "are"} only ${onHand} on hand, so that would put it below zero.`,
-    };
-  }
-
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .update({ quantity_on_hand: next })
-    .eq("id", id)
-    .eq("org_id", orgId)
-    // The count read above has to still be the count being written over. Two people counting the
-    // same shelf on two phones would otherwise each write their own total and the last one would
-    // win silently.
-    .eq("quantity_on_hand", item.quantity_on_hand)
-    .select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length)
-    return { ok: false, error: "What's on hand changed while this was saving, so nothing was written. Reload and try again." };
-
-  revalidatePath("/inventory");
-  return { ok: true };
-}
-
-function numOrNull(v: FormDataEntryValue | null): number | null {
-  const s = String(v ?? "").trim();
-  return s.length ? Number(s) : null;
-}
