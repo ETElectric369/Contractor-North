@@ -58,6 +58,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
   const [stretches, setStretches] = useState<StretchRow[]>([]);
   const [picks, setPicks] = useState<Pick[]>([]);
   const [sharedPhotos, setSharedPhotos] = useState(0);
+  const [stalePhotos, setStalePhotos] = useState(0);
   const [brands, setBrands] = useState<string[]>([]);
   const [options, setOptions] = useState<PickOptionChoice[]>([]);
   const [link, setLink] = useState<LinkState | null>(null);
@@ -70,7 +71,9 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
       setLoadError(null);
       setStretches(st.stretches);
       setPicks(st.picks);
-      setSharedPhotos(st.sharedPhotoIds.length);
+      // A shown photo whose file changed is not on the customer's page (PL4): it is not counted as shown.
+      setSharedPhotos(st.sharedPhotoIds.length - st.staleSharedPhotoIds.length);
+      setStalePhotos(st.staleSharedPhotoIds.length);
       setBrands(st.brands);
       setOptions(st.options);
     }
@@ -113,6 +116,11 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
               {sharedPhotos === 0
                 ? `No photos are shown to ${who} yet.`
                 : `${sharedPhotos} ${sharedPhotos === 1 ? "photo is" : "photos are"} shown to ${who}.`}{" "}
+              {stalePhotos > 0
+                ? `${stalePhotos} ${stalePhotos === 1 ? "photo was" : "photos were"} changed after being shown, so ${who} doesn't see ${
+                    stalePhotos === 1 ? "it" : "them"
+                  } now: Show Again is on the photo. `
+                : null}
               Choose them on the Photos tab with Show Customer under each photo. Receipts are never shown.
             </p>
             <Link href={`/jobs/${jobId}?tab=photos`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">

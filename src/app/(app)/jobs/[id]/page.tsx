@@ -85,6 +85,7 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import type { Customer } from "@/lib/types";
+import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
 export const dynamic = "force-dynamic";
 
@@ -665,10 +666,17 @@ export default async function JobDetailPage({
   // for the office (a tech's Photos tab has no Show Customer control, and RLS would give it no rows
   // anyway). null = the table isn't on this database yet, so the control stays hidden rather than
   // offering a switch that can only fail.
+  // staleSharedPhotoIds: of those, the ones whose file changed after they were shown, which the
+  // customer's page has quietly stopped showing (audit v994 PL4, 0323); the tile says so.
   let sharedPhotoIds: string[] | null = null;
+  let staleSharedIds: string[] = [];
   if (viewerIsStaff) {
-    const { data: shared, error: sharedErr } = await supabase.from("job_shared_photos").select("document_id").eq("job_id", id);
+    const [{ data: shared, error: sharedErr }, stale] = await Promise.all([
+      supabase.from("job_shared_photos").select("document_id").eq("job_id", id),
+      staleSharedPhotoIds(supabase, id),
+    ]);
     sharedPhotoIds = sharedErr ? null : ((shared ?? []) as { document_id: string }[]).map((r) => r.document_id);
+    staleSharedIds = stale;
   }
 
   const empty = (label: string) => (
@@ -932,7 +940,7 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} sharedIds={sharedPhotoIds} />
+            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} sharedIds={sharedPhotoIds} staleIds={staleSharedIds} />
           </CardContent>
         </Card>
       ),

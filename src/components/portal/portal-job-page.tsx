@@ -4,7 +4,7 @@ import { formatDateTimeTz } from "@/lib/tz";
 import type { PortalInvoice, PortalJobView } from "@/lib/portal/job-view-shape";
 import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
 import { PortalSection, PortalShell } from "./portal-shell";
-import { PortalLedger } from "./portal-ledger";
+import { PortalLedger, SplitRows } from "./portal-ledger";
 import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
 import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
 
@@ -16,6 +16,13 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  *
  * Order, phone first: where the money stands; the stretches of work against the payments; work
  * not on a bill yet; the picks; the photos; every bill on the job exactly as /i prints it.
+ *
+ * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
+ * separating time and material right at the top, its all mixed in"). The money card leads with
+ * Labor (and its hours) and Materials as two lines that add up to Work So Far, then Paid and the
+ * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
+ * headings (and any other kind of line under its own, only when there is one). One rule decides
+ * which line is which everywhere: line-kind, from what the line stored, never from its words.
  *
  * A DRAFT IS NOT A BILL. While any bill on the job is a draft the money card says "Running total,
  * not a bill yet" and there is no Pay button for it. A sent bill keeps its own pay door, which is
@@ -102,8 +109,9 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
           icon={<Clock className="h-4 w-4" />}
         >
           <p className="mb-2 px-1 text-sm text-slate-700">
-            Tap a stretch to see each day: who worked, the hours and what was bought, as it is billed. The balance after each
-            stretch is all the work so far minus all the payments so far.
+            Each stretch shows its labor, materials and payments. Tap one to see each day: the labor (who worked and how long)
+            and the materials (what was bought), as billed. The balance after each stretch is all the work so far minus all
+            the payments so far.
           </p>
           <PortalLedger ledger={ledger} thisYear={thisYear} />
         </PortalSection>
@@ -121,33 +129,7 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
                 ? "This work is done but is not in the running total above yet. It is shown at the prices you would be billed, and it will be added later."
                 : "This work is done but is not on a bill yet, so it is not in the figures above. It is shown at the prices you would be billed, and it will be on a bill later."}
             </p>
-            <ul className="mt-3 divide-y divide-slate-200/70 rounded-xl bg-white/80 text-sm">
-              {unbilled.laborByPerson.map((p) => (
-                <li key={p.name} className="flex items-start justify-between gap-3 px-3 py-2">
-                  <div>
-                    <div className="font-medium text-slate-900">{p.name}</div>
-                    <div className="text-xs text-slate-600">{fmtHours(p.hours)}</div>
-                  </div>
-                  <div className="tabular-nums">{formatCurrency(p.amount)}</div>
-                </li>
-              ))}
-              {Math.abs(unbilled.materials) > 0.005 ? (
-                <li className="flex justify-between gap-3 px-3 py-2">
-                  <span className="font-medium text-slate-900">Materials</span>
-                  <span className="tabular-nums">{formatCurrency(unbilled.materials)}</span>
-                </li>
-              ) : null}
-              {unbilled.returnsCredit > 0.005 ? (
-                <li className="flex justify-between gap-3 px-3 py-2">
-                  <span className="font-medium text-slate-900">Returns To Credit</span>
-                  <span className="tabular-nums text-emerald-800">−{formatCurrency(unbilled.returnsCredit)}</span>
-                </li>
-              ) : null}
-              <li className="flex justify-between gap-3 px-3 py-2 font-semibold">
-                <span>{notIn.total}</span>
-                <span className="tabular-nums">{formatCurrency(unbilled.total)}</span>
-              </li>
-            </ul>
+            <UnbilledSplit unbilled={unbilled} totalLabel={notIn.total} />
           </div>
         </PortalSection>
       ) : null}
@@ -192,18 +174,18 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
             </span>
           </p>
         ) : null}
-        <dl className="grid grid-cols-3 gap-2">
-          <div>
-            <dt className="text-xs font-medium text-slate-600">Work So Far</dt>
-            <dd className="text-base font-semibold tabular-nums text-slate-900 sm:text-lg">{formatCurrency(ledger.workTotal)}</dd>
+        {/* Labor and Materials first, as two lines that add up to Work So Far (any other kind of
+            line, a change order or a credit, gets its own line between them only when there is
+            one), then what was paid and what is left. */}
+        <dl data-portal-money className="text-base">
+          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel="Work So Far" />
+          <div className="flex items-baseline justify-between gap-3 py-0.5">
+            <dt className="text-slate-700">Paid</dt>
+            <dd className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(ledger.paidTotal)}</dd>
           </div>
-          <div>
-            <dt className="text-xs font-medium text-slate-600">Paid</dt>
-            <dd className="text-base font-semibold tabular-nums text-emerald-800 sm:text-lg">{formatCurrency(ledger.paidTotal)}</dd>
-          </div>
-          <div className="text-right">
-            <dt className="text-xs font-medium text-slate-600">{ahead ? "Paid Ahead" : "Balance"}</dt>
-            <dd className="text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">{formatCurrency(Math.abs(ledger.balance))}</dd>
+          <div className="mt-1 flex items-baseline justify-between gap-3 border-t border-slate-300/80 pt-1.5">
+            <dt className="font-bold text-slate-900">{ahead ? "Paid Ahead" : "Balance"}</dt>
+            <dd className="shrink-0 text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">{formatCurrency(Math.abs(ledger.balance))}</dd>
           </div>
         </dl>
         {unbilledTotal > 0.005 ? (
@@ -236,11 +218,78 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
 }
 
 /**
+ * The work not on a bill (or not in the running total) yet, under the same two headings as
+ * everything above: Labor (each person, their hours) with its subtotal, Materials (and any returns
+ * still to be credited) with its subtotal, then the total.
+ */
+function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJobView["unbilled"]>; totalLabel: string }) {
+  const hasLabor = unbilled.laborByPerson.length > 0 || Math.abs(unbilled.laborAmount) > 0.005;
+  const hasMaterials = Math.abs(unbilled.materials) > 0.005 || unbilled.returnsCredit > 0.005;
+  const materialsNet = Math.round((unbilled.materials - unbilled.returnsCredit) * 100) / 100;
+  const head = "flex items-baseline justify-between gap-3 px-3 pt-2 text-[11px] font-semibold uppercase tracking-wide text-[rgb(var(--glass-ink))]";
+  return (
+    <div className="mt-3 rounded-xl bg-white/80 pb-1 text-sm">
+      {hasLabor ? (
+        <section data-portal-unbilled-group="labor" aria-label="Labor">
+          <h3 className={head}>
+            <span>
+              Labor
+              {unbilled.hours > 0 ? <span className="font-medium normal-case tracking-normal text-slate-600"> · {fmtHours(unbilled.hours)}</span> : null}
+            </span>
+            <span className="tabular-nums text-slate-900">{formatCurrency(unbilled.laborAmount)}</span>
+          </h3>
+          <ul className="divide-y divide-slate-200/70">
+            {unbilled.laborByPerson.map((p) => (
+              <li key={p.name} className="flex items-start justify-between gap-3 px-3 py-2">
+                <div>
+                  <div className="font-medium text-slate-900">{p.name}</div>
+                  <div className="text-xs text-slate-600">{fmtHours(p.hours)}</div>
+                </div>
+                <div className="tabular-nums">{formatCurrency(p.amount)}</div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {hasMaterials ? (
+        <section data-portal-unbilled-group="materials" aria-label="Materials">
+          <h3 className={head}>
+            <span>Materials</span>
+            <span className="tabular-nums text-slate-900">{formatCurrency(materialsNet)}</span>
+          </h3>
+          <ul className="divide-y divide-slate-200/70">
+            {Math.abs(unbilled.materials) > 0.005 ? (
+              <li className="flex justify-between gap-3 px-3 py-2">
+                <span className="font-medium text-slate-900">Materials Bought</span>
+                <span className="tabular-nums">{formatCurrency(unbilled.materials)}</span>
+              </li>
+            ) : null}
+            {unbilled.returnsCredit > 0.005 ? (
+              <li className="flex justify-between gap-3 px-3 py-2">
+                <span className="font-medium text-slate-900">Returns To Credit</span>
+                <span className="tabular-nums text-emerald-800">−{formatCurrency(unbilled.returnsCredit)}</span>
+              </li>
+            ) : null}
+          </ul>
+        </section>
+      ) : null}
+      <div className="mx-3 mt-1 flex justify-between gap-3 border-t border-slate-300/80 pt-2 font-semibold">
+        <span>{totalLabel}</span>
+        <span className="tabular-nums">{formatCurrency(unbilled.total)}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * One bill, closed until tapped (the money card and the stretches already say where things stand;
  * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as /i prints it,
  * drawn by the same PublicInvoiceDocument. `.portal-bill` only changes how it sits on a phone
  * (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
  * and each line puts its amount beside its description, so nothing hides behind a sideways scroll.
+ * `groupByKind`: the same lines, under Labor and Materials headings with a subtotal each (and any
+ * other kind under its own heading only when the bill has one). Same lines, same figures, same
+ * totals; only the order and the headings are the portal's.
  */
 function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boolean }) {
   const status = BILL_STATUS[b.status] ?? "Sent";
@@ -278,7 +327,7 @@ function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boo
           </div>
         ) : null}
         <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
-          <PublicInvoiceDocument data={b.doc as PublicInvoiceData} />
+          <PublicInvoiceDocument data={b.doc as PublicInvoiceData} groupByKind />
         </div>
       </div>
     </details>

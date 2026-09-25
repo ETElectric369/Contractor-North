@@ -164,6 +164,55 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
   });
 });
 
+describe("labor and materials apart, right at the top and in every section (Erik, 2026-09-24)", () => {
+  const html = render(raw());
+  const t = text(html);
+  const money = html.slice(html.indexOf("data-portal-money"), html.indexOf("</dl>", html.indexOf("data-portal-money")));
+  const m = text(money);
+
+  it("the money card: Labor (hours) and Materials as two lines that add up to Work So Far, then Paid and Balance", () => {
+    expect(m).toMatch(/Labor · 71\.5 hours \$6,100\.00 Materials \$2,218\.62 Work So Far \$8,318\.62 Paid \$6,760\.00 Balance \$1,558\.62/);
+  });
+
+  it("every stretch says Labor, Materials and Paid as separate figures", () => {
+    expect(t).toContain("Labor $1,850.00 Materials $409.12 Paid $1,850.00");
+    expect(t).toMatch(/Labor \$0\.00 Materials \$119\.59 Paid \$0\.00/);
+    expect((html.match(/data-portal-split="labor"/g) ?? []).length).toBe(5); // the card + 4 stretches
+  });
+
+  it("every day groups its labor and its materials under their own headings", () => {
+    expect(html).toContain('data-portal-day-group="labor"');
+    expect(html).toContain('data-portal-day-group="materials"');
+    // Jul 31: Erik's 3 hours at $100 under Labor, the Flexbox order under Materials.
+    const jul31 = html.slice(html.indexOf("Fri, Jul 31"), html.indexOf("</details>", html.indexOf("Fri, Jul 31")));
+    expect(text(jul31)).toMatch(/Labor · 3 hours \$300\.00 Erik 3 hours at \$100\.00 an hour \$300\.00 Materials \$409\.12 Flexbox/);
+  });
+
+  it("the bill lists its lines under Labor and Materials with subtotals, and no Other when there is none", () => {
+    const bill = html.slice(html.indexOf('class="portal-bill '));
+    expect(bill).toContain('data-doc-group="labor"');
+    expect(bill).toContain('data-doc-group="materials"');
+    expect(bill).not.toContain('data-doc-group="other"');
+    const b = text(bill);
+    expect(b).toContain("Labor Subtotal $6,100.00");
+    expect(b).toContain("Materials Subtotal $2,218.62");
+    // Labor first: every labor line comes before the first material line.
+    expect(b.indexOf("Labor - Jimmy")).toBeLessThan(b.indexOf("Flexbox"));
+  });
+
+  it("the work not added yet reads under the same two headings", () => {
+    const view = shapePortalJob(raw(), {
+      signed,
+      unbilled: { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 120, returnsCredit: 20, total: 500 },
+      now: NOW,
+    });
+    const u = renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" }));
+    expect(u).toContain('data-portal-unbilled-group="labor"');
+    expect(u).toContain('data-portal-unbilled-group="materials"');
+    expect(text(u)).toMatch(/Labor · 4 hours \$400\.00 Erik 4 hours \$400\.00 Materials \$100\.00 Materials Bought \$120\.00 Returns To Credit −\$20\.00 Not Added Yet \$500\.00/);
+  });
+});
+
 describe("how the customer's pages say things", () => {
   it("never moves a day: the org's date prints as that date in any timezone", () => {
     expect(fmtDay("2026-09-18")).toBe("Sep 18");

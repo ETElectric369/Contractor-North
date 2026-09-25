@@ -7,6 +7,7 @@ import { CostBreakdown } from "@/components/cost-breakdown";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { customerLines, invoiceBalance, mergeSuppliesAndTax, paymentLedger, type InvoiceLine } from "@/lib/invoice-math";
 import { paymentMethodLabel } from "@/lib/payment-method";
+import { sectionLines } from "@/lib/portal/line-kind";
 
 /**
  * THE single invoice document body. Every read-only surface — the print/PDF page,
@@ -52,6 +53,8 @@ export function InvoiceDocument({
   progress,
   docStyle,
   supplierNames,
+  invoiceKind,
+  groupByKind = false,
 }: {
   co: any;
   template: any;
@@ -81,6 +84,17 @@ export function InvoiceDocument({
   docStyle?: unknown;
   /** The org's supplier names (supplierNameSet), so a line that names one prints as "Materials". */
   supplierNames?: ReadonlySet<string>;
+  /** deposit | progress | final | standard: a deposit bill's own lines read under "Deposit". */
+  invoiceKind?: string | null;
+  /**
+   * The customer portal's bill (Erik, 2026-09-24: "a clearer separation of labor and materials"):
+   * the same lines under Labor and Materials headings with a subtotal each, and any other kind
+   * (Change Orders, Credits, Other...) under its own heading only when the bill has one. Grouped by
+   * what each line stored (line-kind), never by its words. Same lines, same figures, same totals;
+   * the Cost Breakdown box is left off because the subtotals already say it. Off everywhere else,
+   * so the printed and emailed bill is unchanged.
+   */
+  groupByKind?: boolean;
 }) {
   const c = customer;
   const balance = invoiceBalance(total, amountPaid); // floored at 0 — never a negative "Please remit"
@@ -93,6 +107,7 @@ export function InvoiceDocument({
   // "Supplies & tax" row prints as ONE "Supplies & Tax" line (INV-074). Same cents; the office
   // editor and the stored rows keep the full words, per receipt.
   const lines = mergeSuppliesAndTax(customerLines(items, supplierNames));
+  const sections = groupByKind ? sectionLines(lines, invoiceKind ?? null) : null;
   // Oldest first, with what was left after each. The Balance column only prints when the payments
   // add up to Amount Paid; a customer credit would make it end on a different figure than the
   // Balance Due box above it.
@@ -162,25 +177,41 @@ export function InvoiceDocument({
               <th className="w-px whitespace-nowrap py-2 text-right font-semibold" style={gap}>Amount</th>
             </tr>
           </thead>
-          <tbody>
-            {lines.map((it, i) => (
-              <tr key={it.id ?? i} className="border-b border-slate-100">
-                <td className={`${rowPad} pr-2 text-slate-800`}>
-                  <LineItemText description={it.description ?? ""} />
-                </td>
-                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{it.quantity} {it.unit}</td>
-                <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{formatCurrency(it.unit_price)}</td>
-                <td className={`whitespace-nowrap ${rowPad} text-right font-medium text-slate-900`} style={gap}>{formatCurrency(it.line_total)}</td>
-              </tr>
-            ))}
-          </tbody>
+          {sections ? (
+            sections.map((sec) => (
+              <tbody key={sec.group} data-doc-group={sec.group}>
+                <tr className="doc-group-head">
+                  <td colSpan={4} className="pb-1 pt-4 text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    {sec.label}
+                  </td>
+                </tr>
+                {sec.lines.map((it, i) => (
+                  <LineRow key={it.id ?? `${sec.group}-${i}`} it={it} rowPad={rowPad} gap={gap} />
+                ))}
+                <tr className="doc-group-sub border-b border-slate-300">
+                  <td colSpan={3} className="py-1.5 pr-2 text-right text-xs font-semibold text-slate-600">
+                    {sec.label} Subtotal
+                  </td>
+                  <td className="whitespace-nowrap py-1.5 text-right font-semibold text-slate-900" style={gap}>
+                    {formatCurrency(sec.subtotal)}
+                  </td>
+                </tr>
+              </tbody>
+            ))
+          ) : (
+            <tbody>
+              {lines.map((it, i) => (
+                <LineRow key={it.id ?? i} it={it} rowPad={rowPad} gap={gap} />
+              ))}
+            </tbody>
+          )}
         </table>
       </div>
 
       {/* Labor / Materials breakdown + totals paginate as ONE unit (totals-group): if a
           page break would land between them, both jump to the next page together. */}
       <div className="totals-group">
-        {ds.show_breakdown && (
+        {ds.show_breakdown && !sections && (
           <div className="mt-4 flex justify-end">
             <CostBreakdown items={lines} className="w-64" />
           </div>
@@ -244,5 +275,19 @@ export function InvoiceDocument({
         <div className="mt-3 whitespace-pre-wrap text-center text-xs text-slate-400">{documentFooter}</div>
       )}
     </div>
+  );
+}
+
+/** One line of the bill: description, qty and unit, price, amount (the same row grouped or not). */
+function LineRow({ it, rowPad, gap }: { it: InvoiceDocItem; rowPad: string; gap: React.CSSProperties }) {
+  return (
+    <tr className="border-b border-slate-100">
+      <td className={`${rowPad} pr-2 text-slate-800`}>
+        <LineItemText description={it.description ?? ""} />
+      </td>
+      <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{it.quantity} {it.unit}</td>
+      <td className={`whitespace-nowrap ${rowPad} text-right text-slate-600`} style={gap}>{formatCurrency(it.unit_price)}</td>
+      <td className={`whitespace-nowrap ${rowPad} text-right font-medium text-slate-900`} style={gap}>{formatCurrency(it.line_total)}</td>
+    </tr>
   );
 }
