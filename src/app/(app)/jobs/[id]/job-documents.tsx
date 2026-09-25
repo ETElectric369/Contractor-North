@@ -63,12 +63,19 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * (lib/receipt-capture — the same one the Costs tab's Snap the Bill and the Add Cost sheet
  * run): a Receipt or Bill is filed and then read into a job cost; anything else is only filed.
  * A file the reader can't take is still filed and its row says why; "Record as Cost" is the retry.
+ *
+ * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). This uploader is for money paper. Plan and
+ * Permit stay on its list (old habits still work). A line under the uploader always links to that
+ * tab's Add Plans Or Drawings (?plans=add), whatever the dropdown says, so a plan never has to be
+ * found through the dropdown. Office only: the Customer
+ * Page tab is not a tech's, so a tech is never pointed at it.
  */
 export function JobDocuments({
   orgId,
   jobId,
   docs,
   portalPapers = null,
+  plansDoor = false,
 }: {
   orgId: string;
   jobId: string;
@@ -77,6 +84,8 @@ export function JobDocuments({
    *  A plan, permit or other job paper gets Show On Portal, which opens the Customer Page tab's
    *  sheet for it; a receipt, bill or invoice never does. */
   portalPapers?: Record<string, "shown" | "replaced"> | null;
+  /** The viewer is office staff, so the Customer Page tab (and its plans door) exists for them. */
+  plansDoor?: boolean;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("Receipt");
@@ -227,6 +236,21 @@ export function JobDocuments({
           <Camera className="h-4 w-4" /> Take Photo
         </Button>
       </div>
+      {/* Always there for the office, not only after the dropdown says Plan: the dropdown starts
+          on Receipt, so a plan uploaded here without touching it is read as a cost. */}
+      {plansDoor && (
+        <p className="mb-3 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
+          {category === "Plan" || category === "Permit"
+            ? "Plans and drawings live on the Customer Page tab. "
+            : "This is for receipts and bills. "}
+          <Link
+            href={`/jobs/${jobId}?tab=customer&plans=add`}
+            className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
+          >
+            Plan Or Drawing? Add It On The Customer Page
+          </Link>
+        </p>
+      )}
 
       {showCamera && (
         <CameraCapture

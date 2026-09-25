@@ -512,6 +512,76 @@ export async function reshowPhoto(documentId: string): Promise<{ ok: boolean; er
   return on;
 }
 
+// ── the plans door: a new plan or drawing, filed on the job (Erik 2026-09-25) ──────────────────
+
+const PLAN_NOT_IN_JOB_FOLDER = "That file isn't in this job's folder, so it can't be filed on this job. Upload it again.";
+const PLAN_PATH_TAKEN = "That file is already filed on this job as another paper, so it can't be filed again. Upload it again.";
+
+/**
+ * FILE A PLAN ON THE JOB: the Customer Page tab's Add Plans Or Drawings (Erik: "uploading a plan
+ * file from a dropdown in the costs tab is the most unituitive thing ive seen on this app in a
+ * while"). The browser has already put the file in the job's folder (lib/job-file-upload, the
+ * same step the receipt pipeline takes); this writes its documents row, category Plan, and hands
+ * back the paper so the office's Show On Portal sheet can open on it.
+ *
+ * What it never does: read the file as a receipt, write a bill or a cost, or put anything on the
+ * customer's page. Showing is showPaper, pressed by a person on the sheet; Not Now keeps it an
+ * office plan. Office only (requireStaff; the Customer Page tab is not a tech's), the job must be
+ * this org's, and the file must sit in THIS job's folder (a path naming another org's or another
+ * job's file is refused before anything is written). The row is read back (the silent-write law);
+ * a row that doesn't land takes its uploaded file back out of the bucket rather than orphaning it.
+ */
+export async function filePlan(
+  jobId: string,
+  input: { path: unknown; name?: unknown; sizeBytes?: unknown },
+): Promise<{ ok: true; paper: JobPaper } | { ok: false; error: string }> {
+  const s = await staff();
+  if ("error" in s) return { ok: false, error: s.error };
+  if (!(await jobIsOurs(s, jobId))) return { ok: false, error: "That job isn't in your book." };
+  const path = typeof input.path === "string" ? input.path : "";
+  if (!isJobPhotoPath(path, s.orgId, jobId)) return { ok: false, error: PLAN_NOT_IN_JOB_FOLDER };
+  const base = path.slice(path.lastIndexOf("/") + 1).replace(/^\d+-/, "");
+  const name = (typeof input.name === "string" && input.name.trim() ? input.name.trim() : base).slice(0, 200);
+  const size = typeof input.sizeBytes === "number" && Number.isFinite(input.sizeBytes) && input.sizeBytes > 0 ? Math.round(input.sizeBytes) : null;
+
+  // A path another paper already names is refused BEFORE anything is written or removed: a second
+  // row on a receipt's file would slip past 0326's money-paper guard (it goes by document id), and
+  // undoing it (or the rollback below) would delete the file the receipt and its bill still point
+  // at. The browser's upload always makes a fresh <ms>- name, so the real door never trips this.
+  const [usedDoc, usedInv] = await Promise.all([
+    s.supabase.from("documents").select("id").eq("org_id", s.orgId).eq("file_url", path).limit(1),
+    s.supabase.from("supplier_invoices").select("id").eq("org_id", s.orgId).eq("source_file", path).limit(1),
+  ]);
+  if (usedDoc.error || usedInv.error) return { ok: false, error: "It couldn't check that file. Try again." };
+  if ((usedDoc.data as unknown[] | null)?.length || (usedInv.data as unknown[] | null)?.length) {
+    return { ok: false, error: PLAN_PATH_TAKEN };
+  }
+
+  const { data, error } = await s.supabase
+    .from("documents")
+    .insert({ org_id: s.orgId, job_id: jobId, name, category: "Plan", kind: "other", file_url: path, size_bytes: size, uploaded_by: s.userId })
+    .select("id, job_id, name, category, file_url, created_at");
+  const row = (data as (PaperDoc & { created_at: string })[] | null)?.[0];
+  if (error || !row) {
+    await s.supabase.storage.from("documents").remove([path]);
+    return { ok: false, error: error ? dbError(error) : "It uploaded but wasn't filed on the job. Try again." };
+  }
+  const signed = await signDocumentUrls(s.supabase, [row.file_url]);
+  touched(jobId);
+  return {
+    ok: true,
+    paper: {
+      id: row.id,
+      name: row.name ?? name,
+      category: row.category,
+      createdAt: row.created_at,
+      format: docFormat(row.file_url),
+      signedUrl: (row.file_url && signed.get(row.file_url)) || null,
+      refusal: paperRefusal(row, s.orgId),
+    },
+  };
+}
+
 // ── what the editor opens with ─────────────────────────────────────────────────────────────────
 
 export type PickOptionChoice = { id: string; brand: string; label: string | null; partNumber: string | null; itemName: string | null; itemCode: string | null };

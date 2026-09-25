@@ -2,15 +2,44 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
-import { Box, DraftingCompass, ExternalLink, FileText, History, Loader2, Pencil, RotateCcw, EyeOff, Globe } from "lucide-react";
+import { Box, Camera, DraftingCompass, ExternalLink, FileText, History, Loader2, Pencil, Plus, RotateCcw, EyeOff, Globe, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { DropTarget } from "@/components/drop-target";
+import { CameraCapture } from "@/components/camera-capture";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { PORTAL_DOC_KINDS, defaultKindFor, kindLabel, titleFromName } from "@/lib/portal/doc-kinds";
+import { PORTAL_DOC_KINDS, cleanPaperTitle, defaultKindFor, kindLabel } from "@/lib/portal/doc-kinds";
 import { paperHistory, replaceChoices, showsAgainIfTakenOff } from "@/lib/portal/paper-history";
-import { showPaper, takePaperOff, updateShownPaper, type JobPaper, type PapersState, type SharedPaperRow } from "../portal-share-actions";
+import { uploadJobFile } from "@/lib/job-file-upload";
+import { deleteDocument } from "../actions";
+import {
+  filePlan,
+  showPaper,
+  takePaperOff,
+  updateShownPaper,
+  type JobPaper,
+  type PapersState,
+  type SharedPaperRow,
+} from "../portal-share-actions";
+
+/** What the plans door takes: PDFs and pictures, several at once (the same list the Costs tab takes). */
+export const PLAN_ACCEPT = "image/*,application/pdf";
+
+function onPhone() {
+  return (
+    typeof navigator !== "undefined" &&
+    (navigator.maxTouchPoints > 0 || /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent))
+  );
+}
+
+/** The title the Show On Portal sheet starts with: the file's name cleaned, or "Plan, Sep 25, 2026"
+ *  when the name is camera noise (IMG_1234, photo-1727…). A suggestion; the person edits it. */
+export function startingTitle(paper: Pick<JobPaper, "name" | "category" | "createdAt"> | null | undefined): string {
+  if (!paper) return "";
+  return cleanPaperTitle(paper.name, `${kindLabel(defaultKindFor(paper.category))}, ${formatDate(paper.createdAt)}`);
+}
 
 /**
  * PLANS AND DRAWINGS ON THE CUSTOMER'S PAGE (0326), the office's hands on them. Office only: the
@@ -25,14 +54,45 @@ import { showPaper, takePaperOff, updateShownPaper, type JobPaper, type PapersSt
  * invoices never appear on this list (and the server and the database refuse them anyway).
  *
  * The Costs tab's document list links here with ?paper=<id>, which opens that paper's sheet.
+ *
+ * ADD PLANS OR DRAWINGS (Erik 2026-09-25: "uploading a plan file from a dropdown in the costs tab
+ * is the most unituitive thing ive seen on this app in a while"). A plan now comes in HERE, where
+ * plans live: Upload File (PDFs or pictures, several at once, or dropped on the button) or Take
+ * Photo (the phone's camera; the in-app camera on a computer). Each file goes up the same way a
+ * receipt's does (lib/job-file-upload) and is filed as a Plan by filePlan, which never reads it as
+ * a receipt and never writes a cost. Then the Show On Portal sheet opens on the first one with its
+ * title suggested from the file's name, and NOTHING is on the customer's page until the person
+ * presses Show On Portal; Not Now keeps it an office plan. The filing says so and offers Undo.
+ * The Costs tab's uploader says Plans live here and links with ?plans=add, which opens this door.
  */
-export function PapersCard({ state, setState, who }: { state: PapersState; setState: (s: PapersState) => void; who: string }) {
+export function PapersCard({
+  jobId,
+  orgId,
+  state,
+  setState,
+  who,
+}: {
+  jobId: string;
+  orgId: string;
+  state: PapersState;
+  setState: (s: PapersState) => void;
+  who: string;
+}) {
   const toast = useToast();
   const [pending, start] = useTransition();
-  const [sheet, setSheet] = useState<{ paperId: string; mode: "show" | "edit" } | null>(null);
+  const [sheet, setSheet] = useState<{ paperId: string; mode: "show" | "edit"; fresh?: boolean } | null>(null);
   const [showPhotos, setShowPhotos] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [filing, setFiling] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const captureRef = useRef<HTMLInputElement>(null);
+  // The newest state, for the upload loop that finishes after several awaits.
+  const latest = useRef(state);
+  latest.current = state;
   const params = useSearchParams();
   const deepLinked = useRef(false);
+  const addLinked = useRef(false);
 
   const ready = state.ready ? state : null;
   const shares = useMemo(() => ready?.shares ?? [], [ready]);
@@ -55,6 +115,14 @@ export function PapersCard({ state, setState, who }: { state: PapersState; setSt
     setSheet({ paperId: id, mode: s && !s.removed_at ? "edit" : "show" });
     requestAnimationFrame(() => document.getElementById("portal-papers")?.scrollIntoView({ block: "start" }));
   }, [params, ready, paperById, shareById, toast]);
+
+  // The Costs tab's "Plans and drawings live on the Customer Page tab": open the add door, once.
+  useEffect(() => {
+    if (!ready || addLinked.current || params.get("plans") !== "add") return;
+    addLinked.current = true;
+    setAdding(true);
+    requestAnimationFrame(() => document.getElementById("portal-papers")?.scrollIntoView({ block: "start" }));
+  }, [params, ready]);
 
   if (!ready) {
     return (
@@ -84,6 +152,90 @@ export function PapersCard({ state, setState, who }: { state: PapersState; setSt
     });
   }
 
+  /** Put the papers just filed at the top of the list, from the newest state (the loop awaited). */
+  function addPapers(filed: JobPaper[]) {
+    const cur = latest.current;
+    if (!cur.ready) return;
+    const ids = new Set(filed.map((p) => p.id));
+    setState({ ...cur, papers: [...filed, ...cur.papers.filter((p) => !ids.has(p.id))] });
+  }
+
+  /** Undo the filing: the files come back off the job (and out of the bucket). A paper someone
+   *  already showed is refused by the database with its own sentence, which is said. */
+  async function unfile(filed: JobPaper[]) {
+    const gone: string[] = [];
+    const kept: string[] = [];
+    for (const p of filed) {
+      // A server action REJECTS when the signal drops or the server errors: say so for that file
+      // and keep going, so the ones that did come off leave the list.
+      try {
+        const res = await deleteDocument(p.id, null, jobId);
+        if (res.ok) gone.push(p.id);
+        else kept.push(`"${p.name}": ${res.error ?? "it couldn't be removed."}`);
+      } catch {
+        kept.push(`"${p.name}": it didn't reach the server. Check your signal and try again.`);
+      }
+    }
+    const cur = latest.current;
+    if (cur.ready && gone.length) setState({ ...cur, papers: cur.papers.filter((p) => !gone.includes(p.id)) });
+    setSheet((sh) => (sh && gone.includes(sh.paperId) ? null : sh));
+    if (kept.length) toast(`Not removed: ${kept.join(" ")}`, "error");
+    else toast(gone.length === 1 ? "Removed. That file is off the job." : `Removed. Those ${gone.length} files are off the job.`, "success");
+  }
+
+  /** File each one on the job as a Plan, then open the Show On Portal sheet on the first. */
+  async function addPlans(files: File[]) {
+    if (!files.length || filing) return;
+    setFiling(true);
+    const filed: JobPaper[] = [];
+    const lost: string[] = [];
+    try {
+      for (const f of files) {
+        // filePlan is a server action: a dropped signal or a server error REJECTS rather than
+        // returning ok:false. Each file is its own try, so one lost file never freezes the door
+        // and the ones already filed still land on the list with Undo.
+        try {
+          const up = await uploadJobFile({ orgId, jobId, file: f, fallbackName: "plan.jpg" });
+          if (!up.ok) {
+            lost.push(`${f.name || "A file"} ${up.error}.`);
+            continue;
+          }
+          const res = await filePlan(jobId, { path: up.path, name: up.name, sizeBytes: up.size });
+          if (!res.ok) lost.push(`${up.name}: ${res.error}`);
+          else filed.push(res.paper);
+        } catch {
+          lost.push(`${f.name || "A file"} didn't reach the server; check your signal.`);
+        }
+      }
+    } finally {
+      setFiling(false);
+    }
+    if (lost.length) toast(`Not filed: ${lost.join(" ")} Try again.`, "error", undefined, { sticky: true });
+    if (!filed.length) return;
+    addPapers(filed);
+    setAdding(false);
+    toast(
+      filed.length === 1
+        ? `Filed "${filed[0].name}" on this job as a plan. It isn't on ${who}'s page.`
+        : `Filed ${filed.length} plans on this job. None is on ${who}'s page; show each one when you're ready.`,
+      "success",
+      { label: "Undo", onClick: () => void unfile(filed) },
+    );
+    setSheet({ paperId: filed[0].id, mode: "show", fresh: true });
+  }
+
+  function onPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    void addPlans(files);
+  }
+
+  // Phones get the real camera app; a computer gets the in-app camera (the Costs tab's way).
+  function takePhoto() {
+    if (onPhone()) captureRef.current?.click();
+    else setShowCamera(true);
+  }
+
   // Not on the page: never shown, or taken off (and nobody's earlier version). Photos are chosen on
   // the Photos tab; they are listed here only on request, to show one as a drawing or a plan.
   const inChain = new Set(history.current.flatMap((c) => [c.current.document_id, ...c.earlier.map((e) => e.share.document_id)]));
@@ -99,6 +251,27 @@ export function PapersCard({ state, setState, who }: { state: PapersState; setSt
         mark it as replacing the old one: {who} sees only the newest, and the old one stays here with who and when. Receipts,
         bills and supplier invoices are never shown.
       </p>
+
+      <AddPlansDoor
+        adding={adding}
+        filing={filing}
+        who={who}
+        onOpen={() => setAdding((v) => !v)}
+        onUpload={() => fileRef.current?.click()}
+        onTakePhoto={takePhoto}
+        onDrop={(files) => void addPlans(files)}
+      />
+      <input ref={fileRef} type="file" multiple accept={PLAN_ACCEPT} className="hidden" onChange={onPicked} />
+      <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPicked} />
+      {showCamera ? (
+        <CameraCapture
+          onCapture={(file) => {
+            setShowCamera(false);
+            void addPlans([file]);
+          }}
+          onClose={() => setShowCamera(false)}
+        />
+      ) : null}
 
       {current.length ? (
         <>
@@ -175,8 +348,7 @@ export function PapersCard({ state, setState, who }: { state: PapersState; setSt
       <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">This Job&apos;s Papers</h4>
       {notUpPapers.length === 0 && !showPhotos ? (
         <p className="mt-1 text-sm text-slate-500">
-          Nothing else to show. Upload a plan, a permit or a drawing under Costs, Receipts And Documents, filed as Plan, Permit or
-          Other, and it appears here.
+          Nothing else to show. Add a plan, a circuit map or a drawing with Add Plans Or Drawings above, and it appears here.
         </p>
       ) : null}
       <ul className="mt-1 space-y-2">
@@ -214,9 +386,14 @@ export function PapersCard({ state, setState, who }: { state: PapersState; setSt
           paper={paperById.get(sheet.paperId) ?? null}
           share={shareById.get(sheet.paperId) ?? null}
           mode={sheet.mode}
+          fresh={!!sheet.fresh}
           shares={shares}
           who={who}
-          onClose={() => setSheet(null)}
+          onClose={() => {
+            // Not Now on a plan just filed: it stays the office's, and the card says where it is.
+            if (sheet.fresh) toast(`Kept as an office plan. Show it on ${who}'s page any time from This Job's Papers.`, "info");
+            setSheet(null);
+          }}
           onSaved={(row, replacedTitle) => {
             upsert(row);
             setSheet(null);
@@ -246,6 +423,55 @@ function Shell({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * THE PLANS DOOR: one primary button, then the two ways in (Upload File, Take Photo), each a
+ * 44px target, stacked full width on a phone and side by side on a wider screen. A file dragged
+ * over the window lights the whole door up as a drop zone (DropTarget, the app's one primitive).
+ * Pure props, so the test renders it as it stands.
+ */
+export function AddPlansDoor({
+  adding,
+  filing,
+  who,
+  onOpen,
+  onUpload,
+  onTakePhoto,
+  onDrop,
+}: {
+  adding: boolean;
+  filing: boolean;
+  who: string;
+  onOpen: () => void;
+  onUpload: () => void;
+  onTakePhoto: () => void;
+  onDrop: (files: File[]) => void;
+}) {
+  return (
+    <DropTarget onFiles={onDrop} accept={PLAN_ACCEPT} disabled={filing} label="Drop Plans Or Drawings" className="mt-3">
+      <Button className="w-full sm:w-auto" onClick={onOpen} disabled={filing} aria-expanded={adding}>
+        {filing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+        {filing ? "Filing…" : "Add Plans Or Drawings"}
+      </Button>
+      {adding ? (
+        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <p className="text-sm text-slate-600">
+            PDFs or pictures, several at once. Each is filed on this job as a plan. Nothing goes on {who}&apos;s page until you press
+            Show On Portal.
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={onUpload} disabled={filing}>
+              <Upload className="h-4 w-4" /> Upload File
+            </Button>
+            <Button variant="outline" className="w-full sm:w-auto" onClick={onTakePhoto} disabled={filing}>
+              <Camera className="h-4 w-4" /> Take Photo
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </DropTarget>
+  );
+}
+
 function Thumb({ p }: { p: JobPaper | undefined }) {
   if (p?.format === "image" && p.signedUrl) {
     // eslint-disable-next-line @next/next/no-img-element
@@ -260,10 +486,11 @@ function Thumb({ p }: { p: JobPaper | undefined }) {
 }
 
 /** Show a paper (or put it back), or edit one that is up: its title, what it is, what it replaces. */
-function PaperSheet({
+export function PaperSheet({
   paper,
   share,
   mode,
+  fresh = false,
   shares,
   who,
   onClose,
@@ -272,12 +499,14 @@ function PaperSheet({
   paper: JobPaper | null;
   share: SharedPaperRow | null;
   mode: "show" | "edit";
+  /** Just filed through Add Plans Or Drawings: the sheet says so, and its way out is Not Now. */
+  fresh?: boolean;
   shares: SharedPaperRow[];
   who: string;
   onClose: () => void;
   onSaved: (row: SharedPaperRow, replacedTitle: string | null) => void;
 }) {
-  const [title, setTitle] = useState(share?.title ?? titleFromName(paper?.name) ?? "");
+  const [title, setTitle] = useState(share?.title ?? startingTitle(paper));
   const [kind, setKind] = useState<string>(share?.kind ?? defaultKindFor(paper?.category));
   const [replaces, setReplaces] = useState<string>(share?.replaces_document_id ?? "");
   const [saving, setSaving] = useState(false);
@@ -315,9 +544,24 @@ function PaperSheet({
       onClose={onClose}
       title={mode === "edit" ? "On The Portal" : "Show On Portal"}
       size="sm"
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel={mode === "edit" ? "Save" : "Show On Portal"} disabled={!title.trim()} />}
+      footer={
+        <ModalActions
+          onCancel={onClose}
+          onSave={save}
+          saving={saving}
+          cancelLabel={fresh ? "Not Now" : "Cancel"}
+          saveLabel={mode === "edit" ? "Save" : "Show On Portal"}
+          disabled={!title.trim()}
+        />
+      }
     >
       <div className="space-y-4">
+        {fresh ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            Filed on this job as a plan. It goes on {who}&apos;s page only when you press Show On Portal. Not Now keeps it with the
+            office.
+          </p>
+        ) : null}
         <div className="flex items-center gap-3">
           <Thumb p={paper} />
           <div className="min-w-0 text-sm">
@@ -341,23 +585,30 @@ function PaperSheet({
             ))}
           </Select>
         </div>
-        <div>
-          <Label htmlFor="paper-replaces">Replaces</Label>
-          <Select id="paper-replaces" value={replaces} onChange={(e) => setReplaces(e.target.value)}>
-            <option value="">Nothing, it&apos;s new</option>
-            {choices.map((s) => (
-              <option key={s.document_id} value={s.document_id}>
-                {s.title} ({kindLabel(s.kind)})
-              </option>
-            ))}
-          </Select>
-          <p className="mt-1 text-xs text-slate-500">
-            {replaces
-              ? `${who} will see only this one. The one it replaces stays here under Earlier Versions.`
-              : `Pick the older one when this is a newer version, and ${who} sees only the newest.`}
-          </p>
-        </div>
-        <p className="text-xs text-slate-500">It shows on {who}&apos;s page as soon as you save, with its title and date.</p>
+        {/* Offered only when there is something on the page it could replace. */}
+        {choices.length ? (
+          <div>
+            <Label htmlFor="paper-replaces">Replaces</Label>
+            <Select id="paper-replaces" value={replaces} onChange={(e) => setReplaces(e.target.value)}>
+              <option value="">Nothing, it&apos;s new</option>
+              {choices.map((s) => (
+                <option key={s.document_id} value={s.document_id}>
+                  {s.title} ({kindLabel(s.kind)})
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1 text-xs text-slate-500">
+              {replaces
+                ? `${who} will see only this one. The one it replaces stays here under Earlier Versions.`
+                : `Pick the older one when this is a newer version, and ${who} sees only the newest.`}
+            </p>
+          </div>
+        ) : null}
+        <p className="text-xs text-slate-500">
+          {mode === "edit"
+            ? `${who} sees the change as soon as you save.`
+            : `It shows on ${who}'s page when you press Show On Portal, with its title and date.`}
+        </p>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
         {saving ? <Loader2 className="h-4 w-4 animate-spin text-slate-400" /> : null}
       </div>
