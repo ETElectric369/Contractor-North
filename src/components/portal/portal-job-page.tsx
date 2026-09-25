@@ -1,4 +1,4 @@
-import { ArrowLeft, Camera, ChevronRight, CircleDollarSign, Clock, DraftingCompass, FileText, Palette, Receipt } from "lucide-react";
+import { ArrowLeft, Camera, ChevronRight, CircleDollarSign, Clock, DraftingCompass, FileText, Palette, Receipt, Zap } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { formatDateTimeTz } from "@/lib/tz";
 import type { PortalInvoice, PortalJobView } from "@/lib/portal/job-view-shape";
@@ -7,6 +7,7 @@ import { PortalSection, PortalShell } from "./portal-shell";
 import { PortalLedger, SplitRows } from "./portal-ledger";
 import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
 import { PortalDocuments } from "./portal-documents";
+import { PortalPanel } from "./portal-panel";
 import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
 
 /**
@@ -16,8 +17,8 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  * it was read, and every load reads again.
  *
  * Order, phone first: where the money stands; the stretches of work against the payments; work
- * not on a bill yet; the picks; the plans and drawings (0326, newest version only); the photos;
- * every bill on the job exactly as /i prints it.
+ * not on a bill yet; the picks; the plans and drawings (0326, newest version only); the panel (0335,
+ * once the office shows it); the photos; every bill on the job exactly as /i prints it.
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
  * separating time and material right at the top, its all mixed in"). The money card leads with
@@ -71,6 +72,7 @@ export function PortalJobPage({
     ...(unbilled ? [{ id: "unbilled", label: notIn.nav, icon: <CircleDollarSign className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.picks.length ? [{ id: "picks", label: "Picks", icon: <Palette className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.documents.length ? [{ id: "plans", label: "Plans And Drawings", icon: <DraftingCompass className="h-4 w-4" aria-hidden /> }] : []),
+    ...(view.panels.length ? [{ id: "panel", label: "Panel", icon: <Zap className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.photos.length ? [{ id: "photos", label: "Photos", icon: <Camera className="h-4 w-4" aria-hidden /> }] : []),
     ...(bills.length ? [{ id: "bills", label: bills.length === 1 ? "The Bill" : "Bills", icon: <Receipt className="h-4 w-4" aria-hidden /> }] : []),
   ];
@@ -160,6 +162,12 @@ export function PortalJobPage({
             The plans, permits and drawings for this job. When {org.name} updates one, you see the newest version here.
           </p>
           <PortalDocuments documents={view.documents} thisYear={thisYear} />
+        </PortalSection>
+      ) : null}
+
+      {view.panels.length ? (
+        <PortalSection id="panel" title="Your Panel" icon={<Zap className="h-4 w-4" />}>
+          <PortalPanel panels={view.panels} />
         </PortalSection>
       ) : null}
 

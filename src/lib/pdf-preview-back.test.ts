@@ -24,6 +24,7 @@ describe("pdfPreviewBackHref", () => {
     expect(pdfPreviewBackHref("material-list", ID, "")).toBe(`/materials/${ID}`);
     expect(pdfPreviewBackHref("change-order", ID, "")).toBe("/change-orders");
     expect(pdfPreviewBackHref("prelim-notice", ID, "")).toBe(`/jobs/${ID}`);
+    expect(pdfPreviewBackHref("panel", ID, "")).toBe(`/jobs/${ID}?tab=panel`);
   });
 
   it("lands on My Day, never the marketing root, when nothing else is known", () => {

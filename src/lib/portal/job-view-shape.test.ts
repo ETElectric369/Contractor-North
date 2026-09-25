@@ -69,7 +69,7 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
 
   it("top-level and nested keys are exactly the allowlist", () => {
     expect(Object.keys(v).sort()).toEqual(
-      ["asOf", "asOfDay", "customer", "documents", "invoices", "job", "ledger", "org", "photos", "picks", "running", "timezone", "unbilled"].sort(),
+      ["asOf", "asOfDay", "customer", "documents", "invoices", "job", "ledger", "org", "panels", "photos", "picks", "running", "timezone", "unbilled"].sort(),
     );
     expect(Object.keys(v.org).sort()).toEqual(["accent", "email", "license", "logoUrl", "name", "phone", "tint"]);
     expect(Object.keys(v.customer).sort()).toEqual(["companyName", "name"]);
@@ -239,5 +239,32 @@ describe("the plans and drawings (0326)", () => {
 
   it("a file the server could not sign is left out rather than shown broken", () => {
     expect(shapePortalJob(r, { signed: new Map(), unbilled: null, now: NOW }).documents).toEqual([]);
+  });
+});
+
+describe("Your Panel (0335): the block read field by field", () => {
+  it("each panel and circuit carries exactly its allowlist; anything else the block carried is dropped", () => {
+    const r = raw({
+      panels: [
+        {
+          name: "Main Panel",
+          main_amps: 125,
+          spaces: 32,
+          notes: "never",
+          id: "panel-id",
+          circuits: [{ space: 7, half: null, poles: 1, amps: 15, kind: null, room: "Kitchen", label: "Entry Lights", feeds: "Kitchen And Living", is_new: true, wire_tag: "DWDS", source_row: { key: "x" }, verified_by: "someone" }],
+        },
+      ],
+    });
+    const v = shapePortalJob(r, { signed: signedFor(r), unbilled: null, now: NOW });
+    expect(v.panels).toHaveLength(1);
+    expect(Object.keys(v.panels[0]).sort()).toEqual(["brand", "circuits", "deadSpaces", "mainAmps", "name", "numbering", "spaces"]);
+    expect(Object.keys(v.panels[0].circuits[0]).sort()).toEqual(["amps", "feeds", "half", "isNew", "kind", "label", "poles", "room", "space"]);
+    expect(JSON.stringify(v.panels)).not.toMatch(/DWDS|never|panel-id|someone|source_row/);
+  });
+
+  it("before 0335 the read has no panels at all, and the page has none", () => {
+    const v = shapePortalJob(raw(), { signed: new Map(), unbilled: null, now: NOW });
+    expect(v.panels).toEqual([]);
   });
 });

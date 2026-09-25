@@ -37,6 +37,7 @@ import {
 } from "../panel-actions";
 import { CircuitEditSheet } from "./circuit-edit-sheet";
 import { JobPanelBreakers } from "./job-panel-breakers";
+import { JobPanelDirectory } from "./job-panel-directory";
 import { PanelReaders } from "./job-panel-readers";
 import { PanelSetupSheet } from "./panel-setup-sheet";
 
@@ -624,6 +625,10 @@ export function JobPanel({ jobId, initial }: { jobId: string; initial: PanelData
       {/* THE BREAKERS CARD (phase 3): what the new circuits need against what came on the tickets.
           It reads the live list, so a Keep or a Take Off changes the count at once. */}
       <JobPanelBreakers jobId={jobId} circuits={circuits} panel={activePanel} onRows={upsert} onAddPanel={() => setPanelSheet("new")} />
+
+      {/* THE DIRECTORY (phase 5): Print Panel Directory for everyone; Save As Circuit Map for the
+          office, which puts the printed directory on the customer's Plans And Drawings. */}
+      <JobPanelDirectory jobId={jobId} staff={staff} circuits={circuits} />
 
       {/* WHAT CAME OFF: Take Off and Not This are never the end of a circuit. */}
       {takenOff.length > 0 && (
