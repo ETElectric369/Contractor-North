@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { DropTarget } from "@/components/drop-target";
 import { CameraCapture } from "@/components/camera-capture";
 import { QuickCostButton } from "@/components/quick-cost-button";
-import { captureReceipt, type ReceiptTone } from "@/lib/receipt-capture";
+import { captureReceipt, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
 import { formatCurrency } from "@/lib/utils";
 
 /** Same test JobDocuments / JobPhotos use: a touch device gets the phone's own camera app
@@ -27,7 +27,9 @@ const OUTLINE_BTN =
   "btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 transition-colors hover:border-[rgb(var(--glass-ink))]/40 hover:bg-[rgb(var(--glass-tint))]/10 hover:text-[rgb(var(--glass-ink))] [&_svg]:size-4 [&_svg]:shrink-0";
 
 type Tone = ReceiptTone | "busy";
-type Line = { id: number; name: string; text: string; tone: Tone };
+/** `differentDoc`: a bill already carries this paper's number and nothing was written; the line
+ *  offers Different Purchase: Record It Anyway for the paper filed as this document. */
+type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?: string };
 
 /**
  * THE COSTS TAB'S HEADER — the Add Cost door, camera first (Erik, 2026-09-11: "combine costs
@@ -72,8 +74,28 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
 
   // One line per file, newest on top, replaced in place as the file moves through the pipeline —
   // the person watches each bill land (or hears exactly why it didn't).
-  const say = (id: number, name: string, text: string, tone: Tone) =>
-    setLines((ls) => [{ id, name, text, tone }, ...ls.filter((l) => l.id !== id)]);
+  const say = (id: number, name: string, text: string, tone: Tone, differentDoc?: string) =>
+    setLines((ls) => [{ id, name, text, tone, ...(differentDoc ? { differentDoc } : {}) }, ...ls.filter((l) => l.id !== id)]);
+
+  /**
+   * DIFFERENT PURCHASE, RIGHT HERE (review of audit v994's fix). The line said to press it, and
+   * this door had no such button: the one under Receipts & Documents only appears after another
+   * Record as Cost press, another paid read. A person looked and says it is a different purchase.
+   */
+  async function recordAnyway(l: Line) {
+    if (!l.differentDoc || busy) return;
+    setBusy(true);
+    say(l.id, l.name, "Recording it as a different purchase…", "busy");
+    try {
+      const out = await readReceiptDocument(l.differentDoc, { differentPurchase: true });
+      say(l.id, l.name, out.sentence, out.tone);
+      router.refresh();
+    } catch (e) {
+      say(l.id, l.name, `Couldn't record it (${(e as Error)?.message ?? "unknown error"}). Try again.`, "fail", l.differentDoc);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   function snapFiles(files: File[]) {
     if (!files.length) return;
@@ -100,7 +122,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
           const out = await captureReceipt({ orgId, jobId, file: p.file, read: true });
           // "lost" is the only outcome that left nothing on the job; every other one filed the paper.
           if (out.kind !== "lost") touched = true;
-          say(p.id, p.name, out.sentence, out.tone);
+          say(p.id, p.name, out.sentence, out.tone, out.kind === "already" && out.samePurchase ? out.docId : undefined);
         } catch (e) {
           // The pipeline answers in sentences; a throw is the network or a bug. Either way this
           // file's row says so and the loop goes on to the next — one bad file can't strand the
@@ -233,6 +255,18 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
                 >
                   {l.text}
                 </span>
+                {l.differentDoc && (
+                  <span className="mt-1.5 block">
+                    <button
+                      type="button"
+                      onClick={() => recordAnyway(l)}
+                      disabled={busy}
+                      className="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      Different Purchase: Record It Anyway
+                    </button>
+                  </span>
+                )}
               </span>
             </li>
           ))}

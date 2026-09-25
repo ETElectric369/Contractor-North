@@ -331,6 +331,34 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
     expect(w.claimedOn).toEqual(["INV-061"]);
   });
 
+  it("a later return cannot take the purchase a credited return already used up, whatever its uuid (audit v994, DB3)", () => {
+    // Four housings billed $100. R1 (all four) is credited on INV-061; its uuid sorts LAST. R2 (two
+    // more, a second piece of paper) sorts first. In uuid order R2 spent the whole $100 and the
+    // card promised $50 back on top of the $100 already credited.
+    const buy = {
+      id: "bill-buy",
+      amount: 100,
+      po_id: null,
+      created_at: "2026-09-01T10:00:00Z",
+      bill_line_items: [{ id: "p1", description: "4 in LED SHALLOW IC HSG", quantity: 4, unit_price: 25, amount: 100, category: "Electrical", billable: true }],
+    };
+    const ret = (id: string, count: number, at: string) => ({
+      id,
+      amount: -25 * count,
+      po_id: null,
+      created_at: at,
+      bill_line_items: [{ id: `${id}-l`, description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -count, unit_price: -25, amount: -25 * count, category: "Electrical", billable: true }],
+    });
+    const r1 = ret("ffff-credited", 4, "2026-09-05T10:00:00Z");
+    const r2 = ret("0000-later", 2, "2026-09-20T10:00:00Z");
+    const w = computeUnbilledWork({ ...base, claims: claimsHolding(["ffff-credited"]), jobEntries: [], bills: [buy, r2, r1], markupPct: 15 });
+    expect(w.returnsCount).toBe(0);
+    expect(w.returnsCredit).toBe(0);
+    // Nothing credited yet: the earlier return spends first, and the later one gets what is left.
+    const fresh = computeUnbilledWork({ ...base, claims: foldClaims([], true), jobEntries: [], bills: [buy, r2, ret("ffff-first", 3, "2026-09-05T10:00:00Z")], markupPct: 0 });
+    expect(fresh.returnsAmount).toBe(100); // 75 for the first, 25 for the later one - never 125
+  });
+
   it("carries schemaReady:false through when 0255 hasn't landed, so callers can refuse rather than double-bill", () => {
     const w = computeUnbilledWork({ ...base, claims: foldClaims([], false) });
     expect(w.schemaReady).toBe(false);

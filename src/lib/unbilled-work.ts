@@ -331,8 +331,10 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   let returnsCredit = 0;
   let returnsCount = 0;
   // Each return held to what the customer was billed for the purchase it reverses - the importer's
-  // own call, over the same bills, so the card promises the credit the button writes.
-  const returnLines = returnLinesAgainstPurchases(input.bills ?? [], (b) => b.bill_line_items);
+  // own call, over the same bills, so the card promises the credit the button writes. A return
+  // already credited on an invoice spends the purchase first (DB3): the card skips it below, and
+  // without being told it would hand that credit's budget to a later return.
+  const returnLines = returnLinesAgainstPurchases(input.bills ?? [], (b) => b.bill_line_items, claimed);
   for (const b of input.bills ?? []) {
     const paid = Number(b.amount) || 0;
     const isReturn = isReturnBill(b.amount);
@@ -478,8 +480,9 @@ export async function readJobBillsWithLines(
   const read = (withLineStates: boolean) => {
     const q = supabase
       .from("bills")
-      // `description` matches a supplier return to the purchase it reverses (returnLinesAgainstPurchases).
-      .select(`id, amount, po_id, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
+      // `description` matches a supplier return to the purchase it reverses, and `created_at` is
+      // the order returns spend it in (returnLinesAgainstPurchases).
+      .select(`id, amount, po_id, created_at, bill_line_items(id, description, quantity, unit_price, amount, category${withLineStates ? ", billable, billed_amount" : ""})`)
       .eq("job_id", jobId)
       .is("superseded_by_bill_id", null);
     return scope?.orgId ? q.eq("org_id", scope.orgId) : q;

@@ -81,8 +81,10 @@ describe("customerRateRow: the customer's page never prices with a pay rate", ()
       );
     expect(run(customerRateRow(pay), null).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 400 }]);
     expect(run(customerRateRow(pay), 85).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 340 }]);
-    // What the office's own path would have shown: 4 h at his 32.50 pay.
-    expect(run(payViewRow(pay), null).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 130 }]);
+    // The office's own path agrees now (audit v994 PL2): it used to bill 4 h at his 32.50 PAY
+    // ($130). No path prices with a pay rate, so the portal and the importer read one figure.
+    expect(run(payViewRow(pay), null).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 400 }]);
+    expect(run(payViewRow(pay), 85).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 340 }]);
   });
 });
 

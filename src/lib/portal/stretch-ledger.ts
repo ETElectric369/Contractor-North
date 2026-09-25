@@ -35,13 +35,17 @@
  * "Supplies & tax - <supplier>". The customer's copy of the bill prints them as one "Supplies & Tax"
  * line with no vendor (mergeSuppliesAndTax, INV-074); here each keeps its own day and its own cents
  * (so the stretches still reconcile) under the same vendor-free words. A draft's lines were never
- * on /i, so this is the first place a customer would have read them.
+ * on /i, so this is the first place a customer would have read them. Every other line reads through
+ * customerLineWords too (audit v994 PL1): a receipt billed as one amount, an order, a return
+ * ("Materials - CED (bill #...)", "Returned: other items - CED") is "Materials" /
+ * "Returned: Materials" / "Returned: Other Items" here, as on the bill. shapePortalJob has
+ * already applied it with the org's supplier names; this pass is for any caller that has not.
  *
  * Every figure is carried in integer cents (and hours in integer hundredths) and only turned into
  * dollars on the way out, so "reconciles" is an equality, not a tolerance.
  */
 import { todayStrInTz } from "@/lib/tz";
-import { SUPPLIES_AND_TAX_LABEL, isSuppliesAndTaxLine } from "@/lib/invoice-math";
+import { SUPPLIES_AND_TAX_LABEL, customerLineWords, isSuppliesAndTaxLine } from "@/lib/invoice-math";
 
 export type LedgerStretchIn = { id: string; label: string; starts_on: string; ends_on: string; sort?: number | null };
 export type LedgerInvoiceIn = {
@@ -284,12 +288,13 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     }
     const kind: ItemKind = src === "costs" ? "material" : src === "draw_credit" ? "credit" : "charge";
     // A receipt's remainder row names the supplier: the customer reads the same words the bill prints.
+    // So does a lump, an order and a return (customerLineWords).
     const supplies = isSuppliesAndTaxLine({ description: ln.description, import_source: src });
     work.push({
       date: date ?? invDay(inv),
       item: supplies
         ? { description: SUPPLIES_AND_TAX_LABEL, quantity: 1, unit: null, unitPriceCents: L, cents: L, kind, invoiceNumber: num, datedBy }
-        : { description: ln.description, quantity: qty, unit: ln.unit ?? null, unitPriceCents: priceCents, cents: L, kind, invoiceNumber: num, datedBy },
+        : { description: customerLineWords({ description: ln.description, import_source: src }), quantity: qty, unit: ln.unit ?? null, unitPriceCents: priceCents, cents: L, kind, invoiceNumber: num, datedBy },
     });
   }
 

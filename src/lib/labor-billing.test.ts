@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobLaborBilling, laborCostForJob, withoutClaimedLabor } from "@/lib/labor-billing";
+import { computeJobLaborBilling, laborCostForJob, noBillRateWarnings, payViewRow, withoutClaimedLabor } from "@/lib/labor-billing";
 
 describe("laborCostForJob — pay cost (job hub == analytics)", () => {
   const prof = (hourly: number) => ({ hourly_rate: hourly });
@@ -98,6 +98,57 @@ describe("computeJobLaborBilling", () => {
   it("ignores zero/negative durations", () => {
     const bad = entry(brian, 0);
     expect(computeJobLaborBilling([bad], 0)).toEqual({ lines: [], total: 0 });
+  });
+});
+
+describe("never the pay rate (audit v994 PL2)", () => {
+  const tech = (hourly: number, bill: number | null) => ({ id: "t", full_name: "New Tech", role: "tech", hourly_rate: hourly, bill_rate: bill });
+  it("a person with a pay rate and no bill rate bills at the level rate, never the wage", () => {
+    const { lines } = computeJobLaborBilling([entry(tech(40, null), 8)], 95, 125);
+    expect(lines[0].rate).toBe(125);
+    expect(lines[0].rateFrom).toBe("level");
+    expect(lines[0].amount).toBe(1000);
+  });
+  it("with no level rate, the org default: the New Tech scenario is 8 h at $95, not $40", () => {
+    const { lines } = computeJobLaborBilling([entry(tech(40, null), 8)], 95, null);
+    expect(lines[0].rate).toBe(95);
+    expect(lines[0].rateFrom).toBe("default");
+  });
+  it("a pay rate ABOVE the default is not a bill rate either", () => {
+    const { lines } = computeJobLaborBilling([entry(tech(140, null), 2)], 95, null);
+    expect(lines[0].rate).toBe(95);
+  });
+  it("nothing to fall back to is $0 and says so (rateFrom none), never the wage", () => {
+    const { lines } = computeJobLaborBilling([entry(tech(40, null), 8)], 0, null);
+    expect(lines[0].rate).toBe(0);
+    expect(lines[0].rateFrom).toBe("none");
+  });
+  it("a real bill rate is still the person's own, under the level ceiling", () => {
+    const own = computeJobLaborBilling([entry(tech(40, 85), 8)], 95, 125).lines[0];
+    expect(own.rate).toBe(85);
+    expect(own.rateFrom).toBe("bill_rate");
+    const capped = computeJobLaborBilling([entry(tech(40, 150), 8)], 95, 125).lines[0];
+    expect(capped.rate).toBe(125);
+    expect(capped.rateFrom).toBe("bill_rate");
+  });
+  it("the owner is billed at his figure: payViewRow folds it into bill_rate, as profile_pay does", () => {
+    const owner = { ...payViewRow({ id: "o", role: "owner", hourly_rate: 150, bill_rate: null }), full_name: "Erik" };
+    const { lines } = computeJobLaborBilling([entry(owner, 2)], 95, null);
+    expect(lines[0].rate).toBe(150);
+    expect(lines[0].rateFrom).toBe("bill_rate");
+  });
+  it("the office is told, one sentence per person, with the rate used and where to fix it", () => {
+    const lv = computeJobLaborBilling([entry(tech(40, null), 8)], 95, 125).lines;
+    expect(noBillRateWarnings(lv)).toEqual([
+      "No bill rate set for New Tech - billed at this customer's level rate, $125.00 an hour. Set one on the Team page",
+    ]);
+    const df = computeJobLaborBilling([entry(tech(40, null), 8)], 95, null).lines;
+    expect(noBillRateWarnings(df)[0]).toContain("your default labor rate, $95.00 an hour");
+    const none = computeJobLaborBilling([entry(tech(40, null), 8)], 0, null).lines;
+    expect(noBillRateWarnings(none)[0]).toContain("at $0");
+    const rated = computeJobLaborBilling([entry(tech(40, 85), 8)], 95, null).lines;
+    expect(noBillRateWarnings(rated)).toEqual([]);
+    for (const w of [...noBillRateWarnings(lv), ...noBillRateWarnings(df), ...noBillRateWarnings(none)]) expect(w).not.toContain("40");
   });
 });
 

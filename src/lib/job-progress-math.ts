@@ -47,7 +47,14 @@ export type MaterialPo = { id?: string | null; total: number | null; status?: st
  *  into: it decides how much of `amount` reaches the customer (0268/0272), and a row that carries
  *  none - a hand-entered bill, or a caller whose select list has not been widened - bills its
  *  whole amount exactly as it always did. */
-export type MaterialBill = { id?: string | null; amount: number | null; po_id?: string | null; bill_line_items?: BillLine[] | null };
+export type MaterialBill = {
+  id?: string | null;
+  amount: number | null;
+  po_id?: string | null;
+  bill_line_items?: BillLine[] | null;
+  /** When it was filed: the order supplier returns spend a purchase in (returnLinesAgainstPurchases). */
+  created_at?: string | null;
+};
 
 /**
  * THE material-cost rule, shared by every summer (progress financials, profitability,

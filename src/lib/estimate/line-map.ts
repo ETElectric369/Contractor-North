@@ -1,4 +1,5 @@
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
+import { describeChoice, priceBookLine, type OptionedPriceItem, type PriceItemOptionRow } from "@/lib/pricing/item-options";
 
 /**
  * TURNING THE ESTIMATOR'S JSON INTO PRICED LINES — the last place a model's number can become a
@@ -40,6 +41,9 @@ export type BookRow = {
   markup_pct?: number | string | null;
   unit?: string | null;
   category?: string | null;
+  /** The vendors under the code (0282). A book line prices at the DEFAULT vendor when the org made
+   *  one, through priceBookLine, the same function every quote picker uses (audit v994, VP2). */
+  price_list_item_options?: PriceItemOptionRow[] | null;
 };
 
 /** One entry of the model's `items` array. Every field is untrusted. */
@@ -58,6 +62,8 @@ export type LadderPrice = {
   sell_price: number | null;
   unit: string | null;
   code: string | null;
+  /** The default vendor a book match priced at, when the code has one. */
+  vendor?: string | null;
   source: "book" | "paid" | "none";
   flagged: boolean;
   note: string;
@@ -125,7 +131,9 @@ export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): Draf
   const found = !pl ? ctx.laddered?.get(desc.toLowerCase()) : undefined;
   if (found && found.sell_price != null && found.buy_price != null) {
     return {
-      description: found.code ? `${desc || found.code} [${found.code}]` : desc,
+      description: found.code
+        ? `${found.vendor ? `${desc || found.code} (${found.vendor})` : desc || found.code} [${found.code}]`
+        : desc,
       quantity: Number(i.quantity) || 1,
       unit: found.unit || (i.unit ? String(i.unit).trim() : "") || "ea",
       unit_price: found.sell_price,
@@ -133,25 +141,28 @@ export function mapEstimatorLine(i: EstimatorRawItem, ctx: LineMapContext): Draf
     };
   }
 
-  const cost = pl ? Number(pl.buy_price) || 0 : Number(i.unit_cost) || 0;
-
-  // Markup, per item: customer level → the book item's own markup → org default. (An off-book
-  // line has no item markup, so it's level → org default.)
-  const pct = effectiveMarkupPct({
-    levelPct: ctx.levelPct,
-    itemPct: pl ? Number(pl.markup_pct) || 0 : 0,
-    orgDefaultPct: ctx.orgDefaultPct,
-  });
+  // A BOOK LINE PRICES AT THE ONE PRICE (priceBookLine): the default vendor under the code when the
+  // org made one, else the code's own cost, through customer level → markup → org default. The
+  // model's echoed unit_cost never touches a book line. An off-book line has no item markup, so it
+  // is the model's cost at level → org default.
+  const book = pl
+    ? priceBookLine({ ...(pl as OptionedPriceItem), description: String(pl.description ?? "") }, { levelPct: ctx.levelPct, orgDefaultPct: ctx.orgDefaultPct })
+    : null;
+  const cost = book ? book.buyPrice : Number(i.unit_cost) || 0;
+  const pct = book ? book.markupPct : effectiveMarkupPct({ levelPct: ctx.levelPct, itemPct: 0, orgDefaultPct: ctx.orgDefaultPct });
 
   const modelUnit = i.unit ? String(i.unit).trim() : "";
-  const bookUnit = pl?.unit ? String(pl.unit).trim() : "";
+  // A vendor can sell by its own unit; the code's own price keeps the book's unit.
+  const bookUnit = book && !book.isItemOwn ? book.unit : pl?.unit ? String(pl.unit).trim() : "";
   // A mismatch cannot be converted away — we don't know how many feet are on a roll — so it is
   // surfaced. Silently trusting either side produces a number that looks authoritative and isn't.
   const unitMismatch = !!(bookUnit && modelUnit && bookUnit.toLowerCase() !== modelUnit.toLowerCase());
 
   const base = String(i.description ?? pl?.description ?? "");
   return {
-    description: pl ? `${base} [${pl.code}]` : base, // book items carry [CODE] so the order sheet resolves them
+    // Book items carry [CODE] so the order sheet resolves them, and the vendor they priced at is
+    // named, so a Marvin price never sits on a line that does not say Marvin.
+    description: pl && book ? `${describeChoice(base, pl as OptionedPriceItem, book)} [${pl.code}]` : base,
     quantity: Number(i.quantity) || 1,
     unit: bookUnit || modelUnit || "ea",
     unit_price: sellPrice(cost, pct),

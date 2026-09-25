@@ -7,8 +7,12 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
   findSameNumber,
-  jobFromPaperMarks,
+  isLinelessReturn,
+  linesPointWithTotal,
+  onPaperWords,
   paperTypeOf,
+  placeFromMarks,
+  proposalOf,
   rematchPaper,
   type MarkJob,
   type MarkPo,
@@ -106,9 +110,25 @@ export async function insertItemizedBill(
     /** 0270: ONLY from an exact alias a person already made. Never a guess. */
     supplier_account_id?: string | null;
   },
-  lines: BillLine[],
+  given: BillLine[],
   status: "paid" | "unpaid" = "unpaid",
 ): Promise<string | null> {
+  // THE LINES POINT WITH THE TOTAL, HERE WHERE THE BILL IS WRITTEN (audit v994 review). The
+  // readers line them up when they read, but the total can change after that (Fix Details, It Is A
+  // Charge) and the lines sit in the row as they were read. Every door that writes a bill from a
+  // paper comes through here, so this is the one place the two cannot disagree.
+  const lines = linesPointWithTotal(bill.amount, given);
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (DB4): the importer would credit the customer the
+  // whole of it at markup, with nothing to hold it to what they were billed. The doors ask first
+  // and say so in their own words (fileRefusal, billJobReceipt); this is the boundary behind them.
+  if (bill.job_id && isLinelessReturn(bill.amount, lines)) {
+    reportError("organize:insertItemizedBill.linelessReturn", new Error("a return with no lines was refused on a job"), {
+      supplier: bill.supplier,
+      jobId: bill.job_id,
+      amount: bill.amount,
+    });
+    return null;
+  }
   // Undefined keys are dropped so a bill that has no number or account writes exactly what it
   // wrote before these existed.
   const row: Record<string, unknown> = { ...bill, status };
@@ -272,7 +292,11 @@ export async function loadMarkContext(supabase: any, orgId: string | null | unde
 /** Every waiting paper matched again from what it stored (rematchPaper): in memory, no model, no
  *  write. */
 export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkContext): T[] {
-  return items.map((i) => rematchPaper(i, ctx.markJobs, ctx.pos, ctx.selfNames));
+  return items.map((i) => {
+    const r = rematchPaper(i, ctx.markJobs, ctx.pos, ctx.selfNames);
+    // What the paper says in its own words, for the row that picked nothing: shown, never stored.
+    return { ...r, on_paper: onPaperWords(proposalOf(r), ctx.selfNames) };
+  });
 }
 
 /**
@@ -297,9 +321,9 @@ Respond with ONLY a JSON object (no prose):
   "summary": receipt/bill → brief list of what was bought; note → full clean transcription of the handwriting; otherwise what the document is,
   "document_number": the invoice, ticket or receipt number printed on it, exactly as printed, or null,
   "po_number": what is printed or written in its PO, customer order or job box, copied exactly as it appears (a contractor often writes the job's name or street there instead of a number), or null,
-  "line_items": receipts and bills ONLY — an array of every purchased line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. Use [] otherwise,
+  "line_items": receipts, bills and credit memos ONLY — an array of every purchased or returned line: [{"description": item name, "quantity": number, "unit_price": price each (number), "amount": line total (number), "category": ${RECEIPT_LINE_CATEGORY_SCHEMA_HINT}}]. Transcribe EVERY line you can read, including tax as its own line. On a credit memo or a return, every line that comes back (and its tax) has a NEGATIVE amount and unit_price; a restocking fee the supplier keeps stays positive. Use [] otherwise,
   "vendor": store/supplier name or null,
-  "amount": total in dollars as a number, or null,
+  "amount": total in dollars as a number, or null — on a credit memo or a return, the total is NEGATIVE (money coming back),
   "date": "YYYY-MM-DD" date printed on it, or null,
   "category": "Receipt" | "Bill" | "Invoice" | "Photo" | "Plan" | "Permit" | "Other",
   "pricing_provisional": true | false — true when the price column is masked (*****), blank or "N/A", or the paper is a quote/counter preview rather than this account's own pricing,
@@ -388,12 +412,23 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   else if (opts.personSaysCost && !/^(Receipt|Bill|Invoice)$/.test(category)) category = doc_type === "bill" ? "Bill" : "Receipt";
   const title = String(parsed?.title || fallbackTitle).slice(0, 200);
   const confidence = ["low", "medium", "high"].includes(parsed?.confidence) ? parsed.confidence : "medium";
-  const amount = parsed?.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  const readAmount = parsed?.amount != null && !isNaN(Number(parsed.amount)) ? Number(parsed.amount) : null;
+  // A credit memo is money coming back, whatever sign the reader printed on it.
+  const amount = doc_type === "credit_memo" && readAmount !== null ? -Math.abs(readAmount) : readAmount;
   const item_date = /^\d{4}-\d{2}-\d{2}$/.test(String(parsed?.date ?? "")) ? String(parsed.date) : null;
   const vendor = parsed?.vendor ? String(parsed.vendor).slice(0, 200) : null;
   const summary = parsed?.summary ? String(parsed.summary).slice(0, 4000) : null;
   const isCost = kind === "receipt";
-  const lines = isCost ? cleanLines(parsed?.line_items) : [];
+  /**
+   * A CREDIT MEMO KEEPS ITS LINES (audit v994, DB4). They used to be dropped for anything that was
+   * not a receipt or a bill, and a credit memo is neither - until a person switches it to Bill in
+   * Fix Details and files it on a job. Then it became a negative bill with NO lines, the importer
+   * had nothing to hold against the purchase it reverses (returnLinesAgainstPurchases), and it
+   * credited the customer the whole return at markup - the INV-078 housings, $64.48 back for parts
+   * Andrew was never charged. The lines are what make a return creditable only for what was billed.
+   */
+  const keepsLines = isCost || doc_type === "credit_memo";
+  const lines = keepsLines ? linesPointWithTotal(amount, cleanLines(parsed?.line_items)) : [];
   const payment = isCost
     ? ((["paid_at_purchase", "on_account", "unknown"].includes(String(parsed?.payment ?? "")) ? String(parsed.payment) : "unknown") as ReadFields["payment"])
     : null;
@@ -409,17 +444,24 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   // the row as a chip, never picked. A bucket only for a cost the reader called overhead, never
   // Fees, never anything fee-shaped.
   const marks = marksOf(parsed);
-  const byMarks = jobFromPaperMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? []);
   const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
   const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
+  // THE COMPANY'S OWN USE IS READ THE SAME WAY (Erik, 2026-09-24): "TOOLS" in the PO box picks
+  // Tools & Supplies in code, exactly, the way "13897 HERRINGBONE" picks the job. A job mark
+  // beats it; a paper naming both says so and picks nothing (placeFromMarks).
+  const { job: byMarks, companyUse } = placeFromMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? [], { feeShaped });
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;
+  const bucket = isCost && bucketRead && !feeShaped ? bucketRead : null;
   const proposal: PaperProposal = {
     jobId: byMarks.kind === "one" ? byMarks.jobId : null,
     jobFrom: byMarks.kind === "one" ? byMarks.from : null,
     jobHint: byMarks.kind === "one" ? byMarks.words || hint : hint,
     jobConflict: byMarks.kind === "conflict" ? byMarks.sentence : null,
     guessJobId: null,
-    bucket: isCost && bucketRead && !feeShaped ? bucketRead : null,
+    bucket,
+    // The chip says whose guess it is: this one is the reader's, from the paper.
+    bucketFrom: bucket ? "reader" : null,
+    ...(companyUse ? { companyUse } : {}),
     po: cleanDocNumber(parsed?.po_number),
     // Kept, so the tray can match this paper again when the rules learn something (rematchPaper).
     marks,
@@ -506,9 +548,19 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     safe<BookedBill>(
       supabase
         .from("bills")
-        .select("id, supplier, bill_number, supplier_account_id, amount, bill_date, job_id, jobs(job_number, name)")
+        // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
+        // A Bill wrote carries the number in supplier_invoice_number, and a set-aside copy (0271)
+        // is not on the books at all.
+        //
+        // FILTERED IN SQL, NEWEST FIRST (review of that fix). Reading every bill in the org under a
+        // 5000 cap with no order would, past the cap, drop an arbitrary set, and a match missed
+        // here is a second bill. Only a bill with a number in either column can match, only a live
+        // one counts, and if the cap is ever reached it is the oldest that fall off.
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
         .eq("org_id", orgId)
-        .not("bill_number", "is", null)
+        .or("bill_number.not.is.null,supplier_invoice_number.not.is.null")
+        .is("superseded_by_bill_id", null)
+        .order("created_at", { ascending: false })
         .limit(5000),
     ),
     safe<BookedPaper>(

@@ -205,7 +205,7 @@ describe("the default vendor: what an estimate uses when nobody picks", () => {
     const none = three.map((o) => ({ ...o, is_default: false }));
     const rows = pickerChoices({ ...base, price_list_item_options: none }, { orgDefaultPct: 25 });
     expect(rows[0].makerLabel).toBe(ITEM_OWN_OPTION_LABEL);
-    expect(pickerSummary({ ...base, price_list_item_options: none }).defaultChoice).toBeNull();
+    expect(pickerSummary({ ...base, price_list_item_options: none }, {}).defaultChoice).toBeNull();
     expect(defaultItemOptionId({ ...base, price_list_item_options: none })).toBe("");
   });
 
@@ -219,9 +219,9 @@ describe("the default vendor: what an estimate uses when nobody picks", () => {
     const archivedDefault = three.map((o) => (o.id === "m" ? { ...o, archived: true } : o));
     const it830 = { ...base, price_list_item_options: archivedDefault };
     expect(defaultItemOptionId(it830)).toBe("");
-    expect(pickerChoices(it830).map((r) => r.makerLabel)).not.toContain("Milgard");
+    expect(pickerChoices(it830, {}).map((r) => r.makerLabel)).not.toContain("Milgard");
     // And a pick of it that was on screen before the archive is refused, never silently re-priced.
-    expect(chooseItemOption(it830, "m")).toBeNull();
+    expect(chooseItemOption(it830, "m", {})).toBeNull();
   });
 
   it("restoring it brings it back as the default when nothing took the seat", () => {

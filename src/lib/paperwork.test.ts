@@ -6,7 +6,11 @@ import {
   findSameNumber,
   guessOf,
   isPicture,
+  isLinelessReturn,
+  isReturnWithoutLines,
   jobFromPaperMarks,
+  linesPointWithTotal,
+  RETURN_NEEDS_LINES,
   normalizeDocNumber,
   NOT_FILED_YET,
   parseDestination,
@@ -21,6 +25,7 @@ import {
   type PaperItem,
 } from "./paperwork";
 import { indexSupplierAliases } from "./supplier-identity";
+import { returnLinesAgainstPurchases } from "./supplier-returns";
 
 /**
  * PAPER THAT HAS BEEN READ AND NOT YET FILED (0295). The gate the File It button and the server
@@ -89,9 +94,96 @@ describe("readinessOf / fileRefusal: nothing is filed by itself, and nothing hal
     expect(fileRefusal(receipt({ doc_type: "not_a_cost", kind: "job_document" }), { type: "overhead", category: "Other" })).toMatch(/Only a receipt or a bill/);
     expect(fileRefusal(receipt(), { type: "keep" })).toMatch(/This is a cost/);
   });
+  it("a return with no lines is refused on a job, and says Read Again (audit v994, DB4)", () => {
+    // The INV-078 return after Organize dropped its lines and a person switched it to Bill.
+    const lineless = receipt({ doc_type: "bill", category: "Bill", vendor: "CED", amount: -51.58, line_items: null });
+    expect(isReturnWithoutLines(lineless)).toBe(true);
+    expect(fileRefusal(lineless, job)).toBe(RETURN_NEEDS_LINES);
+    expect(RETURN_NEEDS_LINES).toContain("Read Again");
+    // The company's own book never reaches a customer: a business cost is not held to it.
+    expect(fileRefusal(lineless, { type: "overhead", category: "Other" })).toBeNull();
+    // With its lines it files: the importer can hold each part to the purchase it reverses.
+    const lined = { ...lineless, line_items: [{ description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32 }] };
+    expect(isReturnWithoutLines(lined)).toBe(false);
+    expect(fileRefusal(lined, job)).toBeNull();
+    // An ordinary receipt with no lines (a hand-typed total) is untouched by this.
+    expect(fileRefusal(receipt({ line_items: [] }), job)).toBeNull();
+    // Lines that are only blanks are no lines.
+    expect(isReturnWithoutLines({ ...lineless, line_items: [{ description: "  " }] })).toBe(true);
+  });
   it("too big to read keeps its controls and says fill it in", () => {
     const big: PaperItem = { id: "p3", kind: "job_document", status: "needs_review", proposal: { tooBig: true } };
     expect(readinessOf(big)).toEqual({ state: "too_big", sentence: "Too big to read: fill it in yourself." });
+  });
+});
+
+/**
+ * A BILL'S LINES POINT THE SAME WAY AS ITS TOTAL (audit v994 review). The sign was lined up only
+ * where the reader read, so a total changed afterwards (Fix Details, It Is A Charge) left the lines
+ * pointing the other way, and the money readers read the bill as both a return and a charge.
+ */
+describe("linesPointWithTotal: the lines follow the total, both ways", () => {
+  const HSG = { description: "H245ICAT 4 in LED Shallow IC HSG", quantity: 4, unit_price: 11.83, amount: 47.32 };
+  const TAX = { description: "Sales Tax", quantity: 1, unit_price: 4.26, amount: 4.26 };
+
+  it("a negative total over positive lines turns every line negative, and leaves the count alone", () => {
+    expect(linesPointWithTotal(-51.58, [HSG, TAX]).map((l) => [l.quantity, l.unit_price, l.amount])).toEqual([
+      [4, -11.83, -47.32],
+      [1, -4.26, -4.26],
+    ]);
+  });
+
+  it("a positive total over negative lines (It Is A Charge on a credit memo) turns them back positive", () => {
+    const neg = [
+      { ...HSG, unit_price: -11.83, amount: -47.32 },
+      { ...TAX, unit_price: -4.26, amount: -4.26 },
+    ];
+    expect(linesPointWithTotal(51.58, neg).map((l) => l.amount)).toEqual([47.32, 4.26]);
+  });
+
+  it("lines that already point with the total are the same array, untouched", () => {
+    const withFee = [{ ...HSG, unit_price: -11.83, amount: -47.32 }, { description: "Restocking fee", quantity: 1, unit_price: 5, amount: 5 }];
+    expect(linesPointWithTotal(-42.32, withFee)).toBe(withFee);
+    const withDiscount = [HSG, { description: "Discount", quantity: 1, unit_price: -2, amount: -2 }];
+    expect(linesPointWithTotal(45.32, withDiscount)).toBe(withDiscount);
+  });
+
+  it("no total, a zero total, no lines or lines adding to nothing are left as they are", () => {
+    const lines = [HSG];
+    expect(linesPointWithTotal(null, lines)).toBe(lines);
+    expect(linesPointWithTotal(0, lines)).toBe(lines);
+    expect(linesPointWithTotal(-5, [])).toEqual([]);
+    const even = [HSG, { ...HSG, amount: -47.32 }];
+    expect(linesPointWithTotal(-5, even)).toBe(even);
+  });
+
+  it("a missing unit price stays missing (raw tray jsonb)", () => {
+    const [l] = linesPointWithTotal(-10, [{ description: "x", amount: 10, unit_price: null }]);
+    expect(l).toEqual({ description: "x", amount: -10, unit_price: null });
+  });
+
+  it("isLinelessReturn: a negative total with no described line", () => {
+    expect(isLinelessReturn(-51.58, [])).toBe(true);
+    expect(isLinelessReturn(-51.58, null)).toBe(true);
+    expect(isLinelessReturn(-51.58, [{ description: " " }])).toBe(true);
+    expect(isLinelessReturn(-51.58, [HSG])).toBe(false);
+    expect(isLinelessReturn(51.58, [])).toBe(false);
+    expect(isLinelessReturn(null, [])).toBe(false);
+  });
+
+  it("a return typed negative over positive lines is capped against the purchase once its lines are turned", () => {
+    // The purchase: the housings were switched OFF the customer's bill, so none of a return of them
+    // is the customer's. Positive lines under the -51.58 are invisible to the cap; turned, they are held.
+    const purchase = { id: "b-buy", amount: 51.58, lines: [{ ...HSG, id: "l1", category: "Electrical", billable: false, billed_amount: null }] };
+    const typed = [{ ...HSG, id: "r1", category: "Electrical", billable: true, billed_amount: null }];
+    const ret = (lines: typeof typed) => ({ id: "b-ret", amount: -51.58, lines });
+    const unturned = ret(typed);
+    const before = returnLinesAgainstPurchases([purchase, unturned], (b) => b.lines as never).get(unturned)!;
+    expect(before[0].billed_amount).toBeNull(); // the gap the review found: nothing held it
+    const turned = ret(linesPointWithTotal(-51.58, typed));
+    const after = returnLinesAgainstPurchases([purchase, turned], (b) => b.lines as never).get(turned)!;
+    expect(after[0].amount).toBe(-47.32);
+    expect(after[0].billed_amount).toBe(0);
   });
 });
 

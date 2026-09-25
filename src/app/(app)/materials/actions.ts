@@ -6,6 +6,7 @@ import { after } from "next/server";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
 import { firstThatWorks, kitsSelectRungs, kitLineCost, linkedItemOf } from "@/lib/kit-line";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
@@ -546,10 +547,14 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
   // The price book (RLS-scoped to this org) → resolve each material line to its REAL buy cost,
   // catalog #, and vendor. Match on the "[CODE]" tag in the description first, then on the
   // normalized description. Tools are archived, so they never land on an order sheet.
+  // The vendors under each code ride along (THE PROJECTION LAW): a line the estimator, Nort or a
+  // picker priced at a vendor names it ("Replace windows (Marvin) [830]"), and bookLineBuy costs it
+  // at THAT vendor, not at the code's own $830 allowance the customer was never quoted.
   const { data: book } = await supabase
     .from("price_list_items")
-    .select("code, description, supplier, buy_price, unit")
-    .eq("archived", false);
+    .select(`code, description, supplier, buy_price, unit, ${ITEM_OPTIONS_EMBED}`)
+    .eq("archived", false)
+    .eq("price_list_item_options.archived", false);
   const normDesc = (s: string) => (s ?? "").toLowerCase().replace(/\[[^\]]*\]/g, "").replace(/[^a-z0-9]/g, "");
   const byCode = new Map<string, any>();
   const byDesc = new Map<string, any>();
@@ -610,8 +615,11 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
         quantity: Number(it.quantity) || 1,
         unit: it.unit || pl?.unit || "ea",
         vendor: pl?.supplier ?? null,
-        // matched → the book's real buy price; unmatched → estimate price with the markup removed
-        est_cost: pl ? Number(pl.buy_price) : it.unit_price != null ? costFromSell(Number(it.unit_price)) : null,
+        // matched → the book's real buy price, at the vendor the line names when it names one;
+        // unmatched → estimate price with the markup removed. `vendor` stays the item's supplier:
+        // a vendor option is the BRAND (Marvin), the supplier is where it is bought, and the brand
+        // is already in the description.
+        est_cost: pl ? bookLineBuy(pl, cleanDesc).buyPrice : it.unit_price != null ? costFromSell(Number(it.unit_price)) : null,
         sort_order: it.sort_order ?? idx,
       };
     });

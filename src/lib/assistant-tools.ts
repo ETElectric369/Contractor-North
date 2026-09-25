@@ -12,7 +12,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { searchPaidPrices } from "@/lib/pricing/learned-prices";
-import { effectiveMarkupPct } from "@/lib/pricing/markup";
+import { hasItemOptions, itemOptionChoices, priceBookLine, type OptionedPriceItem } from "@/lib/pricing/item-options";
 import { searchPriceBook } from "@/lib/pricing/price-book-search";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { getJobFinancials, getJobBudgetVsActual, listJobProfitability, listProfitByType } from "@/lib/analytics/job-profitability";
@@ -24,6 +24,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
+import { bucketOf } from "@/lib/business-cost-buckets";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -185,7 +186,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "search_price_list",
     description:
-      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + book markup). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL cost (use buy_price verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. PRICING THE LINE: default_sell_price is buy_price at the EFFECTIVE default markup — the item's own markup_pct when it's > 0, else the org's Settings default markup (the fallback chain every pricing surface uses) — and it is only right when the customer has NO pricing level. A customer ON a pricing level gets the LEVEL'S markup instead (sell = buy_price × (1 + level markup% / 100)), exactly like the quote builder; check the customer's pricing level before quoting a sell price, and say which markup you used. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
+      "Search the company's PRICE LIST — their real priced catalog of materials and services (their own buy price + book markup). HARD RULE for estimates: search here FIRST for EVERY material line, BEFORE any web pricing — a book match is their REAL cost (use buy_price verbatim and keep the [CODE] tag on the quote line); web prices are only for items the book doesn't have, and those lines get flagged as estimates. VENDORS: a code can carry several vendors (brands) under it. When the org made one the DEFAULT, the row is priced at that vendor, exactly as the quote pickers price it: priced_at_vendor names it, buy_price and default_sell_price are that vendor's, own_buy_price is the code's own allowance, and vendors[] lists every vendor with its own buy and sell. A line priced at a vendor must NAME it in its description as '(Vendor)' before the [CODE] tag, the way the pickers write it, or the order sheet costs it at the allowance. PRICING THE LINE: default_sell_price is buy_price at markup_pct_used, the markup the one pricing rule resolved with NO customer level — the vendor's own stated markup when it states one, else the item's own markup_pct when it's > 0, else the org's Settings default markup. markup_pct is the ITEM's own book markup, shown for reference; do not rebuild the sell from it. default_sell_price is only right when the customer has NO pricing level. A customer ON a pricing level gets the LEVEL'S markup instead (sell = buy_price × (1 + level markup% / 100)), exactly like the quote builder; check the customer's pricing level before quoting a sell price, and say which markup you used. The search is fuzzy on its own (exact code → partial code → whole phrase → word-by-word), so ONE call with the plain item name or part code is enough — if it returns nothing, the item isn't in the book; don't re-phrase and retry.",
     input_schema: {
       type: "object",
       properties: {
@@ -538,7 +539,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost.",
+      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the six buckets (counted before owner's draw): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.",
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {
@@ -1874,20 +1875,38 @@ export async function runDataTool(
         // tools find the same part. Two lookups with two search implementations is how one part
         // ends up with two prices on two quotes.
         const { matched_by, rows } = await searchPriceBook(supabase, String(input.search ?? ""), lim);
-        const items = rows.map((r) => ({
-          code: r.code,
-          description: r.description,
-          category: r.category,
-          unit: r.unit,
-          buy_price: money(r.buy_price), // the company's REAL net cost — what the estimator prices from
-          markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
-          // Sell at the effective DEFAULT markup (item markup > 0 → org default). A CUSTOMER's
-          // pricing-level markup still overrides it — use price_material to get that applied for you.
-          default_sell_price: money(
-            Number(r.buy_price) * (1 + effectiveMarkupPct({ itemPct: Number(r.markup_pct), orgDefaultPct }) / 100),
-          ),
-          supplier: r.supplier,
-        }));
+        // THE ONE PRICE (priceBookLine), with no customer: the default vendor under the code when
+        // the org made one, else the code's own number, through the same rule every picker uses.
+        // This priced every code at its own allowance, so Nort said $830 for a window the org had
+        // made a $1,610 Marvin by default (audit v994, VP2). A CUSTOMER's pricing level still
+        // overrides it; price_material applies that for you.
+        const noCustomer = { levelPct: null, orgDefaultPct };
+        const items = rows.map((r) => {
+          const item = r as unknown as OptionedPriceItem;
+          const line = priceBookLine(item, noCustomer);
+          const vendors = hasItemOptions(item)
+            ? itemOptionChoices(item, noCustomer)
+                .filter((c) => !c.isItemOwn)
+                .map((c) => ({ vendor: c.makerLabel, is_default: c.isDefault, buy_price: c.buyPrice, default_sell_price: c.unitPrice }))
+            : undefined;
+          return {
+            code: r.code,
+            description: r.description,
+            category: r.category,
+            unit: line.isItemOwn ? r.unit : line.unit,
+            // The company's REAL net cost for what this code quotes at: the default vendor's when
+            // there is one, else the item's own.
+            buy_price: money(line.buyPrice),
+            markup_pct: Number(r.markup_pct) || 0, // the ITEM's book-default markup
+            // The markup default_sell_price was built with: the vendor's own when it states one.
+            // Without it a 40% vendor on a 0% item reads as "the org default" (audit v994).
+            markup_pct_used: line.markupPct,
+            default_sell_price: line.unitPrice,
+            ...(line.isItemOwn ? {} : { priced_at_vendor: line.makerLabel, own_buy_price: money(r.buy_price) }),
+            ...(vendors ? { vendors } : {}),
+            supplier: r.supplier,
+          };
+        });
         if (!items.length) {
           return JSON.stringify({
             count: 0,
@@ -1899,7 +1918,7 @@ export async function runDataTool(
           count: items.length,
           ...(matched_by ? { matched_by } : {}),
           items,
-          note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line. For a QUOTE LINE prefer price_material, which applies the customer's markup for you.",
+          note: "Book matches are this company's REAL prices — use them over any web figure, and keep the [CODE] tag on the quote line (and a priced_at_vendor's name, in parentheses, in its description). For a QUOTE LINE prefer price_material, which applies the customer's markup for you.",
         });
       }
 
@@ -2341,7 +2360,7 @@ export async function runDataTool(
           // or a container used in pieces — and this select list knew about none of them, so Nort
           // read the Kettle Chips and the whole 500ct Twister box back as the customer's cost.
           // The projection law: a field that is missing at runtime is missing from a select list.
-          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
+          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
           .eq("id", bid)
           .maybeSingle();
         if (error) throw error;
@@ -2364,11 +2383,24 @@ export async function runDataTool(
          * money disagreeing by a few dollars is what this whole wave came from (cn-v964, $7.86 of
          * it), so there is one reading of it and everybody reads it.
          */
-        const billableAmount = billableBillCost(b.amount, lines);
+        /**
+         * A BILL WITH NO JOB CHARGES NOBODY (audit v994, bill F3). The CED tools ticket, $44.44 of
+         * testers filed as a Tools & Supplies business cost, came back as "billable_amount 44.44"
+         * with every line billable and a note telling Nort that is what the customer is charged and
+         * that the whole receipt is the job's cost. There is no job and no customer: nothing reads
+         * a no-job bill's lines for an invoice (every importer reads bills by job). So it has no
+         * billable figure at all, and the note says what it is instead. A bill ON a job reads
+         * exactly as before. `job_id` is in the select for this; the embedded name is the fallback
+         * for a row that carries only that.
+         */
+        const hasJob = b.job_id != null || embedName(b.jobs) != null;
+        const billableAmount = hasJob ? billableBillCost(b.amount, lines) : null;
         // NOTHING SILENT: the model is told which figure answers which question, and warned off
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
-          "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
+          hasJob
+            ? "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it."
+            : `No job: this is a business cost in the ${bucketOf(b.category)} bucket, counted before owner's draw. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`,
         ];
         if (b.pricing_provisional === true)
           moneyNote.push(
@@ -2404,8 +2436,9 @@ export async function runDataTool(
             // pieces, where billed_to_customer is the part this job took and the rest went on the
             // shelf. billLineBilledCost is the same reading the invoice itemisation uses, so a
             // line can never say one thing here and another on the invoice.
-            billable: it.billable !== false,
-            billed_to_customer: money(billLineBilledCost(it)),
+            // Not applicable on a bill with no job: there is no customer to bill (null, never true).
+            billable: hasJob ? it.billable !== false : null,
+            billed_to_customer: hasJob ? money(billLineBilledCost(it)) : null,
             is_stock: it.is_stock === true,
           })),
           // Keyed `money_note` and not `note` on purpose: `notes` right above is the bill's OWN

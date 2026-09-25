@@ -125,6 +125,9 @@ function costsImportRoute(opts: {
   /** What the invoice holds BEFORE the import (the room a return has), and what landed before it. */
   existing?: any[];
   landedBefore?: string[];
+  /** The source_ids this invoice's own materials lines already carry (returns credited HERE). */
+  heldHere?: string[][];
+  heldHereError?: any;
 }) {
   return (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select") {
@@ -151,6 +154,9 @@ function costsImportRoute(opts: {
       if (q.cols === "import_source, import_key, line_total, edited") return { data: opts.existing ?? [] }; // returnsThatFit's room
       if (q.cols === "line_total") return { data: [] };                       // recalcInvoice
       if (q.cols === "import_key, line_total, edited") return { data: opts.onInvoice ?? [] }; // edited tax rows
+      if (q.cols === "source_ids") {                                           // returns credited on THIS invoice (DB3)
+        return opts.heldHereError ? { error: opts.heldHereError } : { data: (opts.heldHere ?? []).map((s) => ({ source_ids: s })) };
+      }
     }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
@@ -430,6 +436,79 @@ describe("importCostsIntoInvoice — a supplier return reaches the invoice (INV-
     expect(offered().find((r) => r.import_key === "bli:r1")?.description).toBe("Returned: IDEAL 30641 Twister 341-Tan 500 (the part this job was billed)");
   });
 
+  /**
+   * A CREDITED RETURN SPENDS THE PURCHASE FIRST (audit v994, DB3). Four housings billed $100. R1
+   * (all four) is credited on INV-077 and its uuid sorts LAST; R2 (two more, a later paper) sorts
+   * first. In uuid order R2 took the whole $100 and this import credited Andrew $57.50 more.
+   */
+  describe("the budget a credited return already spent is never spent again (DB3)", () => {
+    const HOUSINGS = { id: "55555555-0000-4000-8000-000000000005", supplier: "CED", bill_number: null, amount: "100.00", po_id: null, pricing_provisional: false, created_at: "2026-09-01T10:00:00Z" };
+    const HOUSING_LINES = [
+      { id: "h1", bill_id: HOUSINGS.id, description: "4 in LED SHALLOW IC HSG", quantity: "4", unit_price: "25", amount: "100", category: "Electrical", sort_order: 0, billable: true, billed_amount: null },
+    ];
+    const back = (id: string, count: number, created_at: string) => ({
+      bill: { id, supplier: "CED", bill_number: null, amount: String(-25 * count), po_id: null, pricing_provisional: false, created_at },
+      lines: [{ id: `${id.slice(0, 4)}-l`, bill_id: id, description: "H245ICAT 4 in LED Shallow IC HSG", quantity: String(-count), unit_price: "-25", amount: String(-25 * count), category: "Electrical", sort_order: 0, billable: true, billed_amount: null }],
+    });
+    const R1 = back("ffffffff-0000-4000-8000-00000000000f", 4, "2026-09-05T10:00:00Z");
+    const R2 = back("00000000-0000-4000-8000-000000000002", 2, "2026-09-20T10:00:00Z");
+    const LABOR = [{ import_source: "labor", import_key: "labor:p-1", line_total: 500, edited: false }];
+
+    it("a later return whose uuid sorts first credits nothing once the earlier return, credited elsewhere, used the purchase up", async () => {
+      const base = costsImportRoute({ bills: [HOUSINGS, R2.bill, R1.bill], lines: [...HOUSING_LINES, ...R2.lines, ...R1.lines], landedAfter: [HOUSINGS.id], existing: LABOR });
+      state.client = fakeSupabase((q) => {
+        if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("invoices!inner")) {
+          return {
+            data: [{ import_key: `bli:${R1.lines[0].id}`, source_ids: [R1.bill.id], invoices: { id: "inv-077", invoice_number: "INV-077", status: "sent", created_at: "2026-09-06T00:00:00Z", job_id: JOB, jobs: { job_number: "J-050" } } }],
+          };
+        }
+        return base(q);
+      }, calls);
+      const res: any = await importCostsIntoInvoice(INV, 15);
+      expect(res.ok).toBe(true);
+      expect(offered().some((r) => (r.source_ids ?? []).includes(R2.bill.id))).toBe(false);
+      expect(offered().some((r) => r.unit_price < 0)).toBe(false);
+      expect(res.stats.summary).toContain("the CED return of $50.00 not credited");
+    });
+
+    it("a re-import of a draft that already credits R1 keeps R1's credit whole, even when R2 was filed earlier", async () => {
+      const early = back("00000000-0000-4000-8000-000000000003", 2, "2026-09-02T10:00:00Z");
+      state.client = fakeSupabase(
+        costsImportRoute({
+          bills: [HOUSINGS, early.bill, R1.bill],
+          lines: [...HOUSING_LINES, ...early.lines, ...R1.lines],
+          landedBefore: [HOUSINGS.id, R1.bill.id],
+          landedAfter: [HOUSINGS.id, R1.bill.id],
+          existing: LABOR,
+          heldHere: [[HOUSINGS.id], [R1.bill.id]],
+        }),
+        calls,
+      );
+      const res: any = await importCostsIntoInvoice(INV, 0);
+      expect(res.ok).toBe(true);
+      const sumOf = (id: string) => Math.round(offered().filter((r) => (r.source_ids ?? []).includes(id)).reduce((t, r) => t + r.quantity * r.unit_price, 0) * 100) / 100;
+      expect(sumOf(R1.bill.id)).toBe(-100);
+      expect(sumOf(early.bill.id)).toBe(0);
+    });
+
+    it("a lost read of this invoice's own lines refuses, nothing written", async () => {
+      state.client = fakeSupabase(
+        costsImportRoute({ bills: [HOUSINGS, R2.bill], lines: [...HOUSING_LINES, ...R2.lines], landedAfter: [], existing: LABOR, heldHereError: { message: "timeout" } }),
+        calls,
+      );
+      const res: any = await importCostsIntoInvoice(INV, 15);
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("nothing was imported");
+      expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+    });
+
+    it("asks the bills read for created_at, so filing order can be read at all", async () => {
+      state.client = fakeSupabase(costsImportRoute({ bills: [HOUSINGS, R2.bill], lines: [...HOUSING_LINES, ...R2.lines], landedAfter: [HOUSINGS.id, R2.bill.id], existing: LABOR }), calls);
+      await importCostsIntoInvoice(INV, 15);
+      expect(calls.find((c) => c.table === "bills" && c.verb === "select")?.cols).toContain("created_at");
+    });
+  });
+
   it("still skips a zero bill: it is neither a cost nor a credit", async () => {
     const zero = { ...RET, id: "57118d9f-c69e-4d32-9747-dca98d162771", amount: "0.00" };
     state.client = fakeSupabase(costsImportRoute({ bills: [zero], lines: [], landedAfter: [] }), calls);
@@ -480,6 +559,7 @@ function drawRoute(opts: { laborRpcError?: any; costsRpcError?: any; bills?: any
       if (q.cols.includes("invoices!inner")) return { data: [] };
       if (q.cols.includes("import_key, edited")) return { data: [] };
       if (q.cols === "invoice_id") return { data: [] };
+      if (q.cols === "source_ids") return { data: [] }; // returns credited on this new draw (none)
       if (q.cols === "line_total") return { data: [] };
       if (q.cols === "import_key, line_total, edited") return { data: [] };
       // The draw's labor, already landed when the costs import measures a return's room.

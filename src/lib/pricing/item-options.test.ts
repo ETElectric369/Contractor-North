@@ -68,7 +68,7 @@ const THREE = [ANDERSEN, MILGARD, MARVIN];
 
 describe("an item with NO makers is untouched by any of this", () => {
   it("offers exactly one choice, and it is the item as it stands", () => {
-    const choices = itemOptionChoices(item830());
+    const choices = itemOptionChoices(item830(), {});
     expect(choices).toHaveLength(1);
     expect(choices[0].isItemOwn).toBe(true);
     expect(choices[0].id).toBe(ITEM_OWN_OPTION_ID);
@@ -76,7 +76,7 @@ describe("an item with NO makers is untouched by any of this", () => {
   });
 
   it("writes the SAME line the pickers already write (code — description, item unit, item price)", () => {
-    const [own] = itemOptionChoices(item830());
+    const [own] = itemOptionChoices(item830(), {});
     expect(own.description).toBe("830 — Windows (Materials) (Allowance)");
     expect(own.unit).toBe("ea");
     // Vivian: item markup 0, org default 0 → the line is the allowance, to the penny.
@@ -102,14 +102,14 @@ describe("WHICH maker is chosen", () => {
   it("nothing flagged → the item's own allowance price, not the cheapest or the first maker", () => {
     const unflagged = THREE.map((o) => ({ ...o, is_default: false }));
     expect(defaultItemOptionId(item830(unflagged))).toBe(ITEM_OWN_OPTION_ID);
-    expect(chooseItemOption(item830(unflagged), defaultItemOptionId(item830(unflagged)))!.unitPrice).toBe(830);
+    expect(chooseItemOption(item830(unflagged), defaultItemOptionId(item830(unflagged)), {})!.unitPrice).toBe(830);
   });
 
   it("the allowance is first, then the flagged maker, then the org's own order", () => {
     // Deliberately the SAME order the price-list screen lists them in
     // (price-list/item-options-math.ts → sortItemOptions). Two screens, one order, or picking
     // "the second one" means two different windows depending which screen you were looking at.
-    const rows = itemOptionChoices(item830(THREE));
+    const rows = itemOptionChoices(item830(THREE), {});
     expect(rows.map((r) => r.makerLabel)).toEqual([
       ITEM_OWN_OPTION_LABEL,
       "Andersen 400 Series", // flagged, so it sits right under the allowance
@@ -119,35 +119,35 @@ describe("WHICH maker is chosen", () => {
   });
 
   it("an empty pick means the allowance — an unselected dropdown is not a failure", () => {
-    expect(chooseItemOption(item830(THREE), "")!.isItemOwn).toBe(true);
-    expect(chooseItemOption(item830(THREE), null)!.isItemOwn).toBe(true);
-    expect(chooseItemOption(item830(THREE), undefined)!.unitPrice).toBe(830);
+    expect(chooseItemOption(item830(THREE), "", {})!.isItemOwn).toBe(true);
+    expect(chooseItemOption(item830(THREE), null, {})!.isItemOwn).toBe(true);
+    expect(chooseItemOption(item830(THREE), undefined, {})!.unitPrice).toBe(830);
   });
 
   it("a pick that is no longer on the code returns NULL, never the allowance", () => {
     // The Marvin row was archived while the estimate sat open. Quoting $830 for it would be the
     // exact wrong number this whole feature exists to prevent, so the caller has to say so.
-    expect(chooseItemOption(item830([ANDERSEN, MILGARD]), "opt-marvin")).toBeNull();
+    expect(chooseItemOption(item830([ANDERSEN, MILGARD]), "opt-marvin", {})).toBeNull();
     expect(missingOptionMessage(item830())).toContain("830");
   });
 });
 
 describe("WHAT THE DESCRIPTION BECOMES — the customer reads it, the crew orders from it", () => {
   it("names the maker and the product line", () => {
-    expect(chooseItemOption(item830(THREE), "opt-andersen")!.description).toBe(
+    expect(chooseItemOption(item830(THREE), "opt-andersen", {})!.description).toBe(
       "830 — Windows (Materials) (Allowance) (Andersen 400 Series)",
     );
   });
 
   it("carries the part number when the org typed one", () => {
-    expect(chooseItemOption(item830(THREE), "opt-milgard")!.description).toBe(
+    expect(chooseItemOption(item830(THREE), "opt-milgard", {})!.description).toBe(
       "830 — Windows (Materials) (Allowance) (Milgard Tuscany, #TUS-3050)",
     );
   });
 
   it("a maker with no product line is just the maker", () => {
     const bare = { ...MARVIN, label: null, id: "opt-bare" };
-    expect(chooseItemOption(item830([bare]), "opt-bare")!.description).toBe(
+    expect(chooseItemOption(item830([bare]), "opt-bare", {})!.description).toBe(
       "830 — Windows (Materials) (Allowance) (Marvin)",
     );
   });
@@ -210,7 +210,7 @@ describe("WHAT IT COSTS — through the one markup rule, never re-derived here",
   it("rounds to cents the way sellPrice does — numeric(12,4) costs do not leak fractions of a cent", () => {
     const odd = { ...MARVIN, id: "opt-odd", buy_price: "1240.3333", markup_pct: "12.50" };
     // 1240.3333 * 1.125 = 1395.3749625 → 1395.37
-    expect(chooseItemOption(item830([odd]), "opt-odd")!.unitPrice).toBe(1395.37);
+    expect(chooseItemOption(item830([odd]), "opt-odd", {})!.unitPrice).toBe(1395.37);
   });
 
   it("reports the cost and the markup it used, so a screen can show its work", () => {
@@ -222,18 +222,18 @@ describe("WHAT IT COSTS — through the one markup rule, never re-derived here",
 
 describe("the UNIT comes from the maker when it has one, then the item", () => {
   it("falls back to the item's unit", () => {
-    expect(chooseItemOption(item830(THREE), "opt-andersen")!.unit).toBe("ea");
+    expect(chooseItemOption(item830(THREE), "opt-andersen", {})!.unit).toBe("ea");
   });
 
   it("a maker that sells by a different unit says so", () => {
     const pair = { ...MILGARD, id: "opt-pair", unit: "pr" };
-    expect(chooseItemOption(item830([pair]), "opt-pair")!.unit).toBe("pr");
+    expect(chooseItemOption(item830([pair]), "opt-pair", {})!.unit).toBe("pr");
   });
 
   it("never lands on an empty unit", () => {
     const noUnit: OptionedPriceItem = { ...item830([{ ...ANDERSEN, unit: "" }]), unit: null };
-    expect(chooseItemOption(noUnit, "opt-andersen")!.unit).toBe("ea");
-    expect(itemOptionChoices(noUnit)[0].unit).toBe("ea");
+    expect(chooseItemOption(noUnit, "opt-andersen", {})!.unit).toBe("ea");
+    expect(itemOptionChoices(noUnit, {})[0].unit).toBe("ea");
   });
 });
 
@@ -280,6 +280,6 @@ describe("reading the embed (THE PROJECTION LAW)", () => {
     };
     const asItem: OptionedPriceItem = fromPicker; // compile-time: no cast, no widening
     expect(defaultItemOptionId(asItem)).toBe("opt-andersen");
-    expect(chooseItemOption(asItem, "opt-andersen")!.unitPrice).toBe(1240);
+    expect(chooseItemOption(asItem, "opt-andersen", {})!.unitPrice).toBe(1240);
   });
 });

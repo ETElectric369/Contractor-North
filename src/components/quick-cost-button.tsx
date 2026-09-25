@@ -13,7 +13,7 @@ import { SegmentedControl } from "@/components/ui/segmented";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { formatCurrency } from "@/lib/utils";
-import { fileReceiptDocument } from "@/lib/receipt-capture";
+import { DIFFERENT_PURCHASE_DOOR, fileReceiptDocument } from "@/lib/receipt-capture";
 import { createBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
@@ -146,6 +146,11 @@ export function QuickCostButton({
   // The bill the first save created, kept so a later successful receipt upload can LINK to
   // it. Without the link, re-uploading that same photo files a second bill for the same money.
   const [savedBillId, setSavedBillId] = useState<string | null>(null);
+  // SAME NUMBER, NOTHING WRITTEN (review of audit v994's fix). The reader found a bill already
+  // carrying this paper's printed number and wrote nothing. The paper is filed on the job (this
+  // id); the sheet stays open and offers Different Purchase: Record It Anyway right here, since
+  // the button under Receipts & Documents only appears after another paid read.
+  const [sameAsDoc, setSameAsDoc] = useState<string | null>(null);
   // Self-loaded context when not passed in (global + menu use).
   const [autoOrg, setAutoOrg] = useState("");
   const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
@@ -179,6 +184,7 @@ export function QuickCostButton({
     setError(null);
     setWarn(null);
     setCostSaved(false);
+    setSameAsDoc(null);
     if (fileRef.current) fileRef.current.value = "";
     if (captureRef.current) captureRef.current.value = "";
   }
@@ -353,9 +359,81 @@ export function QuickCostButton({
    *  there is one. */
   const attachClause = () => attachFailure.current ?? "didn't upload";
 
+  /** What the PERSON stated on the form, handed to the reader: attestation beats inference. */
+  function stated(differentPurchase = false) {
+    return {
+      paid,
+      category: category || null,
+      // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
+      // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
+      // lands when the paper has no legible date, so the bill is never dateless.
+      billDate: dateTouched ? billDate || null : null,
+      fallbackBillDate: billDate || null,
+      ...(differentPurchase ? { differentPurchase: true } : {}),
+    };
+  }
+
+  /** What the sheet does with the reader's answer for the paper filed as `docId`. */
+  async function afterRead(docId: string, res: Awaited<ReturnType<typeof billJobReceipt>>) {
+    if (!res.ok) {
+      // Reader failed (unreadable file) — fall back to a bill so the cost isn't lost,
+      // with the receipt attached and linked for later. Whatever the person typed is
+      // the bill; nothing typed is a $0 placeholder that names its own gap.
+      const typedAmount = amount > 0 ? amount : 0;
+      const fb = await createBill({
+        job_id: targetJob, supplier: supplier.trim() || "From receipt — add supplier", bill_number: "",
+        amount: typedAmount, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
+        notes: "", category, receipt_document_id: docId,
+      });
+      if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
+      setSameAsDoc(null);
+      setSavedBillId(fb.id ?? null);
+      setWarn(
+        typedAmount > 0
+          ? `Nort couldn't read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
+          : `Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`,
+      );
+      setCostSaved(true);
+      return;
+    }
+    // A BILL ALREADY CARRIES THIS NUMBER: NOTHING WAS SAVED. Not the "saved with a warning" branch
+    // below: that one labels the footer Retry Receipt, and here there is no cost to retry. The
+    // receipt is filed on the job, so it is cleared from the form and never uploaded again; the
+    // footer offers the one real choice, and Done closes.
+    if (res.already && res.sameAs) {
+      setReceipt(null);
+      setSameAsDoc(docId);
+      setWarn(`${res.sameAs} ${DIFFERENT_PURCHASE_DOOR}`);
+      return;
+    }
+    setSameAsDoc(null);
+    // THE READER COULDN'T MAKE ITS OWN NUMBERS AGREE. The cost IS saved and the warning is
+    // on the bill's notes permanently — but a person standing at the truck should hear it
+    // now, not discover it in an argument three months later. finishOk() resets state, so
+    // the sheet stays open to say so. Clearing the receipt first makes the costSaved branch
+    // above fall straight to finishOk() on the next tap: no path can re-attach or re-bill.
+    if (res.warning) {
+      setReceipt(null);
+      setWarn(res.warning);
+      setCostSaved(true);
+      return;
+    }
+    finishOk();
+  }
+
   function onSave() {
     setError(null);
     setWarn(null);
+    // A person looked at "already on the books" and says it is a different purchase: the paper
+    // already filed on the job is read once more, and recorded.
+    if (sameAsDoc) {
+      const docId = sameAsDoc;
+      start(async () => {
+        const res = await billJobReceipt(docId, stated(true));
+        await afterRead(docId, res);
+      });
+      return;
+    }
     // Retry mode: the cost already saved last time; only the photo needs a retry.
     if (costSaved) {
       if (!receipt || !targetJob) return finishOk();
@@ -381,47 +459,8 @@ export function QuickCostButton({
         // "Already paid", chose a category, or set a date, those are facts, not guesses.
         // (Supplier and amount are the paper's to read in this mode — the form says so and
         // greys them; if they typed any, they come back below when the reader fails.)
-        const res = await billJobReceipt(docId, {
-          paid,
-          category: category || null,
-          // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
-          // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
-          // lands when the paper has no legible date, so the bill is never dateless.
-          billDate: dateTouched ? billDate || null : null,
-          fallbackBillDate: billDate || null,
-        });
-        if (!res.ok) {
-          // Reader failed (unreadable file) — fall back to a bill so the cost isn't lost,
-          // with the receipt attached and linked for later. Whatever the person typed is
-          // the bill; nothing typed is a $0 placeholder that names its own gap.
-          const typedAmount = amount > 0 ? amount : 0;
-          const fb = await createBill({
-            job_id: targetJob, supplier: supplier.trim() || "From receipt — add supplier", bill_number: "",
-            amount: typedAmount, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
-            notes: "", category, receipt_document_id: docId,
-          });
-          if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
-          setSavedBillId(fb.id ?? null);
-          setWarn(
-            typedAmount > 0
-              ? `Nort couldn't read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
-              : `Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`,
-          );
-          setCostSaved(true);
-          return;
-        }
-        // THE READER COULDN'T MAKE ITS OWN NUMBERS AGREE. The cost IS saved and the warning is
-        // on the bill's notes permanently — but a person standing at the truck should hear it
-        // now, not discover it in an argument three months later. finishOk() resets state, so
-        // the sheet stays open to say so. Clearing the receipt first makes the costSaved branch
-        // above fall straight to finishOk() on the next tap: no path can re-attach or re-bill.
-        if (res.warning) {
-          setReceipt(null);
-          setWarn(res.warning);
-          setCostSaved(true);
-          return;
-        }
-        finishOk();
+        const res = await billJobReceipt(docId, stated());
+        await afterRead(docId, res);
       });
       return;
     }
@@ -598,10 +637,18 @@ export function QuickCostButton({
         onClose={closeModal}
         title="Add a cost"
         portal
-        footer={<ModalActions onCancel={closeModal} onSave={onSave} saving={pending} saveLabel={costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"} />}
+        footer={
+          <ModalActions
+            onCancel={sameAsDoc ? finishOk : closeModal}
+            onSave={onSave}
+            saving={pending}
+            cancelLabel={sameAsDoc ? "Done" : undefined}
+            saveLabel={sameAsDoc ? "Different Purchase: Record It Anyway" : costSaved ? "Retry Receipt" : useReader ? "Read the Receipt" : "Save Cost"}
+          />
+        }
       >
         <div className="space-y-4">
-          {snapTop && receiptBlock}
+          {snapTop && !sameAsDoc && receiptBlock}
           <div>
             {/* The asterisk is the truth of the save path: a supplier is REQUIRED only when
                 there is no receipt to carry it (fragment-first) — with a photo attached, Nort
@@ -623,7 +670,7 @@ export function QuickCostButton({
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
-              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved}>
+              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved || !!sameAsDoc}>
                 <option value="">Business Cost (No Job)</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
@@ -655,7 +702,7 @@ export function QuickCostButton({
             <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} className="h-4 w-4 rounded border-slate-300" disabled={costSaved} />
             Already paid (cash / card) — skip the bill
           </label>
-          {!snapTop && receiptBlock}
+          {!snapTop && !sameAsDoc && receiptBlock}
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>

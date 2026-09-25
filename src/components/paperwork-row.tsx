@@ -13,12 +13,15 @@ import { formatDate } from "@/lib/utils";
 import { jobLabel } from "@/lib/schedule-options";
 import {
   PAPER_BUCKETS,
+  bucketIsReaders,
   describePaper,
   fileRefusal,
   guessOf,
+  isReturnWithoutLines,
   paperTypeOfItem,
   parseDestination,
   pickedBecause,
+  onPaperWords,
   proposalOf,
   readinessOf,
   shownDestination,
@@ -143,28 +146,49 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
   const [paid, setPaid] = useState(item.payment ?? "unknown");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The server asked whether a paper read as a credit memo really is a charge (DB4).
+  const [askCharge, setAskCharge] = useState(false);
   const isCost = type === "receipt" || type === "bill";
 
-  async function save() {
+  async function save(creditIsACharge = false) {
     setSaving(true);
     setError(null);
-    const res = await updatePaperwork(item.id, {
-      doc_type: type,
-      vendor: vendor.trim() || null,
-      amount: amount.trim() === "" ? null : Number(amount.replace(/[$,\s]/g, "")),
-      item_date: date || null,
-      doc_number: number.trim() || null,
-      payment: isCost ? paid : null,
-    });
+    setAskCharge(false);
+    const res = await updatePaperwork(
+      item.id,
+      {
+        doc_type: type,
+        vendor: vendor.trim() || null,
+        amount: amount.trim() === "" ? null : Number(amount.replace(/[$,\s]/g, "")),
+        item_date: date || null,
+        doc_number: number.trim() || null,
+        payment: isCost ? paid : null,
+      },
+      { creditIsACharge },
+    );
     setSaving(false);
-    if (!res.ok) return setError(res.error ?? "Couldn't save.");
+    if (!res.ok) {
+      setAskCharge(res.askCharge === true);
+      return setError(res.error ?? "Couldn't save.");
+    }
     onSaved();
   }
 
   return (
-    <Modal open onClose={onClose} title="Fix Details" footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} />}>
+    <Modal open onClose={onClose} title="Fix Details" footer={<ModalActions onCancel={onClose} onSave={() => save()} saving={saving} />}>
       <div className="space-y-4">
-        {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+            {askCharge && (
+              <div className="mt-2">
+                <Button variant="outline" onClick={() => save(true)} disabled={saving}>
+                  It Is A Charge
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
         <div>
           <Label htmlFor={`fd-type-${item.id}`}>What Kind Of Paper</Label>
           <Select id={`fd-type-${item.id}`} value={type} onChange={(e) => setType(e.target.value)} className="h-11">
@@ -362,9 +386,37 @@ export function PaperworkRow({
       <p className="text-sm font-medium text-slate-900">{question}</p>
     ) : null;
 
+  /**
+   * WHAT THE PAPER SAYS, when it picked nothing (audit v994, tray F2). Paper A's PO box said TOOLS
+   * and the row never showed it: a person had to open the photo to learn what the reader had
+   * already copied. Shown whenever the paper's own pick isn't what is showing; hidden when the
+   * "picked from the PO" line already says the same words. The company's own names are taken out
+   * of the reader's hint on the server (rematchTray), since they are on every ticket.
+   *
+   * NULL IS AN ANSWER (review of audit v994's fix): the server sends null when nothing is left
+   * once the company's own names are out ("ERIK TAYLOR" alone). `??` read that null as "never
+   * computed" and fell back to the unstripped hint, printing "On the paper: ERIK TAYLOR". Only a
+   * row the server never looked at (no key at all) is worked out here, without the names.
+   */
+  const onPaper = item.on_paper !== undefined ? item.on_paper : onPaperWords(p);
+  const onPaperLine =
+    onPaper && !(because && prePick && dest === prePick) ? (
+      <p className="text-xs text-slate-500">On the paper: {onPaper}</p>
+    ) : null;
+
   /** A model's guess: one tap picks it, and it is never picked for anyone. */
   const guessValue = mode === "photo" ? (guess?.startsWith("job:") ? guess : null) : guess;
   const guessShown = guessValue && (mode === "photo" ? `job:${photoJob}` !== guessValue : dest !== guessValue);
+  /**
+   * WHOSE GUESS, IN WORDS THAT ARE TRUE (audit v994, tray F2). A bucket the READER gave, looking at
+   * the paper (Paper A: Tools & Supplies, off a ticket whose PO box said TOOLS), was labelled "Not
+   * read off the paper", which is false. The reader's bucket says it is the reader's guess; a job
+   * guess and AI Suggest's second look keep "Not read off the paper", because they were not.
+   */
+  const readersGuess = !!guessValue?.startsWith("cost:") && bucketIsReaders(p);
+  const guessWhy = readersGuess
+    ? `The reader's guess, from the paper${onPaper ? ` (${onPaper})` : ""}.`
+    : `Not read off the paper${p.why ? `: ${p.why}` : "."}`;
   const guessChip = guessShown ? (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -378,7 +430,7 @@ export function PaperworkRow({
           A Guess: {destLabel(guessValue)} <span className="text-xs text-slate-500">(Tap To Pick)</span>
         </span>
       </button>
-      <span className="text-xs text-slate-500">Not read off the paper{p.why ? `: ${p.why}` : "."}</span>
+      <span className="text-xs text-slate-500">{guessWhy}</span>
     </div>
   ) : null;
 
@@ -393,6 +445,7 @@ export function PaperworkRow({
   const costChooser = (
     <div className="space-y-2" role="group" aria-label="Where does this go?">
       {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+      {onPaperLine}
       {conflict}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Select
@@ -416,6 +469,7 @@ export function PaperworkRow({
           {PAPER_BUCKETS.map((b) => (
             <option key={b} value={`cost:${b}`}>
               {b}
+              {prePick === `cost:${b}` ? " (On The Paper)" : ""}
             </option>
           ))}
         </Select>
@@ -572,6 +626,7 @@ export function PaperworkRow({
           {mode === "keep" && (
             <div className="mt-2.5 space-y-2 empty:hidden">
               {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+              {onPaperLine}
               {conflict}
               {guessChip}
             </div>
@@ -609,6 +664,12 @@ export function PaperworkRow({
             {r.state === "not_read" && (
               <Button onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
                 {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Now"}
+              </Button>
+            )}
+            {/* A return with no lines can't go on a job (RETURN_NEEDS_LINES says Read Again): the door it names. */}
+            {r.state === "ready" && isReturnWithoutLines(item) && item.file_url && (
+              <Button variant="outline" onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
+                {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Again"}
               </Button>
             )}
             {(r.state === "later" || r.state === "supplier_documents") && (

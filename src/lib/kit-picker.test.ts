@@ -96,7 +96,9 @@ describe("kitItemsToPickerRows", () => {
     expect(kitItemsToPickerRows([linked])[0].unit_price).toBe(2.5);
   });
 
-  it("a caller that owns THE rule as a function (AddLineItems' markupFor) wins for linked lines", () => {
+  it("a linked line prices from the same two numbers AddLineItems prices its typeahead from", () => {
+    // Audit v994 VP1: the picker took a markupFor closure that beat these numbers, and the vendor
+    // rows beside it read the numbers, which no caller passed. One input now, and it is these.
     const linked = {
       id: "l",
       description: "x",
@@ -105,17 +107,12 @@ describe("kitItemsToPickerRows", () => {
       unit_price: 0,
       sort_order: 0,
       price_list_item_id: "pli",
-      price_list_items: { id: "pli", code: null, description: "Wire", unit: "ft", buy_price: 1, markup_pct: 25 },
+      price_list_items: { id: "pli", code: null, description: "Wire", unit: "ft", buy_price: 100, markup_pct: 0 },
     };
-    const [r] = kitItemsToPickerRows([linked], { orgDefaultPct: 40, levelPct: 10, markupFor: () => 50 });
-    expect(r.unit_price).toBe(1.5);
-    // …and is ignored for a frozen line, which keeps its own price.
-    const [f] = kitItemsToPickerRows(
-      [{ id: "f", description: "Frozen", quantity: 1, unit: "ea", unit_price: 7, sort_order: 0 }],
-      { orgDefaultPct: 40, levelPct: 10, markupFor: () => 50 },
-    );
-    expect(f.unit_price).toBe(7);
-    expect(f.linked).toBe(false);
+    // No level: the item states no markup, so the org default answers.
+    expect(kitItemsToPickerRows([linked], { orgDefaultPct: 25, levelPct: null })[0].unit_price).toBe(125);
+    // A Local-level customer at 15% outranks the org default.
+    expect(kitItemsToPickerRows([linked], { orgDefaultPct: 25, levelPct: 15 })[0].unit_price).toBe(115);
   });
 
   it("an UNLINKED line keeps its frozen price whatever the customer's level", () => {

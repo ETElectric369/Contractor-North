@@ -194,7 +194,9 @@ export function OrganizeManager({
         const where =
           s?.picked && s.jobLabel
             ? `${s.because ?? "Job picked from the paper"}: ${s.jobLabel}. Waiting in Needs Attention for File It.`
-            : `Waiting in Needs Attention: where does this go?${
+            : s?.picked && s.bucket
+              ? `${s.because ?? `Business cost picked from the paper: ${bucketOf(s.bucket)}`}. Waiting in Needs Attention for File It.`
+              : `Waiting in Needs Attention: where does this go?${
                 s?.jobLabel ? ` (a guess: ${s.jobLabel})` : s?.bucket ? ` (a guess: Business Cost, ${bucketOf(s.bucket)})` : ""
               }`;
         setState(

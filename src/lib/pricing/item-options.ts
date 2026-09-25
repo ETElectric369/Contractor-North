@@ -14,8 +14,10 @@ import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
  * It is pure on purpose. The money in it is the difference between a $830 allowance and a $1,610
  * Marvin window, and the only way to keep that honest is to be able to test it without a database,
  * a browser or a customer standing there. Every screen that offers the choice (the composer's
- * picker, the saved-estimate picker, the invoice picker) resolves through here so they can never
- * disagree about the same pick.
+ * picker, the saved-estimate picker, the invoice picker, the composer's per-line swap) and every
+ * server path that prices a book item (the AI estimator, Nort's price_material and
+ * search_price_list) resolves through here, via priceBookLine when nobody picked, so they can
+ * never disagree about the same item.
  *
  * THREE RULES IT ENFORCES
  *
@@ -72,8 +74,19 @@ export type OptionedPriceItem = {
 };
 
 /** Who owns the markup for this document: the customer's pricing level (null when they have none)
- *  and the org-wide default. Passed in because only the page knows which customer is selected. */
+ *  and the org-wide default. Passed in because only the page knows which customer is selected.
+ *
+ *  EVERY FUNCTION BELOW TAKES IT WITHOUT A DEFAULT (audit v994, VP1). They all used to default it
+ *  to `{}`, so a screen that forgot to pass it still compiled, still rendered, and priced a vendor
+ *  with a blank markup at the item's own markup, which is 0 on every net-cost import: the quote
+ *  picker sold a $100 Leviton at $100 to a customer the price-list sheet said paid $125. A caller
+ *  must now say what it knows, even when what it knows is "no customer yet". */
 export type OptionPricing = { levelPct?: number | null; orgDefaultPct?: number | null };
+
+/** The same two facts with neither one optional: what a SCREEN or a server path hands the one
+ *  pricing function (priceBookLine) and the shared picker. `{}` is not a BookPricing, so leaving
+ *  the org default out is a type error rather than a customer quoted at net cost. */
+export type BookPricing = { levelPct: number | null; orgDefaultPct: number | null };
 
 /** The id that means "the item's own price" — not a row in the table, so not a uuid. An empty
  *  string is what an unselected <select> hands back, which keeps the UI side free of special cases. */
@@ -169,7 +182,7 @@ export function describeWithMaker(base: string, option: PriceItemOptionRow): str
 }
 
 /** The item's own price as a choice: the allowance, always offered, always first. */
-export function itemOwnChoice(item: OptionedPriceItem, pricing: OptionPricing = {}): ItemOptionChoice {
+export function itemOwnChoice(item: OptionedPriceItem, pricing: OptionPricing): ItemOptionChoice {
   const buy = num(item.buy_price);
   const pct = effectiveMarkupPct({
     levelPct: pricing.levelPct,
@@ -208,7 +221,7 @@ export function itemOwnChoice(item: OptionedPriceItem, pricing: OptionPricing = 
 export function optionMarkupPct(
   item: OptionedPriceItem,
   option: Pick<PriceItemOptionRow, "markup_pct">,
-  pricing: OptionPricing = {},
+  pricing: OptionPricing,
 ): number {
   const raw = option.markup_pct;
   const stated = raw === null || raw === undefined || raw === "" || !Number.isFinite(Number(raw)) ? null : Number(raw);
@@ -223,7 +236,7 @@ export function optionMarkupPct(
 export function optionChoice(
   item: OptionedPriceItem,
   option: PriceItemOptionRow,
-  pricing: OptionPricing = {},
+  pricing: OptionPricing,
 ): ItemOptionChoice {
   const buy = num(option.buy_price);
   const pct = optionMarkupPct(item, option, pricing);
@@ -247,7 +260,7 @@ export function optionChoice(
 /** Every row of the dropdown for this code: the item's own price first, then each maker in the
  *  org's own order. An item with no options gets a one-row list, which is why the pickers can ask
  *  `hasItemOptions` and otherwise carry on exactly as before. */
-export function itemOptionChoices(item: OptionedPriceItem, pricing: OptionPricing = {}): ItemOptionChoice[] {
+export function itemOptionChoices(item: OptionedPriceItem, pricing: OptionPricing): ItemOptionChoice[] {
   const opts = normalizeItemOptions(item.price_list_item_options);
   return [itemOwnChoice(item, pricing), ...opts.map((o) => optionChoice(item, o, pricing))];
 }
@@ -261,7 +274,7 @@ export function itemOptionChoices(item: OptionedPriceItem, pricing: OptionPricin
  * allowance stays one row down, still pickable. With no default, the item's own price is the
  * answer and stays first, exactly as before.
  */
-export function pickerChoices(item: OptionedPriceItem, pricing: OptionPricing = {}): ItemOptionChoice[] {
+export function pickerChoices(item: OptionedPriceItem, pricing: OptionPricing): ItemOptionChoice[] {
   const all = itemOptionChoices(item, pricing);
   const def = all.find((c) => c.isDefault);
   if (!def) return all;
@@ -272,7 +285,7 @@ export function pickerChoices(item: OptionedPriceItem, pricing: OptionPricing = 
  *  name and sell (null when no vendor is the default, and the row shows the item's own price). */
 export function pickerSummary(
   item: OptionedPriceItem,
-  pricing: OptionPricing = {},
+  pricing: OptionPricing,
 ): { count: number; defaultChoice: ItemOptionChoice | null; ownChoice: ItemOptionChoice } {
   const all = itemOptionChoices(item, pricing);
   return {
@@ -299,11 +312,76 @@ export function defaultItemOptionId(item: OptionedPriceItem): string {
 export function chooseItemOption(
   item: OptionedPriceItem,
   optionId: string | null | undefined,
-  pricing: OptionPricing = {},
+  pricing: OptionPricing,
 ): ItemOptionChoice | null {
   if (!optionId) return itemOwnChoice(item, pricing);
   const found = normalizeItemOptions(item.price_list_item_options).find((o) => o.id === optionId);
   return found ? optionChoice(item, found, pricing) : null;
+}
+
+/**
+ * THE ONE PRICE A PRICE-BOOK ITEM QUOTES AT when nobody picked a vendor: the vendor the org made
+ * the default when it has one (0282: "what a kit or an import resolves to"), else the item's own
+ * price, both through THE one markup rule with this document's customer level and org default.
+ *
+ * Every door that turns a price-book item into a line without asking "which vendor?" resolves
+ * through here: the shared Add picker's one-tap add and the price it shows, the composer's
+ * per-line swap, the invoice picker, the AI estimator's book lines, and Nort's price_material and
+ * search_price_list. Before this there were six formulas, `sellPrice(buy, markupFor(item))` and
+ * friends, and each one priced 830 Windows at its $830 allowance while the price list said the
+ * item now priced at Marvin (VP2), and the pickers priced every vendor without the customer's
+ * level or the org default (VP1). One function cannot disagree with itself.
+ *
+ * Never null: defaultItemOptionId only ever returns a vendor that is on the item, and the item's
+ * own price is the answer when there is none.
+ */
+export function priceBookLine(item: OptionedPriceItem, pricing: BookPricing): ItemOptionChoice {
+  return chooseItemOption(item, defaultItemOptionId(item), pricing) ?? itemOwnChoice(item, pricing);
+}
+
+/** A caller's OWN wording with the chosen vendor named in it, for the server paths that do not
+ *  write "CODE — description" (the estimator keeps the model's words and a [CODE] tag; Nort keeps
+ *  the book's description). The item's own price leaves the words untouched. */
+export function describeChoice(base: string, item: OptionedPriceItem, choice: ItemOptionChoice): string {
+  if (choice.isItemOwn) return base;
+  const option = normalizeItemOptions(item.price_list_item_options).find((o) => o.id === choice.id);
+  return option ? describeWithMaker(base, option) : base;
+}
+
+/**
+ * WHICH VENDOR A WRITTEN LINE PRICED AT, read back from its own words.
+ *
+ * A quote line stores a description and a sell, not an option id. Every door that prices a code
+ * at a vendor names that vendor in the description in ONE shape (describeWithMaker: "(Marvin)" or
+ * "(Marvin, #M-1)"), so that shape is how a reader downstream, the order sheet, finds out what the
+ * line was sold as. Without it the order sheet matched "[830]", costed the line at the $830
+ * allowance and listed that under a line the customer paid Marvin money for (audit v994 VP2
+ * follow-through). Null when the words name no vendor under this code: the line priced at the
+ * item's own number, or somebody rewrote it, and the item's own cost is then the honest guess.
+ *
+ * The longest name wins, so "Andersen 400 Series" is never read as plain "Andersen".
+ */
+export function optionNamedIn(item: OptionedPriceItem, text: string | null | undefined): PriceItemOptionRow | null {
+  const hay = String(text ?? "").toLowerCase();
+  let best: PriceItemOptionRow | null = null;
+  for (const o of normalizeItemOptions(item.price_list_item_options)) {
+    const maker = makerName(o).toLowerCase();
+    if (!maker) continue;
+    if (!hay.includes(`(${maker})`) && !hay.includes(`(${maker}, #`)) continue;
+    if (!best || maker.length > makerName(best).length) best = o;
+  }
+  return best;
+}
+
+/** What a book line COSTS the company, read the way it was sold: the vendor its words name, else
+ *  the item's own buy price. The order sheet's est_cost, so a buy list never disagrees with the
+ *  quote it was built from about which window is being bought. */
+export function bookLineBuy(
+  item: OptionedPriceItem,
+  text: string | null | undefined,
+): { buyPrice: number; option: PriceItemOptionRow | null } {
+  const option = optionNamedIn(item, text);
+  return { buyPrice: num(option ? option.buy_price : item.buy_price), option };
 }
 
 /** The refusal sentence for a pick that is no longer on the code. Named here so the server action

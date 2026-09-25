@@ -15,8 +15,11 @@
  * picture is asked what it is before it is asked where it goes (Erik, 2026-09-24).
  */
 
-import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
-import { accountForSupplier, aliasKey, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
+
+export { normalizeDocNumber };
 
 // ── WHAT THE PAPER IS ───────────────────────────────────────────────────────────────────────
 
@@ -128,6 +131,21 @@ export type PaperProposal = {
   marks?: PaperMarks | null;
   /** A business-cost bucket a model guesses. Offered as a chip, never picked. Never Fees. */
   bucket?: string | null;
+  /**
+   * WHO GUESSED THE BUCKET: the reader, looking at the paper, or AI Suggest, a second look. The
+   * chip says which ("The reader's guess" is not "Not read off the paper"). A row read before this
+   * was kept has none; a bucket with no `why` key on it is the reader's (AI Suggest always writes
+   * `why`).
+   */
+  bucketFrom?: "reader" | "ai" | null;
+  /**
+   * THE COMPANY'S OWN USE, WRITTEN ON THE PAPER (Erik, 2026-09-24): "TOOLS" in a supplier's PO box
+   * picks Tools & Supplies exactly the way "13897 HERRINGBONE" picks the job. Found in code, by an
+   * exact whole-field match (companyUseWord, placeFromMarks), never by a model. `bucket` null is a word that names
+   * the company's own use and no bucket (STOCK: a shop-stock shelf is a later update), said on the
+   * row and never picked.
+   */
+  companyUse?: CompanyUse | null;
   /** The reader says this is a plain picture (a job site, a panel, a label), not paperwork. */
   picture?: boolean;
   po?: string | null;
@@ -148,8 +166,30 @@ export type PaperProposal = {
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
   /** How the row was last filed, so Undo takes down exactly that and nothing else. */
-  filed?: { how: "bill" | "tie" | "supplier_documents" | "kept" | "photo"; landed?: string[] } | null;
+  filed?: PaperFiled | null;
 };
+
+/**
+ * WHY IT WENT WHERE IT WENT, KEPT WITH HOW (audit v994, tray F1). The tray's pick lived only in
+ * memory, so a filed row could not say whether the PO picked the job, a person took a model's
+ * guess, or a person chose something else. It rides INSIDE `filed`, never on the reader's
+ * proposal: Undo clears `filed`, and the paper goes back exactly as it was read.
+ */
+export type PaperFiled = {
+  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo";
+  landed?: string[];
+  /** "paper": what the paper names (a printed mark, matched exactly); "guess": a model's guess a
+   *  person tapped; "person": a person's own pick. */
+  picked?: "paper" | "guess" | "person" | null;
+  /** The paper's own pick at the moment of filing, and the words that made it. */
+  paperPick?: string | null;
+  because?: string | null;
+  jobFrom?: JobMarkKind | null;
+  jobHint?: string | null;
+};
+
+/** A company-use word on the paper, where it was written, and the bucket it picks (or none). */
+export type CompanyUse = { bucket: BusinessCostBucket | null; from: "po" | "job_name"; words: string };
 
 export type PaperItem = {
   id: string;
@@ -172,6 +212,14 @@ export type PaperItem = {
   tied_supplier_invoice_id?: string | null;
   pricing_provisional?: boolean | null;
   confidence?: string | null;
+  /**
+   * What the paper says about where it goes, in its own words ("PO TOOLS"), for a row where
+   * nothing was picked. Filled on the server when the tray loads (rematchTray), where the
+   * company's own names are known and can be taken out of the reader's hint. Never stored.
+   */
+  on_paper?: string | null;
+  /** What the reader transcribed, line by line (jsonb; File It writes these as the bill's lines). */
+  line_items?: unknown;
 };
 
 export function proposalOf(item: { proposal?: unknown }): PaperProposal {
@@ -187,6 +235,70 @@ export function amountOf(item: { amount?: number | string | null }): number | nu
   const n = Number(item.amount);
   return Number.isFinite(n) ? n : null;
 }
+
+/**
+ * A RETURN WITH NO LINES CANNOT GO ON A JOB (audit v994, DB4).
+ *
+ * A negative bill on a job is a supplier return, and the importer credits it to the customer. What
+ * holds that credit to what the customer was actually billed is its LINES: each returned part is
+ * matched to the purchase it reverses and credits at most what that purchase billed
+ * (returnLinesAgainstPurchases), and a line can be switched off like any other. With no lines
+ * there is nothing to match and nothing to switch off, so the whole return is credited at markup -
+ * the INV-078 housings, credited to Andrew when he was never charged for them. So File It asks for
+ * the lines first. A business cost is the company's own book and never reaches a customer, so it
+ * is not held to this.
+ */
+export function isReturnWithoutLines(item: PaperItem): boolean {
+  const t = paperTypeOfItem(item);
+  if (t !== "receipt" && t !== "bill") return false;
+  return isLinelessReturn(amountOf(item), item.line_items);
+}
+
+/**
+ * A negative total with no described line under it. The one test behind isReturnWithoutLines (the
+ * File It gate) and insertItemizedBill (the write itself), so the rule is held where the bill is
+ * written and not only at the door that happened to ask first.
+ */
+export function isLinelessReturn(total: number | null | undefined, lines: unknown): boolean {
+  if (total === null || total === undefined || !(Math.round(Number(total) * 100) < 0)) return false;
+  const list = Array.isArray(lines) ? lines : [];
+  return !list.some((l) => l && typeof l === "object" && String((l as { description?: unknown }).description ?? "").trim());
+}
+
+/**
+ * A BILL'S LINES POINT THE SAME WAY AS ITS TOTAL (audit v994, DB4 and its review).
+ *
+ * The money readers find a return's parts by their NEGATIVE extensions (returnLinesAgainstPurchases
+ * caps them against the purchase, returnCreditRows credits them) and a charge's parts by positive
+ * ones (billItemisation, the price book). A bill whose total says one thing and whose lines add up
+ * to the other is read as both at once: a -51.58 return with +47.32 of lines skips the cap and
+ * credits the whole return at markup, and a +51.58 charge with -47.32 of lines puts every part on
+ * the customer's invoice as a credit under a doubled lump. That happens whenever the sign is set in
+ * one place and the lines in another: a reader that printed the total as a credit and copied the
+ * lines as printed, or a person who typed the other sign in Fix Details (a return, or It Is A
+ * Charge on a paper read as a credit memo).
+ *
+ * So when the lines add up to the opposite sign from the total, every line is turned around. Lines
+ * that already point with it (a return with a positive restocking fee under it, a receipt with a
+ * discount line) are left exactly as read, and so are lines that add up to nothing. Quantity is
+ * never touched: the extension is the price.
+ */
+export function linesPointWithTotal<T extends { amount?: unknown; unit_price?: unknown }>(total: number | null | undefined, lines: T[]): T[] {
+  if (total === null || total === undefined || !Number.isFinite(Number(total))) return lines;
+  const t = Math.round(Number(total) * 100);
+  if (t === 0 || !lines.length) return lines;
+  const s = Math.round(lines.reduce((acc, l) => acc + (Number(l.amount) || 0), 0) * 100);
+  if (s === 0 || s > 0 === t > 0) return lines;
+  const turn = (v: unknown) => (v === null || v === undefined ? v : -Number(v) || 0);
+  return lines.map((l) => ({ ...l, unit_price: turn(l.unit_price), amount: turn(l.amount) }));
+}
+
+export const RETURN_NEEDS_LINES =
+  "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
+
+/** The same refusal where a receipt is read straight onto a job (Snap the Bill, Record as Cost). */
+export const RETURN_ON_JOB_NEEDS_LINES =
+  "This reads as a return, and none of its lines could be read, so on this job it would credit the customer the whole amount, even for parts they were never charged for. Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.";
 
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {
@@ -319,7 +431,41 @@ function markedJob(p: PaperProposal): string | null {
  */
 export function suggestedDestination(item: PaperItem, jobIds: readonly string[]): string {
   const job = markedJob(proposalOf(item));
-  return job && jobIds.includes(job) ? `job:${job}` : "";
+  if (job) return jobIds.includes(job) ? `job:${job}` : "";
+  const cost = markedCost(item);
+  return cost ? `cost:${cost}` : "";
+}
+
+/**
+ * The business cost the PAPER names (a company-use word in its PO or job box, matched exactly), on
+ * a receipt or a bill that names no job and says nothing that disagrees. Never Fees.
+ */
+function markedCost(item: PaperItem): BusinessCostBucket | null {
+  const p = proposalOf(item);
+  const b = p.companyUse?.bucket;
+  if (!b || !isBusinessCostBucket(b) || b === "Fees") return null;
+  if (markedJob(p) || p.jobConflict) return null;
+  const t = paperTypeOfItem(item);
+  return t === "receipt" || t === "bill" ? b : null;
+}
+
+/**
+ * WHAT THE PAPER ITSELF PICKED, whether or not that job is in anyone's picker: "job:<id>",
+ * "cost:<bucket>", or "". File It compares a person's choice against this to record who decided.
+ */
+export function paperPickOf(item: PaperItem): string {
+  const job = markedJob(proposalOf(item));
+  if (job) return `job:${job}`;
+  const cost = markedCost(item);
+  return cost ? `cost:${cost}` : "";
+}
+
+/** Did the READER (not AI Suggest) guess this row's bucket? Older rows keep no bucketFrom: a
+ *  bucket with no `why` key is the reader's, since AI Suggest always writes one. */
+export function bucketIsReaders(p: PaperProposal): boolean {
+  if (!p.bucket) return false;
+  if (p.bucketFrom) return p.bucketFrom === "reader";
+  return !Object.prototype.hasOwnProperty.call(p, "why");
 }
 
 /**
@@ -334,7 +480,8 @@ export function guessOf(item: PaperItem, jobIds: readonly string[]): string | nu
   const jobGuess = p.guessJobId ?? (p.jobId && p.jobId !== marked ? p.jobId : null);
   if (jobGuess && jobIds.includes(jobGuess) && `job:${jobGuess}` !== picked) return `job:${jobGuess}`;
   const t = paperTypeOfItem(item);
-  if ((t === "receipt" || t === "bill") && p.bucket && isBusinessCostBucket(p.bucket) && p.bucket !== "Fees") return `cost:${p.bucket}`;
+  if ((t === "receipt" || t === "bill") && p.bucket && isBusinessCostBucket(p.bucket) && p.bucket !== "Fees" && `cost:${p.bucket}` !== picked)
+    return `cost:${p.bucket}`;
   return null;
 }
 
@@ -353,9 +500,145 @@ function paperWord(item: PaperItem): string {
  */
 export function pickedBecause(item: PaperItem): string | null {
   const p = proposalOf(item);
-  if (!markedJob(p) || !p.jobFrom) return null;
-  const words = String(p.jobHint ?? "").trim();
-  return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
+  if (markedJob(p) && p.jobFrom) {
+    const words = String(p.jobHint ?? "").trim();
+    return `Job picked from the ${JOB_MARK_WORDS[p.jobFrom]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
+  }
+  const cost = markedCost(item);
+  if (cost && p.companyUse) {
+    const words = String(p.companyUse.words ?? "").trim();
+    return `Business cost picked from the ${JOB_MARK_WORDS[p.companyUse.from]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
+  }
+  return null;
+}
+
+/**
+ * WHO DECIDED WHERE A PAPER WENT, said once, for the row and for the bill's note (audit v994).
+ * `settled` is the paper as the tray showed it (rematchPaper, on the server, before the claim);
+ * `destValue` is where a person filed it ("job:<id>", "cost:<bucket>", "photo:<id>").
+ *
+ *   · "paper": what the paper names, taken as it stood;
+ *   · "guess": a model's guess, tapped (the job it guessed, or the bucket it guessed);
+ *   · "person": anything else, including a person choosing something other than what the paper
+ *     named, which the note says in so many words.
+ */
+export function pickProvenance(settled: PaperItem, destValue: string): { filed: Omit<PaperFiled, "how">; note: string | null } {
+  const p = proposalOf(settled);
+  const paperPick = paperPickOf(settled);
+  const target = destValue.replace(/^photo:/, "job:");
+  const because = pickedBecause(settled);
+  const guessJob = p.guessJobId ?? (p.jobId && !p.jobFrom ? p.jobId : null);
+  const picked: NonNullable<PaperFiled["picked"]> =
+    paperPick && target === paperPick
+      ? "paper"
+      : (guessJob && target === `job:${guessJob}`) || (p.bucket && target === `cost:${p.bucket}`)
+        ? "guess"
+        : "person";
+  const jobPick = paperPick.startsWith("job:");
+  const filed: Omit<PaperFiled, "how"> = {
+    picked,
+    paperPick: paperPick || null,
+    because: because ?? null,
+    jobFrom: jobPick ? (p.jobFrom ?? null) : null,
+    jobHint: jobPick ? (p.jobHint ?? null) : null,
+  };
+  let note: string | null = null;
+  if (picked === "paper" && because) note = `${because}.`;
+  else if (picked === "guess")
+    note = `A person picked ${target.startsWith("cost:") && bucketIsReaders(p) ? "the reader's guess" : "a model's guess"}; it was not read off the paper.`;
+  else if (paperPick && because) note = `A person picked this over what the paper names (${because}).`;
+  else if (p.jobConflict) note = `A person picked this: ${p.jobConflict}`;
+  return { filed, note };
+}
+
+// ── THE COMPANY'S OWN USE, WRITTEN ON THE PAPER (exact, never fuzzy) ────────────────────────
+
+/**
+ * THE WORDS, AND WHAT EACH ONE PICKS (Erik, 2026-09-24: "TOOLS" in the PO box is the tools
+ * bucket, the same way "13897 HERRINGBONE" is the job). The WHOLE box must be the word: "TOOLS",
+ * "Tool", "SHOP TOOLS", "TRUCK 2", "#2 TRUCK", "VAN", "OFFICE". "TOOLS FOR HERRINGBONE" is not.
+ *
+ * STOCK, SHOP STOCK and INVENTORY say the company's own too, but the thing they name, a shelf the
+ * stock sits on until a job uses it, is being built separately. They pick NOTHING; the row says
+ * what the paper says, and a person decides. The company's own name and its people's are never
+ * here: "ERIK TAYLOR" is on every CED ticket as who it was sold to, job purchases included.
+ */
+const COMPANY_WORDS: { re: RegExp; bucket: BusinessCostBucket | null }[] = [
+  { re: /^(SHOP )?TOOLS?$/, bucket: "Tools & Supplies" },
+  { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Gas & Truck" },
+  { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Gas & Truck" },
+  { re: /^OFFICE$/, bucket: "Phone & Office" },
+  { re: /^(SHOP )?STOCK$/, bucket: null },
+  { re: /^INVENTORY$/, bucket: null },
+];
+
+/** Is this whole box a company-use word? The bucket it picks (null: the word picks nothing). */
+export function companyUseWord(raw: string | null | undefined): { bucket: BusinessCostBucket | null; words: string } | null {
+  const key = wordsKey(raw);
+  if (!key) return null;
+  const hit = COMPANY_WORDS.find((w) => w.re.test(key));
+  return hit ? { bucket: hit.bucket, words: String(raw ?? "").trim() } : null;
+}
+
+export type PaperPlace = { job: JobFromMarks; companyUse: CompanyUse | null };
+
+/**
+ * WHERE THE PAPER SAYS IT GOES: a job (jobFromPaperMarks), or the company's own use.
+ *
+ *   · A JOB MARK ALWAYS BEATS A COMPANY WORD. A box whose words name a job exactly (a job the
+ *     owner named "Tools") is that job, and the word is not read as company use at all.
+ *   · A PAPER NAMING BOTH says so and picks nothing: "TOOLS" in the PO box and "13897
+ *     HERRINGBONE" in the address is two answers, and choosing between them is a person's call.
+ *   · A fee-shaped paper (a supplier's late or service charge) is never given a bucket by a word.
+ */
+export function placeFromMarks(
+  marks: PaperMarks | null | undefined,
+  jobs: readonly MarkJob[],
+  pos: readonly MarkPo[] = [],
+  selfNames: readonly (string | null | undefined)[] = [],
+  opts: { feeShaped?: boolean } = {},
+): PaperPlace {
+  const job = jobFromPaperMarks(marks, jobs, pos, selfNames);
+  if (!marks) return { job, companyUse: null };
+  const fromPo = companyUseWord(marks.po);
+  const fromName = fromPo ? null : companyUseWord(marks.jobName);
+  const found = fromPo ? { ...fromPo, from: "po" as const } : fromName ? { ...fromName, from: "job_name" as const } : null;
+  if (!found) return { job, companyUse: null };
+  // The same box names a job: a job mark beats a company word.
+  const same = jobFromPaperMarks(found.from === "po" ? { po: marks.po } : { jobName: marks.jobName }, jobs, pos, selfNames);
+  if (same.kind !== "none") return { job, companyUse: null };
+  const companyUse: CompanyUse = { bucket: opts.feeShaped ? null : found.bucket, from: found.from, words: found.words };
+  if (job.kind === "one") {
+    return {
+      job: {
+        kind: "conflict",
+        sentence: `The paper names a job (the ${JOB_MARK_WORDS[job.from]}${job.words ? ` "${job.words}"` : ""}) and the company's own use (the ${JOB_MARK_WORDS[found.from]} "${found.words}"), so nothing was picked.`,
+      },
+      companyUse,
+    };
+  }
+  return { job, companyUse };
+}
+
+/**
+ * WHAT THE PAPER SAYS, IN ITS OWN WORDS, for a row that picked nothing: "PO TOOLS", "PO STOCK".
+ * The PO box first; with none, the reader's hint with the company's own names taken out (they are
+ * on every ticket as who it was sold to, and "ERIK TAYLOR" tells nobody where a paper goes). Null
+ * when nothing is left.
+ */
+export function onPaperWords(p: PaperProposal, selfNames: readonly (string | null | undefined)[] = []): string | null {
+  const m = storedMarks(p);
+  const po = String(m.po ?? "").trim();
+  if (po) return `PO ${po}`;
+  let hint = String(m.hint ?? "").trim();
+  if (!hint) return null;
+  for (const n of selfNames) {
+    const name = String(n ?? "").trim();
+    if (name.length < 3) continue;
+    hint = hint.replace(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")}\\b`, "gi"), " ");
+  }
+  hint = hint.replace(/\s+/g, " ").trim();
+  return hint || null;
 }
 
 // ── WHICH JOB THE PAPER NAMES (exact, never fuzzy) ─────────────────────────────────────────
@@ -607,7 +890,12 @@ export function storedMarks(p: PaperProposal): PaperMarks {
  * itself has not already settled (no pick, no conflict said) is matched again from what was
  * stored: the same exact rules, no model call, and NOTHING WRITTEN. The row shows the pick and why,
  * and a person still presses File It. A paper a person has filed, set aside, or that already
- * carries a pick or a conflict is returned as it is.
+ * carries a job pick or a conflict is returned as it is.
+ *
+ * A COMPANY WORD IS NOT SETTLED (review of audit v994's fix). A PO STOCK or TOOLS paper read
+ * before its job existed was frozen by the word alone, and never showed the conflict a read today
+ * would find ("TOOLS" in the PO box and the job's street in the address). It is placed again like
+ * any other row; the same answer returns the row untouched.
  */
 export function rematchPaper<T extends PaperItem>(
   item: T,
@@ -619,12 +907,21 @@ export function rematchPaper<T extends PaperItem>(
   const p = proposalOf(item);
   if (markedJob(p) || p.jobConflict || p.ced) return item;
   if (!isRead(item)) return item;
-  const r = jobFromPaperMarks(storedMarks(p), jobs, pos, selfNames);
-  if (r.kind === "none") return item;
+  const { job: r, companyUse } = placeFromMarks(storedMarks(p), jobs, pos, selfNames, {
+    feeShaped: looksLikeSupplierFee(item.title, item.vendor, item.summary),
+  });
+  const had = p.companyUse ?? null;
+  const sameUse =
+    (!companyUse && !had) ||
+    (!!companyUse && !!had && companyUse.bucket === had.bucket && companyUse.from === had.from && companyUse.words === had.words);
+  if (r.kind === "none" && sameUse) return item;
   // A job a model wrote before marks existed stays offered, as the guess it always was.
   const guessJobId = p.guessJobId ?? (p.jobId && !p.jobFrom ? p.jobId : null);
-  if (r.kind === "conflict") return { ...item, proposal: { ...p, jobId: null, jobFrom: null, guessJobId, jobConflict: r.sentence } };
-  return { ...item, proposal: { ...p, jobId: r.jobId, jobFrom: r.from, jobHint: r.words || p.jobHint || null, guessJobId } };
+  // The word as it reads today; a stored word the rules no longer read is cleared, never kept.
+  const withUse = companyUse ? { companyUse } : had ? { companyUse: null } : {};
+  if (r.kind === "conflict") return { ...item, proposal: { ...p, ...withUse, jobId: null, jobFrom: null, guessJobId, jobConflict: r.sentence } };
+  if (r.kind === "none") return { ...item, proposal: { ...p, ...withUse, jobId: null, jobFrom: null, guessJobId } };
+  return { ...item, proposal: { ...p, ...withUse, jobId: r.jobId, jobFrom: r.from, jobHint: r.words || p.jobHint || null, guessJobId } };
 }
 
 /**
@@ -661,29 +958,14 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   if (isCost && dest.type === "keep") return "This is a cost. File it on a job or as a business cost, or change its type in Fix Details.";
   if (!isCost && dest.type === "overhead") return "Only a receipt or a bill can be a business cost. Change its type in Fix Details if it is one.";
   if (isCost && r.state === "needs_total") return r.sentence;
+  if (dest.type === "job" && isReturnWithoutLines(item)) return RETURN_NEEDS_LINES;
   return null;
 }
 
 // ── IS THIS PURCHASE ALREADY ON THE BOOKS? ─────────────────────────────────────────────────
 
-/** "#8802-1108330 ", "no. 8802 1108330" and "8802-1108330" are the same printed number. */
-export function normalizeDocNumber(raw: string | null | undefined): string {
-  return String(raw ?? "")
-    .toUpperCase()
-    .replace(/^\s*(?:NO\.?|NUMBER|INV(?:OICE)?\.?|#)\s*/g, "")
-    .replace(/[^A-Z0-9]+/g, "");
-}
-
-export type BookedBill = {
-  id: string;
-  supplier: string | null;
-  bill_number: string | null;
-  supplier_account_id?: string | null;
-  amount: number | string | null;
-  bill_date: string | null;
-  job_id?: string | null;
-  jobs?: { job_number?: string | null; name?: string | null } | null;
-};
+/** A bill on the books, as the number check reads it (same-purchase.ts: one reading for every door). */
+export type BookedBill = LedgerBill;
 export type BookedPaper = {
   id: string;
   vendor: string | null;
@@ -716,24 +998,17 @@ export type NumberMatch =
   | { kind: "supplier_invoice"; supplierInvoiceId: string; invoiceNumber: string; sentence: string }
   | { kind: "paper"; itemId: string; sentence: string };
 
-function sameSupplier(
-  a: { name: string | null; account: string | null },
-  b: { name: string | null; account: string | null },
-  aliases: SupplierAliasIndex | null,
-): boolean {
-  const aAcct = a.account ?? accountForSupplier(a.name, aliases);
-  const bAcct = b.account ?? accountForSupplier(b.name, aliases);
-  if (aAcct && bAcct) return aAcct === bAcct;
-  const ak = aliasKey(a.name);
-  return !!ak && ak === aliasKey(b.name);
-}
-
 /**
  * Every record already on the books with this paper's printed number AND the same supplier, by
  * exact spelling or exact alias only (supplier-identity.ts: the fuzzy match is for suggestions,
  * and this one decides which button shows). A supplier's own document (supplier_invoices) is
  * keyed on its number alone when it has no account yet, but only for a long number: "1234" from
  * two stores is two purchases, "8802-1108330" is not.
+ *
+ * A BILL IS FOUND BY THE SAME READING EVERY OTHER DOOR USES (billsCarryingNumber, audit v994):
+ * the number in bill_number OR supplier_invoice_number, on a live bill only. Before, this door
+ * read bill_number and the supplier's door read supplier_invoice_number, so each was blind to the
+ * bills the other one wrote.
  */
 export function findSameNumber(
   item: PaperItem,
@@ -744,10 +1019,8 @@ export function findSameNumber(
   if (!number) return [];
   const me = { name: item.vendor ?? null, account: null };
   const out: NumberMatch[] = [];
-  for (const b of books.bills ?? []) {
-    if (b.id === item.bill_id) continue; // the bill THIS paper made
-    if (normalizeDocNumber(b.bill_number) !== number) continue;
-    if (!sameSupplier(me, { name: b.supplier, account: b.supplier_account_id ?? null }, aliases)) continue;
+  // The bill THIS paper made is never "already on the books" against itself.
+  for (const b of billsCarryingNumber(item.doc_number, { supplier: item.vendor }, books.bills ?? [], aliases, { exceptBillId: item.bill_id })) {
     const amount = amountOf(b);
     const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : "business costs";
     out.push({

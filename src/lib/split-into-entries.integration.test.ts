@@ -3,8 +3,9 @@ import pg from "pg";
 import { defineSplitIntoEntriesSuite } from "./split-into-entries.db-suite";
 
 /**
- * Migrations 0288 + 0290 (a split is a cut into ordinary entries; the old split table dropped, and
- * the guards that stay read time entries only), exercised where the rules live. 0289's one-time
+ * Migrations 0288 + 0290 + 0313 (a split is a cut into ordinary entries; the old split table
+ * dropped, and the guards that stay read time entries only; a void line's claim follows every cut),
+ * exercised where the rules live. 0289's one-time
  * conversion cases went with the table. The suite itself is split-into-entries.db-suite.ts;
  * this file points it at the production database, inside ONE transaction that is always rolled back.
  *
@@ -14,7 +15,7 @@ import { defineSplitIntoEntriesSuite } from "./split-into-entries.db-suite";
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 
-d("a split is a cut into ordinary entries (0288, 0290)", () => {
+d("a split is a cut into ordinary entries (0288, 0290, 0313)", () => {
   defineSplitIntoEntriesSuite(async () => {
     const client = new pg.Client({
       host: TEST_DB_HOST,

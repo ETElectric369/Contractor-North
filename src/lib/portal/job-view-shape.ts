@@ -18,7 +18,7 @@
  */
 import { buildJobLedger, type JobLedger, type LedgerInvoiceIn, type LedgerLineIn, type LedgerPaymentIn, type LedgerStretchIn } from "./stretch-ledger";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { customerLineWords, invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
 
@@ -188,16 +188,30 @@ export function portalPathsToSign(raw: PortalJobRaw): string[] {
 
 export function shapePortalJob(
   raw: PortalJobRaw,
-  extra: { signed: ReadonlyMap<string, string>; unbilled: CustomerUnbilled | null; now: Date },
+  extra: {
+    signed: ReadonlyMap<string, string>;
+    unbilled: CustomerUnbilled | null;
+    now: Date;
+    /** The org's supplier names (fetchSupplierNames, pinned to the scope's org). */
+    suppliers?: ReadonlySet<string>;
+  },
 ): PortalJobView {
   const { org_id: orgId, job_id: jobId } = raw.scope;
   const tz = getOrgSettings({ timezone: raw.org?.timezone ?? undefined }).timezone;
-  const invoicesRaw = raw.invoices ?? [];
+  // NO LINE NAMES A SUPPLIER, on the ledger or on the bill (audit v994 PL1, scrub on read). 0315
+  // makes portal_job_view and the invoice projection do this themselves; this is the last door,
+  // and the one that holds before 0315 is applied. Same rule, same words (customerLineWords).
+  const words = (l: { description?: unknown; import_source?: unknown }) =>
+    customerLineWords({ description: typeof l.description === "string" ? l.description : null, import_source: typeof l.import_source === "string" ? l.import_source : null }, extra.suppliers);
+  const invoicesRaw = (raw.invoices ?? []).map((i) =>
+    i.doc && Array.isArray(i.doc.items) ? { ...i, doc: { ...i.doc, items: i.doc.items.map((it) => ({ ...it, description: words(it) })) } } : i,
+  );
+  const lines = (raw.lines ?? []).map((l) => ({ ...l, description: words(l) }));
 
   const ledger = buildJobLedger({
     stretches: raw.stretches ?? [],
     invoices: invoicesRaw,
-    lines: raw.lines ?? [],
+    lines,
     payments: raw.payments ?? [],
     tz,
   });

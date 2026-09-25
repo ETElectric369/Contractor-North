@@ -164,6 +164,42 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     expect(out.items).toEqual([]);
   });
 
+  it("a bill with NO job charges nobody: no billable figure, no billed lines, and the note says it is a business cost", async () => {
+    // fef38cb9, Paper A: $44.44 of CED testers filed as Tools & Supplies, its three lines stored
+    // billable = true. Nort used to tell Erik the customer is charged $44.44 of it.
+    const tools = {
+      ...oshBill,
+      id: "fef38cb9",
+      supplier: "Consolidated Electrical Dist.",
+      amount: "44.44",
+      category: "Tools & Supplies",
+      job_id: null,
+      jobs: null,
+      bill_line_items: [
+        { id: "1d2e3812", description: "SANT 3000CED Ultimate AC Sensor Tester", quantity: "1.00", unit_price: "19.62", amount: "19.62", category: "Tools", billable: true, billed_amount: null, is_stock: false },
+        { id: "397dd8cc", description: "SANT 3115CED AC Sensor", quantity: "1.00", unit_price: "21.15", amount: "21.15", category: "Tools", billable: true, billed_amount: null, is_stock: false },
+        { id: "d7a208f7", description: "Tax", quantity: "1.00", unit_price: "3.67", amount: "3.67", category: "Tax", billable: true, billed_amount: null, is_stock: false },
+      ],
+    };
+    const { calls, client } = fakeDb({ data: tools });
+    const out = await parse("get_bill", { bill_id: tools.id }, client);
+    expect(calls.select).toContain("job_id");
+    expect(out.amount).toBe(44.44);
+    expect(out.billable_amount).toBeNull();
+    for (const i of out.items) expect(i).toMatchObject({ billable: null, billed_to_customer: null });
+    expect(out.money_note).toContain("No job: this is a business cost in the Tools & Supplies bucket");
+    expect(out.money_note).toContain("No customer is billed for it");
+    expect(out.money_note).not.toContain("job's cost");
+    expect(out.money_note).not.toContain("Quote billable_amount");
+  });
+
+  it("a bill whose row carries only the job's name still reads as on a job (the embed is the fallback)", async () => {
+    const { client } = fakeDb({ data: oshBill });
+    const out = await parse("get_bill", { bill_id: oshBill.id }, client);
+    expect(out.billable_amount).toBe(6.5);
+    expect(out.money_note).toContain("Quote billable_amount");
+  });
+
   it("still says 'Bill not found' rather than inventing one", async () => {
     const { client } = fakeDb({ data: null });
     const out = await parse("get_bill", { bill_id: "nope" }, client);
