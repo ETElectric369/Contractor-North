@@ -13,6 +13,7 @@ import {
   tapToPayAccountLinked,
   tapToPayDeviceStatus,
   tapToPayPluginPresent,
+  tapReaderConfiguredThisLoad,
   type TapDeviceStatus,
   type TapProgress,
 } from "@/lib/native-tap";
@@ -186,7 +187,9 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
   // morning after iOS 27, 2026-09-22). The bridge's resting "ready" is a connected, configured
   // reader — which is what set-up means — and it is replayed on subscribe, so it is the truth here
   // whether the connect came from an Enable tap, the shell's warm-up, or a foreground reconnect.
-  const ready = enabled || progress?.stage === "ready";
+  // …and a reader that was ready once on this load stays SET UP when something later lets it go
+  // (Nort's voice stands it down; audit v994 SI10): not connected now is not "not set up".
+  const ready = enabled || progress?.stage === "ready" || tapReaderConfiguredThisLoad();
   const [guide, setGuide] = useState<{ busy: boolean; note: string | null }>({ busy: false, note: null });
   const [announce, setAnnounce] = useState<{ busy: boolean; line: string | null; bad: boolean }>({
     busy: false,

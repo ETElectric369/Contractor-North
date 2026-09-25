@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * The Tap to Pay bridge against a fake StripeTerminal plugin (2026-09-23 sweep). The fake keeps
@@ -309,5 +311,48 @@ describe("Cancel while the reader is still connecting", () => {
     collect.resolve();
     expect(await press).toEqual({ ok: true });
     expect(t.plugin.confirmPaymentIntent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Nort's voice lets the reader go, and the phone stays set up (audit v994 SI10)", () => {
+  it("a stand-down says not ready now, but Settings still reads a phone that was ready as set up", async () => {
+    const tap = await freshBridge();
+    const stages: string[] = [];
+    tap.onTapProgress((p) => stages.push(p.stage));
+    expect(tap.tapReaderConfiguredThisLoad()).toBe(false);
+    expect(await tap.prepareTapToPay()).toEqual({ ok: true });
+    expect(stages).toContain("ready");
+    expect(tap.tapReaderConfiguredThisLoad()).toBe(true);
+
+    await tap.standDownReaderForVoice();
+    expect(t.plugin.disconnectReader).toHaveBeenCalledTimes(1);
+    expect(stages[stages.length - 1]).toBe("not ready");
+    // The stage is the connection; this is the set-up. Voice changed the one, not the other.
+    expect(tap.tapReaderConfiguredThisLoad()).toBe(true);
+
+    // Set up for one company is not set up for another.
+    tap.noteTapIdentity("org-1:user-1");
+    tap.noteTapIdentity("org-2:user-9");
+    expect(tap.tapReaderConfiguredThisLoad()).toBe(false);
+  });
+
+  it("with the SDK saying nothing is connected, the stand-down touches nothing and says nothing", async () => {
+    const tap = await freshBridge();
+    await tap.prepareTapToPay();
+    t.fire("terminalConnectionStatusChange", { status: "NOT_CONNECTED" });
+    await flush();
+    const stages: string[] = [];
+    tap.onTapProgress((p) => stages.push(p.stage));
+    await flush();
+    stages.length = 0;
+    t.plugin.disconnectReader.mockClear();
+    await tap.standDownReaderForVoice();
+    expect(t.plugin.disconnectReader).not.toHaveBeenCalled();
+    expect(stages).toEqual([]);
+  });
+
+  it("Settings reads the flag", () => {
+    const src = readFileSync(join(__dirname, "..", "components", "tap-to-pay", "settings-section.tsx"), "utf8");
+    expect(src).toContain('const ready = enabled || progress?.stage === "ready" || tapReaderConfiguredThisLoad();');
   });
 });

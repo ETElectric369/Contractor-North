@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setOfficeSeesOwnerMoney } from "./actions";
+import { callOrLost } from "@/lib/lost-signal";
 
 /**
  * "Office Can See This": the owner's one control over who sees Left For You (0286). A real switch,
@@ -21,10 +22,13 @@ export function OfficeCanSeeSwitch({ initial }: { initial: boolean }) {
     setOn(next);
     setErr(null);
     start(async () => {
-      const res = await setOfficeSeesOwnerMoney(next);
+      // A dropped signal rejects (audit v994 SI2): the optimistic flip goes back and it says so,
+      // then the page re-reads the truth in case the write landed anyway.
+      const res = await callOrLost(() => setOfficeSeesOwnerMoney(next), "Couldn't reach the server, so the switch may not have moved. The page is checking.");
       if (!res.ok) {
         setOn(!next);
         setErr(res.error ?? "That didn't save. Try again.");
+        if ("lost" in res) router.refresh();
         return;
       }
       router.refresh();

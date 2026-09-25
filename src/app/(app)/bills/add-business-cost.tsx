@@ -11,6 +11,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { createBill, deleteBill } from "../jobs/actions";
+import { callOrLost } from "@/lib/lost-signal";
 
 /**
  * ADD BUSINESS COST: the one typed door for a cost that belongs to no job (Erik, 2026-09-24:
@@ -67,7 +68,9 @@ export function AddBusinessCostButton({ today }: { today: string }) {
     const place = where.trim();
     const picked = bucket;
     start(async () => {
-      const res = await createBill({
+      // A dropped signal rejects (audit v994 SI2): the modal and the typed cost stay put, and the
+      // sentence says it MAY have saved, because a lost answer can hide a bill that landed.
+      const res = await callOrLost(() => createBill({
         job_id: null,
         supplier: place || picked,
         bill_number: "",
@@ -76,8 +79,11 @@ export function AddBusinessCostButton({ today }: { today: string }) {
         bill_date: date,
         notes: note,
         category: picked,
-      });
-      if (!res.ok) return setError(res.error ?? "The business cost didn't save. Nothing was recorded.");
+      }), "Couldn't reach the server, so this may not have saved. Check the Bills list before saving it again.");
+      if (!res.ok) {
+        if ("lost" in res) router.refresh();
+        return setError(res.error ?? "The business cost didn't save. Nothing was recorded.");
+      }
       const said = `${place ? `${place} ` : ""}${formatCurrency(amount)} saved as a Business Cost: ${picked}, ${formatDate(date)}.`;
       const id = res.id;
       toast(

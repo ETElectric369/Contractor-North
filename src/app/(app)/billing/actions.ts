@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { importExtras, extrasSentence } from "@/lib/import-extras";
 import QRCode from "qrcode";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { customerForInquiry } from "@/lib/actions/win-customer";
@@ -538,7 +539,9 @@ export type ImportStats = {
    *  supplier return not credited or held, the invoice's own markup kept. Also in `summary`. */
   notes?: string[];
 };
-type ImportResult = Result & { empty?: boolean; stats?: ImportStats };
+/** `emptyNote`: on an EMPTY run, a reason a caller should still pass on (a supplier return held
+ *  back or not credited, with nothing else to bill), rather than the silent "nothing to pull". */
+type ImportResult = Result & { empty?: boolean; emptyNote?: string; stats?: ImportStats };
 type RpcStats = { inserted: number; updated: number; kept_edited: number; removed: number };
 
 /**
@@ -1861,6 +1864,7 @@ async function importCostsCore(
         ok: false,
         empty: true,
         error: `Nothing here to bill or credit: ${returnsSummaryParts([], returnsNotCredited, returnsHeld).join("; ")}.${returnsNotCredited.length ? " Open the bill to change what the customer pays for." : ""}`,
+        emptyNote: returnsSummaryParts([], returnsNotCredited, returnsHeld).join("; "),
       };
     return { ok: false, error: "No purchase orders or bills on this job yet.", empty: true };
   }
@@ -2330,11 +2334,14 @@ export async function createProgressReportInvoice(
   // Said, so a click from the job card lands on a new document with the sentence of what it is -
   // and names the deposit that came off, so a figure below the card's is never a surprise.
   const num = (inv as { invoice_number?: string | null }).invoice_number ?? "a new progress payment";
+  // What the importers said besides their counts (audit v994 SI5): a return held or not credited,
+  // a counter-preview price, an edited tax row left behind. A warning makes this a heads-up.
+  const extras = importExtras([pLabor, pCosts]);
   const note =
-    decision.credit > 0.005
+    (decision.credit > 0.005
       ? `Started ${num} for the work not yet billed, less the ${formatCurrency(decision.credit)} deposit not yet taken off a bill.`
-      : `Started ${num} for the work not yet billed - its total is that work.`;
-  return { ok: true, id: inv.id, note };
+      : `Started ${num} for the work not yet billed - its total is that work.`) + extrasSentence(extras);
+  return { ok: true, id: inv.id, note, ...(extras.warnings.length ? { partial: true as const } : {}) };
 }
 
 // ── Payment schedule (Fixed-Bid "payment structure") ────────────────────────────
