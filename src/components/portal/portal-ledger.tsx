@@ -222,6 +222,7 @@ const DATED: Record<ItemRow["datedBy"], string> = {
   purchase: "",
   bill: "dated by the bill",
   deposit: "taken off the deposit",
+  draw: "taken off an earlier bill",
 };
 
 function ItemLine({ it }: { it: ItemRow }) {

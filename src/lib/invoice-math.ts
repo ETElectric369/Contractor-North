@@ -142,6 +142,40 @@ export function resolveDrawCredit(
   return { ok: true, credit: cents(Math.max(0, Math.min(prior, work))) };
 }
 
+/** The import sources that itemize the job's own rows (hours, bills, change orders, estimate lines). */
+export const ITEMIZED_SOURCES: ReadonlySet<string> = new Set(["labor", "costs", "change_orders", "quote"]);
+
+/**
+ * THE LUMP MONEY ON ONE BILL: what a later draw's "Less previous billings" credit exists to net.
+ * A deposit's lines, a milestone line on a draw, and a fixed-$ / %-of-estimate draw's own amount
+ * line (a draw that itemizes none of the job's rows is a payment request, and its lines are the
+ * amount asked for). Standard invoices, drafts and void bills carry none; a hand line on a draw
+ * that DOES itemize is an extra the customer bought, never a prepayment. Credit lines are never
+ * lump money. fixedBillingsToNet (unbilled-work) sums this over the job's bills; the customer
+ * portal's ledger (stretch-ledger) dates each piece of a credit by the lump bill it takes off.
+ */
+export function lumpDrawAmount(inv: {
+  status: string;
+  invoice_kind?: string | null;
+  items?: readonly { import_source?: string | null; line_total?: number | string | null }[] | null;
+}): number {
+  if (inv.status === "void" || inv.status === "draft") return 0;
+  const kind = inv.invoice_kind ?? "standard";
+  if (kind === "standard") return 0;
+  const items = inv.items ?? [];
+  const itemized = items.some((it) => ITEMIZED_SOURCES.has(it.import_source ?? ""));
+  const lump = kind === "deposit" || !itemized;
+  let sum = 0;
+  for (const it of items) {
+    const amt = Number(it.line_total);
+    if (!Number.isFinite(amt)) continue;
+    const src = it.import_source ?? null;
+    if (src === "draw_credit") continue;
+    if (src === "milestone" || (lump && !ITEMIZED_SOURCES.has(src ?? ""))) sum += amt;
+  }
+  return cents(sum);
+}
+
 /** The dollar amount a deposit/progress draw bills: a % of the remaining estimate,
  *  or a fixed $. Floored at $0 and finite — a draw never bills a negative/NaN. */
 export function drawAmount(mode: "percent" | "fixed", value: number, remaining: number): number {
@@ -249,6 +283,39 @@ export type LineBreakdown = {
   hasBreakdown: boolean;
 };
 
+const HOURS_UNIT = /^(hr|hrs|hour|hours|man-?hours?)$/;
+
+/** Is this unit hours? (The unit box, trimmed and lower-cased; "hr", "hrs", "hours", "man-hours".) */
+export function isHoursUnit(unit: string | null | undefined): boolean {
+  return HOURS_UNIT.test(String(unit ?? "").trim().toLowerCase());
+}
+
+/**
+ * WHAT A LINE WITH NO IMPORTER BEHIND IT SAYS IT IS: the one rule for a hand-typed line, read by
+ * the Cost Breakdown on /i and print (groupInvoiceLines) and by the customer portal (line-kind), so
+ * the two can never file the same line in two places (audit of the portal split, 2026-09-24:
+ * INV-059's "Labor - Erik" read Labor on /i and Other on the portal).
+ *
+ *  - "Less previous billings ..."                      -> credit
+ *  - billed in HOURS (the unit box, the office's own declaration of what it sold) -> labor
+ *  - "Labor - Brian", "Labor: Erik", "Labor" alone, "Erik Labor" -> labor (Erik, 8/18: a
+ *    hand-typed labor line IS labor; the dash may be - – — or a colon)
+ *  - "Materials - CED", "Material: wire, boxes", "Materials" alone -> materials
+ *  - anything else -> null (the caller's Other)
+ *
+ * Only the line's first word (or, for labor, its last) is read, never a word in the middle: "Labor
+ * and materials" is a lump and stays Other, and "10/3 romex" is not guessed at. A line the words do
+ * not settle needs the office to say what it is; that is a stored kind, not a longer word list.
+ */
+export function handLineKind(line: { description?: string | null; unit?: string | null }): "labor" | "materials" | "credit" | null {
+  const desc = String(line.description ?? "").trim();
+  if (/less previous billings/i.test(desc)) return "credit";
+  if (isHoursUnit(line.unit)) return "labor";
+  if (/^labou?r\s*(?:[—–:-]|$)/i.test(desc) || /\blabou?r$/i.test(desc)) return "labor";
+  if (/^materials?\s*(?:[—–:-]|$)/i.test(desc)) return "materials";
+  return null;
+}
+
 /** Group an invoice's line items into Labor / Materials / Credits / Other with a
  *  subtotal for each — so a progress report can show "Labor $X, Materials $Y" at a
  *  glance instead of a flat list. Keys off import_source ("labor"/"costs" from the
@@ -265,14 +332,12 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
   };
   for (const it of items ?? []) {
     const src = it.import_source;
-    const desc = it.description ?? "";
     const amt = fin(it.line_total);
-    // Prefer import_source; fall back to the importer's exact "Labor — " / "Materials — "
-    // prefix (em dash + space) so the breakdown also works on surfaces (e.g. the public
-    // RPC) that don't expose import_source — but tight enough that a hand-typed
-    // "Labor - extra hour" isn't mistaken for imported labor. Only the genuine
-    // prior-billings credit goes to `credits`; other negatives (manual discounts /
-    // adjustments) stay in `other`, never mislabeled as "Less previous billings".
+    // Prefer import_source; fall back to what the line's words and unit say (handLineKind, the
+    // one rule the customer portal reads too), so the breakdown also works on surfaces (e.g. the
+    // public RPC) that don't expose import_source. Only the genuine prior-billings credit goes to
+    // `credits`; other negatives (manual discounts / adjustments) stay in `other`, never
+    // mislabeled as "Less previous billings".
     /**
      * A HAND-TYPED LABOR LINE IS LABOR (Erik, 8/18 — "dedupe", pointing at a breakdown that
      * read Labor $1,160 / Materials $390.98 / OTHER $760).
@@ -285,16 +350,16 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
      * the honest test is what the line IS, not who typed it.
      *
      * So: any dash after the word (— – -), and — the strongest signal — anything billed in
-     * HOURS. A line sold by the hour is labor no matter how it was worded.
+     * HOURS. A line sold by the hour is labor no matter how it was worded. (2026-09-24: a colon,
+     * the word alone, "Erik Labor", and the same for "Materials", in handLineKind.)
      */
-    const unit = String(it.unit ?? "").trim().toLowerCase();
-    const billedInHours = /^(hr|hrs|hour|hours|man-?hour|man-?hours)$/.test(unit);
+    const worded = handLineKind(it);
     const bucket: keyof LineBreakdown =
-      src === "draw_credit" || /less previous billings/i.test(desc)
+      src === "draw_credit" || worded === "credit"
         ? "credits"
-        : src === "labor" || /^labor\s*[—–-]\s/i.test(desc) || billedInHours
+        : src === "labor" || worded === "labor"
           ? "labor"
-          : src === "costs" || /^materials\s*[—–-]\s/i.test(desc)
+          : src === "costs" || worded === "materials"
             ? "materials"
             : "other";
     (g[bucket] as { lines: InvoiceLine[]; subtotal: number }).lines.push(it);

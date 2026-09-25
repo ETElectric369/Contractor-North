@@ -90,7 +90,8 @@ export function InvoiceDocument({
    * The customer portal's bill (Erik, 2026-09-24: "a clearer separation of labor and materials"):
    * the same lines under Labor and Materials headings with a subtotal each, and any other kind
    * (Change Orders, Credits, Other...) under its own heading only when the bill has one. Grouped by
-   * what each line stored (line-kind), never by its words. Same lines, same figures, same totals;
+   * line-kind: what each line stored, and for a typed line the words-and-unit rule the Cost
+   * Breakdown reads (handLineKind), so the two agree. Same lines, same figures, same totals;
    * the Cost Breakdown box is left off because the subtotals already say it. Off everywhere else,
    * so the printed and emailed bill is unchanged.
    */

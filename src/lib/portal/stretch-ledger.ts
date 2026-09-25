@@ -43,25 +43,27 @@
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24: "no simple breakdown separating time and material
  * right at the top, its all mixed in"). Every row carries its group (line-kind: the stored
- * import_source, or its bill being a deposit; never its wording), and every day, stretch and the
- * job carry a `split`: Labor with its hours, Materials, then any other group that has a line
- * (Change Orders, Credits, Sales Tax, Other...). The split's amounts add up to that level's work
- * total to the cent, because they are summed from the same cents.
+ * import_source, or its bill being a deposit, and for a typed line the same words-and-unit rule the
+ * /i Cost Breakdown reads), and every day, stretch and the job carry a `split`: Labor with its
+ * hours, Materials, then any other group that has a line (Change Orders, Credits, Sales Tax,
+ * Other...). The split's amounts add up to that level's work total to the cent, because they are
+ * summed from the same cents.
  *
  * A DEPOSIT AND ITS CREDIT LAND TOGETHER (audit v994 MR5). A deposit bill is billed before the work
  * and comes back off a later bill as a "Less previous billings" credit. Dated by their own bills,
  * the charge sat in the first stretch and the credit in a later one, so every stretch between
  * them read the deposit as work owed (J-002: $10,000 too high after the first stretch, $10,000
- * short after the next). So a draw credit is dated the day of the job's earliest deposit bill: the
- * charge and the credit cancel in the same stretch, and the deposit's payment reads as what it is,
- * money paid ahead. Its row says "taken off the deposit", not "dated by the bill".
+ * short after the next). So each piece of a draw credit is dated the day of the lump bill it takes
+ * off (placeDrawCredits: a deposit, or a fixed or percent payment request, oldest first): the
+ * charge and the credit cancel in the same stretch, and the payment reads as what it is, money
+ * paid ahead. Its row says "taken off the deposit" or "taken off an earlier bill".
  *
  * Every figure is carried in integer cents (and hours in integer hundredths) and only turned into
  * dollars on the way out, so "reconciles" is an equality, not a tolerance.
  */
 import { todayStrInTz } from "@/lib/tz";
-import { SUPPLIES_AND_TAX_LABEL, customerLineWords, isSuppliesAndTaxLine } from "@/lib/invoice-math";
-import { LINE_GROUP_LABEL, LINE_GROUP_ORDER, lineGroup, type LineGroup } from "./line-kind";
+import { SUPPLIES_AND_TAX_LABEL, customerLineWords, isSuppliesAndTaxLine, lumpDrawAmount } from "@/lib/invoice-math";
+import { LINE_GROUP_LABEL, LINE_GROUP_ORDER, isHoursUnit, lineGroup, type LineGroup } from "./line-kind";
 
 export type LedgerStretchIn = { id: string; label: string; starts_on: string; ends_on: string; sort?: number | null };
 export type LedgerInvoiceIn = {
@@ -115,17 +117,23 @@ export type ItemRow = {
   group: LineGroup;
   invoiceNumber: string | null;
   /** "purchase": the day it was bought. "bill": it has no day of its own, so it carries its bill's.
-   *  "deposit": a credit taken off the deposit, dated with the deposit bill it takes off (MR5). */
-  datedBy: "purchase" | "bill" | "deposit";
+   *  "deposit": a credit taken off the deposit, dated with the deposit bill it takes off (MR5).
+   *  "draw": a credit taken off an earlier fixed or percent payment request, dated with that bill. */
+  datedBy: "purchase" | "bill" | "deposit" | "draw";
 };
 /** One group's figure at one level (a day, a stretch, the job). */
 export type SplitLine = { group: LineGroup; label: string; amount: number };
 /**
  * Labor and Materials apart, then every other group that has a line, in LINE_GROUP_ORDER. At a
- * stretch and the job, Labor and Materials are always listed (at $0.00 when there is none), so
- * the two lines Erik asked for are always there; at a day, only what the day has. The amounts add
- * up to that level's work total exactly. laborHours: the hours the labor bills (a hand-typed line
- * billed in hours counts its quantity).
+ * stretch and the job, Labor and Materials are listed even at $0.00, so the two lines Erik asked
+ * for are there, but ONLY when every dollar at that level is known to be what it says: when some
+ * of it is Other, From The Estimate, Contract Payments or Change Orders (money that may hold labor
+ * or materials the rule cannot see; a discount does not), a $0.00 would tell the customer there was no labor or no
+ * materials when there was (J-053's $450 service call read "Labor $0.00 · Materials $0.00"), so
+ * only the groups that have a line are listed, as a day always does. The amounts add up to that
+ * level's work total exactly. laborHours: the hours the labor bills (a typed line billed in hours
+ * counts its quantity); 0, so no hours are printed, when some of the labor was billed in anything
+ * but hours ("Labor - Erik", 3 ea), because the hours would then undercount the dollars beside them.
  */
 export type LedgerSplit = { laborHours: number; lines: SplitLine[] };
 /** Where a dated row sits against its stretch's own dates: inside them (null), before the first
@@ -260,9 +268,9 @@ export function splitByWeight(total: number, weights: number[]): number[] {
 
 type Placed = { date: string; labor?: { person: string; units: number; rateCents: number; cents: number; invoiceNumber: string | null; lump: boolean }; item?: Omit<ItemRow, "quantity" | "unitPrice" | "amount"> & { quantity: number; unitPriceCents: number; cents: number } };
 
-/** Running cents per group, and labor hundredths. */
-type SplitAcc = { cents: Map<LineGroup, number>; units: number };
-const newSplit = (): SplitAcc => ({ cents: new Map(), units: 0 });
+/** Running cents per group, labor hundredths, and how many labor lines were billed in something but hours. */
+type SplitAcc = { cents: Map<LineGroup, number>; units: number; unhoured: number };
+const newSplit = (): SplitAcc => ({ cents: new Map(), units: 0, unhoured: 0 });
 function addPlaced(acc: SplitAcc, p: Placed): void {
   if (p.labor) {
     acc.cents.set("labor", (acc.cents.get("labor") ?? 0) + p.labor.cents);
@@ -270,22 +278,30 @@ function addPlaced(acc: SplitAcc, p: Placed): void {
   } else if (p.item) {
     const g = p.item.group;
     acc.cents.set(g, (acc.cents.get(g) ?? 0) + p.item.cents);
-    // A hand-typed line billed in hours (the only labor that is an item) bills its quantity in hours.
-    if (g === "labor") acc.units += Math.round(p.item.quantity * 100);
+    // A typed labor line bills its quantity in hours only when its unit says hours.
+    if (g === "labor") {
+      if (isHoursUnit(p.item.unit)) acc.units += Math.round(p.item.quantity * 100);
+      else acc.unhoured += 1;
+    }
   }
 }
 function mergeSplit(into: SplitAcc, from: SplitAcc): void {
   for (const [g, c] of from.cents) into.cents.set(g, (into.cents.get(g) ?? 0) + c);
   into.units += from.units;
+  into.unhoured += from.unhoured;
 }
+/** Groups whose lines may hold labor or materials the rule cannot see. */
+const UNSPLIT: ReadonlySet<LineGroup> = new Set(["change_orders", "estimate", "contract", "other"]);
 function outSplit(acc: SplitAcc, always: boolean): LedgerSplit {
   const lines: SplitLine[] = [];
+  // A discount (a negative Other) hides no labor or materials; money the rule cannot split does.
+  const zeroesAreTrue = always && ![...acc.cents].some(([g, c]) => UNSPLIT.has(g) && c > 0);
   for (const g of LINE_GROUP_ORDER) {
     const has = acc.cents.has(g);
-    if (!has && !(always && (g === "labor" || g === "materials"))) continue;
+    if (!has && !(zeroesAreTrue && (g === "labor" || g === "materials"))) continue;
     lines.push({ group: g, label: LINE_GROUP_LABEL[g], amount: dollars(acc.cents.get(g) ?? 0) });
   }
-  return { laborHours: acc.units / 100, lines };
+  return { laborHours: acc.unhoured > 0 ? 0 : acc.units / 100, lines };
 }
 type PlacedPayment = { date: string; cents: number; method: string | null; kind: "payment" | "credit"; invoiceNumber: string | null; seq: number };
 
@@ -299,17 +315,11 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
   const work: Placed[] = [];
   const lineSum = new Map<string, number>();
 
-  // MR5: the day a draw credit is dated, so it lands with the deposit it takes off: the earliest
-  // deposit bill on the job (a void one never reaches here; the gate drops it, and so does this).
-  const depositDay: string | null =
-    invoices
-      .filter((i) => i.invoice_kind === "deposit" && i.status !== "void")
-      .map((i) => invDay(i))
-      .sort()[0] ?? null;
-
   const lines = [...(input.lines ?? [])].sort(
     (a, b) => a.invoice_id.localeCompare(b.invoice_id) || (a.sort_order ?? 0) - (b.sort_order ?? 0),
   );
+
+  const creditPieces = placeDrawCredits(invoices, lines, invDay);
   for (const ln of lines) {
     const inv = invById.get(ln.invoice_id);
     if (!inv) continue; // a line of a bill this customer is not shown
@@ -357,12 +367,32 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
         if (d && (!date || d > date)) date = d;
       }
       if (date) datedBy = "purchase";
-    } else if (src === "draw_credit" && depositDay) {
-      date = depositDay;
-      datedBy = "deposit";
     }
     const kind: ItemKind = src === "costs" ? "material" : src === "draw_credit" ? "credit" : "charge";
-    const group = lineGroup({ import_source: src, unit: ln.unit }, inv.invoice_kind ?? null);
+    const group = lineGroup({ import_source: src, unit: ln.unit, description: ln.description }, inv.invoice_kind ?? null);
+    const pieces = creditPieces.get(ln);
+    if (pieces) {
+      // A credit is listed once per bill it takes off, each piece on that bill's day (MR5).
+      const words = customerLineWords({ description: ln.description, import_source: src });
+      const whole = pieces.length === 1;
+      for (const pc of pieces) {
+        work.push({
+          date: pc.date ?? invDay(inv),
+          item: {
+            description: words,
+            quantity: whole ? qty : 1,
+            unit: whole ? ln.unit ?? null : null,
+            unitPriceCents: whole ? priceCents : pc.cents,
+            cents: pc.cents,
+            kind,
+            group,
+            invoiceNumber: num,
+            datedBy: pc.datedBy,
+          },
+        });
+      }
+      continue;
+    }
     // A receipt's remainder row names the supplier: the customer reads the same words the bill prints.
     // So does a lump, an order and a return (customerLineWords).
     const supplies = isSuppliesAndTaxLine({ description: ln.description, import_source: src });
@@ -524,6 +554,66 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     billedBalance: dollars(billedBalanceCents),
     reconciles: cumWork === billedCents && cumWork - cumPaid === billedBalanceCents,
   };
+}
+
+type CreditPiece = { cents: number; date: string | null; datedBy: ItemRow["datedBy"] };
+
+/**
+ * WHICH BILL EACH PIECE OF A DRAW CREDIT TAKES OFF (audit v994 MR5, and the review of its fix).
+ *
+ * A "Less previous billings" credit nets the lump money billed before it (fixedBillingsToNet): a
+ * deposit, and also a fixed-$ or %-of-estimate payment request, a milestone. Dated by its own bill,
+ * the credit sat in a later stretch than the charges it cancels, so every stretch between read them
+ * as work owed. Dated whole with the deposit, a credit that also nets a later $5,000 request made
+ * the first stretch's work negative and said "Paid Ahead $15,000" when $10,000 had been paid. So
+ * the lump bills are queued oldest first (lumpDrawAmount, the rule the netting itself uses), the
+ * credits take from them oldest first, and each piece is dated on the day of the bill it takes off:
+ * every charge and its credit cancel in the same stretch, whichever order the bills were sent in
+ * (J-002's deposit went out after its progress bill). Whatever a credit nets beyond the lump money
+ * the customer is shown stays on its own bill's day. Pieces are integer cents and sum to the line.
+ */
+function placeDrawCredits(
+  invoices: LedgerInvoiceIn[],
+  lines: LedgerLineIn[],
+  invDay: (inv: LedgerInvoiceIn | undefined) => string,
+): Map<LedgerLineIn, CreditPiece[]> {
+  const byInv = new Map<string, LedgerLineIn[]>();
+  for (const ln of lines) byInv.set(ln.invoice_id, [...(byInv.get(ln.invoice_id) ?? []), ln]);
+  const invById = new Map(invoices.map((i) => [i.id, i] as const));
+  const order = (a: LedgerInvoiceIn, b: LedgerInvoiceIn) =>
+    invDay(a).localeCompare(invDay(b)) || String(a.created_at).localeCompare(String(b.created_at)) || a.id.localeCompare(b.id);
+
+  const lumps = invoices
+    .map((inv) => ({ inv, left: toCents(lumpDrawAmount({ status: inv.status, invoice_kind: inv.invoice_kind, items: byInv.get(inv.id) ?? [] })) }))
+    .filter((x) => x.left > 0)
+    .sort((a, b) => order(a.inv, b.inv));
+
+  const credits = lines
+    .filter((ln) => ln.import_source === "draw_credit" && invById.has(ln.invoice_id))
+    .sort((a, b) => order(invById.get(a.invoice_id)!, invById.get(b.invoice_id)!) || (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  const out = new Map<LedgerLineIn, CreditPiece[]>();
+  for (const ln of credits) {
+    const L = toCents(ln.line_total);
+    let owed = Math.max(0, -L);
+    const pieces: CreditPiece[] = [];
+    for (const lump of lumps) {
+      if (owed === 0) break;
+      if (lump.left === 0) continue;
+      const take = Math.min(lump.left, owed);
+      lump.left -= take;
+      owed -= take;
+      const date = invDay(lump.inv);
+      const datedBy: CreditPiece["datedBy"] = lump.inv.invoice_kind === "deposit" ? "deposit" : "draw";
+      const last = pieces[pieces.length - 1];
+      if (last && last.date === date && last.datedBy === datedBy) last.cents -= take;
+      else pieces.push({ cents: -take, date, datedBy });
+    }
+    const rest = L - pieces.reduce((s, p) => s + p.cents, 0);
+    if (rest !== 0 || pieces.length === 0) pieces.push({ cents: rest, date: null, datedBy: "bill" });
+    out.set(ln, pieces);
+  }
+  return out;
 }
 
 /** "Labor - Erik Taylor" → "Erik Taylor"; anything else is shown as written. */

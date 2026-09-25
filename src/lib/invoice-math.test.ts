@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS, invoiceOverpayment } from "@/lib/invoice-math";
+import { recalcTotals, resolveDrawCredit, drawAmount, progressSummary, shouldBlockStandardImport, isStandardBillingBlocker, groupInvoiceLines, paidStatus, invoiceTypeLabel, invoiceBalance, subtotalTaxTotal, isDrawKind, DRAW_KINDS, invoiceOverpayment, handLineKind, isHoursUnit, lumpDrawAmount } from "@/lib/invoice-math";
 
 describe("isDrawKind — one draw-vs-standard predicate", () => {
   it("the three draw kinds are draws", () => {
@@ -381,5 +381,39 @@ describe("groupInvoiceLines — a hand-typed labor line is labor (the Badger Lan
     const g = groupInvoiceLines([line("Less previous billings", -500, { import_source: "draw_credit", unit: "hr" })]);
     expect(g.credits.subtotal).toBeCloseTo(-500, 2);
     expect(g.labor.subtotal).toBe(0);
+  });
+});
+
+describe("handLineKind — one rule for a typed line, on /i and the portal (review of the portal split)", () => {
+  it("files the live lines the review found under Other where they belong, on the Cost Breakdown too", () => {
+    const g = groupInvoiceLines([
+      { description: "Erik Labor", line_total: 540, unit: "ea" },
+      { description: "Materials", line_total: 110, unit: "ea" },
+      { description: "Material: Wire, boxes, GFCI, Faceplate", line_total: 55, unit: "ea" },
+      { description: "Labor: travel", line_total: 60, unit: "ea" },
+      { description: "Emergency service call", line_total: 450, unit: "ea" },
+    ]);
+    expect(g.labor.subtotal).toBeCloseTo(600, 2);
+    expect(g.materials.subtotal).toBeCloseTo(165, 2);
+    expect(g.other.subtotal).toBeCloseTo(450, 2);
+  });
+  it("reads only the first word (or a trailing Labor), never a word in the middle", () => {
+    expect(handLineKind({ description: "Labor and materials" })).toBe(null);
+    expect(handLineKind({ description: "Laboratory test" })).toBe(null);
+    expect(handLineKind({ description: "Materials handling fee" })).toBe(null);
+    expect(handLineKind({ description: "Labour - Brian" })).toBe("labor");
+    expect(handLineKind({ description: "anything", unit: "Hours" })).toBe("labor");
+    expect(isHoursUnit("man-hours")).toBe(true);
+  });
+});
+
+describe("lumpDrawAmount — the lump money one bill carries (fixedBillingsToNet sums it)", () => {
+  it("a deposit's lines, a payment request's amount, a milestone; never a standard, draft or itemized draw's extra", () => {
+    expect(lumpDrawAmount({ status: "paid", invoice_kind: "deposit", items: [{ import_source: null, line_total: 10000 }] })).toBe(10000);
+    expect(lumpDrawAmount({ status: "sent", invoice_kind: "progress", items: [{ import_source: null, line_total: "5000" }] })).toBe(5000);
+    expect(lumpDrawAmount({ status: "sent", invoice_kind: "progress", items: [{ import_source: "labor", line_total: 900 }, { import_source: null, line_total: 120 }, { import_source: "draw_credit", line_total: -500 }] })).toBe(0);
+    expect(lumpDrawAmount({ status: "sent", invoice_kind: "final", items: [{ import_source: "costs", line_total: 50 }, { import_source: "milestone", line_total: 3000 }] })).toBe(3000);
+    expect(lumpDrawAmount({ status: "sent", invoice_kind: "standard", items: [{ import_source: null, line_total: 400 }] })).toBe(0);
+    expect(lumpDrawAmount({ status: "draft", invoice_kind: "deposit", items: [{ import_source: null, line_total: 400 }] })).toBe(0);
   });
 });

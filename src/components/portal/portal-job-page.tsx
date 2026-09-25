@@ -22,7 +22,8 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  * Labor (and its hours) and Materials as two lines that add up to Work So Far, then Paid and the
  * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
  * headings (and any other kind of line under its own, only when there is one). One rule decides
- * which line is which everywhere: line-kind, from what the line stored, never from its words.
+ * which line is which everywhere: line-kind, from what the line stored, and for a typed line the
+ * same words-and-unit rule the /i Cost Breakdown reads, so the portal and the bill never disagree.
  *
  * A DRAFT IS NOT A BILL. While any bill on the job is a draft the money card says "Running total,
  * not a bill yet" and there is no Pay button for it. A sent bill keeps its own pay door, which is
