@@ -304,7 +304,7 @@ describe("computeOwnerMoney: what is left for the owner", () => {
 describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR2)", () => {
   const CED = "acct-ced";
   const ACE = "acct-ace";
-  const bill = (id: string, account: string | null, amount: number, day: string, status = "unpaid") => ({
+  const bill = (id: string, account: string | null, amount: number, day: string, status = "unpaid", more: Record<string, unknown> = {}) => ({
     id,
     job_id: "J1",
     amount,
@@ -313,8 +313,9 @@ describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR
     category: "Receipt",
     status,
     supplier_account_id: account,
+    ...more,
   });
-  const doc = (id: string, total: number, open: number | null, closed: boolean, kind = "invoice") => ({
+  const doc = (id: string, total: number, open: number | null, closed: boolean, kind = "invoice", linkedBills: string[] = []) => ({
     id,
     supplier_account_id: CED,
     invoice_number: `8802-${id}`,
@@ -323,6 +324,7 @@ describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR
     open_balance: open,
     closed,
     invoice_date: "2026-08-01",
+    bill_supplier_invoices: linkedBills.map((bill_id) => ({ bill_id })),
   });
   const owed = (m: OwnerMoney) => m.caveats.find((c) => c.kind === "supplier_owed") as
     | { total: number; accounts: { name: string; owed: number; bySupplier: boolean }[] }
@@ -331,25 +333,34 @@ describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR
     ...base(),
     supplierAccounts: [{ id: CED, name: "CED Truckee", on_account: true }],
     // $6,034.54 of bills still read 'unpaid' - including the $3,034.54 statement CED has CLOSED.
-    bills: [bill("s1", CED, 3034.54, "2026-08-10"), bill("s2", CED, 2000, "2026-09-10"), bill("s3", CED, 1000, "2026-09-12")],
+    // Each is covered by one of CED's documents, by each route /bills counts: a statement naming
+    // the number on its own lines, a person's link, and the number in bill_number.
+    bills: [
+      bill("s1", CED, 3034.54, "2026-08-10", "unpaid", { bill_line_items: [{ description: "Sales Tax 9.00000 (Invoice 8802-1105868)" }] }),
+      bill("s2", CED, 2000, "2026-09-10"),
+      bill("s3", CED, 1000, "2026-09-12", "unpaid", { bill_number: "8802-1107002" }),
+    ],
     supplierPayments: [{ id: "sp1", supplier_account_id: CED, amount: 6000, paid_on: "2026-09-15", voided_at: null }],
     supplierDocuments: [
       doc("1105868", 3034.54, 0, true),
-      doc("1107001", 2000, 2000, false),
+      doc("1107001", 2000, 2000, false, "invoice", ["s2"]),
       doc("1107002", 1000, 1000, false),
+      // Open at CED, and no bill in the app carries it: in no cost total, so never "counted".
       doc("1107337", -100, -100, false, "credit_memo"),
     ],
   });
 
   it("model B: the supplier's own open documents, and the $6,000 of payments is NEVER subtracted", () => {
     const m = computeOwnerMoney(ced(), YEAR, TZ, TODAY);
-    // 2000 + 1000 - 100 open at CED. Bills-minus-payments would say $34.54; bill status would say $6,034.54.
-    expect(owed(m)).toEqual({ kind: "supplier_owed", total: 2900, accounts: [{ name: "CED Truckee", owed: 2900, bySupplier: true }] });
-    expect(countedNotPaidLine(m)).toBe("Counted, though not paid yet: $2,900.00 owed to CED Truckee by its own invoices.");
+    // 2000 + 1000 open at CED on documents a counted bill carries. Bills-minus-payments would say
+    // $34.54; bill status would say $6,034.54. The -$100 memo no bill carries is in no total.
+    expect(owed(m)).toEqual({ kind: "supplier_owed", total: 3000, accounts: [{ name: "CED Truckee", owed: 3000, bySupplier: true }] });
+    expect(countedNotPaidLine(m)).toBe("Counted, though not paid yet: $3,000.00 owed to CED Truckee by its own invoices.");
     expect(m.caveats.find((c) => c.kind === "unpaid_bills")).toBeUndefined();
+    expect(m.caveats.find((c) => c.kind === "supplier_no_document")).toBeUndefined();
   });
 
-  it("agrees with the /bills card to the cent for a window ending today", async () => {
+  it("the counted figure plus the open documents no bill carries is the /bills balance, to the cent", async () => {
     const { supplierBalance } = await import("@/app/(app)/bills/supplier-balance");
     const inp = ced();
     const onBills = supplierBalance(
@@ -367,7 +378,64 @@ describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR
       },
       TODAY,
     );
-    expect(owed(computeOwnerMoney(inp, YEAR, TZ, TODAY))!.total).toBe(onBills.owed);
+    // $2,900 at CED: $3,000 counted through the app's bills, and the -$100 memo nothing carries.
+    expect(onBills.owed).toBe(2900);
+    expect(owed(computeOwnerMoney(inp, YEAR, TZ, TODAY))!.total).toBe(3000);
+  });
+
+  it("an open document no bill carries is never counted, and a late charge is named on one side only", () => {
+    const inp: OwnerMoneyInputs = {
+      ...ced(),
+      supplierDocuments: [
+        ...ced().supplierDocuments!,
+        doc("1106969", 301.81, 301.81, false),
+        { ...doc("9019682437", 31.26, 31.26, false, "service_charge"), invoice_number: "9019682437" },
+      ],
+    };
+    const docs = supplierDocsNoBillCovers(inp.supplierDocuments!, inp.bills);
+    const m = computeOwnerMoney({ ...inp, ...docs }, YEAR, TZ, TODAY);
+    expect(owed(m)!.total).toBe(3000);
+    expect(notCountedLine(m)).toBe("Not counted: $100.00 of supplier credit memos (1); $31.26 of supplier late charges not filed as bills (1).");
+    // Once a bill carries the late charge's number it is counted, and so no longer "not counted".
+    const filed = { ...inp, bills: [...inp.bills, bill("sc", CED, 31.26, "2026-09-14", "unpaid", { supplier_invoice_number: "9019682437" })] };
+    const m2 = computeOwnerMoney({ ...filed, ...supplierDocsNoBillCovers(filed.supplierDocuments!, filed.bills) }, YEAR, TZ, TODAY);
+    expect(owed(m2)!.total).toBe(3031.26);
+    expect(notCountedLine(m2)).toBe("Not counted: $100.00 of supplier credit memos (1).");
+  });
+
+  it("a counted bill the supplier has sent no document for is said apart, as /bills' slice", () => {
+    const inp: OwnerMoneyInputs = {
+      ...ced(),
+      bills: [
+        ...ced().bills,
+        bill("e2380fc9", CED, 323.71, "2026-09-24", "unpaid", { bill_number: "8802-SO-257555" }),
+        bill("c9daf1b8", CED, 103.99, "2026-09-24"),
+        // A credit filed as a bill is money back, not money to send: not in the slice (as /bills).
+        bill("2f328286", CED, -51.58, "2026-09-24"),
+        // Bought at the register: not on account, so not owed to anyone.
+        bill("reg", CED, 12, "2026-09-24", "paid"),
+      ],
+    };
+    const m = computeOwnerMoney(inp, YEAR, TZ, TODAY);
+    expect(owed(m)!.total).toBe(3000);
+    expect(m.caveats.find((c) => c.kind === "supplier_no_document")).toEqual({
+      kind: "supplier_no_document",
+      count: 2,
+      total: 427.7,
+      accounts: [{ name: "CED Truckee", total: 427.7, count: 2 }],
+    });
+    expect(countedNotPaidLine(m)).toBe(
+      "Counted, though not paid yet: $3,000.00 owed to CED Truckee by its own invoices and $427.70 in 2 bills CED Truckee has sent no invoice for yet.",
+    );
+    // Last month's window holds none of September's.
+    expect(computeOwnerMoney(inp, ownerMoneyWindow("last_month", TODAY), TZ, TODAY).caveats.find((c) => c.kind === "supplier_no_document")).toBeUndefined();
+  });
+
+  it("a document is counted in the window of the bill that carries it, and closed is zero", () => {
+    const aug = computeOwnerMoney(ced(), ownerMoneyWindow("last_month", TODAY), TZ, TODAY);
+    // August's only CED bill (s1) is covered by a CLOSED document: nothing owed for August.
+    expect(owed(aug)).toBeUndefined();
+    expect(owed(computeOwnerMoney(ced(), ownerMoneyWindow("this_month", TODAY), TZ, TODAY))!.total).toBe(3000);
   });
 
   it("model A: unpaid bills minus live payments, and a voided payment does not count", () => {
@@ -418,7 +486,7 @@ describe("what the suppliers are owed is /bills' own balance (audit v994 MR1, MR
     };
     const m = computeOwnerMoney(inp, YEAR, TZ, TODAY);
     expect(countedNotPaidLine(m)).toBe(
-      "Counted, though not paid yet: $2,944.44 owed to suppliers (CED Truckee by its own invoices $2,900.00, Ace Mountain Hardware $44.44) and $167.92 in 2 bills marked unpaid that no supplier balance holds.",
+      "Counted, though not paid yet: $3,044.44 owed to suppliers (CED Truckee by its own invoices $3,000.00, Ace Mountain Hardware $44.44) and $167.92 in 2 bills marked unpaid that no supplier balance holds.",
     );
   });
 

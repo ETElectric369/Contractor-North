@@ -3,18 +3,22 @@
  * arrays of rows; select / insert / upsert / update apply eq, in, is, lt filters, and limit. The
  * two unique keys these doors lean on are enforced: payments.stripe_event_id (a retried event is a
  * 23505) and pending_bank_transfers.payment_intent (upsert ignoreDuplicates is ON CONFLICT DO
- * NOTHING). A table named in `missing` answers PGRST205, the way a database before 0338 does.
+ * NOTHING). A table named in `missing` answers PGRST205, the way a database before 0338 does. A
+ * table named in `failing` (a Set the test may change between deliveries) answers a plain database
+ * error on every verb, the way a dropped connection or a timeout does.
  */
 export type Tables = Record<string, any[]>;
 
 const UNIQUE: Record<string, string> = { payments: "stripe_event_id", pending_bank_transfers: "payment_intent" };
 
-export function fakeDb(tables: Tables, opts: { missing?: string[] } = {}) {
+export function fakeDb(tables: Tables, opts: { missing?: string[]; failing?: string[] } = {}) {
   let seq = 0;
   const log: { table: string; verb: string; payload?: any; filters: string[] }[] = [];
+  const failing = new Set(opts.failing ?? []);
   const client = {
     log,
     tables,
+    failing,
     from(table: string) {
       const filters: ((r: any) => boolean)[] = [];
       const said: string[] = [];
@@ -26,6 +30,7 @@ export function fakeDb(tables: Tables, opts: { missing?: string[] } = {}) {
       const run = () => {
         log.push({ table, verb, payload, filters: said });
         if (opts.missing?.includes(table)) return { data: null, error: { code: "PGRST205", message: `Could not find the table 'public.${table}'` } };
+        if (failing.has(table)) return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
         const rows = (tables[table] ??= []);
         if (verb === "insert" || verb === "upsert") {
           const list = Array.isArray(payload) ? payload : [payload];

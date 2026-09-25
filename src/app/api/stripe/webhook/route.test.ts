@@ -108,7 +108,48 @@ describe("the webhook and a bank transfer", () => {
   it("the metadata is a claim: an account that does not own the org marks nothing", async () => {
     await deliver("checkout.session.completed", session(), "evt_x", "acct_someone_else");
     await deliver("checkout.session.async_payment_failed", session(), "evt_y", "acct_someone_else");
+    // The cleared path too: no payment is booked, and no 'cleared' marker is written carrying
+    // another tenant's org_id and invoice_id.
+    expect((await deliver("checkout.session.async_payment_succeeded", session({ payment_status: "paid" }), "evt_z", "acct_someone_else")).status).toBe(200);
+    expect(state.db.tables.payments).toHaveLength(0);
     expect(state.db.tables.pending_bank_transfers).toHaveLength(0);
     expect(state.pushes).toHaveLength(0);
+  });
+
+  describe("a marker write that fails is retried, never acked", () => {
+    it("the debit starting: 500, then Stripe's resend marks it once and tells the office once", async () => {
+      state.db.failing.add("pending_bank_transfers");
+      await expect(deliver("checkout.session.completed", session())).rejects.toThrow(/on its way failed/);
+      expect(state.pushes).toHaveLength(0);
+      state.db.failing.delete("pending_bank_transfers");
+      expect((await deliver("checkout.session.completed", session())).status).toBe(200);
+      expect(state.db.tables.pending_bank_transfers).toMatchObject([{ status: "pending" }]);
+      expect(state.pushes).toHaveLength(1);
+    });
+
+    it("the debit failing: 500, then the resend ends the mark and tells the office once", async () => {
+      await deliver("checkout.session.completed", session());
+      state.db.failing.add("pending_bank_transfers");
+      await expect(deliver("checkout.session.async_payment_failed", session(), "evt_fail")).rejects.toThrow(/marker/);
+      expect(state.pushes.filter((p) => p[2].title === "Bank transfer failed")).toHaveLength(0);
+      state.db.failing.delete("pending_bank_transfers");
+      expect((await deliver("checkout.session.async_payment_failed", session(), "evt_fail")).status).toBe(200);
+      await deliver("checkout.session.async_payment_failed", session(), "evt_fail");
+      expect(state.db.tables.pending_bank_transfers[0].status).toBe("failed");
+      expect(state.pushes.filter((p) => p[2].title === "Bank transfer failed")).toHaveLength(1);
+    });
+
+    it("the debit clearing: 500 after the money is booked, then the resend clears the mark with no second payment or push", async () => {
+      await deliver("checkout.session.completed", session());
+      state.db.failing.add("pending_bank_transfers");
+      await expect(deliver("checkout.session.async_payment_succeeded", session({ payment_status: "paid" }), "evt_ok")).rejects.toThrow(/marker/);
+      expect(state.db.tables.payments).toHaveLength(1);
+      const pushed = state.pushes.length;
+      state.db.failing.delete("pending_bank_transfers");
+      expect((await deliver("checkout.session.async_payment_succeeded", session({ payment_status: "paid" }), "evt_ok")).status).toBe(200);
+      expect(state.db.tables.payments).toHaveLength(1);
+      expect(state.db.tables.pending_bank_transfers[0].status).toBe("cleared");
+      expect(state.pushes).toHaveLength(pushed);
+    });
   });
 });
