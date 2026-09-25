@@ -79,11 +79,12 @@ describe("every door that writes payments.method writes a key", () => {
     expect(body).not.toMatch(/method: patch\.method \|\|/);
   });
 
-  it("the Stripe webhook writes the card key", () => {
+  it("the Stripe webhook writes a key: card, or ach for a bank debit (audit v994 BK2)", () => {
     const hook = code("src/app/api/stripe/webhook/route.ts");
     const inserts = [...hook.matchAll(/from\("payments"\)\.insert\(\{[\s\S]*?\}\)/g)].map((m) => m[0]);
     expect(inserts.length).toBeGreaterThan(0);
-    for (const ins of inserts) expect(ins).toContain('method: "card"');
+    for (const ins of inserts) expect(ins).toContain('method: paymentMethodKey(via.method ?? "card")');
+    expect(paymentMethodKey("us_bank_account")).toBe("ach");
   });
 
   it("no other code writes a method into payments", () => {

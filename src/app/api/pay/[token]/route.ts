@@ -12,6 +12,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { connectStateFromOrg, canAcceptPayments } from "@/lib/stripe-connect";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
+import { pendingTransfers } from "@/lib/bank-transfer";
 
 export const runtime = "nodejs";
 
@@ -130,6 +131,36 @@ export async function GET(
   const balance = invoiceBalance(inv.total, inv.amount_paid);
   if (balance <= 0) {
     return NextResponse.redirect(`${site}/i/${token}?paid=1`, { status: 303 });
+  }
+
+  /**
+   * THE BANK DOOR IS SHUT UNLESS THE CONTRACTOR OPENED IT (audit v994 BK1).
+   *
+   * The switch used to hide the button on /i and nothing more, so a customer who typed
+   * ?method=bank onto their link got an ACH checkout on an org that never turned bank transfer on
+   * - and without the async Stripe events subscribed, that debit clears, the invoice never closes,
+   * and reminders chase a customer who paid. Refused here, where the money starts. NEVER a silent
+   * fall back to a card: the customer chose a free way to pay, and a card might carry a fee.
+   */
+  if (method === "bank" && settings.bank_transfer_enabled !== true) {
+    return NextResponse.redirect(`${site}/i/${token}?pay=bank_unavailable`, { status: 303 });
+  }
+
+  /**
+   * A BANK TRANSFER ALREADY ON ITS WAY IS A PAYMENT IN FLIGHT (audit v994 BK3, 0338).
+   *
+   * Nothing is booked until an ACH debit clears, so the balance still reads in full for 3-5 business
+   * days - and a second Checkout here would charge that same balance again. No second online
+   * payment opens while one is pending; /i says why. A read that fails refuses too (fail closed): a
+   * customer can always pay by check, and a double charge is a refund and an apology.
+   */
+  const inFlight = await pendingTransfers(supabase, inv.org_id, [inv.id]);
+  if (inFlight.problem) {
+    reportError("pay.pending-transfer-read", new Error(inFlight.problem), { org_id: inv.org_id, invoice_id: inv.id });
+    return NextResponse.redirect(`${site}/i/${token}?pay=failed`, { status: 303 });
+  }
+  if (inFlight.byInvoice.get(String(inv.id))?.length) {
+    return NextResponse.redirect(`${site}/i/${token}?pay=pending`, { status: 303 });
   }
 
   // CONNECT (0161): the charge is created ON THE CONTRACTOR'S OWN Stripe account, so
