@@ -65,8 +65,9 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * A file the reader can't take is still filed and its row says why; "Record as Cost" is the retry.
  *
  * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). This uploader is for money paper. Plan and
- * Permit stay on its list (old habits still work), but choosing one says where plans live now and
- * links to that tab's Add Plans Or Drawings, so the two doors agree. Office only: the Customer
+ * Permit stay on its list (old habits still work). A line under the uploader always links to that
+ * tab's Add Plans Or Drawings (?plans=add), whatever the dropdown says, so a plan never has to be
+ * found through the dropdown. Office only: the Customer
  * Page tab is not a tech's, so a tech is never pointed at it.
  */
 export function JobDocuments({
@@ -235,14 +236,18 @@ export function JobDocuments({
           <Camera className="h-4 w-4" /> Take Photo
         </Button>
       </div>
-      {plansDoor && (category === "Plan" || category === "Permit") && (
+      {/* Always there for the office, not only after the dropdown says Plan: the dropdown starts
+          on Receipt, so a plan uploaded here without touching it is read as a cost. */}
+      {plansDoor && (
         <p className="mb-3 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
-          Plans and drawings live on the Customer Page tab.{" "}
+          {category === "Plan" || category === "Permit"
+            ? "Plans and drawings live on the Customer Page tab. "
+            : "This is for receipts and bills. "}
           <Link
             href={`/jobs/${jobId}?tab=customer&plans=add`}
             className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
           >
-            Add Them There
+            Plan Or Drawing? Add It On The Customer Page
           </Link>
         </p>
       )}

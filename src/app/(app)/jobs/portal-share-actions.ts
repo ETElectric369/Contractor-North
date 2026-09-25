@@ -515,6 +515,7 @@ export async function reshowPhoto(documentId: string): Promise<{ ok: boolean; er
 // ── the plans door: a new plan or drawing, filed on the job (Erik 2026-09-25) ──────────────────
 
 const PLAN_NOT_IN_JOB_FOLDER = "That file isn't in this job's folder, so it can't be filed on this job. Upload it again.";
+const PLAN_PATH_TAKEN = "That file is already filed on this job as another paper, so it can't be filed again. Upload it again.";
 
 /**
  * FILE A PLAN ON THE JOB: the Customer Page tab's Add Plans Or Drawings (Erik: "uploading a plan
@@ -542,6 +543,19 @@ export async function filePlan(
   const base = path.slice(path.lastIndexOf("/") + 1).replace(/^\d+-/, "");
   const name = (typeof input.name === "string" && input.name.trim() ? input.name.trim() : base).slice(0, 200);
   const size = typeof input.sizeBytes === "number" && Number.isFinite(input.sizeBytes) && input.sizeBytes > 0 ? Math.round(input.sizeBytes) : null;
+
+  // A path another paper already names is refused BEFORE anything is written or removed: a second
+  // row on a receipt's file would slip past 0326's money-paper guard (it goes by document id), and
+  // undoing it (or the rollback below) would delete the file the receipt and its bill still point
+  // at. The browser's upload always makes a fresh <ms>- name, so the real door never trips this.
+  const [usedDoc, usedInv] = await Promise.all([
+    s.supabase.from("documents").select("id").eq("org_id", s.orgId).eq("file_url", path).limit(1),
+    s.supabase.from("supplier_invoices").select("id").eq("org_id", s.orgId).eq("source_file", path).limit(1),
+  ]);
+  if (usedDoc.error || usedInv.error) return { ok: false, error: "It couldn't check that file. Try again." };
+  if ((usedDoc.data as unknown[] | null)?.length || (usedInv.data as unknown[] | null)?.length) {
+    return { ok: false, error: PLAN_PATH_TAKEN };
+  }
 
   const { data, error } = await s.supabase
     .from("documents")

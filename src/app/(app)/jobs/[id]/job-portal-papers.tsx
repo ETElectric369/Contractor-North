@@ -166,9 +166,15 @@ export function PapersCard({
     const gone: string[] = [];
     const kept: string[] = [];
     for (const p of filed) {
-      const res = await deleteDocument(p.id, null, jobId);
-      if (res.ok) gone.push(p.id);
-      else kept.push(`"${p.name}": ${res.error ?? "it couldn't be removed."}`);
+      // A server action REJECTS when the signal drops or the server errors: say so for that file
+      // and keep going, so the ones that did come off leave the list.
+      try {
+        const res = await deleteDocument(p.id, null, jobId);
+        if (res.ok) gone.push(p.id);
+        else kept.push(`"${p.name}": ${res.error ?? "it couldn't be removed."}`);
+      } catch {
+        kept.push(`"${p.name}": it didn't reach the server. Check your signal and try again.`);
+      }
     }
     const cur = latest.current;
     if (cur.ready && gone.length) setState({ ...cur, papers: cur.papers.filter((p) => !gone.includes(p.id)) });
@@ -183,17 +189,27 @@ export function PapersCard({
     setFiling(true);
     const filed: JobPaper[] = [];
     const lost: string[] = [];
-    for (const f of files) {
-      const up = await uploadJobFile({ orgId, jobId, file: f, fallbackName: "plan.jpg" });
-      if (!up.ok) {
-        lost.push(`${f.name || "A file"} ${up.error}.`);
-        continue;
+    try {
+      for (const f of files) {
+        // filePlan is a server action: a dropped signal or a server error REJECTS rather than
+        // returning ok:false. Each file is its own try, so one lost file never freezes the door
+        // and the ones already filed still land on the list with Undo.
+        try {
+          const up = await uploadJobFile({ orgId, jobId, file: f, fallbackName: "plan.jpg" });
+          if (!up.ok) {
+            lost.push(`${f.name || "A file"} ${up.error}.`);
+            continue;
+          }
+          const res = await filePlan(jobId, { path: up.path, name: up.name, sizeBytes: up.size });
+          if (!res.ok) lost.push(`${up.name}: ${res.error}`);
+          else filed.push(res.paper);
+        } catch {
+          lost.push(`${f.name || "A file"} didn't reach the server; check your signal.`);
+        }
       }
-      const res = await filePlan(jobId, { path: up.path, name: up.name, sizeBytes: up.size });
-      if (!res.ok) lost.push(`${up.name}: ${res.error}`);
-      else filed.push(res.paper);
+    } finally {
+      setFiling(false);
     }
-    setFiling(false);
     if (lost.length) toast(`Not filed: ${lost.join(" ")} Try again.`, "error", undefined, { sticky: true });
     if (!filed.length) return;
     addPapers(filed);

@@ -49,6 +49,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[], removed: str
         delete() { mine.verb = "delete"; return chain; },
         select() { return chain; },
         eq(col: string, val: unknown) { mine.eqs.push([col, val]); return chain; },
+        limit() { return chain; },
         maybeSingle: () => Promise.resolve(next(`${table}.${mine.verb}`)),
         single: () => Promise.resolve(next(`${table}.${mine.verb}`)),
         then(resolve: any, reject: any) {
@@ -78,11 +79,17 @@ const ROW = {
   created_at: "2026-09-25T08:00:00Z",
 };
 
+/** The path checks: no paper and no supplier invoice names this file yet. */
+const freePath = () => ({
+  "documents.select": [{ data: [], error: null }],
+  "supplier_invoices.select": [{ data: [], error: null }],
+});
+
 beforeEach(() => billJobReceipt.mockReset());
 
 describe("filePlan", () => {
   it("files the paper on the job as a Plan, org-scoped, and hands back the paper for the sheet", async () => {
-    staffWith({ "jobs.select": [{ data: { id: JOB } }], "documents.insert": [{ data: [ROW], error: null }] });
+    staffWith({ "jobs.select": [{ data: { id: JOB } }], ...freePath(), "documents.insert": [{ data: [ROW], error: null }] });
     const res = await filePlan(JOB, { path: PATH, name: "Panel_Schedule_v2.pdf", sizeBytes: 412_000 });
 
     expect(res.ok).toBe(true);
@@ -99,15 +106,15 @@ describe("filePlan", () => {
   });
 
   it("never reads it as a cost: no receipt reader, no bill, no organize row, no share, nothing on the portal", async () => {
-    staffWith({ "jobs.select": [{ data: { id: JOB } }], "documents.insert": [{ data: [ROW], error: null }] });
+    staffWith({ "jobs.select": [{ data: { id: JOB } }], ...freePath(), "documents.insert": [{ data: [ROW], error: null }] });
     await filePlan(JOB, { path: PATH, name: "receipt.jpg" });
     expect(billJobReceipt).not.toHaveBeenCalled();
-    expect(calls.map((c) => c.table)).toEqual(["jobs", "documents"]);
+    expect(calls.map((c) => c.table)).toEqual(["jobs", "documents", "supplier_invoices", "documents"]);
     for (const t of ["bills", "bill_lines", "organized_items", "job_shared_documents", "petty_cash"]) {
       expect(calls.some((c) => c.table === t)).toBe(false);
     }
     // Even a file named like a receipt is filed as a Plan.
-    expect(calls[1].payload.category).toBe("Plan");
+    expect(calls.find((c) => c.verb === "insert")!.payload.category).toBe("Plan");
   });
 
   it("refuses a tech (requireStaff says no) before touching anything", async () => {
@@ -144,15 +151,59 @@ describe("filePlan", () => {
   });
 
   it("a row that doesn't land takes its file back out of the bucket and says so", async () => {
-    staffWith({ "jobs.select": [{ data: { id: JOB } }], "documents.insert": [{ data: [], error: null }] });
+    staffWith({ "jobs.select": [{ data: { id: JOB } }], ...freePath(), "documents.insert": [{ data: [], error: null }] });
     const res = await filePlan(JOB, { path: PATH });
     expect(res).toEqual({ ok: false, error: "It uploaded but wasn't filed on the job. Try again." });
     expect(removed).toEqual([[PATH]]);
   });
 
   it("names the paper from its stored file when the browser sent no name", async () => {
-    staffWith({ "jobs.select": [{ data: { id: JOB } }], "documents.insert": [{ data: [ROW], error: null }] });
+    staffWith({ "jobs.select": [{ data: { id: JOB } }], ...freePath(), "documents.insert": [{ data: [ROW], error: null }] });
     await filePlan(JOB, { path: PATH });
-    expect(calls[1].payload.name).toBe("Panel_Schedule_v2.pdf");
+    expect(calls.find((c) => c.verb === "insert")!.payload.name).toBe("Panel_Schedule_v2.pdf");
+  });
+
+  it("refuses a path a receipt (or any paper) already names, and never removes that file", async () => {
+    // A crafted call naming the receipt's own file: a second row would slip past the portal's
+    // money-paper guard, and undoing it would delete the file the receipt and its bill point at.
+    const RECEIPT = `${ORG}/${JOB}/1727300000000-CED_receipt.jpg`;
+    staffWith({
+      "jobs.select": [{ data: { id: JOB } }],
+      "documents.select": [{ data: [{ id: "receipt-doc" }], error: null }],
+      "supplier_invoices.select": [{ data: [], error: null }],
+    });
+    const res = await filePlan(JOB, { path: RECEIPT });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/already filed on this job/);
+    // Looked up in THIS org by that exact file.
+    const look = calls.find((c) => c.table === "documents" && c.verb === "select")!;
+    expect(look.eqs).toEqual(expect.arrayContaining([["org_id", ORG], ["file_url", RECEIPT]]));
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+    expect(removed).toEqual([]);
+  });
+
+  it("refuses a supplier invoice's source file the same way", async () => {
+    const SRC = `${ORG}/${JOB}/1727300000000-statement.pdf`;
+    staffWith({
+      "jobs.select": [{ data: { id: JOB } }],
+      "documents.select": [{ data: [], error: null }],
+      "supplier_invoices.select": [{ data: [{ id: "si-1" }], error: null }],
+    });
+    const res = await filePlan(JOB, { path: SRC });
+    expect(res.ok).toBe(false);
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+    expect(removed).toEqual([]);
+  });
+
+  it("a check that fails refuses without writing or removing anything", async () => {
+    staffWith({
+      "jobs.select": [{ data: { id: JOB } }],
+      "documents.select": [{ data: null, error: { message: "boom" } }],
+      "supplier_invoices.select": [{ data: [], error: null }],
+    });
+    const res = await filePlan(JOB, { path: PATH });
+    expect(res).toEqual({ ok: false, error: "It couldn't check that file. Try again." });
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+    expect(removed).toEqual([]);
   });
 });
