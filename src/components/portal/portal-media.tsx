@@ -73,7 +73,7 @@ export function PortalKeepFresh({ asOf }: { asOf: string }) {
 
 /** A picture whose link died: read the page again once, then say so plainly. Keyed on the URL,
  *  so the fresh link a refresh brings gets its own chance. */
-function useDeadLink(url: string | null) {
+export function useDeadLink(url: string | null) {
   const router = useRouter();
   const [deadUrl, setDeadUrl] = useState<string | null>(null);
   const onError = useCallback(() => {
@@ -82,7 +82,7 @@ function useDeadLink(url: string | null) {
   return { dead: url !== null && deadUrl === url, onError };
 }
 
-function TimedOut({ className = "" }: { className?: string }) {
+export function TimedOut({ className = "" }: { className?: string }) {
   return (
     <span className={`flex flex-col items-center justify-center gap-1 bg-white/80 p-2 text-center text-xs text-slate-700 ${className}`}>
       <ImageOff className="h-5 w-5 text-slate-500" aria-hidden />
@@ -91,7 +91,7 @@ function TimedOut({ className = "" }: { className?: string }) {
   );
 }
 
-function useDialog(open: boolean, onClose: () => void) {
+export function useDialog(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDialogElement>(null);
   useModalLock(open);
   useEffect(() => {
@@ -118,7 +118,7 @@ function useDialog(open: boolean, onClose: () => void) {
   return ref;
 }
 
-const iconBtn =
+export const iconBtn =
   "inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 
 // ── photos ───────────────────────────────────────────────────────────────────────────────────

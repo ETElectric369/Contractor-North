@@ -5,13 +5,30 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { PHOTO_NOT_IN_JOB_FOLDER, normalizePick, normalizeStretch, type PickPatch } from "@/lib/portal/share-input";
+import {
+  PHOTO_NOT_IN_JOB_FOLDER,
+  normalizePick,
+  normalizeSharedPaper,
+  normalizeStretch,
+  paperRefusal,
+  type PickPatch,
+  type SharedPaperPatch,
+} from "@/lib/portal/share-input";
 import { CUSTOMER_SHOWN_JOB_STATUSES, isJobPhotoPath } from "@/lib/portal/job-view-shape";
+import {
+  COMPANY_PAPER_CATEGORIES,
+  MONEY_PAPER_REFUSAL,
+  docFormat,
+  organizeRowIsMoney,
+  type DocFormat,
+  type PortalDocKind,
+} from "@/lib/portal/doc-kinds";
 import { getOrgSettings, orgDocUrl } from "@/lib/org-settings";
 
 /**
  * THE OFFICE'S CONTROLS FOR WHAT THE CUSTOMER SEES ON A JOB (0300): the stretches of work, the
- * saved picks, and which photos are shown. Erik: "Update everything right away yes always", so
+ * saved picks, and which photos are shown; and since 0326, which plans, permits, circuit maps,
+ * drawings, renderings and scans are shown, each the newest of its versions. Erik: "Update everything right away yes always", so
  * every one of these is live on the customer's page the moment it saves; there is no publish.
  *
  * Every action is office-only (requireStaff, and the RLS underneath says the same), names a job or
@@ -280,56 +297,188 @@ export async function restorePick(id: string): Promise<Result<PickRow>> {
   return writePick(s, id, cur.job_id, { removed_at: null });
 }
 
-// ── photos ─────────────────────────────────────────────────────────────────────────────────────
+// ── the papers the customer sees: photos, plans, permits, circuit maps, drawings (0300 → 0326) ─
 
 /**
- * Show or stop showing one job photo on the customer's page. Only a Photo can be shown (0300's
- * trigger refuses a receipt by name); the share row records the file the office is looking at, so
- * a later repoint of the document hides it instead of showing whatever it now points at.
+ * One row per paper the office showed (0326's job_shared_documents, 0300's job_shared_photos
+ * widened). Taking a paper down is a soft remove, so what the customer was shown stays on record
+ * with who and when; "replaces" names the older paper a newer one stands in for, and the customer
+ * sees only the newest.
+ */
+export type SharedPaperRow = {
+  document_id: string;
+  kind: PortalDocKind;
+  title: string;
+  replaces_document_id: string | null;
+  shared_by: string | null;
+  shared_at: string;
+  removed_at: string | null;
+  removed_by: string | null;
+  replaces_marked_by: string | null;
+  replaces_marked_at: string | null;
+};
+const SHARES = "job_shared_documents";
+const SHARE_COLS =
+  "document_id, kind, title, replaces_document_id, shared_by, shared_at, removed_at, removed_by, replaces_marked_by, replaces_marked_at";
+type PaperResult = { ok: true; row: SharedPaperRow } | { ok: false; error: string };
+
+/** 0326 isn't on this database yet: undefined_table, or PostgREST's schema cache without it. */
+function sharesNotReady(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42P01" || code === "PGRST205" || (/job_shared_documents/.test(msg) && /does not exist|could not find/i.test(msg));
+}
+const NOT_READY = "Showing plans and drawings on the customer's page isn't switched on yet (migration 0326). Photos still work from the Photos tab.";
+
+type PaperDoc = { id: string; job_id: string | null; name: string | null; category: string | null; file_url: string | null };
+
+async function readPaper(s: Staff, documentId: string): Promise<PaperDoc | null> {
+  if (!UUID.test(documentId)) return null;
+  const { data } = await s.supabase
+    .from("documents")
+    .select("id, job_id, name, category, file_url")
+    .eq("id", documentId)
+    .eq("org_id", s.orgId)
+    .maybeSingle();
+  return (data as PaperDoc | null) ?? null;
+}
+
+/** Is this paper tied to money through Organize? (The database checks this and supplier invoices.) */
+async function paperIsMoney(s: Staff, documentId: string): Promise<boolean> {
+  const { data } = await s.supabase
+    .from("organized_items")
+    .select("bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, category")
+    .eq("document_id", documentId)
+    .eq("org_id", s.orgId);
+  return ((data ?? []) as Parameters<typeof organizeRowIsMoney>[0][]).some(organizeRowIsMoney);
+}
+
+async function readShare(s: Staff, documentId: string): Promise<{ row: SharedPaperRow | null; error: unknown }> {
+  const { data, error } = await s.supabase.from(SHARES).select(SHARE_COLS).eq("document_id", documentId).eq("org_id", s.orgId).maybeSingle();
+  return { row: (data as SharedPaperRow | null) ?? null, error };
+}
+
+/**
+ * Put a paper on the customer's page, or back on it: a photo, a plan, a permit, a circuit map, a
+ * drawing, a rendering, a scan. Receipts, bills and supplier invoices are refused here by name and
+ * again by 0326's stamp, which also refuses anything Organize tied to money, whatever it is filed
+ * as now. The row records the file the office is looking at; a later repoint or upload-over hides
+ * it instead of showing whatever is there now. `replaces` names the older paper this one stands in
+ * for: the customer then sees only this one.
+ */
+export async function showPaper(documentId: string, patch: SharedPaperPatch = {}): Promise<PaperResult> {
+  const s = await staff();
+  if ("error" in s) return { ok: false, error: s.error };
+  const doc = await readPaper(s, documentId);
+  if (!doc) return { ok: false, error: "That paper isn't on file." };
+  const refusal = paperRefusal(doc, s.orgId);
+  if (refusal) return { ok: false, error: refusal };
+  if (await paperIsMoney(s, doc.id)) return { ok: false, error: MONEY_PAPER_REFUSAL };
+
+  const cur = await readShare(s, doc.id);
+  if (cur.error) return { ok: false, error: sharesNotReady(cur.error) ? NOT_READY : dbError(cur.error as never) };
+  const v = normalizeSharedPaper(patch, doc, !cur.row);
+  if (!v.ok) return v;
+
+  let res;
+  if (!cur.row) {
+    // org_id, job_id, the file, who and when are stamped by the trigger from the documents row.
+    res = await s.supabase
+      .from(SHARES)
+      .insert({ document_id: doc.id, org_id: s.orgId, job_id: doc.job_id, file_url_at_share: "", ...v.value })
+      .select(SHARE_COLS);
+  } else {
+    // Back up (a new stamp of the file as it is now), with whatever else was sent.
+    res = await s.supabase
+      .from(SHARES)
+      .update({ ...v.value, removed_at: null })
+      .eq("document_id", doc.id)
+      .eq("org_id", s.orgId)
+      .select(SHARE_COLS);
+  }
+  if (res.error) return { ok: false, error: sharesNotReady(res.error) ? NOT_READY : dbError(res.error) };
+  const row = (res.data as SharedPaperRow[] | null)?.[0];
+  if (!row) return { ok: false, error: "It didn't go on the customer's page. Try again." };
+  touched(doc.job_id!);
+  return { ok: true, row };
+}
+
+/** Change what the customer reads for a paper already shown: its title, its kind, what it replaces. */
+export async function updateShownPaper(documentId: string, patch: SharedPaperPatch): Promise<PaperResult> {
+  const s = await staff();
+  if ("error" in s) return { ok: false, error: s.error };
+  const doc = await readPaper(s, documentId);
+  if (!doc) return { ok: false, error: "That paper isn't on file." };
+  const cur = await readShare(s, doc.id);
+  if (cur.error) return { ok: false, error: sharesNotReady(cur.error) ? NOT_READY : dbError(cur.error as never) };
+  if (!cur.row) return { ok: false, error: "That paper isn't on the customer's page. Show it first." };
+  const v = normalizeSharedPaper(patch, doc, false);
+  if (!v.ok) return v;
+  if (!Object.keys(v.value).length) return { ok: true, row: cur.row };
+  const { data, error } = await s.supabase.from(SHARES).update(v.value).eq("document_id", doc.id).eq("org_id", s.orgId).select(SHARE_COLS);
+  if (error) return { ok: false, error: dbError(error) };
+  const row = (data as SharedPaperRow[] | null)?.[0];
+  if (!row) return { ok: false, error: "That didn't save. Reload the page." };
+  touched(doc.job_id ?? "");
+  return { ok: true, row };
+}
+
+/** Take a paper off the customer's page. Kept on record (who, when); Undo is showPaper. If it
+ *  replaced an older paper, that older one shows again, and the office's list says so. */
+export async function takePaperOff(documentId: string): Promise<PaperResult> {
+  const s = await staff();
+  if ("error" in s) return { ok: false, error: s.error };
+  if (!UUID.test(documentId)) return { ok: false, error: "That paper isn't on file." };
+  const { data, error } = await s.supabase
+    .from(SHARES)
+    .update({ removed_at: new Date().toISOString() })
+    .eq("document_id", documentId)
+    .eq("org_id", s.orgId)
+    .select(`${SHARE_COLS}, job_id`);
+  if (error) return { ok: false, error: sharesNotReady(error) ? NOT_READY : dbError(error) };
+  const row = (data as (SharedPaperRow & { job_id: string })[] | null)?.[0];
+  if (!row) return { ok: false, error: "That paper isn't on the customer's page." };
+  touched(row.job_id);
+  const { job_id: _job, ...rest } = row;
+  void _job;
+  return { ok: true, row: rest };
+}
+
+/**
+ * The Photos tab's switch: show or stop showing one job photo. The same row as every other paper
+ * (a photo is shown as kind Photo); stopping is a soft remove, as for the rest.
  */
 export async function setPhotoShared(documentId: string, shared: boolean): Promise<{ ok: boolean; error?: string; shared?: boolean }> {
   const s = await staff();
   if ("error" in s) return { ok: false, error: s.error };
-  if (!UUID.test(documentId)) return { ok: false, error: "That photo isn't on file." };
-  const { data: doc } = await s.supabase
-    .from("documents")
-    .select("id, job_id, category, file_url")
-    .eq("id", documentId)
-    .eq("org_id", s.orgId)
-    .maybeSingle();
-  const d = doc as { id: string; job_id: string | null; category: string | null; file_url: string | null } | null;
+  const d = await readPaper(s, documentId);
   if (!d) return { ok: false, error: "That photo isn't on file." };
   if (d.category !== "Photo" || !d.job_id) return { ok: false, error: "Only a job photo can be shown to the customer." };
-  // The portal signs only files in the job's own folder (isJobPhotoPath; 0300 refuses the rest by
+  // The portal signs only files in the job's own folder (isJobPhotoPath; 0326 refuses the rest by
   // name). A picture Organize filed elsewhere is said so here, never "shown" and then dropped.
   if (shared && !isJobPhotoPath(d.file_url, s.orgId, d.job_id)) return { ok: false, error: PHOTO_NOT_IN_JOB_FOLDER };
-
   if (shared) {
-    const { data: have } = await s.supabase
-      .from("job_shared_photos")
-      .select("document_id")
-      .eq("document_id", documentId)
-      .eq("org_id", s.orgId)
-      .maybeSingle();
-    if (!have) {
-      // org_id, job_id and the file are stamped by the trigger from the documents row.
-      const { data, error } = await s.supabase
-        .from("job_shared_photos")
-        .insert({ document_id: documentId, org_id: s.orgId, job_id: d.job_id, file_url_at_share: "" })
-        .select("document_id");
-      if (error) return { ok: false, error: dbError(error) };
-      if (!data?.length) return { ok: false, error: "The photo didn't share. Try again." };
+    const cur = await readShare(s, d.id);
+    if (cur.row && !cur.row.removed_at) {
+      // Up, but a newer paper stands in for it: the switch can't say "shown" while it isn't.
+      const { data: newer } = await s.supabase
+        .from(SHARES)
+        .select("title")
+        .eq("replaces_document_id", d.id)
+        .eq("org_id", s.orgId)
+        .is("removed_at", null)
+        .limit(1);
+      const n = (newer as { title: string }[] | null)?.[0];
+      if (n) return { ok: false, error: `"${n.title}" replaces this photo on the customer's page. Change that on the Customer Page tab.` };
+      // Already up (as a photo, or shown with the plans): nothing to do.
+      return { ok: true, shared };
     }
-  } else {
-    const { error } = await s.supabase
-      .from("job_shared_photos")
-      .delete()
-      .eq("document_id", documentId)
-      .eq("org_id", s.orgId)
-      .select("document_id");
-    if (error) return { ok: false, error: dbError(error) };
-    // Zero rows back is fine here: it was not shown, and now it still is not.
+    const res = await showPaper(d.id, cur.row ? {} : { kind: "photo" });
+    return res.ok ? { ok: true, shared } : { ok: false, error: res.error };
   }
+  const res = await takePaperOff(d.id);
+  // "Not on the page" is fine here: it was not shown, and now it still is not.
+  if (!res.ok && res.error !== "That paper isn't on the customer's page.") return { ok: false, error: res.error };
   touched(d.job_id);
   return { ok: true, shared };
 }
@@ -338,10 +487,26 @@ export async function setPhotoShared(documentId: string, shared: boolean): Promi
 
 export type PickOptionChoice = { id: string; brand: string; label: string | null; partNumber: string | null; itemName: string | null; itemCode: string | null };
 
+/** A job paper the office could show, with why not when it can't (said before anyone taps). */
+export type JobPaper = {
+  id: string;
+  name: string;
+  category: string | null;
+  createdAt: string;
+  format: DocFormat;
+  /** A short-lived link for the office's own thumbnail and preview. */
+  signedUrl: string | null;
+  refusal: string | null;
+};
+export type PapersState =
+  | { ready: true; papers: JobPaper[]; shares: SharedPaperRow[]; people: Record<string, string> }
+  | { ready: false; reason: string };
+
 /**
  * The office's editor state for a job: its stretches and picks (removed ones too, newest removal
- * first, for Undo across a reload), which photos are shown, and the brands and price-book options
- * to pick from (names only: no buy_price, no markup ever leaves the price book here).
+ * first, for Undo across a reload), which photos are shown, every paper the customer could be shown
+ * with its share history, and the brands and price-book options to pick from (names only: no
+ * buy_price, no markup ever leaves the price book here).
  */
 export async function jobShareState(jobId: string): Promise<
   | {
@@ -349,6 +514,7 @@ export async function jobShareState(jobId: string): Promise<
       stretches: StretchRow[];
       picks: (PickRow & { file_url: string | null })[];
       sharedPhotoIds: string[];
+      papers: PapersState;
       brands: string[];
       options: PickOptionChoice[];
     }
@@ -357,10 +523,17 @@ export async function jobShareState(jobId: string): Promise<
   const s = await staff();
   if ("error" in s) return { ok: false, error: s.error };
   if (!(await jobIsOurs(s, jobId))) return { ok: false, error: "That job isn't in your book." };
-  const [st, pk, sh, opts, vendors] = await Promise.all([
+  const [st, pk, sh, docs, opts, vendors] = await Promise.all([
     s.supabase.from("job_stretches").select(STRETCH_COLS).eq("job_id", jobId).eq("org_id", s.orgId).order("starts_on").order("sort"),
     s.supabase.from("job_picks").select(PICK_COLS).eq("job_id", jobId).eq("org_id", s.orgId).order("sort").order("updated_at"),
-    s.supabase.from("job_shared_photos").select("document_id").eq("job_id", jobId).eq("org_id", s.orgId),
+    s.supabase.from(SHARES).select(SHARE_COLS).eq("job_id", jobId).eq("org_id", s.orgId).order("shared_at", { ascending: false }),
+    s.supabase
+      .from("documents")
+      .select("id, job_id, name, category, file_url, created_at")
+      .eq("job_id", jobId)
+      .eq("org_id", s.orgId)
+      .not("file_url", "is", null)
+      .order("created_at", { ascending: false }),
     s.supabase
       .from("price_list_item_options")
       .select("id, vendor, label, part_number, price_list_items(name, code)")
@@ -370,9 +543,59 @@ export async function jobShareState(jobId: string): Promise<
       .limit(1000),
     s.supabase.from("price_list_vendors").select("name").eq("org_id", s.orgId).eq("archived", false).order("name"),
   ]);
-  const firstError = st.error ?? pk.error ?? sh.error;
+  const firstError = st.error ?? pk.error ?? docs.error;
   if (firstError) return { ok: false, error: dbError(firstError) };
   const picks = (pk.data ?? []) as PickRow[];
+
+  // THE PAPERS. Before 0326 the share rows live under 0300's name: count the photos from there and
+  // say the plans aren't ready, rather than failing the whole tab.
+  let papers: PapersState;
+  let sharedPhotoIds: string[];
+  if (sh.error) {
+    if (!sharesNotReady(sh.error)) return { ok: false, error: dbError(sh.error) };
+    const old = await s.supabase.from("job_shared_photos").select("document_id").eq("job_id", jobId).eq("org_id", s.orgId);
+    sharedPhotoIds = ((old.data ?? []) as { document_id: string }[]).map((r) => r.document_id);
+    papers = { ready: false, reason: NOT_READY };
+  } else {
+    const shares = (sh.data ?? []) as SharedPaperRow[];
+    sharedPhotoIds = shares.filter((r) => !r.removed_at && r.kind === "photo").map((r) => r.document_id);
+    const docRows = (docs.data ?? []) as (PaperDoc & { created_at: string })[];
+    // Receipts, bills and invoices never appear on this list at all: they are never shown.
+    const candidates = docRows.filter((d) => !(COMPANY_PAPER_CATEGORIES as readonly string[]).includes(String(d.category ?? "")));
+    const ids = candidates.map((d) => d.id);
+    const [oi, signed] = await Promise.all([
+      ids.length
+        ? s.supabase
+            .from("organized_items")
+            .select("document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, category")
+            .in("document_id", ids)
+            .eq("org_id", s.orgId)
+        : Promise.resolve({ data: [] as unknown[] }),
+      signDocumentUrls(s.supabase, candidates.map((d) => d.file_url)),
+    ]);
+    const money = new Set(
+      ((oi.data ?? []) as (Parameters<typeof organizeRowIsMoney>[0] & { document_id: string })[]).filter(organizeRowIsMoney).map((r) => r.document_id),
+    );
+    const list: JobPaper[] = candidates
+      .filter((d) => !money.has(d.id))
+      .map((d) => ({
+        id: d.id,
+        name: d.name ?? "Untitled",
+        category: d.category,
+        createdAt: d.created_at,
+        format: docFormat(d.file_url),
+        signedUrl: (d.file_url && signed.get(d.file_url)) || null,
+        refusal: paperRefusal(d, s.orgId),
+      }));
+    const who = [...new Set(shares.flatMap((r) => [r.shared_by, r.removed_by, r.replaces_marked_by]).filter((x): x is string => !!x))];
+    const people: Record<string, string> = {};
+    if (who.length) {
+      const { data: ppl } = await s.supabase.from("profiles").select("id, full_name").in("id", who).eq("org_id", s.orgId);
+      for (const p of (ppl ?? []) as { id: string; full_name: string | null }[]) people[p.id] = p.full_name?.trim() || "Someone";
+    }
+    papers = { ready: true, papers: list, shares, people };
+  }
+
   const signed = await signDocumentUrls(s.supabase, picks.map((p) => p.file_path));
   const options: PickOptionChoice[] = ((opts.data ?? []) as any[]).map((o) => ({
     id: String(o.id),
@@ -391,7 +614,8 @@ export async function jobShareState(jobId: string): Promise<
     ok: true,
     stretches: (st.data ?? []) as StretchRow[],
     picks: picks.map((p) => ({ ...p, file_url: p.file_path ? signed.get(p.file_path) ?? null : null })),
-    sharedPhotoIds: ((sh.data ?? []) as { document_id: string }[]).map((r) => r.document_id),
+    sharedPhotoIds,
+    papers,
     brands: [...brandSet.values()].sort((a, b) => a.localeCompare(b)),
     options,
   };

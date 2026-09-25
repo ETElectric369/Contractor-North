@@ -665,10 +665,25 @@ export default async function JobDetailPage({
   // for the office (a tech's Photos tab has no Show Customer control, and RLS would give it no rows
   // anyway). null = the table isn't on this database yet, so the control stays hidden rather than
   // offering a switch that can only fail.
+  //
+  // 0326: the same rows now hold every paper shown (plans, circuit maps, drawings too), with a soft
+  // remove. `portalPapers` tells the Costs tab's document list which papers are up, so each row can
+  // say "On The Portal" or offer Show On Portal (null before 0326: no control).
   let sharedPhotoIds: string[] | null = null;
+  let portalPapers: Record<string, "shown" | "replaced"> | null = null;
   if (viewerIsStaff) {
-    const { data: shared, error: sharedErr } = await supabase.from("job_shared_photos").select("document_id").eq("job_id", id);
-    sharedPhotoIds = sharedErr ? null : ((shared ?? []) as { document_id: string }[]).map((r) => r.document_id);
+    const { data: shared, error: sharedErr } = await supabase
+      .from("job_shared_documents")
+      .select("document_id, replaces_document_id")
+      .eq("job_id", id)
+      .is("removed_at", null);
+    if (!sharedErr) {
+      const live = (shared ?? []) as { document_id: string; replaces_document_id: string | null }[];
+      const replaced = new Set(live.map((r) => r.replaces_document_id).filter(Boolean));
+      // What the customer actually sees: a paper a newer one replaces is not on their page.
+      sharedPhotoIds = live.map((r) => r.document_id).filter((d) => !replaced.has(d));
+      portalPapers = Object.fromEntries(live.map((r) => [r.document_id, replaced.has(r.document_id) ? "replaced" : "shown"]));
+    }
   }
 
   const empty = (label: string) => (
@@ -1243,7 +1258,7 @@ export default async function JobDetailPage({
               {/* The job's documents list (plans, permits, every receipt). Its cost role moved up
                   to the tab's header (Snap the Bill); a receipt uploaded here still auto-posts
                   as a job cost (same reader, idempotent), and "Record as Cost" is the retry. */}
-              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} />
+              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} />
             </CardContent>
           </Card>
 
