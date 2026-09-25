@@ -3,6 +3,7 @@ import {
   createInvoiceFromQuote,
   addInvoiceItem,
   updateInvoiceItem,
+  setInvoiceItemKind,
   deleteInvoiceItem,
   recordPayment,
   setPaymentSchedule,
@@ -15,6 +16,7 @@ import {
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
 import { paymentMethodLabel } from "@/lib/payment-method";
+import { LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
 import { localDay, spokenDay } from "@/lib/org-local-time";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
@@ -82,13 +84,14 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Add an invoice line",
     description:
-      "Add ONE line item to any invoice that is not void - a draft, or a bill the customer already has. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. On an invoice that has already gone out this changes what the customer owes, so the app asks the user to confirm first and the invoice is recorded as revised. After adjusting, read the invoice back with get_invoice.",
+      "Add ONE line item to any invoice that is not void - a draft, or a bill the customer already has. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. Optional kind ('labor' | 'materials' | 'other') says where the customer's Cost Breakdown files the line; leave it out and a line whose description starts with a price-list code (\"TM870LA — S5A 125V 1P SWITCH\") is filed under materials by the app. On an invoice that has already gone out this changes what the customer owes, so the app asks the user to confirm first and the invoice is recorded as revised. After adjusting, read the invoice back with get_invoice.",
     input: z.object({
       invoice_id: z.string(),
       description: z.string().min(1),
       quantity: z.number().default(1),
       unit: z.string().default("ea"),
       unit_price: z.number().default(0),
+      kind: z.enum(["labor", "materials", "other"]).optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -108,6 +111,7 @@ export const invoiceActions: Record<string, ActionDef> = {
         quantity: i.quantity ?? 1,
         unit: i.unit ?? "ea",
         unit_price: i.unit_price ?? 0,
+        kind: i.kind ?? null,
       });
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: `Added "${i.description}".` };
@@ -118,7 +122,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Edit an invoice line",
     description:
-      "Change an existing invoice line - 'bump the panel line to $1,800'. Works on any invoice that is not void, a delivered one included. You need BOTH the line's item_id AND its invoice_id - get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price); anything you omit stays as it is. On a bill that has already gone out this changes what the customer owes, so the app asks the user to confirm first.",
+      "Change an existing invoice line - 'bump the panel line to $1,800'. Works on any invoice that is not void, a delivered one included. You need BOTH the line's item_id AND its invoice_id - get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price / kind); anything you omit stays as it is. kind ('labor' | 'materials' | 'other') files the line on the customer's Cost Breakdown without touching its words or price. On a bill that has already gone out this changes what the customer owes, so the app asks the user to confirm first.",
     // A true PATCH: an omitted field must never touch the column (the old defaults
     // silently reset quantity to 1 / price to $0 on a "just fix the description" call).
     input: z.object({
@@ -127,6 +131,7 @@ export const invoiceActions: Record<string, ActionDef> = {
       description: z.string().min(1).optional(),
       quantity: z.number().optional(),
       unit_price: z.number().optional(),
+      kind: z.enum(["labor", "materials", "other"]).optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -139,10 +144,19 @@ export const invoiceActions: Record<string, ActionDef> = {
     // has already paid. The UI is exempt from consent (the person is looking at the line), so this
     // costs a typed edit nothing and gates voice and agent callers, which is exactly the boundary.
     confirm: "financial",
-    describe: (i) => `Change this invoice line${i.description ? ` to "${i.description}"` : ""}${i.unit_price != null ? ` at $${i.unit_price}` : ""} - say yes to confirm.`,
-    handler: async ({ item_id, invoice_id, ...patch }) => {
-      const r = await updateInvoiceItem(item_id, invoice_id, patch);
-      if (!r.ok) return { ok: false, error: r.error };
+    describe: (i) => `Change this invoice line${i.description ? ` to "${i.description}"` : ""}${i.unit_price != null ? ` at $${i.unit_price}` : ""}${i.kind ? ` and file it under ${LINE_KIND_LABEL[i.kind as PickableLineKind] ?? i.kind}` : ""} - say yes to confirm.`,
+    handler: async ({ item_id, invoice_id, kind, ...patch }) => {
+      // The kind is its own write (0342: classification only, never the words or the price).
+      if (kind) {
+        const k = await setInvoiceItemKind(item_id, invoice_id, kind);
+        if (!k.ok) return { ok: false, error: k.error };
+      }
+      const changes = Object.values(patch).some((v) => v !== undefined);
+      if (changes) {
+        const r = await updateInvoiceItem(item_id, invoice_id, patch);
+        if (!r.ok) return { ok: false, error: r.error };
+      }
+      if (!kind && !changes) return { ok: false, error: "Nothing to change on that line." };
       return { ok: true, speak: "Line updated." };
     },
   },

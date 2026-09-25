@@ -3,7 +3,7 @@
 // possibly partial) selection into quote lines without touching the kit itself.
 
 import type { DraftLineItem } from "@/app/(app)/quotes/actions";
-import { subtotalTaxTotal } from "@/lib/invoice-math";
+import { priceBookLineKind, subtotalTaxTotal } from "@/lib/invoice-math";
 import { kitLineView, linkedItemOf, type KitLineRaw, type KitPricing } from "@/lib/kit-line";
 
 /** One row in the Kit Picker: a kit item plus its in-picker state (checked + edits). */
@@ -105,6 +105,9 @@ export function kitSelectionToLines(kitName: string, rows: KitPickerRow[]): Draf
     unit: r.unit || "ea",
     unit_price: Number(r.unit_price) || 0,
     group: kitName,
+    // A LINKED line is a price-book line and says so (0342): materials, or labor when the book sells
+    // it by the hour. A line typed into the kit by hand says nothing, and is read by its words.
+    ...(r.linked ? { kind: priceBookLineKind(r.unit) } : {}),
   }));
 }
 

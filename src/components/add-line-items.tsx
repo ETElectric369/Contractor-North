@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ListPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
+import { priceBookLineKind } from "@/lib/invoice-math";
 import {
   hasItemOptions,
   pickerChoices,
@@ -129,7 +130,9 @@ export function AddLineItems({
    *  and the same inputs as every vendor row below it. */
   const addOne = (p: PriceItemLite) => {
     const line = priceBookLine(p, pricing);
-    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice }]);
+    // A LINE FROM THE BOOK SAYS WHAT IT IS (0342): materials, or labor when the book sells it by
+    // the hour. Its words are a code and a catalog name, which the Cost Breakdown cannot read.
+    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice, kind: priceBookLineKind(p.unit, line.unit) }]);
     setQuery("");
     setOpen(false);
   };
@@ -141,8 +144,8 @@ export function AddLineItems({
    * what the crew orders from: "830 Windows (Andersen 400 Series)", not "830 Windows". The price
    * is the option's own, through the same markup ladder, never recomputed here.
    */
-  const addChoice = (choice: ItemOptionChoice) => {
-    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice }]);
+  const addChoice = (choice: ItemOptionChoice, item: PriceItemLite) => {
+    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice, kind: priceBookLineKind(item.unit, choice.unit) }]);
     setQuery("");
     setOpen(false);
     setMakersFor(null);
@@ -212,7 +215,7 @@ export function AddLineItems({
                             <button
                               type="button"
                               onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => addChoice(choice)}
+                              onClick={() => addChoice(choice, p)}
                               className="flex min-h-[44px] w-full items-center justify-between gap-3 py-2 pl-7 pr-3 text-left text-sm hover:bg-white"
                             >
                               <span className="min-w-0 truncate">

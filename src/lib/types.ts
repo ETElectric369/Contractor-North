@@ -465,6 +465,9 @@ export interface InvoiceItem {
   /** Which import wrote this row ("costs" | "labor" | "quote" | null = hand-entered) —
    *  drives the markup auto-reapply knowing a costs import exists across reloads. */
   import_source?: string | null;
+  /** What the line was said to be (0342): labor / materials / other / credit, or null = read it
+   *  from the import and the words (groupInvoiceLines). Absent before 0342 is applied. */
+  line_kind?: string | null;
 }
 
 export interface Payment {
