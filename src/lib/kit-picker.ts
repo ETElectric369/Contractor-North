@@ -32,8 +32,8 @@ export type KitItemRaw = KitLineRaw;
 
 /** How the picker prices a LINKED line: `orgDefaultPct` + `levelPct`, fed to THE rule directly
  *  (effectiveMarkupPct via kitLineView). The SAME two numbers AddLineItems prices its typeahead
- *  and vendor rows from, so the markup never differs between the two "add" doors. The COST can:
- *  a kit line costs the item's own buy price, not the code's default vendor (audit v994 VP2 wave 2).
+ *  and vendor rows from, so the markup never differs between the two "add" doors, and a code with a
+ *  default vendor prices at that vendor through priceBookLine from both (audit v994 VP2).
  *  (There was also a `markupFor` closure here that beat the numbers; audit v994 VP1 took the
  *  closure out of AddLineItems, the one caller that passed it, because two inputs for one rule is
  *  how a screen hands over one and forgets the other.) */

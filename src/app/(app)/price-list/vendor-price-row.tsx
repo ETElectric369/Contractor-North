@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import { UNIT_DATALIST_ID } from "@/lib/pricing/units";
+import { callOrLost } from "@/lib/lost-signal";
 import {
   archiveItemOption,
   setDefaultItemOption,
@@ -49,10 +50,14 @@ export function useOptionWrites() {
 
   async function run(key: string, fn: () => Promise<OptionResult>, okMsg: string, undo?: Undo | ((res: OptionResult) => Undo | undefined)) {
     mark(key, true);
-    const res = await fn();
+    // A dropped signal REJECTS rather than answering (audit v994 SI2): without this the row stayed
+    // busy forever (PriceCell refuses to open) and nothing was said. A lost answer can hide a
+    // write that landed, so the list is refreshed to show which.
+    const res = await callOrLost(fn);
     mark(key, false);
     if (!res.ok) {
       toast(res.error ?? "Couldn't save that.", "error");
+      if ("lost" in res) startRefresh(() => router.refresh());
       return res;
     }
     const u = typeof undo === "function" ? undo(res) : undo;

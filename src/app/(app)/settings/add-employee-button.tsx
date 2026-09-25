@@ -133,9 +133,18 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
                 </Select>
               </div>
               <div>
-                <Label htmlFor="emp-rate">Billable rate ($/hr)</Label>
+                {/* hourly_rate IS THE PAY RATE (what you pay them, job cost), never what a customer
+                    is billed - the Team page's Bill box is that. It was labelled "Billable rate". */}
+                <Label htmlFor="emp-rate">Pay rate ($/hr)</Label>
                 <NumberInput id="emp-rate" value={rate} onValueChange={setRate} />
               </div>
+              {!(rate > 0) && (
+                // NOTHING SILENT (audit v994 MR3): with no pay rate their hours cost nothing, so
+                // Crew Pay and the owner's draw would be off by their wage until one is set.
+                <p className="col-span-2 -mt-2 text-xs text-amber-700">
+                  No pay rate yet: their hours count as $0 of crew pay until you set one on the Team page.
+                </p>
+              )}
               <label className="col-span-2 flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" checked={requireReset} onChange={(e) => setRequireReset(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
                 <span>Require a password reset on first login <span className="text-slate-400">— they use this password once, then set their own.</span></span>

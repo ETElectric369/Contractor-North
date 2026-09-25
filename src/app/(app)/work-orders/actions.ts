@@ -169,8 +169,10 @@ export async function updateWorkOrder(id: string, formData: FormData): Promise<R
   }
   if (Object.keys(clean).length === 0) return { ok: false, error: "Nothing to update." };
 
-  const { error } = await supabase.from("work_orders").update(clean).eq("id", id);
+  // THE SILENT-WRITE LAW: a zero-row UPDATE is a 204, so ask for the id back.
+  const { data: wrote, error } = await supabase.from("work_orders").update(clean).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "Nothing was saved. That work order may have been removed, so reload the page." };
 
   revalidatePath("/work-orders");
   revalidatePath(`/work-orders/${id}`);

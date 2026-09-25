@@ -138,7 +138,15 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
       return;
     }
     say(id, name, "Reading…", "busy");
-    const read = await readPaperworkItem(added.id);
+    // SAVED IS SAVED (audit v994, SI4). The row is in; a read that never answers (a function
+    // timeout, a lost connection) used to reach drain()'s catch and say "Not added" over a paper
+    // sitting right below.
+    let read: Awaited<ReturnType<typeof readPaperworkItem>>;
+    try {
+      read = await readPaperworkItem(added.id);
+    } catch {
+      return say(id, name, "Saved, not read yet: the reader didn't answer. It is waiting below; press Read Now.", "warn");
+    }
     if (!read.ok) return say(id, name, `Saved, not read: ${read.error ?? "the reader didn't answer"} It is waiting below.`, "warn");
     const it = read.item;
     const total = it?.amount != null ? `$${it.amount.toFixed(2)}` : "no total read";

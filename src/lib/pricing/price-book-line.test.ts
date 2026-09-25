@@ -192,7 +192,8 @@ describe("the rest of the doors that read a vendor-priced line", () => {
 
   it("the Make Default toast says how far a default reaches, kits included", () => {
     expect(defaultVendorNote("Marvin")).toContain("Marvin is now the default");
-    expect(defaultVendorNote()).toMatch(/kit still adds the item's own number/);
+    expect(defaultVendorNote()).toMatch(/kit/);
+    expect(defaultVendorNote()).not.toMatch(/kit still adds the item's own number/);
   });
 });
 

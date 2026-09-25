@@ -21,6 +21,10 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.
 vi.mock("@/lib/staff-guard", () => ({
   requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-1" })),
 }));
+// Organize's own job guard (audit v994 TL2) answers yes here unless a test says otherwise, so the
+// scripted jobs reads below stay the ones the filing itself makes.
+const jobGuard = vi.hoisted(() => ({ jobInOrg: vi.fn(async (_s: unknown, _o: unknown, id: unknown) => !!id) }));
+vi.mock("@/lib/job-in-org", () => jobGuard);
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 // The receipt reader's outside world. None of it is what these tests are about — they are about
 // what happens to the row AFTER the bill lands — so it is all pinned to one boring answer.
@@ -89,6 +93,9 @@ function fakeSupabase(
 ) {
   const next = (key: string) => {
     const q = script[key];
+    // What stands on a document (the customer's page, a panel's photo) is nothing unless a test
+    // says otherwise.
+    if ((!q || q.length === 0) && (key === "job_shared_documents.select" || key === "job_panels.select")) return { data: [], error: null };
     if (!q || q.length === 0) throw new Error(`unscripted call: ${key}`);
     return q.shift();
   };
@@ -119,6 +126,7 @@ function fakeSupabase(
         order() { return chain; },
         not() { return chain; },
         limit() { return chain; },
+        is() { return chain; },
         neq() { return chain; },
         in() { return chain; },
         single: () => Promise.resolve(next(`${table}.${verb}`)),
@@ -141,14 +149,38 @@ beforeEach(() => {
 
 const did = (table: string, verb: string) => calls.find((c) => c.table === table && c.verb === verb);
 
+/**
+ * THE READS A TEARDOWN MAKES BEFORE IT DELETES ANYTHING (audit v994, TD1-TD3): the bill as a person
+ * left it, the copies set aside against it, the papers tied to it, then the document the row points
+ * at. Appended after the script's own entries, in the order the teardown asks.
+ */
+function withTeardownReads(
+  script: Record<string, any[]>,
+  o: { bill?: any; copies?: any[]; tied?: any[]; doc?: any; noBill?: boolean } = {},
+): Record<string, any[]> {
+  const add = (k: string, ...v: any[]) => {
+    script[k] = [...(script[k] ?? []), ...v];
+  };
+  if (!o.noBill) {
+    add(
+      "bills.select",
+      { data: o.bill === undefined ? { id: WALDOW_RECEIPT.bill_id, amount: 467.87, on_shelf: false, bill_line_items: [] } : o.bill, error: null },
+      { data: o.copies ?? [], error: null },
+    );
+    add("organized_items.select", { data: o.tied ?? [], error: null });
+  }
+  add("documents.select", { data: o.doc === undefined ? { id: "doc-1", created_at: "2026-09-15T12:00:00Z", file_url: WALDOW_RECEIPT.file_url } : o.doc, error: null });
+  return script;
+}
+
 describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("refuses the whole move, names INV-069, and tells him what to do about it", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
 
@@ -164,11 +196,11 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
 
   it("leaves the old filing completely standing — nothing torn down, no second bill built", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
 
@@ -188,11 +220,11 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
 
   it("asks for the row back (.select('id')) so an RLS refusal can never read as a 204", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
     await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
@@ -201,7 +233,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
 
   it("an unclaimed receipt still moves: bill torn down, new one built on the new job", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
@@ -209,7 +241,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
         "bill_line_items.insert": [{ data: [{ id: "bli-1" }], error: null }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
 
@@ -225,7 +257,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     // refusal on THIS door would leave the receipt permanently unfilable, which is the dead end
     // the no-dead-ends rule exists for. Only a real error stops the move.
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: [], error: null }],
         "documents.delete": [{ data: [], error: null }],
@@ -233,7 +265,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
         "bill_line_items.insert": [{ data: [{ id: "bli-1" }], error: null }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }, { bill: null }),
       calls,
     );
     const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
@@ -245,14 +277,14 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     // "another invoice", so the trigger's message starts lower case. In a toast that reads as a
     // dropped word.
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{
           data: null,
           error: { code: "P0001", message: "another invoice already bills this receipt. Void that invoice, or take its materials lines off, then delete this receipt." },
         }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
     const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
@@ -262,11 +294,11 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
 
   it("an error the guard did not raise keeps its own sentence (RLS gets the plain-English one)", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: { message: 'new row violates row-level security policy for table "bills"' } }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
     const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
@@ -278,12 +310,12 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
 
   it("a failed document teardown stops the re-file instead of leaving two copies on the job", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: null, error: { message: "boom" } }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
-      },
+      }),
       calls,
     );
     const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
@@ -398,10 +430,10 @@ describe("billJobReceipt — whose date the bill carries", () => {
 describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () => {
   it("refuses, and the trash door's own sentence is the trigger's own sentence", async () => {
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
-      },
+      }),
       calls,
     );
     const res = await deleteOrganizedItem(WALDOW_RECEIPT.id);
@@ -414,10 +446,10 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
   it("nothing else is touched: the photo, the job copy and the item all survive the refusal", async () => {
     const storage = { removed: [] as string[][] };
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
-      },
+      }),
       calls,
       storage,
     );
@@ -430,12 +462,12 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
   it("an unclaimed receipt deletes: row first, THEN the photo", async () => {
     const storage = { removed: [] as string[][] };
     state.client = fakeSupabase(
-      {
+      withTeardownReads({
         "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
         "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
         "organized_items.delete": [{ data: [{ id: WALDOW_RECEIPT.id }], error: null }],
-      },
+      }),
       calls,
       storage,
     );

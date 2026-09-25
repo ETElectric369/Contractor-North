@@ -10,6 +10,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
@@ -194,6 +195,10 @@ async function ensureInvoice(
   paidAt: string | null,
   toast: (m: string, k?: "success" | "error" | "info") => void,
   onOtherInvoice: (id: string) => void,
+  /** The card door on a job whose open bill is a draft: the person has said yes to sending it. */
+  sendIt = false,
+  /** The server asked "Send INV-0xx as the bill first?" — the sheet asks the person, nothing moved. */
+  onNeedsSend?: (invoiceNumber: string | null) => void,
 ): Promise<string | null> {
   if (props.source === "invoice") {
     if (collect === "record") {
@@ -202,11 +207,15 @@ async function ensureInvoice(
     }
     return props.invoiceId;
   }
-  const res = await settleUp({ source: props.source, id: props.id, amount, method, note, collect }).catch(() => ({
+  const res = await settleUp({ source: props.source, id: props.id, amount, method, note, collect, sendIt }).catch(() => ({
     ok: false as const,
     error: "That didn't reach the server — check your connection and try again.",
   }));
   if (!res.ok) {
+    if ("needsSend" in res && res.needsSend && onNeedsSend) {
+      onNeedsSend(("invoiceNumber" in res ? res.invoiceNumber : null) ?? null);
+      return null;
+    }
     toast(res.error ?? "Couldn't settle that.", "error");
     if ("invoiceId" in res && res.invoiceId) onOtherInvoice(res.invoiceId);
     return null;
@@ -549,9 +558,24 @@ export function PayNowButton(props: Mode & {
    *  sheet that isn't there (or on the next one). */
   const gen = useRef(0);
 
+  /**
+   * "SEND INV-078 AS THE BILL FIRST?" (Connected North Phase 1). A card is taken on a bill, and a
+   * draft becomes a bill when a PERSON sends it — never because a pay sheet opened (INV-069) or a
+   * card landed (the webhook used to flip it). Every server door this sheet calls answers a draft
+   * with needsSend and writes nothing; the sheet asks here, and only the yes (`sendOk`, for this
+   * open of the sheet) goes back with `sendIt`. `then` is what the person was doing when it asked:
+   * building the QR, tapping, or the open-time mint.
+   */
+  const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "qr" | "tap" | "mint" } | null>(null);
+  const sendOk = useRef(false);
+  /** settleUp's needsSend for a job's open draft, carried out of invoiceDoor to whoever awaited it. */
+  const askFromDoor = useRef<string | null | undefined>(undefined);
+
   function invoiceDoor(): Promise<string | null> {
     if (!door.current) {
-      door.current = ensureInvoice(props, "card", "later", 0, "", null, toast, (other) => router.push(`/billing/${other}`)).then(
+      door.current = ensureInvoice(props, "card", "later", 0, "", null, toast, (other) => router.push(`/billing/${other}`), sendOk.current, (n) => {
+        askFromDoor.current = n;
+      }).then(
         (id) => {
           if (id) setInvoiceId(id);
           else door.current = null;
@@ -574,9 +598,14 @@ export function PayNowButton(props: Mode & {
       const id = await invoiceDoor();
       // The sheet closed under it: the door (if minted) is kept for the next open, its QR is not.
       if (gen.current !== g) return;
-      if (!id) return;
-      const a = await collectArtifacts(id);
+      if (!id) {
+        if (askFromDoor.current !== undefined) setAsk({ invoiceNumber: askFromDoor.current, then: "qr" });
+        askFromDoor.current = undefined;
+        return;
+      }
+      const a = await collectArtifacts(id, undefined, { sendIt: sendOk.current });
       if (gen.current !== g) return;
+      if (!a.ok && a.needsSend) { setAsk({ invoiceNumber: a.invoiceNumber ?? null, then: "qr" }); return; }
       if (!a.ok) { toast(a.error ?? "Couldn't build the payment code.", "error"); return; }
       if (!a.payQr) {
         toast("Card payments aren't switched on yet — Settings → Getting Paid → Set Up Card Payments.", "error");
@@ -618,8 +647,8 @@ export function PayNowButton(props: Mode & {
   /** The phone as the reader. Same door-building as the QR for a visit/job (settleUp mints the
    *  bill and sends it, because collecting on a visit means there has to BE a bill), then Stripe's
    *  PaymentIntent on the tenant's account, then the bridge: Apple takes the screen while the
-   *  customer holds their card to the phone. On an invoice the door is the invoice itself and its
-   *  status is left exactly as it is — a draft is payable across a counter (INV-069). */
+   *  customer holds their card to the phone. On an invoice the door is the invoice itself; a DRAFT
+   *  is asked about first ("Send INV-078 as the bill first?") and sent only on the yes. */
   async function tapToPay() {
     const g = gen.current;
     const press = ++tapPress.current;
@@ -685,7 +714,7 @@ export function PayNowButton(props: Mode & {
         }
       }
       if (!held) {
-        const r = await createTapPaymentIntent(id);
+        const r = await createTapPaymentIntent(id, { sendIt: sendOk.current });
         // The sheet went while this was in flight. tapPi was still empty, so close() and the
         // unmount both found nothing to cancel and this intent would sit OPEN on the tenant's
         // Stripe account for good — a card_present door with a customer's invoice on it, live in
@@ -693,6 +722,12 @@ export function PayNowButton(props: Mode & {
         // does; this one (every job and appointment tap comes through here) never did.
         if (stale()) {
           if (r.ok) void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
+          return null;
+        }
+        if (!r.ok && r.needsSend) {
+          // A draft: nothing was minted or written. Ask; the yes presses Tap to Pay again with it.
+          setTap({ kind: "idle" });
+          setAsk({ invoiceNumber: r.invoiceNumber, then: "tap" });
           return null;
         }
         if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return null; }
@@ -714,7 +749,12 @@ export function PayNowButton(props: Mode & {
       if (stale()) return;
       const id = await invoiceDoor();
       if (stale()) return;
-      if (!id) { setTap({ kind: "idle" }); return; }
+      if (!id) {
+        setTap({ kind: "idle" });
+        if (askFromDoor.current !== undefined) setAsk({ invoiceNumber: askFromDoor.current, then: "tap" });
+        askFromDoor.current = undefined;
+        return;
+      }
       // The open-time mint may still be in flight — wait for it rather than mint a second door.
       await preMint.current;
       if (stale()) return;
@@ -926,9 +966,45 @@ export function PayNowButton(props: Mode & {
     setTapStarted(false);
     setProgress(null);
     setReceipt(null);
+    setAsk(null);
+    sendOk.current = false;
+    askFromDoor.current = undefined;
     tapPi.current = null;
     preMint.current = null;
     router.refresh();
+  }
+
+  /**
+   * THE YES to "Send INV-078 as the bill first?". The send itself happens on the server, inside the
+   * next call (sendIt), through the one send stamp - so it is never a separate write a lost network
+   * could split from the payment door it was for. Said out loud either way.
+   */
+  function sendAndGo() {
+    const a = ask;
+    if (!a) return;
+    sendOk.current = true;
+    setAsk(null);
+    toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
+    if (a.then === "qr") { prepare(); return; }
+    if (a.then === "tap") { void tapToPay(); return; }
+    // The open-time mint: send it and hold the door now, so the press goes straight to the reader.
+    const invId = props.source === "invoice" ? props.invoiceId : invoiceId;
+    if (!invId) return;
+    const g = gen.current;
+    preMint.current = createTapPaymentIntent(invId, { sendIt: true }).then(
+      (r) => {
+        if (gen.current !== g) {
+          if (r.ok) void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
+          return;
+        }
+        if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return; }
+        noteTapIdentity(r.identity);
+        tapPi.current = { invoiceId: invId, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
+        balanceRef.current = r.balance;
+        toast(`${a.invoiceNumber ?? "The invoice"} is sent. Tap to Pay is ready.`, "success");
+      },
+      () => {},
+    );
   }
 
   const amount = art?.balance ?? balanceRef.current;
@@ -965,6 +1041,9 @@ export function PayNowButton(props: Mode & {
           setReceipt(null);
           setPaid(null);
           setCopied(false);
+          setAsk(null);
+          sendOk.current = false;
+          askFromDoor.current = undefined;
           tapPi.current = null;
           preMint.current = null;
           setOpen(true);
@@ -996,12 +1075,16 @@ export function PayNowButton(props: Mode & {
                       // Erik was still building became a sent bill he could not take back — from
                       // a sheet he opened and closed. `send: false` was the opt-out, and it only
                       // moved the promotion to the press: still a door being opened, still not a
-                      // payment. The mint is a Stripe call and nothing else now; a draft is
-                      // payable across the counter, and the webhook moves the row when the card
-                      // actually lands.
+                      // payment. The mint is a Stripe call and nothing else now, and on a DRAFT it
+                      // mints nothing: it answers needsSend and the sheet asks "Send INV-078 as
+                      // the bill first?" (Connected North Phase 1 — the webhook no longer moves it).
                       preMint.current = createTapPaymentIntent(invId).then(
                         (r) => {
-                          if (!r.ok) return;
+                          // A draft mints nothing and writes nothing: the sheet asks first.
+                          if (!r.ok) {
+                            if (r.needsSend && gen.current === g) setAsk({ invoiceNumber: r.invoiceNumber, then: "mint" });
+                            return;
+                          }
                           // Minted after the person hit Done. close() couldn't cancel it — tapPi
                           // was still empty when it ran — so this door cancels itself rather than
                           // sit open on the tenant's Stripe account.
@@ -1058,6 +1141,17 @@ export function PayNowButton(props: Mode & {
             )}
             <Button size="sm" className="mt-2" onClick={close}>Done</Button>
           </div>
+        ) : ask ? (
+          // "Send INV-078 as the bill first?" — asked, never assumed. Not Now closes the sheet with
+          // nothing written; Send It goes on with the door the person was using.
+          <div className="space-y-3">
+            <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
+            <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber)}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={close}>Not Now</Button>
+              <Button onClick={sendAndGo} disabled={pending}>Send It</Button>
+            </div>
+          </div>
         ) : busy && tap.kind === "busy" ? (
           // Apple owns the screen while the card is read; this is what shows before and after —
           // and while the phone is still being configured (Apple 5.7), with the SDK's own percent
@@ -1109,7 +1203,9 @@ export function PayNowButton(props: Mode & {
             </div>
             {props.source !== "invoice" && (
               <p className="text-xs text-slate-500">
-                This writes the bill, sends it, and marks the visit done — then puts the card door in front of the customer.
+                {props.source === "job"
+                  ? "This takes the card on the job's open bill (or writes one if there's none), then puts the card door in front of the customer."
+                  : "This writes the bill, sends it, and marks the visit done — then puts the card door in front of the customer."}
               </p>
             )}
             {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
@@ -1212,6 +1308,14 @@ export function RecordPaymentButton(props: Mode & {
   const chips = source.filter((m) => paymentMethodKey(m) !== "card");
   const [method, setMethod] = useState(chips[0] ?? "Cash");
   const [venmo, setVenmo] = useState<{ qr: string; handle?: string; invoiceId: string; amount: number } | null>(null);
+  /**
+   * "SEND INV-0xx AS THE BILL FIRST?" (Connected North Phase 1). On a job whose open bill is a
+   * draft, a payment that pays ALL of it would leave a draft reading $0 owed that no screen calls
+   * paid, so the server writes nothing and asks (needsSend); a deposit just lands. Only the yes, for
+   * this open of the sheet, goes back with `sendIt`. `then` is the button the person pressed.
+   */
+  const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "record" | "venmo" } | null>(null);
+  const sendOk = useRef(false);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
   const key = paymentMethodKey(method);
@@ -1221,6 +1325,8 @@ export function RecordPaymentButton(props: Mode & {
     setNote("");
     setPaidAt("");
     setVenmo(null);
+    setAsk(null);
+    sendOk.current = false;
     setAmount(props.source === "invoice" ? String(props.balance || "") : "");
   }
   function close() {
@@ -1239,7 +1345,9 @@ export function RecordPaymentButton(props: Mode & {
     if (qrPending) return; // Enter in the amount box while the QR is still coming
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
     start(async () => {
-      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
+      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+        setAsk({ invoiceNumber: n, then: "record" }),
+      );
       if (!id) return;
       toast(`Paid — ${money(amt())} ${method.toLowerCase()}. Done.`, "success");
       close();
@@ -1259,7 +1367,9 @@ export function RecordPaymentButton(props: Mode & {
       if (props.source === "invoice") {
         id = props.invoiceId;
       } else {
-        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
+        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+          setAsk({ invoiceNumber: n, then: "venmo" }),
+        );
         if (!id) return;
       }
       const art = await venmoQrFor(id, amt());
@@ -1269,6 +1379,18 @@ export function RecordPaymentButton(props: Mode & {
       }
       setVenmo({ qr: art.venmoQr, handle: art.venmoHandle, invoiceId: id, amount: Math.min(amt(), art.balance ?? amt()) });
     });
+  }
+
+  /** THE YES: the send happens on the server inside the next call (sendIt), through the one send
+   *  stamp, so it can never be split from the payment it was for. Said out loud. */
+  function sendAndGo() {
+    const a = ask;
+    if (!a) return;
+    sendOk.current = true;
+    setAsk(null);
+    toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
+    if (a.then === "venmo") showVenmoQr();
+    else go();
   }
 
   /** Venmo's half-blind ending: the app can't hear the payment land, so the person says so. */
@@ -1304,14 +1426,22 @@ export function RecordPaymentButton(props: Mode & {
         portal
         dirty={dirty}
         footer={
-          venmo ? (
+          ask ? (
+            <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel="Send It" cancelLabel="Not Now" />
+          ) : venmo ? (
             <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
           ) : (
             <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel="Record It" disabled={qrPending} />
           )
         }
       >
-        {venmo ? (
+        {ask ? (
+          // Asked, never assumed. Not Now goes back to the form with nothing written.
+          <div className="space-y-3">
+            <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
+            <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment")}</p>
+          </div>
+        ) : venmo ? (
           <div className="flex flex-col items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
             <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />

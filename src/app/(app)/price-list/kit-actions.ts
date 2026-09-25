@@ -4,9 +4,9 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
-import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { normalizeUnit } from "@/lib/pricing/units";
-import { firstThatWorks, lineDisplayName, type KitSizing } from "@/lib/kit-line";
+import { firstThatWorks, KIT_BOOK_OPTIONS_EMBED, kitLineSnapshot, type KitSizing } from "@/lib/kit-line";
+import type { PriceItemOptionRow } from "@/lib/pricing/item-options";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -46,6 +46,8 @@ type BookItem = {
   qty_round?: string | null;
   sized_by?: string | null;
   qty_per?: number | string | null;
+  /** 0282's vendors under the code (archived carried, dropped by normalizeItemOptions). */
+  price_list_item_options?: PriceItemOptionRow[] | PriceItemOptionRow | null;
 };
 
 type LineRow = {
@@ -72,11 +74,13 @@ const finite = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** An item from the org's book (RLS-scoped). Sizing columns requested first, retried without. */
+/** An item from the org's book (RLS-scoped), with the vendors under its code so the snapshot can
+ *  price at the default vendor like the view does. Richest column list first, retried without. */
 async function loadBookItem(supabase: Db, id: string): Promise<BookItem | null> {
   const base = "id, code, description, unit, buy_price, markup_pct";
+  const sized = `${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per`;
   const r = await firstThatWorks(
-    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per`, `${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
+    [`${sized}, ${KIT_BOOK_OPTIONS_EMBED}`, sized, `${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
       (cols) => () => supabase.from("price_list_items").select(cols).eq("id", id).eq("archived", false).maybeSingle(),
     ),
   );
@@ -100,15 +104,13 @@ async function orgDefaultMarkup(supabase: Db): Promise<number> {
   return getOrgSettings((data as { settings?: unknown } | null)?.settings).default_markup_pct;
 }
 
-/** The snapshot a linked line carries: the item's name (with code), normalized unit, and sell
- *  through THE rule with the org default — no customer level, a kit is authored for nobody in
- *  particular. Equal to what kitLineView shows at the moment it is written. */
+/** The snapshot a linked line carries, built BY kitLineView (kitLineSnapshot): the default
+ *  vendor's words, unit and sell when the code has one, else the item's own, through THE rule with
+ *  the org default and no customer level. So it IS what kitLineView shows at the moment it is
+ *  written, and an Unlink freezes the line at exactly what the kits manager showed. The item must
+ *  have been read with KIT_BOOK_OPTIONS_EMBED (every loader here does). */
 function snapshotOf(item: BookItem, orgDefaultPct: number) {
-  return {
-    description: lineDisplayName(item),
-    unit: normalizeUnit(item.unit),
-    unit_price: sellPrice(finite(item.buy_price) ?? 0, effectiveMarkupPct({ itemPct: finite(item.markup_pct), orgDefaultPct })),
-  };
+  return kitLineSnapshot(item, orgDefaultPct);
 }
 
 const hasSizing = (s: { qty_per_sqft?: unknown; qty_per_lf?: unknown; qty_min?: unknown; qty_round?: unknown; sized_by?: unknown; qty_per?: unknown }) =>
@@ -201,14 +203,16 @@ export async function bulkImportKits(
   if (groups.size === 0) return { ok: false, error: "No valid rows — need a 'kit' name and a 'description' per row." };
 
   // The org's book, keyed by lower-cased code (0240 made code unique per org, so this is a join).
-  const { data: book } = await supabase
-    .from("price_list_items")
-    .select("id, code, description, unit, buy_price, markup_pct")
-    .eq("archived", false)
-    .not("code", "is", null)
-    .limit(5000);
+  // With the vendors under each code, so a matched line snapshots at the default vendor (see
+  // snapshotOf); retried without them rather than failing the import.
+  const bookBase = "id, code, description, unit, buy_price, markup_pct";
+  const { data: book } = await firstThatWorks(
+    [`${bookBase}, ${KIT_BOOK_OPTIONS_EMBED}`, bookBase].map(
+      (cols) => () => supabase.from("price_list_items").select(cols).eq("archived", false).not("code", "is", null).limit(5000),
+    ),
+  );
   const byCode = new Map<string, BookItem>();
-  for (const b of (book ?? []) as BookItem[]) {
+  for (const b of (book ?? []) as unknown as BookItem[]) {
     const k = String(b.code ?? "").trim().toLowerCase();
     if (k && !byCode.has(k)) byCode.set(k, b);
   }
@@ -584,7 +588,7 @@ export async function addItemsToKit(input: {
 
   const base = "id, code, description, unit, buy_price, markup_pct";
   const r = await firstThatWorks(
-    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
+    [`${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round, ${KIT_BOOK_OPTIONS_EMBED}`, `${base}, qty_per_sqft, qty_per_lf, qty_min, qty_round`, base].map(
       (cols) => () => supabase.from("price_list_items").select(cols).in("id", ids).eq("archived", false),
     ),
   );

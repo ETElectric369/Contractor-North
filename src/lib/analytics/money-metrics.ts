@@ -168,20 +168,40 @@ export function trailing12Months(todayYmd: string): string[] {
   return out;
 }
 
-/** `todayYmd` = org-local today; `tz` = the org's IANA timezone (payments bucket by ORG month). */
+/**
+ * `todayYmd` = org-local today; `tz` = the org's IANA timezone (payments bucket by ORG month).
+ *
+ * EACH MONTH IS NET OF ITS OWN REFUNDS (audit v994 MR4). This used to bucket payments only and
+ * take refunds off the 12-month total alone, so after a $1,500 August refund the Money by Month
+ * bar (owner-money: computeCollected per month) read $X - 1,500 while Nort's by_month said $X, and
+ * could call August the best month. Now every month is computeCollected over exactly that month's
+ * rows - the same function, the same rows, the same org-local month - so the two cannot disagree.
+ * A refund lands in the month it was made. One with no date (none today: customer_credits
+ * .created_at defaults to now) lands in the newest month: it was read inside this window, and
+ * dropping it would make the year look better than it was.
+ */
 export function computeRevenueTrend(payments: any[], refunds: any[], todayYmd: string, tz: string): RevenueTrend {
   const months = trailing12Months(todayYmd);
-  const byMonth = new Map<string, number>(months.map((m) => [m, 0]));
+  const newest = months[months.length - 1];
+  const payIn = new Map<string, any[]>(months.map((m) => [m, []]));
+  const refundIn = new Map<string, any[]>(months.map((m) => [m, []]));
+  let gross = 0;
   for (const p of payments ?? []) {
-    if (p.invoices?.status === "void") continue; // voided invoice → money reversed, don't count
+    if (!p?.paid_at) continue;
     const k = monthKeyInTz(p.paid_at, tz);
-    if (byMonth.has(k)) byMonth.set(k, byMonth.get(k)! + Number(p.amount));
+    const list = payIn.get(k);
+    if (!list) continue;
+    list.push(p);
+    if (p.invoices?.status !== "void") gross += Number(p.amount) || 0; // voided invoice → money reversed
   }
-  const refunds12 = (refunds ?? []).reduce((s, r) => s + Number(r.amount ?? 0), 0);
-  const series = months.map((m) => ({ month: m, collected: round2(byMonth.get(m) ?? 0) }));
+  for (const r of refunds ?? []) {
+    const k = r?.created_at ? monthKeyInTz(r.created_at, tz) : newest;
+    // computeCollected's own `since` is not used, so an undated refund is not dropped by it.
+    refundIn.get(k)?.push({ amount: r?.amount });
+  }
+  const series = months.map((m) => ({ month: m, collected: computeCollected(payIn.get(m) ?? [], refundIn.get(m) ?? []) }));
   const maxRev = Math.max(1, ...series.map((p) => p.collected));
-  const collected12 = round2(series.reduce((s, p) => s + p.collected, 0) - refunds12);
-  const gross = series.reduce((s, p) => s + p.collected, 0);
+  const collected12 = round2(series.reduce((s, p) => s + p.collected, 0));
   const sorted = [...series].sort((a, b) => b.collected - a.collected);
   // best/worst only mean something once there's revenue — otherwise it'd report "best month: $0".
   const best = gross > 0 ? sorted[0] : null;
@@ -236,8 +256,10 @@ export async function getRevenueTrend(supabase: any, now: Date = new Date()): Pr
   // window and the buckets agree to the instant.
   const start = tzDayStartUtc(`${trailing12Months(todayYmd)[0]}-01`, tz);
   const [{ data: payments }, { data: refunds }] = await Promise.all([
-    supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", start.toISOString()),
-    supabase.from("customer_credits").select("amount").eq("disposition", "refund").gte("created_at", start.toISOString()),
+    // .limit past PostgREST's silent 1000-row cap: half a year of payments is a confident wrong trend.
+    supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", start.toISOString()).limit(50000),
+    // created_at so each refund comes off ITS OWN month (MR4), the way the Money by Month bars take it.
+    supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", start.toISOString()),
   ]);
   return computeRevenueTrend(payments ?? [], refunds ?? [], todayYmd, tz);
 }

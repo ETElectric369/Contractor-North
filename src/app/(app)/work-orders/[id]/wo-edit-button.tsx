@@ -10,17 +10,11 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { updateWorkOrder } from "../actions";
 
-function toLocalInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 export function WoEditButton({
   wo,
   jobs,
   techs,
+  scheduledLocal,
   menuItem = false,
 }: {
   wo: {
@@ -33,6 +27,9 @@ export function WoEditButton({
   };
   jobs: { id: string; job_number: string; name: string }[];
   techs: { id: string; full_name: string | null }[];
+  /** Scheduled For as the ORG's wall clock ("YYYY-MM-DDTHH:MM"), worked out on the server with the
+   *  same timezone the save reads it back in (audit v994 TZ2). The phone's own zone never enters. */
+  scheduledLocal: string;
   /** Render the trigger as an Actions-menu row instead of a standalone button. */
   menuItem?: boolean;
 }) {
@@ -43,6 +40,9 @@ export function WoEditButton({
 
   function onSubmit(formData: FormData) {
     setError(null);
+    // An untouched box is not a new time: sent only when it changed, so fixing a typo in the title
+    // can never move the visit, whatever the zone the phone is in.
+    if (String(formData.get("scheduled_for") ?? "") === scheduledLocal) formData.delete("scheduled_for");
     start(async () => {
       const res = await updateWorkOrder(wo.id, formData);
       if (!res.ok) {
@@ -108,7 +108,7 @@ export function WoEditButton({
           </div>
           <div>
             <Label htmlFor="wo-sched">Scheduled for</Label>
-            <Input id="wo-sched" name="scheduled_for" type="datetime-local" defaultValue={toLocalInput(wo.scheduled_for)} />
+            <Input id="wo-sched" name="scheduled_for" type="datetime-local" defaultValue={scheduledLocal} />
           </div>
           <div>
             <Label htmlFor="wo-desc">Scope / description</Label>

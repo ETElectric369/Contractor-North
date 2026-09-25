@@ -20,6 +20,7 @@ import { getJobFinancials, getJobBudgetVsActual, listJobProfitability, listProfi
 import { unbilledWorkForJob } from "@/lib/unbilled-work";
 import { reportError } from "@/lib/observe";
 import { getArAging, getRevenueTrend, getQuoteStats, getCustomerValue } from "@/lib/analytics/money-metrics";
+import { paymentMethodKey } from "@/lib/payment-method";
 import { getHoursBreakdown } from "@/lib/analytics/time-breakdown";
 import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
@@ -260,7 +261,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "revenue_trend",
     description:
-      "How cash collected is trending. Returns money collected per month for the last 12 months, the total collected over that year (net of refunds), and the best/worst month. Use for 'how's revenue?', 'what did I collect this month vs last?', 'my best month?'.",
+      "How cash collected is trending. Returns money collected per month for the last 12 months (each month net of the refunds made in it, the same figures as the Money by Month chart on Analytics), the total collected over that year, and the best/worst month by those net figures. Use for 'how's revenue?', 'what did I collect this month vs last?', 'my best month?'.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -1473,7 +1474,10 @@ export async function runDataTool(
           total: money((data ?? []).reduce((s: number, p: any) => s + money(p.amount), 0)),
           payments: (data ?? []).map((p: any) => ({
             amount: money(p.amount),
-            method: p.method,
+            // THE KEY, never a stored spelling (0287; audit v994 MR8): a row written before the
+            // normalizer, or by a door that bypassed it, still reads 'check' and not 'Check', so
+            // Nort never counts one way of being paid as two.
+            method: paymentMethodKey(p.method),
             paid_at: p.paid_at ?? p.created_at,
             invoice: p.invoices?.invoice_number ?? null,
             customer: embedName(p.invoices?.customers),

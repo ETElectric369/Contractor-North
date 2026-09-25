@@ -19,6 +19,7 @@ import {
   Archive,
   RotateCcw,
   Pencil,
+  ListTodo,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -43,13 +44,19 @@ import {
   archiveItem,
   unarchiveItem,
   aiReviewItem,
+  keepAsNote,
+  makeTaskFromPaper,
+  readPaperworkItem,
+  undoPaperwork,
+  type OrganizedResult,
 } from "./actions";
-import { fingerprintSeen } from "./paperwork-actions";
+import { addPaperwork, fingerprintSeen } from "./paperwork-actions";
+import { isPdfBytes, readPdfText } from "@/lib/pdf-text";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { jobLabel } from "@/lib/schedule-options";
 import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
-import type { NumberMatch } from "@/lib/paperwork";
+import { proposalOf, type NumberMatch } from "@/lib/paperwork";
 
 // The categories Claude assigns during extraction — offered so the owner can
 // correct a mis-classified item to any valid kind. Mirrors analyzeAndFile.
@@ -72,15 +79,19 @@ export interface OrganizedItemRow extends PaperRowItem {
   signedUrl: string | null;
   jobs: { job_number: string; name: string } | null;
   tied_bill_id?: string | null;
+  /** Which door it came in by: organize, bills_drop, or job (a receipt recorded as a cost on the job page). */
+  source?: string | null;
 }
 
 interface JobOption {
   id: string;
   job_number: string;
   name: string;
+  /** complete: a finished job, offered under Completed Jobs (PR1). */
+  status?: string | null;
 }
 
-type UploadState = { name: string; status: "uploading" | "reading" | "done" | "error"; message?: string };
+type UploadState = { name: string; status: "uploading" | "reading" | "done" | "warn" | "error"; message?: string };
 
 const KIND_META: Record<string, { label: string; icon: any; tone: "green" | "amber" | "blue" }> = {
   receipt: { label: "Receipt", icon: Receipt, tone: "green" },
@@ -162,9 +173,10 @@ export function OrganizeManager({
       try {
         // THE SAME FILE ONCE (0295): fingerprinted from its ORIGINAL bytes, before any resize, and
         // checked before anything is uploaded.
+        const rawBytes = await raw.arrayBuffer();
         let sha: string | null = null;
         try {
-          sha = await sha256Hex(await raw.arrayBuffer());
+          sha = await sha256Hex(rawBytes);
         } catch {
           sha = null; // an old browser: the file still goes in, it just can't be matched
         }
@@ -175,16 +187,66 @@ export function OrganizeManager({
             continue;
           }
         }
-        const file = await prepareImageForUpload(raw);
+        // A CED PDF IS READ FROM ITS OWN TEXT, HERE AS ON BILLS (audit v994, PR3). Dragged onto
+        // Organize, a multi-invoice CED PDF went to the model as one picture and came back as one
+        // "bill" with a statement-class total; dropped on Bills, the same file became CED
+        // documents from the numbers CED printed. One server door (addPaperwork) decides now.
+        const isPdf = raw.type === "application/pdf" || /\.pdf$/i.test(raw.name);
+        let pdfText: string | null = null;
+        if (isPdf) {
+          if (!isPdfBytes(rawBytes)) throw new Error("It is named like a PDF but isn't one inside.");
+          const t = await readPdfText(rawBytes, raw.name);
+          if (t.ok) pdfText = t.text; // a scan has no text; the reader looks at it as a picture instead
+        }
+        const file = isPdf ? raw : await prepareImageForUpload(raw);
         if (file.size > 8 * 1024 * 1024) throw new Error("Over 8 MB — try a smaller photo.");
         const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
         const path = `${orgId}/organize/${Date.now()}-${safe}`;
         const { error: upErr } = await supabase.storage.from("documents").upload(path, file, { upsert: false });
         if (upErr) throw upErr;
 
-        setState("reading");
-        const res = await analyzeAndFile({ path, name: file.name, mime: file.type, size: file.size, sha256: sha });
-        if (!res.ok) throw new Error(res.error);
+        let res: OrganizedResult;
+        if (sha) {
+          const added = await addPaperwork({
+            path,
+            name: file.name,
+            mime: isPdf ? "application/pdf" : file.type,
+            size: file.size,
+            sha256: sha,
+            source: "organize",
+            pdfText,
+          });
+          if (!added.ok || !added.id) {
+            // The row didn't land, so the file must not linger in storage with nothing pointing at it.
+            await supabase.storage.from("documents").remove([path]);
+            if (added.already) {
+              setState("done", `${added.already} Nothing was added twice.`);
+              continue;
+            }
+            throw new Error(added.error ?? "Not added.");
+          }
+          if (!added.needsRead) {
+            setState(added.line?.includes("didn't add up") ? "warn" : "done", added.line ?? "CED documents found in it. Waiting in Needs Attention: press Add To CED Documents.");
+            continue;
+          }
+          setState("reading");
+          // SAVED IS SAVED (audit v994, SI4): once the row is in, a reader that never answers is a
+          // paper waiting for Read Now, never "Not added".
+          try {
+            res = await readPaperworkItem(added.id);
+          } catch {
+            setState("warn", "Saved, not read yet: the reader didn't answer. It is waiting in Needs Attention; press Read Now.");
+            continue;
+          }
+          if (!res.ok) {
+            setState("warn", `Saved, not read: ${res.error ?? "the reader didn't answer."} It is waiting in Needs Attention.`);
+            continue;
+          }
+        } else {
+          setState("reading");
+          res = await analyzeAndFile({ path, name: file.name, mime: file.type, size: file.size, sha256: sha });
+          if (!res.ok) throw new Error(res.error);
+        }
         const it = res.item!;
         // NOTHING IS FILED BY THE READ (Erik, 2026-09-24). The line says what was read and where
         // it is waiting; a person presses File It in Needs Attention.
@@ -213,7 +275,7 @@ export function OrganizeManager({
       }
     }
     router.refresh();
-    setTimeout(() => setUploads((u) => u.filter((x) => x.status === "error")), 6000);
+    setTimeout(() => setUploads((u) => u.filter((x) => x.status === "error" || x.status === "warn")), 6000);
   }
 
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
@@ -272,7 +334,7 @@ export function OrganizeManager({
     start(async () => {
       const res = await deleteOrganizedItem(item.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; }
-      toast("Deleted", "success");
+      toast(res.message ?? "Deleted", "success");
       router.refresh();
     });
   }
@@ -350,10 +412,59 @@ export function OrganizeManager({
               </div>
             )}
 
+            <SuggestChips item={item} />
             <NoteDoors item={item} />
           </div>
         </div>
       </Card>
+    );
+  }
+
+  /**
+   * AI SUGGEST'S PROPOSAL, KEPT ON THE NOTE (Erik, audit v994 PR2). It used to make the task and
+   * file the note by itself, and its message vanished with the card. Now it is a chip: a person taps
+   * Make Task or Keep As Note, the toast says what happened, and Undo takes it back.
+   */
+  function SuggestChips({ item }: { item: OrganizedItemRow }) {
+    const p = proposalOf(item);
+    const task = p.suggestTask ?? null;
+    const keep = p.suggestKeep === true;
+    if (!task && !keep) return null;
+    const act = (fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, fallback: string) =>
+      start(async () => {
+        const res = await fn();
+        if (!res.ok) {
+          toast(res.error ?? "That didn't work. Nothing changed.", "error");
+          return;
+        }
+        toast(res.message ?? fallback, "success", {
+          label: "Undo",
+          onClick: () => {
+            void undoPaperwork(item.id).then((u) => {
+              toast(u.ok ? u.message ?? "Undone." : u.error ?? "Couldn't undo.", u.ok ? "success" : "error");
+              router.refresh();
+            });
+          },
+        });
+        router.refresh();
+      });
+    const chip =
+      "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50";
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {task && (
+          <button type="button" className={chip} disabled={pending} onClick={() => act(() => makeTaskFromPaper(item.id), `Made a task: "${task.title}".`)}>
+            <ListTodo className="h-4 w-4 shrink-0 text-brand" />
+            <span className="min-w-0 break-words">Make Task: {task.title}</span>
+          </button>
+        )}
+        {keep && (
+          <button type="button" className={chip} disabled={pending} onClick={() => act(() => keepAsNote(item.id), "Kept as a note.")}>
+            <StickyNote className="h-4 w-4 shrink-0 text-brand" /> Keep As Note
+          </button>
+        )}
+        <span className="text-xs text-slate-500">AI Suggest&apos;s idea{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
+      </div>
     );
   }
 
@@ -372,9 +483,16 @@ export function OrganizeManager({
           <Briefcase className="h-4 w-4 shrink-0 text-slate-400" />
           <Select value={pick} onChange={(e) => setPick(e.target.value)} disabled={pending} className="h-11 w-48" aria-label="Pick a Job">
             <option value="">Pick a Job…</option>
-            {jobs.map((j) => (
+            {jobs.filter((j) => j.status !== "complete").map((j) => (
               <option key={j.id} value={j.id}>{jobLabel(j)}</option>
             ))}
+            {jobs.some((j) => j.status === "complete") && (
+              <optgroup label="Completed Jobs">
+                {jobs.filter((j) => j.status === "complete").map((j) => (
+                  <option key={j.id} value={j.id}>{jobLabel(j)}</option>
+                ))}
+              </optgroup>
+            )}
           </Select>
         </span>
         <Button variant="outline" onClick={() => pick && file(item, { type: "job", jobId: pick })} disabled={pending || !pick}>
@@ -410,7 +528,13 @@ export function OrganizeManager({
           </div>
           {/* 44px targets. Back undoes a filing (its bill comes down under the 0278 ceiling), so
               the paper never sits in the tray over a bill that is still live. */}
-          <button onClick={() => restore(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title={item.bill_id || item.job_id || item.tied_bill_id ? "Undo Filing (Back To Needs Attention)" : "Back To Needs Attention"} aria-label="Back To Needs Attention">
+          <button onClick={() => restore(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title={
+              item.source === "job"
+                ? "Undo Record As Cost (The Receipt Stays On The Job)"
+                : item.bill_id || item.job_id || item.tied_bill_id
+                  ? "Undo Filing (Back To Needs Attention)"
+                  : "Back To Needs Attention"
+            } aria-label={item.source === "job" ? "Undo Record As Cost" : "Back To Needs Attention"}>
             <RotateCcw className="h-4 w-4" />
           </button>
           <button onClick={() => setEditing(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title="Edit Details" aria-label="Edit Details">
@@ -540,12 +664,13 @@ export function OrganizeManager({
               <li key={i} className="flex items-center gap-3 px-5 py-2.5 text-sm">
                 {(u.status === "uploading" || u.status === "reading") && <Loader2 className="h-4 w-4 animate-spin text-brand" />}
                 {u.status === "done" && <Check className="h-4 w-4 text-green-600" />}
+                {u.status === "warn" && <AlertCircle className="h-4 w-4 text-amber-500" />}
                 {u.status === "error" && <Trash2 className="h-4 w-4 text-red-500" />}
                 <span className="min-w-0 flex-1 truncate text-slate-700">{u.name}</span>
-                <span className={`text-xs ${u.status === "error" ? "text-red-600" : "text-slate-400"}`}>
+                <span className={`text-xs ${u.status === "error" ? "text-red-600" : u.status === "warn" ? "text-amber-800" : "text-slate-400"}`}>
                   {u.status === "uploading" && "Uploading…"}
                   {u.status === "reading" && "Reading…"}
-                  {(u.status === "done" || u.status === "error") && (u.message ?? "")}
+                  {(u.status === "done" || u.status === "warn" || u.status === "error") && (u.message ?? "")}
                 </span>
               </li>
             ))}

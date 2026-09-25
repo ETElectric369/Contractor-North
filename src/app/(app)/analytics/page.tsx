@@ -121,8 +121,10 @@ export default async function AnalyticsPage({
   // A job's cost missing its shelf part would be a confident wrong number on every row below.
   if (shelf.error) throw shelf.error;
 
-  // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
-  // tools call, so the dashboard and what Nort says can never diverge.
+  // ── Money metrics — the SAME computations Nort's ar_aging / quote_win_rate tools call. The
+  // monthly money here is the Money by Month chart (owner-money, computeCollected per month), and
+  // Nort's revenue_trend is held to it month by month by a test (audit v994 MR4), not by sharing
+  // this call: this page no longer calls computeRevenueTrend.
   const ar = computeArAging((invoices ?? []) as any[], todayYmd);
   const qs = computeQuoteStats((quotes ?? []) as any[]);
 

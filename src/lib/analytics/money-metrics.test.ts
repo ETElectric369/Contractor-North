@@ -176,10 +176,30 @@ describe("computeRevenueTrend — collected by month", () => {
       "UTC",
     );
     expect(t.series.length).toBe(12);
-    expect(t.series.find((s) => s.month === "2026-07")!.collected).toBe(1500);
+    // The refund has no date, so it comes off the newest month (MR4's defined rule), never dropped.
+    expect(t.series.find((s) => s.month === "2026-07")!.collected).toBe(1400);
     expect(t.series.find((s) => s.month === "2026-06")!.collected).toBe(2000);
     expect(t.collected12).toBe(3400); // 3500 collected − 100 refund
     expect(t.best!.month).toBe("2026-06");
+  });
+
+  it("each month is net of the refunds made in it, and best/worst read the net months (audit v994 MR4)", () => {
+    // A $1,500 June refund: June's bar is $2,000 - $1,500, and July is the best month, not June.
+    const t = computeRevenueTrend(
+      [pay(1000, "07"), pay(500, "07"), pay(2000, "06")],
+      [{ amount: 1500, created_at: "2026-06-20T18:00:00Z" }],
+      TODAY,
+      "UTC",
+    );
+    expect(t.series.find((s) => s.month === "2026-06")!.collected).toBe(500);
+    expect(t.series.find((s) => s.month === "2026-07")!.collected).toBe(1500);
+    expect(t.collected12).toBe(2000);
+    expect(t.best!.month).toBe("2026-07");
+  });
+
+  it("a refund lands in the ORG month it was made, like a payment", () => {
+    const t = computeRevenueTrend([pay(900, "06")], [{ amount: 100, created_at: "2026-07-01T02:00:00Z" }], TODAY, "America/Los_Angeles");
+    expect(t.series.find((s) => s.month === "2026-06")!.collected).toBe(800);
   });
 
   it("ignores payments outside the trailing 12-month window", () => {

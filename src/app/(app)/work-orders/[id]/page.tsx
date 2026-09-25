@@ -7,7 +7,8 @@ import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
-import { formatDateTime } from "@/lib/utils";
+import { formatDateTimeTz, tzLocalInputValue } from "@/lib/tz";
+import { orgTimezone } from "@/lib/org-local-time";
 import { WoStatusControl } from "./wo-status-control";
 import { WoEditButton } from "./wo-edit-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
@@ -36,7 +37,7 @@ export default async function WorkOrderDetailPage({
   if (!wo) notFound();
   const w = wo as any;
 
-  const [{ data: jobs }, { data: techs }] = await Promise.all([
+  const [{ data: jobs }, { data: techs }, tz] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -44,6 +45,8 @@ export default async function WorkOrderDetailPage({
       .order("created_at", { ascending: false })
       .limit(100),
     listActiveTechs(supabase),
+    // The org's clock, for the Scheduled For box and its display (audit v994 TZ2).
+    orgTimezone(supabase),
   ]);
 
   return (
@@ -82,7 +85,7 @@ export default async function WorkOrderDetailPage({
               },
             )}
           >
-            <WoEditButton menuItem wo={w} jobs={jobs ?? []} techs={techs ?? []} />
+            <WoEditButton menuItem wo={w} jobs={jobs ?? []} techs={techs ?? []} scheduledLocal={tzLocalInputValue(w.scheduled_for, tz)} />
           </SectionActionsMenu>
         </div>
       </div>
@@ -120,7 +123,7 @@ export default async function WorkOrderDetailPage({
               <Calendar className="h-4 w-4" /> Scheduled
             </div>
             <div className="mt-1 text-sm font-medium text-slate-900">
-              {w.scheduled_for ? formatDateTime(w.scheduled_for) : "—"}
+              {w.scheduled_for ? formatDateTimeTz(w.scheduled_for, tz) : "—"}
             </div>
           </CardContent>
         </Card>

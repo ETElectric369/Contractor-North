@@ -2,20 +2,23 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BookOpen, Camera, Check, FileText, Link2, Loader2, Pencil, Receipt, Sparkles, Trash2, Undo2 } from "lucide-react";
+import { Archive, BookOpen, Camera, Check, FileText, Link2, ListTodo, Loader2, Pencil, Receipt, Sparkles, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
-import { formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
+import { reconcileReceipt } from "@/lib/receipt-reconcile";
+import { callOrLost } from "@/lib/lost-signal";
 import { jobLabel } from "@/lib/schedule-options";
 import {
   PAPER_BUCKETS,
   bucketIsReaders,
   describePaper,
   fileRefusal,
+  billDeletedSaid,
   guessOf,
   isReturnWithoutLines,
   SHELF_TRAY_NEEDS_LINES,
@@ -37,6 +40,8 @@ import {
   archiveItem,
   deleteOrganizedItem,
   fileItem,
+  keepAsNote,
+  makeTaskFromPaper,
   readAsCost,
   readPaperworkItem,
   tiePaperwork,
@@ -69,7 +74,8 @@ export type PaperRowItem = PaperItem & {
   file_url?: string | null;
 };
 
-type JobOption = { id: string; job_number: string; name: string };
+/** `status` complete: a finished job, offered under Completed Jobs (PR1), never pre-picked. */
+type JobOption = { id: string; job_number: string; name: string; status?: string | null };
 type Filed = { id: string; sentence: string };
 
 const TYPE_CHOICES: { value: string; label: string }[] = [
@@ -90,6 +96,7 @@ const PAID_CHOICES = [
 
 function matchKey(m: NumberMatch): string {
   if (m.kind === "bill") return `bill:${m.billId}`;
+  if (m.kind === "maybe_bill") return `maybe:${m.billId}`;
   if (m.kind === "supplier_invoice") return `si:${m.supplierInvoiceId}`;
   return `paper:${m.itemId}`;
 }
@@ -281,6 +288,14 @@ export function PaperworkRow({
   const onBooks = matches.filter((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill");
   const toLink = matches.filter((m): m is Extract<NumberMatch, { kind: "supplier_invoice" }> => m.kind === "supplier_invoice");
   const papers = matches.filter((m) => m.kind === "paper");
+  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5): a warning with a Tie, never
+  // a gate. File It stays File It.
+  const maybes = matches.filter((m): m is Extract<NumberMatch, { kind: "maybe_bill" }> => m.kind === "maybe_bill");
+  // THE LINES, AND WHETHER THEY ADD UP TO THE TOTAL READ (audit v994, MR6). Shown, never a gate:
+  // the bill File It writes carries the same sentence in its notes.
+  const rowLines = isCost ? shelfRowsOf(item) : [];
+  const rowTotal = item.amount === null || item.amount === undefined || item.amount === "" ? null : Number(item.amount);
+  const addsUp = rowTotal !== null && Number.isFinite(rowTotal) && rowLines.length ? reconcileReceipt(rowTotal, rowLines) : null;
   // What the paper itself picked (a printed mark, matched exactly), and why; a model's guess is
   // only ever a chip beside the question.
   const prePick = suggestedDestination(item, jobIds);
@@ -305,6 +320,9 @@ export function PaperworkRow({
   const parsedDest = parseDestination(activeDest);
   const blocked = fileRefusal(item, parsedDest);
   const working = pending || busy !== null;
+  // PR2: AI Suggest's proposal for a note or a kept paper, a tap away and never done for anyone.
+  const suggestTask = mode === "keep" && answer !== "else" ? (p.suggestTask ?? null) : null;
+  const suggestKeep = mode === "keep" && answer !== "else" && p.suggestKeep === true;
 
   function destLabel(value: string): string {
     const d = parseDestination(value);
@@ -331,10 +349,13 @@ export function PaperworkRow({
     setSaid(null);
     setBusy(key);
     start(async () => {
-      const res = await fn();
+      // A dropped signal rejects (audit v994 SI2): caught here, the pick stays on the row and the
+      // row says so, instead of the page being swapped for the error card.
+      const res = await callOrLost(fn);
       setBusy(null);
       if (!res.ok) {
         setSaid({ text: res.error ?? "That didn't work. Nothing changed.", tone: "error" });
+        if ("lost" in res) router.refresh();
         return;
       }
       if (filedSentence) {
@@ -377,12 +398,22 @@ export function PaperworkRow({
     );
   }
 
-  const jobOptions = jobs.map((j) => (
-    <option key={j.id} value={j.id}>
+  // OPEN JOBS FIRST, THEN THE FINISHED ONES (Erik, audit v994 PR1): a ticket that lands after a
+  // job is complete is still that job's cost. Only an open job is ever picked for anyone.
+  const openJobs = jobs.filter((j) => j.status !== "complete");
+  const doneJobs = jobs.filter((j) => j.status === "complete");
+  const optionFor = (j: JobOption, value: string) => (
+    <option key={j.id} value={value}>
       {jobLabel(j)}
       {prePick === `job:${j.id}` ? " (On The Paper)" : ""}
     </option>
-  ));
+  );
+  const jobOptions = (
+    <>
+      {openJobs.map((j) => optionFor(j, j.id))}
+      {doneJobs.length > 0 && <optgroup label="Completed Jobs">{doneJobs.map((j) => optionFor(j, j.id))}</optgroup>}
+    </>
+  );
 
   /** What the paper picked, and why; or the question, when it picked nothing. Never silent. */
   const pickedLine = (showing: string, question: string) =>
@@ -443,6 +474,9 @@ export function PaperworkRow({
     </div>
   ) : null;
 
+  /** Why it is back in the tray: its bill was deleted, maybe as a duplicate (review of wave 2, TD5). */
+  const billBack = billDeletedSaid(item);
+
   const conflict = p.jobConflict ? (
     <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
       {p.jobConflict}
@@ -500,14 +534,8 @@ export function PaperworkRow({
       aria-label="Where It Goes"
     >
       <option value="">Where Does It Go?</option>
-      <optgroup label="A Job">
-        {jobs.map((j) => (
-          <option key={j.id} value={`job:${j.id}`}>
-            {jobLabel(j)}
-            {prePick === `job:${j.id}` ? " (On The Paper)" : ""}
-          </option>
-        ))}
-      </optgroup>
+      <optgroup label="A Job">{openJobs.map((j) => optionFor(j, `job:${j.id}`))}</optgroup>
+      {doneJobs.length > 0 && <optgroup label="Completed Jobs">{doneJobs.map((j) => optionFor(j, `job:${j.id}`))}</optgroup>}
       <option value="keep">Keep It In Files</option>
     </Select>
   );
@@ -610,6 +638,52 @@ export function PaperworkRow({
               ))}
             </div>
           )}
+          {maybes.length > 0 && onBooks.length === 0 && r.state === "ready" && (
+            <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {maybes.map((m) => (
+                <div key={matchKey(m)}>
+                  <p>{m.sentence}</p>
+                  <Button
+                    variant="outline"
+                    className="mt-1.5"
+                    disabled={working}
+                    onClick={() => run(`tie`, () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
+                  >
+                    {busy === "tie" ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
+                  </Button>
+                </div>
+              ))}
+              <p className="text-xs">A long number like this is usually one purchase. If it is a different purchase, pick where it goes and press File It; the bill will say a person checked.</p>
+            </div>
+          )}
+          {addsUp?.mismatch && (r.state === "ready" || r.state === "needs_total") && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              The lines add up to {formatCurrency(addsUp.lineSum)}; the total read is {formatCurrency(addsUp.amount)}. If the total is
+              wrong, press Fix Details. File It records the total either way, and the bill says so.
+            </p>
+          )}
+          {rowLines.length > 0 && (
+            <details className="mt-1.5 text-sm">
+              <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium text-brand">
+                Lines ({rowLines.length})
+              </summary>
+              <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {rowLines.map((l) => (
+                  <li key={l.index} className="flex items-start gap-2 px-3 py-1.5 text-xs text-slate-700">
+                    <span className="min-w-0 flex-1 break-words">
+                      {l.quantity !== 1 ? `${l.quantity} × ` : ""}
+                      {l.description}
+                      {!l.billable ? <span className="text-slate-500"> (not billed to the customer)</span> : null}
+                      {l.billable && l.billed_amount !== undefined ? (
+                        <span className="text-slate-500"> (bills {formatCurrency(l.billed_amount)} of it)</span>
+                      ) : null}
+                    </span>
+                    <span className="shrink-0 tabular-nums">{formatCurrency(l.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {p.ced?.refused?.length ? (
             <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
               {p.ced.refused.map((x, i) => (
@@ -624,6 +698,12 @@ export function PaperworkRow({
                 <p key={matchKey(m)}>{m.sentence}</p>
               ))}
             </div>
+          )}
+
+          {billBack && (
+            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              {billBack}
+            </p>
           )}
 
           {said && (
@@ -641,6 +721,33 @@ export function PaperworkRow({
               {onPaperLine}
               {conflict}
               {guessChip}
+              {(suggestTask || suggestKeep) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {suggestTask && (
+                    <button
+                      type="button"
+                      onClick={() => run("task", () => makeTaskFromPaper(item.id), `Made a task: "${suggestTask.title}".`)}
+                      disabled={working}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
+                    >
+                      {busy === "task" ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <ListTodo className="h-4 w-4 shrink-0 text-brand" />}
+                      <span className="min-w-0 break-words">Make Task: {suggestTask.title}</span>
+                    </button>
+                  )}
+                  {suggestKeep && (
+                    <button
+                      type="button"
+                      onClick={() => run("note", () => keepAsNote(item.id), "Kept as a note.")}
+                      disabled={working}
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
+                    >
+                      {busy === "note" ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <StickyNote className="h-4 w-4 shrink-0 text-brand" />}
+                      Keep As Note
+                    </button>
+                  )}
+                  <span className="text-xs text-slate-500">AI Suggest&apos;s idea{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
+                </div>
+              )}
             </div>
           )}
 

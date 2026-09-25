@@ -6,6 +6,8 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytics/money-metrics";
 import { isMissingShelf } from "@/lib/job-cost";
+import { isOnAccountBill, openBalanceOf, supplierBalance, type SupplierAccountRow } from "@/app/(app)/bills/supplier-balance";
+import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
 
 /**
  * LEFT FOR YOU: what the business kept for its owner (migration 0286's other half).
@@ -227,7 +229,21 @@ export type OwnerMoneyCaveat =
   | { kind: "credit_memos"; count: number; total: number }
   | { kind: "service_charges"; count: number; total: number }
   | { kind: "open_shifts"; count: number }
+  /** Closed, unpaid crew hours in the window priced at $0 because the person has no pay rate
+   *  (audit v994 MR3). Unrated hours are REPORTED, never swallowed: Crew Pay is short by their wage. */
+  | { kind: "unrated_hours"; hours: number; people: string[] }
   | { kind: "crew_owed"; total: number }
+  /** What the business still owes its SUPPLIERS for bills counted in this window, account by
+   *  account, by the SAME supplierBalance /bills reads (audit v994 MR1): the supplier's own open
+   *  documents where it has sent them (model B), unpaid bills minus payments otherwise (model A). */
+  | { kind: "supplier_owed"; total: number; accounts: { name: string; owed: number; bySupplier: boolean }[] }
+  /** Bills counted in this window, on account with a supplier that sends its own documents (model
+   *  B), that NO document of that supplier covers yet: /bills' "no supplier document" slice. The
+   *  supplier's open balances cannot hold them, so they are said apart, never folded into what the
+   *  supplier is owed and never dropped. */
+  | { kind: "supplier_no_document"; count: number; total: number; accounts: { name: string; total: number; count: number }[] }
+  /** Bills marked unpaid that no supplier balance holds: on no supplier account yet, or on a
+   *  pay-at-the-register account. Said on their own, never folded into what a supplier is owed. */
   | { kind: "unpaid_bills"; count: number; total: number }
   | { kind: "records_start"; date: string };
 
@@ -285,6 +301,16 @@ export type OwnerMoneyInputs = {
   /** stock_lot_balance rows (0303): lot_id, bill_id, cost, cost_left, lost_cost, live. Every lot,
    *  so a roll's lost part and the shelf's value now come from the same read. Absent = no lots. */
   shelfLots?: any[];
+  /** supplier_accounts (0270): id, name, on_account. With the two below, what each supplier is
+   *  still owed, by the /bills rule (supplierBalance). Absent = no accounts. */
+  supplierAccounts?: any[];
+  /** supplier_payments (0270), voided ones included: supplier_account_id, amount, paid_on, voided_at. */
+  supplierPayments?: any[];
+  /** supplier_invoices (0273), EVERY kind: id, supplier_account_id, invoice_number, kind, total,
+   *  open_balance, closed, bill_supplier_invoices(bill_id). The supplier's own verdict on what is
+   *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
+   *  counted bill carries is ever in the "counted" figure. */
+  supplierDocuments?: any[];
 };
 
 // ── Arithmetic helpers (cents) ───────────────────────────────────────────────
@@ -649,6 +675,29 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
 
   if (openShifts > 0) caveats.push({ kind: "open_shifts", count: openShifts });
 
+  // UNRATED HOURS ARE REPORTED, NEVER SWALLOWED (audit v994 MR3; laborCostForJob's v800 rule). A
+  // crew member saved with no pay rate prices every hour at $0 above, so Crew Pay is short by his
+  // wage and the draw reads that much too high. Only the hours that are still LIVE-priced count:
+  // closed, not yet locked into a pay period (a locked period's gross is frozen on its run), in a
+  // month this window covers, for someone paid wages. An owner's hours are never a cost and never
+  // appear here.
+  {
+    let hundredths = 0;
+    const people = new Set<string>();
+    for (const e of inp.entries ?? []) {
+      if (!e?.clock_out || e.paid_at) continue;
+      const pid = e.profile_id ? String(e.profile_id) : "";
+      if (!pid || inp.people.get(pid)?.paidByDraw) continue;
+      if (!inWindow.has(monthOfDay(recordDay(null, e.clock_in, tz)) ?? "")) continue;
+      if (payRateForEntry(e, Number(inp.people.get(pid)?.hourlyRate ?? 0) || 0) > 0) continue;
+      const h = Math.round(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * 100);
+      if (!(h > 0)) continue;
+      hundredths += h;
+      people.add(inp.people.get(pid)?.name?.trim() || String(e.profiles?.full_name ?? "").trim() || "Someone");
+    }
+    if (hundredths > 0) caveats.push({ kind: "unrated_hours", hours: hundredths / 100, people: [...people].sort() });
+  }
+
   // Crew pay earned but not recorded as paid, FOR THIS WINDOW. The card prints it as "Counted, though
   // not paid yet: $X of crew pay", so it may only name pay that is inside the Crew Pay line above.
   // Each person's all-time unpaid balance is the Pay board's You Owe (the SAME balanceForPerson over
@@ -695,16 +744,210 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     if (owedCents > 0) caveats.push({ kind: "crew_owed", total: fromCents(owedCents) });
   }
 
+  // WHAT THE SUPPLIERS ARE STILL OWED, FOR THIS WINDOW (audit v994 MR1 + MR2).
+  //
+  // This used to add up every bill whose status read 'unpaid'. But bills.status says HOW a thing
+  // was bought (on account or at the register), not whether it has been paid: a supplier payment
+  // is a chunk of money that flips no bill, and CED closes documents the app's bills never hear
+  // about. So it said $9,014.31 was unpaid while /bills said ET owed CED $5,174.62. Now each
+  // account's balance comes from supplierBalance, the one function /bills itself reads: the
+  // supplier's own open documents when it has sent them (model B: payments NEVER subtracted, or the
+  // $1,360.93 double count returns), unpaid bills minus live payments otherwise (model A).
+  //
+  // Under model B the figure is built bill by bill (see below): only a document a counted bill
+  // covers is in it, and a counted bill no document covers is named on its own. Under model A the
+  // balance is as of today and has no month, so it is clamped to this window the way crew
+  // owed is: payments pay the OLDEST charges first, so the unpaid dollars are the NEWEST ones. Of
+  // an account's balance B, the charges dated after the window absorb theirs first (E_after,
+  // including a bill post-dated past today, which no window counts), and what remains, up to what
+  // the window counted (E_window), is this window's:  owed in window = clamp(B - E_after, 0, E_window).
+  //
+  // A charge is counted in a window only when its MONTH is one the window's totals cover (MR2):
+  // This Year stops at the org's current month, so a bill dated next month is in no total and is
+  // named in none.
   {
-    let n = 0;
-    let c = 0;
-    for (const b of liveBills) {
-      if (String(b.status ?? "").toLowerCase() !== "unpaid") continue;
-      if (!inDays(recordDay(b.bill_date, b.created_at, tz))) continue;
-      n += 1;
-      c += toCents(b.amount);
+    const monthOfBill = (b: any) => monthOfDay(recordDay(b.bill_date, b.created_at, tz));
+    const place = (month: string | null): "before" | "window" | "after" | null => {
+      if (!month) return null;
+      if (inWindow.has(month)) return "window";
+      return month < winStartMonth ? "before" : "after";
+    };
+    const accountRows = new Map<string, SupplierAccountRow>();
+    for (const a of inp.supplierAccounts ?? []) {
+      if (!a?.id) continue;
+      accountRows.set(String(a.id), {
+        id: String(a.id),
+        name: String(a.name ?? "").trim() || "a supplier",
+        accountNumber: null,
+        branchCode: null,
+        onAccount: a.on_account !== false,
+        note: null,
+        aliases: [],
+        bills: [],
+        payments: [],
+      });
     }
-    if (n > 0) caveats.push({ kind: "unpaid_bills", count: n, total: fromCents(c) });
+    for (const b of liveBills) {
+      const row = b.supplier_account_id ? accountRows.get(String(b.supplier_account_id)) : undefined;
+      if (!row) continue;
+      row.bills.push({
+        id: String(b.id),
+        supplier: "",
+        billDate: recordDay(b.bill_date, b.created_at, tz),
+        amount: Number(b.amount) || 0,
+        status: String(b.status ?? ""),
+        jobId: b.job_id ?? null,
+        jobName: null,
+        invoiceNumber: null,
+        isStatement: false,
+      });
+    }
+    for (const p of inp.supplierPayments ?? []) {
+      const row = p?.supplier_account_id ? accountRows.get(String(p.supplier_account_id)) : undefined;
+      if (!row) continue;
+      row.payments.push({
+        id: String(p.id ?? ""),
+        amount: Number(p.amount) || 0,
+        paidOn: String(p.paid_on ?? ""),
+        method: String(p.method ?? "other"),
+        reference: null,
+        note: null,
+        voided: !!p.voided_at,
+      });
+    }
+    for (const d of inp.supplierDocuments ?? []) {
+      const row = d?.supplier_account_id ? accountRows.get(String(d.supplier_account_id)) : undefined;
+      if (!row) continue;
+      (row.supplierInvoices ??= []).push({
+        id: String(d.id ?? ""),
+        invoiceNumber: String(d.invoice_number ?? ""),
+        kind: String(d.kind ?? "invoice"),
+        invoiceDate: d.invoice_date ?? null,
+        dueDate: null,
+        jobNameRaw: null,
+        jobId: null,
+        total: Number(d.total) || 0,
+        openBalance: d.open_balance === null || d.open_balance === undefined ? null : Number(d.open_balance),
+        closed: d.closed === true,
+        discountAmount: null,
+        discountBy: null,
+      });
+    }
+
+    const accounts: { name: string; owed: number; bySupplier: boolean }[] = [];
+    let owedCents = 0;
+    // Bills marked unpaid that no supplier balance holds: on no account, or on a register account
+    // whose balance is not a running one.
+    let looseCount = 0;
+    let looseCents = 0;
+    const loose = (b: any) => {
+      if (place(monthOfBill(b)) !== "window") return;
+      const c = toCents(b.amount);
+      if (!c) return;
+      looseCount += 1;
+      looseCents += c;
+    };
+    for (const b of liveBills) {
+      if (b.supplier_account_id && accountRows.has(String(b.supplier_account_id))) continue;
+      if (isOnAccountBill({ status: String(b.status ?? "") })) loose(b);
+    }
+    // WHICH BILLS COVER WHICH DOCUMENT: the one reading supplierDocsNoBillCovers makes too, so a
+    // document is on exactly one side of the card (counted through a bill, or named not counted).
+    const coverage = supplierDocCoverage(inp.supplierDocuments ?? [], liveBills);
+    const billById = new Map<string, any>();
+    for (const b of liveBills) if (b?.id) billById.set(String(b.id), b);
+    const docsOf = new Map<string, any[]>();
+    for (const d of inp.supplierDocuments ?? []) {
+      const id = d?.supplier_account_id ? String(d.supplier_account_id) : "";
+      if (id && accountRows.has(id)) docsOf.set(id, [...(docsOf.get(id) ?? []), d]);
+    }
+    const noDocAccounts: { name: string; total: number; count: number }[] = [];
+    let noDocCount = 0;
+    let noDocCents = 0;
+
+    for (const row of accountRows.values()) {
+      const bal = supplierBalance(row, todayYmd ?? win.end);
+      if (bal.owed === null) {
+        for (const b of row.bills) if (isOnAccountBill(b)) loose({ amount: b.amount, bill_date: b.billDate });
+        continue;
+      }
+      if (bal.model === "supplier-invoices") {
+        // MODEL B, BILL BY BILL (review of audit v994 MR1). The supplier's whole open balance is
+        // NOT money this window counted: it holds documents no bill in the app carries (in no cost
+        // total at all, and the credit memos and late charges among them are already named "Not
+        // counted"), and it cannot hold a counted bill the supplier has issued no document for.
+        // So, the way /bills builds its own slices:
+        //   · a document a counted bill on this account covers (linked, or its number carried)
+        //     gives its open balance, and 0 once closed, in the window of its newest covering bill;
+        //   · an on-account bill no document covers is named apart (supplier_no_document);
+        //   · a document no bill covers is in no total, so it is never inside "Counted".
+        const covered = new Set<string>();
+        let c = 0;
+        for (const d of docsOf.get(row.id) ?? []) {
+          const covering = [...(coverage.get(String(d.id)) ?? [])]
+            .map((id) => billById.get(id))
+            .filter((b) => b && String(b.supplier_account_id ?? "") === row.id);
+          if (!covering.length) continue;
+          for (const b of covering) covered.add(String(b.id));
+          if (d.closed === true) continue;
+          const newest = covering.map((b) => monthOfBill(b) ?? "").sort().at(-1) || null;
+          if (place(newest) !== "window") continue;
+          c += toCents(
+            openBalanceOf({
+              id: String(d.id),
+              closed: false,
+              openBalance: d.open_balance == null ? null : Number(d.open_balance),
+              total: Number(d.total) || 0,
+            }),
+          );
+        }
+        if (c > 0) {
+          owedCents += c;
+          accounts.push({ name: row.name, owed: fromCents(c), bySupplier: true });
+        }
+        // /bills' "no supplier document" slice, for this window: a $0.00 or negative row is not a
+        // slice of money owed (a credit filed as a bill is money back, not money to send).
+        let n = 0;
+        let cents = 0;
+        for (const b of liveBills) {
+          if (String(b.supplier_account_id ?? "") !== row.id) continue;
+          if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+          if (covered.has(String(b.id))) continue;
+          if (place(monthOfBill(b)) !== "window") continue;
+          const amt = toCents(b.amount);
+          if (amt <= 0) continue;
+          n += 1;
+          cents += amt;
+        }
+        if (n > 0) {
+          noDocCount += n;
+          noDocCents += cents;
+          noDocAccounts.push({ name: row.name, total: fromCents(cents), count: n });
+        }
+        continue;
+      }
+      let eWindow = 0;
+      let eAfter = 0;
+      for (const b of row.bills) {
+        if (!isOnAccountBill(b)) continue;
+        const where = place(b.billDate ? b.billDate.slice(0, 7) : null);
+        if (where === "window") eWindow += toCents(b.amount);
+        else if (where === "after") eAfter += toCents(b.amount);
+      }
+      const c = Math.min(Math.max(toCents(bal.owed) - eAfter, 0), Math.max(eWindow, 0));
+      if (c <= 0) continue;
+      owedCents += c;
+      accounts.push({ name: row.name, owed: fromCents(c), bySupplier: false });
+    }
+    if (owedCents > 0) {
+      accounts.sort((x, y) => y.owed - x.owed || x.name.localeCompare(y.name));
+      caveats.push({ kind: "supplier_owed", total: fromCents(owedCents), accounts });
+    }
+    if (noDocCount > 0) {
+      noDocAccounts.sort((x, y) => y.total - x.total || x.name.localeCompare(y.name));
+      caveats.push({ kind: "supplier_no_document", count: noDocCount, total: fromCents(noDocCents), accounts: noDocAccounts });
+    }
+    if (looseCount > 0 && looseCents !== 0) caveats.push({ kind: "unpaid_bills", count: looseCount, total: fromCents(looseCents) });
   }
 
   if (inp.recordsStart && inp.recordsStart > win.start && inp.recordsStart < win.end) {
@@ -751,8 +994,26 @@ export function notCountedLine(m: OwnerMoney): string | null {
     if (c.kind === "credit_memos") parts.push(`${money(c.total)} of supplier credit memos (${c.count})`);
     if (c.kind === "service_charges") parts.push(`${money(c.total)} of supplier late charges not filed as bills (${c.count})`);
     if (c.kind === "open_shifts") parts.push(`${c.count} ${c.count === 1 ? "shift" : "shifts"} still on the clock`);
+    if (c.kind === "unrated_hours") {
+      const who = c.people.length === 1 ? ` by ${c.people[0]}` : c.people.length > 1 ? ` by ${sayList(c.people)}` : "";
+      parts.push(`pay for ${hoursWords(c.hours)} of crew time${who} with no pay rate set`);
+    }
   }
   return parts.length ? `Not counted: ${parts.join("; ")}.` : null;
+}
+
+/** True when the window has crew hours priced at $0 for want of a pay rate: the card offers the
+ *  door that fixes it (the Team page's Pay box). */
+export function hasUnratedHours(m: OwnerMoney): boolean {
+  return m.caveats.some((c) => c.kind === "unrated_hours");
+}
+
+const hoursWords = (h: number) => `${Number.isInteger(h) ? h : h.toFixed(2).replace(/0$/, "")} ${h === 1 ? "hour" : "hours"}`;
+
+/** "a", "a and b", "a, b and c". */
+function sayList(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
 /** What IS counted but has not been paid yet: said so a figure that is still owed never reads as
@@ -761,9 +1022,27 @@ export function countedNotPaidLine(m: OwnerMoney): string | null {
   const parts: string[] = [];
   for (const c of m.caveats) {
     if (c.kind === "crew_owed") parts.push(`${money(c.total)} of crew pay`);
-    if (c.kind === "unpaid_bills") parts.push(`${money(c.total)} of supplier bills`);
+    if (c.kind === "supplier_owed") {
+      // Named account by account, and the supplier's own figure is SAID to be theirs (MR1: the
+      // card names the model, so it can be checked against /bills and the supplier's portal).
+      const each = (a: { name: string; owed: number; bySupplier: boolean }) => `${a.name}${a.bySupplier ? " by its own invoices" : ""}`;
+      if (c.accounts.length === 1) parts.push(`${money(c.total)} owed to ${each(c.accounts[0])}`);
+      else {
+        const shown = c.accounts.slice(0, 3).map((a) => `${each(a)} ${money(a.owed)}`);
+        const more = c.accounts.length - shown.length;
+        parts.push(`${money(c.total)} owed to suppliers (${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""})`);
+      }
+    }
+    if (c.kind === "supplier_no_document") {
+      const bills = `${c.count} ${c.count === 1 ? "bill" : "bills"}`;
+      if (c.accounts.length === 1) parts.push(`${money(c.total)} in ${bills} ${c.accounts[0].name} has sent no invoice for yet`);
+      else parts.push(`${money(c.total)} in ${bills} their suppliers have sent no invoice for yet (${c.accounts.map((a) => `${a.name} ${money(a.total)}`).join(", ")})`);
+    }
+    if (c.kind === "unpaid_bills") {
+      parts.push(`${money(c.total)} in ${c.count} ${c.count === 1 ? "bill" : "bills"} marked unpaid that no supplier balance holds`);
+    }
   }
-  return parts.length ? `Counted, though not paid yet: ${parts.join(" and ")}.` : null;
+  return parts.length ? `Counted, though not paid yet: ${sayList(parts)}.` : null;
 }
 
 // ── THE FETCH HALF ───────────────────────────────────────────────────────────
@@ -789,13 +1068,56 @@ async function readEvery<T>(
 }
 
 /**
- * Supplier credit memos and service charges that NO bill covers (rows carry bill_supplier_invoices).
- * Once a bill covers a document it is already in Materials & Bills as that bill (a credit memo as a
- * negative bill, the 518 Crater Lake correction), so it must not also be named as "not counted".
+ * WHICH LIVE BILLS COVER EACH SUPPLIER DOCUMENT, by the two routes /bills counts (same-purchase.ts,
+ * audit v994 DB1): a person LINKED them (bill_supplier_invoices), or a live bill on the document's
+ * own account carries its number (bill_number, supplier_invoice_number, or named on its lines).
+ * Keyed by document id; a document no bill covers has no entry. One reading for both sides of the
+ * card, so a document is either counted through a bill or named "not counted", never both.
  */
-export function supplierDocsNoBillCovers(rows: any[]): { creditMemos: any[]; unbilledServiceCharges: any[] } {
-  const uncovered = (rows ?? []).filter(
-    (s: any) => s && !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length),
+export function supplierDocCoverage(docs: any[], bills: any[]): Map<string, Set<string>> {
+  const live = (bills ?? []).filter((b: any) => b?.id && !b.superseded_by_bill_id);
+  const liveIds = new Set(live.map((b: any) => String(b.id)));
+  const ledger: LedgerBill[] = live.map((b: any) => ({
+    id: String(b.id),
+    supplier: b.supplier ?? null,
+    supplier_account_id: b.supplier_account_id ?? null,
+    bill_number: b.bill_number ?? null,
+    supplier_invoice_number: b.supplier_invoice_number ?? null,
+    amount: b.amount ?? null,
+    bill_date: b.bill_date ?? null,
+    job_id: b.job_id ?? null,
+    superseded_by_bill_id: null,
+    named_numbers: namedNumbersOf({ notes: b.notes ?? null, bill_line_items: b.bill_line_items ?? null }).numbers,
+  }));
+  const out = new Map<string, Set<string>>();
+  for (const d of docs ?? []) {
+    if (!d?.id) continue;
+    const set = new Set<string>();
+    for (const l of Array.isArray(d.bill_supplier_invoices) ? d.bill_supplier_invoices : []) {
+      if (l?.bill_id && liveIds.has(String(l.bill_id))) set.add(String(l.bill_id));
+    }
+    const account = d.supplier_account_id ? String(d.supplier_account_id) : "";
+    if (account) {
+      for (const b of billsCarryingNumber(d.invoice_number, { accountId: account }, ledger)) {
+        if (String(b.supplier_account_id ?? "") === account) set.add(b.id);
+      }
+    }
+    if (set.size) out.set(String(d.id), set);
+  }
+  return out;
+}
+
+/**
+ * Supplier credit memos and service charges that NO bill covers. Once a bill covers a document it
+ * is already in Materials & Bills as that bill (a credit memo as a negative bill, the 518 Crater
+ * Lake correction), so it must not also be named as "not counted". With the live bills, coverage
+ * is supplierDocCoverage's (links and carried numbers, the reading the "Counted" figure uses);
+ * without them, a document with any link is covered.
+ */
+export function supplierDocsNoBillCovers(rows: any[], bills?: any[]): { creditMemos: any[]; unbilledServiceCharges: any[] } {
+  const coverage = bills ? supplierDocCoverage(rows ?? [], bills) : null;
+  const uncovered = (rows ?? []).filter((s: any) =>
+    s && (coverage ? !coverage.has(String(s.id)) : !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length)),
   );
   return {
     creditMemos: uncovered.filter((s: any) => s.kind === "credit_memo"),
@@ -865,7 +1187,7 @@ export async function readOwnerMoneyInputs(
   // A locked period can start up to a month before the window and still spread pay into it.
   const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -916,13 +1238,14 @@ export async function readOwnerMoneyInputs(
         .order("id")
         .range(f, t),
     ),
-    // Credit memos (named, not subtracted, until a bill covers one) and service charges, each with
-    // the bills that cover it, so a memo or late charge already filed is not named twice.
-    readEvery<any>("supplier credit memos", (f, t) =>
+    // EVERY supplier document (0273). Credit memos (named, not subtracted, until a bill covers one)
+    // and service charges, each with the bills that cover it, so a memo or late charge already
+    // filed is not named twice; and ALL of them, open and closed, for what each supplier says is
+    // still owed (model B, supplierBalance) in the "Counted, though not paid yet" line.
+    readEvery<any>("supplier documents", (f, t) =>
       supabase
         .from("supplier_invoices")
-        .select("id, kind, total, invoice_date, created_at, bill_supplier_invoices(id)")
-        .in("kind", ["credit_memo", "service_charge"])
+        .select("id, supplier_account_id, invoice_number, kind, total, open_balance, closed, invoice_date, created_at, bill_supplier_invoices(bill_id)")
         .order("id")
         .range(f, t),
     ),
@@ -939,10 +1262,21 @@ export async function readOwnerMoneyInputs(
     ]),
     // THE SHELF (0303): every lot, for the shelf's part of each ticket and what is on it now.
     readShelfLots(supabase),
+    // THE SUPPLIER ACCOUNTS AND WHAT WAS SENT THEM (0270), for what each is still owed, by the
+    // same supplierBalance /bills reads (audit v994 MR1). Voided payments come back too; the
+    // balance skips them itself.
+    readEvery<any>("supplier accounts", (f, t) =>
+      supabase.from("supplier_accounts").select("id, name, on_account").order("id").range(f, t),
+    ),
+    readEvery<any>("supplier payments", (f, t) =>
+      supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
+    ),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots].map((r) => r.problem).find(Boolean) ??
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments]
+      .map((r) => r.problem)
+      .find(Boolean) ??
     ratesRead.problem ??
     ((names as any)?.error ? "the names could not be read" : null);
   if (problem) return { inputs: null, problem };
@@ -975,11 +1309,14 @@ export async function readOwnerMoneyInputs(
       entries: entries.rows,
       runs: runs.rows,
       payPayments: payPayments.rows,
-      ...supplierDocsNoBillCovers(memos.rows),
+      ...supplierDocsNoBillCovers(memos.rows, bills.rows),
       people,
       recordsStart,
       firstPaymentDay,
       shelfLots: shelfLots.rows,
+      supplierAccounts: supplierAccounts.rows,
+      supplierPayments: supplierPayments.rows,
+      supplierDocuments: memos.rows,
     },
     problem: null,
   };
@@ -991,7 +1328,11 @@ export async function readOwnerMoneyInputs(
  * the same deploy-window shape as readJobBillsWithLines. Any other failure is a lost read.
  */
 async function readBills(supabase: any): Promise<{ rows: any[]; problem: string | null }> {
-  const cols = "id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id";
+  // supplier_account_id (0270): which supplier's balance a bill is part of (audit v994 MR1). The
+  // numbers a bill carries (bill_number, supplier_invoice_number, the ones named on its notes and
+  // lines) say which supplier document covers it (supplierDocCoverage), the /bills reading.
+  const cols =
+    "id, job_id, amount, bill_date, created_at, category, status, po_id, superseded_by_bill_id, supplier_account_id, supplier, bill_number, supplier_invoice_number, notes, bill_line_items(description)";
   let withShelf = true;
   const out: any[] = [];
   for (let i = 0, from = 0; i < MAX_PAGES; i++) {

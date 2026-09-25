@@ -7,6 +7,7 @@ import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { resolveJobId, resolveProfileId } from "../resolve-id";
 import { todayStrInTz, tzDayStartUtc, tzNaiveIsoToUtc } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
+import { quotedData } from "@/lib/org-local-time";
 
 /**
  * ONE CONVERTER FOR EVERY TIME VERB (audit 7). cn-v728 converted addEntry and left fixEntry and
@@ -481,7 +482,9 @@ export const timeActions: Record<string, ActionDef> = {
             next: "Open it and tap Split Shift to save it.",
           },
         },
-        speak: `Ready to split ${who}'s shift at ${splitClock(p.at, tz)}: ${splitClock(e.clock_in, tz)} to ${splitClock(p.at, tz)} on ${first} (${p.left.hours} h), then ${splitClock(p.at, tz)} to ${splitClock(e.clock_out, tz)} on ${second} (${p.right.hours} h). Same ${p.shiftHours} h in total. Tap Split Shift to save it.`,
+        // Names are database free text, quoted as data (audit v994 TL4): the model is told to speak
+        // this line, so an instruction-shaped job name must read as a name, never as an order.
+        speak: `Ready to split the shift of ${quotedData(who)} at ${splitClock(p.at, tz)}: ${splitClock(e.clock_in, tz)} to ${splitClock(p.at, tz)} on ${quotedData(first)} (${p.left.hours} h), then ${splitClock(p.at, tz)} to ${splitClock(e.clock_out, tz)} on ${quotedData(second)} (${p.right.hours} h). Same ${p.shiftHours} h in total. Tap Split Shift to save it.`,
       };
     },
   },

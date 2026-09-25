@@ -10,6 +10,7 @@ import { docTitle } from "@/lib/doc-title";
 import { NO_INDEX } from "@/lib/no-index";
 import { customerLines, invoiceBalance } from "@/lib/invoice-math";
 import { cardFeeDecision, feePctLabel, payUrl } from "@/lib/org-settings";
+import { pendingTransfers, transferOnItsWaySentence, type PendingTransfer } from "@/lib/bank-transfer";
 import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -26,16 +27,26 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice"), robots: NO_INDEX };
 }
 
-/** The supplier names of the org that owns this link, read as the service role and pinned to that
- *  one org. The link is the credential (the same one public_invoice took); nothing here is shown. */
-async function orgSupplierNames(token: string): Promise<ReadonlySet<string>> {
+/** What the page needs to know about the org that owns this link, read as the service role and
+ *  pinned to that one org and this one invoice. The link is the credential (the same one
+ *  public_invoice took). The supplier names are never shown (they are scrubbed out of the lines);
+ *  the bank transfers on their way are (audit v994 BK3, 0338). */
+async function linkFacts(token: string): Promise<{ supplierNames: ReadonlySet<string>; pending: PendingTransfer[] }> {
+  const none = { supplierNames: new Set<string>(), pending: [] as PendingTransfer[] };
   try {
     const svc = createServiceClient();
-    const { data } = await svc.from("invoices").select("org_id").eq("public_token", token).maybeSingle();
+    const { data } = await svc.from("invoices").select("id, org_id").eq("public_token", token).maybeSingle();
     const orgId = (data as { org_id?: string | null } | null)?.org_id;
-    return orgId ? await fetchSupplierNames(svc, orgId) : new Set<string>();
+    const invoiceId = (data as { id?: string | null } | null)?.id;
+    if (!orgId) return none;
+    const [supplierNames, inFlight] = await Promise.all([
+      fetchSupplierNames(svc, orgId).catch(() => new Set<string>()),
+      invoiceId ? pendingTransfers(svc, orgId, [invoiceId]).catch(() => null) : Promise.resolve(null),
+    ]);
+    // A read that failed shows no banner; /api/pay refuses a second checkout on its own read anyway.
+    return { supplierNames, pending: (invoiceId && inFlight?.byInvoice.get(String(invoiceId))) || [] };
   } catch {
-    return new Set<string>();
+    return none;
   }
 }
 
@@ -53,9 +64,9 @@ export default async function PublicInvoicePage({
   if (!data) notFound();
 
   const inv = data.invoice;
-  const [pdfReady, supplierNames] = await Promise.all([
+  const [pdfReady, { supplierNames, pending }] = await Promise.all([
     sharePdfReady("invoice", token, String(inv.status ?? "")),
-    orgSupplierNames(token),
+    linkFacts(token),
   ]);
   // NO LINE NAMES A SUPPLIER (audit v994 PL1, scrub on read). public_invoice does this itself once
   // 0315 is applied; until then, and as the last door either way, the page does it with the same
@@ -105,8 +116,15 @@ export default async function PublicInvoicePage({
   // because the card button is still on the screen in that state, and it sits BELOW this banner
   // (the bank button is the only one that hides) — copy never names a control that isn't there,
   // and never points the wrong way at one that is.
+  // A BANK TRANSFER ALREADY ON ITS WAY (audit v994 BK3). The balance still reads in full until it
+  // clears, so the page says so and offers no second online payment (/api/pay refuses one too).
+  const inFlight = !paid && pending.length > 0 && balance > 0;
+  // (/api/pay's ?pay=pending needs no sentence of its own: while the transfer is pending the banner
+  // below says it, and once it has cleared or failed the page is simply payable, or paid, again.)
   const payNotice =
-    pay === "unavailable"
+    inFlight
+      ? null
+      : pay === "unavailable"
       ? "Card payments aren't switched on for this contractor yet. Please pay by check, or call them."
       : pay === "bank_unavailable"
         ? "Bank transfer isn't switched on for this contractor's account yet. You can still pay by card below, or pay by check."
@@ -159,6 +177,17 @@ export default async function PublicInvoicePage({
           )}
         </div>
       )}
+      {inFlight && (
+        <div className="no-print mx-auto mb-4 max-w-3xl px-4">
+          <div className="rounded-xl bg-sky-50 px-4 py-3 text-center text-sm text-sky-900">
+            <p className="font-medium">{transferOnItsWaySentence(pending)} Thank you!</p>
+            <p className="mt-1">
+              Banks take a few business days to move it. The balance below still shows until it clears, so please do not
+              pay again. If the transfer does not go through, you can pay here once more.
+            </p>
+          </div>
+        </div>
+      )}
       {!paid && payNotice && (
         <div className="no-print mx-auto mb-4 max-w-3xl px-4">
           <div className="rounded-xl bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-800">
@@ -172,7 +201,7 @@ export default async function PublicInvoicePage({
           bill for the fee. Each button states its own total and says what it costs and how long
           it takes, so the choice is made with both numbers on the screen.
           Stacked at 375px, side by side from sm up; both are full-width taps well over 44px. */}
-      {!paid && balance >= 0.5 && payable && pay !== "unavailable" && (
+      {!paid && !inFlight && balance >= 0.5 && payable && pay !== "unavailable" && (
         <div className="no-print mx-auto mb-4 max-w-3xl px-4">
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:justify-center">
             <div className="sm:w-64">

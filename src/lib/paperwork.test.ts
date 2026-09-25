@@ -328,6 +328,77 @@ describe("jobFromPaperMarks: exact, never fuzzy", () => {
   });
 });
 
+describe("finished jobs: fileable, never picked, and a street they share picks nothing (Erik, audit v994 PR1)", () => {
+  // ET's live shape: 235 Timbercreek has J-002 in progress and J-032 complete; 300 W Lake Blvd has
+  // an open TTP job and finished ones.
+  const JOBS: MarkJob[] = [
+    { id: "j02", job_number: "J-002", name: "Tao Zhu", address: "235 Timbercreek Rd", customerNames: ["Tao Zhu"] },
+    { id: "j32", job_number: "J-032", name: "Tao Zhu Deck", address: "235 Timbercreek Rd", customerNames: ["Tao Zhu"], closed: true },
+    { id: "j44", job_number: "J-044", name: "Dino", address: "300 W Lake Blvd #99", customerNames: ["Tahoe Tavern Properties"] },
+    { id: "j52", job_number: "J-052", name: "TTP 99", address: "300 West Lake Boulevard", customerNames: ["Tahoe Tavern Properties"], closed: true },
+    { id: "j46", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", customerNames: ["Jason Waldow"], closed: true },
+    { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customerNames: ["Andrew Cohen"] },
+  ];
+
+  it("a street shared with a finished job picks nothing, and says which finished job", () => {
+    const r = jobFromPaperMarks({ address: "235 TIMBERCREEK RD" }, JOBS);
+    expect(r).toMatchObject({ kind: "conflict", veto: true });
+    expect((r as { sentence: string }).sentence).toBe("235 TIMBERCREEK RD also has finished job (J-032 Tao Zhu Deck), so no job was picked. Pick the job.");
+    // The same street in the PO box, the same answer.
+    expect(jobFromPaperMarks({ po: "300 W LAKE BLVD" }, JOBS)).toMatchObject({ kind: "conflict", veto: true });
+  });
+
+  it("a job number, a job name or a customer naming the open job still picks it", () => {
+    expect(jobFromPaperMarks({ address: "235 Timbercreek Rd", jobNumber: "J-002" }, JOBS)).toMatchObject({ kind: "one", jobId: "j02" });
+    expect(jobFromPaperMarks({ po: "13897 HERRINGBONE" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11" });
+  });
+
+  it("a finished job is never the pick, even when the paper names it exactly", () => {
+    expect(jobFromPaperMarks({ jobNumber: "J-046" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ address: "518 Crater Lake Rd" }, JOBS)).toEqual({ kind: "none" });
+  });
+
+  it("a street only open jobs sit on still picks, as before", () => {
+    expect(jobFromPaperMarks({ address: "13897 Herringbone Way" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "address" });
+  });
+
+  it("a row picked by its street before finished jobs counted stops picking on the next load, and says why", () => {
+    const row: PaperItem = {
+      id: "p1",
+      status: "needs_review",
+      doc_type: "bill",
+      amount: 40,
+      proposal: { jobId: "j02", jobFrom: "address", jobHint: "235 TIMBERCREEK RD", marks: { address: "235 TIMBERCREEK RD" } },
+    };
+    const again = rematchPaper(row, JOBS);
+    expect(suggestedDestination(again, JOBS.map((j) => j.id))).toBe("");
+    expect((again.proposal as { jobConflict?: string }).jobConflict).toContain("also has finished job (J-032");
+    // A pick a job NUMBER made is never second-guessed.
+    const byNumber: PaperItem = { ...row, proposal: { jobId: "j02", jobFrom: "job_number", jobHint: "J-002", marks: { jobNumber: "J-002", address: "235 TIMBERCREEK RD" } } };
+    expect(rematchPaper(byNumber, JOBS)).toBe(byNumber);
+  });
+
+  it("a row picked while its job was open stops picking once that job is finished, from a street or a PO alone", () => {
+    // J-046 has since finished; nothing else sits on 518 Crater Lake Rd, so the street alone finds nothing.
+    const row: PaperItem = {
+      id: "p2",
+      status: "needs_review",
+      doc_type: "bill",
+      amount: 40,
+      proposal: { jobId: "j46", jobFrom: "address", jobHint: "518 CRATER LAKE RD", marks: { address: "518 CRATER LAKE RD" } },
+    };
+    const again = rematchPaper(row, JOBS);
+    // The pickers list finished jobs, and still nothing is picked.
+    expect(suggestedDestination(again, JOBS.map((j) => j.id))).toBe("");
+    expect((again.proposal as { jobConflict?: string }).jobConflict).toBe("J-046 Jason Waldow is finished, so no job was picked. Pick the job.");
+    const byPo: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "po", jobHint: "WALDOW", marks: { po: "WALDOW" } } };
+    expect(suggestedDestination(rematchPaper(byPo, JOBS), JOBS.map((j) => j.id))).toBe("");
+    // A printed job number is that job, finished or not: it stands.
+    const byNumber: PaperItem = { ...row, proposal: { jobId: "j46", jobFrom: "job_number", jobHint: "J-046", marks: { jobNumber: "J-046" } } };
+    expect(rematchPaper(byNumber, JOBS)).toBe(byNumber);
+  });
+});
+
 describe("the job in the PO box: 13897 HERRINGBONE (Erik, 2026-09-24)", () => {
   // ET's live row 12962a84: a CED sales order, $323.71, 8802-SO-257555, PO "13897 HERRINGBONE",
   // hint "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE". It came in with no job picked.
@@ -548,12 +619,38 @@ describe("findSameNumber: the same purchase already on the books", () => {
     expect(m[0].sentence).toContain("$653.25");
   });
 
-  it("same number from a DIFFERENT supplier is two purchases", () => {
-    expect(findSameNumber(receipt({ vendor: "Home Depot", doc_number: "8802-1108330" }), { bills: [bill] }, aliases)).toEqual([]);
+  // DB5, ERIK'S CALL (audit v994): "a long supplier number matches even when the supplier name is
+  // spelled differently, as a WARNING only". Never the certain "bill" (which refuses File It), and
+  // never a guess at the account.
+  it("a long number under a spelling on no account is a WARNING, never the certain match that refuses", () => {
+    const m = findSameNumber(receipt({ vendor: "Consolidated Electrical Distributors (CED)", doc_number: "8802-1108330" }), { bills: [bill] }, aliases);
+    expect(m.filter((x) => x.kind === "bill")).toEqual([]);
+    expect(m).toEqual([expect.objectContaining({ kind: "maybe_bill", billId: "bill-1", jobId: "job-046" })]);
+    expect(m[0].sentence).toContain("Maybe already on the books");
+    expect(m[0].sentence).toContain('"Consolidated Electrical Distributors (CED)" here, "Consolidated Electrical Dist." there');
   });
 
-  it("no alias and a different spelling is not guessed into a match (exact only)", () => {
-    expect(findSameNumber(receipt({ vendor: "Consolidated Electric", doc_number: "8802-1108330" }), { bills: [bill] }, null)).toEqual([]);
+  it("no alias at all and a different spelling: still only a warning (exact only for the certain match)", () => {
+    const m = findSameNumber(receipt({ vendor: "Consolidated Electric", doc_number: "8802-1108330" }), { bills: [bill] }, null);
+    expect(m.map((x) => x.kind)).toEqual(["maybe_bill"]);
+  });
+
+  it("a SHORT number under another spelling is two purchases: no warning", () => {
+    const short = { ...bill, bill_number: "1234" };
+    expect(findSameNumber(receipt({ vendor: "Home Depot", doc_number: "1234" }), { bills: [short] }, aliases)).toEqual([]);
+  });
+
+  it("two accounts a person set up are two suppliers, whatever the number", () => {
+    const two = indexSupplierAliases([
+      { alias: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" },
+      { alias: "Home Depot", supplier_account_id: "acct-hd" },
+    ]);
+    expect(findSameNumber(receipt({ vendor: "Home Depot", doc_number: "8802-1108330" }), { bills: [bill] }, two)).toEqual([]);
+  });
+
+  it("a set-aside copy is never a warning either", () => {
+    const copy = { ...bill, superseded_by_bill_id: "bill-9" };
+    expect(findSameNumber(receipt({ vendor: "Consolidated Electric", doc_number: "8802-1108330" }), { bills: [copy] }, aliases)).toEqual([]);
   });
 
   it("a paper with no number matches nothing", () => {

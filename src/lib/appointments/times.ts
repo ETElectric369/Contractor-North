@@ -16,3 +16,13 @@ export function endAfterStart(startIso: string, endIso: string | null): string |
   if (!isNaN(start) && end <= start) return "The end time has to be after the start.";
   return null;
 }
+
+/** The end a moved visit keeps when no new end was given (audit v994 SI1): the old length, moved
+ *  with the new start, or none when the old row had no real length (no end, or an end at or before
+ *  its start, which is a broken row, not a length to copy). */
+export function keptEnd(newStart: Date, oldStart: string | null, oldEnd: string | null): string | null {
+  if (!oldStart || !oldEnd) return null;
+  const len = new Date(oldEnd).getTime() - new Date(oldStart).getTime();
+  if (!Number.isFinite(len) || len <= 0 || !Number.isFinite(newStart.getTime())) return null;
+  return new Date(newStart.getTime() + len).toISOString();
+}

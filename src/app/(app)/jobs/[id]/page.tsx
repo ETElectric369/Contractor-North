@@ -1571,9 +1571,11 @@ export default async function JobDetailPage({
           <span>{j.job_number}</span>
           <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
           {/* Done & paid — the critical path's last step, on the record itself. Staff only, and
-              not on a job already settled by draws (settleUp re-checks server-side; hiding it
-              here just spares the tap that would be refused). */}
-          {viewerIsStaff && j.status !== "cancelled" && (
+              NOT on a job billed with progress payments (Connected North Phase 1): the comment
+              always said so and the condition never did, so INV-078's job carried a Pay Now whose
+              server answer was a refusal. There the money is taken on the draw itself, from its
+              invoice page (which asks before it sends a draft). settleUp re-checks server-side. */}
+          {viewerIsStaff && j.status !== "cancelled" && !isDrawBilled && (
             <SettleUpButton
               source="job"
               id={j.id}

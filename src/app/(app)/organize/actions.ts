@@ -18,6 +18,7 @@ import {
   paperTypeLabel,
   paperTypeOfItem,
   isLinelessReturn,
+  isPicture,
   linesPointWithTotal,
   paperPickOf,
   pickedBecause,
@@ -36,6 +37,7 @@ import {
 import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib/shelf-plan";
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
+import { jobInOrg } from "@/lib/job-in-org";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -51,16 +53,26 @@ import {
   billStatusFromItem,
   cleanDocNumber,
   cleanLines,
+  copyToJobFolder,
+  documentInUse,
   exactAccountFor,
+  filingDocument,
   insertItemizedBill,
   insertPaperRow,
   loadBooks,
   loadMarkContext,
   matchesOnBooks,
   paperReaderSystem,
+  readBillStanding,
   readerFields,
+  removeCopy,
+  returnTiedPapers,
+  standingRefusal,
+  takeDownLanded,
   tradeOf,
   updateItemTolerant,
+  type BillLine,
+  type BillStanding,
 } from "./paperwork-core";
 
 export type Result = { ok: boolean; error?: string };
@@ -122,9 +134,13 @@ async function readInto(
   const supabase = ctx.supabase;
   const { markJobs, pos, selfNames } = await loadMarkContext(supabase, ctx.orgId);
 
+  // EVERY WRITE HERE LANDS ONLY WHILE THE PAPER IS STILL WAITING (audit v994, TD6). A read takes
+  // 5 to 20 seconds; a paper filed from another screen meanwhile keeps its filing, and the late read
+  // changes nothing and says so.
+  const waiting = { onlyIfStatus: "needs_review" };
   const { data: blob, error: dlErr } = await supabase.storage.from("documents").download(file.path);
   if (dlErr || !blob) {
-    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the file couldn't be opened" } });
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the file couldn't be opened" } }, waiting);
     revalidatePath("/organize");
     revalidatePath("/bills");
     return { ok: false, error: `${dlErr?.message ?? "Could not read the upload."} It is saved and waiting; press Read Now to try again.` };
@@ -133,7 +149,7 @@ async function readInto(
   // TOO BIG TO READ IS NOT TOO BIG TO KEEP. The file is in; the row says so and keeps every
   // control, and a person types the total in.
   if (bytes.byteLength > READ_LIMIT) {
-    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { tooBig: true } });
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { tooBig: true } }, waiting);
     revalidatePath("/organize");
     revalidatePath("/bills");
     return { ok: false, error: "Too big to read: fill it in yourself. It is saved and waiting." };
@@ -171,7 +187,7 @@ async function readInto(
     parsed = await parseAiJson(client, text?.text ?? "", ctx.orgId);
   } catch (e: any) {
     // The paper is NOT lost: the row stays in the tray, saying it was not read.
-    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader didn't answer" } });
+    await updateItemTolerant(supabase, itemId, ctx.orgId, { proposal: { readError: "the reader didn't answer" } }, waiting);
     revalidatePath("/organize");
     revalidatePath("/bills");
     return { ok: false, error: `${e?.message ?? "AI could not read this file."} It is saved and waiting; press Read Now to try again.` };
@@ -180,7 +196,7 @@ async function readInto(
   const f = readerFields(parsed, file.name, { markJobs, pos, selfNames, personSaysCost: opts.personSaysCost });
   // A picture never keeps itself as a note: it waits for a person to say what it is.
   const keepsItself = f.kind === "note" && f.amount === null && !opts.personSaysCost && !f.proposal.picture;
-  const { error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
+  const { data: landed, error } = await updateItemTolerant(supabase, itemId, ctx.orgId, {
     kind: f.kind,
     title: f.title,
     summary: f.summary,
@@ -196,9 +212,17 @@ async function readInto(
     doc_type: keepsItself ? null : f.doc_type,
     doc_number: f.doc_number,
     pricing_provisional: f.pricing_provisional,
-    proposal: f.proposal,
-  });
+    // A NOTE THAT KEEPS ITSELF SAYS HOW (review of wave 2, TD5): with no `filed` on it, a filed row
+    // with no links read as "filed over nothing", and dropping the same file again said what it
+    // filed is gone, of a note nothing was ever filed from.
+    proposal: keepsItself ? ({ ...f.proposal, filed: { how: "note" } } satisfies PaperProposal) : f.proposal,
+  }, waiting);
   if (error) return { ok: false, error: dbError(error) };
+  if (!landed?.length) {
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    return { ok: false, error: "This paper was filed while it was being read, so the read changed nothing. Undo it first if it needs reading again." };
+  }
 
   revalidatePath("/organize");
   revalidatePath("/bills");
@@ -325,15 +349,21 @@ export async function readAsCost(id: string): Promise<{ ok: boolean; error?: str
   if (readinessOf(item).state !== "picture")
     return { ok: false, error: "Only a picture is asked what it is. To change what this paper is, use Fix Details." };
   const { picture: _wasPicture, ...rest } = proposalOf(item);
-  const { data: back, error } = await updateItemTolerant(ctx.supabase, id, ctx.orgId, {
-    doc_type: "receipt",
-    kind: "receipt",
-    category: "Receipt",
-    payment: "unknown",
-    proposal: rest,
-  });
+  const { data: back, error } = await updateItemTolerant(
+    ctx.supabase,
+    id,
+    ctx.orgId,
+    {
+      doc_type: "receipt",
+      kind: "receipt",
+      category: "Receipt",
+      payment: "unknown",
+      proposal: rest,
+    },
+    { onlyIfStatus: "needs_review" },
+  );
   if (error) return { ok: false, error: dbError(error) };
-  if (!back?.length) return { ok: false, error: "Nothing changed. That paper isn't here any more, or this login can't change it." };
+  if (!back?.length) return { ok: false, error: "Nothing changed. That paper was just filed, isn't here any more, or this login can't change it." };
   revalidatePath("/organize");
   revalidatePath("/bills");
 
@@ -607,6 +637,9 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     line_items: lines.length ? lines : null,
     file_url: doc.file_url,
     created_by: ctx.userId,
+    // THE JOB'S OWN UPLOAD (audit v994, TD1): this row points at a document the job already had,
+    // so Undo and Delete take the bill down and never the receipt (filingDocument).
+    source: "job",
   }).select("id");
 
   // THE LINK ROW IS THE IDEMPOTENCY (same pass as 0278, same class as the teardown above).
@@ -702,11 +735,59 @@ function sameNumberRefusal(matches: NumberMatch[]): string {
   return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: File It Anyway. Nothing was filed.`;
 }
 
+/** What a teardown did, for the sentence and for the paper's own row. */
+type Teardown =
+  | { refused: string }
+  | {
+      refused: null;
+      /** The bill the filing made, as a person left it, read just before it came down. */
+      standing: BillStanding | null;
+      /** Papers that were tied to that bill and are back in the tray now. */
+      papersBack: string[];
+      /** The job's own document the row pointed at and did NOT make (TD1): kept on the job. */
+      keptDoc: { id: string; file_url: string | null } | null;
+    };
+
+/** The words a teardown refusal ends with, for the door that asked. */
+type TeardownWords = {
+  /** After an invoice's claim: "Void that invoice, or take its materials lines off, then ...". */
+  tail: string;
+  /** What to press after the fix: "press Undo again". */
+  then: string;
+  /** "Nothing was undone." */
+  nothing: string;
+};
+
 /**
  * Tear down whatever the previous filing made, bill FIRST and only if the database lets it (0278).
- * Returns the refusal sentence, or null when everything came down. The tail names the door.
+ * Every read that can refuse runs before anything is deleted, so a refusal leaves the filing
+ * exactly as it was. The words name the door.
  */
-async function tearDownFiling(supabase: any, item: any, tail: string): Promise<string | null> {
+async function tearDownFiling(supabase: any, orgId: string | null, item: any, words: TeardownWords): Promise<Teardown> {
+  // WHAT LEANS ON THE BILL, READ FIRST (audit v994, TD2 and TD3). A copy set aside as its
+  // duplicate refuses in words (Erik: "Undo refuses when a duplicate copy was set aside against the
+  // bill, and names that copy"), a roll of it on the shop shelf refuses, and the lines a person
+  // set on the bill (switched off, part-used) are read so they can ride back onto the paper.
+  let standing: BillStanding | null = null;
+  if (item.bill_id) {
+    const st = await readBillStanding(supabase, orgId, String(item.bill_id));
+    if (st && "error" in st) return { refused: st.error };
+    standing = st;
+    const no = standing ? standingRefusal(standing, words.then, words.nothing) : null;
+    if (no) return { refused: no };
+  }
+  // WHICH DOCUMENT THIS FILING MADE (audit v994, TD1). A receipt recorded as a cost on the job page
+  // points at the job's OWN upload; that one is never this teardown's to delete.
+  const doc = await filingDocument(supabase, orgId, item);
+  if (doc && "error" in doc) return { refused: `${dbError(doc.error)} ${words.nothing}` };
+  // WHAT STANDS ON THAT DOCUMENT (review of wave 2, PR4): the customer's page or a panel's photo.
+  // Read before anything is deleted, so a refusal leaves the filing exactly as it was.
+  if (doc && doc.owned) {
+    const used = await documentInUse(supabase, orgId, doc.id);
+    if (used && "error" in used) return { refused: `${dbError(used.error)} ${words.nothing}` };
+    if (used) return { refused: `${used.sentence}, then ${words.then}. ${words.nothing}` };
+  }
+
   // THE BILL COMES DOWN FIRST, AND ONLY IF THE DATABASE LETS IT (0278; audit of cn-v951..v966).
   //
   // Re-filing tears the old filing down and builds a new one, and this line tore down a bill a
@@ -725,22 +806,43 @@ async function tearDownFiling(supabase: any, item: any, tail: string): Promise<s
   //
   // A TIED bill (0295) is never here: tied_bill_id is its own column precisely so that this
   // teardown, which deletes bill_id, can never delete a bill this row did not make.
+  let papersBack: string[] = [];
   if (item.bill_id) {
     const { error: billErr } = await supabase.from("bills").delete().eq("id", item.bill_id).select("id");
-    if (billErr) return billClaimRefusal(billErr, tail) ?? dbError(billErr);
+    if (billErr) return { refused: billClaimRefusal(billErr, words.tail) ?? dbError(billErr) };
+    // Papers tied to that bill would be left "filed" over nothing: they go back to the tray, named.
+    if (standing?.tiedPapers.length) papersBack = await returnTiedPapers(supabase, orgId, standing.tiedPapers);
   }
   // Then the rest of the previous filing. The petty-cash row is torn down HERE too (audit 9,
   // 0202). Both are checked for the bill's own reason - a teardown that fails and says nothing
   // becomes a SECOND row a moment later.
-  if (item.document_id) {
-    const { error: docErr } = await supabase.from("documents").delete().eq("id", item.document_id).select("id");
-    if (docErr) return `${dbError(docErr)} The old copy is still on the job, so nothing was changed.`;
+  if (doc && doc.owned) {
+    const { error: docErr } = await supabase.from("documents").delete().eq("id", doc.id).select("id");
+    if (docErr) return { refused: `${dbError(docErr)} The old copy is still on the job. ${words.nothing}` };
+    // The copy a filing put in the job's own folder (PR4) goes with its row.
+    if (doc.file_url && doc.file_url !== item.file_url) await removeCopy(supabase, doc.file_url, orgId);
   }
   if (item.petty_cash_id) {
     const { error: pcErr } = await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id).select("id");
-    if (pcErr) return `${dbError(pcErr)} The old petty cash entry is still in the drawer, so nothing was changed.`;
+    if (pcErr) return { refused: `${dbError(pcErr)} The old petty cash entry is still in the drawer. ${words.nothing}` };
   }
-  return null;
+  return { refused: null, standing, papersBack, keptDoc: doc && !doc.owned ? { id: doc.id, file_url: doc.file_url } : null };
+}
+
+/** "Tied to that bill and back in the tray too: X." Empty when there were none. */
+function papersBackSaid(titles: string[]): string {
+  if (!titles.length) return "";
+  const many = titles.length > 1;
+  return ` ${many ? `${titles.length} other papers (${titles.map((t) => `"${t}"`).join(", ")}) were` : `"${titles[0]}" was`} tied to that bill and ${many ? "are" : "is"} back in the tray too.`;
+}
+
+/** The choices made on the bill that rode back onto the paper, said once (TD3). */
+function keptChoicesSaid(lines: BillLine[]): string {
+  const off = lines.filter((l) => !l.billable).length;
+  const part = lines.filter((l) => l.billable && l.billed_amount !== undefined).length;
+  if (!off && !part) return "";
+  const bits = [off ? `${off} ${off === 1 ? "line" : "lines"} switched off` : "", part ? `${part} part-used` : ""].filter(Boolean).join(", ");
+  return ` The choices made on the bill (${bits}) stay with it, so File It carries them again.`;
 }
 
 /**
@@ -786,6 +888,11 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
   if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
     return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
+  // THE JOB IS OURS, asked before anything is claimed or torn down (audit v994 TL2). The job id
+  // arrives from the browser; a crafted call naming another company's job would write a bill and a
+  // document pointing at a job this company can't see (0340 refuses it in the database too).
+  if ((dest.type === "job" || dest.type === "photo") && !(await jobInOrg(supabase, ctx.orgId, dest.jobId)))
+    return { ok: false, error: "That job isn't in your book. Nothing was filed." };
 
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
@@ -824,12 +931,21 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // sheet 8802-1108330, photographed after the CED PDF went on the list). That document is LINKED
   // to the bill this makes, in the same press, and the button said so before it was pressed.
   let linkTo: { id: string; number: string }[] = [];
+  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5) is a warning, never a
+  // refusal: the row showed it with Same Purchase: Tie Them, a person pressed File It anyway, and
+  // the bill says so, so two bills with one number are known to have been decided, not missed.
+  let maybeSaid = "";
   if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && item.doc_number && !opts.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
     const found = matchesOnBooks(item, books);
     const onBooks = found.filter((m) => m.kind === "bill");
     if (onBooks.length) return { ok: false, error: sameNumberRefusal(onBooks) };
     linkTo = found.flatMap((m) => (m.kind === "supplier_invoice" ? [{ id: m.supplierInvoiceId, number: m.invoiceNumber }] : []));
+    const maybes = found.filter((m) => m.kind === "maybe_bill");
+    if (maybes.length)
+      maybeSaid = `\nA person filed this with a bill carrying the same number under another supplier spelling on the books: ${maybes
+        .map((m) => m.sentence.replace(/^Maybe already on the books: /, "").replace(/ It carries this number.*$/, ""))
+        .join("; ")}`;
   }
 
   // WHO DECIDED WHERE IT WENT (audit v994, tray F1). The tray's pick lived only in memory: the tray
@@ -864,17 +980,24 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     if (claimed) await supabase.from("organized_items").update({ status: "needs_review" }).eq("id", id).eq("org_id", ctx.orgId).select("id");
   };
 
-  const refused = await tearDownFiling(
-    supabase,
-    item,
-    "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
-  );
-  if (refused) {
+  const torn = await tearDownFiling(supabase, ctx.orgId, item, {
+    tail: "Void that invoice, or take its materials lines off, then file this again. Nothing was moved.",
+    then: "file this again",
+    nothing: "Nothing was moved.",
+  });
+  if (torn.refused !== null) {
     await release();
-    return { ok: false, error: refused.replace("so nothing was changed", "so this was not re-filed") };
+    return { ok: false, error: torn.refused };
   }
   const prevJob = item.job_id;
-  const lines = cleanLines(item.line_items);
+  // The lines as a person left them on the bill being replaced (TD3), else as the paper holds them.
+  const lines = torn.standing?.lines.length ? torn.standing.lines : cleanLines(item.line_items);
+  // DOES IT ADD UP? (audit v994, MR6.) The job-page reader has always compared the total it read
+  // with the lines under it and written the gap into the bill's notes; File It wrote the tray's
+  // total with no look. Flagged, never corrected, never a refusal: the row said it before the press.
+  const total = amountOf(item);
+  const check = isCost && total !== null ? reconcileReceipt(total, linesPointWithTotal(total, lines)) : null;
+  const checkSaid = check?.mismatch ? `\n\n${check.note}` : "";
 
   let documentId: string | null = null;
   let billId: string | null = null;
@@ -888,7 +1011,9 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // person who sees two bills with one number knows it was decided, not missed.
   const decided =
     (opts.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : "") +
-    (provenance?.note ? `\n${provenance.note}` : "");
+    maybeSaid +
+    (provenance?.note ? `\n${provenance.note}` : "") +
+    checkSaid;
   const billFacts = isCost
     ? {
         pricing_provisional: item.pricing_provisional === true,
@@ -900,9 +1025,12 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // A cost that did not land puts the paper back in the tray holding nothing, and says so, instead
   // of reading "Filed" over a cost that does not exist. A bill this press made a moment ago comes
   // down with it: nothing can have claimed it yet.
+  /** The copy this press put in the job's own folder (PR4), taken back out if the filing fails. */
+  let copyPath: string | null = null;
   const backToTray = async (message: string): Promise<Result> => {
     if (billId) await supabase.from("bills").delete().eq("id", billId).select("id");
     if (documentId) await supabase.from("documents").delete().eq("id", documentId).select("id");
+    if (copyPath) await removeCopy(supabase, copyPath, ctx.orgId);
     await supabase
       .from("organized_items")
       .update({ job_id: null, document_id: null, bill_id: null, petty_cash_id: null, status: "needs_review" })
@@ -932,6 +1060,20 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
             ? item.category
             : "Other";
     category = docCategory;
+    // A PHOTO OR A JOB PAPER GOES IN THE JOB'S OWN FOLDER (audit v994, PR4). Left in
+    // <org>/organize/, which only the office can open (0213), a panel photo filed to J-047 was
+    // missing from the tech's Photos tab on J-047 and Show On Portal refused it. The document
+    // points at a copy in <org>/<job>/; the paper keeps its original for the tray. A receipt or a
+    // bill stays where it is: it is the office's paper, with prices on it.
+    //
+    // PICTURES ONLY (review of wave 2, PR4). Every other paper kept on a job stays in the office's
+    // folder as before: a supplier's quote or price sheet read as "not a cost" is still the
+    // office's paper with prices on it, and the job folder is one every tech on the job can open.
+    // A plan or permit that belongs on the job goes up from the job's own Plans door.
+    if (item.file_url && ctx.orgId && (dest.type === "photo" || isPicture(item as PaperItem))) {
+      copyPath = await copyToJobFolder(supabase, ctx.orgId, dest.jobId, String(item.file_url));
+      if (!copyPath) return backToTray("The file couldn't be copied onto the job, so it is back in the tray. Try again.");
+    }
     const { data: doc } = await supabase
       .from("documents")
       .insert({
@@ -939,15 +1081,17 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         name: item.title,
         category: docCategory,
         kind: "other",
-        file_url: item.file_url,
+        file_url: copyPath ?? item.file_url,
         uploaded_by: ctx.userId,
       })
       .select("id")
       .single();
     documentId = doc?.id ?? null;
-    // For a photo the copy on the job IS the filing: a photo that did not land is not "Filed".
+    // For a photo or a paper kept on the job, the copy on the job IS the filing: one that did not
+    // land is not "Filed".
     if (dest.type === "photo" && !documentId)
       return backToTray("The photo didn't save on the job, so it is back in the tray. Try again.");
+    if (!isCost && !documentId) return backToTray("It didn't save on the job, so it is back in the tray. Try again.");
     // A receipt or bill filed to a job becomes an itemized billable cost on that job.
     if (dest.type === "job" && isCost && item.amount != null) {
       billId = await insertItemizedBill(
@@ -1078,6 +1222,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if ("proposal" in item)
     patch.proposal = {
       ...proposalOf(item),
+      // A person filed it again: why it came back (a deleted bill) is answered.
+      ...(dest.type === "unfiled" ? {} : { billDeleted: null }),
       filed: dest.type === "unfiled" ? null : { how: dest.type === "photo" ? "photo" : "bill", ...(provenance?.filed ?? {}) },
     } satisfies PaperProposal;
   const { data: wrote, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
@@ -1100,14 +1246,24 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
 }
 
 /**
- * UNDO A FILING (0295). The paper goes back to the tray exactly as it was read, and whatever the
- * filing made comes down under the same 0278 ceiling as every other teardown: a bill a live
- * invoice already bills cannot be un-filed, and the sentence says which invoice and what to do.
+ * UNDO A FILING (0295). The paper goes back to the tray, and whatever the filing made comes down
+ * under the same 0278 ceiling as every other teardown: a bill a live invoice already bills cannot
+ * be un-filed, and the sentence says which invoice and what to do.
  *
  *   · a TIE made nothing, so undoing one removes nothing but the link.
  *   · CED documents added from a PDF: the ones this paper ADDED come off the list, unless
  *     something already points at them (a bill covering it, a job a person set, or another paper
  *     tied to it), which are named and kept.
+ *   · a bill with a copy set aside as its duplicate REFUSES and names the copy (Erik, audit v994
+ *     TD2), and papers tied to the bill go back to the tray with it, named.
+ *   · THE CHOICES MADE ON THE BILL COME BACK WITH THE PAPER (Erik, audit v994 TD3: "Undo, then
+ *     refile, keeps the line choices made on the bill"). A tool line switched off and 60 of 500 wire
+ *     nuts billed are copied onto the paper's lines, so File It carries them again instead of
+ *     billing the tool and the whole box with nothing said.
+ *   · a receipt recorded as a cost ON THE JOB PAGE (TD1) takes its bill down and never the job's
+ *     own receipt; its link row goes, and Record as Cost on the job makes it a cost again. It never
+ *     lands in the tray, where File It would put a second copy of the receipt on the job.
+ *   · a task made from a note (PR2): the task comes off the list and the note comes back.
  */
 export async function undoPaperwork(id: string): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
@@ -1120,43 +1276,46 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
     return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
 
-  const kept: string[] = [];
+  let kept: string[] = [];
+  let torn: Extract<Teardown, { refused: null }> | null = null;
   if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
-    const { data: docs } = await supabase
-      .from("supplier_invoices")
-      .select("id, invoice_number, job_id")
-      .eq("org_id", ctx.orgId)
-      .in("invoice_number", p.filed.landed);
-    const ids = (docs ?? []).map((d: any) => String(d.id));
-    const { data: links } = ids.length
-      ? await supabase.from("bill_supplier_invoices").select("supplier_invoice_id").in("supplier_invoice_id", ids)
-      : { data: [] };
-    const linked = new Set((links ?? []).map((l: any) => String(l.supplier_invoice_id)));
-    // ANOTHER PAPER TIED TO ONE OF THEM. tied_supplier_invoice_id is ON DELETE SET NULL (0295), so
-    // deleting the document would leave that paper "filed", tied to nothing, gone from the tray
-    // without a word. It is kept and named like the rest.
-    const { data: tiedPapers } = ids.length
-      ? await supabase.from("organized_items").select("tied_supplier_invoice_id").eq("org_id", ctx.orgId).in("tied_supplier_invoice_id", ids)
-      : { data: [] };
-    for (const t of tiedPapers ?? []) if ((t as any)?.tied_supplier_invoice_id) linked.add(String((t as any).tied_supplier_invoice_id));
-    const removable = (docs ?? []).filter((d: any) => !linked.has(String(d.id)) && !d.job_id);
-    for (const d of docs ?? []) if (!removable.includes(d)) kept.push(String(d.invoice_number));
-    if (removable.length) {
-      const { error: delErr } = await supabase
-        .from("supplier_invoices")
-        .delete()
-        .eq("org_id", ctx.orgId)
-        .in("id", removable.map((d: any) => String(d.id)))
-        .select("id");
-      if (delErr) return { ok: false, error: `${dbError(delErr)} Nothing was undone.` };
-    }
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    if (down.error) return { ok: false, error: `${down.error} Nothing was undone.` };
+    kept = down.kept;
+  } else if (p.filed?.how === "task" && p.filed.taskId) {
+    // THE TASK A NOTE BECAME comes off the list first; a task already gone is simply gone.
+    let q = supabase.from("tasks").delete().eq("id", p.filed.taskId);
+    if (ctx.orgId) q = q.eq("org_id", ctx.orgId);
+    const { error: taskErr } = await q.select("id");
+    if (taskErr) return { ok: false, error: `${dbError(taskErr)} The task is still on the list, so nothing was undone.` };
   } else if (!tied) {
-    const refused = await tearDownFiling(
-      supabase,
-      item,
-      "Void that invoice, or take its materials lines off, then press Undo again. Nothing was undone.",
-    );
-    if (refused) return { ok: false, error: refused.replace("so nothing was changed", "so nothing was undone") };
+    const down = await tearDownFiling(supabase, ctx.orgId, item, {
+      tail: "Void that invoice, or take its materials lines off, then press Undo again. Nothing was undone.",
+      then: "press Undo again",
+      nothing: "Nothing was undone.",
+    });
+    if (down.refused !== null) return { ok: false, error: down.refused };
+    torn = down;
+  }
+
+  // A RECEIPT RECORDED AS A COST ON THE JOB PAGE (TD1): its bill is down, the job keeps its receipt,
+  // and the link row goes, so Record as Cost on that receipt makes it a cost again.
+  if (torn && (item.source === "job" || torn.keptDoc)) {
+    const { data: gone, error: goneErr } = await supabase.from("organized_items").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
+    if (goneErr || !gone?.length) {
+      reportError("organize:undoPaperwork.jobLink", goneErr ?? new Error("link row delete removed no rows"), { id });
+      return {
+        ok: true,
+        message: `Undone: its cost is off the job. The receipt stays on the job, but this row didn't clear; refresh before recording it again.${papersBackSaid(torn.papersBack)}`,
+      };
+    }
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+    return {
+      ok: true,
+      message: `Undone: its cost is off the job. The receipt stays on the job; press Record as Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
+    };
   }
 
   const type = paperTypeOfItem(item);
@@ -1166,9 +1325,20 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     bill_id: null,
     petty_cash_id: null,
     status: "needs_review",
-    // A business-cost filing replaced the category with its bucket; the paper gets its own back.
-    category: type === "receipt" || type === "bill" ? billCategoryFor({ doc_type: item.doc_type, category: null }) : item.category,
+    // A business-cost filing replaced the category with its bucket, and a task replaced it with
+    // "Task"; the paper gets its own back.
+    category:
+      type === "receipt" || type === "bill"
+        ? billCategoryFor({ doc_type: item.doc_type, category: null })
+        : p.filed?.how === "task"
+          ? (p.filed.category ?? "Note")
+          : item.category,
   };
+  // The bill's lines, as a person left them, ride back onto the paper (TD3).
+  const standing = torn?.standing ?? null;
+  const keptLines = standing?.lines.length ? standing.lines : null;
+  if (keptLines) patch.line_items = keptLines;
+  if (standing && standing.amount !== null) patch.amount = standing.amount;
   if ("tied_bill_id" in item) {
     patch.tied_bill_id = null;
     patch.tied_supplier_invoice_id = null;
@@ -1180,10 +1350,15 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
 
   revalidatePath("/organize");
   revalidatePath("/bills");
+  if (p.filed?.how === "task") revalidatePath("/tasks");
   if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
   return {
     ok: true,
-    message: `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.${kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""}`,
+    message:
+      `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
+      (keptLines ? keptChoicesSaid(keptLines) : "") +
+      papersBackSaid(torn?.papersBack ?? []) +
+      (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""),
   };
 }
 
@@ -1191,9 +1366,10 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
  * SAME PURCHASE: TIE THEM (0295). The paper's number is already on the books; a person says it is
  * the same purchase. Nothing new is written and no money moves: the paper is filed AGAINST the
  * existing BILL (its own column, never bill_id, so no teardown can ever delete what it points
- * at). Only a bill the number check actually found can be tied to: a bill with this number, or
- * the bill that already covers a CED document with it. A CED document no bill covers is not a
- * cost, so a tie to it would record nothing; File It links it instead.
+ * at). Only a bill the number check actually found can be tied to: a bill with this number, the
+ * bill that already covers a CED document with it, or a bill carrying the same long number under
+ * another spelling of the supplier (DB5's warning, which a person has now answered). A CED document
+ * no bill covers is not a cost, so a tie to it would record nothing; File It links it instead.
  */
 export async function tiePaperwork(id: string, target: { billId: string }): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
@@ -1204,14 +1380,16 @@ export async function tiePaperwork(id: string, target: { billId: string }): Prom
   if (item.status !== "needs_review" || item.bill_id) return { ok: false, error: "This is already filed. Undo it first." };
   const books = await loadBooks(supabase, ctx.orgId);
   const matches = matchesOnBooks(item, books);
-  const hit = matches.find((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill" && m.billId === target.billId);
+  const hit = matches.find(
+    (m): m is Extract<NumberMatch, { kind: "bill" | "maybe_bill" }> => (m.kind === "bill" || m.kind === "maybe_bill") && m.billId === target.billId,
+  );
   if (!hit) return { ok: false, error: "That bill doesn't carry this paper's number and supplier, so they weren't tied. Nothing changed." };
   const patch: Record<string, unknown> = {
     status: "filed",
     tied_bill_id: target.billId,
     tied_supplier_invoice_id: null,
     job_id: hit.jobId ?? null,
-    proposal: { ...proposalOf(item), filed: { how: "tie" } } satisfies PaperProposal,
+    proposal: { ...proposalOf(item), billDeleted: null, filed: { how: "tie" } } satisfies PaperProposal,
   };
   // Only while it is still waiting: a File It pressed a moment ago on another screen wins.
   const { data: back, error } = await supabase
@@ -1225,16 +1403,34 @@ export async function tiePaperwork(id: string, target: { billId: string }): Prom
   if (!back?.length) return { ok: false, error: "Nothing was tied. That paper was just filed somewhere else, isn't here any more, or this login can't change it." };
   revalidatePath("/organize");
   revalidatePath("/bills");
-  return { ok: true, message: `Tied. ${hit.sentence.replace(/^Already on the (books|CED documents list): /, "Filed against ")} Nothing new was added.` };
+  const against = hit.sentence
+    .replace(/^(Maybe )?[Aa]lready on the (books|CED documents list): /, "Filed against ")
+    .replace(/ It carries this number, but the supplier is spelled another way.*$/, "");
+  return { ok: true, message: `Tied. ${against} Nothing new was added.` };
 }
 
-/** Delete an organized item, everything it filed (doc row, overhead bill), and the stored file. */
-export async function deleteOrganizedItem(id: string): Promise<Result> {
+/**
+ * Delete an organized item, everything it filed, and the stored file. The same teardown Undo runs
+ * (audit v994, TD4): the CED documents a paper added come off the list like any other filing, a
+ * bill with a copy set aside against it refuses, and a receipt recorded as a cost on the job page
+ * keeps its receipt on the job, file included (TD1).
+ */
+export async function deleteOrganizedItem(id: string): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
+  const p = proposalOf(item);
+
+  // THE CED DOCUMENTS IT ADDED (TD4): the confirm says Delete removes whatever it filed, and a
+  // supplier-documents filing records what it added only on its proposal.
+  let kept: string[] = [];
+  if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    if (down.error) return { ok: false, error: `${down.error} Nothing was deleted.` };
+    kept = down.kept;
+  }
 
   // SAME CEILING, SAME ORDER (0278). A receipt a live invoice is already billing cannot be thrown
   // away, so the bill goes first and a refusal costs nothing: the photo, the copy on the job and
@@ -1242,38 +1438,23 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
   // the result and carried on, which deleted the picture and the row and left INV-069 charging
   // for a receipt nobody could open. The escape hatch is the invoice's, not ours: void it, or
   // take its materials lines off, and the same tap goes through.
-  if (item.bill_id) {
-    const { error: billErr } = await supabase.from("bills").delete().eq("id", item.bill_id).select("id");
-    if (billErr)
-      return {
-        ok: false,
-        error:
-          billClaimRefusal(
-            billErr,
-            "Void that invoice, or take its materials lines off, then delete this receipt. Nothing was deleted.",
-          ) ?? dbError(billErr),
-      };
-  }
-  if (item.document_id) {
-    const { error: docErr } = await supabase.from("documents").delete().eq("id", item.document_id).select("id");
-    if (docErr) return { ok: false, error: `${dbError(docErr)} The copy on the job is still there, so nothing else was deleted.` };
-  }
-  // The petty-cash disbursement this filing created goes with it (audit 9, 0202) — deleting the
-  // item used to orphan real spend in the drawer with nothing behind it.
-  if (item.petty_cash_id) {
-    const { error: pcErr } = await supabase.from("petty_cash").delete().eq("id", item.petty_cash_id).select("id");
-    if (pcErr)
-      return { ok: false, error: `${dbError(pcErr)} The petty cash entry is still in the drawer, so nothing else was deleted.` };
-  }
+  const torn = await tearDownFiling(supabase, ctx.orgId, item, {
+    tail: "Void that invoice, or take its materials lines off, then delete this receipt. Nothing was deleted.",
+    then: "delete this again",
+    nothing: "Nothing was deleted.",
+  });
+  if (torn.refused !== null) return { ok: false, error: torn.refused };
 
   // THE ROW BEFORE THE PHOTO, and the silent-write law on the row itself: a delete that matches
   // nothing is a 204 that reads exactly like success. Removing the file first meant a refused row
   // delete left an item sitting in the tray pointing at a picture that was already gone.
-  const { data: gone, error } = await supabase.from("organized_items").delete().eq("id", id).select("id");
+  const { data: gone, error } = await supabase.from("organized_items").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length)
     return { ok: false, error: "Nothing deleted. That item isn't here any more, or this login can't delete it." };
-  if (item.file_url) {
+  // The file goes too, unless it is the job's own receipt, which stays on the job (TD1).
+  const jobsOwnFile = item.source === "job" || (torn.keptDoc && torn.keptDoc.file_url === item.file_url);
+  if (item.file_url && !jobsOwnFile) {
     const { error: rmErr } = await supabase.storage.from("documents").remove([item.file_url]);
     // The item IS gone, which is what was asked for. A left-behind photo costs storage, not
     // money, so it goes to the ops log the daily sweep reads rather than a red box over a deed
@@ -1283,7 +1464,12 @@ export async function deleteOrganizedItem(id: string): Promise<Result> {
 
   revalidatePath("/organize");
   revalidatePath("/bills");
-  return { ok: true };
+  if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+  const said =
+    (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +
+    papersBackSaid(torn.papersBack) +
+    (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "");
+  return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }
 
 /** Save a typed/dictated note as a needs-review item (no photo). */
@@ -1395,6 +1581,15 @@ export async function unarchiveItem(id: string): Promise<Result> {
 }
 
 /**
+ * AI SUGGEST WRITES ONLY ONTO A PAPER STILL WAITING (review of wave 2, TD6). The paper is read
+ * before the model's 5-20 seconds; a paper filed in that time had its whole proposal replaced with
+ * the one read before, and the `filed` record inside it (what Undo takes down: the CED documents it
+ * added, the task it made) was gone. Every suggestion write is onlyIfStatus needs_review.
+ */
+const SUGGEST_MISSED =
+  "Nothing was suggested: this paper was filed or moved while AI Suggest was looking, or it isn't here any more. Refresh to see where it is.";
+
+/**
  * Let Claude look at a needs-attention item and SUGGEST where it goes: a job or a business-cost
  * bucket (written onto the row as a suggestion, never filed), or turn a to-do note into a task,
  * or keep a reference note. Returns what it did.
@@ -1412,16 +1607,18 @@ export async function unarchiveItem(id: string): Promise<Result> {
  *   · "nothing to suggest" is an answer, said as a plain note, never styled as an error.
  */
 export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, message: "Not signed in." };
-  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).maybeSingle();
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, message: ctx.error ?? "This action is staff-only." };
+  const supabase = ctx.supabase;
+  let iq = supabase.from("organized_items").select("*").eq("id", id);
+  if (ctx.orgId) iq = iq.eq("org_id", ctx.orgId);
+  const { data: item } = await iq.maybeSingle();
   if (!item) return { ok: false, message: "Item not found." };
 
-  const orgId = (item as { org_id?: string }).org_id ?? null;
-  const { markJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
+  const orgId = ctx.orgId ?? (item as { org_id?: string }).org_id ?? null;
+  const { markJobs: allJobs, pos, selfNames } = await loadMarkContext(supabase, orgId);
+  // The model is offered the OPEN jobs only; a finished job is filed to by a person's own pick.
+  const markJobs = allJobs.filter((j) => !j.closed);
   const jobLabelOf = (jobId: string) => {
     const j = markJobs.find((x) => x.id === jobId);
     return j ? `${j.job_number ?? ""}${j.name ? ` ${j.name}` : ""}`.trim() || "that job" : "that job";
@@ -1429,7 +1626,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
 
   // THE PAPER FIRST: the same exact rules the tray runs. Nothing is written; the tray shows the
   // pick from the same rules on every load.
-  const settled = rematchPaper(item as PaperItem, markJobs, pos, selfNames);
+  const settled = rematchPaper(item as PaperItem, allJobs, pos, selfNames);
   const sp = proposalOf(settled);
   const paperJob = sp.jobId && sp.jobFrom && !sp.jobConflict && markJobs.some((j) => j.id === sp.jobId) ? sp.jobId : null;
   if (paperJob) {
@@ -1546,9 +1743,9 @@ ${jobLines.join("\n") || "(none)"}`,
       const label = jobLabelOf(String(parsed.job_id));
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), guessJobId: String(parsed.job_id), bucket: null, bucketFrom: null, why: reason || null },
-      });
+      }, { onlyIfStatus: "needs_review" });
       if (sErr) return { ok: false, message: dbError(sErr) };
-      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
       revalidatePath("/bills");
       if (state === "picture")
@@ -1580,9 +1777,9 @@ ${jobLines.join("\n") || "(none)"}`,
         };
       const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, {
         proposal: { ...proposalOf(item), guessJobId: null, bucket: cat, bucketFrom: "ai", why: reason || null },
-      });
+      }, { onlyIfStatus: "needs_review" });
       if (sErr) return { ok: false, message: dbError(sErr) };
-      if (!sBack?.length) return { ok: false, message: "Nothing was suggested. That paper isn't here any more, or this login can't change it." };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
       revalidatePath("/bills");
       return { ok: true, message: `A guess: Business Cost, ${cat}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
@@ -1602,27 +1799,30 @@ ${jobLines.join("\n") || "(none)"}`,
           ok: true,
           message: `Suggested: ${said}. This paper can be money, so it stays here until a person files it or sets it aside. ${reason}`.trim(),
         };
-      if (action === "task") {
-        const title = String(parsed.task_title || item.title).slice(0, 200);
-        const category = ["office", "operations", "sales"].includes(parsed.task_category) ? parsed.task_category : "operations";
-        const { data: task, error: taskErr } = await supabase.from("tasks").insert({ title, category, status: "open", created_by: user.id }).select("id");
-        if (taskErr || !task?.length) return { ok: false, message: taskErr ? dbError(taskErr) : "The task didn't save, so this note stays here." };
-        let q = supabase.from("organized_items").update({ status: "filed", category: "Task" }).eq("id", id).eq("status", "needs_review");
-        if (orgId) q = q.eq("org_id", orgId);
-        const { data: moved, error: movedErr } = await q.select("id");
-        revalidatePath("/organize");
-        revalidatePath("/tasks");
-        if (movedErr || !moved?.length)
-          return { ok: true, message: `Made a task: "${title}". This note is still in the tray; archive it when you're done with it. ${reason}`.trim() };
-        return { ok: true, message: `Made a task: "${title}". ${reason}`.trim() };
-      }
-      let q = supabase.from("organized_items").update({ status: "filed" }).eq("id", id).eq("status", "needs_review");
-      if (orgId) q = q.eq("org_id", orgId);
-      const { data: kept, error: keptErr } = await q.select("id");
-      if (keptErr) return { ok: false, message: dbError(keptErr) };
-      if (!kept?.length) return { ok: false, message: "Nothing was kept. This paper was already moved, or this login can't change it." };
+      // SUGGEST PROPOSES, EVEN HERE (Erik, audit v994 PR2). This used to insert the task and file
+      // the note on its own, and the only message saying so vanished with the card on refresh, with
+      // no Undo. Now the proposal is kept on the row as a chip (Make Task: <title>, or Keep As
+      // Note), and a person's tap does it, through a door that says what it did and offers Undo.
+      const proposal: PaperProposal =
+        action === "task"
+          ? {
+              ...proposalOf(item),
+              suggestTask: {
+                title: String(parsed.task_title || item.title).slice(0, 200),
+                category: ["office", "operations", "sales"].includes(parsed.task_category) ? parsed.task_category : "operations",
+              },
+              suggestKeep: null,
+              why: reason || null,
+            }
+          : { ...proposalOf(item), suggestTask: null, suggestKeep: true, why: reason || null };
+      const { data: sBack, error: sErr } = await updateItemTolerant(supabase, id, orgId, { proposal }, { onlyIfStatus: "needs_review" });
+      if (sErr) return { ok: false, message: dbError(sErr) };
+      if (!sBack?.length) return { ok: false, message: SUGGEST_MISSED };
       revalidatePath("/organize");
-      return { ok: true, message: `Kept as a note in your archive. ${reason}`.trim() };
+      return {
+        ok: true,
+        message: `Suggested: ${said}. Tap ${action === "task" ? "Make Task" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
+      };
     }
     // NOTHING TO SUGGEST IS AN ANSWER, NOT A FAILURE (Erik, 2026-09-24): said as a plain note on the
     // row, never in the red box an error gets.
@@ -1633,4 +1833,77 @@ ${jobLines.join("\n") || "(none)"}`,
   } catch (e: any) {
     return { ok: false, message: e?.message ?? "Couldn't apply the suggestion." };
   }
+}
+
+/** Can this paper become a task or be kept as a note? Only paper that is not money, still waiting. */
+function noteRefusal(item: any): string | null {
+  if (!item) return "That paper isn't here any more.";
+  if (item.status !== "needs_review") return "This is already filed or kept. Undo it first.";
+  const state = readinessOf(item).state;
+  if (state === "picture") return "Answer What Is This? on the row first.";
+  if (state !== "keep") return "This paper can be money, so it stays here until a person files it or sets it aside.";
+  return null;
+}
+
+/**
+ * MAKE TASK: a person tapped AI Suggest's proposal (Erik, audit v994 PR2). The task is made, the
+ * note is filed as a Task, and the filing records the task, so Undo takes the task off the list and
+ * brings the note back. The note moves only while it is still waiting; if it moved meanwhile, the
+ * task this press made comes back off, so one tap never leaves a task and a note both standing.
+ */
+export async function makeTaskFromPaper(id: string): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  const no = noteRefusal(item);
+  if (no) return { ok: false, error: no };
+  const p = proposalOf(item);
+  const title = String(p.suggestTask?.title || item.title || "Follow up").slice(0, 200);
+  const category = p.suggestTask?.category ?? "operations";
+  const { data: task, error: taskErr } = await supabase
+    .from("tasks")
+    .insert({ title, category, status: "open", created_by: ctx.userId })
+    .select("id")
+    .single();
+  if (taskErr || !task?.id) return { ok: false, error: taskErr ? `${dbError(taskErr)} No task was made.` : "The task didn't save, so this note stays here." };
+  const { data: moved, error: movedErr } = await supabase
+    .from("organized_items")
+    .update({
+      status: "filed",
+      category: "Task",
+      proposal: { ...p, filed: { how: "task", taskId: String(task.id), category: item.category ?? null } } satisfies PaperProposal,
+    })
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
+    .select("id");
+  if (movedErr || !moved?.length) {
+    await supabase.from("tasks").delete().eq("id", task.id).select("id");
+    return { ok: false, error: movedErr ? `${dbError(movedErr)} No task was made.` : "This note was just moved somewhere else, so no task was made." };
+  }
+  revalidatePath("/organize");
+  revalidatePath("/tasks");
+  return { ok: true, message: `Made a task: "${title}". The note is filed with it.` };
+}
+
+/** KEEP AS NOTE: a person tapped AI Suggest's proposal (PR2). Filed as a note; Undo brings it back. */
+export async function keepAsNote(id: string): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  const no = noteRefusal(item);
+  if (no) return { ok: false, error: no };
+  const { data: kept, error } = await supabase
+    .from("organized_items")
+    .update({ status: "filed", proposal: { ...proposalOf(item), filed: { how: "note" } } satisfies PaperProposal })
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!kept?.length) return { ok: false, error: "Nothing was kept. This paper was just moved, or this login can't change it." };
+  revalidatePath("/organize");
+  return { ok: true, message: "Kept as a note. Find it in the Archive." };
 }

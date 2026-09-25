@@ -147,6 +147,12 @@ export interface OrgSettings {
    * `checkout.session.async_payment_failed` to the connected-accounts destination in Stripe, and
    * after confirming ACH is switched on for the account at all. Same shape as the Tap to Pay
    * entitlement: the capability lives somewhere this app cannot read, so a person confirms it.
+   *
+   * AND NOT BEFORE 0338 IS APPLIED (audit v994 BK1-BK3, Erik: stays OFF until they ship). Since
+   * then this switch is enforced where the money starts (/api/pay refuses ?method=bank when it is
+   * off, not only /i hiding the button), a debit on its way is marked pending
+   * (pending_bank_transfers) so /i, /api/pay and the reminders do not invite a second payment,
+   * and a cleared debit is booked as 'ach', not 'card'.
    */
   bank_transfer_enabled: boolean;
 

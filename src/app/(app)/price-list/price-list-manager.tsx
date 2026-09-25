@@ -21,7 +21,7 @@ import { ImportCsvModal } from "./import-preview";
 import { PriceCell } from "./price-cell";
 import { addItemHasDraft, costLooksLikeCode, patchForEdit, rowView, undoPatch, type InlineField, type InlinePatch, type PriceItem } from "./price-list-math";
 import { ItemSheet } from "./item-sheet";
-import { optionName, type ItemOption } from "./item-options-math";
+import { deleteLiveVendorsRefusal, deleteVendorsClause, optionName, type ItemOption } from "./item-options-math";
 
 /** A table row: the item plus what the table computes from it. A type alias (not an interface)
  *  so it satisfies sortRows' Record<string, unknown> — the sort key is looked up by name. */
@@ -263,9 +263,15 @@ export function PriceListManager({
     const inKits = item.kits?.length
       ? ` It is in ${item.kits.length} kit${item.kits.length === 1 ? "" : "s"} (${item.kits.slice(0, 3).join(", ")}${item.kits.length > 3 ? "…" : ""}) — those lines will freeze at today's price.`
       : "";
-    if (!confirm(`Delete "${item.description}" for good? Archive keeps it findable — delete does not.${inKits}`)) return;
+    // The vendors under it (VP5): while the item is live and so is a vendor, Archive is the door;
+    // say so BEFORE the confirm, not after it. Otherwise the confirm names the vendor prices that
+    // go with it, and the server deletes only if it names as many as the table holds.
+    const vendors = optionsByItem?.[item.id] ?? [];
+    const liveVendors = vendors.filter((o) => !o.archived);
+    if (!item.archived && liveVendors.length) return toast(deleteLiveVendorsRefusal(liveVendors), "error");
+    if (!confirm(`Delete "${item.description}" for good? Archive keeps it findable — delete does not.${inKits}${deleteVendorsClause(vendors)}`)) return;
     markSaving(item.id, true);
-    const res = await deletePriceItem(item.id);
+    const res = await deletePriceItem(item.id, { vendorPricesNamed: vendors.length });
     markSaving(item.id, false);
     if (!res.ok) return toast(res.error ?? "Couldn't delete.", "error");
     setLocal((prev) => prev.filter((i) => i.id !== item.id));

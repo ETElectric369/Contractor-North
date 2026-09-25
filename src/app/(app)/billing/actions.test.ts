@@ -37,6 +37,7 @@ import {
   setInvoiceDescription,
   setInvoiceTitle,
   setInvoiceDueDate,
+  settleUp,
 } from "./actions";
 
 // ── A scriptable PostgREST fake, ROUTED not queued ────────────────────────────────────────────
@@ -56,7 +57,11 @@ type Reply = { data?: any; error?: any } | undefined;
 
 function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
   const answer = (q: Q) => {
-    const r = route(q);
+    let r = route(q);
+    // upsertImportedItems' own read of the lines on each side of the RPC (a present line is never
+    // dropped by a stale tombstone; what it removes is named). Routed here once for every test that
+    // doesn't say otherwise: nothing on the invoice, so nothing stale and nothing removed.
+    if (r === undefined && q.table === "invoice_items" && q.verb === "select" && q.cols === "id, import_key, description, line_total") r = { data: [] };
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
     return { data: r.data ?? null, error: r.error ?? null };
   };
@@ -739,7 +744,7 @@ const B_NEW = "b1000000-0000-4000-8000-000000000002";
  * and a new $323.71 bill. Otherwise INV-080, a contract draw with one hand line. `schedule` puts a
  * payment schedule on the job. The claims move as the RPC writes, so the before/after measure is real.
  */
-function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: number; oldBillLine?: number }) {
+function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: number; oldBillLine?: number; laborQty?: string }) {
   const drawId = opts.actuals ? OPEN_DRAW : CONTRACT_DRAW;
   const number = opts.actuals ? "INV-078" : "INV-080";
   const landed = new Set<string>();
@@ -798,7 +803,9 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
     if (q.table === "bill_line_items") return { data: [] };
     if (q.table === "invoice_items" && q.verb === "select") {
       if (q.cols === "import_source") return { data: opts.actuals ? [{ import_source: "labor" }, { import_source: "costs" }] : [{ import_source: null }] };
-      if (q.cols === "source_ids, import_key, edited") return { data: opts.actuals ? [{ import_key: "labor:p-1", edited: true, source_ids: [TE_OLD] }] : [] };
+      if (q.cols === "id, source_ids, import_key, edited, quantity, unit_price, unit, description") {
+        return { data: opts.actuals ? [{ id: "li-1", import_key: "labor:p-1", edited: true, source_ids: [TE_OLD], quantity: opts.laborQty ?? "8.00", unit_price: "100.00", unit: "hr", description: "Labor - Erik" }] : [] };
+      }
       if (q.cols.includes("invoices!inner")) return { data: [] };
       if (q.cols.includes("import_key, edited")) return { data: drawItems().map((i) => ({ ...i, edited: false })) };
       if (q.cols === "line_total") return { data: [] };
@@ -810,10 +817,16 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
         return { data: opts.actuals ? [{ import_key: `bill:${B_OLD}`, source_ids: [B_OLD], line_total: opts.oldBillLine ?? 115, edited: false }] : [] };
       }
     }
+    // THE JOIN (Erik's INV-078 rule): the new hours onto the edited line, checked.
+    if (q.table === "invoice_items" && q.verb === "update") {
+      for (const id of q.payload?.source_ids ?? []) landed.add(id);
+      return { data: [{ id: "li-1" }] };
+    }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
     if (q.table === "rpc:upsert_imported_invoice_items") {
-      for (const r of q.payload?.p_rows ?? []) for (const id of r.source_ids ?? []) landed.add(id);
+      // The RPC keeps an edited line as it is, claims included: only the costs offer lands here.
+      if (q.payload?.p_source !== "labor") for (const r of q.payload?.p_rows ?? []) for (const id of r.source_ids ?? []) landed.add(id);
       return { data: { inserted: 1, updated: 0, kept_edited: q.payload?.p_source === "labor" ? 1 : 0, removed: 0 } };
     }
     return undefined;
@@ -821,7 +834,7 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
 }
 
 describe("J-011 — a draw built from actuals takes new work; a contract draw refuses it (server)", () => {
-  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours beside the negotiated line, says what it pulled", async () => {
+  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
     spies.reportError = () => {};
     state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
     const res = await createProgressReportInvoice(JOB, "progress");
@@ -836,13 +849,26 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     const rpcs = calls.filter((c) => c.table === "rpc:upsert_imported_invoice_items");
     expect(rpcs.every((c) => c.payload.p_invoice_id === OPEN_DRAW)).toBe(true);
     const labor = rpcs.find((c) => c.payload.p_source === "labor")!;
-    // The new 6-hour shift rides its own line beside the edited one, at Erik's bill rate.
-    const overflow = labor.payload.p_rows.find((r: any) => r.import_key === "labor:p-1:2");
-    expect(overflow).toMatchObject({ quantity: 6, unit_price: 115, source_ids: [TE_NEW] });
+    // No second line for Erik: the new 6-hour shift JOINS his edited line, at its own $100.
+    expect(labor.payload.p_rows.map((r: any) => r.import_key)).toEqual(["labor:p-1"]);
+    const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
+    expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
     const costs = rpcs.find((c) => c.payload.p_source === "costs")!;
     expect(costs.payload.p_rows.flatMap((r: any) => r.source_ids)).toEqual([B_NEW]); // the old bill is not offered again
     expect(costs.payload.p_rows[0].unit_price).toBe(372.27); // $323.71 at the customer's 15%
-    expect(res.note).toBe("Pulled 6 hours and 1 bill into INV-078.");
+    expect(res.note).toBe("Pulled 6 hours and 1 bill into INV-078. Added 6 h to Labor - Erik at $100.");
+  });
+
+  it("a labor line bumped by hand past its entries takes no new hours: nothing joins, and the office is told (decision 1)", async () => {
+    spies.reportError = () => {};
+    // The line reads 11 h over the 8 h shift it holds - 3 h hand-set, like INV-069's "Labor - Erik".
+    state.client = fakeSupabase(openDrawRoute({ actuals: true, laborQty: "11.00" }), calls);
+    const res = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(res.ok).toBe(true);
+    expect(calls.some((c) => c.table === "invoice_items" && c.verb === "update")).toBe(false);
+    expect((res as any).stats.warnings).toContain(
+      "Labor - Erik shows 3 h more than the time entries it holds, so Erik's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Labor from Timecards again",
+    );
   });
 
   it("an open CONTRACT draw is named with its door, not a dead end, and nothing is written", async () => {
@@ -919,5 +945,75 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     const res: any = await importQuoteItemsIntoInvoice(OPEN_DRAW);
     expect(res.ok).toBe(false);
     expect(String(res.error)).toMatch(/estimate/);
+  });
+});
+
+/**
+ * THE SAME TAP, TWICE, IS ONE PAYMENT (review of Connected North Phase 1).
+ *
+ * J-052: INV-074 sent weeks ago, open for $624.49. The job header's Record Payment lands the cash on
+ * it; the answer is lost on truck LTE and the tech taps again. INV-074 is paid now, so it is no
+ * longer "open" - without the guard the retry minted a second $624.49 bill and recorded the cash
+ * twice. And a $300 part payment retried would put $300 on INV-074 twice.
+ */
+describe("settleUp — a retried Record Payment on the job's open bill records once, mints nothing", () => {
+  const J052 = "0520aaaa-0000-4000-8000-000000000052";
+  const INV074 = "0740aaaa-0000-4000-8000-000000000074";
+  function jobPayRoute() {
+    const payments: any[] = [];
+    const paid = () => payments.reduce((s, p) => s + p.amount, 0);
+    const route = (q: Q): Reply => {
+      if (q.table === "jobs") return { data: { id: J052, name: "Panel swap", job_number: "J-052", customer_id: "cust-1", inquiry_id: null } };
+      if (q.table === "invoices" && q.verb === "select") {
+        if (q.cols === "id, created_at, total, amount_paid") return { data: null }; // INV-074 is weeks old
+        if (q.cols === "id, invoice_number, status, total, amount_paid") {
+          return { data: [{ id: INV074, invoice_number: "INV-074", status: paid() >= 624.49 ? "paid" : "sent", total: 624.49, amount_paid: paid() }] };
+        }
+        if (q.cols.startsWith("id, org_id, invoice_number, total, amount_paid")) {
+          return { data: { id: INV074, org_id: "org-1", invoice_number: "INV-074", total: 624.49, amount_paid: paid(), customers: { name: "J" } } };
+        }
+      }
+      if (q.table === "payments" && q.verb === "select" && q.cols === "id, invoice_id") {
+        return { data: payments.length ? { id: "pay-1", invoice_id: INV074 } : null }; // same person, amount, method, <5 min
+      }
+      if (q.table === "payments" && q.verb === "insert") { payments.push(q.payload); return { data: null }; }
+      return undefined;
+    };
+    return { route, payments };
+  }
+
+  it("full payment: the retry is answered as done, nothing minted, one payment", async () => {
+    const { route, payments } = jobPayRoute();
+    const fallback = (q: Q): Reply => route(q) ?? { data: q.single ? null : [] };
+    state.client = fakeSupabase(fallback, calls);
+    const input = { source: "job" as const, id: J052, amount: 624.49, method: "Cash" };
+    const first = await settleUp(input);
+    const second = await settleUp(input);
+    expect(first).toMatchObject({ ok: true, invoiceId: INV074 });
+    expect(second).toMatchObject({ ok: true, invoiceId: INV074 });
+    expect(payments).toHaveLength(1);
+    expect(calls.some((c) => c.table === "invoices" && c.verb === "insert")).toBe(false);
+  });
+
+  it("part payment: $300 retried is $300 once", async () => {
+    const { route, payments } = jobPayRoute();
+    state.client = fakeSupabase((q) => route(q) ?? { data: q.single ? null : [] }, calls);
+    const input = { source: "job" as const, id: J052, amount: 300, method: "Cash" };
+    await settleUp(input);
+    const again = await settleUp(input);
+    expect(again).toMatchObject({ ok: true, invoiceId: INV074 });
+    expect(payments.map((p) => p.amount)).toEqual([300]);
+  });
+
+  it("a lost payments read records nothing and says so", async () => {
+    const { route, payments } = jobPayRoute();
+    state.client = fakeSupabase(
+      (q) => (q.table === "payments" && q.verb === "select" && q.cols === "id, invoice_id" ? { error: { message: "timeout" } } : route(q) ?? { data: q.single ? null : [] }),
+      calls,
+    );
+    const res = await settleUp({ source: "job", id: J052, amount: 300, method: "Cash" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/nothing was recorded/);
+    expect(payments).toHaveLength(0);
   });
 });

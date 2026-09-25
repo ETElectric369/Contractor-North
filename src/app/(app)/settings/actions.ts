@@ -906,7 +906,15 @@ export async function removeMember(id: string): Promise<Result> {
  *  `hourlyRate` UNDEFINED MEANS "LEAVE THE PAY RATE ALONE" (0286). It used to be written on every
  *  save as `pay || null`, which for the owner's row (no Pay box any more, only Bill) would have
  *  nulled profiles.hourly_rate, the column his bill rate falls back to (0054). And an owner has no
- *  pay rate to set at all: he is paid by owner's draw, so a pay figure for him is refused. */
+ *  pay rate to set at all: he is paid by owner's draw, so a pay figure for him is refused.
+ *
+ *  AN OWNER MAY HAVE NO BILL RATE OF HIS OWN (Erik, audit v994 MR7). Clearing his Bill box means
+ *  "bill my hours at the customer's level rate, or the default labor rate" - never his old wage.
+ *  profile_pay reads an owner's bill rate as coalesce(bill_rate, hourly_rate) (0286), so clearing
+ *  bill_rate alone left the box showing $0 with a green check while every draft billed him at the
+ *  stored wage ($120 for Chris, above his own $110). So an owner's cleared bill rate clears that
+ *  stored wage with it, here on the server where every door passes: after 0286 it is read by
+ *  nothing else (the view reads an owner's pay as 0), and a pay figure for him is still refused. */
 export async function updateMemberRate(
   id: string,
   hourlyRate: number | null | undefined,
@@ -922,16 +930,27 @@ export async function updateMemberRate(
   // Same-org + row check (audit v921 silent-write).
   const { data: rt } = await supabase.from("profiles").select("org_id, role, full_name").eq("id", id).maybeSingle();
   if (!rt || (rt as { org_id?: string | null }).org_id !== me.org_id) return { ok: false, error: "Member not found." };
-  if (hourlyRate !== undefined && (rt as { role?: string | null }).role === "owner") {
+  const isOwner = (rt as { role?: string | null }).role === "owner";
+  // Only a real figure is a pay rate. null is "no stored wage", which is what an owner has anyway.
+  if (hourlyRate !== undefined && hourlyRate !== null && isOwner) {
     const who = String((rt as { full_name?: string | null }).full_name ?? "").trim() || "The owner";
     return { ok: false, error: `${who} is the owner and is paid by owner's draw, so there is no pay rate to set. The bill rate still applies.` };
   }
+  const clean = (n: number | null | undefined) => (n == null ? n : Number.isFinite(Number(n)) && Number(n) > 0 ? Number(n) : null);
 
   const patch: Record<string, unknown> = {};
-  if (hourlyRate !== undefined) patch.hourly_rate = hourlyRate;
-  if (billRate !== undefined) patch.bill_rate = billRate;
+  if (hourlyRate !== undefined) patch.hourly_rate = clean(hourlyRate);
+  if (billRate !== undefined) patch.bill_rate = clean(billRate);
+  // MR7: an owner's cleared bill rate takes the old stored wage with it, so billing falls to the
+  // customer's level or the default rate and never back to that wage (see the header).
+  if (isOwner && billRate !== undefined && patch.bill_rate === null) patch.hourly_rate = null;
   if (!Object.keys(patch).length) return { ok: true };
-  const { data: wroteR, error } = await supabase.from("profiles").update(patch).eq("id", id).select("id");
+  const { data: wroteR, error } = await supabase
+    .from("profiles")
+    .update(patch)
+    .eq("id", id)
+    .eq("org_id", me.org_id)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteR?.length) return { ok: false, error: "That didn't save - reload and try again." };
   revalidatePath("/team");

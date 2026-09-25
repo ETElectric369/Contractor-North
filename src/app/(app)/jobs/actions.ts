@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/import-extras";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -20,9 +21,11 @@ import { shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
+import { finishedWithWorkOffBill, finishWouldLeaveOffBill } from "@/lib/finish-job-words";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { restampLotsForBill } from "@/lib/stock-ledger";
+import { papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -131,6 +134,11 @@ type PulledIn = {
   count: number;
   /** Importers that FAILED (a DB error — never a "nothing to pull" no-op). */
   missed: string[];
+  /** What the importers said besides their counts (audit v994 SI5): warnings a person must read
+   *  before sending (INV-074's edited tax row, a line taken off, hours that could not go on), and
+   *  notes (a return held, a counter preview, and labor's joins - "Added 6 h to Labor - Erik Taylor
+   *  at $100", Erik's INV-078 rule). Never swallowed: every door says them (importExtras). */
+  results: ImportOutcomeLike[];
 };
 
 /**
@@ -147,10 +155,11 @@ async function pullNewWorkInto(
   want: { labor: boolean; costs: boolean; changeOrders: boolean },
   markup: number,
 ): Promise<PulledIn> {
-  const out: PulledIn = { parts: [], count: 0, missed: [] };
-  type Outcome = { ok: boolean; empty?: boolean; error?: string; stats?: { pulled_in: number } };
+  const out: PulledIn = { parts: [], count: 0, missed: [], results: [] };
+  type Outcome = { ok: boolean; empty?: boolean; emptyNote?: string; error?: string; stats?: { pulled_in: number; warnings?: string[]; notes?: string[] } };
   const fail = (e: unknown): Outcome => ({ ok: false, error: String((e as { message?: unknown })?.message ?? e), empty: false });
   const take = (r: Outcome, noun: [string, string], what: string, tag: string) => {
+    out.results.push(r);
     if (r.ok) {
       // pulled_in counts SOURCE ROWS newly on the invoice (a refreshed line whose claims did not
       // change is not "pulled in") — the honest number, not the RPC's lines-touched.
@@ -290,28 +299,63 @@ export async function createInvoiceForJob(
   // landing on. So once the quote's invoice has gone out, the next invoice on this job starts
   // blank; what is new on a quoted job is its approved change orders (and actuals only when a
   // caller deliberately asks), never the quote lines a second time.
-  const quoteBilled = !!quote && standards.some((r) => r.quote_id === quote.id);
+  //
+  // THE ESTIMATE'S INVOICE IS REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tao Zhu
+  // J-002). This used to count only STANDARD invoices as the quote's, so on Tao's job - whose
+  // estimate was billed as a DEPOSIT draw (INV-00006, $10,000, paid) - it read the quote as never
+  // billed, asked createInvoiceFromQuote, got the paid deposit back, and "New Invoice" opened it:
+  // a paid bill reopened as the place for new work. Any non-void invoice made from the estimate
+  // means it is billed; what is new goes on the next bill (below).
+  let quoteBilled = !!quote && standards.some((r) => r.quote_id === quote.id);
+  if (quote && !quoteBilled) {
+    const { data: fromEstimate, error: estErr } = await supabase.from("invoices").select("id").eq("quote_id", quote.id).neq("status", "void").limit(1);
+    if (estErr) return { ok: false, error: dbError(estErr) };
+    quoteBilled = (fromEstimate ?? []).length > 0;
+  }
   const fromQuote = !!quote && !quoteBilled;
 
   // A JOB BILLED WITH DRAWS TAKES ITS NEXT BILL AS A DRAW. With no draft open and a draw already on
   // the job, a standard invoice is refused (H4, blockStandardCreateOnDrawJob) — so "Create Invoice
-  // for $X" on the Overview card after INV-078 went out would be the same dead door. On a job that
-  // bills its actuals (no live quote), the next bill is a progress report of exactly the unclaimed
-  // work, which is what the card priced. A quoted job keeps the refusal: its draws are the contract.
+  // for $X" on the Overview card after INV-078 went out would be the same dead door. The next bill
+  // is a progress report of exactly the unclaimed work, which is what the card priced: on a job with
+  // no live quote, and on a quoted job whose draws already bill its actuals (Tao: INV-00028 was a
+  // T&M report, so Sept 8-9's 19.5 h go on the next one, netting the deposit). A quoted job whose
+  // draws are all slices of the contract is not billed from actuals behind anyone's back: it is told
+  // the door (Progress Payment), with the latest draw to open.
   // A STANDARD draft beside a live draw is not a door either (every importer refuses content on it -
   // H4), so it doesn't stop this: the draw door is the one that works (openDraftOnJob agrees, and
   // the card offers "Create Invoice", not "Add to" that draft). The draw door still refuses beside
   // a standard draft that carries content, in the shared words that name it.
-  if (!quote) {
-    const { data: liveDraw, error: drawErr } = await supabase
+  {
+    const { data: liveDraws, error: drawErr } = await supabase
       .from("invoices")
-      .select("id")
+      .select("id, invoice_number")
       .eq("job_id", jobId)
       .neq("status", "void")
       .in("invoice_kind", [...DRAW_KINDS])
-      .limit(1);
+      .order("created_at", { ascending: false });
     if (drawErr) return { ok: false, error: dbError(drawErr) };
-    if ((liveDraw ?? []).length) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
+    const draws = (liveDraws ?? []) as { id: string; invoice_number: string | null }[];
+    if (draws.length) {
+      let billsActuals = !quote;
+      if (!billsActuals) {
+        const { data: actualLines, error: linesErr } = await supabase
+          .from("invoice_items")
+          .select("id")
+          .in("invoice_id", draws.map((d) => d.id))
+          .in("import_source", ["labor", "costs"])
+          .limit(1);
+        if (linesErr) return { ok: false, error: dbError(linesErr) };
+        billsActuals = (actualLines ?? []).length > 0;
+      }
+      if (billsActuals) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
+      const latest = draws[0];
+      return {
+        ok: false,
+        error: `This job bills its estimate with progress payments${latest.invoice_number ? ` (latest: ${latest.invoice_number})` : ""}, so a new invoice isn't the door. Bill the next part with Progress Payment on the job's Invoices tab.`,
+        ...(latest.invoice_number ? { billedOn: { id: latest.id, number: latest.invoice_number } } : {}),
+      };
+    }
   }
 
   // THE contract-vs-actuals switch. FinishJobButton already initialised its toggles to
@@ -346,11 +390,14 @@ export async function createInvoiceForJob(
     // never reads as "it made a new one".
     const label = draft.invoice_number ?? "the draft you already started";
     const pulled = await pullNewWorkInto(supabase, jobId, draft.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
+    const extras = importExtras(pulled.results);
+    const said = extrasSentence(extras);
+    const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ok: true, id: draft.id, partial: true, importWarning: `Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.` };
+      return { ok: true, id: draft.id, partial: true, importWarning: `Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
     }
     if (pulled.count > 0) {
-      return { ok: true, id: draft.id, importWarning: `Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.` };
+      return { ok: true, id: draft.id, ...heads, importWarning: `Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.${said}` };
     }
     // Nothing landed — but "nothing new" is decided from the FULL picture, never from the parts
     // the caller asked for (toggles off) or the rows an edited line holds back. If work is still
@@ -364,9 +411,11 @@ export async function createInvoiceForJob(
     return {
       ok: true,
       id: draft.id,
-      importWarning: stillOff.length
-        ? `Opened ${label} — still unbilled on this job: ${joinAnd(stillOff)}.`
-        : `Opened ${label} — nothing new to pull in since.`,
+      ...heads,
+      importWarning:
+        (stillOff.length
+          ? `Opened ${label} — still unbilled on this job: ${joinAnd(stillOff)}.`
+          : `Opened ${label} — nothing new to pull in since.`) + said,
     };
   }
 
@@ -425,8 +474,11 @@ export async function createInvoiceForJob(
   // straight from the field instead of having to be back at a desk with the data entered.
   if (res.ok && res.id) {
     const pulled = await pullNewWorkInto(supabase, jobId, res.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
+    const extras = importExtras(pulled.results);
+    const said = extrasSentence(extras);
+    const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.` };
+      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
     }
     if (prior) {
       const { data: made } = await supabase
@@ -454,25 +506,35 @@ export async function createInvoiceForJob(
         }
         revalidateMoney();
         revalidatePath(`/jobs/${jobId}`);
-        return nothingNewRefusal(prior, priorLabel, !!quote);
+        // A return held back is still money owed the customer: the shell goes, the sentence stays.
+        const refusal = nothingNewRefusal(prior, priorLabel, !!quote);
+        if (said && refusal.error) refusal.error += said;
+        return refusal;
       }
       if (landed === 0) {
         // Blank on purpose. The work the caller left off is named with its door, so the empty
         // draft can never read as "nothing new" while the Overview card shows a figure.
         return {
           ...res,
-          importWarning: leftOff.length
-            ? `Started ${newNumber} empty, as asked — still unbilled since ${priorLabel}: ${joinAnd(leftOff)}.`
-            : `Started ${newNumber} empty, as asked.`,
+          ...heads,
+          importWarning:
+            (leftOff.length
+              ? `Started ${newNumber} empty, as asked — still unbilled since ${priorLabel}: ${joinAnd(leftOff)}.`
+              : `Started ${newNumber} empty, as asked.`) + said,
         };
       }
       return {
         ...res,
+        ...heads,
         importWarning:
           `Started ${newNumber} for what's new since ${priorLabel} — ${landed} ${landed === 1 ? "line" : "lines"} pulled in.` +
-          (leftOff.length ? ` Left off, as asked: ${joinAnd(leftOff)}.` : ""),
+          (leftOff.length ? ` Left off, as asked: ${joinAnd(leftOff)}.` : "") +
+          said,
       };
     }
+    // The first invoice on the job: its count is on the page, but what the importers flagged is
+    // not, so it is said here too (audit v994 SI5).
+    if (said) return { ...res, ...heads, importWarning: said.trim() };
   }
   return res;
 }
@@ -628,7 +690,24 @@ export async function finishJob(
       };
     }
     // No open draft (or it couldn't be read - then no draft is named, only the door that is there).
-    return { ok: true, id: draws[0].id, speak: "Job finished. It bills with progress payments — bill what's left with Progress Payment → Final on the job." };
+    // THE WORK THAT IS NOT ON A BILL IS NAMED (Tao J-002: 19.5 h after INV-00028). Finishing bills
+    // nothing here, so hours and receipts no bill claims would drop off every screen unsaid; the
+    // sentence counts them from the Unbilled card's own arithmetic, as a warning every surface relays.
+    const unbilled = await unbilledWorkForJob(supabase, jobId).catch((e) => {
+      reportError("finishJob.unbilled", e, { jobId });
+      return null;
+    });
+    const off = unbilled?.schemaReady ? finishedWithWorkOffBill(unbilled) : null;
+    if (off) return { ok: true, id: draws[0].id, speak: `Job finished. ${off}`, warning: off };
+    if (!unbilled) {
+      return {
+        ok: true,
+        id: draws[0].id,
+        speak: "Job finished. It bills with progress payments.",
+        warning: "Couldn't check just now whether any hours or bills are still off a bill - look at the job's Invoices tab, and bill what's left with Progress Payment → Final.",
+      };
+    }
+    return { ok: true, id: draws[0].id, speak: "Job finished. Every hour and bill on it is already on a progress payment." };
   }
 
   // createInvoiceForJob does the imports (labor at rate, materials WITH org markup), honoring the
@@ -673,6 +752,54 @@ export async function finishJob(
     speak: inv.importWarning && !inv.partial ? `Job finished. ${inv.importWarning}` : "Job finished — its draft invoice is ready to review.",
     ...(inv.partial && inv.importWarning ? { warning: inv.importWarning } : {}),
   };
+}
+
+/** What the Finish Job modal says BEFORE the press (Connected North Phase 1). */
+export type FinishJobPreview = {
+  ok: boolean;
+  error?: string;
+  /** The job bills with progress payments (a live deposit / progress / final). */
+  drawBilled?: boolean;
+  /** …on a payment schedule. */
+  schedule?: boolean;
+  /** Its open draft draw, and whether new work can go on it (an actuals report can). */
+  openDraft?: { number: string | null; refreshable: boolean } | null;
+  /** The amber line: work no bill claims that finishing would leave off ("Not billed yet: 19.5 h ($2,437.50)…"). */
+  offBill?: string | null;
+};
+
+/**
+ * THE TRUTH AT THE BUTTON. Read when the Finish modal opens, from the same reads finishJob acts on,
+ * so the sentence before the press and the one after it cannot disagree. Read-only.
+ */
+export async function finishJobPreview(jobId: string): Promise<FinishJobPreview> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const [drawsRead, schedRead] = await Promise.all([
+    supabase.from("invoices").select("id").eq("job_id", jobId).neq("status", "void").in("invoice_kind", [...DRAW_KINDS]).limit(1),
+    supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1),
+  ]);
+  if (drawsRead.error || schedRead.error) return { ok: false, error: "Couldn't read this job's bills just now." };
+  const drawBilled = (drawsRead.data ?? []).length > 0;
+  if (!drawBilled) return { ok: true, drawBilled: false, schedule: false, openDraft: null, offBill: null };
+  const schedule = (schedRead.data ?? []).length > 0;
+  const draft = await openDraftOnJob(supabase, jobId).catch(() => null);
+  const openDraft = draft && isDrawKind(draft.kind) ? { number: draft.number ?? null, refreshable: !!draft.refreshable } : null;
+  // Only when finishing would leave work off a bill: no schedule, and no open report to take it.
+  let offBill: string | null = null;
+  if (!schedule && !openDraft?.refreshable) {
+    const unbilled = await unbilledWorkForJob(supabase, jobId).catch((e) => {
+      reportError("finishJobPreview.unbilled", e, { jobId });
+      return null;
+    });
+    offBill = unbilled
+      ? unbilled.schemaReady
+        ? finishWouldLeaveOffBill(unbilled)
+        : null
+      : "Couldn't check just now whether any hours or bills are still off a bill - look at the Invoices tab before you finish.";
+  }
+  return { ok: true, drawBilled, schedule, openDraft, offBill };
 }
 
 export type DeleteJobResult = {
@@ -1225,15 +1352,28 @@ export async function deleteBill(id: string, jobId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // WHAT STANDS ON THIS BILL, READ BEFORE IT GOES (audit v994, TD2 and TD5). A copy set aside as
+  // its duplicate would count on its job again with nothing said, so that refuses and names the
+  // copy. The papers behind it are read now, because bill_id is ON DELETE SET NULL: after the
+  // delete nothing says which paper made it, and that paper sat "filed" over nothing.
+  const standing = await readBillStanding(supabase, ctx.orgId, id);
+  if (standing && "error" in standing) return { ok: false, error: standing.error };
+  if (standing) {
+    const no = standingRefusal(standing, "delete it again", "Nothing was deleted.", { shelf: false });
+    if (no) return { ok: false, error: no };
+  }
+  const makers = standing ? await papersBehindBill(supabase, ctx.orgId, id) : [];
   let write = supabase.from("bills").delete().eq("id", id);
   if (ctx.orgId) write = write.eq("org_id", ctx.orgId);
   const { data, error } = await write.select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "Nothing was deleted. That bill isn't here, or this login can't delete it." };
+  const said = standing && (makers.length || standing.tiedPapers.length) ? await papersAfterBillDeleted(supabase, ctx.orgId, makers, standing, ctx.userId) : "";
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // a deleted cost moves job profitability
-  return { ok: true };
+  if (said) revalidatePath("/organize");
+  return said ? { ok: true, warning: `Bill deleted. ${said}` } : { ok: true };
 }
 
 export async function updateJobNotes(
