@@ -27,7 +27,8 @@ import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsN
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
-import { planLaborOffer, type OwnLaborLine } from "@/lib/labor-offer";
+import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
+import { removedLines, removedSentence, staleTombstones } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
@@ -1050,14 +1051,68 @@ async function upsertImportedItems(
   invoiceId: string,
   source: string,
   rows: ImportRow[],
-): Promise<{ error?: string; stats?: RpcStats }> {
+): Promise<{ error?: string; stats?: RpcStats; removed?: RemovedLine[] }> {
+  /**
+   * A REFRESH NEVER SILENTLY DROPS A LINE THAT IS ON THE INVOICE (INV-078, 2026-09-24).
+   *
+   * The RPC filters the offer through dismissed_import_keys BEFORE it reconciles, and then removes
+   * every unedited keyed line the (filtered) offer doesn't name. So a line that is ON the invoice
+   * while its key also sits in the tombstones - put back by hand after a delete, as INV-078's Home
+   * Depot 14-2 rolls were - is read as "gone from the source" and deleted, by the importer, so not
+   * even re-tombstoned: $186.48 of wire left the bill and nothing said so. A line that is present is
+   * the office's answer to "do you want this on the bill"; the tombstone that says otherwise is
+   * stale. So it is cleared, checked, BEFORE the RPC runs - and when it can't be, nothing runs.
+   *
+   * And what the RPC does remove (a bill deleted, a receipt line marked not billable, an entry moved
+   * to another job) is named, line by line, from a read on each side of it: `removed`.
+   */
+  const lineRead = () =>
+    supabase.from("invoice_items").select("id, import_key, description, line_total").eq("invoice_id", invoiceId).eq("import_source", source);
+  const [beforeLines, keysRow] = await Promise.all([lineRead(), supabase.from("invoices").select("dismissed_import_keys").eq("id", invoiceId).maybeSingle()]);
+  if (beforeLines.error || keysRow.error) {
+    reportError("upsertImportedItems.read", beforeLines.error ?? keysRow.error, { invoiceId, source });
+    return { error: "Couldn't read this invoice's lines just now, so nothing was imported - try again in a moment." };
+  }
+  const present = ((beforeLines.data ?? []) as PresentLine[]).filter((l) => l.import_key);
+  const dismissed = (((keysRow.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []) as string[]).map(String);
+  const stale = staleTombstones(present, dismissed);
+  if (stale.length) {
+    const { data: cleared, error: clearErr } = await supabase
+      .from("invoices")
+      .update({ dismissed_import_keys: dismissed.filter((k) => !stale.includes(k)) })
+      .eq("id", invoiceId)
+      .select("id");
+    if (clearErr || !cleared?.length) {
+      reportError("upsertImportedItems.staleTombstones", clearErr ?? "zero rows", { invoiceId, source, stale });
+      return { error: "Couldn't update this invoice just now, so nothing was imported (a line on it would have been dropped) - try again in a moment." };
+    }
+  }
   const { data, error } = await supabase.rpc("upsert_imported_invoice_items", {
     p_invoice_id: invoiceId,
     p_source: source,
     p_rows: rows,
   });
   if (error) return { error: dbError(error) };
-  return { stats: (data ?? undefined) as RpcStats | undefined };
+  const stats = (data ?? undefined) as RpcStats | undefined;
+  let removed: RemovedLine[] | undefined;
+  if (Number(stats?.removed ?? 0) > 0 || !stats) {
+    const afterLines = await lineRead();
+    if (afterLines.error) reportError("upsertImportedItems.readBack", afterLines.error, { invoiceId, source });
+    else removed = removedLines(present, (afterLines.data ?? []) as PresentLine[]);
+  }
+  return { stats, removed };
+}
+
+/** An imported line as the importer reads it on each side of the RPC. */
+type PresentLine = { id: string; import_key: string | null; description: string | null; line_total: number | string | null };
+/** A line the importer took off the invoice, in the office's words. */
+type RemovedLine = { importKey: string; description: string; amount: number };
+
+/** Put what the importer took off the invoice in front of the office - a warning, never silent. */
+function sayRemoved(stats: ImportStats, removed: RemovedLine[] | undefined): ImportStats {
+  const said = removedSentence(removed ?? []);
+  if (said) stats.warnings = [...(stats.warnings ?? []), said];
+  return stats;
 }
 
 /** Import the linked job's quote line items into this invoice (idempotent). */
@@ -1133,7 +1188,7 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // 2 updated, 5 of your edited lines left alone" is a different sentence from "Materials imported",
   // and it is the one that tells the office whether their negotiated prices survived.
   const after = await landedSourceIds(supabase, invoiceId, "quote", rows);
-  return { ok: true, stats: withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "estimate lines") };
+  return { ok: true, stats: sayRemoved(withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "estimate lines"), rep.removed) };
 }
 
 // ── H4: one billing path per job ────────────────────────────────────────────
@@ -1406,29 +1461,36 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
       : { ok: false, error: "No billable hours on this job yet.", empty: true };
   }
 
-  // NEW HOURS BESIDE A NEGOTIATED LINE (lib/labor-offer, J-011). This invoice's own labor lines and
-  // the keys the office deleted decide whether a person whose line was edited gets a second line
-  // for the hours worked since. A lost read here is not "no lines": refuse, nothing written.
+  // NEW HOURS JOIN THE PERSON'S LINE (lib/labor-offer, Erik's INV-078 rule). This invoice's own
+  // labor lines and the keys the office deleted decide, per person: a new line, a refresh, or the
+  // new hours joined onto the edited line at its rate. A lost read here is not "no lines": refuse,
+  // nothing written.
   const [ownRead, keysRead] = await Promise.all([
-    supabase.from("invoice_items").select("source_ids, import_key, edited").eq("invoice_id", invoiceId).eq("import_source", "labor"),
+    supabase.from("invoice_items").select("id, source_ids, import_key, edited, quantity, unit_price, unit, description").eq("invoice_id", invoiceId).eq("import_source", "labor"),
     supabase.from("invoices").select("dismissed_import_keys").eq("id", invoiceId).maybeSingle(),
   ]);
   if (ownRead.error || keysRead.error) {
     reportError("importLabor.ownLines", ownRead.error ?? keysRead.error, { invoiceId });
     return { ok: false, error: "Couldn't read this invoice's labor lines just now, so nothing was imported - try again in a moment." };
   }
-  const offer = planLaborOffer({
+  const ownLines = (ownRead.data ?? []) as OwnLaborLine[];
+  // A line ON the invoice is never judged by a tombstone of its own key: upsertImportedItems clears
+  // that stale key before the RPC runs, so the planner doesn't read the person as deleted either.
+  const presentKeys = new Set(ownLines.map((l) => String(l.import_key ?? "")).filter(Boolean));
+  const plan = planLaborOffer({
     entries: free.jobEntries,
-    ownLines: (ownRead.data ?? []) as OwnLaborLine[],
-    dismissed: new Set(((keysRead.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []).map(String)),
+    ownLines,
+    dismissed: new Set(
+      ((keysRead.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []).map(String).filter((k) => !presentKeys.has(k)),
+    ),
     bill: (entries) => computeJobLaborBilling(entries, defaultRate, levelRate, labor.nonBillableCodes).lines,
   });
+  const invLabel = (inv as { invoice_number?: string | null }).invoice_number ?? "this invoice";
 
-  const rows: ImportRow[] = offer.map(({ importKey, line: l }) => ({
-    // Keyed by PERSON: the importer aggregates a job's time per head, so "Erik" is one
-    // line whose hours grow. Re-importing refreshes it — unless the office negotiated
-    // the number, in which case `edited` protects it, a NEW person still appends, and the hours
-    // that person works AFTER the negotiation land on their own line beside it (labor-offer).
+  const rows: ImportRow[] = plan.offer.map(({ importKey, line: l }) => ({
+    // Keyed by PERSON: the importer aggregates a job's time per head, so "Erik" is one line whose
+    // hours grow. Re-importing refreshes it; once the office has edited it (a negotiated rate), the
+    // RPC leaves it alone and the new hours JOIN it below, at its rate (labor-offer).
     import_key: importKey,
     /**
      * THE LINE THE CUSTOMER READS SAYS WHO, AND THE NUMBERS SAY THE REST.
@@ -1450,9 +1512,8 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
     quantity: l.quantity,
     unit: "hr",
     unit_price: l.rate,
-    // THE CLAIM: the entry ids behind this line ride with it and die with it. An
-    // `edited` line keeps the claims it already holds and takes no new ones — its hours were
-    // negotiated, and hours that arrive later are not on it, so they stay free for the next bill.
+    // THE CLAIM: the entry ids behind this line ride with it and die with it. An edited line keeps
+    // the claims it holds through the RPC; the ones it takes on are added by the join below.
     source_ids: l.sourceIds,
   }));
   // What the invoice's labor lines claim BEFORE the RPC, so the toast counts only the entries this
@@ -1460,20 +1521,88 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   const before = await landedSourceIds(supabase, invoiceId, "labor", rows);
   const rep = await upsertImportedItems(supabase, invoiceId, "labor", rows);
   if (rep.error) return { ok: false, error: rep.error };
-  if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importLaborIntoInvoice");
+
+  const join = await joinLaborHours(supabase, invoiceId, plan.joins);
+
+  if (importMovedMoney(rep.stats) || join.joined.length) await stampInvoiceRevised(supabase, invoiceId, "importLaborIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  // Report what actually happened, in time entries, counted from the lines that LANDED (an edited
-  // line takes none of the offer): "5 time entries pulled in · 9 already on INV-061 skipped" tells
-  // the office what this invoice carries and what it deliberately left where it was — a different
-  // sentence from "Labor imported".
+  // Report what actually happened, in time entries, counted from the lines that LANDED: "5 time
+  // entries pulled in · 9 already on INV-061 skipped" tells the office what this invoice carries and
+  // what it deliberately left where it was — a different sentence from "Labor imported".
   const after = await landedSourceIds(supabase, invoiceId, "labor", rows);
   const stats = withClaimStats(rep.stats, rows, landedDiff(before, after), free.skippedIds, claims, "time entries");
+  const said = join.joined.map(joinedSentence);
+  if (said.length) {
+    // A join is an update to a line: counted as one, so the invoice page never reads a run that
+    // added hours as "stuck" and offers Start It Over over it.
+    stats.updated += said.length;
+    stats.summary = [...said, stats.summary].filter(Boolean).join(" · ");
+    stats.notes = [...(stats.notes ?? []), ...said];
+  }
+  // An old ":2" line whose hours merged into its person's line is said as a merge, not as a line
+  // "the job no longer bills".
+  const joinedPeople = new Set(join.joined.map((j) => j.personId));
+  const merged = (rep.removed ?? []).filter((r) => {
+    const m = /^labor:([^:]+):\d+$/.exec(r.importKey);
+    return !!m && joinedPeople.has(m[1]);
+  });
+  const warnings: string[] = [];
+  if (merged.length) {
+    warnings.push(`Merged ${merged.length === 1 ? `a second ${merged[0].description} line` : `${merged.length} second labor lines`} into the person's own labor line - one line per person`);
+  }
+  const plainRemoved = removedSentence((rep.removed ?? []).filter((r) => !merged.includes(r)));
+  if (plainRemoved) warnings.push(plainRemoved);
+  warnings.push(...join.failed);
+  warnings.push(...plan.leftOff.map((l) => leftOffSentence(l, invLabel)));
   // NEVER THEIR PAY RATE, AND NEVER SILENTLY (audit v994 PL2): anyone priced at the level or
   // default rate because they have no bill rate is named, with the rate used and where to set theirs.
-  const unrated = noBillRateWarnings(offer.map((o) => o.line));
-  if (unrated.length) stats.warnings = [...(stats.warnings ?? []), ...unrated];
+  // A person whose hours join an edited line bills at that line's rate, so isn't named for it.
+  const joinedKeys = new Set(plan.joins.map((j) => j.importKey));
+  warnings.push(...noBillRateWarnings(plan.offer.filter((o) => !joinedKeys.has(o.importKey)).map((o) => o.line)));
+  if (warnings.length) stats.warnings = [...(stats.warnings ?? []), ...warnings];
   return { ok: true, stats };
+}
+
+/**
+ * THE JOIN: quantity += the new hours, source_ids += the new entries; rate and `edited` untouched.
+ *
+ * Run AFTER the RPC, so an old unedited overflow line (":2") it just removed has let go of its
+ * entries before they join the home line. Guarded on the quantity the plan read - a person changing
+ * the line in the same second makes this land on zero rows, and that is SAID, never added on top of
+ * a number nobody read - and checked (silent-write law). The claim trigger (0258/0259/0260) still
+ * judges every id added here: an hour another invoice took in the meantime refuses the write in its
+ * own words ("hours already billed on INV-0xx").
+ */
+async function joinLaborHours(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string,
+  joins: readonly LaborJoin[],
+): Promise<{ joined: LaborJoin[]; failed: string[] }> {
+  const out: { joined: LaborJoin[]; failed: string[] } = { joined: [], failed: [] };
+  for (const j of joins) {
+    const quantity = Math.round((j.fromQuantity + j.addHours) * 100) / 100;
+    const source_ids = [...new Set([...j.heldIds, ...j.addIds])];
+    const { data: wrote, error } = await supabase
+      .from("invoice_items")
+      .update({ quantity, source_ids })
+      .eq("id", j.lineId)
+      .eq("invoice_id", invoiceId)
+      .eq("edited", true)
+      .eq("quantity", j.fromQuantity)
+      .select("id");
+    if (error || !wrote?.length) {
+      reportError("importLabor.join", error ?? "zero rows", { invoiceId, lineId: j.lineId });
+      out.failed.push(
+        error
+          ? `${j.name}'s ${hoursWords(j.addHours)} couldn't join ${j.description}: ${dbError(error)}`
+          : `${j.name}'s ${hoursWords(j.addHours)} didn't join ${j.description} - the line changed while this ran. Import Labor again`,
+      );
+      continue;
+    }
+    out.joined.push(j);
+  }
+  return out;
 }
 
 /**
@@ -1562,7 +1691,7 @@ async function importChangeOrdersCore(invoiceId: string, trustedActuals: boolean
   revalidateMoney(invoiceId);
   revalidatePath("/change-orders");
   const after = await landedSourceIds(supabase, invoiceId, "change_orders", offer);
-  return { ok: true, stats: withClaimStats(rep.stats, offer, landedDiff(before, after), skippedIds, claims, "change orders") };
+  return { ok: true, stats: sayRemoved(withClaimStats(rep.stats, offer, landedDiff(before, after), skippedIds, claims, "change orders"), rep.removed) };
 }
 
 /** Import materials from the job's costs: purchase orders + supplier bills,
@@ -1914,8 +2043,8 @@ async function importCostsCore(
   notes.push(...returnsSummaryParts([], returnsNotCredited, returnsHeld));
   if (notes.length) stats.notes = notes;
   const drift = await editedRemainderWarnings(supabase, invoiceId, (bills ?? []) as { id: string; supplier?: string | null; amount?: unknown }[], rows, markup);
-  if (drift.length) stats.warnings = drift;
-  return { ok: true, stats };
+  if (drift.length) stats.warnings = [...(stats.warnings ?? []), ...drift];
+  return { ok: true, stats: sayRemoved(stats, rep.removed) };
 }
 
 /**
@@ -2077,7 +2206,9 @@ async function refreshActualsDraw(
   // what the counts don't say (notes) - a counter-preview price to check before sending, a return
   // not credited or held and why, the invoice's own markup kept.
   const extra = [
-    ...(lab.ok ? lab.stats?.warnings ?? [] : []),
+    // "Added 6 h to Labor - Erik Taylor at $100" (Erik's INV-078 rule), then anything the labor run
+    // could not put on, or took off, in plain words.
+    ...(lab.ok ? [...(lab.stats?.notes ?? []), ...(lab.stats?.warnings ?? [])] : []),
     ...(cos.ok ? [...(cos.stats?.notes ?? []), ...(cos.stats?.warnings ?? [])] : []),
     // An "empty" costs run carries its reason in `error` (e.g. a return held, nothing else to bill).
     ...(!cos.ok && cos.empty && before && before.returnsCount > 0 && cos.error ? [cos.error.replace(/\.$/, "")] : []),

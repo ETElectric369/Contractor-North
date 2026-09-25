@@ -377,22 +377,40 @@ d("billing draw invariants (DB integration)", () => {
       const others = foldClaims((await client.query(claimsSql, [jobId, draw.id])).rows, true);
       const entries = [e1, e2].map((e: any) => ({ ...e, lunch_minutes: 0, job_code: null, profiles: { id: person.id, full_name: person.full_name, bill_rate: 115 } }));
       const free = withoutClaimedLabor(entries, new Set(others.owner.keys()));
-      const { rows: own } = await client.query(`select import_key, edited, source_ids from invoice_items where invoice_id=$1 and import_source='labor'`, [draw.id]);
-      const offer = planLaborOffer({ entries: free.jobEntries, ownLines: own, dismissed: new Set(), bill: (es) => computeJobLaborBilling(es, 95, null).lines });
-      const laborRows = offer.map(({ importKey, line }) => ({ import_key: importKey, description: `Labor - ${line.name}`, quantity: line.quantity, unit: "hr", unit_price: line.rate, source_ids: line.sourceIds }));
+      const { rows: own } = await client.query(
+        `select id, import_key, edited, source_ids, quantity, unit_price, unit, description from invoice_items where invoice_id=$1 and import_source='labor'`,
+        [draw.id],
+      );
+      const plan = planLaborOffer({ entries: free.jobEntries, ownLines: own, dismissed: new Set(), bill: (es) => computeJobLaborBilling(es, 95, null).lines });
+      const laborRows = plan.offer.map(({ importKey, line }) => ({ import_key: importKey, description: `Labor - ${line.name}`, quantity: line.quantity, unit: "hr", unit_price: line.rate, source_ids: line.sourceIds }));
       const { rows: [repL] } = await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb) as r`, [draw.id, JSON.stringify(laborRows)]);
-      expect(repL.r.kept_edited).toBe(1); // the negotiated line is left alone
-      expect(repL.r.inserted).toBe(1);    // the new hours get their own line
+      expect(repL.r.kept_edited).toBe(1); // the negotiated line is left alone by the RPC
+      expect(repL.r.inserted).toBe(0);    // no second line for the same person (Erik's INV-078 rule)
+      // THE JOIN, exactly as joinLaborHours writes it: guarded on the quantity the plan read.
+      expect(plan.joins).toHaveLength(1);
+      const j = plan.joins[0];
+      const { rowCount: joinedRows } = await client.query(
+        `update invoice_items set quantity = $2, source_ids = $3::uuid[] where id = $1 and edited and quantity = $4`,
+        [j.lineId, j.fromQuantity + j.addHours, [...j.heldIds, ...j.addIds], j.fromQuantity],
+      );
+      expect(joinedRows).toBe(1);
       await client.query(`select public.upsert_imported_invoice_items($1, 'costs', $2::jsonb)`, [draw.id, JSON.stringify([costRow(b1.id, 115), costRow(b2.id, 372.27)])]);
 
-      // Landed on the SAME draft: e2 on its own line, e1 still only on the negotiated one; b2 claimed.
+      // Landed on the SAME draft and the SAME line: 8 + 6 h at the negotiated $100, both shifts claimed.
       const { rows: after } = await client.query(
         `select import_key, edited, source_ids, unit_price::float as unit_price, quantity::float as quantity from invoice_items where invoice_id=$1 order by sort_order`,
         [draw.id],
       );
       const byKey = Object.fromEntries(after.map((r: any) => [r.import_key, r]));
-      expect(byKey[laborKey]).toMatchObject({ edited: true, source_ids: [e1.id], unit_price: 100 });
-      expect(byKey[`${laborKey}:2`]).toMatchObject({ edited: false, source_ids: [e2.id], quantity: 6, unit_price: 115 });
+      expect(byKey[laborKey]).toMatchObject({ edited: true, quantity: 14, unit_price: 100 });
+      expect([...byKey[laborKey].source_ids].sort()).toEqual([e1.id, e2.id].sort());
+      expect(byKey[`${laborKey}:2`]).toBeUndefined();
+      // A stale write (someone changed the line since the plan read it) lands on zero rows.
+      const { rowCount: staleRows } = await client.query(
+        `update invoice_items set quantity = $2 where id = $1 and edited and quantity = $3`,
+        [j.lineId, 99, j.fromQuantity],
+      );
+      expect(staleRows).toBe(0);
       expect(byKey[`bill:${b2.id}`]).toMatchObject({ source_ids: [b2.id], unit_price: 372.27 });
       const { rows: invoicesNow } = await client.query(`select id, status from invoices where job_id=$1`, [jobId]);
       expect(invoicesNow).toEqual([{ id: draw.id, status: "draft" }]); // one document, still a draft

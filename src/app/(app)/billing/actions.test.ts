@@ -56,7 +56,11 @@ type Reply = { data?: any; error?: any } | undefined;
 
 function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
   const answer = (q: Q) => {
-    const r = route(q);
+    let r = route(q);
+    // upsertImportedItems' own read of the lines on each side of the RPC (a present line is never
+    // dropped by a stale tombstone; what it removes is named). Routed here once for every test that
+    // doesn't say otherwise: nothing on the invoice, so nothing stale and nothing removed.
+    if (r === undefined && q.table === "invoice_items" && q.verb === "select" && q.cols === "id, import_key, description, line_total") r = { data: [] };
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
     return { data: r.data ?? null, error: r.error ?? null };
   };
@@ -798,7 +802,9 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
     if (q.table === "bill_line_items") return { data: [] };
     if (q.table === "invoice_items" && q.verb === "select") {
       if (q.cols === "import_source") return { data: opts.actuals ? [{ import_source: "labor" }, { import_source: "costs" }] : [{ import_source: null }] };
-      if (q.cols === "source_ids, import_key, edited") return { data: opts.actuals ? [{ import_key: "labor:p-1", edited: true, source_ids: [TE_OLD] }] : [] };
+      if (q.cols === "id, source_ids, import_key, edited, quantity, unit_price, unit, description") {
+        return { data: opts.actuals ? [{ id: "li-1", import_key: "labor:p-1", edited: true, source_ids: [TE_OLD], quantity: "8.00", unit_price: "100.00", unit: "hr", description: "Labor - Erik" }] : [] };
+      }
       if (q.cols.includes("invoices!inner")) return { data: [] };
       if (q.cols.includes("import_key, edited")) return { data: drawItems().map((i) => ({ ...i, edited: false })) };
       if (q.cols === "line_total") return { data: [] };
@@ -810,10 +816,16 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
         return { data: opts.actuals ? [{ import_key: `bill:${B_OLD}`, source_ids: [B_OLD], line_total: opts.oldBillLine ?? 115, edited: false }] : [] };
       }
     }
+    // THE JOIN (Erik's INV-078 rule): the new hours onto the edited line, checked.
+    if (q.table === "invoice_items" && q.verb === "update") {
+      for (const id of q.payload?.source_ids ?? []) landed.add(id);
+      return { data: [{ id: "li-1" }] };
+    }
     if (q.table === "payments") return { data: [] };
     if (q.table === "customer_credits") return { data: [] };
     if (q.table === "rpc:upsert_imported_invoice_items") {
-      for (const r of q.payload?.p_rows ?? []) for (const id of r.source_ids ?? []) landed.add(id);
+      // The RPC keeps an edited line as it is, claims included: only the costs offer lands here.
+      if (q.payload?.p_source !== "labor") for (const r of q.payload?.p_rows ?? []) for (const id of r.source_ids ?? []) landed.add(id);
       return { data: { inserted: 1, updated: 0, kept_edited: q.payload?.p_source === "labor" ? 1 : 0, removed: 0 } };
     }
     return undefined;
@@ -821,7 +833,7 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
 }
 
 describe("J-011 — a draw built from actuals takes new work; a contract draw refuses it (server)", () => {
-  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours beside the negotiated line, says what it pulled", async () => {
+  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
     spies.reportError = () => {};
     state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
     const res = await createProgressReportInvoice(JOB, "progress");
@@ -836,13 +848,14 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     const rpcs = calls.filter((c) => c.table === "rpc:upsert_imported_invoice_items");
     expect(rpcs.every((c) => c.payload.p_invoice_id === OPEN_DRAW)).toBe(true);
     const labor = rpcs.find((c) => c.payload.p_source === "labor")!;
-    // The new 6-hour shift rides its own line beside the edited one, at Erik's bill rate.
-    const overflow = labor.payload.p_rows.find((r: any) => r.import_key === "labor:p-1:2");
-    expect(overflow).toMatchObject({ quantity: 6, unit_price: 115, source_ids: [TE_NEW] });
+    // No second line for Erik: the new 6-hour shift JOINS his edited line, at its own $100.
+    expect(labor.payload.p_rows.map((r: any) => r.import_key)).toEqual(["labor:p-1"]);
+    const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
+    expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
     const costs = rpcs.find((c) => c.payload.p_source === "costs")!;
     expect(costs.payload.p_rows.flatMap((r: any) => r.source_ids)).toEqual([B_NEW]); // the old bill is not offered again
     expect(costs.payload.p_rows[0].unit_price).toBe(372.27); // $323.71 at the customer's 15%
-    expect(res.note).toBe("Pulled 6 hours and 1 bill into INV-078.");
+    expect(res.note).toBe("Pulled 6 hours and 1 bill into INV-078. Added 6 h to Labor - Erik at $100.");
   });
 
   it("an open CONTRACT draw is named with its door, not a dead end, and nothing is written", async () => {

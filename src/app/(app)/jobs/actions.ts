@@ -131,7 +131,16 @@ type PulledIn = {
   count: number;
   /** Importers that FAILED (a DB error — never a "nothing to pull" no-op). */
   missed: string[];
+  /** What the labor run did to a person's line and anything an importer left off or took off, one
+   *  sentence each - "Added 6 h to Labor - Erik Taylor at $100" (Erik's INV-078 rule). */
+  said: string[];
 };
+
+/** The run's own sentences on the end of the door's note. */
+function withSaid(note: string, said: string[]): string {
+  if (!said.length) return note;
+  return `${note.replace(/\.$/, "")}. ${said.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(". ")}.`;
+}
 
 /**
  * Run the importers a caller asked for into one draft and count what landed. ONE helper for both
@@ -147,8 +156,8 @@ async function pullNewWorkInto(
   want: { labor: boolean; costs: boolean; changeOrders: boolean },
   markup: number,
 ): Promise<PulledIn> {
-  const out: PulledIn = { parts: [], count: 0, missed: [] };
-  type Outcome = { ok: boolean; empty?: boolean; error?: string; stats?: { pulled_in: number } };
+  const out: PulledIn = { parts: [], count: 0, missed: [], said: [] };
+  type Outcome = { ok: boolean; empty?: boolean; error?: string; stats?: { pulled_in: number; notes?: string[]; warnings?: string[] } };
   const fail = (e: unknown): Outcome => ({ ok: false, error: String((e as { message?: unknown })?.message ?? e), empty: false });
   const take = (r: Outcome, noun: [string, string], what: string, tag: string) => {
     if (r.ok) {
@@ -157,6 +166,10 @@ async function pullNewWorkInto(
       const n = r.stats?.pulled_in ?? 0;
       if (n > 0) out.parts.push(`${n} ${n === 1 ? noun[0] : noun[1]}`);
       out.count += n;
+      // Labor's notes are the joins ("Added 6 h to ..."); every importer's warnings are money a
+      // person should look at (a line taken off, hours that could not go on). Never swallowed here.
+      if (tag === "labor") out.said.push(...(r.stats?.notes ?? []));
+      out.said.push(...(r.stats?.warnings ?? []));
       return;
     }
     if (!r.empty) {
@@ -347,10 +360,10 @@ export async function createInvoiceForJob(
     const label = draft.invoice_number ?? "the draft you already started";
     const pulled = await pullNewWorkInto(supabase, jobId, draft.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
     if (pulled.missed.length) {
-      return { ok: true, id: draft.id, partial: true, importWarning: `Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.` };
+      return { ok: true, id: draft.id, partial: true, importWarning: withSaid(`Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.`, pulled.said) };
     }
     if (pulled.count > 0) {
-      return { ok: true, id: draft.id, importWarning: `Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.` };
+      return { ok: true, id: draft.id, importWarning: withSaid(`Opened ${label} and pulled in what's new — ${joinAnd(pulled.parts)}.`, pulled.said) };
     }
     // Nothing landed — but "nothing new" is decided from the FULL picture, never from the parts
     // the caller asked for (toggles off) or the rows an edited line holds back. If work is still
@@ -364,9 +377,9 @@ export async function createInvoiceForJob(
     return {
       ok: true,
       id: draft.id,
-      importWarning: stillOff.length
+      importWarning: withSaid(stillOff.length
         ? `Opened ${label} — still unbilled on this job: ${joinAnd(stillOff)}.`
-        : `Opened ${label} — nothing new to pull in since.`,
+        : `Opened ${label} — nothing new to pull in since.`, pulled.said),
     };
   }
 
@@ -426,7 +439,7 @@ export async function createInvoiceForJob(
   if (res.ok && res.id) {
     const pulled = await pullNewWorkInto(supabase, jobId, res.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
     if (pulled.missed.length) {
-      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.` };
+      return { ...res, partial: true, importWarning: withSaid(`Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.`, pulled.said) };
     }
     if (prior) {
       const { data: made } = await supabase
