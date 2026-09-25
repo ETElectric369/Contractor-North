@@ -10,9 +10,12 @@ import { updateMemberRate } from "./actions";
  *  person (job cost); Bill = what the customer is charged for their labor.
  *
  *  AN OWNER HAS NO PAY RATE (0286): he is paid by owner's draw, so his row says "Owner's Draw"
- *  where the Pay box was and keeps only the Bill box, and a save sends the bill rate alone. Sending
- *  a pay figure for him would be refused, and sending null would wipe the old hourly_rate that his
- *  bill rate may still fall back to. */
+ *  where the Pay box was and keeps only the Bill box, and a save sends the bill rate alone (a pay
+ *  figure for him would be refused).
+ *
+ *  AN EMPTY BILL BOX IS A REAL ANSWER, FOR THE OWNER TOO (Erik, audit v994 MR7): his hours then
+ *  bill at the customer's level rate or the default labor rate, never his old stored wage. The
+ *  server clears that wage with the bill rate, so the line below the box tells the truth. */
 export function MemberRate({
   id,
   rate,
@@ -27,6 +30,16 @@ export function MemberRate({
   const router = useRouter();
   const [pay, setPay] = useState(rate ?? 0);
   const [bill, setBill] = useState(billRate ?? 0);
+  // THE BOXES SHOW WHAT BILLING USES (audit v994 MR7). They were seeded once, so after a save and
+  // router.refresh() a box kept what was typed even when the server stored something else. Re-seed
+  // whenever the rates the page read change (React's "adjust state on prop change" pattern, which
+  // keeps the green check on screen instead of remounting it away).
+  const [seen, setSeen] = useState({ rate, billRate });
+  if (seen.rate !== rate || seen.billRate !== billRate) {
+    setSeen({ rate, billRate });
+    setPay(rate ?? 0);
+    setBill(billRate ?? 0);
+  }
   const [pending, start] = useTransition();
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
