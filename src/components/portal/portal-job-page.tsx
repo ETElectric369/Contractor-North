@@ -42,7 +42,16 @@ const BILL_STATUS: Record<string, string> = {
 const chip =
   "seaglass-btn inline-flex h-11 shrink-0 items-center whitespace-nowrap gap-1.5 rounded-xl px-3.5 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]";
 
-export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHref: string }) {
+export function PortalJobPage({
+  view,
+  homeHref,
+  footer,
+}: {
+  view: PortalJobView;
+  homeHref: string;
+  /** Under the page (0331: Sign Out On This Device). */
+  footer?: React.ReactNode;
+}) {
   const { org, job, ledger } = view;
   const thisYear = view.asOfDay.slice(0, 4);
   const site = siteLine(job.site);
@@ -67,7 +76,7 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
   ];
 
   return (
-    <PortalShell org={{ ...org }}>
+    <PortalShell org={{ ...org }} footer={footer}>
       {/* Live, and the photo and file links last 10 minutes: an open or restored page reads again. */}
       <PortalKeepFresh asOf={view.asOf} />
       <a href={homeHref} className="mb-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-[rgb(var(--glass-ink))] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]">

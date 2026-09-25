@@ -28,6 +28,8 @@ import {
   type StretchRow,
 } from "../portal-share-actions";
 import { PapersCard } from "./job-portal-papers";
+import { portalOfficeLookUrl } from "../../portal-look-actions";
+import { openOfficeLook } from "@/components/portal/open-office-look";
 
 /**
  * WHAT THE CUSTOMER SEES ON THIS JOB, AND THE OFFICE'S HANDS ON IT (office only: the page renders
@@ -105,7 +107,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
 
   return (
     <div className="space-y-4">
-      <LinkCard link={link} who={who} />
+      <LinkCard link={link} who={who} jobId={jobId} />
       {loadError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>
       ) : (
@@ -140,8 +142,9 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
 
 // ── the link ─────────────────────────────────────────────────────────────────────────────────
 
-function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
+function LinkCard({ link, who, jobId }: { link: LinkState | null; who: string; jobId: string }) {
   const toast = useToast();
+  const [looking, startLook] = useTransition();
   if (!link) return null;
   if (!link.customerId) {
     return (
@@ -186,9 +189,17 @@ function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={!url || !link.jobShown}
-            onClick={() => url && window.open(`${url}?look=office`, "_blank", "noopener,noreferrer")}
-            title="Open it exactly as the customer sees it. Your own looks don't count as them opening it."
+            disabled={!url || !link.jobShown || looking}
+            onClick={() => {
+              const customerId = link.customerId;
+              if (!url || !customerId) return;
+              // A one-use office ticket (0331): the office never needs the customer's code.
+              startLook(async () => {
+                const problem = await openOfficeLook(() => portalOfficeLookUrl(customerId, jobId));
+                if (problem) toast(problem, "error");
+              });
+            }}
+            title="Open it exactly as the customer sees it, without their code. Your own looks don't count as them opening it."
           >
             <ExternalLink className="h-4 w-4" /> See What They See
           </Button>

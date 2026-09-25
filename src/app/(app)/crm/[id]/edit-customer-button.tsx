@@ -14,9 +14,12 @@ import type { Customer } from "@/lib/types";
 export function EditCustomerButton({
   customer,
   pricingLevels = [],
+  label = "Edit",
 }: {
   customer: Customer;
   pricingLevels?: { id: string; name: string; markup_pct: number }[];
+  /** The button's words where it is a door for one field (the portal card's "Add Their Email"). */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +44,7 @@ export function EditCustomerButton({
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <Pencil className="h-4 w-4" /> Edit
+        <Pencil className="h-4 w-4" /> {label}
       </Button>
 
       <form action={onSubmit}>

@@ -17,7 +17,18 @@ export type PortalOrg = {
   tint?: string | null;
 };
 
-export function PortalShell({ org, children, wide = false }: { org: PortalOrg; children: React.ReactNode; wide?: boolean }) {
+export function PortalShell({
+  org,
+  children,
+  wide = false,
+  footer,
+}: {
+  org: PortalOrg;
+  children: React.ReactNode;
+  wide?: boolean;
+  /** Under the "Questions?" line (0331: Sign Out On This Device). */
+  footer?: React.ReactNode;
+}) {
   return (
     <div className="portal-backdrop min-h-dvh pb-12 text-slate-900" style={seaGlassStyle(org.tint)}>
       <div className={`mx-auto px-4 pt-4 sm:pt-8 ${wide ? "max-w-5xl" : "max-w-2xl"}`}>
@@ -36,6 +47,7 @@ export function PortalShell({ org, children, wide = false }: { org: PortalOrg; c
           ) : null}
           .
         </p>
+        {footer}
       </div>
     </div>
   );

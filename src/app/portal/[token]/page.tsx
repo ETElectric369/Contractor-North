@@ -10,7 +10,8 @@ import { statusTone, toneClasses } from "@/components/ui/badge";
 import { NO_INDEX } from "@/lib/no-index";
 import { PortalNotice, PortalSection, PortalShell, PortalTurnedOff } from "@/components/portal/portal-shell";
 import { portalJobStatus } from "@/components/portal/portal-format";
-import { OpenedBeacon } from "./opened-beacon";
+import { readPortalAccess } from "@/lib/portal/access";
+import { gateTitle, portalGate, portalSignOut } from "./gate";
 
 export const dynamic = "force-dynamic";
 // Live on every load, and never kept by a shared cache (one customer's account per response).
@@ -32,6 +33,11 @@ export const fetchCache = "force-no-store";
  * bad token with SQL null, so an error here is the database or the service key failing: every
  * customer opening an emailed link got a bare 404 and the office never heard. Now it is reported
  * (error_events) and the customer reads "couldn't load just now", as on the job page (readPortalJob).
+ *
+ * THE LINK IS NO LONGER THE WHOLE KEY (0331). Erik opened Andrew's link himself: "it opened right up
+ * with no email verification". The link still names the customer, but a device must also be signed
+ * in (a code emailed to the address on file) before this page reads anything: readPortalAccess, then
+ * portalGate, first thing in the page AND in generateMetadata.
  */
 type PortalData = {
   disabled?: boolean;
@@ -61,6 +67,10 @@ const readPortal = cache(async (token: string): Promise<PortalRead> => {
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  // The door first (0331): a device that isn't signed in reads no customer row, not even for a title.
+  const access = await readPortalAccess(token);
+  const shut = gateTitle(access);
+  if (shut) return { title: shut, robots: NO_INDEX };
   const r = await readPortal(token);
   const data = r.kind === "ok" ? r.data : null;
   const name = data?.org?.name;
@@ -88,6 +98,10 @@ export default async function CustomerPortalPage({
 }) {
   const { token } = await params;
   const { look } = await searchParams;
+  // THE DOOR (0331): not signed in on this device → the sign-in screen, and nothing is read.
+  const access = await readPortalAccess(token);
+  const shut = portalGate(access, token);
+  if (shut) return shut;
   const r = await readPortal(token);
   if (r.kind === "error") {
     return (
@@ -106,15 +120,13 @@ export default async function CustomerPortalPage({
   const contracts = data.contracts ?? [];
   const quotes = data.quotes ?? [];
   const jobs = data.jobs ?? [];
-  const office = look === "office";
+  // The office's See What They See arrives on an office session (0331); ?look=office rides along on
+  // its links. Last Opened is stamped by portal_session_check for a customer's own session only, so
+  // neither a link preview (no session) nor the office's look reads as "they opened it".
+  const office = access.kind === "in" && access.session === "office" ? true : look === "office";
 
   return (
-    <PortalShell org={org}>
-      {/* Last Opened: stamped from the customer's own browser, so a mail scanner or a link preview
-          that never runs the page doesn't read as "they opened it". The office's own look
-          (See What They See adds ?look=office) doesn't count either. */}
-      {!office && <OpenedBeacon token={token} />}
-
+    <PortalShell org={org} footer={portalSignOut(access, token)}>
       <h1 className="mb-1 px-1 text-2xl font-bold text-slate-900">
         Welcome{data.customer.name ? `, ${data.customer.name}` : ""}
       </h1>
