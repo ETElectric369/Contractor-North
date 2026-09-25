@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Sparkles, Loader2, Save, Zap } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, Plus, Trash2, Sparkles, Loader2, Save, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -12,7 +13,16 @@ import { generateCircuitSchedule, saveCircuitSchedule } from "../actions";
 const blank = (): QuoteCircuit => ({ ckt: "", description: "", wire: "", breaker: "", load: "" });
 
 /** Circuit schedule editor — the panel layout that prints as a second page on the estimate. */
-export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; initial: QuoteCircuit[] }) {
+export function CircuitScheduleCard({
+  quoteId,
+  initial,
+  panelJob = null,
+}: {
+  quoteId: string;
+  initial: QuoteCircuit[];
+  /** The job that keeps its own circuit list for this work, when one does (Panel plan, phase 2). */
+  panelJob?: { id: string; label: string } | null;
+}) {
   const router = useRouter();
   const [rows, setRows] = useState<QuoteCircuit[]>(initial.length ? initial : []);
   const [dirty, setDirty] = useState(false);
@@ -67,6 +77,19 @@ export function CircuitScheduleCard({ quoteId, initial }: { quoteId: string; ini
         </div>
       </div>
 
+      {/* THE PROPOSAL IS NOT THE JOB'S LIST. Once a job exists, the crew works that job's Panel tab,
+          and an edit here changes what the customer was proposed, not what is in the panel. */}
+      {panelJob && (
+        <div className="mx-5 mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
+          <span className="py-2">This Is The Proposal. The Job Keeps Its Own List On The Panel Tab.</span>
+          <Link
+            href={`/jobs/${panelJob.id}?tab=panel`}
+            className="inline-flex min-h-[44px] items-center gap-1 font-semibold text-brand hover:underline"
+          >
+            Open {panelJob.label}&apos;s Panel <ChevronRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
       {error && <div className="mx-5 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
       {rows.length === 0 ? (

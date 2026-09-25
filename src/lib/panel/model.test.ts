@@ -121,6 +121,8 @@ describe("reading the estimate", () => {
     expect(s[0].room).toBe("Kitchen");
     expect(s[4].room).toBe("Bath");
     expect(s[10].room).toBeNull(); // "Range": no room named, none guessed
+    expect(s[5].room).toBeNull(); // "Living/bedroom recepts": two rooms named, so neither
+    expect(s[9].room).toBe("Bath");
     expect(s[0].source_row).toMatchObject({ quote_number: "E-017", ckt: "1", load: "Countertop GFCI receptacles" });
     expect(new Set(s.map((d) => d.source_row.key)).size).toBe(12);
     expect(s.map((d) => d.sort_order)).toEqual([...Array(12).keys()]);
@@ -221,10 +223,11 @@ describe("the list", () => {
     expect(groups.find((g) => g.room === "Kitchen")!.circuits).toHaveLength(6);
   });
 
-  it("reads a line the way the plan does: 20A · 1P · Outlets Right", () => {
-    expect(circuitLine(FINAL_MAP[3])).toBe("20A · 1P · Outlets Right");
+  it("reads a line the way the plan does: 20A · 1P · Kitchen Outlets Right", () => {
+    expect(circuitLine(FINAL_MAP[3])).toBe("20A · 1P · Kitchen Outlets Right");
     expect(circuitName(FINAL_MAP[3])).toBe("Kitchen Outlets Right");
-    expect(circuitLine(FINAL_MAP[21])).toBe("50A · 2P · GFCI · Range");
+    expect(circuitLine(FINAL_MAP[21])).toBe("50A · 2P · GFCI · Kitchen Range");
+    expect(circuitLine(circuit({ room: null, description: null, amps: 20 }))).toBe("20A · 1P · Unnamed Circuit");
   });
 
   it("flags the door label that differs from what the circuit feeds, and not a punctuation difference", () => {

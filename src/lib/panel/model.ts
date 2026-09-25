@@ -77,8 +77,8 @@ export function circuitName(c: Pick<JobCircuit, "room" | "description" | "panel_
 export function circuitLine(c: Pick<JobCircuit, "room" | "description" | "panel_label" | "amps" | "poles" | "kind">): string {
   const parts = [c.amps == null ? "?A" : `${c.amps}A`, `${c.poles}P`];
   if (c.kind && c.kind !== "standard") parts.push(KIND_WORDS[c.kind]);
-  const feeds = titleWords(c.description) || titleWords(c.panel_label) || "Unnamed Circuit";
-  return `${parts.join(" · ")} · ${feeds}`;
+  const named = titleWords(c.description) || titleWords(c.panel_label) ? circuitName(c) : "Unnamed Circuit";
+  return `${parts.join(" · ")} · ${named}`;
 }
 
 // ── reading the estimate's take-off ─────────────────────────────────────────────────────────────
@@ -152,11 +152,12 @@ const ROOM_WORDS: [RegExp, string][] = [
   [/\bbasement\b/i, "Basement"],
   [/\b(?:exterior|outside|outdoor)\b/i, "Outside"],
 ];
-/** A room named in the words, or null. A suggestion only; nothing is guessed from an appliance. */
+/** The one room named in the words, or null. A suggestion only: nothing is guessed from an
+ *  appliance, and words that name two rooms ("Living/bedroom recepts") name neither. */
 export function roomFromWords(...texts: (string | null | undefined)[]): string | null {
   const t = texts.filter(Boolean).join(" ");
-  for (const [re, room] of ROOM_WORDS) if (re.test(t)) return room;
-  return null;
+  const named = ROOM_WORDS.filter(([re]) => re.test(t)).map(([, room]) => room);
+  return named.length === 1 ? named[0] : null;
 }
 
 const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();

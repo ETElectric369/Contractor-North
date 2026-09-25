@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { quoteCircuitsToSuggestions } from "./panel/model";
+import { E017 } from "./panel/__fixtures__/herringbone";
 
 /**
  * Migration 0333 — THE JOB KNOWS ITS PANEL, exercised where the boundary lives.
@@ -206,6 +208,31 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
     await one("update job_panels set removed_at = null, shown_on_portal = false where id = $1 returning id", [panelId]);
   });
 
+  it("Bring In's own payload (E-017's twelve) lands as twelve suggestions; they count only once a tech keeps them", async () => {
+    await asServer();
+    const q = await one("insert into quotes (org_id, customer_id, quote_number, circuits) select $1, customer_id, 'TEST-0333-E017', $2::jsonb from jobs where id = $3 returning id", [
+      orgId,
+      JSON.stringify(E017),
+      jobId,
+    ]);
+    const drafts = quoteCircuitsToSuggestions({ id: q.id, quote_number: "TEST-0333-E017", circuits: E017 }, 100);
+    await as(staffId);
+    const cols = Object.keys(drafts[0]);
+    const values = drafts.map((_d, i) => `(${[`$1`, ...cols.map((_, j) => `$${2 + i * cols.length + j}`)].join(", ")})`).join(", ");
+    const params: unknown[] = [jobId];
+    for (const d0 of drafts) for (const k of cols) params.push(k === "source_row" ? JSON.stringify((d0 as any)[k]) : (d0 as any)[k]);
+    const ins = await client.query(`insert into job_circuits (job_id, ${cols.join(", ")}) values ${values} returning id, state, amps, poles`, params);
+    expect(ins.rowCount).toBe(12);
+    expect(ins.rows.every((r) => r.state === "suggested")).toBe(true);
+    const counted = async () => Number((await one("select count(*)::int n from job_circuits where job_id = $1 and source_quote_id = $2 and state = 'kept' and removed_at is null", [jobId, q.id])).n);
+    expect(await counted()).toBe(0);
+    await as(techId);
+    const kept = await client.query("update job_circuits set state = 'kept' where job_id = $1 and source_quote_id = $2 and state = 'suggested' returning id, updated_by", [jobId, q.id]);
+    expect(kept.rowCount).toBe(12);
+    expect(kept.rows.every((r) => r.updated_by === techId)).toBe(true);
+    expect(await counted()).toBe(12);
+  });
+
   it("nobody hard-deletes, the tech or the office", async () => {
     await as(techId);
     const t = await refused("delete from job_circuits where job_id = $1", [jobId]);
@@ -265,13 +292,13 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
 
   it("the estimate a circuit came from can still be deleted: the link empties, the circuit stays", async () => {
     await asServer();
-    const before = Number((await one("select count(*)::int n from job_circuits where source_quote_id = $1", [quoteId])).n);
-    expect(before).toBeGreaterThan(0);
+    const ids = (await client.query("select id from job_circuits where source_quote_id = $1", [quoteId])).rows.map((r) => r.id as string);
+    expect(ids.length).toBeGreaterThan(0);
     const gone = await refused("delete from quotes where id = $1", [quoteId]);
     expect(gone).toBeNull();
     await client.query("delete from quotes where id = $1", [quoteId]);
-    const left = await client.query("select source_quote_id, source_row, source from job_circuits where job_id = $1 and source = 'estimate'", [jobId]);
-    expect(left.rowCount).toBe(before);
-    expect(left.rows.every((r) => r.source_quote_id === null && r.source_row?.key)).toBe(true);
+    const left = await client.query("select source_quote_id, source_row, source from job_circuits where id = any($1::uuid[])", [ids]);
+    expect(left.rowCount).toBe(ids.length);
+    expect(left.rows.every((r) => r.source_quote_id === null && r.source === "estimate" && r.source_row?.key)).toBe(true);
   });
 });

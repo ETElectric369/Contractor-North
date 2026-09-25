@@ -200,7 +200,8 @@ export async function loadJobPanel(jobId: string): Promise<PanelLoad> {
   }
 
   const ids = [...new Set(circuits.flatMap((c) => [c.verified_by, c.updated_by]).filter(Boolean))] as string[];
-  const people: Record<string, string> = {};
+  // The viewer rides along, so a mark they make now ("Verified On Site By Brian") has its name.
+  const people: Record<string, string> = { [m.userId]: m.name };
   if (ids.length) {
     const { data: ps } = await m.supabase.from("profiles").select("id, full_name").in("id", ids);
     for (const p of (ps ?? []) as { id: string; full_name: string | null }[]) people[p.id] = p.full_name?.trim() || "Someone";
