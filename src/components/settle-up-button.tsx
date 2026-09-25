@@ -1308,6 +1308,14 @@ export function RecordPaymentButton(props: Mode & {
   const chips = source.filter((m) => paymentMethodKey(m) !== "card");
   const [method, setMethod] = useState(chips[0] ?? "Cash");
   const [venmo, setVenmo] = useState<{ qr: string; handle?: string; invoiceId: string; amount: number } | null>(null);
+  /**
+   * "SEND INV-0xx AS THE BILL FIRST?" (Connected North Phase 1). On a job whose open bill is a
+   * draft, a payment that pays ALL of it would leave a draft reading $0 owed that no screen calls
+   * paid, so the server writes nothing and asks (needsSend); a deposit just lands. Only the yes, for
+   * this open of the sheet, goes back with `sendIt`. `then` is the button the person pressed.
+   */
+  const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "record" | "venmo" } | null>(null);
+  const sendOk = useRef(false);
 
   const amt = () => Number(String(amount).replace(/[$,\s]/g, ""));
   const key = paymentMethodKey(method);
@@ -1317,6 +1325,8 @@ export function RecordPaymentButton(props: Mode & {
     setNote("");
     setPaidAt("");
     setVenmo(null);
+    setAsk(null);
+    sendOk.current = false;
     setAmount(props.source === "invoice" ? String(props.balance || "") : "");
   }
   function close() {
@@ -1335,7 +1345,9 @@ export function RecordPaymentButton(props: Mode & {
     if (qrPending) return; // Enter in the amount box while the QR is still coming
     if (!Number.isFinite(amt()) || amt() <= 0) { toast("Enter what they paid.", "error"); return; }
     start(async () => {
-      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
+      const id = await ensureInvoice(props, method, "record", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+        setAsk({ invoiceNumber: n, then: "record" }),
+      );
       if (!id) return;
       toast(`Paid — ${money(amt())} ${method.toLowerCase()}. Done.`, "success");
       close();
@@ -1355,7 +1367,9 @@ export function RecordPaymentButton(props: Mode & {
       if (props.source === "invoice") {
         id = props.invoiceId;
       } else {
-        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`));
+        id = await ensureInvoice(props, method, "later", amt(), note, paidAt || null, toast, (o) => router.push(`/billing/${o}`), sendOk.current, (n) =>
+          setAsk({ invoiceNumber: n, then: "venmo" }),
+        );
         if (!id) return;
       }
       const art = await venmoQrFor(id, amt());
@@ -1365,6 +1379,18 @@ export function RecordPaymentButton(props: Mode & {
       }
       setVenmo({ qr: art.venmoQr, handle: art.venmoHandle, invoiceId: id, amount: Math.min(amt(), art.balance ?? amt()) });
     });
+  }
+
+  /** THE YES: the send happens on the server inside the next call (sendIt), through the one send
+   *  stamp, so it can never be split from the payment it was for. Said out loud. */
+  function sendAndGo() {
+    const a = ask;
+    if (!a) return;
+    sendOk.current = true;
+    setAsk(null);
+    toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
+    if (a.then === "venmo") showVenmoQr();
+    else go();
   }
 
   /** Venmo's half-blind ending: the app can't hear the payment land, so the person says so. */
@@ -1400,14 +1426,22 @@ export function RecordPaymentButton(props: Mode & {
         portal
         dirty={dirty}
         footer={
-          venmo ? (
+          ask ? (
+            <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel="Send It" cancelLabel="Not Now" />
+          ) : venmo ? (
             <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
           ) : (
             <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel="Record It" disabled={qrPending} />
           )
         }
       >
-        {venmo ? (
+        {ask ? (
+          // Asked, never assumed. Not Now goes back to the form with nothing written.
+          <div className="space-y-3">
+            <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
+            <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment")}</p>
+          </div>
+        ) : venmo ? (
           <div className="flex flex-col items-center gap-2">
             <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
             <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />

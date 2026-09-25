@@ -535,6 +535,14 @@ export type TapPaymentIntentResult =
    *  as the bill first?" and calls again with `sendIt` only on the person's yes. */
   | NeedsSend;
 
+/** A balance a card can't be taken for: nothing owed, or under Stripe's fifty-cent floor (the same
+ *  floor /api/pay applies). Checked before a draft is sent, and again on the balance after it. */
+function balanceRefusal(balance: number): { ok: false; error: string } | null {
+  if (balance <= 0) return { ok: false, error: "This invoice is already paid in full." };
+  if (balance < 0.5) return { ok: false, error: "The balance is under $0.50 — too small for a card. Record it another way." };
+  return null;
+}
+
 /**
  * MINT THE PAYMENTINTENT THE PHONE WILL COLLECT — on the tenant's account, for the full balance.
  *
@@ -603,6 +611,24 @@ export async function createTapPaymentIntent(invoiceId: string, opts?: { sendIt?
    * before the PaymentIntent exists. The balance is read AFTER the send, from the recalc.
    */
   let row = inv as { total?: number | null; amount_paid?: number | null };
+
+  // EVERY REFUSAL THAT NEEDS NO STRIPE CALL COMES BEFORE THE QUESTION AND THE SEND. The person said
+  // yes to "Sending records it as sent today, then the card can be taken": a send that can't be
+  // taken back must not go out for a card that was never going to be taken - a company whose card
+  // payments aren't set up, or a balance under Stripe's floor. Read here, used for the charge below.
+  const { data: org, error: orgErr } = await supabase
+    .from("organizations")
+    .select("stripe_account_id, stripe_account_status, stripe_charges_enabled")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) {
+    return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  }
+  const connect = connectStateFromOrg(org as never);
+  if (!canAcceptPayments(connect)) return { ok: false, error: NOT_SET_UP };
+  const before = balanceRefusal(invoiceBalance(row.total, row.amount_paid));
+  if (before) return before;
+
   if (status === "draft") {
     if (!opts?.sendIt) return needsSendRefusal((inv as { invoice_number?: string | null }).invoice_number);
     const sent = await sendDraftForPayment(supabase, invoiceId);
@@ -618,21 +644,9 @@ export async function createTapPaymentIntent(invoiceId: string, opts?: { sendIt?
   }
 
   const balance = invoiceBalance(row.total, row.amount_paid);
-  if (balance <= 0) return { ok: false, error: "This invoice is already paid in full." };
-  // Stripe refuses a card charge under fifty cents (the same floor /api/pay applies).
-  if (balance < 0.5) return { ok: false, error: "The balance is under $0.50 — too small for a card. Record it another way." };
+  const tooSmall = balanceRefusal(balance);
+  if (tooSmall) return tooSmall;
   const amount = Math.round(balance * 100);
-
-  const { data: org, error: orgErr } = await supabase
-    .from("organizations")
-    .select("stripe_account_id, stripe_account_status, stripe_charges_enabled")
-    .eq("id", orgId)
-    .maybeSingle();
-  if (orgErr || !org) {
-    return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
-  }
-  const connect = connectStateFromOrg(org as never);
-  if (!canAcceptPayments(connect)) return { ok: false, error: NOT_SET_UP };
 
   const invoiceNumber = ((inv as { invoice_number?: string | null }).invoice_number ?? null) || null;
   try {

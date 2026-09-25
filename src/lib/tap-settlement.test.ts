@@ -32,6 +32,9 @@ describe("the question the pay doors ask", () => {
     expect(sendFirstQuestion(null)).toBe("Send this invoice as the bill first?");
     expect(sendFirstDetail("INV-078")).toMatch(/INV-078 is still a draft/);
     expect(sendFirstDetail("INV-078")).toMatch(/Nothing is emailed or texted/);
+    expect(sendFirstDetail("INV-081", "payment")).toBe(
+      "INV-081 is still a draft, and this pays all of it. A draft never reads as paid, so sending records it as sent today, then the payment goes on it. Nothing is emailed or texted.",
+    );
   });
 });
 
@@ -63,6 +66,15 @@ describe("Tap to Pay (tap-actions.ts) sends only on the yes", () => {
     expect(refuse).toBeGreaterThan(0);
     expect(send).toBeGreaterThan(refuse);
     expect(stripe).toBeGreaterThan(send);
+  });
+  it("a company that can't take cards, or a balance under the floor, is refused BEFORE the draft is sent", () => {
+    const send = mint.indexOf("sendDraftForPayment(");
+    const setUp = mint.indexOf("if (!canAcceptPayments(connect)) return");
+    const floor = mint.indexOf("balanceRefusal(invoiceBalance(row.total, row.amount_paid))");
+    expect(setUp).toBeGreaterThan(0);
+    expect(floor).toBeGreaterThan(0);
+    expect(send).toBeGreaterThan(setUp);
+    expect(send).toBeGreaterThan(floor);
   });
 });
 

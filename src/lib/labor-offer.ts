@@ -29,6 +29,12 @@
  *     no edited line on this invoice holds are a JOIN onto it.
  *   - Home line edited but not in hours (a set price, "1 lot") → hours can't be added to a lump;
  *     nothing joins, and the office is told (`notHours`) - the hours stay free and unbilled.
+ *   - Home line edited, but its quantity is MORE than the hours of the time entries it holds (bumped
+ *     by hand to cover a shift it doesn't claim - INV-069's "Labor - Erik" reads 30.5 h over 27.5 h
+ *     of entries) → nothing joins: adding the free hours on top could bill that same shift twice, on
+ *     one line, and the claim trigger allows repeats on one invoice. The office is told (`drift`),
+ *     checks the line, and imports again. The allowance is the quarter-hour rounding each joined run
+ *     can carry (1/8 h per held entry), so a line this importer built never trips it.
  *   - Any OTHER unedited line of the person (an old ":2") is not offered, so the RPC removes it and
  *     its entries - free again - join the home line in the same run: the ":2" lines merge themselves.
  */
@@ -67,7 +73,15 @@ export type LaborJoin = {
 };
 
 /** Hours a person worked that this run could NOT put on the invoice, and why. */
-export type LaborLeftOff = { personId: string; name: string; hours: number; why: "deleted" | "notHours"; lineDescription?: string };
+export type LaborLeftOff = {
+  personId: string;
+  name: string;
+  hours: number;
+  why: "deleted" | "notHours" | "drift";
+  lineDescription?: string;
+  /** "drift": how many hours the line shows beyond the time entries it holds. */
+  overBy?: number;
+};
 
 export type LaborPlan = { offer: LaborOffer[]; joins: LaborJoin[]; leftOff: LaborLeftOff[] };
 
@@ -97,6 +111,9 @@ export function planLaborOffer(input: {
   dismissed: ReadonlySet<string>;
   /** computeJobLaborBilling bound to the job's rates and codes. */
   bill: (entries: any[]) => LaborLine[];
+  /** The job's entries BEFORE any claim was taken out, to measure the hours an edited line holds
+   *  (its own entries are on it, so they are never "free"). Defaults to `entries`. */
+  heldEntries?: any[];
 }): LaborPlan {
   const heldByEdited = new Set<string>();
   for (const l of input.ownLines) if (l.edited) for (const id of l.source_ids ?? []) heldByEdited.add(String(id));
@@ -137,6 +154,15 @@ export function planLaborOffer(input: {
       continue;
     }
     if (!home.id) continue; // no row to write to (a read without ids) - the offer above still stands
+    // A HAND-BUMPED LINE TAKES NOTHING (Erik's decision 1: "the hours read as unbilled and can be
+    // billed twice"). Measured against the unrounded hours of the entries it holds for this person.
+    const heldHere = new Set((home.source_ids ?? []).map(String));
+    const claimed = input.bill((input.heldEntries ?? input.entries).filter((e) => heldHere.has(String(e?.id)))).find((r) => r.personId === line.personId);
+    const overBy = Number(home.quantity ?? 0) - (claimed?.rawHours ?? 0);
+    if (overBy > 0.125 * Math.max(1, heldHere.size) + 0.01) {
+      plan.leftOff.push({ personId: line.personId, name: line.name, hours: r2(add.quantity), why: "drift", lineDescription: home.description ?? undefined, overBy: r2(overBy) });
+      continue;
+    }
     plan.joins.push({
       lineId: String(home.id),
       importKey: homeKey,
@@ -172,6 +198,9 @@ export function joinedSentence(j: Pick<LaborJoin, "addHours" | "description" | "
 /** The sentence for hours that could not go on: where they are and what brings them in. */
 export function leftOffSentence(l: LaborLeftOff, invoiceLabel: string): string {
   const they = l.hours === 1 ? "It stays" : "They stay";
+  if (l.why === "drift") {
+    return `${l.lineDescription ?? `${l.name}'s labor line`} shows ${hoursWords(l.overBy ?? 0)} more than the time entries it holds, so ${l.name}'s new ${hoursWords(l.hours)} ${l.hours === 1 ? "was" : "were"} not added. ${they} unbilled on the job - check the line's hours, then Labor from Timecards again`;
+  }
   if (l.why === "deleted") {
     return `${l.name}'s labor line was deleted from ${invoiceLabel}, so ${l.name}'s ${hoursWords(l.hours)} ${l.hours === 1 ? "was" : "were"} not added. ${they} unbilled on the job - Start It Over on Labor brings the line back`;
   }

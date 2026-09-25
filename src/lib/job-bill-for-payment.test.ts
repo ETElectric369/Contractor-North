@@ -18,6 +18,16 @@ describe("a payment from the job page lands on the job's open bill (J-052, J-028
     const draft = [bill("INV-078", "draft", 9505.83, 6760)];
     expect(jobBillForPayment(draft, { card: true })).toMatchObject({ kind: "needsSend", bill: { invoice_number: "INV-078" }, balance: 2745.83 });
     expect(jobBillForPayment(draft, { card: false })).toMatchObject({ kind: "land", bill: { invoice_number: "INV-078" } });
+    expect(jobBillForPayment(draft, { card: false, amount: 500 })).toMatchObject({ kind: "land", bill: { invoice_number: "INV-078" } });
+  });
+
+  it("cash that pays ALL of a draft asks to send it first - a draft never reads as paid, so it would sit Draft at $0 owed", () => {
+    const draft = [bill("INV-081", "draft", 450)];
+    expect(jobBillForPayment(draft, { card: false, amount: 450 })).toMatchObject({ kind: "needsSend", bill: { invoice_number: "INV-081" }, balance: 450 });
+    expect(jobBillForPayment(draft, { card: false, amount: 449.999 })).toMatchObject({ kind: "needsSend" }); // a cent's rounding is all of it
+    expect(jobBillForPayment(draft, { card: false, amount: 449 })).toMatchObject({ kind: "land" }); // a deposit lands
+    // A SENT bill paid in full just lands: it reads Paid on its own.
+    expect(jobBillForPayment([bill("INV-074", "sent", 624.49)], { card: false, amount: 624.49 })).toMatchObject({ kind: "land" });
   });
 
   it("two open bills are named, never guessed between", () => {

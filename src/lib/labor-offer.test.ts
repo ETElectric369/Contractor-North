@@ -121,6 +121,43 @@ describe("planLaborOffer — new hours join the person's line (Erik's INV-078 ru
     expect(plan.leftOff).toEqual([{ personId: "p-erik", name: "Erik Taylor", hours: 6, why: "notHours", lineDescription: "Labor - rough-in" }]);
   });
 
+  it("a line bumped by hand past the hours it holds takes nothing: the new hours are named, never added on top (INV-069)", () => {
+    // INV-069's "Labor - Erik": 30.5 h on the line over 27.5 h of claimed entries - 3 h hand-set.
+    const plan = planLaborOffer({
+      entries: [OLD_E, NEW_E],
+      ownLines: [{ ...E_LINE, quantity: "11.00" }],
+      dismissed: new Set(),
+      bill,
+    });
+    expect(plan.joins).toEqual([]);
+    expect(plan.offer.map((o) => o.importKey)).toEqual(["labor:p-erik"]); // the RPC still keeps the edited line as it is
+    expect(plan.leftOff).toEqual([{ personId: "p-erik", name: "Erik Taylor", hours: 6, why: "drift", lineDescription: "Labor - Erik Taylor", overBy: 3 }]);
+    expect(leftOffSentence(plan.leftOff[0], "INV-078")).toBe(
+      "Labor - Erik Taylor shows 3 h more than the time entries it holds, so Erik Taylor's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Labor from Timecards again",
+    );
+  });
+
+  it("a line this importer joined before never reads as bumped: quarter-hour rounding per run is allowed", () => {
+    // 8.15 h rounds to 8.25 and a joined 6.15 h to 6.25: the line reads 14.5 over 14.3 raw hours held.
+    const a = shift("e-a", ERIK, "2026-08-01", 8.15);
+    const b = shift("e-b", ERIK, "2026-08-02", 6.15);
+    const c = shift("e-c", ERIK, "2026-08-03", 2);
+    const plan = planLaborOffer({
+      entries: [a, b, c],
+      ownLines: [{ ...E_LINE, source_ids: ["e-a", "e-b"], quantity: "14.50" }],
+      dismissed: new Set(),
+      bill,
+    });
+    expect(plan.leftOff).toEqual([]);
+    expect(plan.joins[0]).toMatchObject({ fromQuantity: 14.5, addHours: 2, addIds: ["e-c"] });
+  });
+
+  it("a line cut BELOW its hours (a courtesy) still takes the new hours", () => {
+    const plan = planLaborOffer({ entries: [OLD_E, NEW_E], ownLines: [{ ...E_LINE, quantity: "6.00" }], dismissed: new Set(), bill });
+    expect(plan.leftOff).toEqual([]);
+    expect(plan.joins[0]).toMatchObject({ fromQuantity: 6, addHours: 6 });
+  });
+
   it("a brand-new person on the job gets their own line", () => {
     const plan = planLaborOffer({ entries: [OLD_E, NEW_B], ownLines: [E_LINE], dismissed: new Set(), bill });
     expect(plan.offer.map((o) => o.importKey).sort()).toEqual(["labor:p-brian", "labor:p-erik"]);

@@ -30,7 +30,7 @@ import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
-import { removedLines, removedSentence, staleTombstones } from "@/lib/import-reconcile";
+import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
@@ -1093,14 +1093,23 @@ async function upsertImportedItems(
   const dismissed = (((keysRow.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []) as string[]).map(String);
   const stale = staleTombstones(present, dismissed);
   if (stale.length) {
+    // GUARDED ON THE VALUE IT READ. A line deleted between the read and this write tombstones its
+    // key (0175's delete trigger appends it); an unguarded write would drop that new tombstone and
+    // the RPC below would put the just-deleted line straight back. Zero rows = the invoice changed
+    // while this ran: said, and nothing imported.
     const { data: cleared, error: clearErr } = await supabase
       .from("invoices")
       .update({ dismissed_import_keys: dismissed.filter((k) => !stale.includes(k)) })
       .eq("id", invoiceId)
+      .filter("dismissed_import_keys", "eq", textArrayLiteral(dismissed))
       .select("id");
     if (clearErr || !cleared?.length) {
       reportError("upsertImportedItems.staleTombstones", clearErr ?? "zero rows", { invoiceId, source, stale });
-      return { error: "Couldn't update this invoice just now, so nothing was imported (a line on it would have been dropped) - try again in a moment." };
+      return {
+        error: clearErr
+          ? "Couldn't update this invoice just now, so nothing was imported (a line on it would have been dropped) - try again in a moment."
+          : "This invoice's lines changed while the import ran, so nothing was imported - try again.",
+      };
     }
   }
   const { data, error } = await supabase.rpc("upsert_imported_invoice_items", {
@@ -1495,6 +1504,7 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   const presentKeys = new Set(ownLines.map((l) => String(l.import_key ?? "")).filter(Boolean));
   const plan = planLaborOffer({
     entries: free.jobEntries,
+    heldEntries: labor.jobEntries,
     ownLines,
     dismissed: new Set(
       ((keysRead.data as { dismissed_import_keys?: string[] | null } | null)?.dismissed_import_keys ?? []).map(String).filter((k) => !presentKeys.has(k)),
@@ -3625,6 +3635,44 @@ export async function settleUp(input: {
     return { ok: true, invoiceId };
   };
 
+  /**
+   * THE SAME TAP, TWICE, IS ONE PAYMENT (review of Connected North Phase 1).
+   *
+   * A payment that LANDS on a bill that already existed (the job's open INV-074, a visit's bill)
+   * is invisible to the five-minute same-total check below, which only finds a bill this tap
+   * minted. And the sheet turns any lost answer into "check your connection and try again": on
+   * truck LTE the first tap lands $624.49 on INV-074, the answer never arrives, the tech taps again
+   * - and INV-074, now paid, is no longer open, so the retry MINTED a second $624.49 bill and
+   * recorded the cash twice (or, for a $300 part payment, put $300 on INV-074 twice).
+   * So before any money is written: the same person, the same amount, the same way of paying, on
+   * one of these bills in the last five minutes, is this tap already done - answered as done, and
+   * nothing is written. A genuine second identical payment inside five minutes is recorded from
+   * the invoice itself. A lost read is not "no payment": refuse, nothing written.
+   */
+  const sameTap = async (invoiceIds: string[]): Promise<{ invoiceId: string } | { error: string } | null> => {
+    if (noFigure || input.collect === "later" || !invoiceIds.length) return null;
+    const raw = input.method || "cash";
+    const { data, error } = await supabase
+      .from("payments")
+      .select("id, invoice_id")
+      .in("invoice_id", invoiceIds)
+      .eq("amount", amount)
+      .eq("method", raw.trim() ? paymentMethodKey(raw) : "check") // as recordPayment stores it
+      .eq("recorded_by", ctx.userId)
+      .is("stripe_payment_intent", null)
+      .gte("created_at", new Date(Date.now() - 5 * 60_000).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return { error: "Couldn't check this job's payments just now, so nothing was recorded. Try again in a moment." };
+    return data ? { invoiceId: String((data as { invoice_id: string }).invoice_id) } : null;
+  };
+  const alreadyDone = (invoiceId: string): Result & { invoiceId?: string } => {
+    revalidateMoney(invoiceId);
+    revalidateMoney();
+    return { ok: true, invoiceId };
+  };
+
   if (apptId) {
     const { data: existing } = await supabase
       .from("invoices")
@@ -3633,7 +3681,12 @@ export async function settleUp(input: {
       .neq("status", "void")
       .limit(1)
       .maybeSingle();
-    if (existing) return settleExisting(existing.id, Number(existing.total ?? 0), Number(existing.amount_paid ?? 0));
+    if (existing) {
+      const tap = await sameTap([existing.id]);
+      if (tap && "error" in tap) return { ok: false, error: tap.error };
+      if (tap) return alreadyDone(tap.invoiceId);
+      return settleExisting(existing.id, Number(existing.total ?? 0), Number(existing.amount_paid ?? 0));
+    }
   } else if (jobId) {
     /**
      * THE JOB'S OPEN BILL IS THE DOOR (Connected North Phase 1; J-052, J-028).
@@ -3641,8 +3694,9 @@ export async function settleUp(input: {
      * This used to look only for a same-total bill minted in the last five minutes (a re-tap), and
      * otherwise wrote a NEW one-line invoice for whatever was typed - beside INV-074, sent and open
      * for $624.49, so the customer would owe the same work twice. Now the job's one open bill takes
-     * the payment (jobBillForPayment); two are named and the person picks; a card on a DRAFT asks
-     * "Send INV-0xx as the bill first?" and sends it properly only on the yes. With no open bill at
+     * the payment (jobBillForPayment); two are named and the person picks; a card on a DRAFT, or a
+     * payment that pays all of one, asks "Send INV-0xx as the bill first?" and sends it properly
+     * only on the yes (a deposit on a draft just lands). With no open bill at
      * all, the settle-up bill is written as before. A lost read is not "no bill": refuse, nothing
      * written.
      */
@@ -3669,19 +3723,26 @@ export async function settleUp(input: {
       .neq("status", "void")
       .order("created_at", { ascending: true });
     if (billsErr) return { ok: false, error: "Couldn't read this job's bills just now, so nothing was recorded. Try again in a moment." };
-    const choice = jobBillForPayment((jobBills ?? []) as JobBillRow[], { card: paymentMethodKey(input.method || "") === "card" });
+    // Before the choice, so a retry of a payment that PAID the bill off never falls through to "no
+    // open bill" and mints a second one.
+    const tap = await sameTap((jobBills ?? []).map((b) => String(b.id)));
+    if (tap && "error" in tap) return { ok: false, error: tap.error };
+    if (tap) return alreadyDone(tap.invoiceId);
+    const choice = jobBillForPayment((jobBills ?? []) as JobBillRow[], {
+      card: paymentMethodKey(input.method || "") === "card",
+      amount: noFigure ? null : amount,
+    });
     if (choice.kind === "ambiguous") {
       return {
         ok: false,
         error: `This job has ${choice.bills.length} open bills: ${choice.bills.map((b) => `${b.number} (${formatCurrency(b.balance)} left)`).join(", ")}. Take the payment from the bill they're paying, on the job's Invoices tab.`,
       };
     }
-    if (choice.kind === "needsSend" && !input.sendIt) {
-      return { ...needsSendRefusal(choice.bill.invoice_number), invoiceId: choice.bill.id };
-    }
     if (choice.kind === "needsSend" || choice.kind === "land") {
       const bill = choice.bill;
       const label = bill.invoice_number ?? "The job's open bill";
+      // Before the question, never after the yes: a send can't be taken back, so a payment that
+      // can't land is refused while nothing has moved.
       if (input.collect !== "later" && amount > choice.balance + 0.005) {
         // Never cap it silently: the difference would vanish from the record.
         return {
@@ -3689,6 +3750,9 @@ export async function settleUp(input: {
           invoiceId: bill.id,
           error: `${label} has ${formatCurrency(choice.balance)} left, less than the ${formatCurrency(amount)} they paid. Record ${formatCurrency(choice.balance)} on ${label}, then put the rest on a new invoice.`,
         };
+      }
+      if (choice.kind === "needsSend" && !input.sendIt) {
+        return { ...needsSendRefusal(choice.bill.invoice_number), invoiceId: choice.bill.id };
       }
       if (choice.kind === "needsSend") {
         const sent = await sendDraftForPayment(supabase, bill.id);

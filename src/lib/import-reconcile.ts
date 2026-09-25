@@ -18,6 +18,15 @@ export function staleTombstones(present: readonly Pick<Line, "import_key">[], di
   return [...new Set(dismissed.map(String))].filter((k) => onInvoice.has(k));
 }
 
+/**
+ * A text[] as a Postgres array literal - `{"bill:1","labor:p-1:2"}` - for guarding a write on the
+ * exact value it read (`.filter(col, "eq", literal)`). Every element quoted, `"` and `\` escaped,
+ * so no key can break out of the literal.
+ */
+export function textArrayLiteral(values: readonly string[]): string {
+  return `{${values.map((v) => `"${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+}
+
 /** The lines that were on the invoice before the importer ran and are not after it. */
 export function removedLines(before: readonly Line[], after: readonly Pick<Line, "id">[]): { importKey: string; description: string; amount: number }[] {
   const still = new Set(after.map((l) => String(l.id)));
