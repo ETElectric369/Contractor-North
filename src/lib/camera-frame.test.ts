@@ -3,6 +3,7 @@ import {
   BLACK_SAMPLE_SIZE,
   CAMERA_CHOICE_KEY,
   HAVE_CURRENT_DATA,
+  cameraCountForReport,
   cameraFailureExtra,
   cameraFailureLine,
   cameraOptions,
@@ -193,6 +194,15 @@ describe("the camera choice memory", () => {
     // Both keep the receipt-readable size.
     expect(videoConstraints(null)).toMatchObject({ width: { ideal: 2560 }, height: { ideal: 1440 } });
   });
+
+  it("a computer with nothing remembered asks for no facing, so the system's default webcam opens", () => {
+    const c = videoConstraints(null, false);
+    expect(c).not.toHaveProperty("facingMode");
+    expect(c).not.toHaveProperty("deviceId");
+    expect(c).toMatchObject({ width: { ideal: 2560 }, height: { ideal: 1440 } });
+    // A remembered camera is still asked for exactly.
+    expect(videoConstraints("facetime-hd", false)).toMatchObject({ deviceId: { exact: "facetime-hd" } });
+  });
 });
 
 describe("cameraOptions: what the picker offers", () => {
@@ -223,6 +233,29 @@ describe("cameraOptions: what the picker offers", () => {
       { kind: "videoinput", deviceId: "a", label: "One again" },
     ]);
     expect(list).toEqual([{ deviceId: "a", label: "One" }]);
+  });
+});
+
+describe("cameraCountForReport: the count ops sees", () => {
+  it("counts every camera once permission has given them ids", () => {
+    expect(
+      cameraCountForReport([
+        { kind: "audioinput", deviceId: "mic" },
+        { kind: "videoinput", deviceId: "a" },
+        { kind: "videoinput", deviceId: "b" },
+      ]),
+    ).toBe("2");
+  });
+
+  it("before permission (ids empty) says 'at least', never 0", () => {
+    expect(cameraCountForReport([{ kind: "videoinput", deviceId: "" }])).toBe("1+");
+    // The picker would drop that row, which is why the report doesn't use it.
+    expect(cameraOptions([{ kind: "videoinput", deviceId: "" }])).toEqual([]);
+  });
+
+  it("no camera at all is 0", () => {
+    expect(cameraCountForReport([{ kind: "audioinput", deviceId: "" }])).toBe("0");
+    expect(cameraCountForReport([])).toBe("0");
   });
 });
 

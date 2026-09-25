@@ -153,6 +153,23 @@ describe("CameraCaptureView", () => {
     }
   });
 
+  it("a short screen (a phone on its side) can reach Capture: the dialog scrolls and nothing in it shrinks", () => {
+    const html = render("live", { cameras: TWO, cameraId: "iphone", darkHint: true });
+    const dialog = html.match(/<div role="dialog"[^>]*class="([^"]*)"/)?.[1] ?? "";
+    expect(dialog).toMatch(/\boverflow-y-auto\b/);
+    expect(dialog).not.toMatch(/\boverflow-hidden\b/);
+    // Every direct section of the dialog keeps its height, so the video can't spill over the
+    // picker and the button row can't be squeezed out of reach.
+    for (const cls of [
+      /class="[^"]*\bshrink-0\b[^"]*items-center justify-between/, // header
+      /class="relative [^"]*\bshrink-0\b/, // the video box
+      /<p role="status" class="[^"]*\bshrink-0\b/, // the dark-preview line
+      /class="flex shrink-0 flex-col gap-2/, // picker + Capture + Choose A Photo Instead
+    ]) {
+      expect(html).toMatch(cls);
+    }
+  });
+
   it("Title Case and 44px: the close is a labelled 44px icon, the rest are h-11 or taller", () => {
     const html = render("failed", { message: "x", cameras: TWO });
     expect(html).toContain("Take A Photo");

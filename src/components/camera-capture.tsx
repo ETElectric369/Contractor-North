@@ -12,6 +12,9 @@ import {
   DARK_PREVIEW_HINT_MS,
   FIRST_FRAME_TIMEOUT_MS,
   NO_FRAME_LINE,
+  WARMING_UP_LINE,
+  WARMUP_GATE_MS,
+  cameraCountForReport,
   cameraFailureExtra,
   cameraFailureLine,
   cameraOptions,
@@ -110,6 +113,15 @@ export function CameraCapture({
   const reportedRef = useRef<Set<CameraBranch>>(new Set());
   const camerasRef = useRef<CameraOption[]>([]);
   const rememberedRef = useRef(false);
+  // When the first ready frame arrived for this start (the warm-up gate and the warming-up line
+  // count from it), and which camera this start actually opened.
+  const readySinceRef = useRef<number | null>(null);
+  const openedIdRef = useRef<string | null>(null);
+  // A camera the person picked that hasn't sent a picture yet. It is remembered for next time
+  // only once it has: a pick that fails is never written to storage.
+  const pickedRef = useRef<string | null>(null);
+  // The phase as the track's `ended` handler sees it (a closure can't read state).
+  const phaseRef = useRef<CameraPhase>("starting");
 
   const [phase, setPhase] = useState<CameraPhase>("starting");
   const [message, setMessage] = useState<string | null>(null);
@@ -118,6 +130,10 @@ export function CameraCapture({
   const [cameraId, setCameraId] = useState<string | null>(null);
   const [shotUrl, setShotUrl] = useState<string | null>(null);
   useModalLock(true); // hide the bottom nav so it can't cover Capture / Use Photo
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   /** Make every camera start in flight stale (a close, a Use Photo, a chosen file, unmount). */
   const cancelStarts = useCallback(() => {
@@ -148,7 +164,7 @@ export function CameraCapture({
   }, []);
 
   const report = useCallback(
-    (branch: CameraBranch, name: string | null, cameraCount?: number) => {
+    (branch: CameraBranch, name: string | null, cameraCount?: number | string) => {
       if (reportedRef.current.has(branch)) return;
       reportedRef.current.add(branch);
       void reportClientError(
@@ -173,9 +189,19 @@ export function CameraCapture({
       setDarkHint(false);
       setMessage(line ?? cameraFailureLine(name, isNativeShell()));
       // Count the cameras before reporting: "no frame from one of two cameras" and "no frame from
-      // the only camera" are different findings. Without permission the count still comes back.
-      // (refreshCameras never throws: no mediaDevices at all is an empty list.)
-      void refreshCameras().then((list) => report(branch, name, list.length));
+      // the only camera" are different findings. The count is the RAW videoinput rows, not the
+      // picker's list: before permission a browser lists at most one camera with an empty id,
+      // which the picker drops, so a denial would otherwise always report "0" ("1+" instead).
+      void refreshCameras();
+      void (async () => {
+        let count: string = "0";
+        try {
+          count = cameraCountForReport(await navigator.mediaDevices.enumerateDevices());
+        } catch {
+          count = "unknown";
+        }
+        report(branch, name, count);
+      })();
     },
     [refreshCameras, report, stopStream],
   );
@@ -189,8 +215,18 @@ export function CameraCapture({
       const arrived = () => {
         if (gen !== genRef.current) return true;
         if (!frameReady(v)) return false;
+        // A cold camera's first frames are black: keep the shutter shut until a frame that isn't,
+        // or until WARMUP_GATE_MS after the first one (a dark subject is the person's call).
+        const now = Date.now();
+        readySinceRef.current ??= now;
+        if (now - readySinceRef.current < WARMUP_GATE_MS && looksBlack(v, scratchRef)) return false;
         frameArrivedRef.current = true;
         clearWatchers();
+        const picked = pickedRef.current;
+        if (picked && picked === openedIdRef.current) {
+          rememberCameraChoice(localStore(), picked);
+          pickedRef.current = null;
+        }
         setPhase("live");
         return true;
       };
@@ -236,6 +272,8 @@ export function CameraCapture({
       const gen = ++genRef.current;
       stopStream();
       frameArrivedRef.current = false;
+      readySinceRef.current = null;
+      openedIdRef.current = null;
       rememberedRef.current = !!deviceId;
       setPhase("starting");
       setMessage(null);
@@ -246,7 +284,12 @@ export function CameraCapture({
       }
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints(deviceId), audio: false });
+        // A computer (no touch) asks for no facing, so the system's default webcam opens.
+        const preferRear = typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 0;
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints(deviceId, preferRear),
+          audio: false,
+        });
       } catch (e) {
         if (gen !== genRef.current) return;
         const name = errorName(e);
@@ -266,14 +309,16 @@ export function CameraCapture({
       streamRef.current = stream;
       const track = stream.getVideoTracks()[0];
       const openedId = track?.getSettings?.().deviceId ?? deviceId;
+      openedIdRef.current = openedId ?? null;
       setCameraId(openedId ?? null);
       if (track) {
         const onEnded = () => {
-          if (gen === genRef.current) {
-            stopStream();
-            setPhase("failed");
-            setMessage(TRACK_ENDED_LINE);
-          }
+          if (gen !== genRef.current) return;
+          stopStream();
+          // A finished picture outlives its camera: Use Photo still works, and Retake reopens it.
+          if (phaseRef.current === "shot" || phaseRef.current === "encoding") return;
+          setPhase("failed");
+          setMessage(TRACK_ENDED_LINE);
         };
         track.addEventListener("ended", onEnded);
       }
@@ -349,12 +394,20 @@ export function CameraCapture({
     ctx.drawImage(v!, 0, 0, canvas.width, canvas.height);
     if (looksBlack(canvas, scratchRef)) {
       setPhase("refused");
+      // Black in the first seconds is a camera still warming up, not a dead one: say so, and
+      // don't file it with ops.
+      const since = readySinceRef.current;
+      if (since !== null && Date.now() - since < DARK_PREVIEW_HINT_MS) {
+        setMessage(WARMING_UP_LINE);
+        return;
+      }
       setMessage(BLACK_FRAME_LINE);
       report("black-frame", null);
       return;
     }
     const seq = ++shotSeqRef.current;
     fileRef.current = null;
+    phaseRef.current = "encoding"; // now, not after the render: the `ended` handler reads it
     setPhase("encoding");
     setMessage(null);
     canvas.toBlob(
@@ -368,6 +421,7 @@ export function CameraCapture({
         }
         fileRef.current = new File([blob], `photo-${Date.now()}.jpg`, { type: "image/jpeg" });
         setShotUrl(URL.createObjectURL(blob));
+        phaseRef.current = "shot";
         setPhase("shot");
       },
       "image/jpeg",
@@ -391,7 +445,9 @@ export function CameraCapture({
 
   function pickCamera(id: string) {
     if (!id || id === cameraId) return;
-    rememberCameraChoice(localStore(), id);
+    // The picker and Try Again follow what was tried; storage waits until it sends a picture.
+    pickedRef.current = id;
+    setCameraId(id);
     setShotUrl(null);
     fileRef.current = null;
     void start(id);
@@ -486,9 +542,9 @@ export function CameraCaptureView({
         role="dialog"
         aria-modal="true"
         aria-label="Take A Photo"
-        className="flex max-h-full w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+        className="flex max-h-full w-full max-w-md flex-col overflow-y-auto overscroll-contain rounded-2xl bg-white shadow-xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-100 py-1 pl-4 pr-1">
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 py-1 pl-4 pr-1">
           <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <Camera className="h-4 w-4" /> Take A Photo
           </span>
@@ -497,7 +553,7 @@ export function CameraCaptureView({
           </Button>
         </div>
 
-        <div className="relative min-h-56 bg-slate-900">
+        <div className="relative min-h-[min(14rem,40dvh)] shrink-0 bg-slate-900">
           {/* Mounted for the modal's whole life: Retake returns to this same running stream. */}
           <video
             ref={videoRef}
@@ -505,7 +561,7 @@ export function CameraCaptureView({
             playsInline
             muted
             aria-label="Camera preview"
-            className={`max-h-[60vh] w-full object-contain ${phase === "failed" ? "invisible" : ""}`}
+            className={`max-h-[60dvh] w-full object-contain ${phase === "failed" ? "invisible" : ""}`}
           />
           {phase === "starting" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-white/80">
@@ -531,12 +587,12 @@ export function CameraCaptureView({
         </div>
 
         {line && phase !== "refused" && phase !== "failed" && (
-          <p role="status" className="border-b border-slate-100 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          <p role="status" className="shrink-0 border-b border-slate-100 bg-amber-50 px-4 py-2 text-sm text-amber-800">
             {line}
           </p>
         )}
 
-        <div className="flex flex-col gap-2 px-4 py-3">
+        <div className="flex shrink-0 flex-col gap-2 px-4 py-3">
           {showPicker && (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               <span className="shrink-0 font-medium">Camera</span>

@@ -4,20 +4,22 @@
  *
  * "camera was black" (Erik, 2026-09-24, the North web app on his Intel Mac with his iPhone on the
  * cable): Organize → Take Photo, the Mac's camera light came on, the preview was black, and the
- * modal offered Retake / Use Photo over a black frame. The old modal had three ways to get there,
- * all in camera-capture.tsx before this fix:
+ * modal offered Retake / Use Photo over a black frame. The old modal (camera-capture.tsx before
+ * this fix) had one CONFIRMED way to get there and two that fit but weren't proven:
  *
- *   1. READY MEANT "play() RESOLVED", NOT "A FRAME ARRIVED". The shutter opened the moment play()
- *      settled. A Mac camera takes a second or two after its light comes on to send a picture
- *      that isn't black (the sensor starts dark and the exposure climbs), and a <video> can report
- *      playing before it has decoded anything at all. Capture in that window drew black.
- *   2. RETAKE ORPHANED THE STREAM. The <video> was rendered only while there was no shot, so
- *      Capture unmounted it and Retake mounted a NEW one with no srcObject. `ready` stayed true,
- *      the shutter stayed open, and the second Capture drew a 0×0 canvas: a blank "data:," image
- *      on the black backdrop, and a toBlob of null, so Use Photo did nothing, without a word.
- *   3. ONE CAMERA, CHOSEN BY facingMode "environment". On a Mac with an iPhone attached, the
- *      system can hand over a camera that sends black (a Continuity Camera phone that isn't set up
- *      to film, a virtual camera), and there was no way to pick another or to choose a file.
+ *   CONFIRMED, deterministic: RETAKE ORPHANED THE STREAM. The <video> was rendered only while
+ *      there was no shot, so Capture unmounted it and Retake mounted a NEW one with no srcObject
+ *      while the stream kept running: camera light on, black preview, `ready` still true, the
+ *      shutter still open. The next Capture drew a 0×0 canvas: a blank "data:," image under
+ *      Retake / Use Photo, and a toBlob of null, so Use Photo did nothing, without a word. That is
+ *      exactly what Erik saw.
+ *   POSSIBLE: READY MEANT "play() RESOLVED", NOT "A FRAME ARRIVED". The shutter opened the moment
+ *      play() settled. A Mac camera sends black for a moment after its light comes on, so a
+ *      capture in that window was black (a black CAPTURE, not a preview that stays black).
+ *   POSSIBLE, unchecked: ONE CAMERA, CHOSEN BY facingMode "environment". On a Mac with an iPhone
+ *      attached, that ask can land on a Continuity or virtual camera that sends black, with no way
+ *      to pick another or to choose a file. A computer now asks for no facing at all (the system's
+ *      default webcam); phones keep the rear-camera ask.
  *
  * Everything here is pure so it is tested, not assumed: no DOM, no React, no storage of its own.
  */
@@ -80,6 +82,15 @@ export const NO_FRAME_LINE = "The camera never sent a picture. Try another camer
 /** How long a camera that has been granted gets to send its first picture before the modal says
  *  so. Generous: a cold Mac camera, or a phone camera waking over a cable, takes a few seconds. */
 export const FIRST_FRAME_TIMEOUT_MS = 10_000;
+
+/** How long, after the first picture arrives, the shutter waits for one that isn't black. A
+ *  cold camera's first frames are black (the sensor starts dark and the exposure climbs); past
+ *  this the shutter opens anyway, because a dark subject is the person's call. */
+export const WARMUP_GATE_MS = 1_500;
+
+/** The sentence a black capture gets while the camera is still warming up: not the camera's fault,
+ *  and not reported to ops. */
+export const WARMING_UP_LINE = "The camera is still starting. Wait a moment and capture again.";
 
 /** How long the preview may stay black before the modal says so (the shutter stays open: a
  *  camera warming up sends black for a moment, and a genuinely dark subject is the person's
@@ -161,12 +172,27 @@ export function rememberCameraChoice(storage: ChoiceStorage | null | undefined, 
 
 /**
  * The video constraints to open with. A remembered camera is asked for by id (exact, so the
- * browser can't quietly substitute the one that was black); with nothing remembered, the old
- * ask stands: the rear camera on a phone, at a size a receipt can be read at.
+ * browser can't quietly substitute the one that was black). With nothing remembered, a phone asks
+ * for the rear camera; a computer (`preferRear` false) asks for no facing at all, so the system's
+ * default webcam opens rather than whatever answers to "environment" (a Continuity or virtual
+ * camera). Either way at a size a receipt can be read at.
  */
-export function videoConstraints(deviceId: string | null): MediaTrackConstraints {
+export function videoConstraints(deviceId: string | null, preferRear = true): MediaTrackConstraints {
   const size = { width: { ideal: 2560 }, height: { ideal: 1440 } };
-  return deviceId ? { deviceId: { exact: deviceId }, ...size } : { facingMode: "environment", ...size };
+  if (deviceId) return { deviceId: { exact: deviceId }, ...size };
+  return preferRear ? { facingMode: "environment", ...size } : { ...size };
+}
+
+/**
+ * How many cameras this machine has, for a failure report (not the picker). Counts the raw
+ * videoinput rows: before permission is granted a browser lists at most one camera, with an empty
+ * id, so the count is then "1+" (at least one) rather than a number that reads as "no camera".
+ */
+export function cameraCountForReport(devices: ReadonlyArray<{ kind: string; deviceId: string }>): string {
+  const cams = devices.filter((d) => d.kind === "videoinput");
+  if (cams.length === 0) return "0";
+  if (cams.some((d) => !d.deviceId)) return `${cams.length}+`;
+  return String(cams.length);
 }
 
 /** Every way the camera modal ends without a picture. The name IS the error_events message. */
@@ -183,7 +209,7 @@ export type CameraBranch =
  */
 export function cameraFailureExtra(s: {
   errorName?: string | null;
-  cameras: number;
+  cameras: number | string;
   frameArrived: boolean;
   remembered: boolean;
   native: boolean;
