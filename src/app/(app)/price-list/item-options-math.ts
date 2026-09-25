@@ -61,6 +61,32 @@ export function optionName(o: { vendor?: string | null; label?: string | null })
   return label ? `${vendor} ${label}` : vendor || "This vendor";
 }
 
+/** "Milgard, Andersen" or "Milgard, Andersen, Marvin and 2 more": the vendors a Delete sentence names. */
+export function vendorNameList(options: { vendor?: string | null; label?: string | null }[]): string {
+  const names = [...new Set(options.map((o) => optionName(o)))];
+  return names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+}
+
+/**
+ * DELETE FOR GOOD AND THE VENDORS UNDER AN ITEM (audit v994 VP5). Vendor rows are archive-only
+ * (there is no delete for one), and deleting the item cascades them, so Delete is refused while a
+ * LIVE item still carries LIVE vendors: Archive is the door, and it is right there beside Delete.
+ * Once the item is archived, or every vendor under it is, Delete goes ahead after a confirm that
+ * names the vendor prices going with it (deleteVendorsClause), so it is never a dead end and never
+ * silent. Shared by the row (which says it before the confirm) and the server (which enforces it).
+ */
+export function deleteLiveVendorsRefusal(live: { vendor?: string | null; label?: string | null }[]): string {
+  const n = new Set(live.map((o) => optionName(o))).size;
+  return `Nothing was deleted. This item has ${n === 1 ? "a vendor" : `${n} vendors`} under it (${vendorNameList(live)}), and deleting it would delete their prices too. Archive it instead (the box button beside Delete): it leaves every picker and keeps the prices findable.`;
+}
+
+/** The confirm's sentence for the vendor prices a Delete takes with it ("" when there are none). */
+export function deleteVendorsClause(all: { vendor?: string | null; label?: string | null }[]): string {
+  if (!all.length) return "";
+  const n = new Set(all.map((o) => optionName(o))).size;
+  return ` Its ${n === 1 ? "vendor price" : `${n} vendor prices`} (${vendorNameList(all)}) will be deleted with it.`;
+}
+
 /** WHICH RUNG of the one markup rule answered. Shown next to the number so a fall-through is
  *  never mistaken for a markup somebody set on this option. */
 export type MarkupSource = "option" | "item" | "org" | "none";

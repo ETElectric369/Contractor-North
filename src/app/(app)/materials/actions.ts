@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 import { ITEM_OPTIONS_EMBED, bookLineBuy } from "@/lib/pricing/item-options";
-import { firstThatWorks, kitsSelectRungs, kitLineCost, kitLineView, linkedItemOf } from "@/lib/kit-line";
+import { firstThatWorks, kitsSelectRungs, kitLineView, linkedItemOf } from "@/lib/kit-line";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { recordAiUsage, currentOrgId } from "@/lib/ai-cost";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
@@ -629,17 +629,24 @@ export async function createMaterialListFromQuote(quoteId: string): Promise<Resu
       const kitItems = [...(k.kit_items ?? [])].sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
       for (const it of kitItems) {
         const item = linkedItemOf(it);
-        // A code with a default vendor is BOUGHT at that vendor (audit v994 VP2): the words name it
-        // and est_cost (kitLineCost) is its cost, the same answer the kit priced the line at.
-        const vendor = item ? kitLineView(it, { orgDefaultPct: 0 }).vendor : null;
+        // ONE RESOLUTION (audit v994 VP2): a code with a default vendor is BOUGHT at that vendor,
+        // so the words, the unit and est_cost all come from the same kitLineView the kit priced
+        // the line with. A vendor can carry its own unit (a supplier quoting by the pair); taking
+        // the item's unit beside the vendor's per-pair cost made the buy list and the quote
+        // disagree about what one of it is. Markup doesn't touch any of the three, so any pricing
+        // will do. The code rides in part_number, so the words drop the "CODE — " the view leads
+        // with and keep the vendor and its part number ("Windows (Marvin, #M-1)").
+        const view = item ? kitLineView(it, { orgDefaultPct: 0 }) : null;
+        const lead = view?.code ? `${view.code} — ` : "";
+        const words = view ? (lead && view.description.startsWith(lead) ? view.description.slice(lead.length) : view.description) : it.description;
         rows.push({
           list_id: list.id,
-          description: `${k.name} — ${item ? `${item.description}${vendor ? ` (${vendor})` : ""}` : it.description}`,
+          description: `${k.name} — ${words}`,
           part_number: item?.code ?? null,
           quantity: Number(it.quantity) || 1,
-          unit: item ? item.unit || "ea" : it.unit || "ea",
+          unit: view ? view.unit : it.unit || "ea",
           vendor: item?.supplier ?? null,
-          est_cost: item ? kitLineCost(it) : it.unit_price != null ? Number(it.unit_price) : null,
+          est_cost: view ? view.cost : it.unit_price != null ? Number(it.unit_price) : null,
           sort_order: so++,
         });
       }

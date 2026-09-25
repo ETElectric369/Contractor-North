@@ -211,6 +211,18 @@ export function kitLineView(line: KitLineRaw, pricing: KitPricing): KitLineView 
   };
 }
 
+/** THE SNAPSHOT a linked line carries (kit_items.description/unit/unit_price), for the day it is
+ *  unlinked or its item vanishes. Built BY kitLineView, with the org default and no customer level
+ *  (a kit is authored for nobody in particular), so the frozen line is exactly what the kits
+ *  manager showed a second before: the default vendor's name, unit and sell when the code has one
+ *  (audit v994 VP2 follow-through: a snapshot that re-derived the item's own allowance froze
+ *  "830 — Windows (Marvin)" at $1,610 into "830 — Windows" at $830). The item must be read with
+ *  KIT_BOOK_OPTIONS_EMBED for the vendor to be seen; without it the item's own price is the answer. */
+export function kitLineSnapshot(item: KitLinkedItem, orgDefaultPct: number): { description: string; unit: string; unit_price: number } {
+  const view = kitLineView({ description: "", quantity: null, price_list_items: item }, { orgDefaultPct, levelPct: null });
+  return { description: view.description, unit: view.unit, unit_price: view.unit_price };
+}
+
 /* ── THE SHARED SELECT SHAPE ──────────────────────────────────────────────────────────────────
    Every kits query in the app selects the same columns in the same three tolerant rungs, because
    a deploy lands before its migration and naming an absent column fails the WHOLE query rather
@@ -229,11 +241,17 @@ export const KIT_ITEM_LINK_COLS =
 export const KIT_ITEM_LINK_COLS_V2 =
   "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per)";
 
+/** 0282: the vendors under a code, as every kit read embeds them — `archived` carried rather than
+ *  filtered, so normalizeItemOptions drops the ones the org stopped carrying without a nested
+ *  filter restated at each call site. The kit WRITES (kit-actions' snapshot, the importer's kit
+ *  step) read the item through this same embed so the frozen copy matches what the view shows. */
+export const KIT_BOOK_OPTIONS_EMBED =
+  "price_list_item_options(id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, sort_order, archived)";
+
 /** 0282: the V2 embed plus the vendors under each code, so a kit line quotes at the code's default
  *  vendor like every other door (audit v994 VP2). `archived` rides in the embed rather than as a
  *  filter, because a nested filter would have to be restated at all five call sites. */
-export const KIT_ITEM_LINK_COLS_V3 =
-  "price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per, price_list_item_options(id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, sort_order, archived))";
+export const KIT_ITEM_LINK_COLS_V3 = `price_list_item_id, price_list_items(id, code, description, category, supplier, unit, buy_price, markup_pct, archived, qty_per_sqft, qty_per_lf, qty_min, qty_round, sized_by, qty_per, ${KIT_BOOK_OPTIONS_EMBED})`;
 
 /** The kit_items(...) column lists, most capable first. */
 export const KIT_ITEM_SELECT_RUNGS = [

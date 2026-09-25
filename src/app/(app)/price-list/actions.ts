@@ -7,9 +7,9 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { searchPaidPrices, type LearnedPrice } from "@/lib/pricing/learned-prices";
 import { normalizeUnit } from "@/lib/pricing/units";
 import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
-import { lineDisplayName } from "@/lib/kit-line";
+import { KIT_BOOK_OPTIONS_EMBED, kitLineSnapshot, type KitLinkedItem } from "@/lib/kit-line";
 import { formatCurrency } from "@/lib/utils";
-import { canonicalVendorName, cleanOptionFields, defaultVendorNote, optionName, optionSellPatch, optionWriteRefusal, type OptionFieldsInput } from "./item-options-math";
+import { canonicalVendorName, cleanOptionFields, defaultVendorNote, deleteLiveVendorsRefusal, optionName, optionSellPatch, optionWriteRefusal, vendorNameList, type OptionFieldsInput } from "./item-options-math";
 import { knownVendorNamesFor } from "./vendor-db";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
@@ -141,30 +141,39 @@ export async function archivePriceItem(id: string, archived = true): Promise<Res
 }
 
 /**
- * DELETE FOR GOOD — refused while the item has vendors under it (audit v994 VP5).
+ * DELETE FOR GOOD AND THE VENDORS UNDER IT (audit v994 VP5).
  *
  * A vendor row is archive-only (there is deliberately no deleteItemOption), but 0282's FK cascades
  * it away with its item, and 0300 unlinks every job pick that named it. So deleting 830 Windows
- * was a back door that deleted the Andersen/Milgard/Marvin prices, archived ones included, with
- * a confirm that named only kits. Archive keeps every one of them; delete waits until there are
- * none, and the refusal says which ones and where the Archive button is.
+ * was a back door that deleted the Andersen/Milgard/Marvin prices with a confirm that named only
+ * kits. Now: while a LIVE item carries LIVE vendors, Delete is refused and points at Archive, the
+ * box button beside it. Once the item is archived, or every vendor under it is, Delete goes ahead,
+ * but only after a confirm that NAMED the vendor prices going with it: the caller passes how many
+ * it named (`vendorPricesNamed`), and if the table holds more (a stale page, or the vendors didn't
+ * load) nothing is deleted and the sentence names what the confirm missed. Never a dead end (the
+ * old rule refused forever once a vendor had ever existed, and pointed an archived row at an
+ * Archive button it doesn't have), never silent.
  */
-export async function deletePriceItem(id: string): Promise<Result> {
+export async function deletePriceItem(id: string, opts: { vendorPricesNamed?: number } = {}): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  const { data: item, error: iErr } = await supabase.from("price_list_items").select("id, archived").eq("id", id).maybeSingle();
+  if (iErr) return { ok: false, error: `Nothing was deleted: the item didn't load (${dbError(iErr)}).` };
+  if (!item) return { ok: false, error: "Nothing was deleted — that item may already be gone. Reload the page." };
   const { data: vendors, error: vErr } = await supabase
     .from("price_list_item_options")
-    .select("vendor, label")
+    .select("vendor, label, archived")
     .eq("item_id", id)
-    .limit(50);
+    .limit(500);
   if (vErr) return { ok: false, error: `Nothing was deleted: the vendors under this item didn't load (${dbError(vErr)}).` };
-  const names = [...new Set(((vendors ?? []) as { vendor: string; label: string | null }[]).map((o) => optionName(o)))];
-  if (names.length) {
-    const list = names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ");
+  const all = (vendors ?? []) as { vendor: string; label: string | null; archived: boolean | null }[];
+  const live = all.filter((o) => o.archived !== true);
+  if (live.length && (item as { archived?: boolean | null }).archived !== true) return { ok: false, error: deleteLiveVendorsRefusal(live) };
+  if (all.length > Math.max(0, Number(opts.vendorPricesNamed) || 0)) {
     return {
       ok: false,
-      error: `Nothing was deleted. This item has ${names.length === 1 ? "a vendor" : `${names.length} vendors`} under it (${list}), and deleting it would delete their prices too. Archive it instead (the box button beside Delete): it leaves every picker and keeps the prices findable.`,
+      error: `Nothing was deleted. This item has ${all.length === 1 ? "a vendor price" : `${all.length} vendor prices`} under it (${vendorNameList(all)}) that the page didn't show you, and they would be deleted with it. Reload the page and Delete again to see them first.`,
     };
   }
   const { data, error } = await supabase.from("price_list_items").delete().eq("id", id).select("id");
@@ -478,26 +487,20 @@ export async function bulkImportPriceItems(rows: ImportRow[], mapped: ImportFiel
       const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
       const orgDefaultPct = getOrgSettings((org as { settings?: unknown } | null)?.settings).default_markup_pct;
 
-      // The SNAPSHOT a linked line carries (kit-actions' snapshotOf, same shape): the item's name
-      // with its code, normalized unit, and sell through THE rule with the org default. Read back
-      // from the book AFTER the writes, so a row that refreshed only some columns still snapshots
-      // the whole item, not the half the sheet knew.
-      type Snap = { id: string; code: string | null; description: string; unit: string | null; buy_price: number | string | null; markup_pct: number | string | null };
+      // The SNAPSHOT a linked line carries (kitLineSnapshot, the one kit-actions writes too): built
+      // by kitLineView, so a code with a default vendor freezes at that vendor's words, unit and
+      // sell, exactly what the kits manager shows. Read back from the book AFTER the writes, with
+      // the vendors under each code, so a row that refreshed only some columns still snapshots the
+      // whole item, not the half the sheet knew.
       const snapOf = new Map<string, { description: string; unit: string; unit_price: number }>();
       const ids = [...new Set(kitRows.map((c) => itemIdOf.get(c)!))];
       for (let i = 0; i < ids.length; i += 500) {
         const { data: items, error: sErr } = await supabase
           .from("price_list_items")
-          .select("id, code, description, unit, buy_price, markup_pct")
+          .select(`id, code, description, unit, buy_price, markup_pct, ${KIT_BOOK_OPTIONS_EMBED}`)
           .in("id", ids.slice(i, i + 500));
         if (sErr) throw sErr;
-        for (const it of (items ?? []) as Snap[]) {
-          snapOf.set(it.id, {
-            description: lineDisplayName(it),
-            unit: normalizeUnit(it.unit),
-            unit_price: sellPrice(Number(it.buy_price) || 0, effectiveMarkupPct({ itemPct: Number(it.markup_pct) || 0, orgDefaultPct })),
-          });
-        }
+        for (const it of (items ?? []) as unknown as KitLinkedItem[]) snapOf.set(it.id, kitLineSnapshot(it, orgDefaultPct));
       }
 
       const { data: existingKits, error: kErr } = await supabase.from("kits").select("id, name");

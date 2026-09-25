@@ -127,6 +127,8 @@ vi.mock("server-only", () => ({}));
 
 import { addItemOption, deletePriceItem, setDefaultItemOption } from "./actions";
 import { saveVendorField } from "./vendor-actions";
+import { linkKitItem } from "./kit-actions";
+import { kitLineView } from "@/lib/kit-line";
 
 const opt = (over: Row) => ({ org_id: "org-1", item_id: "item-830", label: null, archived: false, is_default: false, buy_price: 1000, sort_order: 1, ...over });
 const seat = () => (db.tables.price_list_item_options ?? []).filter((o) => o.is_default && !o.archived).map((o) => o.vendor);
@@ -211,12 +213,38 @@ describe("renaming a vendor is all or nothing (VP4)", () => {
   });
 });
 
-describe("Delete For Good waits until the item has no vendors (VP5)", () => {
-  it("refuses while vendors (archived ones included) hang under the item, and names them", async () => {
-    const res = await deletePriceItem("item-830");
+describe("Delete For Good and the vendors under the item (VP5)", () => {
+  it("a live item with a live vendor is refused, names the live vendors, and points at Archive", async () => {
+    const res = await deletePriceItem("item-830", { vendorPricesNamed: 2 });
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/2 vendors under it \(Milgard, Andersen\)/);
+    expect(res.error).toMatch(/has a vendor under it \(Milgard\)/);
     expect(res.error).toMatch(/Archive it instead/);
+    expect(db.tables.price_list_items).toHaveLength(1);
+  });
+
+  it("once every vendor is archived, Delete goes ahead after a confirm that named them", async () => {
+    db.tables.price_list_item_options[0].archived = true;
+    db.tables.price_list_item_options[0].is_default = false;
+    expect(await deletePriceItem("item-830", { vendorPricesNamed: 2 })).toEqual({ ok: true });
+    expect(db.tables.price_list_items).toHaveLength(0);
+  });
+
+  it("an ARCHIVED item is never pointed at an Archive button it doesn't have: it deletes once the confirm named its vendors", async () => {
+    db.tables.price_list_items[0].archived = true;
+    const unnamed = await deletePriceItem("item-830");
+    expect(unnamed.ok).toBe(false);
+    expect(unnamed.error).toMatch(/2 vendor prices under it \(Milgard, Andersen\) that the page didn't show you/);
+    expect(unnamed.error).not.toMatch(/Archive it instead/);
+    expect(db.tables.price_list_items).toHaveLength(1);
+    expect(await deletePriceItem("item-830", { vendorPricesNamed: 2 })).toEqual({ ok: true });
+    expect(db.tables.price_list_items).toHaveLength(0);
+  });
+
+  it("a vendor the confirm didn't name (a stale page) stops the delete and is named", async () => {
+    db.tables.price_list_item_options[0].archived = true;
+    const res = await deletePriceItem("item-830", { vendorPricesNamed: 1 });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/Reload the page and Delete again/);
     expect(db.tables.price_list_items).toHaveLength(1);
   });
 
@@ -224,5 +252,41 @@ describe("Delete For Good waits until the item has no vendors (VP5)", () => {
     db.tables.price_list_item_options = [];
     expect(await deletePriceItem("item-830")).toEqual({ ok: true });
     expect(db.tables.price_list_items).toHaveLength(0);
+  });
+});
+
+describe("Unlink freezes a kit line at exactly what it showed (VP2 follow-through)", () => {
+  it("a code whose default vendor is Marvin freezes at Marvin's words, unit and sell, not the allowance", async () => {
+    const book = {
+      id: "item-830",
+      org_id: "org-1",
+      code: "830",
+      description: "Windows",
+      unit: "ea",
+      buy_price: 830,
+      markup_pct: 0,
+      archived: false,
+      price_list_item_options: [
+        opt({ id: "o-marvin", vendor: "Marvin", part_number: "M-1", unit: "pair", buy_price: 1610, is_default: true }),
+        opt({ id: "o-andersen", vendor: "Andersen", archived: true, buy_price: 900 }),
+      ],
+    };
+    db.tables.price_list_items = [book];
+    db.tables.organizations = [{ id: "org-1", settings: { default_markup_pct: 25 } }];
+    db.tables.kit_items = [{ id: "line-1", kit_id: "kit-1", description: "stale", unit: "ea", unit_price: 1, quantity: 2, price_list_item_id: "item-830" }];
+    const shown = kitLineView({ ...db.tables.kit_items[0], price_list_items: book } as never, { orgDefaultPct: 25 });
+    expect(shown.vendor).toBe("Marvin");
+
+    const res = await linkKitItem("line-1", null);
+    expect(res.ok).toBe(true);
+    const line = db.tables.kit_items[0];
+    expect(line.price_list_item_id).toBeNull();
+    expect({ description: line.description, unit: line.unit, unit_price: line.unit_price }).toEqual({
+      description: shown.description,
+      unit: shown.unit,
+      unit_price: shown.unit_price,
+    });
+    expect(line.description).toBe("830 — Windows (Marvin, #M-1)");
+    expect(line.unit_price).toBe(2012.5); // 1610 × 1.25, not the $830 allowance
   });
 });

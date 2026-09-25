@@ -16,6 +16,18 @@ export function OfficeCanSeeSwitch({ initial }: { initial: boolean }) {
   const [on, setOn] = useState(initial);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  // The stored value, re-read on every refresh, wins over the local one: after a lost answer the
+  // page "is checking", and this is where the check lands. Without it `initial` was read once, so
+  // a write that committed before the answer was lost left the switch showing the old setting
+  // while the database held the new one. A stored value that moved answers the "may not have
+  // moved" sentence too, so that goes. (Adjusting state during render: React's pattern for
+  // following a prop, no effect and no extra paint.)
+  const [stored, setStored] = useState(initial);
+  if (initial !== stored) {
+    setStored(initial);
+    setOn(initial);
+    setErr(null);
+  }
 
   function flip() {
     const next = !on;

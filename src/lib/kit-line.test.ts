@@ -3,6 +3,7 @@ import {
   firstThatWorks,
   kitLineCost,
   kitLineSizing,
+  kitLineSnapshot,
   kitLineView,
   kitsSelectRungs,
   lineDisplayName,
@@ -136,6 +137,15 @@ describe("kitLineView — a code with a default vendor quotes at that vendor (au
     expect(v.vendor).toBe("Marvin");
     expect(kitLineView(line, { orgDefaultPct: 25, levelPct: 10 }).unit_price).toBe(1771);
     expect(kitLineCost(line)).toBe(1610);
+  });
+
+  it("the snapshot a line freezes at IS the view: vendor words, the vendor's own unit, its sell", () => {
+    const line = windows([vendor({ unit: "pair", part_number: "M-1" })]);
+    const v = kitLineView(line, { orgDefaultPct: 25 });
+    expect(kitLineSnapshot(linkedItemOf(line)!, 25)).toEqual({ description: v.description, unit: v.unit, unit_price: v.unit_price });
+    expect(v.description).toBe("830 — Windows (Materials) (Allowance) (Marvin, #M-1)");
+    // …and with no vendors it is the old item-markup snapshot, unchanged.
+    expect(kitLineSnapshot(linkedItemOf(windows([]))!, 25)).toEqual({ description: "830 — Windows (Materials) (Allowance)", unit: "ea", unit_price: 1037.5 });
   });
 
   it("no default, an archived default, or no vendors at all: the item's own number, as before", () => {
