@@ -194,6 +194,23 @@ export type ReplayRoundOptions = {
  * already reached the screen (it would say it twice), when no one is left to answer, or when
  * there was nothing to strip.
  */
+/**
+ * THE CLOSING USAGE (vendor import, Phase 2 fix). The API reports a streamed message's usage twice:
+ * once in message_start (before any server tool ran) and again, cumulatively, in message_delta at
+ * the end. The pinned SDK (0.36) copies only output_tokens from the second, so a round that
+ * searched the web came back with server_tool_use missing and the search results' input tokens
+ * left out, and costOf metered those searches at $0. Every field the closing usage carries (input,
+ * cache, server_tool_use) replaces the early one here; a field it leaves out or sends as null is kept.
+ */
+export function mergeClosingUsage(final: Anthropic.Message, closing: Record<string, unknown> | null): void {
+  if (!closing || !final?.usage) return;
+  const usage = final.usage as unknown as Record<string, unknown>;
+  for (const k of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "server_tool_use"]) {
+    const v = closing[k];
+    if (v !== undefined && v !== null) usage[k] = v;
+  }
+}
+
 export async function runReplayRound(opts: ReplayRoundOptions): Promise<Anthropic.Message> {
   const { client, params, convo, onText } = opts;
   const prepare = opts.prepare ?? ((m: Anthropic.MessageParam[]) => m);
@@ -206,7 +223,14 @@ export async function runReplayRound(opts: ReplayRoundOptions): Promise<Anthropi
       onText(text);
     });
     turn.on("streamEvent", capture.onEvent);
+    // The closing usage rides on message_delta, which this SDK copies only output_tokens from.
+    let closing: Record<string, unknown> | null = null;
+    turn.on("streamEvent", (ev) => {
+      const u = (ev as { type?: string; usage?: unknown }).type === "message_delta" ? (ev as { usage?: unknown }).usage : null;
+      if (u && typeof u === "object") closing = u as Record<string, unknown>;
+    });
     const final = await turn.finalMessage();
+    mergeClosingUsage(final, closing);
     return { final, capture };
   };
 

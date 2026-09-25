@@ -11,9 +11,15 @@ import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
-import { knownVendorNames, summarizeVendors, type ItemOption, type VendorCard } from "./item-options-math";
+import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
+import type { ExistingVendor } from "./vendor-import-math";
 
 export const dynamic = "force-dynamic";
+// Look Up and Read With Nort are server actions on this page that call the model (a lookup is up
+// to three rounds with web searches, three names at a time). The page's own time, not the
+// platform's default, decides when they give up (audit v994, SI4), so a slow chunk is not cut off
+// before its lookups reach the ledger.
+export const maxDuration = 60;
 
 // Every NEW column (0240) is requested FIRST and the query RETRIED without it — a deploy lands
 // before its migration, and naming an absent column fails the whole query rather than degrading,
@@ -31,8 +37,12 @@ type KitRow = { id: string; name: string; category: string | null; kit_items: (K
  *  option row, the modal and the sell-price resolution read has to be named right here, or it is
  *  undefined at runtime with nothing to show for it. */
 const OPTION_SELECT = "id, item_id, vendor, label, part_number, unit, buy_price, markup_pct, is_default, archived, sort_order";
-/** 0296's vendor cards: how to reach each vendor (the brand), once per name. */
+/** 0296's vendor cards: how to reach each vendor, once per name. 0341's kind, trade, is_person and
+ *  Look Up's source_url, maps_url and looked_up_at are asked for first and the query retried
+ *  without them, so a deploy that lands before 0341 still shows every card (as a brand, which is
+ *  what every card was before it). */
 const CARD_SELECT = "id, name, contact_name, phone, email, website, address, notes, archived";
+const CARD_SELECT_0341 = `${CARD_SELECT}, kind, trade, is_person, source_url, maps_url, looked_up_at`;
 
 export default async function PriceListPage() {
   const supabase = await createClient();
@@ -68,7 +78,12 @@ export default async function PriceListPage() {
     supabase.from("price_list_item_options").select(OPTION_SELECT).order("item_id").order("sort_order").limit(2000),
     // 0296 is a new table too: absent = no contact cards yet, and the Vendors tab still lists every
     // vendor from the items, with the contact boxes switched off and saying why.
-    supabase.from("price_list_vendors").select(CARD_SELECT).order("name").limit(2000),
+    (async () => {
+      const withKinds = await supabase.from("price_list_vendors").select(CARD_SELECT_0341).order("name").limit(2000);
+      if (!withKinds.error) return { data: withKinds.data as unknown[] | null, error: null, kindsAvailable: true };
+      const base = await supabase.from("price_list_vendors").select(CARD_SELECT).order("name").limit(2000);
+      return { data: base.data as unknown[] | null, error: base.error, kindsAvailable: false };
+    })(),
   ]);
   // 0241: what THIS company can count an item by — every form's playbook, measured number needs.
   // Best-effort: no forms (or a pre-playbook org) just means the two built-in dimensions.
@@ -121,8 +136,9 @@ export default async function PriceListPage() {
   for (const o of options) (optionsByItem[o.item_id] ??= []).push(o);
   // Archived options still ride in optionsByItem so they stay findable (and restorable) on their
   // item's sheet.
-  // VENDORS ARE BRANDS (Erik for Justin, 2026-09-24: "vendor means what brand with its own cost and
-  // sell price"). One per name across every item, with its card when it has one.
+  // VENDORS: one per name across every item, with its card when it has one. A brand or supplier
+  // carries prices on items (Erik for Justin, 2026-09-24: "vendor means what brand with its own
+  // cost and sell price"); a subcontractor (0341) is on the list to be reached, never priced.
   const cardsAvailable = !cardsRes.error;
   const cards: VendorCard[] = ((cardsRes.data ?? []) as Record<string, unknown>[]).map((c) => ({
     id: String(c.id),
@@ -134,9 +150,38 @@ export default async function PriceListPage() {
     address: (c.address as string | null) ?? null,
     notes: (c.notes as string | null) ?? null,
     archived: Boolean(c.archived),
+    // 0341. Absent (undefined) before it, so every card reads as the brand it was added as.
+    ...(cardsRes.kindsAvailable
+      ? {
+          kind: vendorKindOf(c.kind) ?? null,
+          trade: (c.trade as string | null) ?? null,
+          is_person: Boolean(c.is_person),
+          // Look Up's provenance: THE PROJECTION LAW, or View On Map never sees the saved link.
+          source_url: linkOf(c.source_url) ?? null,
+          maps_url: linkOf(c.maps_url) ?? null,
+          looked_up_at: (c.looked_up_at as string | null) ?? null,
+        }
+      : {}),
   }));
   const vendors = summarizeVendors(options, allItems, cards, defaultMarkupPct);
   const knownVendors = knownVendorNames(options, cards);
+  // What an import compares a dropped list against: every card (live and archived) and every name
+  // on an item, one entry per name.
+  const existingVendors: ExistingVendor[] = (() => {
+    const byKey = new Map<string, ExistingVendor>();
+    for (const c of cards) {
+      const k = vendorKey(c.name);
+      if (k) byKey.set(k, { name: c.name, card: true, archived: c.archived, onItems: false });
+    }
+    for (const o of options) {
+      const k = vendorKey(o.vendor);
+      if (!k) continue;
+      const e = byKey.get(k);
+      if (e) e.onItems = e.onItems || !o.archived;
+      else byKey.set(k, { name: o.vendor, card: false, archived: false, onItems: !o.archived });
+    }
+    return [...byKey.values()];
+  })();
 
   return (
     <div>
@@ -145,7 +190,7 @@ export default async function PriceListPage() {
         description={
           "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier list (e.g. CED) via CSV." +
           // Only said when the tab is actually there — copy never names a control that doesn't exist.
-          (optionsAvailable ? " Click any item to give it vendors (the brand, e.g. Andersen), each with its own cost and sell." : "")
+          (optionsAvailable ? " Click any item to give it vendors (the brand or supplier, e.g. Andersen), each with its own cost and sell." : "")
         }
       />
       {/* ONE unit vocabulary, one list: every unit input on the page points at this datalist. */}
@@ -189,6 +234,8 @@ export default async function PriceListPage() {
                       knownVendors={knownVendors}
                       defaultMarkupPct={defaultMarkupPct}
                       cardsAvailable={cardsAvailable}
+                      kindsAvailable={cardsAvailable && cardsRes.kindsAvailable}
+                      existingVendors={existingVendors}
                     />
                   ),
                 },

@@ -354,7 +354,27 @@ export function vendorKey(name: string | null | undefined): string {
   return String(name ?? "").trim().toLowerCase();
 }
 
-/** One vendor card (0296), as the page reads it. */
+/** What a vendor is (0341). NULL is Not Sorted. Only a brand, a supplier or a Not Sorted vendor
+ *  is offered as a vendor on an item: a subcontractor does the work, it doesn't make the windows. */
+export type VendorKind = "brand" | "supplier" | "subcontractor";
+export const VENDOR_KINDS: VendorKind[] = ["supplier", "subcontractor", "brand"];
+
+/** A kind as typed or chosen -> the column's value, or undefined when it isn't one ("" is null,
+ *  Not Sorted). The whitelist 0341's check constraint also holds. */
+export function vendorKindOf(raw: unknown): VendorKind | null | undefined {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return null;
+  return (VENDOR_KINDS as string[]).includes(s) ? (s as VendorKind) : undefined;
+}
+
+/** Can this kind carry prices on items? Brand and supplier yes, Not Sorted yes (today's vendors
+ *  from items have no card and are brands), subcontractor never. */
+export function kindCarriesPrices(kind: VendorKind | null | undefined): boolean {
+  return kind !== "subcontractor";
+}
+
+/** One vendor card (0296), as the page reads it. kind/trade/is_person arrive with 0341; before
+ *  it they are absent and every card reads as it did (a brand). */
 export interface VendorCard {
   id: string;
   name: string;
@@ -365,11 +385,50 @@ export interface VendorCard {
   address: string | null;
   notes: string | null;
   archived: boolean;
+  kind?: VendorKind | null;
+  trade?: string | null;
+  is_person?: boolean;
+  /** Look Up (0341): the page a picked choice was found on, its map link, and when it was saved. */
+  source_url?: string | null;
+  maps_url?: string | null;
+  looked_up_at?: string | null;
 }
 
-export type VendorCardField = "name" | "contact_name" | "phone" | "email" | "website" | "address" | "notes";
+export type VendorCardField = "name" | "contact_name" | "phone" | "email" | "website" | "address" | "notes" | "kind" | "trade";
 
-export const VENDOR_CARD_FIELDS: VendorCardField[] = ["name", "contact_name", "phone", "email", "website", "address", "notes"];
+export const VENDOR_CARD_FIELDS: VendorCardField[] = ["name", "contact_name", "phone", "email", "website", "address", "notes", "kind", "trade"];
+
+/** What cleanVendorCard takes: the text fields, whether the name is a person's (0341), and where a
+ *  looked-up choice came from (Look Up: only ever from a pick a person made). */
+export type VendorCardInput = Partial<Record<VendorCardField, string | null | undefined>> & {
+  is_person?: boolean | null;
+  source_url?: string | null;
+  maps_url?: string | null;
+};
+/** What it gives back: only the fields passed, blank as null. */
+export type VendorCardClean = Partial<Record<Exclude<VendorCardField, "kind">, string | null>> & {
+  kind?: VendorKind | null;
+  is_person?: boolean;
+  source_url?: string | null;
+  maps_url?: string | null;
+};
+
+export const LINK_MAX = 500;
+
+/** A stored link (source_url, maps_url): an explicit http(s) address with no spaces, at most 500
+ *  characters, the rule 0341's checks hold. null for blank, undefined for anything else. */
+export function linkOf(raw: unknown): string | null | undefined {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (s.length > LINK_MAX || /\s/.test(s) || !/^https?:\/\//i.test(s)) return undefined;
+  try {
+    const u = new URL(s);
+    if (!/^https?:$/.test(u.protocol) || !u.hostname.includes(".")) return undefined;
+    return s;
+  } catch {
+    return undefined;
+  }
+}
 
 /** One item a vendor is on, with the numbers the row shows. */
 export interface VendorItemRow {
@@ -467,19 +526,50 @@ export function summarizeVendors(
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Every vendor name the org already spells one way, for the vendor box's suggestions, so the
- *  next item gets "Andersen" and not "Anderson". Cards first (a person chose that spelling). */
-export function knownVendorNames(options: Pick<ItemOption, "vendor">[], cards: Pick<VendorCard, "name" | "archived">[]): string[] {
+/** Every vendor name the org already spells one way, for the vendor box's suggestions on an item
+ *  (THE ITEM PRICE PICKER), so the next item gets "Andersen" and not "Anderson". Cards first (a
+ *  person chose that spelling). A SUBCONTRACTOR is never offered (0341): Coldwater Drywall is not a
+ *  maker of windows, and a name a card calls a subcontractor stays out even where an item row
+ *  still spells it. */
+export function knownVendorNames(options: Pick<ItemOption, "vendor">[], cards: Pick<VendorCard, "name" | "archived" | "kind">[]): string[] {
   const seen = new Map<string, string>();
+  const subs = new Set(cards.filter((c) => !c.archived && !kindCarriesPrices(c.kind)).map((c) => vendorKey(c.name)));
   for (const c of cards) {
     const k = vendorKey(c.name);
-    if (!c.archived && k && !seen.has(k)) seen.set(k, c.name.trim());
+    if (!c.archived && k && !subs.has(k) && !seen.has(k)) seen.set(k, c.name.trim());
   }
   for (const o of options) {
     const k = vendorKey(o.vendor);
-    if (k && !seen.has(k)) seen.set(k, o.vendor.trim());
+    if (k && !subs.has(k) && !seen.has(k)) seen.set(k, o.vendor.trim());
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** Which Kind a vendor on the Vendors tab reads as: its card's kind, and a vendor that is only on
+ *  items (no card yet) is a brand, because that is what an item's vendor has always been. */
+export function listedKind(v: Pick<VendorSummary, "card">): VendorKind | null {
+  if (!v.card) return "brand";
+  return v.card.kind === undefined ? "brand" : (v.card.kind ?? null);
+}
+
+export type VendorFilter = "all" | VendorKind | "none";
+
+/** The Vendors tab's chips: All, Suppliers, Subs, Brands, Not Sorted, each with its count. */
+export function vendorFilters(vendors: Pick<VendorSummary, "card">[]): { id: VendorFilter; label: string; count: number }[] {
+  const count = (k: VendorKind | null) => vendors.filter((v) => listedKind(v) === k).length;
+  return [
+    { id: "all", label: "All", count: vendors.length },
+    { id: "supplier", label: "Suppliers", count: count("supplier") },
+    { id: "subcontractor", label: "Subs", count: count("subcontractor") },
+    { id: "brand", label: "Brands", count: count("brand") },
+    { id: "none", label: "Not Sorted", count: count(null) },
+  ];
+}
+
+export function matchesVendorFilter(v: Pick<VendorSummary, "card">, f: VendorFilter): boolean {
+  if (f === "all") return true;
+  const k = listedKind(v);
+  return f === "none" ? k === null : k === f;
 }
 
 /** The spelling the org already uses for this vendor, when it has one; else the typed one,
@@ -492,11 +582,8 @@ export function canonicalVendorName(typed: string, known: string[]): string {
 
 /** The vendor-card fields a person typed → the columns, or the sentence saying why not. Only the
  *  fields passed are touched (a phone edit never blanks the email). Blank is null. */
-export function cleanVendorCard(
-  input: Partial<Record<VendorCardField, string | null | undefined>>,
-  mode: "create" | "update",
-): { clean: Partial<Record<VendorCardField, string | null>> } | { error: string } {
-  const clean: Partial<Record<VendorCardField, string | null>> = {};
+export function cleanVendorCard(input: VendorCardInput, mode: "create" | "update"): { clean: VendorCardClean } | { error: string } {
+  const clean: VendorCardClean = {};
   const limits: Record<VendorCardField, number> = {
     name: 120,
     contact_name: 120,
@@ -505,6 +592,8 @@ export function cleanVendorCard(
     website: 300,
     address: 300,
     notes: 2000,
+    kind: 20,
+    trade: 60,
   };
   const words: Record<VendorCardField, string> = {
     name: "name",
@@ -514,16 +603,33 @@ export function cleanVendorCard(
     website: "website",
     address: "address",
     notes: "note",
+    kind: "kind",
+    trade: "trade",
   };
   for (const f of VENDOR_CARD_FIELDS) {
     if (input[f] === undefined && !(f === "name" && mode === "create")) continue;
     const v = String(input[f] ?? "").trim();
-    if (f === "name" && !v) return { error: "Name the vendor: the brand, e.g. Andersen." };
+    if (f === "name" && !v) return { error: "Name the vendor, e.g. Andersen or Granite Peak Plumbing." };
+    if (f === "kind") {
+      // THE WHITELIST (0341's check constraint holds the same three): anything else is refused in
+      // words rather than stored as a fourth kind nobody filters on.
+      const k = vendorKindOf(v);
+      if (k === undefined) return { error: "Pick a kind: Supplier, Subcontractor, Brand or Not Sorted." };
+      clean.kind = k;
+      continue;
+    }
     if (v.length > limits[f]) return { error: `That ${words[f]} is too long. Keep it under ${limits[f]} characters.` };
     if (f === "email" && v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
       return { error: "That email doesn't look right. It needs an @ and a domain." };
     }
-    clean[f] = v || null;
+    clean[f as Exclude<VendorCardField, "kind">] = v || null;
+  }
+  if (input.is_person !== undefined && input.is_person !== null) clean.is_person = input.is_person === true;
+  for (const f of ["source_url", "maps_url"] as const) {
+    if (input[f] === undefined) continue;
+    const link = linkOf(input[f]);
+    if (link === undefined) return { error: "That looked-up link isn't a web address, so nothing was saved. Look it up again." };
+    clean[f] = link;
   }
   return { clean };
 }
@@ -548,6 +654,11 @@ export function vendorCardRefusal(err: unknown, name?: string | null): string {
   const raw = typeof err === "string" ? err : String((err as { message?: unknown } | null)?.message ?? "");
   if (raw.includes("price_list_vendors_one_per_name")) {
     return `${name?.trim() || "That vendor"} is already on your Vendors list. Open it there instead of adding it again.`;
+  }
+  if (raw.includes("price_list_vendors_kind_check")) return "Pick a kind: Supplier, Subcontractor, Brand or Not Sorted.";
+  if (raw.includes("price_list_vendors_trade_check")) return "Keep the trade under 60 characters.";
+  if (raw.includes("price_list_vendors_source_url_check") || raw.includes("price_list_vendors_maps_url_check")) {
+    return "That looked-up link isn't a web address, so nothing was saved. Look it up again.";
   }
   return dbError(err);
 }

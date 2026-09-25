@@ -32,10 +32,22 @@ export type TokenUsage = {
   output_tokens?: number | null;
   cache_read_input_tokens?: number | null;
   cache_creation_input_tokens?: number | null;
+  /** Server tools the call ran on Anthropic's side. Web search is billed per search, on top of
+   *  the tokens its results add to the input. */
+  server_tool_use?: { web_search_requests?: number | null } | null;
 };
 
+/** USD per web search (Anthropic bills $10 per 1,000 searches). */
+export const WEB_SEARCH_USD = 0.01;
+
 /** Dollar cost of one call. Cache classes are priced separately — collapsing them
- *  would misstate an agentic loop's cost by an order of magnitude. */
+ *  would misstate an agentic loop's cost by an order of magnitude.
+ *
+ *  WEB SEARCHES COUNT (vendor import, Phase 2). Every search is $0.01 whatever the model, and
+ *  this used to price tokens only: Nort chat's research (up to 6 searches a message) and the
+ *  public site-chat's ballparks went onto the ledger at their token cost alone, so the $150
+ *  ceiling could be walked past a cent a search. Recorded spend for orgs that use research rises
+ *  from here on; that is a gap closing, not new cost. */
 export function costOf(model: string, u: TokenUsage): number {
   // Strip a trailing date snapshot before the lookup (audit 8): "claude-haiku-4-5-20251001" is
   // the same model as "claude-haiku-4-5", but the exact-key miss fell through to FALLBACK and
@@ -46,11 +58,13 @@ export function costOf(model: string, u: TokenUsage): number {
   const read = Number(u.cache_read_input_tokens ?? 0);
   const write = Number(u.cache_creation_input_tokens ?? 0);
   const output = Number(u.output_tokens ?? 0);
+  const searches = Math.max(0, Number(u.server_tool_use?.web_search_requests ?? 0) || 0);
   const dollars =
     (input / 1e6) * p.input +
     (read / 1e6) * p.input * 0.1 +
     (write / 1e6) * p.input * 1.25 +
-    (output / 1e6) * p.output;
+    (output / 1e6) * p.output +
+    searches * WEB_SEARCH_USD;
   return Math.round(dollars * 1e6) / 1e6;
 }
 

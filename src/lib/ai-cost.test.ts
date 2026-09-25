@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { costOf, modelFor, MONTHLY_AI_CEILING_USD } from "./ai-cost";
+import { costOf, modelFor, MONTHLY_AI_CEILING_USD, WEB_SEARCH_USD } from "./ai-cost";
 
 /**
  * These guard the number the whole pricing model rests on. If costOf() is wrong, the
@@ -75,5 +75,33 @@ describe("the ceiling is an abuse stop, not a usage tier", () => {
     // A heavy user measured at ~$22-67/mo depending on routing. The ceiling must not
     // catch them — it exists for runaway loops and abuse.
     expect(MONTHLY_AI_CEILING_USD).toBeGreaterThan(100);
+  });
+});
+
+describe("costOf — web searches are billed per search (vendor import, Phase 2)", () => {
+  it("adds $0.01 per search on top of the tokens", () => {
+    expect(WEB_SEARCH_USD).toBe(0.01);
+    const tokens = costOf("claude-sonnet-5", { input_tokens: 20_000, output_tokens: 1_000 });
+    const withSearches = costOf("claude-sonnet-5", { input_tokens: 20_000, output_tokens: 1_000, server_tool_use: { web_search_requests: 3 } });
+    expect(withSearches - tokens).toBeCloseTo(0.03, 6);
+  });
+
+  it("a search costs the same on any model, and a call that only searched is not free", () => {
+    expect(costOf("claude-haiku-4-5", { server_tool_use: { web_search_requests: 6 } })).toBeCloseTo(0.06, 6);
+    expect(costOf("claude-opus-4-8", { server_tool_use: { web_search_requests: 1 } })).toBeCloseTo(0.01, 6);
+  });
+
+  it("the chat route's usage object, passed straight through, now counts its searches", () => {
+    // Nort chat and site-chat hand recordAiUsage the SDK's own usage object; it carries
+    // server_tool_use whenever web_search ran. Before this fix those searches cost $0 here.
+    const sdkUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, server_tool_use: { web_search_requests: 6 } };
+    expect(costOf("claude-opus-4-8", sdkUsage)).toBeCloseTo(0.06, 6);
+  });
+
+  it("missing, null or nonsense search counts are zero, never NaN or a refund", () => {
+    expect(costOf("claude-sonnet-5", { server_tool_use: null })).toBe(0);
+    expect(costOf("claude-sonnet-5", { server_tool_use: { web_search_requests: null } })).toBe(0);
+    expect(costOf("claude-sonnet-5", { server_tool_use: { web_search_requests: -4 } })).toBe(0);
+    expect(costOf("claude-sonnet-5", { server_tool_use: { web_search_requests: Number.NaN } })).toBe(0);
   });
 });
