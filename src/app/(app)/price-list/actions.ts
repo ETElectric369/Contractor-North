@@ -10,7 +10,7 @@ import { effectiveMarkupPct, sellPrice } from "@/lib/pricing/markup";
 import { KIT_BOOK_OPTIONS_EMBED, kitLineSnapshot, type KitLinkedItem } from "@/lib/kit-line";
 import { formatCurrency } from "@/lib/utils";
 import { canonicalVendorName, cleanOptionFields, defaultVendorNote, deleteLiveVendorsRefusal, optionName, optionSellPatch, optionWriteRefusal, vendorNameList, type OptionFieldsInput } from "./item-options-math";
-import { knownVendorNamesFor } from "./vendor-db";
+import { knownVendorNamesFor, subcontractorKeysFor } from "./vendor-db";
 
 export type Result = { ok: boolean; error?: string; imported?: number };
 
@@ -789,6 +789,15 @@ async function nextSortOrder(supabase: StaffDb, orgId: string, itemId: string): 
   return (Number((data as { sort_order?: number }[] | null)?.[0]?.sort_order) || 0) + 1;
 }
 
+/** A SUBCONTRACTOR NEVER CARRIES PRICES ON AN ITEM (0341). The picker already leaves them out;
+ *  this is the same rule at the write, so a typed name can't slip one in. Null when it's fine. */
+async function subcontractorRefusal(supabase: Parameters<typeof knownVendorNamesFor>[0], orgId: string, vendor: string): Promise<string | null> {
+  const subs = await subcontractorKeysFor(supabase, orgId);
+  if (!(subs instanceof Set)) return dbError(subs.error);
+  if (!subs.has(vendor.trim().toLowerCase())) return null;
+  return `${vendor.trim()} is a subcontractor on your Vendors list, and subcontractors don't carry prices on items. Change its Kind to Supplier or Brand on the Vendors tab first.`;
+}
+
 export async function addItemOption(
   input: {
     itemId: string;
@@ -817,6 +826,8 @@ export async function addItemOption(
   if (typeof owned === "string") return { ok: false, error: owned };
   // ONE BRAND, ONE SPELLING: "andersen" typed on a new item joins the Andersen already listed.
   cleaned.clean.vendor = canonicalVendorName(String(cleaned.clean.vendor), await knownVendorNamesFor(supabase, orgId));
+  const subRefusal = await subcontractorRefusal(supabase, orgId, String(cleaned.clean.vendor));
+  if (subRefusal) return { ok: false, error: subRefusal };
 
   // THE NEW ROW LANDS AS AN ALTERNATIVE FIRST, and only then takes the default seat (audit v994
   // VP3). Standing the sitting default down before an insert that can still be refused (the
@@ -909,6 +920,8 @@ export async function updateItemOption(input: { optionId: string } & OptionField
     // retyping "ANDERSEN" as "Andersen" on the only Andersen row must be allowed to stick.
     const known = (await knownVendorNamesFor(supabase, orgId)).filter((n) => n !== row.vendor.trim());
     patch.vendor = canonicalVendorName(patch.vendor, known);
+    const subRefusal = await subcontractorRefusal(supabase, orgId, String(patch.vendor));
+    if (subRefusal) return { ok: false, error: subRefusal };
   }
   if (Object.keys(patch).length === 0) return { ok: true };
 
