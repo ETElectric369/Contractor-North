@@ -444,11 +444,38 @@ describe("Link To J-055 Instead", () => {
     for (const st of ["cancelled", "completed", "", null, undefined]) expect(linkableStatus(st), String(st)).toBe(false);
   });
 
-  it("offers nothing for two such jobs (open or finished), a cancelled one, or one made another day", () => {
+  it("an open job and a finished one made the same day: the open one is offered", () => {
+    // The morning service call J-054 is finished; the office made J-055 for the afternoon work.
+    const day = visitDay(tomVisit.starts_at, TZ);
+    const j54 = { ...j55, id: "job-54", job_number: "J-054", status: "complete", created_at: "2026-09-25T16:00:00Z" };
+    expect(linkInsteadPick([j54, j55], day, TZ)?.id).toBe("job-55");
+    expect(linkInsteadPick([j55, { ...j54, status: "invoiced" }], day, TZ)?.id).toBe("job-55");
+  });
+
+  it("links the open J-055 when a finished J-054 was made the same day, and makes nothing new", async () => {
+    state.jobs = [{ ...j55, id: "job-54", job_number: "J-054", status: "complete", created_at: "2026-09-25T16:00:00Z" }, j55];
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res).toMatchObject({ ok: true, jobId: "job-55" });
+    expect(spies.link).toHaveBeenCalledWith("appt-tom", "job", "job-55");
+    expect(spies.createJob).not.toHaveBeenCalled();
+    // The finished one is not the offer, so a stale tap on it changes nothing.
+    spies.link.mockClear();
+    const stale = await linkVisitInstead("appt-tom", "job-54");
+    expect(stale).toMatchObject({ ok: false });
+    expect(spies.link).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing for two open jobs, two finished ones, a cancelled one, or one made another day", () => {
     const day = visitDay(tomVisit.starts_at, TZ);
     expect(linkInsteadPick([j55, { ...j55, id: "job-57", job_number: "J-057" }], day, TZ)).toBeNull();
-    // Still exactly one or nothing: an open one and a finished one the same day is a question.
-    expect(linkInsteadPick([j55, { ...j55, id: "job-57", job_number: "J-057", status: "complete" }], day, TZ)).toBeNull();
+    // Two open ones plus a finished one is still a question.
+    expect(
+      linkInsteadPick([j55, { ...j55, id: "job-57", job_number: "J-057" }, { ...j55, id: "job-54", status: "complete" }], day, TZ),
+    ).toBeNull();
+    // No open one and two finished ones is a question too.
+    expect(
+      linkInsteadPick([{ ...j55, status: "complete" }, { ...j55, id: "job-57", job_number: "J-057", status: "invoiced" }], day, TZ),
+    ).toBeNull();
     expect(linkInsteadPick([{ ...j55, status: "cancelled" }], day, TZ)).toBeNull();
     expect(linkInsteadPick([{ ...j55, created_at: "2026-09-24T22:00:00Z" }], day, TZ)).toBeNull();
     // 11:30 PM Pacific on the 25th is 06:30 UTC on the 26th: still the visit's day on the org's clock.

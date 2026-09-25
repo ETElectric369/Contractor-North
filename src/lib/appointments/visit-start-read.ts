@@ -20,8 +20,8 @@ export async function visitCustomerId(
 }
 
 /**
- * The same customer's one job made on the visit's day that is not cancelled (open OR finished), or
- * null (none, or more than one). The read is narrowed to the visit's org-local day, so a customer
+ * The same customer's one job made on the visit's day that is not cancelled (the one open job, else
+ * the one finished job when none is open), or null (none, or no single answer). The read is narrowed to the visit's org-local day, so a customer
  * with a long history can never push the right job out of the page; the pick re-checks the day.
  */
 export async function loadLinkInstead(

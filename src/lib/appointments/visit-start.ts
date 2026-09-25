@@ -11,8 +11,9 @@
  * card never offers what the action would refuse:
  *
  *   - which job the visit could be linked to INSTEAD of making a new one (linkInsteadPick): the same
- *     customer's one job made on the visit's own day that is not cancelled, open OR finished. Exactly
- *     one or nothing; the app suggests, a person taps, and nothing links itself;
+ *     customer's one job made on the visit's own day that is not cancelled: the one OPEN job, else the
+ *     one finished job when none is open. One or nothing; the app suggests, a person taps, and
+ *     nothing links itself;
  *   - what a visit that is OVER may offer (visitIsOver, clockOffered): never a clock on the visit
  *     itself, and none on its job once that job is finished too;
  *   - when a clock-in may start (startedAtProblem): never in the future, never before midnight
@@ -87,8 +88,13 @@ export function visitDayBounds(day: string, tz: string): { start: string; end: s
  * `jobs` are the SAME customer's jobs (the caller filters by customer and org). Offered only when
  * exactly one of them still stands (linkableStatus: open or finished, not cancelled) AND was made on
  * the visit's own org-local day: that is the Tom Goodman case (a job made by hand the afternoon of
- * the visit). Two candidates is a question the app cannot answer, so it offers neither; Edit Details
- * still links any job by hand.
+ * the visit).
+ *
+ * OPEN FIRST (review, 2026-09-25): the customer's morning service call J-054 finished, the office
+ * made J-055 for the afternoon, and the visit is unlinked. The one open job is the one to offer, as
+ * it was before finished jobs counted; a finished one is offered only when no open one was made that
+ * day. Two open ones, or no open one and two finished ones, is a question the app cannot answer, so
+ * it offers neither; Edit Details still links any job by hand.
  */
 export function linkInsteadPick(jobs: LinkInsteadJob[], day: string, tz: string): LinkInsteadJob | null {
   const hits = jobs.filter((j) => {
@@ -98,6 +104,8 @@ export function linkInsteadPick(jobs: LinkInsteadJob[], day: string, tz: string)
     if (isNaN(made.getTime())) return false;
     return todayStrInTz(tz, made) === day;
   });
+  const open = hits.filter((j) => !jobIsFinished(j.status));
+  if (open.length > 0) return open.length === 1 ? open[0] : null;
   return hits.length === 1 ? hits[0] : null;
 }
 
