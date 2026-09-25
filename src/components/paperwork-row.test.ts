@@ -242,4 +242,30 @@ describe("PaperworkRow", () => {
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toMatch(/h-11/);
     expect(html).toMatch(/<select[^>]*class="[^"]*h-11/);
   });
+
+  it("a return with no lines on a job is refused in words, and the Read Again it names is there (DB4)", () => {
+    const html = render({
+      doc_type: "bill",
+      vendor: "CED",
+      amount: -51.58,
+      payment: "on_account",
+      line_items: null,
+      file_url: "org-1/organize/ret.jpg",
+      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HERRINGBONE" },
+    });
+    expect(html).toContain("Press Read Again so its lines come with it");
+    expect(html).toMatch(/Read Again<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="This is a return with no lines/);
+    // The same paper WITH its lines has no Read Again and files.
+    const lined = render({
+      doc_type: "bill",
+      vendor: "CED",
+      amount: -51.58,
+      payment: "on_account",
+      line_items: [{ description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32 }],
+      file_url: "org-1/organize/ret.jpg",
+      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HERRINGBONE" },
+    });
+    expect(lined).not.toContain("Read Again");
+  });
 });
