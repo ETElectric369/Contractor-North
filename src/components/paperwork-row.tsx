@@ -13,12 +13,14 @@ import { formatDate } from "@/lib/utils";
 import { jobLabel } from "@/lib/schedule-options";
 import {
   PAPER_BUCKETS,
+  bucketIsReaders,
   describePaper,
   fileRefusal,
   guessOf,
   paperTypeOfItem,
   parseDestination,
   pickedBecause,
+  onPaperWords,
   proposalOf,
   readinessOf,
   shownDestination,
@@ -362,9 +364,32 @@ export function PaperworkRow({
       <p className="text-sm font-medium text-slate-900">{question}</p>
     ) : null;
 
+  /**
+   * WHAT THE PAPER SAYS, when it picked nothing (audit v994, tray F2). Paper A's PO box said TOOLS
+   * and the row never showed it: a person had to open the photo to learn what the reader had
+   * already copied. Shown whenever the paper's own pick isn't what is showing; hidden when the
+   * "picked from the PO" line already says the same words. The company's own names are taken out
+   * of the reader's hint on the server (rematchTray), since they are on every ticket.
+   */
+  const onPaper = item.on_paper ?? onPaperWords(p);
+  const onPaperLine =
+    onPaper && !(because && prePick && dest === prePick) ? (
+      <p className="text-xs text-slate-500">On the paper: {onPaper}</p>
+    ) : null;
+
   /** A model's guess: one tap picks it, and it is never picked for anyone. */
   const guessValue = mode === "photo" ? (guess?.startsWith("job:") ? guess : null) : guess;
   const guessShown = guessValue && (mode === "photo" ? `job:${photoJob}` !== guessValue : dest !== guessValue);
+  /**
+   * WHOSE GUESS, IN WORDS THAT ARE TRUE (audit v994, tray F2). A bucket the READER gave, looking at
+   * the paper (Paper A: Tools & Supplies, off a ticket whose PO box said TOOLS), was labelled "Not
+   * read off the paper", which is false. The reader's bucket says it is the reader's guess; a job
+   * guess and AI Suggest's second look keep "Not read off the paper", because they were not.
+   */
+  const readersGuess = !!guessValue?.startsWith("cost:") && bucketIsReaders(p);
+  const guessWhy = readersGuess
+    ? `The reader's guess, from the paper${onPaper ? ` (${onPaper})` : ""}.`
+    : `Not read off the paper${p.why ? `: ${p.why}` : "."}`;
   const guessChip = guessShown ? (
     <div className="flex flex-wrap items-center gap-2">
       <button
@@ -378,7 +403,7 @@ export function PaperworkRow({
           A Guess: {destLabel(guessValue)} <span className="text-xs text-slate-500">(Tap To Pick)</span>
         </span>
       </button>
-      <span className="text-xs text-slate-500">Not read off the paper{p.why ? `: ${p.why}` : "."}</span>
+      <span className="text-xs text-slate-500">{guessWhy}</span>
     </div>
   ) : null;
 
@@ -393,6 +418,7 @@ export function PaperworkRow({
   const costChooser = (
     <div className="space-y-2" role="group" aria-label="Where does this go?">
       {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+      {onPaperLine}
       {conflict}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <Select
@@ -416,6 +442,7 @@ export function PaperworkRow({
           {PAPER_BUCKETS.map((b) => (
             <option key={b} value={`cost:${b}`}>
               {b}
+              {prePick === `cost:${b}` ? " (On The Paper)" : ""}
             </option>
           ))}
         </Select>
@@ -572,6 +599,7 @@ export function PaperworkRow({
           {mode === "keep" && (
             <div className="mt-2.5 space-y-2 empty:hidden">
               {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
+              {onPaperLine}
               {conflict}
               {guessChip}
             </div>

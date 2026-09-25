@@ -1303,3 +1303,175 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
     expect(res.line).toMatch(/^1 CED document found in it; 1 didn't add up and won't be added: 8802-1101999/);
   });
 });
+
+// ── audit v994: who decided, and one purchase is one bill ──────────────────────────────────────
+
+describe("File It records who decided where the paper went (Paper B, 12962a84)", () => {
+  // Read 24 minutes before the PO-street rule shipped: nothing stored says the PO picked J-011.
+  const PAPER_B = {
+    ...PAPER,
+    id: "12962a84",
+    doc_number: "8802-SO-257555",
+    title: "Consolidated Electrical Dist. — $323.71",
+    vendor: "Consolidated Electrical Dist.",
+    amount: 323.71,
+    pricing_provisional: false,
+    line_items: null,
+    proposal: { po: "13897 HERRINGBONE", jobId: null, jobFrom: null, bucket: null, guessJobId: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" },
+  };
+  const J011 = { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } };
+  const script = () => ({
+    "organized_items.select": [{ data: PAPER_B, error: null }, { data: [], error: null }],
+    "bills.select": [{ data: [], error: null }],
+    "supplier_invoices.select": [{ data: [], error: null }],
+    "supplier_aliases.select": [{ data: [], error: null }, { data: [], error: null }],
+    "bill_supplier_invoices.select": [{ data: [], error: null }],
+    // The tray's exact match, run again on the server before the claim.
+    "jobs.select": [{ data: [J011], error: null }],
+    "purchase_orders.select": [{ data: [], error: null }],
+    "profiles.select": [{ data: [{ full_name: "Erik Taylor", organizations: { name: "ET Electric" } }], error: null }],
+    "organized_items.update": [
+      { data: [{ id: "12962a84" }], error: null },
+      { data: [{ id: "12962a84" }], error: null },
+    ],
+    "documents.insert": [{ data: { id: "doc-b" }, error: null }],
+    "bills.insert": [{ data: { id: "bill-b" }, error: null }],
+  });
+
+  it("filed on the job the PO names: the note says why, and `filed` keeps it (never the reader's proposal)", async () => {
+    state.client = fakeSupabase(script(), calls);
+    const res = await fileItem("12962a84", { type: "job", jobId: "j11" });
+    expect(res.ok).toBe(true);
+    expect(did("bills", "insert")!.payload.notes).toBe(
+      "Bill filed by a person from the tray: Consolidated Electrical Dist. — $323.71\nJob picked from the PO on the bill: 13897 HERRINGBONE.",
+    );
+    const proposal = lastDid("organized_items", "update")!.payload.proposal;
+    expect(proposal.filed).toEqual({
+      how: "bill",
+      picked: "paper",
+      paperPick: "job:j11",
+      because: "Job picked from the PO on the bill: 13897 HERRINGBONE",
+      jobFrom: "po",
+      jobHint: "13897 HERRINGBONE",
+    });
+    // The reader's proposal is untouched: Undo clears `filed` and the paper is as it was read.
+    expect(proposal.jobId).toBeNull();
+    expect(proposal.jobFrom).toBeNull();
+  });
+
+  it("filed somewhere else: a person overrode the paper, and the bill says so", async () => {
+    state.client = fakeSupabase(script(), calls);
+    await fileItem("12962a84", { type: "job", jobId: "job-046" });
+    expect(did("bills", "insert")!.payload.notes).toContain(
+      "A person picked this over what the paper names (Job picked from the PO on the bill: 13897 HERRINGBONE).",
+    );
+    expect(lastDid("organized_items", "update")!.payload.proposal.filed.picked).toBe("person");
+  });
+});
+
+describe("billJobReceipt asks 'already on the books?' like every other door (audit v994, DB1)", () => {
+  const TRAY_BILL = {
+    id: "e2380fc9",
+    supplier: "Consolidated Electrical Dist.",
+    bill_number: "8802-SO-257555",
+    supplier_invoice_number: null,
+    supplier_account_id: "acct-ced",
+    superseded_by_bill_id: null,
+    amount: 323.71,
+    bill_date: "2026-09-24",
+    job_id: "j11",
+    jobs: { job_number: "J-011", name: "13897 Herringbone" },
+  };
+  const snapped = (over: Record<string, any[]> = {}) => ({
+    "documents.select": [{ data: { id: "doc-2", name: "IMG_2375.jpg", file_url: "org-1/j11/IMG_2375.jpg", size_bytes: 10, job_id: "j11" }, error: null }],
+    "organized_items.select": [{ data: null, error: null }, { data: [], error: null }],
+    "organizations.select": [{ data: { settings: {} }, error: null }],
+    "supplier_aliases.select": [
+      { data: [{ alias: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" }], error: null },
+      { data: [{ alias: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" }], error: null },
+    ],
+    "bills.select": [{ data: [TRAY_BILL], error: null }],
+    "supplier_invoices.select": [{ data: [], error: null }],
+    "bill_supplier_invoices.select": [{ data: [], error: null }],
+    ...over,
+  });
+  beforeEach(() => {
+    ai.parsed = {
+      vendor: "Consolidated Electrical Dist.",
+      amount: 323.71,
+      date: "2026-09-24",
+      document_number: "8802-SO-257555",
+      line_items: [{ description: "SIEM Q2020", quantity: 8, unit_price: 26.58, amount: 212.64 }],
+      payment: "on_account",
+      confidence: "high",
+    };
+  });
+
+  it("the same ticket snapped again on the job page writes NOTHING and says which bill it is", async () => {
+    state.client = fakeSupabase(snapped(), calls);
+    const res = await billJobReceipt("doc-2");
+    expect(res).toMatchObject({ ok: true, already: true });
+    expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone.");
+    expect(res.sameAs).toContain("Different Purchase: Record It Anyway");
+    // The Add Cost sheet prints `warning` and never falls back to a typed second bill on an ok.
+    expect(res.warning).toBe(res.sameAs);
+    expect(did("bills", "insert")).toBeUndefined();
+    expect(did("organized_items", "insert")).toBeUndefined();
+  });
+
+  it("Different Purchase: Record It Anyway records it, and the bill says a person checked", async () => {
+    state.client = fakeSupabase(
+      snapped({
+        "organized_items.select": [{ data: null, error: null }],
+        "bills.insert": [{ data: { id: "bill-new" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "bli" }], error: null }],
+        "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+      }),
+      calls,
+    );
+    const res = await billJobReceipt("doc-2", { differentPurchase: true });
+    expect(res.ok).toBe(true);
+    expect(res.already).toBeUndefined();
+    expect(did("bills", "insert")!.payload.notes).toContain("A person checked: a different purchase");
+  });
+});
+
+describe("TOOLS in the PO box, read fresh (Erik, 2026-09-24)", () => {
+  it("picks Tools & Supplies from the PO, keeps whose guess the bucket was, and files nothing", async () => {
+    ai.parsed = {
+      paper_type: "bill",
+      kind: "receipt",
+      title: "Consolidated Electrical Dist. — $44.44",
+      vendor: "Consolidated Electrical Dist.",
+      amount: 44.44,
+      document_number: "8802-SO-257558",
+      po_number: "TOOLS",
+      job_hint: "JOB NAME AND ADDRESS ERIK TAYLOR TOOLS",
+      payment: "on_account",
+      destination: "overhead",
+      overhead_category: "Tools & Supplies",
+      job_marks: {},
+      confidence: "high",
+    };
+    state.client = fakeSupabase(
+      {
+        "organized_items.insert": [{ data: { id: "oi-a" }, error: null }],
+        "jobs.select": [JOBS],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-a" }], error: null }],
+      },
+      calls,
+    );
+    const res = await analyzeAndFile({ path: "org-1/organize/a.jpg", name: "a.jpg", mime: "image/jpeg", size: 1000 });
+    expect(res.item?.suggestion).toEqual({
+      jobLabel: null,
+      bucket: "Tools & Supplies",
+      picked: true,
+      because: "Business cost picked from the PO on the bill: TOOLS",
+    });
+    const proposal = lastDid("organized_items", "update")!.payload.proposal;
+    expect(proposal.companyUse).toEqual({ bucket: "Tools & Supplies", from: "po", words: "TOOLS" });
+    expect(proposal.bucketFrom).toBe("reader");
+    expect(did("bills", "insert")).toBeUndefined();
+  });
+});

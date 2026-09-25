@@ -7,8 +7,10 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
   findSameNumber,
-  jobFromPaperMarks,
+  onPaperWords,
   paperTypeOf,
+  placeFromMarks,
+  proposalOf,
   rematchPaper,
   type MarkJob,
   type MarkPo,
@@ -272,7 +274,11 @@ export async function loadMarkContext(supabase: any, orgId: string | null | unde
 /** Every waiting paper matched again from what it stored (rematchPaper): in memory, no model, no
  *  write. */
 export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkContext): T[] {
-  return items.map((i) => rematchPaper(i, ctx.markJobs, ctx.pos, ctx.selfNames));
+  return items.map((i) => {
+    const r = rematchPaper(i, ctx.markJobs, ctx.pos, ctx.selfNames);
+    // What the paper says in its own words, for the row that picked nothing: shown, never stored.
+    return { ...r, on_paper: onPaperWords(proposalOf(r), ctx.selfNames) };
+  });
 }
 
 /**
@@ -409,17 +415,24 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
   // the row as a chip, never picked. A bucket only for a cost the reader called overhead, never
   // Fees, never anything fee-shaped.
   const marks = marksOf(parsed);
-  const byMarks = jobFromPaperMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? []);
   const bucketRead = parsed?.destination === "overhead" ? bucketOf(parsed?.overhead_category) : null;
   const feeShaped = bucketRead === "Fees" || looksLikeSupplierFee(title, vendor, summary);
+  // THE COMPANY'S OWN USE IS READ THE SAME WAY (Erik, 2026-09-24): "TOOLS" in the PO box picks
+  // Tools & Supplies in code, exactly, the way "13897 HERRINGBONE" picks the job. A job mark
+  // beats it; a paper naming both says so and picks nothing (placeFromMarks).
+  const { job: byMarks, companyUse } = placeFromMarks(marks, opts.markJobs ?? [], opts.pos ?? [], opts.selfNames ?? [], { feeShaped });
   const hint = parsed?.job_hint ? String(parsed.job_hint).slice(0, 200) : null;
+  const bucket = isCost && bucketRead && !feeShaped ? bucketRead : null;
   const proposal: PaperProposal = {
     jobId: byMarks.kind === "one" ? byMarks.jobId : null,
     jobFrom: byMarks.kind === "one" ? byMarks.from : null,
     jobHint: byMarks.kind === "one" ? byMarks.words || hint : hint,
     jobConflict: byMarks.kind === "conflict" ? byMarks.sentence : null,
     guessJobId: null,
-    bucket: isCost && bucketRead && !feeShaped ? bucketRead : null,
+    bucket,
+    // The chip says whose guess it is: this one is the reader's, from the paper.
+    bucketFrom: bucket ? "reader" : null,
+    ...(companyUse ? { companyUse } : {}),
     po: cleanDocNumber(parsed?.po_number),
     // Kept, so the tray can match this paper again when the rules learn something (rematchPaper).
     marks,
@@ -506,9 +519,12 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     safe<BookedBill>(
       supabase
         .from("bills")
-        .select("id, supplier, bill_number, supplier_account_id, amount, bill_date, job_id, jobs(job_number, name)")
+        // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
+        // A Bill wrote carries the number in supplier_invoice_number, and a set-aside copy (0271)
+        // is not on the books at all. billsCarryingNumber reads all three, and passes over a bill
+        // with neither number in code (one read, no OR filter to keep in step with it).
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
         .eq("org_id", orgId)
-        .not("bill_number", "is", null)
         .limit(5000),
     ),
     safe<BookedPaper>(

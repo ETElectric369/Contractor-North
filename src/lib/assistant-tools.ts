@@ -24,6 +24,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
+import { bucketOf } from "@/lib/business-cost-buckets";
 
 /**
  * Read-only data tools for the in-app assistant.
@@ -538,7 +539,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost.",
+      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the six buckets (counted before owner's draw): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.",
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {
@@ -2341,7 +2342,7 @@ export async function runDataTool(
           // or a container used in pieces — and this select list knew about none of them, so Nort
           // read the Kettle Chips and the whole 500ct Twister box back as the customer's cost.
           // The projection law: a field that is missing at runtime is missing from a select list.
-          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
+          .select("id, supplier, bill_number, amount, status, category, bill_date, notes, pricing_provisional, superseded_by_bill_id, job_id, jobs(name), bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount, is_stock)")
           .eq("id", bid)
           .maybeSingle();
         if (error) throw error;
@@ -2364,11 +2365,24 @@ export async function runDataTool(
          * money disagreeing by a few dollars is what this whole wave came from (cn-v964, $7.86 of
          * it), so there is one reading of it and everybody reads it.
          */
-        const billableAmount = billableBillCost(b.amount, lines);
+        /**
+         * A BILL WITH NO JOB CHARGES NOBODY (audit v994, bill F3). The CED tools ticket, $44.44 of
+         * testers filed as a Tools & Supplies business cost, came back as "billable_amount 44.44"
+         * with every line billable and a note telling Nort that is what the customer is charged and
+         * that the whole receipt is the job's cost. There is no job and no customer: nothing reads
+         * a no-job bill's lines for an invoice (every importer reads bills by job). So it has no
+         * billable figure at all, and the note says what it is instead. A bill ON a job reads
+         * exactly as before. `job_id` is in the select for this; the embedded name is the fallback
+         * for a row that carries only that.
+         */
+        const hasJob = b.job_id != null || embedName(b.jobs) != null;
+        const billableAmount = hasJob ? billableBillCost(b.amount, lines) : null;
         // NOTHING SILENT: the model is told which figure answers which question, and warned off
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
-          "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
+          hasJob
+            ? "amount is the WHOLE receipt (still the job's cost). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it."
+            : `No job: this is a business cost in the ${bucketOf(b.category)} bucket, counted before owner's draw. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`,
         ];
         if (b.pricing_provisional === true)
           moneyNote.push(
@@ -2404,8 +2418,9 @@ export async function runDataTool(
             // pieces, where billed_to_customer is the part this job took and the rest went on the
             // shelf. billLineBilledCost is the same reading the invoice itemisation uses, so a
             // line can never say one thing here and another on the invoice.
-            billable: it.billable !== false,
-            billed_to_customer: money(billLineBilledCost(it)),
+            // Not applicable on a bill with no job: there is no customer to bill (null, never true).
+            billable: hasJob ? it.billable !== false : null,
+            billed_to_customer: hasJob ? money(billLineBilledCost(it)) : null,
             is_stock: it.is_stock === true,
           })),
           // Keyed `money_note` and not `note` on purpose: `notes` right above is the bill's OWN

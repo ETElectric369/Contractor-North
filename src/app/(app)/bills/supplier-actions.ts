@@ -26,6 +26,19 @@ import { supplierBillLines } from "./supplier-bill-lines";
 // and the source_ids array 0255 added. The Bills page reads claims with this same function, so the
 // sentence an action writes and the sentence the card prints can never drift apart.
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
+// "Is this purchase already on the books?" - one reading for every door (audit v994, DB1): the
+// tray, the job page and this card all ask the same functions, so no door can be blind to the
+// bills another door wrote.
+import {
+  billsCoveredByDocuments,
+  namedNumbersOf,
+  samePurchaseCandidates,
+  samePurchaseSentence,
+  type LedgerBill,
+  type SamePurchaseCandidate,
+  type SupplierDoc,
+} from "@/lib/same-purchase";
+import { indexSupplierAliases } from "@/lib/supplier-identity";
 
 /**
  * PAYING A SUPPLIER, AND SAYING WHO THE SUPPLIER IS (migration 0270).
@@ -1299,6 +1312,115 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
+// IS THIS PURCHASE ALREADY IN HIS BOOKS? (audit v994, DB1)
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * THE BILLS A SUPPLIER DOCUMENT MAY ALREADY BE, read the way the /bills page reads them.
+ *
+ * The page lists a document under Purchases Not In Your Books with Same Purchase: Tie Them beside
+ * each candidate, and these actions refuse or accept on the SAME candidates, recomputed here from
+ * the database: a client's say-so never ties anything. `null` is a read that failed, which is
+ * never "no bill": the caller refuses instead of writing.
+ */
+async function samePurchaseFor(
+  supabase: any,
+  orgId: string,
+  doc: SupplierDoc,
+): Promise<{ candidates: SamePurchaseCandidate[] } | null> {
+  const [billsRes, docsRes, linksRes, aliasRes] = await Promise.all([
+    supabase
+      .from("bills")
+      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, notes, jobs(job_number, name), bill_line_items(description)")
+      .eq("org_id", orgId)
+      .is("superseded_by_bill_id", null)
+      .limit(5000),
+    supabase.from("supplier_invoices").select("id, invoice_number, supplier_account_id, job_id, total, invoice_date").eq("org_id", orgId).limit(5000),
+    supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
+    supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
+  ]);
+  if (billsRes?.error || docsRes?.error || linksRes?.error) return null;
+  const bills: LedgerBill[] = ((billsRes?.data ?? []) as any[]).map((b) => {
+    const named = namedNumbersOf(b);
+    return { ...b, is_statement: !!b.is_statement || named.isStatement, named_numbers: named.numbers };
+  });
+  const aliases = indexSupplierAliases(aliasRes?.error ? [] : (aliasRes?.data ?? []));
+  const covered = billsCoveredByDocuments(bills, (docsRes?.data ?? []) as SupplierDoc[], (linksRes?.data ?? []) as any[], aliases);
+  return { candidates: samePurchaseCandidates(doc, bills, covered, aliases) };
+}
+
+/**
+ * SAME PURCHASE: TIE THEM. The supplier's own document and a bill already in his books are one
+ * purchase; a person says so, and this writes the link (bill_supplier_invoices, 0273/0277) and
+ * nothing else. No money moves and no bill is written: the cost was already on the job.
+ *
+ * The CED counter ticket is why this exists. It carries a sales-order number (8802-SO-257555) and
+ * CED's invoice for the same breakers carries 8802-11xxxxx, so no number check can ever join them,
+ * and the only way out the card offered was Record It As A Bill: a second $323.71 on J-011 and a
+ * second import onto Andrew's invoice. The bill must be one this document is actually offered
+ * (samePurchaseFor, recomputed here): the same number, or the same account, job, and a total and
+ * date within a few dollars and days.
+ */
+export async function tieSupplierInvoiceToBill(input: { invoiceId: string; billId: string }): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+  const invoiceId = String(input?.invoiceId ?? "");
+  const billId = String(input?.billId ?? "");
+  if (!invoiceId || !billId) return { ok: false, error: "Couldn't tell which invoice and bill you meant. Nothing was tied." };
+
+  const { data: inv, error: readErr } = await ctx.supabase
+    .from("supplier_invoices")
+    .select("id, invoice_number, kind, invoice_date, job_id, supplier_account_id, total")
+    .eq("id", invoiceId)
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: `Couldn't read that invoice just now, so nothing was tied. ${dbError(readErr)}` };
+  if (!inv) return { ok: false, error: "That invoice isn't here anymore. Reload the page." };
+  const number = text((inv as any).invoice_number) ?? "That invoice";
+  if (String((inv as any).kind ?? "invoice") !== "invoice")
+    return { ok: false, error: `${number} isn't a purchase, so there is no bill to tie it to. Nothing was tied.` };
+
+  const found = await samePurchaseFor(ctx.supabase, org.orgId, inv as SupplierDoc);
+  if (!found) return { ok: false, error: `Couldn't check your bills just now, so ${number} was not tied. Try again.` };
+  const hit = found.candidates.find((c) => c.billId === billId);
+  if (!hit)
+    return {
+      ok: false,
+      error: `That bill isn't one ${number} could be: not the same number, or not the same account, job, total and date. Nothing was tied.`,
+    };
+
+  const { data: joined, error: joinErr } = await ctx.supabase
+    .from("bill_supplier_invoices")
+    .insert({ org_id: org.orgId, bill_id: billId, supplier_invoice_id: invoiceId })
+    .select("id");
+  if (joinErr && isDuplicateKey(joinErr)) {
+    // 0277: this document is already covered. Say by which bill rather than guessing.
+    const { data: existing } = await ctx.supabase
+      .from("bill_supplier_invoices")
+      .select("bill_id")
+      .eq("org_id", org.orgId)
+      .eq("supplier_invoice_id", invoiceId)
+      .limit(1);
+    const on = String((existing?.[0] as { bill_id?: string } | undefined)?.bill_id ?? "");
+    revalidatePath("/bills");
+    return on === billId
+      ? { ok: true, message: `${number} was already tied to that bill. Nothing changed.` }
+      : { ok: false, error: `${number} is already tied to a different bill, so it was left alone. Reload the page to see which.` };
+  }
+  if (joinErr) return { ok: false, error: `That didn't save, so ${number} is not tied. ${dbError(joinErr)}` };
+  if (!joined?.length) return { ok: false, error: `That didn't save, so ${number} is not tied. Try it again.` };
+
+  revalidatePath("/bills");
+  if (hit.jobId) revalidatePath(`/jobs/${hit.jobId}`);
+  return {
+    ok: true,
+    message: `${number} is tied to ${hit.label}. It was already in your books, so nothing was charged twice, and it stops asking.`,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
 // THE SUPPLIER'S OWN INVOICES - putting one on a job
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1350,7 +1472,7 @@ export async function setSupplierInvoiceJob(input: {
     .update({ job_id: jobId })
     .eq("id", invoiceId)
     .eq("org_id", org.orgId)
-    .select("id, invoice_number");
+    .select("id, invoice_number, supplier_account_id, total, invoice_date");
   if (error) return { ok: false, error: `That didn't save, so the invoice still has no job. ${dbError(error)}` };
   // Silent-write law: a zero-row update is a 204, and an invoice silently left unassigned is money
   // sitting on no job while the screen says it landed.
@@ -1388,12 +1510,36 @@ export async function setSupplierInvoiceJob(input: {
   // offers him the next step instead of telling him a cost has landed.
   const hasLiveBill = ((billLinks ?? []) as any[]).some((r) => r?.bills && !r.bills.superseded_by_bill_id);
 
+  // ALREADY ON THE BOOKS, BY ANOTHER NAME (audit v994, DB1). A bill on this job that carries this
+  // number, or a counter ticket on this account for the same money a few days apart, may be this
+  // very purchase. Said now, so "Record It As A Bill is next" is never the only thing he hears
+  // about a purchase that is already on the job. A read that fails says only the next step.
+  let maybe: SamePurchaseCandidate | null = null;
+  if (!hasLiveBill) {
+    try {
+      const row = data[0] as any;
+      const found = await samePurchaseFor(ctx.supabase, org.orgId, {
+        id: invoiceId,
+        invoice_number: row.invoice_number ?? null,
+        supplier_account_id: row.supplier_account_id ?? null,
+        job_id: jobId,
+        total: row.total ?? null,
+        invoice_date: row.invoice_date ?? null,
+      });
+      maybe = found?.candidates[0] ?? null;
+    } catch (e) {
+      reportError("bills:setInvoiceJob.samePurchase", e, { invoiceId });
+    }
+  }
+
   revalidatePath("/bills");
   return {
     ok: true,
     message: hasLiveBill
       ? `${number} is on ${label} now, and its bill is already in your books.`
-      : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
+      : maybe
+        ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press Same Purchase: Tie Them on it down in Purchases Not In Your Books; if not, Different Purchase: Record It Anyway puts the cost on the job.`
+        : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
   };
 }
 
@@ -1430,6 +1576,8 @@ export async function setSupplierInvoiceJob(input: {
  */
 export async function recordSupplierInvoiceAsBill(input: {
   invoiceId: string;
+  /** A person looked at "maybe already on the books" and said it is a different purchase. */
+  differentPurchase?: boolean;
 }): Promise<SupplierActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1476,8 +1624,9 @@ export async function recordSupplierInvoiceAsBill(input: {
     return { ok: false, error: why[kind] ?? `${number} isn't an invoice, so it can't become a bill.` };
   }
 
+  // No job is refused BELOW the "already in your books?" checks: a purchase already on the books
+  // is answered with the tie, which needs no job, rather than sent off to pick one first.
   const jobId = text(row.job_id);
-  if (!jobId) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
 
   const accountId = text(row.supplier_account_id);
   const accountName = text(row.supplier_accounts?.name);
@@ -1563,40 +1712,42 @@ export async function recordSupplierInvoiceAsBill(input: {
     };
   }
 
-  // A SET-ASIDE COPY IS NOT WHERE THIS BELONGS (review, 2026-09-19). 0271's duplicate resolver
-  // leaves the losing copy in the table with a pointer on it, and tying the supplier's invoice to
-  // that one would hang it off a bill every cost reader in the app deliberately ignores: the
-  // reconcile list would fall quiet and the job would carry none of the money.
-  const { data: sameNumber } = await ctx.supabase
-    .from("bills")
-    .select("id, job_id, jobs(name)")
-    .eq("org_id", org.orgId)
-    .eq("supplier_invoice_number", number)
-    .is("superseded_by_bill_id", null)
-    .limit(1);
-  if (sameNumber?.length) {
-    const existing = sameNumber[0] as { id: string; job_id?: string | null; jobs?: { name?: string | null } | null };
-    const { data: joined, error: joinErr } = await ctx.supabase
-      .from("bill_supplier_invoices")
-      .insert({ org_id: org.orgId, bill_id: existing.id, supplier_invoice_id: invoiceId })
-      .select("id");
-    // 0277 is unique on the supplier invoice, so a collision here means the tie this branch is
-    // trying to create already exists - which is the end state it wants, not a failure.
-    if (joinErr && !isDuplicateKey(joinErr)) {
-      return { ok: false, error: `A bill already carries ${number}, and tying the two together didn't save. ${dbError(joinErr)}` };
+  /**
+   * ALREADY IN HIS BOOKS UNDER ANOTHER DOOR'S NUMBER (audit v994, DB1).
+   *
+   * This used to look for a bill with this number in supplier_invoice_number only, the column this
+   * button writes, and never in bill_number, the column the tray and the job page write. So a CED
+   * ticket filed from the tray as 8802-1109000 was invisible here, and CED's own PDF of the same
+   * number made a second $400 bill on the same job. And a counter ticket carries a sales-order
+   * number (8802-SO-...) that CED's invoice never prints, so no number could ever find it.
+   *
+   * Now the one reading every door uses (samePurchaseFor): a live bill carrying this number in
+   * either column, or on this account and job within a few dollars and days. Any of those and
+   * nothing is written: the card offers Same Purchase: Tie Them against each, and a person who
+   * says it is a different purchase comes back with differentPurchase. Set-aside copies (0271)
+   * are never offered: every cost reader ignores them.
+   */
+  if (!input?.differentPurchase) {
+    const found = await samePurchaseFor(ctx.supabase, org.orgId, {
+      id: invoiceId,
+      invoice_number: text(row.invoice_number),
+      supplier_account_id: accountId,
+      job_id: jobId,
+      total: row.total as any,
+      invoice_date: text(row.invoice_date),
+    });
+    if (!found) return { ok: false, error: `Couldn't check whether ${number} is already in your books, so nothing was written. Try again.` };
+    const first = found.candidates[0];
+    if (first) {
+      const more = found.candidates.length > 1 ? ` ${found.candidates.length - 1} more bill${found.candidates.length === 2 ? "" : "s"} could be it too; each is listed on the card.` : "";
+      return {
+        ok: false,
+        error: `${samePurchaseSentence(first)}${more} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: Record It Anyway. Nothing was written.`,
+      };
     }
-    if (!joinErr && !joined?.length) {
-      reportError("bills:recordAsBill.join", new Error("bill_supplier_invoices insert wrote no rows"), { invoiceId });
-      return { ok: false, error: `A bill already carries ${number}, but tying the two together didn't save. Try it again.` };
-    }
-    revalidatePath("/bills");
-    if (existing.job_id) revalidatePath(`/jobs/${existing.job_id}`);
-    const where = text(existing.jobs?.name) ?? "a job";
-    return {
-      ok: true,
-      message: `${number} was already in your books on ${where}. Nothing was charged twice - the two are tied together now, so it stops asking.`,
-    };
   }
+
+  if (!jobId) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
 
   // ── THE LINES ───────────────────────────────────────────────────────────────────────────────
   const { data: lineRows, error: lineErr } = await ctx.supabase

@@ -87,6 +87,7 @@ export interface SuppliersCardActions
   /** Optional, and optional inside the card too: record a supplier invoice the app never scanned
    *  as a bill on its job. Without it those rows still name the money and link to the job. */
   recordAsBill?: SupplierInvoiceActions["recordAsBill"];
+  tieToBill?: SupplierInvoiceActions["tieToBill"];
 }
 
 const METHOD_LABELS: Record<SupplierPayMethod, string> = {
@@ -1085,7 +1086,7 @@ export function SuppliersCard({
               // The payment sheet lives up here and stays there: a second way to record a payment
               // is a second thing to drift.
               onRecordPayment={account.onAccount ? () => openPay(account) : undefined}
-              actions={{ setInvoiceJob: actions.setInvoiceJob!, recordAsBill: actions.recordAsBill }}
+              actions={{ setInvoiceJob: actions.setInvoiceJob!, recordAsBill: actions.recordAsBill, tieToBill: actions.tieToBill }}
             />
           ))}
 

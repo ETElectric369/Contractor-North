@@ -41,7 +41,14 @@ export interface SupplierInvoiceActions {
    * line prices. Without it the row still names the money and links to the job, which is the
    * whole point of the section - a button that can only refuse would be worse than no button.
    */
-  recordAsBill?: (input: { invoiceId: string }) => Promise<SupplierActionResult>;
+  recordAsBill?: (input: { invoiceId: string; differentPurchase?: boolean }) => Promise<SupplierActionResult>;
+  /**
+   * Same Purchase: Tie Them (audit v994, DB1). A bill already in his books may be this purchase:
+   * the same number, or a counter ticket on this account and job within a few dollars and days
+   * (a counter ticket's sales-order number is never on CED's invoice). A person presses it; the
+   * server re-derives the candidates and writes only the link.
+   */
+  tieToBill?: (input: { invoiceId: string; billId: string }) => Promise<SupplierActionResult>;
 }
 
 /** How many rows a section shows before it says how many more there are. */
@@ -454,12 +461,66 @@ export function SupplierInvoicesCard({
                   </span>
                 </div>
 
+                {/* MAYBE ALREADY IN HIS BOOKS (audit v994, DB1). A bill that carries this number,
+                    or a counter ticket on this account and job for the same money a few days
+                    apart, may be this very purchase. Each one is offered, with the words that
+                    matched, and a person says which it is: Same Purchase ties them and writes no
+                    money; Different Purchase records it after all. Record It As A Bill never sits
+                    beside these on its own, because one press of it was a second bill. */}
+                {invoice.samePurchase?.length && actions.tieToBill ? (
+                  <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2.5">
+                    {invoice.samePurchase.map((c) => (
+                      <div key={c.billId} className="space-y-1.5">
+                        <p className="text-xs leading-relaxed text-amber-900">{c.sentence}</p>
+                        <Button
+                          variant="outline"
+                          className="h-11 w-full"
+                          disabled={pending}
+                          onClick={() =>
+                            run(
+                              () => actions.tieToBill!({ invoiceId: invoice.id, billId: c.billId }),
+                              `tie:${invoice.id}`,
+                              `Invoice ${invoice.invoiceNumber} is tied to the bill already in your books.`,
+                            )
+                          }
+                        >
+                          {busy === `tie:${invoice.id}` ? "Tying Them…" : "Same Purchase: Tie Them"}
+                        </Button>
+                      </div>
+                    ))}
+                    {actions.recordAsBill && invoice.jobId ? (
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full"
+                        disabled={pending}
+                        onClick={() =>
+                          run(
+                            () => actions.recordAsBill!({ invoiceId: invoice.id, differentPurchase: true }),
+                            `bill:${invoice.id}`,
+                            `Invoice ${invoice.invoiceNumber} is now a bill on ${invoice.jobName ?? "its job"}.`,
+                          )
+                        }
+                      >
+                        {busy === `bill:${invoice.id}` ? "Recording It…" : "Different Purchase: Record It Anyway"}
+                      </Button>
+                    ) : (
+                      <p className="text-xs leading-relaxed text-amber-900">
+                        If it is a different purchase, give it a job up in Invoices With No Job, and Different Purchase: Record It Anyway appears here.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+                {failedAt === `tie:${invoice.id}` && error && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">
+                    {error}
+                  </p>
+                )}
                 {/* ONE ACTION, AND ONLY WHEN THERE IS ONE TO OFFER. With recordAsBill wired it
                     writes the cost onto the job at CED's own line prices. Without it the job name
                     above is a link, which is the way forward for a row that HAS a job; for one
                     that does not, the section's own intro says where to go, once, instead of the
                     same sentence repeating down six rows of a phone screen. */}
-                {actions.recordAsBill && invoice.jobId && (
+                {actions.recordAsBill && invoice.jobId && !(invoice.samePurchase?.length && actions.tieToBill) && (
                   <Button
                     variant="outline"
                     className="mt-2 h-11 w-full"

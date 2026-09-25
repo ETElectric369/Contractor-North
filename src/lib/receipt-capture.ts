@@ -44,8 +44,10 @@ export type ReceiptOutcome =
       lineCount: number;
       warning: string | null;
     }
-  /** This file already produced a bill — nothing added twice (organized_items.document_id). */
-  | { kind: "already"; docId: string; tone: "ok"; sentence: string }
+  /** This file already produced a bill — nothing added twice (organized_items.document_id). Or
+   *  `samePurchase`: a bill already carries this paper's printed number (audit v994), so nothing
+   *  was written, and the door offers Different Purchase: Record It Anyway. */
+  | { kind: "already"; docId: string; tone: "ok" | "warn"; sentence: string; samePurchase?: boolean }
   /** Filed on the job as a document. The reader wasn't asked (a Plan, a Permit), or the file is
    *  over its cap, or it refused (a name it can't read, no total) — the sentence names which. */
   | { kind: "filed"; docId: string; tone: "ok" | "warn"; why: "not_asked" | "over_cap" | "refused"; sentence: string };
@@ -110,7 +112,7 @@ export async function fileReceiptDocument(o: {
 export async function readReceiptDocument(
   docId: string,
   /** What the PERSON stated on the form (paid, category, date) — attestation beats inference. */
-  stated?: { paid?: boolean; category?: string | null; billDate?: string | null },
+  stated?: { paid?: boolean; category?: string | null; billDate?: string | null; differentPurchase?: boolean },
 ): Promise<ReceiptOutcome> {
   let res: Awaited<ReturnType<typeof billJobReceipt>>;
   try {
@@ -120,6 +122,9 @@ export async function readReceiptDocument(
   }
   if (!res.ok) {
     return { kind: "filed", docId, tone: "warn", why: "refused", sentence: `${res.error ?? "Nort couldn't read it."} ${RETRY_DOOR}` };
+  }
+  if (res.already && res.sameAs) {
+    return { kind: "already", docId, tone: "warn", sentence: res.sameAs, samePurchase: true };
   }
   if (res.already) {
     return { kind: "already", docId, tone: "ok", sentence: "Already recorded as a cost — nothing added twice." };

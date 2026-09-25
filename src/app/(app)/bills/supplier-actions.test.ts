@@ -24,6 +24,7 @@ import {
   recordSupplierInvoiceAsBill,
   resolveDuplicateBill,
   setSupplierInvoiceJob,
+  tieSupplierInvoiceToBill,
 } from "./supplier-actions";
 
 type Call = { table: string; verb: string; payload?: any };
@@ -176,9 +177,16 @@ const INV_ROW = {
 /** The reads every run of recordSupplierInvoiceAsBill makes before it writes anything. */
 const recordScript = (over: Record<string, any[]> = {}) => ({
   "profiles.select": [STAFF],
-  "supplier_invoices.select": [INV_ROW, { data: [{ id: INVOICE_ID, kind: "invoice", total: "95.27", open_balance: "95.27", closed: false }], error: null }],
-  "bill_supplier_invoices.select": [{ data: [], error: null }],
+  "supplier_invoices.select": [
+    INV_ROW,
+    { data: [{ id: INVOICE_ID, kind: "invoice", total: "95.27", open_balance: "95.27", closed: false }], error: null },
+    // "Already in your books?" (samePurchaseFor): the account's documents.
+    { data: [{ id: INVOICE_ID, invoice_number: "8802-1104644", supplier_account_id: "acct-ced", job_id: "job-whitney", total: "95.27", invoice_date: "2026-07-29" }], error: null },
+  ],
+  // The link check, then samePurchaseFor's read of every link.
+  "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }],
   "bills.select": [{ data: [], error: null }],
+  "supplier_aliases.select": [{ data: [], error: null }],
   "supplier_invoice_lines.select": [{ data: [], error: null }],
   "bills.insert": [{ data: [{ id: "bill-new" }], error: null }],
   ...over,
@@ -191,7 +199,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     state.client = fakeSupabase(
       recordScript({
         "bill_supplier_invoices.insert": [{ data: null, error: DUPLICATE_KEY }],
-        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [{ bill_id: "bill-theirs" }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }, { data: [{ bill_id: "bill-theirs" }], error: null }],
         "bills.delete": [{ data: [{ id: "bill-new" }], error: null }],
       }),
       calls,
@@ -214,7 +222,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     state.client = fakeSupabase(
       recordScript({
         "bill_supplier_invoices.insert": [{ data: null, error: DUPLICATE_KEY }],
-        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [{ bill_id: "bill-new" }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }, { data: [{ bill_id: "bill-new" }], error: null }],
       }),
       calls,
     );
@@ -233,7 +241,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     state.client = fakeSupabase(
       recordScript({
         "bill_supplier_invoices.insert": [{ data: null, error: DUPLICATE_KEY }],
-        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [{ bill_id: "bill-theirs" }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }, { data: [{ bill_id: "bill-theirs" }], error: null }],
         "bills.delete": [{ data: [], error: null }],
       }),
       calls,
@@ -253,7 +261,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     state.client = fakeSupabase(
       recordScript({
         "bill_supplier_invoices.insert": [{ data: null, error: DUPLICATE_KEY }],
-        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: null, error: { code: "42501", message: "permission denied" } }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }, { data: null, error: { code: "42501", message: "permission denied" } }],
         "bills.delete": [{ data: [{ id: "bill-new" }], error: null }],
       }),
       calls,
@@ -330,5 +338,169 @@ describe("setSupplierInvoiceJob - a set-aside copy is not 'in your books'", () =
     state.client = fakeSupabase(script([{ bill_id: WHITNEY_COPY, bills: { superseded_by_bill_id: null } }]), calls);
     const res = await setSupplierInvoiceJob({ invoiceId: INVOICE_ID, jobId: "job-whitney" });
     expect(res.message).toBe("8802-1104644 is on 85 Whitney Place now, and its bill is already in your books.");
+  });
+});
+
+// ── ONE PURCHASE, ONE BILL (audit v994, DB1) ────────────────────────────────────────────────────
+
+/**
+ * Paper B, as it will meet CED's own invoice. The counter ticket is on the books as bill e2380fc9,
+ * bill_number 8802-SO-257555, $323.71 on J-011. CED invoices the same breakers later under its own
+ * number, which the SO ticket never carries, so no number can join them.
+ */
+const SO_BILL = {
+  id: "e2380fc9",
+  supplier: "Consolidated Electrical Dist.",
+  supplier_account_id: "acct-ced",
+  bill_number: "8802-SO-257555",
+  supplier_invoice_number: null,
+  amount: "323.71",
+  bill_date: "2026-09-24",
+  job_id: "job-j011",
+  is_statement: false,
+  notes: "Bill filed by a person from the tray: Consolidated Electrical Dist. — $323.71",
+  jobs: { job_number: "J-011", name: "13897 Herringbone" },
+  bill_line_items: [{ description: "SIEM Q2020" }],
+};
+const CED_INVOICE = {
+  id: "si-herringbone",
+  invoice_number: "8802-1109999",
+  kind: "invoice",
+  invoice_date: "2026-09-26",
+  job_id: "job-j011",
+  supplier_account_id: "acct-ced",
+  tax: 0,
+  shipping: 0,
+  total: "323.71",
+  open_balance: "323.71",
+  closed: false,
+  supplier_accounts: { name: "CED Truckee" },
+  jobs: { name: "13897 Herringbone", job_number: "J-011" },
+};
+const ledger = (bills: any[] = [SO_BILL]) => ({
+  "bills.select": [{ data: bills, error: null }],
+  "supplier_aliases.select": [{ data: [], error: null }],
+});
+
+describe("Record It As A Bill never writes a second bill for a purchase already on the books", () => {
+  const script = (over: Record<string, any[]> = {}) => ({
+    "profiles.select": [STAFF],
+    "supplier_invoices.select": [
+      { data: CED_INVOICE, error: null },
+      { data: [{ id: CED_INVOICE.id, kind: "invoice", total: "323.71", open_balance: "323.71", closed: false }], error: null },
+      { data: [CED_INVOICE], error: null },
+    ],
+    "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }],
+    ...ledger(),
+    ...over,
+  });
+
+  it("CED's invoice for the SO ticket's breakers refuses, names the ticket, and offers the tie", async () => {
+    state.client = fakeSupabase(script(), calls);
+    const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone");
+    expect(res.error).toContain("Same Purchase: Tie Them");
+    expect(res.error).toContain("Different Purchase: Record It Anyway");
+    expect(res.error).toContain("Nothing was written.");
+    expect(calls.some((c) => c.verb !== "select")).toBe(false);
+  });
+
+  it("a bill the tray filed with CED's own number (bill_number) is found too: the door it used to miss", async () => {
+    const trayBill = { ...SO_BILL, id: "tray-1", bill_number: "8802-1109999", amount: "400.00", bill_date: "2026-08-01" };
+    state.client = fakeSupabase(script(ledger([trayBill])), calls);
+    const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/^Already on the books with this number: Consolidated Electrical Dist\. #8802-1109999/);
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(false);
+  });
+
+  it("Different Purchase: Record It Anyway writes the bill without asking again", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "supplier_invoices.select": [CED_INVOICE_ROW(), { data: [], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }],
+        "supplier_invoice_lines.select": [{ data: [], error: null }],
+        "bills.insert": [{ data: [{ id: "bill-new" }], error: null }],
+        "bill_supplier_invoices.insert": [{ data: [{ id: "link" }], error: null }],
+      },
+      calls,
+    );
+    const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id, differentPurchase: true });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("8802-1109999 is a bill on 13897 Herringbone now: $323.71");
+  });
+
+  it("a read that fails is never 'no bill': nothing is written", async () => {
+    state.client = fakeSupabase(script({ "bills.select": [{ data: null, error: { code: "42501", message: "permission denied" } }] }), calls);
+    const res = await recordSupplierInvoiceAsBill({ invoiceId: CED_INVOICE.id });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Couldn't check whether 8802-1109999 is already in your books");
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(false);
+  });
+});
+
+function CED_INVOICE_ROW() {
+  return { data: CED_INVOICE, error: null };
+}
+
+describe("Same Purchase: Tie Them writes the link and nothing else", () => {
+  const script = (over: Record<string, any[]> = {}) => ({
+    "profiles.select": [STAFF],
+    "supplier_invoices.select": [CED_INVOICE_ROW(), { data: [CED_INVOICE], error: null }],
+    "bill_supplier_invoices.select": [{ data: [], error: null }],
+    ...ledger(),
+    ...over,
+  });
+
+  it("ties CED's invoice to the SO ticket it was offered, and no bill is written", async () => {
+    state.client = fakeSupabase(script({ "bill_supplier_invoices.insert": [{ data: [{ id: "link-1" }], error: null }] }), calls);
+    const res = await tieSupplierInvoiceToBill({ invoiceId: CED_INVOICE.id, billId: "e2380fc9" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("8802-1109999 is tied to Consolidated Electrical Dist. #8802-SO-257555");
+    expect(calls.find((c) => c.table === "bill_supplier_invoices" && c.verb === "insert")?.payload).toEqual({
+      org_id: "org-1",
+      bill_id: "e2380fc9",
+      supplier_invoice_id: CED_INVOICE.id,
+    });
+    expect(calls.some((c) => c.table === "bills" && c.verb !== "select")).toBe(false);
+  });
+
+  it("refuses a bill the document was never offered (the client's word ties nothing)", async () => {
+    state.client = fakeSupabase(script(), calls);
+    const res = await tieSupplierInvoiceToBill({ invoiceId: CED_INVOICE.id, billId: "some-other-bill" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Nothing was tied.");
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+  });
+
+  it("a zero-row insert is a refusal said out loud", async () => {
+    state.client = fakeSupabase(script({ "bill_supplier_invoices.insert": [{ data: [], error: null }] }), calls);
+    const res = await tieSupplierInvoiceToBill({ invoiceId: CED_INVOICE.id, billId: "e2380fc9" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("is not tied");
+  });
+});
+
+describe("setSupplierInvoiceJob says when the purchase may already be on the job", () => {
+  it("names the SO ticket and the tie, instead of only 'Record It As A Bill is next'", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "jobs.select": [{ data: { id: "job-j011", name: "13897 Herringbone", job_number: "J-011" }, error: null }],
+        "supplier_invoices.update": [
+          { data: [{ id: CED_INVOICE.id, invoice_number: "8802-1109999", supplier_account_id: "acct-ced", total: "323.71", invoice_date: "2026-09-26" }], error: null },
+        ],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }],
+        "supplier_invoices.select": [{ data: [CED_INVOICE], error: null }],
+        ...ledger(),
+      },
+      calls,
+    );
+    const res = await setSupplierInvoiceJob({ invoiceId: CED_INVOICE.id, jobId: "job-j011" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555");
+    expect(res.message).toContain("Same Purchase: Tie Them");
   });
 });
