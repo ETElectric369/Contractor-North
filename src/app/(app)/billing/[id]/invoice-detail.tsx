@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -12,7 +12,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { invoiceBalance, invoiceOverpayment, isDrawKind } from "@/lib/invoice-math";
+import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet } from "@/lib/invoice-math";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
 import { LineItemText } from "@/components/line-item-text";
@@ -75,7 +75,25 @@ const toDateInput = (iso?: string | null) => {
  * Pulling the text out means the locked row can never drift from the editable one — the customer
  * sees the same line either way, and the only difference is whether it does anything.
  */
-function LineRowText({ item: it }: { item: InvoiceItem }) {
+/** What the office is told about a line that the customer never sees (audit v994 PL1/PL2). */
+type LineNotes = { suppliers: ReadonlySet<string>; noBillRate: ReadonlySet<string> };
+
+/** The person a labor line bills: its key is `labor:<personId>` (or `labor:<personId>:2` for the
+ *  hours after a negotiated line, lib/labor-offer). */
+function laborPersonId(importKey: unknown): string | null {
+  const m = /^labor:([^:]+)/.exec(String(importKey ?? ""));
+  return m ? m[1] : null;
+}
+
+function LineRowText({ item: it, notes }: { item: InvoiceItem; notes?: LineNotes }) {
+  const row = it as InvoiceItem & { import_key?: string | null; edited?: boolean | null };
+  // THE CUSTOMER'S WORDS, SAID TO THE OFFICE. This row keeps the supplier's name (it is how the
+  // line is traced back to its paper); every customer door prints the same line as "Materials"
+  // (customerLineWords). Said here so the two never surprise each other.
+  const customerWords = notes ? customerLineWords(row, notes.suppliers) : String(it.description ?? "");
+  const reworded = customerWords !== String(it.description ?? "");
+  const person = it.import_source === "labor" ? laborPersonId(row.import_key) : null;
+  const unrated = !!person && !!notes?.noBillRate.has(person);
   return (
     <>
       <LineItemText description={it.description} className="block font-medium text-slate-800" />
@@ -88,7 +106,16 @@ function LineRowText({ item: it }: { item: InvoiceItem }) {
             something only the office needed (2026-09-18: "the rest is repetitive and
             unnecessary"). It belongs here, on the editor row, which no customer ever sees.
             Imported labor only, and only when the office is looking. */}
-        {it.import_source === "labor" && <span className="ml-1 text-slate-300">· their bill rate</span>}
+        {/* NEVER THEIR PAY RATE (audit v994 PL2, Erik's law). Someone with no bill rate is billed
+            at the customer's level rate or the default labor rate, and the row says which kind
+            of number it is, so nobody reads it as that person's own rate. */}
+        {it.import_source === "labor" &&
+          (unrated ? (
+            <span className="ml-1 font-medium text-amber-700">· No bill rate set - imports bill the level or default rate (set one on the Team page)</span>
+          ) : (
+            <span className="ml-1 text-slate-300">· their bill rate</span>
+          ))}
+        {reworded && <span className="ml-1 text-slate-400">· the customer reads “{customerWords}”</span>}
       </div>
     </>
   );
@@ -122,6 +149,8 @@ export function InvoiceDetail({
   importMode,
   importHeld = null,
   textReady = true,
+  supplierNames = [],
+  noBillRateIds = [],
   tz = "America/Los_Angeles",
 }: {
   invoice: Invoice;
@@ -155,6 +184,11 @@ export function InvoiceDetail({
   runningClocks?: { id: string; clockIn: string; name: string; self?: boolean; door: string }[];
   /** Can this org text (lib/sms-readiness)? The resend chip's Text door reads it before it promises. */
   textReady?: boolean;
+  /** The org's supplier names: a line naming one says what the customer reads instead (PL1). */
+  supplierNames?: string[];
+  /** Who has no bill rate (profile_pay): their labor line says it was billed at the level or
+   *  default rate, never their pay (PL2). */
+  noBillRateIds?: string[];
   /** The org's timezone, for the "since" time on a running clock. */
   tz?: string;
 }) {
@@ -162,6 +196,10 @@ export function InvoiceDetail({
   const toast = useToast();
   const [pending, start] = useTransition();
   const refresh = () => router.refresh();
+  const lineNotes = useMemo<LineNotes>(
+    () => ({ suppliers: supplierNameSet(supplierNames), noBillRate: new Set(noBillRateIds) }),
+    [supplierNames, noBillRateIds],
+  );
 
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
 
@@ -1056,7 +1094,7 @@ export function InvoiceDetail({
                       that takes this branch; a sent or paid bill gets the real button back. */}
                   {linesLocked ? (
                     <div className="min-w-0 flex-1">
-                      <LineRowText item={it} />
+                      <LineRowText item={it} notes={lineNotes} />
                     </div>
                   ) : (
                     <button
@@ -1066,7 +1104,7 @@ export function InvoiceDetail({
                       className="min-w-0 flex-1 cursor-pointer text-left"
                       title="Edit line item"
                     >
-                      <LineRowText item={it} />
+                      <LineRowText item={it} notes={lineNotes} />
                     </button>
                   )}
                   <div className="shrink-0 font-medium text-slate-900">{formatCurrency(it.line_total)}</div>

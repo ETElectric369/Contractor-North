@@ -152,7 +152,7 @@ describe("the customer's copy uses it, and only the customer's copy", () => {
   it("InvoiceDocument prints the merged lines and feeds them to the breakdown", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync("src/components/invoice-document.tsx", "utf8");
-    expect(src).toMatch(/const lines = mergeSuppliesAndTax\(items\)/);
+    expect(src).toMatch(/const lines = mergeSuppliesAndTax\(customerLines\(items, supplierNames\)\)/);
     expect(src).toMatch(/\{lines\.map\(/);
     expect(src).toMatch(/<CostBreakdown items=\{lines\}/);
     expect(src).not.toMatch(/\{items\.map\(/);

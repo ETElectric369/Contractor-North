@@ -10,6 +10,7 @@ import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-fina
 import { invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { docTitle } from "@/lib/doc-title";
+import { fetchSupplierNames } from "@/lib/supplier-names";
 import type { Metadata } from "next";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
@@ -34,12 +35,15 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   if (!invoice) notFound();
   const inv = invoice as Invoice & { customers: any };
 
-  const [{ data: items }, { data: payments }] = await Promise.all([
+  const [{ data: items }, { data: payments }, supplierNames] = await Promise.all([
     supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
     // What the customer's copy prints and nothing more: never `note`, which is the office's
     // (a check number, a reminder) and which the public invoice door leaves out on purpose (0247).
     // Oldest first, the order the statement's running balance reads in.
     supabase.from("payments").select("id, amount, paid_at, method").eq("invoice_id", id).order("paid_at", { ascending: true }),
+    // This page IS the PDF the customer receives: a line naming a supplier prints "Materials"
+    // (audit v994 PL1). The stored row keeps its words for the office's editor.
+    fetchSupplierNames(supabase),
   ]);
 
   const { data: org } = await supabase.from("organizations").select("*").maybeSingle();
@@ -94,6 +98,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         terms={settings.invoice_terms}
         documentFooter={settings.document_footer}
         docStyle={settings.doc_style}
+        supplierNames={supplierNames}
         // Nothing to measure against, nothing to print: a progress bill on a T&M job with no
         // quote printed "Estimate $0.00" beside its Balance Due (INV-078).
         progress={

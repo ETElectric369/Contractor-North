@@ -1,11 +1,24 @@
-import { hoursBetween } from "@/lib/utils";
+import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { payRateForEntry } from "@/lib/payroll-math";
 import { isPaidByDraw } from "@/lib/profile-columns";
 
 /** One billable-labor line for a worker on a job. `sourceIds` are the time_entry ids whose hours
  *  this line bills: the line's CLAIM on them (0255). A claim is what lets a second invoice bill only
  *  what is new: the hours a line holds are never imported onto another one. */
-export type LaborLine = { personId: string; name: string; rate: number; rawHours: number; quantity: number; amount: number; sourceIds: string[] };
+export type LaborLine = {
+  personId: string;
+  name: string;
+  rate: number;
+  rawHours: number;
+  quantity: number;
+  amount: number;
+  sourceIds: string[];
+  /** Where `rate` came from. "bill_rate": the person's own (under the level's ceiling). "level" /
+   *  "default": they have NO bill rate, so the customer's level rate or the org's default labor rate
+   *  (the office is told: "No bill rate set"). "none": no bill rate and nothing to fall back to, so
+   *  the line is $0 and the office is told that too. Never their pay rate (audit v994 PL2). */
+  rateFrom: "bill_rate" | "level" | "default" | "none";
+};
 
 /**
  * DROP THE HOURS ANOTHER INVOICE ALREADY BILLS (0255, "the invariant moves to the row").
@@ -95,8 +108,16 @@ export function laborCostForJob(
  *  Rule (Erik's): bill the EXACT time on this job, which is every closed entry on it, lunch
  *  deducted. A split shift is ordinary entries (0288), one job each, so "the time on this job" is
  *  simply the entries on this job; there is no second ledger to reconcile any more. Rate =
- *  bill_rate ?? hourly_rate ?? default_labor_rate. Quantity is rounded to the quarter hour PER
- *  PERSON (so a 2.6h person bills 2.5h, matching the printed line).
+ *  bill_rate (capped at the level rate) ?? level rate ?? default_labor_rate. Quantity is rounded to
+ *  the quarter hour PER PERSON (so a 2.6h person bills 2.5h, matching the printed line).
+ *
+ *  NEVER THEIR PAY RATE (audit v994 PL2, Erik's law). This used to fall back from bill_rate to
+ *  hourly_rate, so a new tech at $40 pay with no bill rate was billed to the customer at $40: his
+ *  wage, on the customer's paper (the portal shows a draft's lines live), and underpriced. A person
+ *  with no bill rate now bills at the customer's level rate or the org's default labor rate, and the
+ *  line carries `rateFrom` so the office is told "No bill rate set". The owner is unaffected: the
+ *  view that supplies the rates (profile_pay, and payViewRow for the service role) already folds his
+ *  figure into bill_rate. A pay figure on the profile is not read here at all.
  *
  *  jobEntries: closed time_entries on the job, each with id, clock_in/out, lunch, job_code, profiles. */
 export function computeJobLaborBilling(
@@ -139,9 +160,9 @@ export function computeJobLaborBilling(
   const addHours = (prof: any, hrs: number, sourceId?: unknown) => {
     if (!(hrs > 0)) return;
     const key = String(prof?.id ?? prof?.full_name ?? "unknown");
-    // BILL rate (what the customer is charged), NOT pay. A time entry's rate_override is a
-    // PAY-rate override (payroll only, see payRateForEntry) and is intentionally ignored here.
-    const raw = Number(prof?.bill_rate ?? prof?.hourly_rate ?? 0);
+    // BILL rate (what the customer is charged), NOT pay: never hourly_rate, and never a time
+    // entry's rate_override (a PAY-rate override, payroll only, see payRateForEntry).
+    const raw = Number(prof?.bill_rate ?? 0);
     const realRate = Number.isFinite(raw) && raw > 0 ? raw : 0; // 0 = no usable rate on this snapshot
     const cur = perPerson.get(key);
     if (cur) {
@@ -161,11 +182,34 @@ export function computeJobLaborBilling(
   const lines: LaborLine[] = [...perPerson.entries()].map(([personId, p]) => {
     const personal = p.realRate > 0 ? p.realRate : 0;
     const rate = personal > 0 ? (level > 0 ? Math.min(personal, level) : personal) : level > 0 ? level : def;
+    const rateFrom: LaborLine["rateFrom"] = personal > 0 ? "bill_rate" : level > 0 ? "level" : def > 0 ? "default" : "none";
     const quantity = Math.round(p.hours * 4) / 4; // quarter-hour
-    return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100, sourceIds: p.sourceIds };
+    return { personId, name: p.name, rate, rawHours: p.hours, quantity, amount: Math.round(quantity * rate * 100) / 100, sourceIds: p.sourceIds, rateFrom };
   });
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   return { lines, total };
+}
+
+/**
+ * WHAT THE OFFICE IS TOLD ABOUT A LINE PRICED WITHOUT A BILL RATE (audit v994 PL2; nothing silent).
+ *
+ * One sentence per person the labor import priced at the customer's level rate or the org's default
+ * rate because they have no bill rate of their own, and one for anyone it could price at nothing at
+ * all. The importer puts these in its warnings (the toast, and the line under the import row), and
+ * the invoice editor marks the line itself.
+ */
+export function noBillRateWarnings(lines: readonly LaborLine[]): string[] {
+  const out: string[] = [];
+  for (const l of lines ?? []) {
+    if (l.rateFrom === "level") {
+      out.push(`No bill rate set for ${l.name} - billed at this customer's level rate, ${formatCurrency(l.rate)} an hour. Set one on the Team page`);
+    } else if (l.rateFrom === "default") {
+      out.push(`No bill rate set for ${l.name} - billed at your default labor rate, ${formatCurrency(l.rate)} an hour. Set one on the Team page`);
+    } else if (l.rateFrom === "none" && l.quantity > 0) {
+      out.push(`No bill rate set for ${l.name} and no default labor rate - their ${l.quantity} hours are on this bill at $0. Set a bill rate on the Team page or a default labor rate in Settings`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -186,13 +230,11 @@ export function payViewRow(p: { id: string; role?: string | null; hourly_rate?: 
 /**
  * THE RATES A CUSTOMER'S PAGE MAY PRICE WITH: payViewRow with the PAY figure taken out.
  *
- * computeJobLaborBilling falls back from bill_rate to hourly_rate. In the office that fallback
- * reaches a customer only through a draft the office reads and chooses to send. The portal's
- * "Work Not On A Bill Yet" card goes to the customer live, with a name, hours and an amount, and
- * amount / hours would be that person's PAY rate. So on the service-role (portal) path nobody
- * carries an hourly_rate: a person with no bill rate is priced at the customer's level rate or the
- * org's default labor rate, never at what they are paid. (An owner's figure is a bill figure: the
- * view pays an owner by draw, so payViewRow already moved it to bill_rate.)
+ * computeJobLaborBilling no longer reads hourly_rate at all (audit v994 PL2: it used to fall back to
+ * it, and the portal shows a draft's lines live, so that fallback put a wage on a customer's page).
+ * The pay figure is still dropped here, on the one path whose reader is a customer, so no future
+ * reader of these rows can price with it by accident. (An owner's figure is a bill figure: the view
+ * pays an owner by draw, so payViewRow already moved it to bill_rate.)
  */
 export function customerRateRow(p: Parameters<typeof payViewRow>[0]) {
   return { ...payViewRow(p), hourly_rate: null };

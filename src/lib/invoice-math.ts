@@ -320,6 +320,90 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
 /** The one label the customer's copy prints for every receipt's "Supplies & tax" row. */
 export const SUPPLIES_AND_TAX_LABEL = "Supplies & Tax";
 
+/** What the customer reads for a whole receipt billed as one amount, and for its return. */
+export const MATERIALS_LABEL = "Materials";
+export const RETURNED_MATERIALS_LABEL = "Returned: Materials";
+export const RETURNED_OTHER_ITEMS_LABEL = "Returned: Other Items";
+
+/** A supplier name as the scrub compares it: whitespace collapsed, trimmed, lower case. The SQL twin
+ *  (customer_supplier_key, 0315) is the same expression, so the two can never disagree about a name. */
+export function supplierKey(name: unknown): string {
+  return String(name ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/** The org's supplier names (bills.supplier, purchase_orders.vendor, supplier_accounts.name,
+ *  supplier_aliases.alias), keyed by supplierKey. Empty is allowed: the words and the key still scrub. */
+export function supplierNameSet(names: Iterable<unknown>): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const n of names) {
+    const k = supplierKey(n);
+    if (k) out.add(k);
+  }
+  return out;
+}
+
+/** "(bill #8802-1101363)" / "(PO 1042)" at the end of a line: the supplier's paper, never the customer's. */
+const PAPER_NUMBER = /\s*\((bill\s*#|po\s)[^)]*\)\s*$/i;
+const SUPPLIES_ROW = /^\s*supplies\s*&\s*tax\b/i;
+const RETURNED_OTHER_ROW = /^\s*returned:\s*other\s+items\s*[—–-]/i;
+const MATERIALS_ROW = /^\s*(returned:\s*)?materials\s*[—–-]\s*(.*)$/is;
+const GENERATED_KEY = /^(bill|po):[^:]+$/;
+
+/**
+ * THE WORDS A CUSTOMER READS FOR ONE LINE (audit v994 PL1; the sanitize-on-read law).
+ *
+ * The materials import writes the office's words onto the row: "Materials — Consolidated
+ * Electrical Distributors, Inc. (CED) (bill #8802-1101363)" for a receipt billed as one amount,
+ * "Materials — Home Depot (PO 1042)" for an order, "Supplies & tax — CED" for a receipt's
+ * remainder, "Returned: materials — CED (bill #…)" / "Returned: other items — CED" for a return.
+ * The office keeps those words: they are how a line is traced back to its paper. The customer
+ * never reads a supplier's name or a supplier's paper number, on any door (the portal's job page
+ * and bill, /i, the PDF), including bills that went out before this rule existed. So the rule
+ * runs where the line is READ for a customer, and never rewrites the stored row.
+ *
+ * Only an imported materials row (import_source "costs") is ever reworded, and only when it is one
+ * of the importer's own shapes:
+ *   - "Supplies & tax …"             → "Supplies & Tax" (every remainder row, as INV-074 decided);
+ *   - "Returned: other items — …"    → "Returned: Other Items";
+ *   - "Materials — X" / "Returned: materials — X" → "Materials" / "Returned: Materials" when X is
+ *     the supplier: the row is the importer's untouched lump (key bill:<id> or po:<id>, not
+ *     edited), or X ends in the paper's number ("(bill #…)", "(PO …)"), or X is one of the org's
+ *     supplier names.
+ * Anything else is the office's own text and prints as written: "Materials — Ground rod" on a
+ * hand-typed line, or INV-060's lump the office rewrote into the list of what was in the box.
+ *
+ * The SQL twin is public.customer_line_words (migration 0315), which invoice_document_projection
+ * and portal_job_view call; a DB test holds the two to the same answer on every live line.
+ */
+export function customerLineWords(
+  line: { description?: string | null; import_source?: string | null; import_key?: string | null; edited?: boolean | null },
+  suppliers?: ReadonlySet<string>,
+): string {
+  const raw = String(line.description ?? "");
+  if (line.import_source !== "costs") return raw;
+  if (SUPPLIES_ROW.test(raw)) return SUPPLIES_AND_TAX_LABEL;
+  if (RETURNED_OTHER_ROW.test(raw)) return RETURNED_OTHER_ITEMS_LABEL;
+  const m = MATERIALS_ROW.exec(raw);
+  if (!m) return raw;
+  const rest = m[2] ?? "";
+  const who = supplierKey(rest.replace(PAPER_NUMBER, ""));
+  const untouchedLump = GENERATED_KEY.test(String(line.import_key ?? "")) && line.edited !== true;
+  const supplierWords = PAPER_NUMBER.test(rest) || (!!who && !!suppliers?.has(who));
+  if (!untouchedLump && !supplierWords) return raw;
+  return m[1] ? RETURNED_MATERIALS_LABEL : MATERIALS_LABEL;
+}
+
+/** customerLineWords over a whole bill, keeping every other field (and so every cent) as it was. */
+export function customerLines<T extends { description?: string | null; import_source?: string | null; import_key?: string | null; edited?: boolean | null }>(
+  items: readonly T[],
+  suppliers?: ReadonlySet<string>,
+): T[] {
+  return (items ?? []).map((it) => {
+    const words = customerLineWords(it, suppliers);
+    return words === String(it.description ?? "") ? it : { ...it, description: words };
+  });
+}
+
 /** A materials import's per-receipt remainder row: "Supplies & tax — <supplier>" (bill-itemisation). */
 export function isSuppliesAndTaxLine(it: InvoiceLine): boolean {
   return it.import_source === "costs" && /^supplies\s*&\s*tax\b/i.test(String(it.description ?? "").trim());
