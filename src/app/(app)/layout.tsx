@@ -23,6 +23,7 @@ import { ToastProvider } from "@/components/toast";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
+import { loadShiftChains } from "@/lib/shift-chain";
 
 /** "#1b9488" → "27 148 136" (the space-separated rgb our --glass-tint expects). */
 function hexToRgbTriplet(hex: string): string {
@@ -176,6 +177,9 @@ export default async function AppLayout({
     clock_in: string;
     job_id: string | null;
     job: { job_number: string; name: string } | null;
+    /** 0288: a Switch Job's piece points at the shift's first entry and says 'live'. */
+    split_from?: string | null;
+    split_how?: string | null;
   };
   // Geofence: if the user is on the clock, mount the exit monitor. The clock-in GPS
   // is the fence anchor when it exists; entries WITHOUT one mount too (My Day and the
@@ -184,15 +188,26 @@ export default async function AppLayout({
   // clock-in. Requiring gps_in here is what silently disabled the geofence for most
   // punches (the 30-hour open shift).
   let openEntry: OpenEntry | null = null;
+  // THE SHIFT, NOT THE PIECE (audit v994 SW1): the monitor's "past twelve hours" counts from the
+  // first piece of a switched shift (lib/shift-chain). One extra read, only for a switched clock.
+  let openShiftStart: string | null = null;
   if (settings.geofence_logout) {
     try {
       const { data: oe } = await supabase
         .from("time_entries")
-        .select("id, gps_in, clock_in, job_id, job:job_id(job_number, name)")
+        .select("id, gps_in, clock_in, job_id, split_from, split_how, job:job_id(job_number, name)")
         .eq("profile_id", user.id)
         .eq("status", "open")
         .maybeSingle();
       openEntry = (oe as any) ?? null;
+      if (openEntry?.split_from) {
+        const chains = await loadShiftChains(
+          supabase as any,
+          [{ id: openEntry.id, profile_id: user.id, clock_in: openEntry.clock_in, split_from: openEntry.split_from }],
+          profile.org_id ?? null,
+        );
+        openShiftStart = chains.get(openEntry.id)?.startIso ?? null;
+      }
     } catch (e) {
       // Degrade: the geofence monitor just won't mount this render. Never crash the shell.
       reportError("app-layout:open-entry", e);
@@ -289,6 +304,11 @@ export default async function AppLayout({
           // must retire the old site's anchor + trip state instead of fencing on it.
           jobId={openEntry.job_id ?? null}
           jobLabel={openEntry.job ? jobLabel(openEntry.job) : "the job site"}
+          // The piece began at a Switch Job (0288 cut): its anchor window is the wider post-switch
+          // one (audit v994 SW2), and "long" counts from the shift's first piece (SW1).
+          startedBySwitch={openEntry.split_how === "live"}
+          shiftStartIso={openShiftStart}
+          tz={tz}
         />
       )}
     </div>

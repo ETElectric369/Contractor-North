@@ -217,13 +217,14 @@ export function SplitShiftSheet({
             >
               {!preview.ok
                 ? (preview.problem ?? "Pick a split time inside the shift.")
-                : !pick
-                  ? `Total ${hoursText(preview.totalHours)}, same as the shift. Pick a job for the second part.`
-                  : crossJobBlocked
-                    ? `${holderName} bills this whole shift to ${leftLabel}, so the second part has to stay on ${leftLabel}.`
-                    : preview.sameAsShift
-                      ? `Total ${hoursText(preview.totalHours)}, same as the shift`
-                      : `Total ${hoursText(preview.totalHours)} (the shift is ${hoursText(preview.shiftHours)})`}
+                : crossJobBlocked && pick
+                  ? `${holderName} bills this whole shift to ${leftLabel}, so the second part has to stay on ${leftLabel}.`
+                  : `${
+                      preview.sameAsShift
+                        ? `Total ${hoursText(preview.paidHours)}, same as the shift.`
+                        : // Each part is rounded to the hundredth on its own, as payroll pays it (SW9).
+                          `Total ${hoursText(preview.paidHours)}: each part is rounded on its own, so the two parts pay ${Math.abs(preview.roundingDrift).toFixed(2)} h ${preview.roundingDrift > 0 ? "more" : "less"} than the shift's ${hoursText(preview.shiftHours)}. Move the split a minute to even it out.`
+                    }${pick ? "" : " Pick a job for the second part."}`}
             </p>
           )}
           <div className="flex items-center justify-end gap-2">

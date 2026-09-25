@@ -141,7 +141,9 @@ export function aggregatePayrollEntries(
     // Shape just what summarizeMileage reads, coercing miles to finite (one bad row
     // must not poison the per-day mileage sum the way it can't poison gross). Miles
     // split by their OWN lock — a base payment never moves them.
-    const milesEntry = { clock_in: e.clock_in, miles: fin(e.miles) };
+    // id + split_from ride along when the caller read them: a split shift's miles count on the day
+    // the shift began (summarizeMileage, audit v994 SW5).
+    const milesEntry = { clock_in: e.clock_in, miles: fin(e.miles), id: e.id ?? null, split_from: e.split_from ?? null };
     if (e.mileage_paid_at) rec.settledEntries.push(milesEntry);
     else rec.heldEntries.push(milesEntry);
     byProfile.set(e.profile_id, rec);

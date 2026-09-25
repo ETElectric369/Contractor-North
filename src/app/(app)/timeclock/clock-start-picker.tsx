@@ -3,15 +3,34 @@
 import { useState } from "react";
 import { Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { clockInputValue } from "@/lib/split-preview";
+import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 
-function nowParts(iso?: string) {
+/** The phone's own zone: the fallback when a host passes no org timezone. */
+function deviceTz(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Los_Angeles";
+  } catch {
+    return "America/Los_Angeles";
+  }
+}
+
+/**
+ * The date and time fields for an instant, read on the ORG's wall clock (audit v994 TZ1). A phone
+ * set to Mountain time showed "Since 7:00 AM" (Pacific, the heading) over a picker that opened at
+ * 8:00, and a typed 3:30 PM saved as 2:30 PM Pacific: the shift was paid and billed an hour short.
+ */
+export function pickerParts(iso: string | undefined, tz: string): { date: string; time: string } {
   const seeded = iso ? new Date(iso) : null;
   const d = seeded && !isNaN(seeded.getTime()) ? seeded : new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return {
-    date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
-    time: `${p(d.getHours())}:${p(d.getMinutes())}`,
-  };
+  return { date: todayStrInTz(tz, d), time: clockInputValue(d.toISOString(), tz) };
+}
+
+/** The instant the fields name, on the org's wall clock; null when they don't name one. */
+export function pickerInstant(date: string, time: string, tz: string): string | null {
+  if (!/^\d{2}:\d{2}$/.test(time ?? "")) return null;
+  const iso = tzDateTimeUtc(date, time, tz);
+  return iso && !isNaN(Date.parse(iso)) ? iso : null;
 }
 
 /**
@@ -30,6 +49,7 @@ export function ClockStartPicker({
   caption,
   initialIso,
   fieldLabel = "Start",
+  tz,
 }: {
   onChange: (iso: string | null) => void;
   className?: string;
@@ -48,10 +68,14 @@ export function ClockStartPicker({
   /** What the two inputs set, for screen readers: "Start" on a clock-in, "Stop" when the picker is
    *  the stop time of a forgotten punch (the Timeclock long-shift block, the geofence sheet). */
   fieldLabel?: string;
+  /** The org's timezone: the fields are its wall clock, whatever the phone is set to (audit v994
+   *  TZ1). Absent: the phone's own zone, as before. */
+  tz?: string;
 }) {
+  const zone = tz || deviceTz();
   const [custom, setCustom] = useState(startExpanded);
   const [rounded, setRounded] = useState(false);
-  const init = nowParts(initialIso);
+  const init = pickerParts(initialIso, zone);
   const [date, setDate] = useState(init.date);
   const [time, setTime] = useState(init.time);
 
@@ -60,8 +84,7 @@ export function ClockStartPicker({
   if (!staff) {
     const now = Date.now();
     const floor = new Date(now - (now % 1_800_000));
-    const p = (n: number) => String(n).padStart(2, "0");
-    const lbl = `${p(floor.getHours())}:${p(floor.getMinutes())}`;
+    const lbl = clockInputValue(floor.toISOString(), zone);
     const onBoundary = now - floor.getTime() < 60_000;
     return (
       <button
@@ -81,8 +104,7 @@ export function ClockStartPicker({
   }
 
   function emit(d: string, t: string) {
-    const iso = new Date(`${d}T${t}:00`);
-    onChange(isNaN(iso.getTime()) ? null : iso.toISOString());
+    onChange(pickerInstant(d, t, zone));
   }
 
   if (!custom) {
@@ -90,7 +112,7 @@ export function ClockStartPicker({
       <button
         type="button"
         onClick={() => {
-          const n = nowParts();
+          const n = pickerParts(undefined, zone);
           setDate(n.date);
           setTime(n.time);
           setCustom(true);

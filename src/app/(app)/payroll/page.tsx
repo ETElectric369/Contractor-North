@@ -38,8 +38,9 @@ const BALANCE_MONTHS = 18;
 /** Every column the balance math and the mileage block read off a time entry. One list, used by
  *  both entry queries, so a field can never go missing from one of them (THE PROJECTION LAW: the
  *  failure is always a select list). */
+// split_from: a split shift's miles count on the day the shift began (summarizeMileage, audit v994 SW5).
 const ENTRY_COLS =
-  "id, profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)";
+  "id, profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, split_from, profiles(full_name)";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 

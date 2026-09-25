@@ -41,7 +41,9 @@ export function MyDayClock({
   userId,
   className = "mb-4",
 }: {
-  open: { id: string; clock_in: string; notes: string | null } | null;
+  /** shift_start: when the SHIFT began (lib/shift-chain), the first part's clock-in after a Switch
+   *  Job. The long-shift door counts twelve hours from it (audit v994 SW1). */
+  open: { id: string; clock_in: string; notes: string | null; shift_start?: string | null } | null;
   jobLabel: string | null;
   /** WHO is signed in. A queued punch is stamped with this and only ever replays for the same
    *  person — a shared shop phone must never file one tech's hours onto another's timecard. */
@@ -238,7 +240,7 @@ export function MyDayClock({
             </div>
           )}
         </div>
-        {open && isLongOpenShift(new Date(open.clock_in).getTime(), now) ? (
+        {open && isLongOpenShift(new Date(open.shift_start ?? open.clock_in).getTime(), now) ? (
           /* A clock running LONG_SHIFT_HOURS (twelve) or more was probably forgotten: the one-tap close at now would
              write the night onto payroll. Timeclock asks when he stopped (lib/long-shift); the
              server refuses a now-close past the line anyway, so this is the door, not the guard. */

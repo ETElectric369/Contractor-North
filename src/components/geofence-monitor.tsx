@@ -8,6 +8,8 @@ import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app
 import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
 import { isLongOpenShift, stopWindow } from "@/lib/long-shift";
+import { splitClock } from "@/lib/split-preview";
+import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
 import { speakSmart } from "@/lib/tts";
 import { geoPermission, getPosition, watchPosition } from "@/lib/geo";
@@ -62,7 +64,7 @@ function setSnooze(entryId: string, until: number) {
   }
 }
 
-type Phase = "idle" | "prompt" | "picking" | "saving" | "confirmed";
+type Phase = GeofencePhase;
 
 /**
  * Global geofence watcher (mounted in the app shell while the user is clocked in).
@@ -96,6 +98,9 @@ export function GeofenceMonitor({
   graceMin = 4,
   jobLabel = "the job site",
   jobId = null,
+  startedBySwitch = false,
+  shiftStartIso = null,
+  tz,
 }: {
   entryId: string;
   gpsIn: GeoPoint | null;
@@ -108,6 +113,14 @@ export function GeofenceMonitor({
    *  seen-inside, last-inside — belongs to a different site now. Without it the fence
    *  kept judging the tech against the FIRST job's centre for the rest of the day. */
   jobId?: string | null;
+  /** This entry began at a Switch Job (0288 cut, split_how 'live'). Its missing anchor gets the wider
+   *  post-switch adoption window, like the server's (audit v994 SW2): the tech still has to drive to
+   *  the new site, and Nort's switches never carry a fix. */
+  startedBySwitch?: boolean;
+  /** When the SHIFT began (lib/shift-chain). "Past twelve hours" counts from here (audit v994 SW1). */
+  shiftStartIso?: string | null;
+  /** The org's timezone: every time this sheet says or takes is on its clock (audit v994 TZ1). */
+  tz?: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -152,9 +165,17 @@ export function GeofenceMonitor({
   pickedIsoRef.current = pickedIso;
   /** This prompt opened on a clock already running LONG_SHIFT_HOURS (straight onto the picker). */
   const longPromptRef = useRef(false);
-  /** The clock-in, in a ref so openPrompt still touches only refs and stable setters. */
-  const clockInRef = useRef(clockInIso);
-  clockInRef.current = clockInIso;
+  /** When the SHIFT began (the first piece after a Switch Job; else this entry's clock-in), in a ref
+   *  so openPrompt still touches only refs and stable setters. */
+  const shiftStartOf = () => {
+    const ci = Date.parse(clockInIso);
+    const s = shiftStartIso ? Date.parse(shiftStartIso) : NaN;
+    return Number.isFinite(s) && (!Number.isFinite(ci) || s < ci) ? s : ci;
+  };
+  const shiftStartRef = useRef(shiftStartOf());
+  shiftStartRef.current = shiftStartOf();
+  /** The anchor window closed with no anchor: the fence cannot work on this shift, and he is told. */
+  const [anchorLost, setAnchorLost] = useState(false);
   const [closedAt, setClosedAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Location permission is off/revoked — the fence can't watch, and he needs to know. */
@@ -218,7 +239,7 @@ export function GeofenceMonitor({
     // A CLOCK RUNNING LONG_SHIFT_HOURS (TWELVE) OR MORE (lib/long-shift) opens straight onto the picker, seeded at
     // the clock-in, with no "Clock Out Now": a close at now on a forgotten shift writes the night
     // onto payroll, and the server refuses it anyway.
-    const long = isLongOpenShift(Date.parse(clockInRef.current), Date.now());
+    const long = isLongOpenShift(shiftStartRef.current, Date.now());
     longPromptRef.current = long;
     setPhase(long ? "picking" : "prompt");
     // Site-leave PUSH (Erik: "push at geofence for clock out only for techs") — the sheet
@@ -247,19 +268,25 @@ export function GeofenceMonitor({
    * unchanged, so it cannot cause one that wasn't already earned.
    */
   const [, forcePromptTick] = useState(0);
+  const armedNow = fallbackArmed({
+    phase,
+    longPrompt: longPromptRef.current,
+    picked: pickedIso != null,
+    source: promptSourceRef.current,
+    lastInsideMs: lastInsideMsRef.current,
+    streamGap: streamGapRef.current,
+  });
+  const heartbeat = phase === "prompt" || (phase === "picking" && longPromptRef.current && pickedIso == null);
   useEffect(() => {
-    if (phase !== "prompt") return;
+    if (!heartbeat) return;
     const t = setInterval(() => forcePromptTick((n) => n + 1), 30_000);
     return () => clearInterval(t);
-  }, [phase]);
+  }, [heartbeat]);
 
   // What the un-answered fallback WOULD write, in his words — null when it cannot fire (a wake
   // prompt, or an observation we no longer trust). Same source as the submit() call below, so the
-  // sheet can never promise a time the code wouldn't use.
-  const autoAtLabel =
-    phase === "prompt" && promptSourceRef.current === "live" && lastInsideMsRef.current > 0 && !streamGapRef.current
-      ? new Date(lastInsideMsRef.current).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-      : null;
+  // sheet can never promise a time the code wouldn't use. On the org's clock (TZ1).
+  const autoAtLabel = armedNow ? splitClock(lastInsideMsRef.current, tz) : null;
 
   // The one write path for every close. `atIso` is now / the user's pick / the
   // observed last-at-site time — see the component doc.
@@ -309,7 +336,8 @@ export function GeofenceMonitor({
           try {
             if ("Notification" in window && Notification.permission === "granted") {
               const n = new Notification("Clocked out — you left the job site", {
-                body: "Tap to log which job codes you worked today.",
+                // /timeclock asks only about lunch now (audit v994 SI8): no job codes to log.
+                body: "Tap to finish your timecard.",
                 tag: "geo-clockout",
               });
               n.onclick = () => {
@@ -336,8 +364,8 @@ export function GeofenceMonitor({
   function clockOutPicked() {
     const ci = Date.parse(clockInIso);
     // On a long shift nothing counts as picked until the person picks: "now" is the very default
-    // this sheet exists to avoid.
-    const long = longPromptRef.current || isLongOpenShift(ci, Date.now());
+    // this sheet exists to avoid. Long = twelve hours of the SHIFT (SW1).
+    const long = longPromptRef.current || isLongOpenShift(shiftStartRef.current, Date.now());
     if (long && !pickedIso) {
       setError("Pick a time between clock-in and now, within 18 hours.");
       return;
@@ -409,10 +437,16 @@ export function GeofenceMonitor({
       // over-bills). Only for live-sourced prompts — a wake prompt has no observed
       // exit, so it waits for the human.
       if (
-        // A long-shift sheet opens on the picker; untouched, it is the same unanswered prompt.
-        (phaseRef.current === "prompt" ||
-          (phaseRef.current === "picking" && longPromptRef.current && pickedIsoRef.current == null)) &&
-        promptSourceRef.current === "live" &&
+        // A long-shift sheet opens on the picker; untouched, it is the same unanswered prompt. The
+        // SAME predicate the on-screen promise uses (fallbackArmed), so it never fires unsaid.
+        fallbackArmed({
+          phase: phaseRef.current,
+          longPrompt: longPromptRef.current,
+          picked: pickedIsoRef.current != null,
+          source: promptSourceRef.current,
+          lastInsideMs: lastInsideMsRef.current,
+          streamGap: streamGapRef.current,
+        }) &&
         promptShownAtRef.current > 0 &&
         now - promptShownAtRef.current >= AUTO_FALLBACK_MS &&
         // THE OBSERVATION HAS TO BE AN OBSERVATION (audit 6). Two ways it isn't:
@@ -511,9 +545,17 @@ export function GeofenceMonitor({
           // switch-cleared anchor can actually be re-armed after the drive to the new site —
           // the client used to cap every adoption at 15 min, making the server's post-switch
           // window dead code.
-          const switched = !isNaN(ciMs) && tripStartMsRef.current > ciMs;
+          //
+          // SINCE 0288 A CUT SWITCH IS A NEW ENTRY (audit v994 SW2): the layout remounts this monitor
+          // per entry, so tripStart equals the new piece's clock-in and the test above is never true.
+          // The piece says it began at a switch (startedBySwitch), which is what the server reads too.
+          const switched = startedBySwitch || (!isNaN(ciMs) && tripStartMsRef.current > ciMs);
           const fromMs = Math.max(isNaN(ciMs) ? 0 : ciMs, tripStartMsRef.current || 0);
-          if (!fromMs || now - fromMs > adoptWindowMs(switched)) return;
+          if (!fromMs || now - fromMs > adoptWindowMs(switched)) {
+            // NOTHING SILENT: the window closed with no anchor, so the fence is off for this shift.
+            if (fromMs && !cancelled) setAnchorLost(true);
+            return;
+          }
           const r = await getPosition({ enableHighAccuracy: true, timeout: 4_000, maximumAge: 30_000 });
           if (cancelled || doneRef.current || r.status !== "ok" || (r.accuracy ?? 0) > 150) return;
           const fix = { lat: r.coords.lat, lng: r.coords.lng, accuracy: r.accuracy };
@@ -563,7 +605,7 @@ export function GeofenceMonitor({
       document.removeEventListener("visibilitychange", onVis);
       window.removeEventListener("focus", onFocus);
     };
-  }, [tripKey, anchorLat, anchorLng, radiusM, clockInIso]);
+  }, [tripKey, anchorLat, anchorLng, radiusM, clockInIso, startedBySwitch]);
 
   // Route changes are wakes too (throttled inside check).
   useEffect(() => {
@@ -577,14 +619,17 @@ export function GeofenceMonitor({
         Location is off for this app, so I can&rsquo;t offer to clock you out when you leave. Clock out
         yourself, or turn location back on in Settings.
       </div>
+    ) : anchorLost && typeof anchorLat !== "number" ? (
+      <div className="mx-auto mb-3 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        I couldn&rsquo;t get a location at {jobLabel}, so I can&rsquo;t offer to clock you out when you leave this job.
+        Clock out yourself when you&rsquo;re done.
+      </div>
     ) : null;
 
-  const closedTime = closedAt
-    ? new Date(closedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : "";
+  const closedTime = closedAt ? splitClock(closedAt, tz) : "";
   const pickedMs = pickedIso ? Date.parse(pickedIso) : null;
   const ciMs = Date.parse(clockInIso);
-  const longShift = longPromptRef.current || isLongOpenShift(ciMs, Date.now());
+  const longShift = longPromptRef.current || isLongOpenShift(shiftStartRef.current, Date.now());
   // The 18-hour ceiling rides the shared window (lib/long-shift). On a long shift an untouched
   // picker is NOT a valid answer: it would mean "now".
   const pickWin = Number.isFinite(ciMs) ? stopWindow(ciMs, Date.now()) : null;
@@ -614,8 +659,10 @@ export function GeofenceMonitor({
               <div className="font-semibold text-slate-900">
                 Clocked out at {closedTime} — you left {jobLabel}.
               </div>
+              {/* /timeclock asks only about lunch now (audit v994 SI8). A geofence close is always
+                  auto_gps and unanswered, so the prompt there is pending whenever this shows. */}
               <Link href="/timeclock" className="mt-0.5 inline-block font-medium text-brand hover:underline">
-                Add your job codes →
+                Finish Your Timecard →
               </Link>
             </div>
           </div>
@@ -639,7 +686,9 @@ export function GeofenceMonitor({
                     fallback can actually fire; a wake prompt waits for a human indefinitely. */}
                 {autoAtLabel && (
                   <div className="mt-1 text-xs font-medium text-amber-700">
-                    No answer? We&apos;ll clock you out at {autoAtLabel}.
+                    {phase === "picking"
+                      ? `No answer in 5 minutes? We'll clock you out at ${autoAtLabel}, when you were last at the site.`
+                      : `No answer? We'll clock you out at ${autoAtLabel}.`}
                   </div>
                 )}
               </div>
@@ -655,7 +704,14 @@ export function GeofenceMonitor({
                   /* A long shift starts the picker on the clock-in's day and time, so a man who
                      forgot yesterday is not handed today as the answer. */
                   initialIso={longShift ? clockInIso : undefined}
-                  caption="Clocking out at the time above. Pick when you actually left."
+                  tz={tz}
+                  /* A long shift's picker starts at the clock-in, which is not a stop time anybody
+                     chose, so it never says "the time above" until he has picked one (SI7). */
+                  caption={
+                    longShift && pickedIso == null
+                      ? "Pick when you actually left."
+                      : "Clocking out at the time above. Pick when you actually left."
+                  }
                   onChange={setPickedIso}
                 />
               </div>

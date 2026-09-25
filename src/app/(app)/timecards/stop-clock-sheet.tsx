@@ -15,9 +15,11 @@
  *
  *   An ordinary shift: the clock-out time is filled with now and follows the minute hand until
  *     somebody touches it, so it is two taps: the door, then the button.
- *   A forgotten one (LONG_SHIFT_HOURS, or begun on an earlier day): the clock-out fields start
- *     EMPTY, and one line says why, because the office never gets a silent default on a forgotten punch; "Now"
- *     and "End Of Work Day" are chips that fill the fields and never save.
+ *   A forgotten one (LONG_SHIFT_HOURS of the SHIFT, counted from the first piece after a Switch
+ *     Job, or begun on an earlier day): the clock-out fields start EMPTY, and one line says which of
+ *     the two it is, because the office never gets a silent default on a forgotten punch. "Now" is
+ *     ALWAYS offered (Erik, 2026-09-24, audit v994 SI9) and "End Of Work Day" when it has passed;
+ *     both are chips that fill the fields and never save.
  *
  * Every time here is the ORG's wall clock, whatever the laptop says.
  */
@@ -33,11 +35,9 @@ import { jobLabel } from "@/lib/schedule-options";
 import { clockInputValue, splitClock } from "@/lib/split-preview";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { hoursBetween } from "@/lib/utils";
-import { MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isForgottenShift, stopProblem } from "@/lib/long-shift";
+import { LONG_SHIFT_PHRASE, clockDoorWords, clockedOutWords, forgottenReason, stopProblem } from "@/lib/long-shift";
 import type { JobCode } from "@/lib/types";
 import { stopShift, updateOpenEntry } from "../timeclock/actions";
-
-const H = 3_600_000;
 
 export interface StopClockEntry {
   id: string;
@@ -49,6 +49,9 @@ export interface StopClockEntry {
   notes: string | null;
   profiles?: { full_name: string | null } | null;
   job?: { job_number: string; name: string } | null;
+  /** When the SHIFT began (lib/shift-chain): after a Switch Job, the first piece's clock-in. The
+   *  page reads it; absent = this entry's own clock_in. */
+  shift_start?: string | null;
 }
 
 function dayLabel(ms: number, tz: string): string {
@@ -100,11 +103,19 @@ export function StopClockSheet({
   const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  /** The same person's running entry after a Switch Job beat this sheet to it (audit v994 SW4). */
+  const [stillOpenId, setStillOpenId] = useState<string | null>(null);
 
   const clockInMs = Date.parse(entry.clock_in);
+  // THE SHIFT, NOT THE PIECE (audit v994 SW1): after a Switch Job the running entry began at the
+  // switch, and "forgotten" counts from the first piece of the day.
+  const shiftStartParsed = entry.shift_start ? Date.parse(entry.shift_start) : NaN;
+  const shiftStartMs = Number.isFinite(shiftStartParsed) && shiftStartParsed < clockInMs ? shiftStartParsed : clockInMs;
+  const switched = shiftStartMs < clockInMs;
   // Frozen at mount: which sheet this is must not change under somebody typing.
   const [openedAt] = useState(() => Date.now());
-  const forgotten = isForgottenShift(clockInMs, openedAt, tz);
+  const reason = forgottenReason(shiftStartMs, openedAt, tz);
+  const forgotten = reason != null;
   const self = !!viewerId && entry.profile_id === viewerId;
   const words = clockDoorWords(entry.profiles?.full_name, { self });
   const said = clockedOutWords(entry.profiles?.full_name, self);
@@ -146,6 +157,14 @@ export function StopClockSheet({
   }, [open, tz]);
 
   const name = entry.profiles?.full_name?.trim() || "This person";
+  /** "yesterday", or the day it started when that was longer ago. */
+  const startWord = (() => {
+    const y = new Date(`${todayStrInTz(tz, new Date(openedAt))}T12:00:00Z`);
+    y.setUTCDate(y.getUTCDate() - 1);
+    return todayStrInTz(tz, new Date(shiftStartMs)) === y.toISOString().slice(0, 10)
+      ? "yesterday"
+      : `on ${dayLabel(shiftStartMs, tz)}`;
+  })();
   const first = name.split(/\s+/)[0] || name;
   const label = entry.job ? jobLabel(entry.job) : null;
 
@@ -159,9 +178,11 @@ export function StopClockSheet({
   const shownError = error ?? externalError ?? null;
   const valid = !!startIso && !!stopIso && !problem;
 
-  // Chips fill the fields; they never save.
+  // Chips fill the fields; they never save. NOW IS ALWAYS OFFERED (Erik, 2026-09-24, audit v994
+  // SI9): a 7 PM callback stopped at 12:40 AM is an ordinary night, and the office typing the date
+  // and time by hand for it was a chore with no reason. The chip only fills the fields; stopProblem
+  // still judges the time (past the 18-hour ceiling it says so under the fields).
   const clockInDay = todayStrInTz(tz, new Date(clockInMs));
-  const showNow = now - clockInMs <= MAX_SHIFT_HOURS * H && clockInDay === todayStrInTz(tz, new Date(now));
   const workEndIso = workDayEnd ? tzDateTimeUtc(clockInDay, workDayEnd, tz) : null;
   const workEndMs = workEndIso ? Date.parse(workEndIso) : NaN;
   const showWorkEnd = Number.isFinite(workEndMs) && workEndMs > clockInMs && workEndMs <= now;
@@ -198,7 +219,10 @@ export function StopClockSheet({
       } catch {
         return setError("No connection. The clock is still running; try again.");
       }
-      if (!res.ok) return setError(res.error ?? `That didn't go through, so the clock is still running. Try again.`);
+      if (!res.ok) {
+        setStillOpenId(res.still_open_entry_id ?? null);
+        return setError(res.error ?? `That didn't go through, so the clock is still running. Try again.`);
+      }
       onClose();
       router.refresh();
       toast(res.sentence ?? `${said.headline}.`, "success");
@@ -244,6 +268,20 @@ export function StopClockSheet({
               {shownError}
             </div>
           )}
+          {stillOpenId && (
+            // Opens the running entry's own sheet, pre-filled with its times. Never applied from here.
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full"
+              onClick={() => {
+                onClose();
+                router.push(`/timecards?entry=${stillOpenId}`, { scroll: false });
+              }}
+            >
+              Open The Running Shift
+            </Button>
+          )}
           <Button type="button" className="h-11 w-full" onClick={stopIt} disabled={busy || !valid}>
             {pending ? "Clocking Out…" : verb}
           </Button>
@@ -262,13 +300,28 @@ export function StopClockSheet({
       }
     >
       <div className="space-y-4">
-        <p className="text-sm text-slate-700">
-          Clocked in {dayLabel(clockInMs, tz)}, {splitClock(entry.clock_in, tz)}
-          {label ? ` at ${label}` : " with no job"}, {agoLabel(now - clockInMs)} ago.
-        </p>
-        {forgotten && (
+        {switched ? (
+          <p className="text-sm text-slate-700">
+            On the clock since {dayLabel(shiftStartMs, tz)}, {splitClock(shiftStartMs, tz)}, {agoLabel(now - shiftStartMs)} in all.
+            {" "}Switched to {label ?? "no job"} at {splitClock(entry.clock_in, tz)}
+            {dayLabel(clockInMs, tz) !== dayLabel(shiftStartMs, tz) ? ` on ${dayLabel(clockInMs, tz)}` : ""}.
+          </p>
+        ) : (
+          <p className="text-sm text-slate-700">
+            Clocked in {dayLabel(clockInMs, tz)}, {splitClock(entry.clock_in, tz)}
+            {label ? ` at ${label}` : " with no job"}, {agoLabel(now - clockInMs)} ago.
+          </p>
+        )}
+        {reason === "long" && (
           <p className="text-sm text-amber-800">
-            This clock has been running a long time, so the clock-out time starts empty: set when the work really ended.
+            This clock has been running {agoLabel(openedAt - shiftStartMs)}, {LONG_SHIFT_PHRASE}, so the clock-out time
+            starts empty: set when the work really ended, or tap Now if {self ? "you are" : `${first} is`} stopping now.
+          </p>
+        )}
+        {reason === "earlier_day" && (
+          <p className="text-sm text-amber-800">
+            This clock started {startWord}, so the clock-out time starts empty: set when the work really ended, or tap Now
+            if {self ? "you are" : `${first} is`} stopping now.
           </p>
         )}
 
@@ -310,20 +363,16 @@ export function StopClockSheet({
           </div>
         </div>
 
-        {(showNow || showWorkEnd) && (
-          <div className="flex flex-wrap gap-2">
-            {showNow && (
-              <Button type="button" variant="outline" className="h-11" onClick={() => fill(now)}>
-                Now
-              </Button>
-            )}
-            {showWorkEnd && (
-              <Button type="button" variant="outline" className="h-11" onClick={() => fill(workEndMs)}>
-                End Of Work Day ({splitClock(workEndMs, tz)})
-              </Button>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" className="h-11" onClick={() => fill(now)}>
+            Now
+          </Button>
+          {showWorkEnd && (
+            <Button type="button" variant="outline" className="h-11" onClick={() => fill(workEndMs)}>
+              End Of Work Day ({splitClock(workEndMs, tz)})
+            </Button>
+          )}
+        </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm">
           <span className="text-slate-700">Unpaid lunch</span>

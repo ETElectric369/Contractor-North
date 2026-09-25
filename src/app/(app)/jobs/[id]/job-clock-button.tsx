@@ -9,7 +9,7 @@ import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 
 /** One-tap clock-in to this job, right in the job's Time tab. Pick a different
  *  start time if you forgot to clock in. Clock out from My Day or the Timeclock. */
-export function JobClockButton({ jobId, isStaff = true }: { jobId: string; isStaff?: boolean }) {
+export function JobClockButton({ jobId, isStaff = true, tz }: { jobId: string; isStaff?: boolean; tz?: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
@@ -37,7 +37,7 @@ export function JobClockButton({ jobId, isStaff = true }: { jobId: string; isSta
           <Play className="h-3.5 w-3.5" /> Clock In
         </Button>
       </div>
-      <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
+      <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} tz={tz} />
     </div>
   );
 }

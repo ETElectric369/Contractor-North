@@ -38,6 +38,9 @@ interface Entry {
   // it's older than the recent-jobs list and would otherwise vanish on save.
   job?: { job_number: string; name: string } | null;
   status?: string | null;
+  /** A running entry's SHIFT start (lib/shift-chain): the first piece's clock-in after a Switch Job.
+   *  The clock-out sheet counts "forgotten" from it (audit v994 SW1). */
+  shift_start?: string | null;
   /** 0288: the first entry of the shift this piece was cut from, and how. */
   split_from?: string | null;
   split_how?: string | null;

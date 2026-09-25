@@ -30,6 +30,8 @@ import { NewTaskBox } from "../tasks/tasks-view";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
+import { loadShiftChains } from "@/lib/shift-chain";
+import { reportError } from "@/lib/observe";
 
 export const dynamic = "force-dynamic";
 
@@ -142,7 +144,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
     // notes rides along so the My Day one-tap clock-out can round-trip a mid-shift note.
-    supabase.from("time_entries").select("id, job_id, clock_in, clock_out, lunch_minutes, status, notes").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
+    supabase.from("time_entries").select("id, profile_id, job_id, clock_in, clock_out, lunch_minutes, status, notes, split_from").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
     // Options for the inline add/edit controls + the owner snapshot.
     listCustomerOptions(supabase),
     listActiveTechs(supabase),
@@ -164,6 +166,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
   const isStaff = isStaffRole((me as any)?.role ?? "");
+  // THE SHIFT, NOT THE PIECE (audit v994 SW1): after a Switch Job the running entry began at the
+  // switch; "Set When You Stopped" appears at twelve hours of the shift, as the server refuses.
+  let openShiftStart: string | null = null;
+  if (openEntry?.split_from) {
+    try {
+      openShiftStart = (await loadShiftChains(supabase as any, [openEntry], null)).get(openEntry.id)?.startIso ?? null;
+    } catch (e) {
+      reportError("planner-shift-chain", e);
+    }
+  }
 
   // THE week lives at /schedule for staff — My Day keeps a week only for techs,
   // who can't see /schedule (office-only). A role-gated single map ≠ duplication.
@@ -729,7 +741,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           <MyDayClock
             userId={user?.id ?? null}
             className="h-full"
-            open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
+            open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
             jobLabel={currentJob ? jobLabel(currentJob) : null}
           />
           <Link
@@ -762,7 +774,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       ) : (
         <MyDayClock
             userId={user?.id ?? null}
-          open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null } : null}
+          open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
           jobLabel={currentJob ? jobLabel(currentJob) : null}
         />
       )}

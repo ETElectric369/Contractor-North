@@ -257,7 +257,9 @@ export function ShiftList({ rows, lead }: { rows: StackEntry[]; lead: (e: StackE
   const done = new Set<string>();
   for (const e of rows) {
     if (done.has(e.id)) continue;
-    const kin = e.family ? rows.filter((r) => r.family === e.family) : [];
+    // One person's pieces only (audit v994 SW7): a family that somehow spans two people (0319 now
+    // refuses the move that made one) is never bracketed as one shift with a combined total.
+    const kin = e.family ? rows.filter((r) => r.family === e.family && r.personId === e.personId) : [];
     if (kin.length < 2) {
       done.add(e.id);
       out.push(<ShiftRow key={e.id} e={e} lead={lead(e)} />);
@@ -411,7 +413,8 @@ export function TimecardStack({
           // over the person's whole week at once — lib/mileage-math owns that rule, here as on
           // the page that used to draw this list.
           mileage: summarizeMileage(
-            p.entries.map((e) => ({ clock_in: e.clockIn, miles: e.miles })),
+            // The family rides along: a split shift's miles count on the day it began (SW5).
+            p.entries.map((e) => ({ clock_in: e.clockIn, miles: e.miles, id: e.id, split_from: e.family ?? null })),
             Number(baselineById[p.id] ?? 0),
             tz,
           ),

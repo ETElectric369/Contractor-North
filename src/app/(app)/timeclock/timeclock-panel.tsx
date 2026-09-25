@@ -80,6 +80,7 @@ export function TimeclockPanel({
   openEntry,
   previousPiece = null,
   earlierShiftHours = 0,
+  shiftStartIso = null,
   jobCodes,
   jobs,
   lang,
@@ -96,6 +97,9 @@ export function TimeclockPanel({
   /** Worked hours on the earlier parts of this same shift (the touching entries a Switch Job closed).
    *  The running timer counts only the part since the switch, so the shift's total is said beside it. */
   earlierShiftHours?: number;
+  /** When the SHIFT began (lib/shift-chain): after a Switch Job, the first part's clock-in. The
+   *  long-shift question counts twelve hours from here, as the server does (audit v994 SW1). */
+  shiftStartIso?: string | null;
   jobCodes: JobCode[];
   jobs: JobOption[];
   lang?: string;
@@ -443,7 +447,11 @@ export function TimeclockPanel({
 
     // THE LONG SHIFT. One rule (lib/long-shift) decides it, and the server answers the same way.
     const ciMs = Date.parse(openEntry.clock_in);
-    const longShift = forceLongFor === openEntry.id || isLongOpenShift(ciMs, now);
+    // Twelve hours of the SHIFT, from its first part (audit v994 SW1). The stop picker still starts
+    // at this part's clock-in: a stop time closes only the part that is running.
+    const shiftParsed = shiftStartIso ? Date.parse(shiftStartIso) : NaN;
+    const shiftMs = Number.isFinite(shiftParsed) && shiftParsed < ciMs ? shiftParsed : ciMs;
+    const longShift = forceLongFor === openEntry.id || isLongOpenShift(shiftMs, now);
     const earlierDay = mounted && startedEarlierDay(ciMs, now, tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
     const zone = tz ? { timeZone: tz } : {};
     const sinceText = mounted
@@ -452,7 +460,7 @@ export function TimeclockPanel({
         : new Date(ciMs).toLocaleTimeString("en-US", { ...zone, hour: "numeric", minute: "2-digit" })
       : "";
     const longWhen = mounted
-      ? new Date(ciMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+      ? new Date(shiftMs).toLocaleString("en-US", { ...zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
       : "";
     const stopMs = stopIso ? Date.parse(stopIso) : NaN;
     const stopSentence = stopIso
@@ -472,6 +480,7 @@ export function TimeclockPanel({
           startExpanded
           fieldLabel="Stop"
           initialIso={pickerSeed ?? openEntry.clock_in}
+          tz={tz}
           caption={t("tc_whenStopped")}
           onChange={(iso) => setStopIso(iso)}
         />
@@ -487,7 +496,7 @@ export function TimeclockPanel({
             }}
             suppressHydrationWarning
           >
-            {fillText(t("tc_nowChip"), { hours: ((now - ciMs) / 3_600_000).toFixed(1) })}
+            {fillText(t("tc_nowChip"), { hours: ((now - shiftMs) / 3_600_000).toFixed(1) })}
           </Button>
         )}
         <LunchCheckbox id="tc-lunch-long" checked={tookLunch} onChange={setTookLunch} />
@@ -816,7 +825,7 @@ export function TimeclockPanel({
 
         <div>
           <Label>Start time</Label>
-          <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
+          <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} tz={tz} />
         </div>
 
         {/* Job + code pickers — STAFF only, and tucked behind the ONE quiet "More

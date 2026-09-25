@@ -62,7 +62,8 @@ export default async function TaxReportPage({
     supabase.from("tax_rates").select("name, rate").order("rate"),
     supabase
       .from("time_entries")
-      .select("clock_in, miles, profile_id")
+      // id + split_from: a split shift's miles count on the day it began (summarizeMileage, SW5).
+      .select("id, clock_in, miles, profile_id, split_from")
       .gte("clock_in", start.toISOString())
       .lt("clock_in", end.toISOString()),
   ]);
