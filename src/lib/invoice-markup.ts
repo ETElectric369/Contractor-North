@@ -18,6 +18,8 @@
  *
  * Pure: the caller hands over the invoice's materials lines, the tombstones and the job's bills,
  * orders and receipt lines. Returns null when there is nothing to read it from, or no one answer.
+ * The reads that feed it live in ONE place (lib/invoice-markup-read), shared by the importer and
+ * the invoice page's % box, so the two can never disagree about what an invoice is priced at.
  */
 
 import { billableBillCost, type BillLine } from "./bill-itemisation";
@@ -35,13 +37,29 @@ const VOTE_FLOOR = 20;
 /** How far (percentage points) one bill may sit from the weighted answer and still agree. */
 const AGREE = 0.5;
 
-export function markupOnInvoice(input: {
+export type MarkupOnInvoiceInput = {
   lines: readonly InvoiceCostLine[];
   dismissed: ReadonlySet<string>;
   bills: readonly { id: string; amount: unknown }[];
   linesByBill: ReadonlyMap<string, BillLine[]>;
   pos: readonly { id: string; total: unknown }[];
-}): number | null {
+};
+
+/**
+ * What the lines say, in the three shapes the % box has to tell apart (Erik, 2026-09-25: "i changed
+ * andrew's invoice to 11% ... but the marker still shows 15"). `one`: every untouched bill agrees,
+ * and this is the figure. `mixed`: there were bills to read and they disagree - no single answer,
+ * and the box says so rather than show one. `none`: nothing untouched to read it from.
+ */
+export type MarkupReading = { kind: "one"; pct: number } | { kind: "mixed" } | { kind: "none" };
+
+/** The importer's rule (keepInvoiceMarkup) as a number: the one figure, or null for mixed / none. */
+export function markupOnInvoice(input: MarkupOnInvoiceInput): number | null {
+  const r = markupReading(input);
+  return r.kind === "one" ? r.pct : null;
+}
+
+export function markupReading(input: MarkupOnInvoiceInput): MarkupReading {
   const bySource = new Map<string, InvoiceCostLine[]>();
   for (const l of input.lines) {
     const src = (l.source_ids ?? [])[0];
@@ -72,12 +90,94 @@ export function markupOnInvoice(input: {
   for (const p of input.pos) read(p.id, Number(p.total), (k) => k === `po:${p.id}`);
 
   const cost = samples.reduce((s, x) => s + x.cost, 0);
-  if (!(cost >= 5)) return null;
+  if (!(cost >= 5)) return { kind: "none" };
   const sell = samples.reduce((s, x) => s + x.sell, 0);
   const pct = (sell / cost - 1) * 100;
   for (const x of samples) {
     if (x.cost < VOTE_FLOOR) continue;
-    if (Math.abs((x.sell / x.cost - 1) * 100 - pct) > AGREE) return null;
+    if (Math.abs((x.sell / x.cost - 1) * 100 - pct) > AGREE) return { kind: "mixed" };
   }
-  return Math.round(pct * 10) / 10;
+  return { kind: "one", pct: Math.round(pct * 10) / 10 };
+}
+
+/**
+ * WHAT THE % BOX STARTS AT, AND WHY (2026-09-25).
+ *
+ * The box used to start at the customer's usual markup whatever the lines said. On INV-078 that
+ * was a trap: Erik had moved Andrew's invoice to 11%, the box still read 15, and tapping Materials
+ * from Costs (or typing in the box and leaving it) sent that 15 and repriced every untouched line
+ * back. The box now starts where the invoice IS when its lines give one answer - the reading the
+ * importer's keepInvoiceMarkup takes, from the same server read (lib/invoice-markup-read) - and at
+ * the usual figure otherwise, with the reason said beside it.
+ *
+ * `reading` null = the invoice has no materials lines to read (a fresh invoice); "unread" = the
+ * read failed, which is not the same as "no lines" and is said as such.
+ */
+export type MarkupSeed = {
+  /** What the box starts at. */
+  pct: number;
+  /** Where that figure came from. */
+  source: "invoice" | "mixed" | "usual" | "unread";
+  /** The customer's pricing level, or the org default when they have none. */
+  usualPct: number;
+};
+
+export function markupBoxSeed(reading: MarkupReading | "unread" | null, usualPct: unknown): MarkupSeed {
+  const n = Number(usualPct);
+  const usual = Number.isFinite(n) && n >= 0 ? n : 0;
+  if (reading === "unread") return { pct: usual, source: "unread", usualPct: usual };
+  if (reading?.kind === "one") return { pct: reading.pct, source: "invoice", usualPct: usual };
+  if (reading?.kind === "mixed") return { pct: usual, source: "mixed", usualPct: usual };
+  return { pct: usual, source: "usual", usualPct: usual };
+}
+
+const pctWords = (n: number) => `${Math.round(n * 10) / 10}%`;
+
+/**
+ * The words beside the box. `main` is what the lines are priced at, or why there is no one figure;
+ * `usual` is the customer's usual - small, secondary, and only when it differs from what the lines
+ * say. `who` is whose usual it is: the customer when they have a pricing level, null when the usual
+ * is the org default.
+ */
+export function markupBoxWords(seed: MarkupSeed, who: string | null): { main: string | null; usual: string | null } {
+  if (seed.source === "mixed") return { main: "Lines are at different markups", usual: null };
+  if (seed.source === "unread") return { main: "Couldn't read what these lines are priced at just now", usual: null };
+  if (seed.source !== "invoice") return { main: null, usual: null };
+  const name = who?.trim();
+  const differs = Math.abs(seed.pct - seed.usualPct) > 0.05;
+  return {
+    main: `Priced at ${pctWords(seed.pct)}`,
+    usual: !differs ? null : name ? `${name}'s usual is ${pctWords(seed.usualPct)}` : `Your default is ${pctWords(seed.usualPct)}`,
+  };
+}
+
+/**
+ * THE BOX'S OWN STATE: what is typed, and what the lines were last set to from here.
+ *
+ * `applied` starts at the seed, so opening the page and leaving the box never reprices anything,
+ * and `value !== applied` is the one meaning of "the person has typed a new number". When the
+ * server re-reads (a refresh after any import, or someone else's change), the new seed is taken
+ * only when nothing is typed - and a seed that is not the invoice's own reading (no lines left to
+ * read, or lines that disagree) does not overwrite a number the person just applied here.
+ */
+export type MarkupBoxState = { value: number; applied: number; appliedHere: boolean };
+
+export function markupBoxStart(seed: MarkupSeed): MarkupBoxState {
+  return { value: seed.pct, applied: seed.pct, appliedHere: false };
+}
+
+export function markupBoxTyped(box: MarkupBoxState): boolean {
+  return box.value !== box.applied;
+}
+
+export function markupBoxOnSeed(box: MarkupBoxState, seed: MarkupSeed): MarkupBoxState {
+  if (markupBoxTyped(box)) return box;
+  if (seed.source !== "invoice" && box.appliedHere) return box;
+  return { ...box, value: seed.pct, applied: seed.pct };
+}
+
+/** The lines were just set to `pct` from here. What is in the box stays - if they typed again while
+ *  the import ran, that is still theirs to apply. */
+export function markupBoxApplied(box: MarkupBoxState, pct: number): MarkupBoxState {
+  return { value: box.value, applied: pct, appliedHere: true };
 }

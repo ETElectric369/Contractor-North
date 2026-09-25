@@ -456,7 +456,7 @@ export function customerUnbilled(u: UnbilledWork): CustomerUnbilled {
  * jobProgressFinancials so the Unbilled card, the progress panel, Nort's job numbers and the
  * printed report all read the same receipt the same way.
  *
- * The retry is the cn-v576 deploy-window shape, copied from the importer's own billLinesForBills:
+ * The retry is the cn-v576 deploy-window shape, copied from the importer's own readBillLines (lib/invoice-markup-read):
  * a push can land before its migration runs, and a select naming a column that is not there yet
  * fails the WHOLE read - which would take the job page's money panel down for those minutes.
  * Falling back leaves both columns undefined, which the arithmetic reads as "the whole line",
