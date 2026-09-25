@@ -3,7 +3,9 @@
 import { useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
-import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil } from "lucide-react";
+import Link from "next/link";
+import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil, Globe } from "lucide-react";
+import { categoryIsShowable } from "@/lib/portal/doc-kinds";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -66,10 +68,15 @@ export function JobDocuments({
   orgId,
   jobId,
   docs,
+  portalPapers = null,
 }: {
   orgId: string;
   jobId: string;
   docs: Doc[];
+  /** 0326: which papers are on the customer's page (null before 0326, or for a tech: no control).
+   *  A plan, permit or other job paper gets Show On Portal, which opens the Customer Page tab's
+   *  sheet for it; a receipt, bill or invoice never does. */
+  portalPapers?: Record<string, "shown" | "replaced"> | null;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("Receipt");
@@ -335,6 +342,23 @@ export function JobDocuments({
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
+              {portalPapers && d.file_url && categoryIsShowable(d.category) && (
+                <div className="pl-15">
+                  <Link
+                    href={`/jobs/${jobId}?tab=customer&paper=${d.id}`}
+                    className={`inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold ${
+                      portalPapers[d.id] === "shown" ? "bg-emerald-50 text-emerald-800" : "text-brand hover:bg-brand/5"
+                    }`}
+                  >
+                    <Globe className="h-4 w-4" />
+                    {portalPapers[d.id] === "shown"
+                      ? "On The Portal"
+                      : portalPapers[d.id] === "replaced"
+                        ? "Replaced By A Newer One On The Portal"
+                        : "Show On Portal"}
+                  </Link>
+                </div>
+              )}
               {n && (
                 <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
                   {n.text}

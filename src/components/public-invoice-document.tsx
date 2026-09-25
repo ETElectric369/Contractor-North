@@ -20,7 +20,9 @@ export type PublicInvoiceData = {
   org?: Record<string, any> | null;
 };
 
-export function PublicInvoiceDocument({ data }: { data: PublicInvoiceData }) {
+/** groupByKind: the customer portal's bill, its lines under Labor / Materials / ... headings with
+ *  subtotals (InvoiceDocument). The /i page leaves it off and prints the bill as it always has. */
+export function PublicInvoiceDocument({ data, groupByKind = false }: { data: PublicInvoiceData; groupByKind?: boolean }) {
   const inv = data.invoice;
   const org = (data.org ?? null) as (Organization & Record<string, any>) | null;
   const co = companyFromOrg(org);
@@ -52,6 +54,8 @@ export function PublicInvoiceDocument({ data }: { data: PublicInvoiceData }) {
       notes={inv.notes}
       terms={(org?.invoice_terms as string | null | undefined) ?? null}
       documentFooter={(org?.document_footer as string | null | undefined) ?? null}
+      invoiceKind={(inv.invoice_kind as string | null | undefined) ?? null}
+      groupByKind={groupByKind}
     />
   );
 }

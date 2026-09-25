@@ -164,6 +164,112 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
   });
 });
 
+describe("labor and materials apart, right at the top and in every section (Erik, 2026-09-24)", () => {
+  const html = render(raw());
+  const t = text(html);
+  const money = html.slice(html.indexOf("data-portal-money"), html.indexOf("</dl>", html.indexOf("data-portal-money")));
+  const m = text(money);
+
+  it("the money card: Labor (hours) and Materials as two lines that add up to Work So Far, then Paid and Balance", () => {
+    expect(m).toMatch(/Labor · 71\.5 hours \$6,100\.00 Materials \$2,218\.62 Work So Far \$8,318\.62 Paid \$6,760\.00 Balance \$1,558\.62/);
+  });
+
+  it("every stretch says Labor, Materials and Paid as separate figures", () => {
+    expect(t).toContain("Labor $1,850.00 Materials $409.12 Paid $1,850.00");
+    expect(t).toMatch(/Labor \$0\.00 Materials \$119\.59 Paid \$0\.00/);
+    expect((html.match(/data-portal-split="labor"/g) ?? []).length).toBe(5); // the card + 4 stretches
+  });
+
+  it("every day groups its labor and its materials under their own headings", () => {
+    expect(html).toContain('data-portal-day-group="labor"');
+    expect(html).toContain('data-portal-day-group="materials"');
+    // Jul 31: Erik's 3 hours at $100 under Labor, the Flexbox order under Materials.
+    const jul31 = html.slice(html.indexOf("Fri, Jul 31"), html.indexOf("</details>", html.indexOf("Fri, Jul 31")));
+    expect(text(jul31)).toMatch(/Labor · 3 hours \$300\.00 Erik 3 hours at \$100\.00 an hour \$300\.00 Materials \$409\.12 Flexbox/);
+  });
+
+  it("the bill lists its lines under Labor and Materials with subtotals, and no Other when there is none", () => {
+    const bill = html.slice(html.indexOf('class="portal-bill '));
+    expect(bill).toContain('data-doc-group="labor"');
+    expect(bill).toContain('data-doc-group="materials"');
+    expect(bill).not.toContain('data-doc-group="other"');
+    const b = text(bill);
+    expect(b).toContain("Labor Subtotal $6,100.00");
+    expect(b).toContain("Materials Subtotal $2,218.62");
+    // Labor first: every labor line comes before the first material line.
+    expect(b.indexOf("Labor - Jimmy")).toBeLessThan(b.indexOf("Flexbox"));
+  });
+
+  it("the work not added yet reads under the same two headings", () => {
+    const view = shapePortalJob(raw(), {
+      signed,
+      unbilled: { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 120, returnsCredit: 20, total: 500 },
+      now: NOW,
+    });
+    const u = renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" }));
+    expect(u).toContain('data-portal-unbilled-group="labor"');
+    expect(u).toContain('data-portal-unbilled-group="materials"');
+    expect(text(u)).toMatch(/Labor · 4 hours \$400\.00 Erik 4 hours \$400\.00 Materials \$100\.00 Materials Bought \$120\.00 Returns To Credit −\$20\.00 Not Added Yet \$500\.00/);
+  });
+});
+
+describe("the plans and drawings section (0326)", () => {
+  const files: Record<string, string> = {
+    [`${ORG}/${JOB}/300-circuit.pdf`]: "https://signed.example/circuit?t=1",
+    [`${ORG}/${JOB}/301-floor.jpg`]: "https://signed.example/floor?t=1",
+    [`${ORG}/${JOB}/302-house.e57`]: "https://signed.example/scan?t=1",
+  };
+  const doc = (id: string, kind: string, path: string, over: Record<string, unknown> = {}) => ({
+    id,
+    kind,
+    title: null as string | null,
+    file_path: path,
+    added_at: "2026-09-24T18:00:00Z",
+    shown_at: "2026-09-24T18:05:00Z",
+    is_update: false,
+    ...over,
+  });
+  const r = raw({
+    documents: [
+      doc("d1", "circuit_map", `${ORG}/${JOB}/300-circuit.pdf`, { title: "Circuit Map", is_update: true }),
+      doc("d2", "plan", `${ORG}/${JOB}/301-floor.jpg`, { title: "Main Floor Plan", added_at: "2026-08-03T18:00:00Z" }),
+      doc("d3", "scan_3d", `${ORG}/${JOB}/302-house.e57`, { title: "House Scan" }),
+    ],
+  });
+  const html = renderToStaticMarkup(
+    createElement(PortalJobPage, { view: shapePortalJob(r, { signed: new Map([...signed, ...Object.entries(files)]), unbilled: null, now: NOW }), homeHref: "/portal/x" }),
+  );
+  const t = text(html);
+
+  it("has its own section and chip, with each paper's title and date", () => {
+    expect(html).toContain('id="plans"');
+    expect(html).toContain('href="#plans"');
+    expect(t).toContain("Plans And Drawings");
+    expect(t).toContain("Main Floor Plan");
+    expect(t).toContain("Main Floor Plan Added Aug 3");
+    // The newer circuit map says it is an update, not a second map.
+    expect(t).toContain("Circuit Map Updated Sep 24");
+    // Each kind is its own heading.
+    for (const h of ["Plan", "Circuit Map", "3D Scan"]) expect(html).toContain(`tracking-wide text-slate-600">${h}</h3>`);
+  });
+
+  it("a picture is drawn on the page, a PDF opens in the viewer or full size, a scan is a plain link", () => {
+    expect(html).toContain('src="https://signed.example/floor?t=1"');
+    expect(t).toContain("Open The Circuit Map");
+    expect(html).toContain('href="https://signed.example/circuit?t=1"');
+    expect(t).toContain("Open Full Size");
+    expect(t).toContain("A 3D file.");
+    expect(html).toContain('href="https://signed.example/scan?t=1"');
+    expect(t).toContain("Open The File");
+  });
+
+  it("no section and no chip when nothing is shown", () => {
+    const none = render(raw());
+    expect(none).not.toContain('id="plans"');
+    expect(text(none)).not.toContain("Plans And Drawings");
+  });
+});
+
 describe("how the customer's pages say things", () => {
   it("never moves a day: the org's date prints as that date in any timezone", () => {
     expect(fmtDay("2026-09-18")).toBe("Sep 18");

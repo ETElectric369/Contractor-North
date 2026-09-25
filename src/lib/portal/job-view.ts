@@ -19,8 +19,9 @@ import { portalPathsToSign, shapePortalJob, type PortalJobRaw, type PortalJobVie
  * customer is shown. A customer never touches RLS, never an auth user, never a staff path. What
  * comes back is turned into the page's allowlisted shape by shapePortalJob. Two more reads, both
  * as the service role and both only AFTER the gate passed, both pinned to the org the gate named:
- *   - signing: 10-minute signed URLs for exactly the pick files and shared photos the function
- *     returned (never a folder listing: receipts live in the same folder as photos);
+ *   - signing: 10-minute signed URLs for exactly the pick files, shared photos and shared plans and
+ *     drawings (0326) the function returned (never a folder listing: receipts live in the same
+ *     folder as photos);
  *   - the work not on a bill yet, on a job that bills its actuals, through the SAME fetcher the
  *     office's Unbilled card reads (scoped to the org by hand), cut to the customer's shape.
  */

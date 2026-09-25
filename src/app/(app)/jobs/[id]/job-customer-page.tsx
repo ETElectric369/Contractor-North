@@ -22,10 +22,12 @@ import {
   restoreStretch,
   updatePick,
   updateStretch,
+  type PapersState,
   type PickOptionChoice,
   type PickRow,
   type StretchRow,
 } from "../portal-share-actions";
+import { PapersCard } from "./job-portal-papers";
 
 /**
  * WHAT THE CUSTOMER SEES ON THIS JOB, AND THE OFFICE'S HANDS ON IT (office only: the page renders
@@ -58,6 +60,8 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
   const [stretches, setStretches] = useState<StretchRow[]>([]);
   const [picks, setPicks] = useState<Pick[]>([]);
   const [sharedPhotos, setSharedPhotos] = useState(0);
+  const [stalePhotos, setStalePhotos] = useState(0);
+  const [papers, setPapers] = useState<PapersState | null>(null);
   const [brands, setBrands] = useState<string[]>([]);
   const [options, setOptions] = useState<PickOptionChoice[]>([]);
   const [link, setLink] = useState<LinkState | null>(null);
@@ -70,7 +74,10 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
       setLoadError(null);
       setStretches(st.stretches);
       setPicks(st.picks);
-      setSharedPhotos(st.sharedPhotoIds.length);
+      // A shown photo whose file changed is not on the customer's page (PL4): it is not counted as shown.
+      setSharedPhotos(st.sharedPhotoIds.length - st.staleSharedPhotoIds.length);
+      setStalePhotos(st.staleSharedPhotoIds.length);
+      setPapers(st.papers);
       setBrands(st.brands);
       setOptions(st.options);
     }
@@ -105,6 +112,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
         <>
           <StretchesCard jobId={jobId} rows={stretches} setRows={setStretches} who={who} />
           <PicksCard jobId={jobId} orgId={orgId} rows={picks} setRows={setPicks} brands={brands} options={options} who={who} />
+          {papers ? <PapersCard state={papers} setState={setPapers} who={who} /> : null}
           <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <h3 className="flex items-center gap-2 text-base font-semibold text-slate-900">
               <Camera className="h-4 w-4 text-[rgb(var(--glass-ink))]" /> Photos
@@ -113,6 +121,11 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
               {sharedPhotos === 0
                 ? `No photos are shown to ${who} yet.`
                 : `${sharedPhotos} ${sharedPhotos === 1 ? "photo is" : "photos are"} shown to ${who}.`}{" "}
+              {stalePhotos > 0
+                ? `${stalePhotos} ${stalePhotos === 1 ? "photo was" : "photos were"} changed after being shown, so ${who} doesn't see ${
+                    stalePhotos === 1 ? "it" : "them"
+                  } now: Show Again is on the photo. `
+                : null}
               Choose them on the Photos tab with Show Customer under each photo. Receipts are never shown.
             </p>
             <Link href={`/jobs/${jobId}?tab=photos`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">
@@ -143,8 +156,8 @@ function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
       <div className="relative z-10">
         <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{who}&apos;s own page for this job</div>
         <p className="mt-1 text-sm text-slate-700">
-          The work by stretch with each day&apos;s hours and dollars as billed, the payments, the bill, the picks and the photos
-          you share. Every change here shows on their page right away. Picks never show a price.
+          The work by stretch with each day&apos;s hours and dollars as billed, the payments, the bill, the picks, and the plans,
+          drawings and photos you share. Every change here shows on their page right away. Picks never show a price.
         </p>
         {/* Said in the card, not in a tooltip: a phone never shows a title. */}
         {!link.hasLink ? (

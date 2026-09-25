@@ -258,6 +258,31 @@ body.modal-open .app-bottom-nav {
   .portal-bill .doc-lines td:nth-child(3)::before {
     content: "at ";
   }
+  /* The portal's grouped bill: a group's heading and its subtotal are one row each, the label on
+     the left and the figure on the right, never folded into the line grid above. */
+  .portal-bill .doc-lines tr.doc-group-head,
+  .portal-bill .doc-lines tr.doc-group-sub {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .portal-bill .doc-lines tr.doc-group-head td,
+  .portal-bill .doc-lines tr.doc-group-sub td {
+    grid-column: auto;
+    grid-row: auto;
+    margin-left: 0;
+  }
+  .portal-bill .doc-lines tr.doc-group-sub td:nth-child(1) {
+    text-align: left;
+  }
+  .portal-bill .doc-lines tr.doc-group-sub td:nth-child(2) {
+    font-size: inherit;
+    text-align: right;
+  }
+  .portal-bill .doc-lines tr.doc-group-head td {
+    padding-top: 12px !important;
+  }
 }
 /* The native dialog the portal uses for its lightbox and pick sheet. */
 dialog.portal-dialog::backdrop {

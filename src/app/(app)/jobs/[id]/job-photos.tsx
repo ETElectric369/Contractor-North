@@ -3,13 +3,13 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
-import { Camera, Upload, Trash2, Loader2, ImageOff, Eye, EyeOff } from "lucide-react";
+import { Camera, Upload, Trash2, Loader2, ImageOff, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { useToast } from "@/components/toast";
 import { deleteDocument } from "../actions";
 import { uploadJobPhotos } from "./upload-job-photos";
-import { setPhotoShared } from "../portal-share-actions";
+import { reshowPhoto, setPhotoShared } from "../portal-share-actions";
 import { PHOTO_NOT_IN_JOB_FOLDER } from "@/lib/portal/share-input";
 import { isJobPhotoPath } from "@/lib/portal/job-view-shape";
 
@@ -39,17 +39,25 @@ function onPhone() {
  *  receipt is an image in the same folder, and the database refuses to share it by name. The
  *  portal picks photos by this switch's row, never by the folder. A Photo filed outside this job's
  *  own folder (Organize files papers under <org>/organize/) can't reach the customer's page, so its
- *  switch says so when pressed instead of pretending to share it. */
+ *  switch says so when pressed instead of pretending to share it.
+ *
+ *  CHANGED SINCE SHOWN (audit v994 PL4, `staleIds`): a shown photo whose file was replaced after it
+ *  was shown is no longer on the customer's page (the portal shows only the file the office looked
+ *  at). Its tile says so and offers Show Again, which shares the photo as it is now; it never
+ *  claims "Customer Sees It" for a photo the customer can't see. */
 export function JobPhotos({
   orgId,
   jobId,
   docs,
   sharedIds = null,
+  staleIds = [],
 }: {
   orgId: string;
   jobId: string;
   docs: Doc[];
   sharedIds?: string[] | null;
+  /** Shown photos whose file changed after they were shown: the customer's page hides them. */
+  staleIds?: string[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -66,6 +74,39 @@ export function JobPhotos({
   useEffect(() => {
     setShown(new Set(sharedKey ? sharedKey.split(",") : []));
   }, [sharedKey]);
+  const staleKey = staleIds.join(",");
+  const [stale, setStale] = useState<Set<string>>(() => new Set(staleIds));
+  useEffect(() => {
+    setStale(new Set(staleKey ? staleKey.split(",") : []));
+  }, [staleKey]);
+  const dropStale = (id: string) =>
+    setStale((s) => {
+      if (!s.has(id)) return s;
+      const n = new Set(s);
+      n.delete(id);
+      return n;
+    });
+
+  async function showAgain(d: Doc) {
+    setSharing(d.id);
+    const res = await reshowPhoto(d.id);
+    setSharing(null);
+    if (!res.ok) {
+      // The old share may be off by now: the tile follows what the server said happened.
+      if (res.shared === false) {
+        dropStale(d.id);
+        setShown((s) => {
+          const n = new Set(s);
+          n.delete(d.id);
+          return n;
+        });
+      }
+      toast(res.error ?? "That didn't take. Try again.", "error");
+      return;
+    }
+    dropStale(d.id);
+    toast("Shown again. The customer sees the photo as it is now.", "success");
+  }
 
   async function share(d: Doc, next: boolean, undoable = true) {
     if (next && !isJobPhotoPath(d.file_url, orgId, jobId)) {
@@ -81,6 +122,8 @@ export function JobPhotos({
     });
     const res = await setPhotoShared(d.id, next);
     setSharing(null);
+    // Hidden, the old share is gone, and with it "changed since shown".
+    if (res.ok && !next) dropStale(d.id);
     if (!res.ok) {
       setShown((s) => {
         const n = new Set(s);
@@ -172,7 +215,20 @@ export function JobPhotos({
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
-              {sharedIds && d.category === "Photo" ? (
+              {sharedIds && d.category === "Photo" && shown.has(d.id) && stale.has(d.id) ? (
+                <div className="absolute inset-x-1 bottom-1 space-y-1">
+                  <button
+                    type="button"
+                    onClick={() => void showAgain(d)}
+                    disabled={sharing === d.id}
+                    title="This photo's file changed after it was shown, so the customer no longer sees it. Tap to show it as it is now."
+                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-amber-100/95 px-2 text-xs font-semibold text-amber-950 shadow-sm backdrop-blur"
+                  >
+                    {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    <span className="leading-tight">Changed Since Shown — Show Again</span>
+                  </button>
+                </div>
+              ) : sharedIds && d.category === "Photo" ? (
                 // The position lives on a wrapper: .seaglass-btn is unlayered CSS and sets
                 // position: relative, which beats Tailwind's layered `absolute` on the same element.
                 // The ON state is .seaglass-btn (it carries the white glass base as its last layer),

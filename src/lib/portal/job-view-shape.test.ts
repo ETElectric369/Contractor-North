@@ -69,7 +69,7 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
 
   it("top-level and nested keys are exactly the allowlist", () => {
     expect(Object.keys(v).sort()).toEqual(
-      ["asOf", "asOfDay", "customer", "invoices", "job", "ledger", "org", "photos", "picks", "running", "timezone", "unbilled"].sort(),
+      ["asOf", "asOfDay", "customer", "documents", "invoices", "job", "ledger", "org", "photos", "picks", "running", "timezone", "unbilled"].sort(),
     );
     expect(Object.keys(v.org).sort()).toEqual(["accent", "email", "license", "logoUrl", "name", "phone", "tint"]);
     expect(Object.keys(v.customer).sort()).toEqual(["companyName", "name"]);
@@ -77,9 +77,11 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "isDraft", "number", "payToken", "status", "total"]);
     expect(Object.keys(v.picks[0]).sort()).toEqual(["brand", "category", "code", "colorHex", "file", "id", "linkUrl", "location", "name", "note"]);
     expect(Object.keys(v.photos[0]).sort()).toEqual(["addedOn", "id", "url"]);
-    expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "stretches", "workTotal"]);
+    expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "split", "stretches", "workTotal"]);
+    expect(Object.keys(v.ledger.split).sort()).toEqual(["laborHours", "lines"]);
+    expect(Object.keys(v.ledger.split.lines[0]).sort()).toEqual(["amount", "group", "label"]);
     const day = v.ledger.stretches[0].days[0];
-    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "outside", "total"]);
+    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "outside", "split", "total"]);
     expect(Object.keys(day.labor[0]).sort()).toEqual(["amount", "hours", "invoiceNumber", "lump", "person", "rate"]);
   });
 
@@ -164,5 +166,78 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     const s = shapePortalJob(raw({ org: { ...r.org!, timezone: null } }), { signed: new Map(), unbilled: null, now: NOW });
     expect(s.timezone).toBe("America/Los_Angeles");
     expect(s.asOfDay).toBe("2026-09-24");
+  });
+});
+
+describe("the plans and drawings (0326)", () => {
+  const doc = (id: string, kind: string | null, file: string, over: Record<string, unknown> = {}) => ({
+    id,
+    kind,
+    title: `Title ${id}`,
+    file_path: file,
+    added_at: "2026-09-24T01:00:00Z",
+    shown_at: "2026-09-24T02:00:00Z",
+    is_update: false,
+    ...over,
+  });
+  const r = raw({
+    documents: [
+      doc("d1", "circuit_map", `${ORG}/${JOB}/300-circuit-map-rev2.pdf`, { is_update: true }),
+      doc("d2", "plan", `${ORG}/${JOB}/301-floor.jpg`),
+      doc("d3", "scan_3d", `${ORG}/${JOB}/302-house.e57`),
+      doc("d4", "rendering", `${ORG}/${JOB}/303-kitchen.glb`),
+      // A kind a later build adds: shown as a Document, never dropped.
+      doc("d5", "hologram", `${ORG}/${JOB}/304-notes.docx`),
+      // Another job's paper and a folder listing's receipt: never signed, never shown.
+      doc("d6", "plan", `${ORG}/${OTHER_JOB}/305-plan.pdf`),
+      doc("d7", "document", `${ORG}/organize/306-receipt.jpg`),
+      // A title a database never sent falls back to the kind's name.
+      doc("d8", "permit", `${ORG}/${JOB}/307-permit.pdf`, { title: "  " }),
+      // A row carrying a column the function might one day return by mistake.
+      doc("d9", "drawing", `${ORG}/${JOB}/308-panel.png`, { shared_by: "SECRET-PERSON", category: "Receipt" }),
+    ],
+  });
+  const v = shapePortalJob(r, { signed: signedFor(r), unbilled: null, now: NOW });
+
+  it("each carries exactly its allowlist of fields, and only a signed URL for its file", () => {
+    for (const d of v.documents) {
+      expect(Object.keys(d).sort()).toEqual(["addedOn", "format", "id", "isUpdate", "kind", "kindLabel", "title", "url"]);
+      expect(d.url).toMatch(/^https:\/\/signed\.example\//);
+    }
+    expect(JSON.stringify(v.documents)).not.toMatch(/SECRET-PERSON|Receipt|shown_at|file_path/);
+  });
+
+  it("only the job's own folder is signed: another job's paper and an Organize file are left out", () => {
+    const paths = portalPathsToSign(r);
+    expect(paths).not.toContain(`${ORG}/${OTHER_JOB}/305-plan.pdf`);
+    expect(paths).not.toContain(`${ORG}/organize/306-receipt.jpg`);
+    expect(v.documents.map((d) => d.id)).not.toContain("d6");
+    expect(v.documents.map((d) => d.id)).not.toContain("d7");
+  });
+
+  it("grouped by kind in the page's order, and the file says how it is shown", () => {
+    expect(v.documents.map((d) => [d.id, d.kindLabel, d.format])).toEqual([
+      ["d2", "Plan", "image"],
+      ["d1", "Circuit Map", "pdf"],
+      ["d9", "Drawing", "image"],
+      ["d8", "Permit", "pdf"],
+      ["d4", "Rendering", "model"],
+      ["d3", "3D Scan", "model"],
+      ["d5", "Document", "file"],
+    ]);
+    expect(v.documents.find((d) => d.id === "d8")!.title).toBe("Permit");
+    expect(v.documents.find((d) => d.id === "d1")!.isUpdate).toBe(true);
+    // Added 6 PM Pacific on the 23rd: the org's day.
+    expect(v.documents[0].addedOn).toBe("2026-09-23");
+  });
+
+  it("before 0326 the read has no documents at all, and the page has none", () => {
+    const old = raw();
+    delete (old as { documents?: unknown }).documents;
+    expect(shapePortalJob(old, { signed: signedFor(old), unbilled: null, now: NOW }).documents).toEqual([]);
+  });
+
+  it("a file the server could not sign is left out rather than shown broken", () => {
+    expect(shapePortalJob(r, { signed: new Map(), unbilled: null, now: NOW }).documents).toEqual([]);
   });
 });

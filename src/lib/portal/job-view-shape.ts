@@ -21,6 +21,7 @@ import { accentHex, getOrgSettings } from "@/lib/org-settings";
 import { customerLineWords, invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
+import { docFormat, isPortalDocKind, kindLabel, kindRank, type DocFormat, type PortalDocKind } from "./doc-kinds";
 
 /** What portal_job_view returns (0301), as the server reads it. */
 export type PortalJobRaw = {
@@ -54,6 +55,19 @@ export type PortalJobRaw = {
   payments: LedgerPaymentIn[] | null;
   picks: RawPick[] | null;
   photos: { id: string; file_path: string | null; added_at: string | null }[] | null;
+  /** 0326: the plans and drawings (absent before 0326 is applied: no section, never an error). */
+  documents?: RawDocument[] | null;
+};
+
+/** One shared paper as portal_job_view returns it (0326): already only the newest of its chain. */
+type RawDocument = {
+  id: string;
+  kind: string | null;
+  title: string | null;
+  file_path: string | null;
+  added_at: string | null;
+  shown_at: string | null;
+  is_update: boolean | null;
 };
 
 /** The invoice document exactly as /i receives it from public_invoice (the same projection,
@@ -108,6 +122,22 @@ export type PortalPick = {
 /** addedOn: the day the photo was filed (documents.created_at), which is not always the day it was
  *  taken (a picture pulled from the library days later), so the page never calls it "taken". */
 export type PortalPhoto = { id: string; url: string; addedOn: string | null };
+/**
+ * A plan, permit, circuit map, drawing, rendering or scan on the customer's page (0326). `format`
+ * says how the page shows the file (a picture inline, a PDF in its viewer, anything else as a
+ * plain link); `isUpdate`: it replaced an older version, so the page says "Updated" with its day.
+ */
+export type PortalDocument = {
+  id: string;
+  kind: PortalDocKind;
+  kindLabel: string;
+  title: string;
+  format: DocFormat;
+  url: string;
+  /** The day the file was added (documents.created_at) in the org's time zone. */
+  addedOn: string | null;
+  isUpdate: boolean;
+};
 
 export type PortalJobView = {
   /** accent: the org's ink (accentHex, readable text on white). tint: the org's own glass color as
@@ -131,6 +161,8 @@ export type PortalJobView = {
   invoices: PortalInvoice[];
   picks: PortalPick[];
   photos: PortalPhoto[];
+  /** 0326: the plans and drawings, grouped by kind in PORTAL_DOC_KINDS order, newest first within. */
+  documents: PortalDocument[];
   /** The work not on a bill yet, at the customer's price. null on a job that bills a contract or draws. */
   unbilled: CustomerUnbilled | null;
 };
@@ -183,6 +215,7 @@ export function portalPathsToSign(raw: PortalJobRaw): string[] {
   const out: string[] = [];
   for (const p of raw.picks ?? []) if (pickHasContent(p) && isPickPath(p.file_path, orgId, jobId) && (p.file_kind === "image" || p.file_kind === "pdf")) out.push(p.file_path);
   for (const p of raw.photos ?? []) if (isJobPhotoPath(p.file_path, orgId, jobId)) out.push(p.file_path);
+  for (const d of raw.documents ?? []) if (isJobPhotoPath(d.file_path, orgId, jobId)) out.push(d.file_path);
   return out;
 }
 
@@ -255,6 +288,30 @@ export function shapePortalJob(
     photos.push({ id: p.id, url, addedOn: p.added_at ? todayStrInTz(tz, new Date(p.added_at)) : null });
   }
 
+  // THE PLANS AND DRAWINGS (0326). The database already chose them (the office showed them, the
+  // category is allowed, nothing ties them to money, only the newest of each chain); this door
+  // keeps the page to the job's own folder and the signed URL, as for the photos. A kind this build
+  // does not know shows as a Document rather than vanishing.
+  const documents: PortalDocument[] = [];
+  for (const d of raw.documents ?? []) {
+    if (!isJobPhotoPath(d.file_path, orgId, jobId)) continue;
+    const url = extra.signed.get(d.file_path);
+    if (!url) continue;
+    const kind: PortalDocKind = isPortalDocKind(d.kind) ? d.kind : "document";
+    documents.push({
+      id: d.id,
+      kind,
+      kindLabel: kindLabel(kind),
+      title: str(d.title) ?? kindLabel(kind),
+      format: docFormat(d.file_path),
+      url,
+      addedOn: d.added_at ? todayStrInTz(tz, new Date(d.added_at)) : null,
+      isUpdate: d.is_update === true,
+    });
+  }
+  // Stable sort: the database's order (newest shown first) holds inside each kind.
+  documents.sort((a, b) => kindRank(a.kind) - kindRank(b.kind));
+
   const org = raw.org;
   return {
     org: {
@@ -288,6 +345,7 @@ export function shapePortalJob(
     invoices,
     picks,
     photos,
+    documents,
     unbilled: extra.unbilled,
   };
 }

@@ -7,7 +7,16 @@
  * where the sentence comes from. Every patch is an allowlist of fields: a request carrying
  * org_id, job_id, removed_at or anything else is read for the fields named here and nothing more.
  */
-import { isPickPath } from "./job-view-shape";
+import { isJobPhotoPath, isPickPath } from "./job-view-shape";
+import {
+  COMPANY_PAPER_CATEGORIES,
+  categoryIsShowable,
+  defaultKindFor,
+  docFormat,
+  isPortalDocKind,
+  titleFromName,
+  type PortalDocKind,
+} from "./doc-kinds";
 
 /** The one sentence every door says when a photo is not in its job's own folder (setPhotoShared,
  *  the Photos tab, and 0300's trigger in the same words). */
@@ -197,4 +206,67 @@ export function fileKindFor(name: string, mime?: string | null): "image" | "pdf"
 export function pickFilePath(orgId: string, jobId: string, fileName: string, now = Date.now()): string {
   const safe = (fileName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").replace(/\.{2,}/g, ".").slice(-80);
   return `${orgId}/picks/${jobId}/${now}-${safe}`;
+}
+
+// ── the plans and drawings the office shows (0326) ─────────────────────────────────────────────
+
+/** The one sentence every door says when a paper that is not a photo sits outside its job's
+ *  folder (0326's stamp says it in the same words). */
+export const PAPER_NOT_IN_JOB_FOLDER = "Only papers uploaded on this job can be shown to the customer.";
+
+/**
+ * Why this paper can't go on the customer's page, in the same words as 0326's stamp, or null when
+ * it can. The database says all of this again (and also refuses paper that is tied to a bill or a
+ * supplier invoice, which only it can see in full); this is where the office's sentence comes from
+ * before a round trip.
+ */
+export function paperRefusal(doc: { category: string | null; file_url: string | null; job_id: string | null }, orgId: string): string | null {
+  const cat = String(doc.category ?? "").trim();
+  if ((COMPANY_PAPER_CATEGORIES as readonly string[]).includes(cat)) {
+    return `A ${cat.toLowerCase()} is the company's own paper and is never shown to the customer.`;
+  }
+  if (!cat) return "Give this paper a category first (Photo, Plan, Permit or Other). Only those can be shown to the customer.";
+  if (!categoryIsShowable(cat)) return `Only a photo, a plan, a permit or another job paper can be shown to the customer, not a ${cat}.`;
+  if (!doc.job_id || !doc.file_url) return "That paper is not filed on a job.";
+  if (!isJobPhotoPath(doc.file_url, orgId, doc.job_id)) return cat === "Photo" ? PHOTO_NOT_IN_JOB_FOLDER : PAPER_NOT_IN_JOB_FOLDER;
+  return null;
+}
+
+export type SharedPaperFields = { kind: PortalDocKind; title: string; replaces_document_id: string | null };
+export type SharedPaperPatch = Partial<{ kind: unknown; title: unknown; replaces: unknown }>;
+
+/**
+ * What the office chose for a paper on the customer's page: its kind, its title and the older
+ * paper it replaces. New (`isNew`): kind and title start from the paper when not given. Edit: only
+ * the fields sent change. A photo kind is a picture: a PDF shown as a Photo would be a broken tile.
+ */
+export function normalizeSharedPaper(
+  patch: SharedPaperPatch,
+  paper: { id: string; name: string | null; category: string | null; file_url: string | null },
+  isNew: boolean,
+): Ok<Partial<SharedPaperFields>> | Fail {
+  const out: Partial<SharedPaperFields> = {};
+  const has = (k: keyof SharedPaperPatch) => Object.prototype.hasOwnProperty.call(patch, k) && patch[k] !== undefined;
+  if (has("kind") || isNew) {
+    const kind = has("kind") ? patch.kind : defaultKindFor(paper.category);
+    if (!isPortalDocKind(kind)) {
+      return { ok: false, error: "Pick what this paper is: a plan, a circuit map, a drawing, a permit, a rendering, a 3D scan or a document." };
+    }
+    if (kind === "photo" && docFormat(paper.file_url) !== "image") {
+      return { ok: false, error: "Only a picture can show as a photo. Pick Plan, Drawing or Document for this one." };
+    }
+    out.kind = kind;
+  }
+  if (has("title") || isNew) {
+    const t = clean(patch.title, 120) ?? (isNew ? titleFromName(paper.name) || null : null);
+    if (!t) return { ok: false, error: "Give it a title the customer will read, like Circuit Map or Main Floor Plan." };
+    out.title = t;
+  }
+  if (has("replaces")) {
+    const r = patch.replaces === null || patch.replaces === "" ? null : String(patch.replaces);
+    if (r !== null && !UUID.test(r)) return { ok: false, error: "That older paper isn't one we know." };
+    if (r !== null && r === paper.id) return { ok: false, error: "A paper can't replace itself." };
+    out.replaces_document_id = r;
+  }
+  return { ok: true, value: out };
 }
