@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { portalPathsToSign, shapePortalJob, type PortalJobRaw } from "./job-view-shape";
+import { isJobPhotoPath, pickHasContent, portalPathsToSign, shapePortalJob, type PortalJobRaw } from "./job-view-shape";
 import { INV_078, LINES, PAYMENTS, STRETCHES } from "./j011-fixture";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
@@ -53,9 +53,9 @@ function raw(over: Partial<PortalJobRaw> = {}): PortalJobRaw {
       },
     ],
     photos: [
-      { id: "ph1", file_path: `${ORG}/${JOB}/100-panel.jpg`, taken_at: "2026-09-19T00:30:00Z" },
+      { id: "ph1", file_path: `${ORG}/${JOB}/100-panel.jpg`, added_at: "2026-09-19T00:30:00Z" },
       // A receipt path from another job must never be signed, even if a row named it.
-      { id: "ph2", file_path: `${ORG}/${OTHER_JOB}/200-receipt.jpg`, taken_at: "2026-09-20T00:30:00Z" },
+      { id: "ph2", file_path: `${ORG}/${OTHER_JOB}/200-receipt.jpg`, added_at: "2026-09-20T00:30:00Z" },
     ],
     ...over,
   };
@@ -76,10 +76,10 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(Object.keys(v.job).sort()).toEqual(["id", "name", "number", "site", "status"]);
     expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "isDraft", "number", "payToken", "status", "total"]);
     expect(Object.keys(v.picks[0]).sort()).toEqual(["brand", "category", "code", "colorHex", "file", "id", "linkUrl", "location", "name", "note"]);
-    expect(Object.keys(v.photos[0]).sort()).toEqual(["id", "takenOn", "url"]);
+    expect(Object.keys(v.photos[0]).sort()).toEqual(["addedOn", "id", "url"]);
     expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "stretches", "workTotal"]);
     const day = v.ledger.stretches[0].days[0];
-    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "total"]);
+    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "outside", "total"]);
     expect(Object.keys(day.labor[0]).sort()).toEqual(["amount", "hours", "invoiceNumber", "lump", "person", "rate"]);
   });
 
@@ -122,8 +122,31 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(v.picks[0].file).toEqual({ url: expect.stringMatching(/^https:\/\/signed\.example\//), kind: "image" });
     expect(v.picks[1].file).toBeNull();
     expect(v.photos.map((p) => p.id)).toEqual(["ph1"]);
-    // Taken 5:30 PM Pacific on the 18th: the org's day, not UTC's.
-    expect(v.photos[0].takenOn).toBe("2026-09-18");
+    // Added 5:30 PM Pacific on the 18th: the org's day, not UTC's.
+    expect(v.photos[0].addedOn).toBe("2026-09-18");
+  });
+
+  it("the J-011 page names no supplier anywhere in the stretches", () => {
+    const text = JSON.stringify(v.ledger);
+    for (const supplier of ["Consolidated", "Home Depot", "Supplies & tax —"]) expect(text).not.toContain(supplier);
+  });
+
+  it("a pick with nothing to show yet stays off the page (no publish step: Add Pick is live)", () => {
+    const blank = { id: "p3", category: "Paint Color", brand: null, name: null, code: null, location: "Kitchen", note: "Deciding Friday", color_hex: null, link_url: null, file_path: null, file_kind: null, updated_at: null };
+    const withBlank = raw({ picks: [...r.picks!, blank] });
+    const s = shapePortalJob(withBlank, { signed: signedFor(withBlank), unbilled: null, now: NOW });
+    expect(s.picks.map((p) => p.id)).toEqual(["p1", "p2"]);
+    expect(pickHasContent(blank)).toBe(false);
+    for (const has of [{ name: "Swiss Coffee" }, { code: "OC-45" }, { brand: "Leviton" }, { color_hex: "#FFFFFF" }, { link_url: "https://example.com" }, { file_path: "x", file_kind: "pdf" as const }]) {
+      expect(pickHasContent({ ...blank, ...has })).toBe(true);
+    }
+    // An unsafe link or a bad swatch does not count as something to show.
+    expect(pickHasContent({ ...blank, link_url: "http://x.example", color_hex: "nope" })).toBe(false);
+  });
+
+  it("a photo filed outside its job's folder (Organize's <org>/organize/) is not a job photo", () => {
+    expect(isJobPhotoPath(`${ORG}/organize/1-photo.jpg`, ORG, JOB)).toBe(false);
+    expect(isJobPhotoPath(`${ORG}/${JOB}/1-photo.jpg`, ORG, JOB)).toBe(true);
   });
 
   it("an unsafe link and a bad swatch are dropped, not passed along", () => {

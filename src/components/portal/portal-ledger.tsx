@@ -52,9 +52,10 @@ function StretchCard({ s, thisYear, open }: { s: LedgerStretch; thisYear: string
           <div className="font-semibold text-slate-900">{s.label}</div>
           {range ? <div className="text-sm text-slate-600">{range}</div> : null}
           <div className="mt-0.5 text-sm text-slate-700">
-            <span className="tabular-nums">Work {formatCurrency(s.workTotal)}</span>
+            {/* Each label keeps its figure: on a phone the pair wraps whole, never "Paid" / "$1,850.00". */}
+            <span className="whitespace-nowrap tabular-nums">Work {formatCurrency(s.workTotal)}</span>
             <span aria-hidden> · </span>
-            <span className="tabular-nums">Paid {formatCurrency(s.paidTotal)}</span>
+            <span className="whitespace-nowrap tabular-nums">Paid {formatCurrency(s.paidTotal)}</span>
           </div>
         </div>
         <Balance value={s.balanceAfter} label="Balance After" />
@@ -129,10 +130,12 @@ function DayRow({ d, thisYear }: { d: LedgerDay; thisYear: string }) {
         <div className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(d.total)}</div>
       </summary>
       <div className="border-t border-slate-200/70 px-3 pb-2 pt-1">
-        {!d.inRange ? (
+        {d.outside === "after" ? (
           <p className="py-1 text-xs text-amber-900">
             After this stretch&apos;s dates. It is shown here until the next stretch starts.
           </p>
+        ) : d.outside === "before" ? (
+          <p className="py-1 text-xs text-amber-900">Before this stretch&apos;s dates. Work before the first stretch is shown with it.</p>
         ) : null}
         <ul className="divide-y divide-slate-200/70">
           {d.labor.map((l, i) => (
@@ -193,7 +196,7 @@ function PaymentRow({ p, thisYear }: { p: LedgerPaymentRow; thisYear: string }) 
         <div className="font-medium text-slate-900">{what}</div>
         <div className="text-xs text-slate-600">
           {fmtWeekday(p.date, thisYear)}
-          {!p.inRange ? " · after the stretch ended" : ""}
+          {p.outside === "after" ? " · after the stretch ended" : p.outside === "before" ? " · before the stretch started" : ""}
         </div>
       </div>
       <div className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(p.amount)}</div>

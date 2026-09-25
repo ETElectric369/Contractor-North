@@ -5,7 +5,7 @@ import type { PortalInvoice, PortalJobView } from "@/lib/portal/job-view-shape";
 import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
 import { PortalSection, PortalShell } from "./portal-shell";
 import { PortalLedger } from "./portal-ledger";
-import { PortalPhotos, PortalPicks } from "./portal-media";
+import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
 import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
 
 /**
@@ -41,10 +41,15 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
   const bills = view.invoices.filter((i) => i.doc);
   const onlyAllWork = ledger.stretches.length === 1 && !ledger.stretches[0].id;
   const hasWork = ledger.stretches.some((s) => s.days.length > 0 || s.payments.length > 0);
+  // Two money ideas must not share one name. While a bill is a draft, the figures above are a
+  // running total that is "not a bill yet" too, so the work outside them is "not added yet".
+  const notIn = view.running
+    ? { nav: "Not Added Yet", title: "Work Not Added Yet", total: "Not Added Yet" }
+    : { nav: "Not Billed Yet", title: "Work Not On A Bill Yet", total: "Not Billed Yet" };
 
   const sections: { id: string; label: string; icon: React.ReactNode }[] = [
     ...(hasWork ? [{ id: "work", label: "Work And Payments", icon: <Clock className="h-4 w-4" aria-hidden /> }] : []),
-    ...(unbilled ? [{ id: "unbilled", label: "Not Billed Yet", icon: <CircleDollarSign className="h-4 w-4" aria-hidden /> }] : []),
+    ...(unbilled ? [{ id: "unbilled", label: notIn.nav, icon: <CircleDollarSign className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.picks.length ? [{ id: "picks", label: "Picks", icon: <Palette className="h-4 w-4" aria-hidden /> }] : []),
     ...(view.photos.length ? [{ id: "photos", label: "Photos", icon: <Camera className="h-4 w-4" aria-hidden /> }] : []),
     ...(bills.length ? [{ id: "bills", label: bills.length === 1 ? "The Bill" : "Bills", icon: <Receipt className="h-4 w-4" aria-hidden /> }] : []),
@@ -52,6 +57,8 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
 
   return (
     <PortalShell org={{ ...org }}>
+      {/* Live, and the photo and file links last 10 minutes: an open or restored page reads again. */}
+      <PortalKeepFresh asOf={view.asOf} />
       <a href={homeHref} className="mb-3 inline-flex min-h-[44px] items-center gap-1.5 rounded-lg px-1 text-sm font-medium text-[rgb(var(--glass-ink))] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]">
         <ArrowLeft className="h-4 w-4" aria-hidden /> All Your Jobs And Papers
       </a>
@@ -107,11 +114,12 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
       )}
 
       {unbilled ? (
-        <PortalSection id="unbilled" title="Work Not On A Bill Yet" icon={<CircleDollarSign className="h-4 w-4" />}>
+        <PortalSection id="unbilled" title={notIn.title} icon={<CircleDollarSign className="h-4 w-4" />}>
           <div className="portal-glass rounded-2xl p-4">
             <p className="text-sm text-slate-700">
-              This work is done but is not on a bill yet, so it is not in the figures above. It is shown at the prices you would
-              be billed, and it will be on a bill later.
+              {view.running
+                ? "This work is done but is not in the running total above yet. It is shown at the prices you would be billed, and it will be added later."
+                : "This work is done but is not on a bill yet, so it is not in the figures above. It is shown at the prices you would be billed, and it will be on a bill later."}
             </p>
             <ul className="mt-3 divide-y divide-slate-200/70 rounded-xl bg-white/80 text-sm">
               {unbilled.laborByPerson.map((p) => (
@@ -136,7 +144,7 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
                 </li>
               ) : null}
               <li className="flex justify-between gap-3 px-3 py-2 font-semibold">
-                <span>Not Billed Yet</span>
+                <span>{notIn.total}</span>
                 <span className="tabular-nums">{formatCurrency(unbilled.total)}</span>
               </li>
             </ul>
@@ -161,7 +169,7 @@ export function PortalJobPage({ view, homeHref }: { view: PortalJobView; homeHre
         <PortalSection id="bills" title={bills.length === 1 ? "The Bill" : "Bills"} icon={<Receipt className="h-4 w-4" />}>
           <div className="space-y-3">
             {bills.map((b, i) => (
-              <BillCard key={`${b.number ?? "bill"}-${i}`} b={b} open={bills.length === 1 && !b.isDraft} />
+              <BillCard key={`${b.number ?? "bill"}-${i}`} b={b} explainBalance={hasWork && b.amountPaid > 0.005} />
             ))}
           </div>
         </PortalSection>
@@ -200,7 +208,11 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
         </dl>
         {unbilledTotal > 0.005 ? (
           <p className="mt-2 text-sm text-slate-700">
-            Plus <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">{formatCurrency(unbilledTotal)} of work not on a bill yet</a>.
+            Plus{" "}
+            <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">
+              {formatCurrency(unbilledTotal)} of work {view.running ? "not added to the running total yet" : "not on a bill yet"}
+            </a>
+            .
           </p>
         ) : null}
         {payable.length ? (
@@ -223,10 +235,17 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
   );
 }
 
-function BillCard({ b, open }: { b: PortalInvoice; open: boolean }) {
+/**
+ * One bill, closed until tapped (the money card and the stretches already say where things stand;
+ * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as /i prints it,
+ * drawn by the same PublicInvoiceDocument. `.portal-bill` only changes how it sits on a phone
+ * (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
+ * and each line puts its amount beside its description, so nothing hides behind a sideways scroll.
+ */
+function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boolean }) {
   const status = BILL_STATUS[b.status] ?? "Sent";
   return (
-    <details className="portal-glass group rounded-2xl" open={open}>
+    <details className="portal-glass group rounded-2xl">
       <summary className="portal-summary flex min-h-[44px] cursor-pointer list-none items-center gap-3 rounded-2xl px-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]">
         <ChevronRight className="h-5 w-5 shrink-0 text-[rgb(var(--glass-ink))] motion-safe:transition-transform group-open:rotate-90" aria-hidden />
         <FileText className="h-5 w-5 shrink-0 text-slate-600" aria-hidden />
@@ -243,9 +262,13 @@ function BillCard({ b, open }: { b: PortalInvoice; open: boolean }) {
           <div className="font-bold tabular-nums">{formatCurrency(b.balance)}</div>
         </div>
       </summary>
-      {/* Edge to edge inside the card on a phone: the sheet keeps its printed margins, so every
-          pixel of width goes to the lines. It scrolls sideways before it ever widens the page. */}
       <div className="border-t border-white/70 sm:p-3">
+        {explainBalance ? (
+          <p className="px-3 pt-2 text-xs text-slate-700 sm:px-1 sm:pt-0 sm:pb-2">
+            In this bill&apos;s list of payments, Balance counts down from the whole bill. The stretches above count up
+            from the work done so far, so after the same payment the two figures differ.
+          </p>
+        ) : null}
         {b.payToken ? (
           <div className="flex justify-end p-2 sm:mb-2 sm:p-0">
             <a href={`/i/${b.payToken}`} rel="nofollow" className={chip}>
@@ -254,7 +277,7 @@ function BillCard({ b, open }: { b: PortalInvoice; open: boolean }) {
             </a>
           </div>
         ) : null}
-        <div className="overflow-x-auto rounded-b-2xl sm:rounded-xl">
+        <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
           <PublicInvoiceDocument data={b.doc as PublicInvoiceData} />
         </div>
       </div>

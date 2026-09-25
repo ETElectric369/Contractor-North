@@ -191,6 +191,74 @@ body.modal-open .app-bottom-nav {
 .portal-summary::-webkit-details-marker {
   display: none;
 }
+/* THE BILL ON A PHONE, INSIDE THE PORTAL. The sheet is the customer's copy exactly as /i and the
+   PDF print it (InvoiceDocument), but its printed geometry (0.75in side margins, an 11in floor, a
+   460px line table) left ~200px for content inside a glass card: amounts behind a sideways scroll,
+   the letterhead clipped, Bill To running into the address. Under 640px, inside .portal-bill only:
+   the margins and floor come off, the letterhead and Bill To wrap, and each line becomes two rows,
+   its description with the amount beside it, then "qty unit at price". Same lines, same figures. */
+@media (max-width: 639.98px) {
+  .portal-bill .print-page {
+    width: auto;
+    min-height: 0;
+    padding: 16px 12px;
+  }
+  .portal-bill .print-page > .flex {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .portal-bill .print-page > .flex > .flex-1 {
+    flex-basis: 100%;
+  }
+  .portal-bill .print-page .grid-cols-2 {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 6px;
+  }
+  .portal-bill .doc-lines,
+  .portal-bill .doc-lines tbody {
+    display: block;
+    min-width: 0;
+  }
+  .portal-bill .doc-lines thead {
+    display: none;
+  }
+  .portal-bill .doc-lines tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 12px;
+    padding: 6px 0;
+  }
+  .portal-bill .doc-lines td {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  .portal-bill .doc-lines td:nth-child(1) {
+    grid-column: 1 / 3;
+    grid-row: 1;
+    padding-right: 0;
+  }
+  .portal-bill .doc-lines td:nth-child(4) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .portal-bill .doc-lines td:nth-child(2),
+  .portal-bill .doc-lines td:nth-child(3) {
+    grid-row: 2;
+    padding-left: 0 !important;
+    text-align: left;
+    font-size: 12px;
+  }
+  .portal-bill .doc-lines td:nth-child(2) {
+    grid-column: 1;
+  }
+  .portal-bill .doc-lines td:nth-child(3) {
+    grid-column: 2;
+    margin-left: -8px;
+  }
+  .portal-bill .doc-lines td:nth-child(3)::before {
+    content: "at ";
+  }
+}
 /* The native dialog the portal uses for its lightbox and pick sheet. */
 dialog.portal-dialog::backdrop {
   background: rgb(15 23 42 / 0.82);

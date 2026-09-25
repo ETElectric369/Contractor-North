@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, ImageOff, Palette, X } from "lucide-react";
 import { useModalLock } from "@/components/ui/modal-lock";
 import type { PortalPhoto, PortalPick } from "@/lib/portal/job-view-shape";
 import { fmtDay } from "./portal-format";
@@ -17,6 +18,78 @@ import { fmtDay } from "./portal-format";
  * the tile that opened it. Arrow keys and a sideways swipe step through the photos. Motion is a
  * fade only, and none at all under reduced motion.
  */
+
+// ── keeping the page's links alive ──────────────────────────────────────────────────────────
+
+/** Signed file links last 10 minutes (PORTAL_FILE_TTL_SECONDS); read again a little before that. */
+const FRESH_MS = 8 * 60_000;
+/** One refresh at a time, across every tile that notices a dead link at once. */
+let lastRefreshAt = 0;
+function refreshOnce(refresh: () => void): boolean {
+  const now = Date.now();
+  if (now - lastRefreshAt < 30_000) return false;
+  lastRefreshAt = now;
+  refresh();
+  return true;
+}
+
+/**
+ * THE PAGE READS AGAIN BEFORE ITS LINKS DIE. The page is live (Erik: "Update everything right away"),
+ * and every photo and pick file is a 10-minute signed URL. A page left open, or restored by iOS
+ * from memory or the back-forward cache (after View And Pay and back), would otherwise show blank
+ * tiles, a raw storage error behind "Open The PDF", and a stale "Up to date as of". So: on a
+ * restore, on coming back to the tab after 8 minutes, and every 8 minutes while it is on screen,
+ * the server render runs again, which mints fresh links and a fresh "as of".
+ */
+export function PortalKeepFresh({ asOf }: { asOf: string }) {
+  const router = useRouter();
+  const loadedAt = useRef(Date.now());
+  useEffect(() => {
+    loadedAt.current = Date.now();
+  }, [asOf]);
+  useEffect(() => {
+    const stale = () => Date.now() - loadedAt.current > FRESH_MS;
+    const refresh = () => {
+      loadedAt.current = Date.now();
+      router.refresh();
+    };
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted || stale()) refresh();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && stale()) refresh();
+    };
+    const tick = window.setInterval(onVisible, 60_000);
+    window.addEventListener("pageshow", onShow);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(tick);
+      window.removeEventListener("pageshow", onShow);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [router]);
+  return null;
+}
+
+/** A picture whose link died: read the page again once, then say so plainly. Keyed on the URL,
+ *  so the fresh link a refresh brings gets its own chance. */
+function useDeadLink(url: string | null) {
+  const router = useRouter();
+  const [deadUrl, setDeadUrl] = useState<string | null>(null);
+  const onError = useCallback(() => {
+    if (!refreshOnce(() => router.refresh())) setDeadUrl(url);
+  }, [router, url]);
+  return { dead: url !== null && deadUrl === url, onError };
+}
+
+function TimedOut({ className = "" }: { className?: string }) {
+  return (
+    <span className={`flex flex-col items-center justify-center gap-1 bg-white/80 p-2 text-center text-xs text-slate-700 ${className}`}>
+      <ImageOff className="h-5 w-5 text-slate-500" aria-hidden />
+      This picture timed out. Pull down to reload.
+    </span>
+  );
+}
 
 function useDialog(open: boolean, onClose: () => void) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -65,7 +138,7 @@ export function PortalPhotos({ photos, thisYear }: { photos: PortalPhoto[]; this
   );
   const touchX = useRef<number | null>(null);
 
-  const label = (p: PortalPhoto, i: number) => `Photo ${i + 1} of ${photos.length}${p.takenOn ? `, taken ${fmtDay(p.takenOn, thisYear)}` : ""}`;
+  const label = (p: PortalPhoto, i: number) => `Photo ${i + 1} of ${photos.length}${p.addedOn ? `, added ${fmtDay(p.addedOn, thisYear)}` : ""}`;
   const cur = at !== null ? photos[at] : null;
 
   return (
@@ -82,10 +155,9 @@ export function PortalPhotos({ photos, thisYear }: { photos: PortalPhoto[]; this
               className="group relative block aspect-square w-full overflow-hidden rounded-xl bg-white/60 shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
               aria-label={`Open ${label(p, i)}`}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={p.url} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover motion-safe:transition-transform motion-safe:group-hover:scale-[1.03]" />
-              {p.takenOn ? (
-                <span className="absolute bottom-1.5 left-1.5 rounded-md bg-black/55 px-1.5 py-0.5 text-xs font-medium text-white">{fmtDay(p.takenOn, thisYear)}</span>
+              <PhotoTile p={p} />
+              {p.addedOn ? (
+                <span className="absolute bottom-1.5 left-1.5 rounded-md bg-black/55 px-1.5 py-0.5 text-xs font-medium text-white">{fmtDay(p.addedOn, thisYear)}</span>
               ) : null}
             </button>
           </li>
@@ -123,8 +195,7 @@ export function PortalPhotos({ photos, thisYear }: { photos: PortalPhoto[]; this
                 step(x1 < x0 ? 1 : -1);
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img key={cur.id} src={cur.url} alt={label(cur, at!)} className="max-h-full max-w-full rounded-lg object-contain motion-safe:animate-[cn-fade_0.16s_ease-out_both]" />
+              <LightboxImage key={cur.id} src={cur.url} alt={label(cur, at!)} />
             </div>
             {photos.length > 1 ? (
               <div className="flex items-center justify-center gap-6 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
@@ -145,21 +216,51 @@ export function PortalPhotos({ photos, thisYear }: { photos: PortalPhoto[]; this
   );
 }
 
+function PhotoTile({ p }: { p: PortalPhoto }) {
+  const { dead, onError } = useDeadLink(p.url);
+  if (dead) return <TimedOut className="h-full w-full" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={p.url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      onError={onError}
+      className="h-full w-full object-cover motion-safe:transition-transform motion-safe:group-hover:scale-[1.03]"
+    />
+  );
+}
+
+function LightboxImage({ src, alt }: { src: string; alt: string }) {
+  const { dead, onError } = useDeadLink(src);
+  if (dead) return <TimedOut className="rounded-lg px-4 py-6 text-sm" />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={src} alt={alt} onError={onError} className="max-h-full max-w-full rounded-lg object-contain motion-safe:animate-[cn-fade_0.16s_ease-out_both]" />
+  );
+}
+
 // ── picks ────────────────────────────────────────────────────────────────────────────────────
 
-/** A pick's swatch, picture or PDF mark at a given size. */
+/** A pick's picture, swatch or PDF mark at a given size. A pick with none of those gets a neutral
+ *  mark for its kind, never a document icon that promises a file which isn't there. */
 function PickVisual({ p, big = false }: { p: PortalPick; big?: boolean }) {
   const box = big ? "h-48 w-full rounded-xl" : "h-16 w-16 rounded-xl";
-  if (p.file?.kind === "image") {
+  const src = p.file?.kind === "image" ? p.file.url : null;
+  const { dead, onError } = useDeadLink(src);
+  if (src && dead) return <TimedOut className={`${box} shrink-0`} />;
+  if (src) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={p.file.url} alt="" loading="lazy" decoding="async" className={`${box} shrink-0 bg-white object-cover`} />;
+    return <img src={src} alt="" loading="lazy" decoding="async" onError={onError} className={`${box} shrink-0 bg-white object-cover`} />;
   }
   if (p.colorHex) {
     return <span aria-hidden className={`${box} block shrink-0 border border-black/10 shadow-inner`} style={{ backgroundColor: p.colorHex }} />;
   }
+  const Mark = p.file?.kind === "pdf" ? FileText : Palette;
   return (
     <span aria-hidden className={`${box} flex shrink-0 items-center justify-center bg-white/80 text-[rgb(var(--glass-ink))]`}>
-      <FileText className={big ? "h-12 w-12" : "h-7 w-7"} />
+      <Mark className={big ? "h-12 w-12" : "h-7 w-7"} />
     </span>
   );
 }

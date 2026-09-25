@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeUnbilledWork, customerUnbilled, foldClaims } from "@/lib/unbilled-work";
-import { payViewRow } from "@/lib/labor-billing";
+import { customerRateRow, payViewRow } from "@/lib/labor-billing";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 
 /**
@@ -53,6 +53,36 @@ describe("payViewRow is profile_pay, row for row, for the service role", () => {
   it("anyone else keeps both figures as stored", () => {
     expect(payViewRow({ id: "t", role: "tech", hourly_rate: "32.50", bill_rate: null })).toEqual({ id: "t", hourly_rate: 32.5, bill_rate: null });
     expect(payViewRow({ id: "t", role: "office", hourly_rate: null, bill_rate: "65" })).toEqual({ id: "t", hourly_rate: null, bill_rate: 65 });
+  });
+});
+
+describe("customerRateRow: the customer's page never prices with a pay rate", () => {
+  it("drops the hourly figure; an owner keeps his bill figure", () => {
+    expect(customerRateRow({ id: "t", role: "tech", hourly_rate: 32.5, bill_rate: null })).toEqual({ id: "t", hourly_rate: null, bill_rate: null });
+    expect(customerRateRow({ id: "t", role: "tech", hourly_rate: 32.5, bill_rate: 65 })).toEqual({ id: "t", hourly_rate: null, bill_rate: 65 });
+    expect(customerRateRow({ id: "o", role: "owner", hourly_rate: 80, bill_rate: null })).toEqual({ id: "o", hourly_rate: null, bill_rate: 80 });
+  });
+
+  it("a person with no bill rate is priced at the org's rate, so amount / hours is never their pay", () => {
+    const pay = { id: "j", role: "tech", hourly_rate: 32.5, bill_rate: null };
+    const entry = { id: "t9", clock_in: "2026-09-24T16:00:00Z", clock_out: "2026-09-24T20:00:00Z", lunch_minutes: 0 };
+    const run = (profile: object, levelRate: number | null) =>
+      customerUnbilled(
+        computeUnbilledWork({
+          claims: foldClaims([], true),
+          jobEntries: [{ ...entry, profiles: { full_name: "Jimmy", ...profile } }],
+          nonBillableCodes: new Set(),
+          defaultRate: 100,
+          levelRate,
+          pos: [],
+          bills: [],
+          markupPct: 0,
+        }),
+      );
+    expect(run(customerRateRow(pay), null).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 400 }]);
+    expect(run(customerRateRow(pay), 85).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 340 }]);
+    // What the office's own path would have shown: 4 h at his 32.50 pay.
+    expect(run(payViewRow(pay), null).laborByPerson).toEqual([{ name: "Jimmy", hours: 4, amount: 130 }]);
   });
 });
 

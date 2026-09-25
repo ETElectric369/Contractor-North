@@ -31,10 +31,17 @@
  * typed charge, a draw credit, the tax) is dated by its bill: the day it was sent, or made if it
  * has not been. With no stretches at all the job is one stretch, "All Work".
  *
+ * NEVER A SUPPLIER'S NAME. The materials import writes one remainder row per receipt, worded
+ * "Supplies & tax - <supplier>". The customer's copy of the bill prints them as one "Supplies & Tax"
+ * line with no vendor (mergeSuppliesAndTax, INV-074); here each keeps its own day and its own cents
+ * (so the stretches still reconcile) under the same vendor-free words. A draft's lines were never
+ * on /i, so this is the first place a customer would have read them.
+ *
  * Every figure is carried in integer cents (and hours in integer hundredths) and only turned into
  * dollars on the way out, so "reconciles" is an equality, not a tolerance.
  */
 import { todayStrInTz } from "@/lib/tz";
+import { SUPPLIES_AND_TAX_LABEL, isSuppliesAndTaxLine } from "@/lib/invoice-math";
 
 export type LedgerStretchIn = { id: string; label: string; starts_on: string; ends_on: string; sort?: number | null };
 export type LedgerInvoiceIn = {
@@ -85,10 +92,14 @@ export type ItemRow = {
   /** "purchase": the day it was bought. "bill": it has no day of its own, so it carries its bill's. */
   datedBy: "purchase" | "bill";
 };
-export type LedgerDay = { date: string; inRange: boolean; hours: number; total: number; labor: LaborRow[]; items: ItemRow[] };
+/** Where a dated row sits against its stretch's own dates: inside them (null), before the first
+ *  stretch began (a deposit, early work), or after the stretch ended and before the next began. */
+export type Outside = "before" | "after" | null;
+export type LedgerDay = { date: string; inRange: boolean; outside: Outside; hours: number; total: number; labor: LaborRow[]; items: ItemRow[] };
 export type LedgerPaymentRow = {
   date: string;
   inRange: boolean;
+  outside: Outside;
   amount: number;
   method: string | null;
   /** "credit": the bill's paid figure holds money no payment row explains (a customer credit applied). */
@@ -272,9 +283,13 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
       if (date) datedBy = "purchase";
     }
     const kind: ItemKind = src === "costs" ? "material" : src === "draw_credit" ? "credit" : "charge";
+    // A receipt's remainder row names the supplier: the customer reads the same words the bill prints.
+    const supplies = isSuppliesAndTaxLine({ description: ln.description, import_source: src });
     work.push({
       date: date ?? invDay(inv),
-      item: { description: ln.description, quantity: qty, unit: ln.unit ?? null, unitPriceCents: priceCents, cents: L, kind, invoiceNumber: num, datedBy },
+      item: supplies
+        ? { description: SUPPLIES_AND_TAX_LABEL, quantity: 1, unit: null, unitPriceCents: L, cents: L, kind, invoiceNumber: num, datedBy }
+        : { description: ln.description, quantity: qty, unit: ln.unit ?? null, unitPriceCents: priceCents, cents: L, kind, invoiceNumber: num, datedBy },
     });
   }
 
@@ -327,7 +342,8 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     });
     return before >= 0 ? before : 0;
   };
-  const inRange = (g: (typeof groups)[number], d: string) => !g.startsOn || !g.endsOn || (g.startsOn <= d && d <= g.endsOn);
+  const outside = (g: (typeof groups)[number], d: string): Outside =>
+    !g.startsOn || !g.endsOn ? null : d < g.startsOn ? "before" : d > g.endsOn ? "after" : null;
 
   type Acc = { days: Map<string, Placed[]>; pays: PlacedPayment[] };
   const acc: Acc[] = groups.map(() => ({ days: new Map(), pays: [] }));
@@ -383,7 +399,8 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
       const labor: LaborRow[] = [...laborMap.values()]
         .sort((x, y) => Number(x.lump) - Number(y.lump) || x.person.localeCompare(y.person))
         .map((l) => ({ person: l.person, hours: l.units / 100, rate: dollars(l.rateCents), amount: dollars(l.cents), invoiceNumber: l.invoiceNumber, lump: l.lump }));
-      return { date, inRange: inRange(g, date), hours: dayUnits / 100, total: dollars(dayCents), labor, items };
+      const o = outside(g, date);
+      return { date, inRange: o === null, outside: o, hours: dayUnits / 100, total: dollars(dayCents), labor, items };
     });
     const payRows = [...a.pays].sort((x, y) => x.date.localeCompare(y.date) || x.seq - y.seq);
     const paidCents = payRows.reduce((s, p) => s + p.cents, 0);
@@ -395,7 +412,10 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
       startsOn: g.startsOn,
       endsOn: g.endsOn,
       days,
-      payments: payRows.map((p) => ({ date: p.date, inRange: inRange(g, p.date), amount: dollars(p.cents), method: p.method, kind: p.kind, invoiceNumber: p.invoiceNumber })),
+      payments: payRows.map((p) => {
+        const o = outside(g, p.date);
+        return { date: p.date, inRange: o === null, outside: o, amount: dollars(p.cents), method: p.method, kind: p.kind, invoiceNumber: p.invoiceNumber };
+      }),
       hours: unitsAll / 100,
       workTotal: dollars(workCents),
       paidTotal: dollars(paidCents),

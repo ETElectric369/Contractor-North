@@ -53,7 +53,7 @@ export type PortalJobRaw = {
   lines: LedgerLineIn[] | null;
   payments: LedgerPaymentIn[] | null;
   picks: RawPick[] | null;
-  photos: { id: string; file_path: string | null; taken_at: string | null }[] | null;
+  photos: { id: string; file_path: string | null; added_at: string | null }[] | null;
 };
 
 /** The invoice document exactly as /i receives it from public_invoice (the same projection,
@@ -105,7 +105,9 @@ export type PortalPick = {
   linkUrl: string | null;
   file: { url: string; kind: "image" | "pdf" } | null;
 };
-export type PortalPhoto = { id: string; url: string; takenOn: string | null };
+/** addedOn: the day the photo was filed (documents.created_at), which is not always the day it was
+ *  taken (a picture pulled from the library days later), so the page never calls it "taken". */
+export type PortalPhoto = { id: string; url: string; addedOn: string | null };
 
 export type PortalJobView = {
   /** accent: the org's ink (accentHex, readable text on white). tint: the org's own glass color as
@@ -135,6 +137,9 @@ export type PortalJobView = {
 
 /** The default sea-glass teal (org-settings DEFAULT_SETTINGS.glass_tint). */
 const DEFAULT_TINT = "#1b9488";
+/** The job statuses a customer is shown (customer_portal and portal_job_view, 0301): the same
+ *  fail-closed allowlist, so the office can say when a job is not on the customer's page. */
+export const CUSTOMER_SHOWN_JOB_STATUSES: readonly string[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold", "complete", "invoiced"];
 const SENT = new Set(["sent", "partial", "paid", "overdue"]);
 const HEX = /^#[0-9a-f]{6}$/i;
 const HTTPS = /^https:\/\/[^\s]+$/i;
@@ -153,11 +158,30 @@ export function isJobPhotoPath(path: string | null | undefined, orgId: string, j
   return typeof path === "string" && path.startsWith(`${orgId}/${jobId}/`) && !path.includes("..");
 }
 
+/**
+ * Does a pick say anything yet? There is no publish step, so "Add Pick" is on the customer's page
+ * the moment the office presses it. A pick with only its category (the office still typing) would
+ * be a card titled "Paint Color" that opens to nothing: it stays off the page until it has a
+ * name, a code, a brand, a swatch, a file or a link. A note or a room alone does not say what the
+ * pick IS, so it waits too.
+ */
+export function pickHasContent(p: Pick<RawPick, "name" | "code" | "brand" | "color_hex" | "link_url" | "file_path" | "file_kind">): boolean {
+  const has = (v: string | null | undefined) => typeof v === "string" && v.trim() !== "";
+  return (
+    has(p.name) ||
+    has(p.code) ||
+    has(p.brand) ||
+    (typeof p.color_hex === "string" && HEX.test(p.color_hex)) ||
+    (typeof p.link_url === "string" && HTTPS.test(p.link_url)) ||
+    (has(p.file_path) && (p.file_kind === "image" || p.file_kind === "pdf"))
+  );
+}
+
 /** The storage paths the server has to sign for this page, and nothing else. */
 export function portalPathsToSign(raw: PortalJobRaw): string[] {
   const { org_id: orgId, job_id: jobId } = raw.scope;
   const out: string[] = [];
-  for (const p of raw.picks ?? []) if (isPickPath(p.file_path, orgId, jobId) && (p.file_kind === "image" || p.file_kind === "pdf")) out.push(p.file_path);
+  for (const p of raw.picks ?? []) if (pickHasContent(p) && isPickPath(p.file_path, orgId, jobId) && (p.file_kind === "image" || p.file_kind === "pdf")) out.push(p.file_path);
   for (const p of raw.photos ?? []) if (isJobPhotoPath(p.file_path, orgId, jobId)) out.push(p.file_path);
   return out;
 }
@@ -192,7 +216,7 @@ export function shapePortalJob(
     };
   });
 
-  const picks: PortalPick[] = (raw.picks ?? []).map((p) => {
+  const picks: PortalPick[] = (raw.picks ?? []).filter(pickHasContent).map((p) => {
     const kind = p.file_kind === "image" || p.file_kind === "pdf" ? p.file_kind : null;
     const url = kind && isPickPath(p.file_path, orgId, jobId) ? extra.signed.get(p.file_path) : undefined;
     return {
@@ -214,7 +238,7 @@ export function shapePortalJob(
     if (!isJobPhotoPath(p.file_path, orgId, jobId)) continue;
     const url = extra.signed.get(p.file_path);
     if (!url) continue;
-    photos.push({ id: p.id, url, takenOn: p.taken_at ? todayStrInTz(tz, new Date(p.taken_at)) : null });
+    photos.push({ id: p.id, url, addedOn: p.added_at ? todayStrInTz(tz, new Date(p.added_at)) : null });
   }
 
   const org = raw.org;

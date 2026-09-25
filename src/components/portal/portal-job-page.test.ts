@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shapePortalJob, type PortalJobRaw, type PublicInvoiceDoc } from "@/lib/portal/job-view-shape";
@@ -12,6 +12,9 @@ import { fmtDay, fmtHours, fmtRange, fmtWeekday, portalJobStatus, seaGlassStyle,
  * shows them, says a draft is not a bill, offers a pay door only for a sent bill, and never
  * prints a field the shape does not carry.
  */
+// The page refreshes itself through the App Router (PortalKeepFresh); a static render has none.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => undefined }) }));
+
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "22222222-2222-4222-8222-222222222222";
 const NOW = new Date("2026-09-24T23:00:00Z");
@@ -30,7 +33,8 @@ const DOC: PublicInvoiceDoc = {
     total: 8318.62,
     amount_paid: 6760,
   },
-  items: [{ description: "Labor - Erik", quantity: 50.5, unit: "hr", unit_price: 100, line_total: 5050 }],
+  // INV-078's real lines, as invoice_document_projection hands them over (supplier rows included).
+  items: LINES.map((l) => ({ description: l.description, quantity: l.quantity, unit: l.unit, unit_price: l.unit_price, line_total: l.line_total, import_source: l.import_source })),
   payments: [{ amount: 1850, paid_at: "2026-08-10T19:00:00Z", method: "cash" }],
   customer: { name: "A Customer" },
   site_candidates: [],
@@ -65,7 +69,7 @@ function raw(over: Partial<PortalJobRaw> = {}): PortalJobRaw {
         ...({ buy_price: 41.5, markup_pct: 25 } as object),
       },
     ],
-    photos: [{ id: "ph1", file_path: `${ORG}/${JOB}/100-panel.jpg`, taken_at: "2026-09-19T00:30:00Z" }],
+    photos: [{ id: "ph1", file_path: `${ORG}/${JOB}/100-panel.jpg`, added_at: "2026-09-19T00:30:00Z" }],
     ...over,
   };
 }
@@ -117,6 +121,42 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(sent).toContain(`href="/i/${"a".repeat(32)}"`);
     expect(text(sent)).toContain("View And Pay INV-078 ($1,558.62 due)");
     expect(text(sent)).not.toContain("Running total, not a bill yet.");
+  });
+
+  it("never names a supplier: not in the stretches, not in the bill", () => {
+    for (const supplier of ["Consolidated", "Home Depot"]) expect(t).not.toContain(supplier);
+    expect(t).toContain("Supplies & Tax");
+  });
+
+  it("the bill is closed until tapped, laid out for a phone, and says why its Balance differs", () => {
+    expect(html).toMatch(/<details class="portal-glass group rounded-2xl">(?:(?!<\/details>).)*INV-078/s);
+    expect(html).toContain('class="portal-bill ');
+    expect(html).toContain('class="doc-lines ');
+    expect(t).toContain("Balance counts down from the whole bill");
+  });
+
+  it("while a bill is a draft, the work outside the running total is 'not added yet', not a second 'not a bill yet'", () => {
+    const view = shapePortalJob(raw(), {
+      signed,
+      unbilled: { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 0, returnsCredit: 0, total: 400 },
+      now: NOW,
+    });
+    const u = text(renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" })));
+    expect(u).toContain("$400.00 of work not added to the running total yet");
+    expect(u).toContain("Work Not Added Yet");
+    expect(u).not.toContain("not on a bill yet");
+    const sentView = shapePortalJob(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }), {
+      signed,
+      unbilled: view.unbilled,
+      now: NOW,
+    });
+    const v2 = text(renderToStaticMarkup(createElement(PortalJobPage, { view: sentView, homeHref: "/portal/x" })));
+    expect(v2).toContain("Work Not On A Bill Yet");
+  });
+
+  it("a photo's date is the day it was added, never claimed as the day it was taken", () => {
+    expect(html).not.toMatch(/taken/i);
+    expect(html).toContain("added Sep 18");
   });
 
   it("wears the org's own glass color", () => {

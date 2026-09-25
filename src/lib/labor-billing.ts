@@ -183,11 +183,27 @@ export function payViewRow(p: { id: string; role?: string | null; hourly_rate?: 
   return { id: p.id, hourly_rate: owner ? 0 : hourly, bill_rate: owner ? (bill ?? hourly) : bill };
 }
 
+/**
+ * THE RATES A CUSTOMER'S PAGE MAY PRICE WITH: payViewRow with the PAY figure taken out.
+ *
+ * computeJobLaborBilling falls back from bill_rate to hourly_rate. In the office that fallback
+ * reaches a customer only through a draft the office reads and chooses to send. The portal's
+ * "Work Not On A Bill Yet" card goes to the customer live, with a name, hours and an amount, and
+ * amount / hours would be that person's PAY rate. So on the service-role (portal) path nobody
+ * carries an hourly_rate: a person with no bill rate is priced at the customer's level rate or the
+ * org's default labor rate, never at what they are paid. (An owner's figure is a bill figure: the
+ * view pays an owner by draw, so payViewRow already moved it to bill_rate.)
+ */
+export function customerRateRow(p: Parameters<typeof payViewRow>[0]) {
+  return { ...payViewRow(p), hourly_rate: null };
+}
+
 /** The reads computeJobLaborBilling needs, run against a job_id. Centralised so import and
  *  financials fetch identical data.
  *
  *  `scope.orgId`: the caller is the SERVICE ROLE (the customer portal), which RLS does not narrow.
- *  Every read is then pinned to that org by hand, and the rates come from payViewRow. A signed-in
+ *  Every read is then pinned to that org by hand, and the rates come from customerRateRow (never
+ *  a pay rate: this path is only the customer's page). A signed-in
  *  caller leaves it out and RLS scopes the reads as it always has. */
 export async function fetchJobLaborRows(
   supabase: any,
@@ -216,13 +232,14 @@ export async function fetchJobLaborRows(
     // BILL RATES COME FROM THE STAFF-SCOPED VIEW (0215/0216), not from an embed on profiles:
     // those columns are revoked from the authenticated role. The view returns the whole org to
     // office staff and nothing but your own row to a tech. The service role reads the table in
-    // the one org it was handed, through the view's own rule (payViewRow).
+    // the one org it was handed, through the view's own rule with the pay figure removed
+    // (customerRateRow).
     orgId
       ? supabase
           .from("profiles")
           .select("id, role, hourly_rate, bill_rate")
           .eq("org_id", orgId)
-          .then((r: { data: any[] | null }) => ({ data: (r.data ?? []).map(payViewRow) }))
+          .then((r: { data: any[] | null }) => ({ data: (r.data ?? []).map(customerRateRow) }))
       : supabase.from("profile_pay").select("id, hourly_rate, bill_rate"),
   ]);
   const rateById = new Map<string, { hourly_rate: number | null; bill_rate: number | null }>();

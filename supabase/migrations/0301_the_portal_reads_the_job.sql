@@ -33,8 +33,10 @@
 --         (never GPS, notes, pay rates, rate overrides, mileage);
 --       - material sources give only their dates (never the supplier, the amount or the lines);
 --       - picks are the job's live ones (never a price: the table has none);
---       - photos are those with a job_shared_photos row, category Photo, on this job, whose
---         documents.file_url still equals the file the office shared. Never a folder listing.
+--       - photos are those with a job_shared_photos row, category Photo, on this job, in the job's
+--         own folder, whose documents.file_url still equals the file the office shared AND whose
+--         stored object is still the version the office shared (an upload over the same path is a
+--         different file). Never a folder listing.
 --     It returns raw building blocks plus a `scope` the server uses to sign files and read the
 --     unbilled work, and the server (src/lib/portal/job-view.ts) turns them into the allowlisted
 --     page payload. A customer never reaches any of this through RLS.
@@ -307,14 +309,16 @@ begin
       from public.job_picks k
      where k.job_id = j.id and k.org_id = a.org_id and k.removed_at is null), '[]'::json),
     'photos', coalesce((select json_agg(json_build_object(
-        'id', d.id, 'file_path', d.file_url, 'taken_at', d.created_at)
+        'id', d.id, 'file_path', d.file_url, 'added_at', d.created_at)
         order by d.created_at desc, d.id)
       from public.job_shared_photos s
       join public.documents d on d.id = s.document_id
      where s.job_id = j.id and s.org_id = a.org_id
        and d.job_id = j.id and d.org_id = a.org_id
        and d.category = 'Photo'
-       and d.file_url = s.file_url_at_share), '[]'::json)
+       and d.file_url = s.file_url_at_share
+       and d.file_url like (a.org_id::text || '/' || j.id::text || '/%')
+       and public.documents_object_version(d.file_url) is not distinct from s.object_version_at_share), '[]'::json)
   );
 end $$;
 comment on function public.portal_job_view(text, uuid) is

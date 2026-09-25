@@ -5,7 +5,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { normalizePick, normalizeStretch, type PickPatch } from "@/lib/portal/share-input";
+import { PHOTO_NOT_IN_JOB_FOLDER, normalizePick, normalizeStretch, type PickPatch } from "@/lib/portal/share-input";
+import { CUSTOMER_SHOWN_JOB_STATUSES, isJobPhotoPath } from "@/lib/portal/job-view-shape";
 import { getOrgSettings, orgDocUrl } from "@/lib/org-settings";
 
 /**
@@ -292,13 +293,16 @@ export async function setPhotoShared(documentId: string, shared: boolean): Promi
   if (!UUID.test(documentId)) return { ok: false, error: "That photo isn't on file." };
   const { data: doc } = await s.supabase
     .from("documents")
-    .select("id, job_id, category")
+    .select("id, job_id, category, file_url")
     .eq("id", documentId)
     .eq("org_id", s.orgId)
     .maybeSingle();
-  const d = doc as { id: string; job_id: string | null; category: string | null } | null;
+  const d = doc as { id: string; job_id: string | null; category: string | null; file_url: string | null } | null;
   if (!d) return { ok: false, error: "That photo isn't on file." };
   if (d.category !== "Photo" || !d.job_id) return { ok: false, error: "Only a job photo can be shown to the customer." };
+  // The portal signs only files in the job's own folder (isJobPhotoPath; 0300 refuses the rest by
+  // name). A picture Organize filed elsewhere is said so here, never "shown" and then dropped.
+  if (shared && !isJobPhotoPath(d.file_url, s.orgId, d.job_id)) return { ok: false, error: PHOTO_NOT_IN_JOB_FOLDER };
 
   if (shared) {
     const { data: have } = await s.supabase
@@ -402,7 +406,17 @@ export async function jobShareState(jobId: string): Promise<
  * org's own public host (orgDocUrl), the same host the portal email sends.
  */
 export async function jobPortalLink(jobId: string): Promise<
-  | { ok: true; url: string | null; enabled: boolean; customerId: string | null; customerName: string | null }
+  | {
+      ok: true;
+      url: string | null;
+      enabled: boolean;
+      /** The customer has a link at all (an access row). No row is "no link yet", not "turned off". */
+      hasLink: boolean;
+      /** The job's status is one a customer is shown (0301's allowlist); else their link 404s here. */
+      jobShown: boolean;
+      customerId: string | null;
+      customerName: string | null;
+    }
   | { ok: false; error: string }
 > {
   const s = await staff();
@@ -410,13 +424,14 @@ export async function jobPortalLink(jobId: string): Promise<
   if (!UUID.test(jobId)) return { ok: false, error: "That job isn't in your book." };
   const { data: job } = await s.supabase
     .from("jobs")
-    .select("id, customer_id, customers(name)")
+    .select("id, status, customer_id, customers(name)")
     .eq("id", jobId)
     .eq("org_id", s.orgId)
     .maybeSingle();
-  const j = job as { id: string; customer_id: string | null; customers: { name: string | null } | null } | null;
+  const j = job as { id: string; status: string | null; customer_id: string | null; customers: { name: string | null } | null } | null;
   if (!j) return { ok: false, error: "That job isn't in your book." };
-  if (!j.customer_id) return { ok: true, url: null, enabled: false, customerId: null, customerName: null };
+  const jobShown = CUSTOMER_SHOWN_JOB_STATUSES.includes(String(j.status ?? ""));
+  if (!j.customer_id) return { ok: true, url: null, enabled: false, hasLink: false, jobShown, customerId: null, customerName: null };
   const [{ data: access }, { data: org }] = await Promise.all([
     s.supabase.from("customer_portal_access").select("token, enabled").eq("customer_id", j.customer_id).eq("org_id", s.orgId).maybeSingle(),
     s.supabase.from("organizations").select("settings").eq("id", s.orgId).maybeSingle(),
@@ -425,5 +440,5 @@ export async function jobPortalLink(jobId: string): Promise<
   const url = a?.token
     ? `${orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "portal", a.token)}/jobs/${j.id}`
     : null;
-  return { ok: true, url, enabled: !!a?.enabled, customerId: j.customer_id, customerName: j.customers?.name ?? null };
+  return { ok: true, url, enabled: !!a?.enabled, hasLink: !!a?.token, jobShown, customerId: j.customer_id, customerName: j.customers?.name ?? null };
 }

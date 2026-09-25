@@ -137,7 +137,9 @@ export function InvoiceDocument({
 
       {/* Line items */}
       <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[460px] text-sm">
+        {/* doc-lines: a stable hook for a surface that lays the same lines out for a phone
+            (.portal-bill, globals.css). The columns and figures are the same everywhere. */}
+        <table className="doc-lines w-full min-w-[460px] text-sm">
           <thead>
             <tr className="border-b border-slate-300 text-left text-xs uppercase tracking-wide text-slate-500">
               <th className="py-2 font-semibold">Description</th>

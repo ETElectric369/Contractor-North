@@ -73,6 +73,24 @@ describe("J-011 / INV-078: the stretches reconcile to the invoice to the cent", 
     expect(trim.days.every((d) => d.inRange)).toBe(true);
   });
 
+  it("never names a supplier: each receipt's remainder row reads Supplies & Tax, on its own day, to the cent", () => {
+    const items = s.flatMap((st) => st.days.flatMap((d) => d.items.map((i) => ({ date: d.date, ...i }))));
+    const text = JSON.stringify(ledger);
+    for (const supplier of ["Consolidated", "Home Depot", "Supplies & tax —", "—"]) expect(text).not.toContain(supplier);
+    const supplies = items.filter((i) => i.description === "Supplies & Tax");
+    // Six receipts' rows (sort 4, 9, 18, 22, 26, 36), each kept whole on its purchase day.
+    expect(supplies.map((i) => [i.date, i.amount])).toEqual([
+      ["2026-07-31", 33.84],
+      ["2026-08-19", 19.02],
+      ["2026-08-20", 14.22],
+      ["2026-08-29", 26.12],
+      ["2026-09-22", 78.17],
+      ["2026-09-24", 9.87],
+    ]);
+    expect(supplies.every((i) => i.quantity === 1 && i.unit === null && i.unitPrice === i.amount && i.kind === "material")).toBe(true);
+    expect(ledger.reconciles).toBe(true);
+  });
+
   it("a bill's own date is never shifted by the timezone", () => {
     expect(orgDay("2026-07-31", TZ)).toBe("2026-07-31");
     const jul31 = s[0].days.find((d) => d.date === "2026-07-31");
@@ -162,8 +180,8 @@ describe("rows that have no day of their own, and rows between stretches", () =>
       payments: [{ invoice_id: "a", amount: 40, paid_at: "2026-03-10T20:00:00Z", method: "cash" }],
       tz: TZ,
     });
-    expect(l.stretches[0].days.map((d) => [d.date, d.inRange])).toEqual([["2026-03-09", false]]);
-    expect(l.stretches[0].payments.map((p) => [p.date, p.inRange])).toEqual([["2026-03-10", false]]);
+    expect(l.stretches[0].days.map((d) => [d.date, d.inRange, d.outside])).toEqual([["2026-03-09", false, "after"]]);
+    expect(l.stretches[0].payments.map((p) => [p.date, p.inRange, p.outside])).toEqual([["2026-03-10", false, "after"]]);
     expect(l.stretches[1].workTotal).toBe(0);
   });
 
@@ -175,7 +193,19 @@ describe("rows that have no day of their own, and rows between stretches", () =>
       payments: [{ invoice_id: "a", amount: 500, paid_at: "2026-02-20T20:00:00Z", method: "check" }],
       tz: TZ,
     });
-    expect(l.stretches[0].payments[0]).toMatchObject({ date: "2026-02-20", inRange: false, amount: 500 });
+    // BEFORE the stretch started: the page must not say "after the stretch ended".
+    expect(l.stretches[0].payments[0]).toMatchObject({ date: "2026-02-20", inRange: false, outside: "before", amount: 500 });
+  });
+
+  it("early work before the first stretch is marked before, not after", () => {
+    const l = buildJobLedger({
+      stretches,
+      invoices: [{ ...base, tax: 0, total: 40, amount_paid: 0 }],
+      lines: [{ invoice_id: "a", sort_order: 0, description: "Wire", quantity: 1, unit: "ea", unit_price: 40, line_total: 40, import_source: "costs", sources: [{ date: "2026-02-20", at: null }] }],
+      payments: [],
+      tz: TZ,
+    });
+    expect(l.stretches[0].days.map((d) => [d.date, d.outside])).toEqual([["2026-02-20", "before"]]);
   });
 });
 

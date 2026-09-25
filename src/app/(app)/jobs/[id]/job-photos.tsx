@@ -10,6 +10,8 @@ import { useToast } from "@/components/toast";
 import { deleteDocument } from "../actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { setPhotoShared } from "../portal-share-actions";
+import { PHOTO_NOT_IN_JOB_FOLDER } from "@/lib/portal/share-input";
+import { isJobPhotoPath } from "@/lib/portal/job-view-shape";
 
 interface Doc {
   id: string;
@@ -35,7 +37,9 @@ function onPhone() {
  *  SHOW CUSTOMER (office only; `sharedIds` is null for a tech, or before 0300): under each PHOTO
  *  a switch puts it on the customer's job page, live. Only a document filed as a Photo gets one: a
  *  receipt is an image in the same folder, and the database refuses to share it by name. The
- *  portal picks photos by this switch's row, never by the folder. */
+ *  portal picks photos by this switch's row, never by the folder. A Photo filed outside this job's
+ *  own folder (Organize files papers under <org>/organize/) can't reach the customer's page, so its
+ *  switch says so when pressed instead of pretending to share it. */
 export function JobPhotos({
   orgId,
   jobId,
@@ -64,6 +68,10 @@ export function JobPhotos({
   }, [sharedKey]);
 
   async function share(d: Doc, next: boolean, undoable = true) {
+    if (next && !isJobPhotoPath(d.file_url, orgId, jobId)) {
+      toast(PHOTO_NOT_IN_JOB_FOLDER, "error");
+      return;
+    }
     setSharing(d.id);
     setShown((s) => {
       const n = new Set(s);
@@ -165,21 +173,27 @@ export function JobPhotos({
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
               {sharedIds && d.category === "Photo" ? (
-                <button
-                  type="button"
-                  onClick={() => void share(d, !shown.has(d.id))}
-                  disabled={sharing === d.id}
-                  aria-pressed={shown.has(d.id)}
-                  title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
-                  className={`absolute inset-x-1 bottom-1 inline-flex h-11 items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm backdrop-blur ${
-                    shown.has(d.id) ? "seaglass-active" : "bg-black/55 text-white"
-                  }`}
-                >
-                  <span className="relative z-10 inline-flex items-center gap-1.5">
-                    {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                    {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
-                  </span>
-                </button>
+                // The position lives on a wrapper: .seaglass-btn is unlayered CSS and sets
+                // position: relative, which beats Tailwind's layered `absolute` on the same element.
+                // The ON state is .seaglass-btn (it carries the white glass base as its last layer),
+                // so the dark ink stays readable over a dark or busy photo.
+                <div className="absolute inset-x-1 bottom-1">
+                  <button
+                    type="button"
+                    onClick={() => void share(d, !shown.has(d.id))}
+                    disabled={sharing === d.id}
+                    aria-pressed={shown.has(d.id)}
+                    title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
+                    className={`inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm ${
+                      shown.has(d.id) ? "seaglass-btn" : "bg-black/55 text-white backdrop-blur"
+                    }`}
+                  >
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
+                    </span>
+                  </button>
+                </div>
               ) : null}
             </div>
           ))}

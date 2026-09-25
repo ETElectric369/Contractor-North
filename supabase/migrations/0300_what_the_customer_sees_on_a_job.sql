@@ -25,7 +25,15 @@
 -- flag ON documents would be a flag the crew could flip. The share row also records the file the
 -- office looked at (file_url_at_share, stamped by a trigger from the documents row, never taken
 -- from the request): if anyone repoints documents.file_url afterwards, the portal stops showing
--- that photo instead of showing whatever it now points at.
+-- that photo instead of showing whatever it now points at. It records the FILE'S CONTENT too
+-- (object_version_at_share: storage.objects.version, which every upload replaces): any member may
+-- upload over an object under <org>/<job>/ (docs_update), so a crew member could put a receipt's
+-- bytes at a shared photo's exact path and leave file_url untouched. A new version is a different
+-- file; the portal stops showing it until the office shares it again.
+--
+-- A SHARED PHOTO LIVES IN ITS JOB'S FOLDER. Only a file under <org>/<job>/ can be shared: that is
+-- where the Photos tab files what it takes, and the portal signs nothing else (a paper Organize
+-- filed under <org>/organize/ would be accepted here and then dropped at the page, silently).
 --
 -- PICK FILES live under <org>/picks/<job>/ in the documents bucket, and 'picks' joins the
 -- staff-only prefixes (docs_path_is_staff_only, rebuilt from the LIVE definition of 0247): the
@@ -107,12 +115,28 @@ create table if not exists public.job_shared_photos (
   org_id            uuid not null references public.organizations(id) on delete cascade,
   job_id            uuid not null references public.jobs(id) on delete cascade,
   file_url_at_share text not null,
+  -- The stored object's version when the office shared it (null: no object at that path then).
+  object_version_at_share text,
   shared_by         uuid references public.profiles(id) on delete set null,
   shared_at         timestamptz not null default now()
 );
 comment on table public.job_shared_photos is
   'One row per job photo the office chose to show the customer (0300). The portal selects photos by this row and only while documents.file_url still equals file_url_at_share; never by listing a folder. Office staff only.';
 create index if not exists job_shared_photos_job_idx on public.job_shared_photos (job_id, shared_at desc);
+
+-- The version of the object a documents path names right now (null when there is none). One rule
+-- for the share stamp below and for portal_job_view (0301), so they cannot disagree about "the same
+-- file". Definer-only: it reads storage.objects, which no member reads directly.
+create or replace function public.documents_object_version(p_name text)
+returns text language sql stable security definer set search_path = public as $$
+  select o.version
+    from storage.objects o
+   where o.bucket_id = 'documents' and o.name = p_name
+   order by o.updated_at desc nulls last, o.created_at desc nulls last
+   limit 1;
+$$;
+revoke execute on function public.documents_object_version(text) from public, anon, authenticated;
+grant execute on function public.documents_object_version(text) to service_role;
 
 -- Whatever the request said, the share row describes the document it names: its org, its job, the
 -- file it points at right now, and who shared it. Only a Photo on a job can be shared; a receipt
@@ -132,6 +156,11 @@ begin
   if d.job_id is null or d.file_url is null or d.file_url = '' then
     raise exception 'That photo is not filed on a job.' using errcode = '23514';
   end if;
+  -- The portal signs only what sits in the job's own folder: refuse out loud here rather than
+  -- accept a share the customer would never see.
+  if d.file_url not like (d.org_id::text || '/' || d.job_id::text || '/%') or d.file_url ~ '\.\.' then
+    raise exception 'Only photos taken or uploaded on this job can be shown to the customer.' using errcode = '23514';
+  end if;
   -- A signed-in writer shares only inside their own org (the policy says so too; this says it for
   -- the service role's writes, which RLS does not see).
   if not public.is_privileged_writer() and d.org_id is distinct from public.auth_org_id() then
@@ -140,6 +169,7 @@ begin
   new.org_id := d.org_id;
   new.job_id := d.job_id;
   new.file_url_at_share := d.file_url;
+  new.object_version_at_share := public.documents_object_version(d.file_url);
   new.shared_by := coalesce(auth.uid(), new.shared_by);
   new.shared_at := now();
   return new;
@@ -273,5 +303,9 @@ begin
   if not public.docs_path_is_staff_only('00000000-0000-0000-0000-000000000000/picks/x/y.jpg')
      or public.docs_path_is_staff_only('00000000-0000-0000-0000-000000000000/11111111-1111-1111-1111-111111111111/y.jpg') then
     raise exception '0300: the picks prefix is not the office''s alone. Nothing was changed.';
+  end if;
+  if has_function_privilege('authenticated', 'public.documents_object_version(text)', 'execute')
+     or has_function_privilege('anon', 'public.documents_object_version(text)', 'execute') then
+    raise exception '0300: a member could read storage object versions. Nothing was changed.';
   end if;
 end $$;

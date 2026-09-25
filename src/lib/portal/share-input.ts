@@ -9,6 +9,10 @@
  */
 import { isPickPath } from "./job-view-shape";
 
+/** The one sentence every door says when a photo is not in its job's own folder (setPhotoShared,
+ *  the Photos tab, and 0300's trigger in the same words). */
+export const PHOTO_NOT_IN_JOB_FOLDER = "Only photos taken or uploaded on this job can be shown to the customer.";
+
 /** The categories the editor offers first. Any other a person types is fine. */
 export const PICK_CATEGORIES = [
   "Paint Color",

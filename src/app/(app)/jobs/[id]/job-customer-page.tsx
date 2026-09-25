@@ -9,6 +9,7 @@ import { useToast } from "@/components/toast";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { PICK_CATEGORIES, fileKindFor, pickFilePath, type PickPatch } from "@/lib/portal/share-input";
+import { pickHasContent } from "@/lib/portal/job-view-shape";
 import { fmtRange } from "@/components/portal/portal-format";
 import {
   addPick,
@@ -39,7 +40,14 @@ import {
  * for it until someone looks.
  */
 type Pick = PickRow & { file_url: string | null };
-type LinkState = { url: string | null; enabled: boolean; customerId: string | null; customerName: string | null };
+type LinkState = {
+  url: string | null;
+  enabled: boolean;
+  hasLink: boolean;
+  jobShown: boolean;
+  customerId: string | null;
+  customerName: string | null;
+};
 
 const byDates = (a: StretchRow, b: StretchRow) =>
   a.starts_on.localeCompare(b.starts_on) || a.sort - b.sort || a.ends_on.localeCompare(b.ends_on);
@@ -66,7 +74,8 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
       setBrands(st.brands);
       setOptions(st.options);
     }
-    if (ln.ok) setLink({ url: ln.url, enabled: ln.enabled, customerId: ln.customerId, customerName: ln.customerName });
+    if (ln.ok)
+      setLink({ url: ln.url, enabled: ln.enabled, hasLink: ln.hasLink, jobShown: ln.jobShown, customerId: ln.customerId, customerName: ln.customerName });
     setLoaded(true);
   }, [jobId]);
 
@@ -137,7 +146,16 @@ function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
           The work by stretch with each day&apos;s hours and dollars as billed, the payments, the bill, the picks and the photos
           you share. Every change here shows on their page right away. Picks never show a price.
         </p>
-        {!link.enabled ? (
+        {/* Said in the card, not in a tooltip: a phone never shows a title. */}
+        {!link.hasLink ? (
+          <p className="mt-2 text-sm text-red-700">
+            {who} has no link yet, so there is nothing to open or copy.{" "}
+            <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
+              Make one on their contact page
+            </Link>
+            .
+          </p>
+        ) : !link.enabled ? (
           <p className="mt-2 text-sm text-red-700">
             Their link is turned off, so it opens to &ldquo;This link was turned off.&rdquo;{" "}
             <Link href={`/crm/${link.customerId}`} className="font-semibold underline">
@@ -146,10 +164,16 @@ function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
             .
           </p>
         ) : null}
+        {link.hasLink && !link.jobShown ? (
+          <p className="mt-2 text-sm text-amber-800">
+            This job isn&apos;t on {who}&apos;s page yet: a job shows there once it is past the estimate (to be scheduled,
+            scheduled, in progress, on hold, complete or invoiced). Until then its page doesn&apos;t open for them or for you.
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button
             variant="outline"
-            disabled={!url}
+            disabled={!url || !link.jobShown}
             onClick={() => url && window.open(`${url}?look=office`, "_blank", "noopener,noreferrer")}
             title="Open it exactly as the customer sees it. Your own looks don't count as them opening it."
           >
@@ -157,7 +181,7 @@ function LinkCard({ link, who }: { link: LinkState | null; who: string }) {
           </Button>
           <Button
             variant="outline"
-            disabled={!url || !link.enabled}
+            disabled={!url || !link.enabled || !link.jobShown}
             onClick={() => {
               if (!url) return;
               navigator.clipboard?.writeText(url).then(
@@ -268,7 +292,7 @@ function StretchesCard({
       {removed.length ? (
         <details className="mt-3">
           <summary className="flex min-h-[44px] cursor-pointer items-center text-sm font-medium text-slate-600">
-            Taken off their page ({removed.length})
+            Taken Off Their Page ({removed.length})
           </summary>
           <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200">
             {removed.map((r) => (
@@ -430,7 +454,7 @@ function PicksCard({
       }
       setRows((rs) => [...rs, { ...res.row, file_url: null }]);
       setJustAdded(res.row.id);
-      toast(`A ${res.row.category} pick is on ${who}'s page. Fill it in below.`, "success", {
+      toast(`A ${res.row.category} pick is started. It shows on ${who}'s page once it has a name, brand, code, swatch, file or link.`, "success", {
         label: "Undo",
         onClick: () => void removePick(res.row.id).then((u) => (u.ok ? put(u.row) : toast(u.error, "error"))),
       });
@@ -500,7 +524,7 @@ function PicksCard({
       {removed.length ? (
         <details className="mt-3">
           <summary className="flex min-h-[44px] cursor-pointer items-center text-sm font-medium text-slate-600">
-            Taken off their page ({removed.length})
+            Taken Off Their Page ({removed.length})
           </summary>
           <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200">
             {removed.map((r) => (
@@ -580,11 +604,13 @@ function PickEditor({
       return;
     }
     onSaved(res.row);
+    // Nothing silent: a pick with nothing to show yet is not on their page (pickHasContent).
+    const seen = pickHasContent(res.row) ? `${who} sees it now.` : `It shows on ${who}'s page once it has a name, brand, code, swatch, file or link.`;
     if (!undo) {
-      toast(`${what}. ${who} sees it now.`, "success");
+      toast(`${what}. ${seen}`, "success");
       return;
     }
-    toast(`${what} saved. ${who} sees it now.`, "success", {
+    toast(`${what} saved. ${seen}`, "success", {
       label: "Undo",
       onClick: () => void updatePick(row.id, undo).then((u) => (u.ok ? onSaved(u.row) : toast(u.error, "error"))),
     });
@@ -694,6 +720,7 @@ function PickEditor({
             {title}
             {row.location ? <span className="font-normal text-slate-500"> · {row.location}</span> : null}
           </span>
+          {!pickHasContent(row) ? <span className="block text-xs text-amber-800">Not on {who}&apos;s page until it has a name, brand, code, swatch, file or link.</span> : null}
         </span>
         {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-400" /> : null}
       </summary>

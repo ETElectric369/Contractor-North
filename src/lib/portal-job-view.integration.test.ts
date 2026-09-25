@@ -233,6 +233,49 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
     ).toBe("23514");
   });
 
+  it("a photo filed outside its job's folder is refused out loud, never accepted and then dropped", async () => {
+    if (!needs()) return;
+    // Organize files a paper under <org>/organize/ and keeps its category, which can be Photo.
+    const filedElsewhere = (
+      await one("insert into public.documents (org_id, job_id, name, kind, category, file_url) values ($1, $2, 'test-0301-organize.jpg', 'other', 'Photo', $3) returning id", [
+        orgId,
+        jobA,
+        `${orgId}/organize/test-0301-organize.jpg`,
+      ])
+    ).id as string;
+    expect(
+      await refused(async () => {
+        await as(staffId);
+        await c.query("insert into public.job_shared_photos (document_id, org_id, job_id, file_url_at_share) values ($1, $2, $3, '')", [filedElsewhere, orgId, jobA]);
+      }),
+    ).toBe("23514");
+  });
+
+  it("a shared photo that was uploaded over stops showing instead of showing the new bytes", async () => {
+    if (!needs()) return;
+    const name = `${orgId}/${jobA}/test-0301-bytes.jpg`;
+    await c.query("savepoint overwrite");
+    try {
+      // The stored object the office looked at, then the same path uploaded over (a new version).
+      await c.query("insert into storage.objects (bucket_id, name, version) values ('documents', $1, 'test-0301-v1')", [name]);
+      const id = (
+        await one("insert into public.documents (org_id, job_id, name, kind, category, file_url) values ($1, $2, 'test-0301-bytes.jpg', 'other', 'Photo', $3) returning id", [orgId, jobA, name])
+      ).id as string;
+      await as(staffId);
+      await c.query("insert into public.job_shared_photos (document_id, org_id, job_id, file_url_at_share) values ($1, $2, $3, '')", [id, orgId, jobA]);
+      await asServer();
+      expect((await one("select object_version_at_share as v from public.job_shared_photos where document_id = $1", [id])).v).toBe("test-0301-v1");
+      const before = await view(tokenA, jobA);
+      await c.query("update storage.objects set version = 'test-0301-v2' where bucket_id = 'documents' and name = $1", [name]);
+      const after = await view(tokenA, jobA);
+      expect(before.photos.map((p: any) => p.id)).toContain(id);
+      expect(after.photos.map((p: any) => p.id)).not.toContain(id);
+    } finally {
+      await c.query("rollback to savepoint overwrite");
+      await asServer();
+    }
+  });
+
   it("the crew reads the stretches and picks but writes none of it, and never sees the share rows", async () => {
     if (!needs()) return;
     const seen = await lookAs(
