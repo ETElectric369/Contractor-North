@@ -8,6 +8,7 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { PHOTO_NOT_IN_JOB_FOLDER, normalizePick, normalizeStretch, type PickPatch } from "@/lib/portal/share-input";
 import { CUSTOMER_SHOWN_JOB_STATUSES, isJobPhotoPath } from "@/lib/portal/job-view-shape";
 import { getOrgSettings, orgDocUrl } from "@/lib/org-settings";
+import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
 /**
  * THE OFFICE'S CONTROLS FOR WHAT THE CUSTOMER SEES ON A JOB (0300): the stretches of work, the
@@ -334,6 +335,22 @@ export async function setPhotoShared(documentId: string, shared: boolean): Promi
   return { ok: true, shared };
 }
 
+/**
+ * SHOW AGAIN (audit v994 PL4): a shown photo whose file changed after it was shown is hidden from
+ * the customer (the portal shows only the file the office looked at). The office's tile says
+ * "Changed Since Shown", and this is its one button: take the old share off and share the photo as
+ * it is now, which stamps the new file. It is a person's decision on purpose; nothing re-shares a
+ * changed file by itself (setPhotoShared(true) on a photo already shown changes nothing).
+ */
+export async function reshowPhoto(documentId: string): Promise<{ ok: boolean; error?: string; shared?: boolean }> {
+  const off = await setPhotoShared(documentId, false);
+  if (!off.ok) return off;
+  const on = await setPhotoShared(documentId, true);
+  // Off went through and on did not: the tile must say it is hidden now, not that it is shown.
+  if (!on.ok) return { ok: false, shared: false, error: `${on.error ?? "It didn't show again."} It is off the customer's page now.` };
+  return on;
+}
+
 // ── what the editor opens with ─────────────────────────────────────────────────────────────────
 
 export type PickOptionChoice = { id: string; brand: string; label: string | null; partNumber: string | null; itemName: string | null; itemCode: string | null };
@@ -349,6 +366,8 @@ export async function jobShareState(jobId: string): Promise<
       stretches: StretchRow[];
       picks: (PickRow & { file_url: string | null })[];
       sharedPhotoIds: string[];
+      /** Of those, the ones the customer's page has stopped showing because the file changed (PL4). */
+      staleSharedPhotoIds: string[];
       brands: string[];
       options: PickOptionChoice[];
     }
@@ -357,7 +376,7 @@ export async function jobShareState(jobId: string): Promise<
   const s = await staff();
   if ("error" in s) return { ok: false, error: s.error };
   if (!(await jobIsOurs(s, jobId))) return { ok: false, error: "That job isn't in your book." };
-  const [st, pk, sh, opts, vendors] = await Promise.all([
+  const [st, pk, sh, opts, vendors, stale] = await Promise.all([
     s.supabase.from("job_stretches").select(STRETCH_COLS).eq("job_id", jobId).eq("org_id", s.orgId).order("starts_on").order("sort"),
     s.supabase.from("job_picks").select(PICK_COLS).eq("job_id", jobId).eq("org_id", s.orgId).order("sort").order("updated_at"),
     s.supabase.from("job_shared_photos").select("document_id").eq("job_id", jobId).eq("org_id", s.orgId),
@@ -369,6 +388,7 @@ export async function jobShareState(jobId: string): Promise<
       .order("vendor")
       .limit(1000),
     s.supabase.from("price_list_vendors").select("name").eq("org_id", s.orgId).eq("archived", false).order("name"),
+    staleSharedPhotoIds(s.supabase, jobId),
   ]);
   const firstError = st.error ?? pk.error ?? sh.error;
   if (firstError) return { ok: false, error: dbError(firstError) };
@@ -392,6 +412,7 @@ export async function jobShareState(jobId: string): Promise<
     stretches: (st.data ?? []) as StretchRow[],
     picks: picks.map((p) => ({ ...p, file_url: p.file_path ? signed.get(p.file_path) ?? null : null })),
     sharedPhotoIds: ((sh.data ?? []) as { document_id: string }[]).map((r) => r.document_id),
+    staleSharedPhotoIds: stale,
     brands: [...brandSet.values()].sort((a, b) => a.localeCompare(b)),
     options,
   };

@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { FileText, FileSignature, Receipt, Briefcase, ChevronRight } from "lucide-react";
 import { createServiceClient } from "@/lib/supabase/server";
 import { invoiceBalance } from "@/lib/invoice-math";
+import { reportError } from "@/lib/observe";
+import { portalHomeOrg, portalHomeRunning, type PortalHomeOrgRaw, type PortalHomeRunningRaw } from "@/lib/portal/home-shape";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { statusTone, toneClasses } from "@/components/ui/badge";
 import { NO_INDEX } from "@/lib/no-index";
-import { PortalSection, PortalShell, PortalTurnedOff } from "@/components/portal/portal-shell";
+import { PortalNotice, PortalSection, PortalShell, PortalTurnedOff } from "@/components/portal/portal-shell";
 import { portalJobStatus } from "@/components/portal/portal-format";
 import { OpenedBeacon } from "./opened-beacon";
 
@@ -25,26 +27,42 @@ export const fetchCache = "force-no-store";
  * customer, and links already sit in inboxes on whatever host they were sent from.
  *
  * cache(): generateMetadata and the page read the same thing once per request.
+ *
+ * A READ THAT FAILED IS NOT A LINK THAT DOESN'T EXIST (audit v994 SI3). customer_portal answers a
+ * bad token with SQL null, so an error here is the database or the service key failing: every
+ * customer opening an emailed link got a bare 404 and the office never heard. Now it is reported
+ * (error_events) and the customer reads "couldn't load just now", as on the job page (readPortalJob).
  */
 type PortalData = {
   disabled?: boolean;
   customer?: { name?: string | null; company_name?: string | null } | null;
-  org?: { name?: string | null; logo_url?: string | null; phone?: string | null; email?: string | null; license?: string | null; glass_tint?: string } | null;
+  /** 0323: glass_tint, so the home wears the org's own glass (DD2). */
+  org?: PortalHomeOrgRaw;
   invoices?: any[];
   contracts?: any[];
   quotes?: any[];
   /** Since 0301 each job carries its id, so the list can open /portal/<token>/jobs/<id>. */
   jobs?: any[];
+  /** 0323: each job's running bill (its draft bills), which the invoice list leaves out. */
+  running?: PortalHomeRunningRaw[];
 };
-const readPortal = cache(async (token: string): Promise<PortalData | null> => {
+type PortalRead = { kind: "ok"; data: PortalData | null } | { kind: "error" };
+const TOKEN = /^[0-9a-f]{32,128}$/i;
+const readPortal = cache(async (token: string): Promise<PortalRead> => {
+  // Not a link's shape: no such link, and no reason to ask the database.
+  if (typeof token !== "string" || !TOKEN.test(token)) return { kind: "ok", data: null };
   const { data, error } = await createServiceClient().rpc("customer_portal", { p_token: token });
-  if (error) return null;
-  return (data ?? null) as PortalData | null;
+  if (error) {
+    reportError("portal.home", error);
+    return { kind: "error" };
+  }
+  return { kind: "ok", data: (data ?? null) as PortalData | null };
 });
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const data = await readPortal(token);
+  const r = await readPortal(token);
+  const data = r.kind === "ok" ? r.data : null;
   const name = data?.org?.name;
   // NEVER indexed. This page fans out to EVERY document that customer has — crawling one
   // portal token would expose their whole invoice/quote/contract history. See @/lib/no-index.
@@ -70,11 +88,20 @@ export default async function CustomerPortalPage({
 }) {
   const { token } = await params;
   const { look } = await searchParams;
-  const data = await readPortal(token);
+  const r = await readPortal(token);
+  if (r.kind === "error") {
+    return (
+      <PortalNotice title="This page couldn't load just now.">
+        Pull down or reload to try again in a minute.
+      </PortalNotice>
+    );
+  }
+  const data = r.data;
   if (data?.disabled) return <PortalTurnedOff orgName={data.org?.name ?? null} />;
   if (!data || !data.customer) notFound();
 
-  const org = data.org ?? {};
+  const org = portalHomeOrg(data.org ?? null);
+  const running = portalHomeRunning(data.running);
   const invoices = data.invoices ?? [];
   const contracts = data.contracts ?? [];
   const quotes = data.quotes ?? [];
@@ -82,16 +109,7 @@ export default async function CustomerPortalPage({
   const office = look === "office";
 
   return (
-    <PortalShell
-      org={{
-        name: org.name ?? "Your contractor",
-        logoUrl: org.logo_url ?? null,
-        phone: org.phone ?? null,
-        email: org.email ?? null,
-        license: org.license ?? null,
-        tint: org.glass_tint ?? null,
-      }}
-    >
+    <PortalShell org={org}>
       {/* Last Opened: stamped from the customer's own browser, so a mail scanner or a link preview
           that never runs the page doesn't read as "they opened it". The office's own look
           (See What They See adds ?look=office) doesn't count either. */}
@@ -100,7 +118,7 @@ export default async function CustomerPortalPage({
       <h1 className="mb-1 px-1 text-2xl font-bold text-slate-900">
         Welcome{data.customer.name ? `, ${data.customer.name}` : ""}
       </h1>
-      <p className="mb-2 px-1 text-sm text-slate-700">Your jobs and papers with {org.name ?? "us"}, up to date every time you open this page.</p>
+      <p className="mb-2 px-1 text-sm text-slate-700">Your jobs and papers with {org.name}, up to date every time you open this page.</p>
 
       {/* Jobs first: each one opens its own page (work and payments, picks, photos, the bill). */}
       {jobs.length > 0 && (
@@ -136,9 +154,23 @@ export default async function CustomerPortalPage({
         </PortalSection>
       )}
 
-      {invoices.length > 0 && (
+      {(invoices.length > 0 || running.length > 0) && (
         <PortalSection id="invoices" title="Bills" icon={<Receipt className="h-4 w-4" />}>
           <ul className="portal-glass divide-y divide-slate-200/70 overflow-hidden rounded-2xl">
+            {/* A running bill (a draft the office keeps adding to) is not a bill yet, so it has no
+                pay door here: it opens the job page, where the work and payments so far are. */}
+            {running.map((rb) => (
+              <Row
+                key={`running-${rb.jobId}`}
+                href={`/portal/${token}/jobs/${rb.jobId}${office ? "?look=office" : ""}`}
+                sameTab
+                label={rb.name}
+                sub={`Running total, not a bill yet · ${
+                  rb.balance < -0.005 ? `${formatCurrency(-rb.balance)} paid ahead` : `${formatCurrency(rb.balance)} left`
+                }`}
+                cta="See The Work"
+              />
+            ))}
             {invoices.map((i: any) => {
               const bal = invoiceBalance(i.total, i.amount_paid);
               return (
@@ -190,7 +222,7 @@ export default async function CustomerPortalPage({
         </PortalSection>
       )}
 
-      {invoices.length === 0 && contracts.length === 0 && quotes.length === 0 && jobs.length === 0 && (
+      {invoices.length === 0 && running.length === 0 && contracts.length === 0 && quotes.length === 0 && jobs.length === 0 && (
         <div className="portal-glass mt-4 rounded-2xl px-6 py-10 text-center text-sm text-slate-700">
           Nothing to show yet. Your jobs and papers will show here as they are sent to you.
         </div>
@@ -200,21 +232,37 @@ export default async function CustomerPortalPage({
 }
 
 
-function Row({ href, label, sub, status, cta }: { href: string; label: string; sub: string; status: string; cta: string }) {
+function Row({
+  href,
+  label,
+  sub,
+  status,
+  cta,
+  sameTab = false,
+}: {
+  href: string;
+  label: string;
+  sub: string;
+  /** No status chip when there is none to say (a running bill says so in its own words). */
+  status?: string;
+  cta: string;
+  /** A page of this portal (a job) opens in place, like the jobs list; a paper opens in a new tab. */
+  sameTab?: boolean;
+}) {
   return (
     <li>
       {/* nofollow: the portal links out to every sibling token document, so a crawler that ever
           reaches one portal URL must not fan out across the customer's whole document history. */}
       <a
         href={href}
-        target="_blank"
-        rel="noopener nofollow"
+        target={sameTab ? undefined : "_blank"}
+        rel={sameTab ? "nofollow" : "noopener nofollow"}
         className="flex min-h-[56px] items-center justify-between gap-3 px-4 py-3 hover:bg-white/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-semibold text-slate-900">{label}</span>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusColor(status)}`}>{status}</span>
+            {status ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${statusColor(status)}`}>{status}</span> : null}
           </div>
           <div className="truncate text-sm text-slate-700">{sub}</div>
         </div>

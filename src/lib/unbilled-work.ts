@@ -22,6 +22,7 @@ import { isReturnBill, returnCreditCost, returnLinesAgainstPurchases } from "@/l
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, withoutClaimedLabor } from "@/lib/labor-billing";
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
+import { lumpDrawAmount } from "@/lib/invoice-math";
 
 /** The contract every consumer reads (job overview, Nort, the progress-draw builder). */
 export type UnbilledWork = {
@@ -555,10 +556,6 @@ export async function unbilledWorkForJob(
 
 // ── The prior-billings credit on a delta draw ──────────────────────────────────────────────────
 
-/** Line sources that ARE the rows — a line carrying one of these is work itemized from the job,
- *  never a lump the customer paid up front. */
-const ROW_SOURCES = new Set(["labor", "costs", "change_orders", "quote"]);
-
 export type PriorInvoiceRow = {
   id: string;
   status: string;
@@ -586,25 +583,19 @@ export type PriorInvoiceRow = {
  * modal read low).
  *
  * Drafts and void invoices don't count (a draft isn't a bill yet); the invoice being built is
- * excluded by the caller. Floored at $0 — a job that over-credited can't grow money here.
+ * excluded by the caller. Floored at $0 — a job that over-credited can't grow money here. Which
+ * lines are lump money is lumpDrawAmount (invoice-math), the one rule the customer portal's
+ * ledger also reads when it dates a credit by the bill it takes off.
  */
 export function fixedBillingsToNet(invoices: PriorInvoiceRow[]): number {
   let fixed = 0;
   let credited = 0;
   for (const inv of invoices ?? []) {
     if (inv.status === "void" || inv.status === "draft") continue;
-    const kind = inv.invoice_kind ?? "standard";
-    const isDraw = kind !== "standard";
-    const items = inv.invoice_items ?? [];
-    const itemized = items.some((it) => ROW_SOURCES.has(it.import_source ?? ""));
-    const lump = isDraw && (kind === "deposit" || !itemized);
-    for (const it of items) {
+    fixed += lumpDrawAmount({ status: inv.status, invoice_kind: inv.invoice_kind, items: inv.invoice_items });
+    for (const it of inv.invoice_items ?? []) {
       const amt = Number(it.line_total);
-      if (!Number.isFinite(amt)) continue;
-      const src = it.import_source ?? null;
-      if (src === "draw_credit") credited += Math.abs(amt);
-      else if (isDraw && src === "milestone") fixed += amt;
-      else if (lump && !ROW_SOURCES.has(src ?? "")) fixed += amt;
+      if (Number.isFinite(amt) && it.import_source === "draw_credit") credited += Math.abs(amt);
     }
   }
   return Math.max(0, cents(fixed - credited));

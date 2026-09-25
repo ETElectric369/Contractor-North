@@ -77,9 +77,11 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "isDraft", "number", "payToken", "status", "total"]);
     expect(Object.keys(v.picks[0]).sort()).toEqual(["brand", "category", "code", "colorHex", "file", "id", "linkUrl", "location", "name", "note"]);
     expect(Object.keys(v.photos[0]).sort()).toEqual(["addedOn", "id", "url"]);
-    expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "stretches", "workTotal"]);
+    expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "split", "stretches", "workTotal"]);
+    expect(Object.keys(v.ledger.split).sort()).toEqual(["laborHours", "lines"]);
+    expect(Object.keys(v.ledger.split.lines[0]).sort()).toEqual(["amount", "group", "label"]);
     const day = v.ledger.stretches[0].days[0];
-    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "outside", "total"]);
+    expect(Object.keys(day).sort()).toEqual(["date", "hours", "inRange", "items", "labor", "outside", "split", "total"]);
     expect(Object.keys(day.labor[0]).sort()).toEqual(["amount", "hours", "invoiceNumber", "lump", "person", "rate"]);
   });
 
