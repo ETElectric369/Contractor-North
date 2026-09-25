@@ -18,6 +18,13 @@ export interface BillLine {
   category: string | null;
   /** false = the company eats this line; it never reaches the customer's invoice (0268). */
   billable: boolean;
+  /**
+   * What the job used, in dollars, when the line was a container (0272): 60 of 500 wire nuts.
+   * Set by a person on the bill, never by a reader. It rides back onto the paper when a filing is
+   * undone (Erik, audit v994 TD3: "Undo, then refile, keeps the line choices made on the bill").
+   * Absent = the whole line, which is what every read line means.
+   */
+  billed_amount?: number;
 }
 
 /** Normalize the AI's line_items into clean BillLine rows. */
@@ -37,7 +44,13 @@ export function cleanLines(raw: any): BillLine[] {
       // never re-bills the snacks. decideReceiptLine is the deterministic net under the model's
       // category: it fills a shrug when the words are plainly food, and never overrules a person.
       const { category, billable } = decideReceiptLine(description, stated, l?.billable);
-      return { description, quantity, unit_price, amount, category, billable };
+      // A part-used amount a person set on the bill (TD3), kept only where it can stand: on a line
+      // that bills, between nothing and the line itself (0272's check).
+      const used = l?.billed_amount === null || l?.billed_amount === undefined || l?.billed_amount === "" ? NaN : Number(l.billed_amount);
+      const keepsUsed = billable && Number.isFinite(used) && used >= 0 && used <= Math.abs(amount) + 0.005;
+      return keepsUsed
+        ? { description, quantity, unit_price, amount, category, billable, billed_amount: Math.round(used * 100) / 100 }
+        : { description, quantity, unit_price, amount, category, billable };
     })
     .filter((l: BillLine) => l.description.length > 0)
     .slice(0, 100);

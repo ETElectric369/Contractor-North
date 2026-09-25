@@ -36,9 +36,8 @@ import { CedPdfPicker } from "./ced-pdf-picker";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
-import { loadBooks, loadMarkContext, matchesOnBooks, rematchTray } from "@/app/(app)/organize/paperwork-core";
+import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import {
   candidateMoving,
   isOnAccountBill,
@@ -69,6 +68,9 @@ import {
 } from "./supplier-actions";
 
 export const dynamic = "force-dynamic";
+// Drop Paperwork reads a paper inside this page's server actions: a 12-page CED PDF gets the
+// reader's own time, not the platform default (audit v994, SI4).
+export const maxDuration = 60;
 
 /**
  * The bills ledger, with each receipt's lines. `billable` (0268) and the line's own id ride along
@@ -362,9 +364,11 @@ export default async function BillsPage({
   await Promise.all([signPaths(), readClaims(), signPapers()]);
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({ ...i, signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
-  const activeStatuses = ACTIVE_JOB_STATUSES as readonly string[];
+  // Open AND finished jobs (audit v994, PR1): a ticket that lands after a job is complete is still
+  // that job's cost. Never a cancelled one.
+  const paperStatuses = PAPER_JOB_STATUSES as readonly string[];
   const paperJobs = ((jobs ?? []) as { id: string; job_number: string; name: string; status?: string | null }[]).filter(
-    (j) => !j.status || activeStatuses.includes(j.status),
+    (j) => !j.status || paperStatuses.includes(j.status),
   );
   const docs = (docRows ?? []).map((d: any) => ({ ...d, signedUrl: (d.file_url && signed.get(d.file_url)) || null }));
 

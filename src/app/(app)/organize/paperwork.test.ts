@@ -39,7 +39,7 @@ vi.mock("@/app/(app)/bills/supplier-import-actions", async (orig) => {
   return { ...real, importCedInvoices: vi.fn(real.importCedInvoices) };
 });
 
-import { aiReviewItem, analyzeAndFile, billJobReceipt, fileItem, readAsCost, tiePaperwork, unarchiveItem, undoPaperwork } from "./actions";
+import { aiReviewItem, analyzeAndFile, billJobReceipt, deleteOrganizedItem, fileItem, keepAsNote, makeTaskFromPaper, readAsCost, tiePaperwork, unarchiveItem, undoPaperwork } from "./actions";
 import { addPaperwork, addSupplierDocuments, updatePaperwork } from "./paperwork-actions";
 import { insertItemizedBill } from "./paperwork-core";
 import { RETURN_ON_JOB_NEEDS_LINES } from "@/lib/paperwork";
@@ -58,7 +58,14 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
     auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     storage: {
       from: () => ({
-        remove: async () => ({ data: null, error: null }),
+        remove: async (paths: string[]) => {
+          storageLog.removed.push(...paths);
+          return { data: null, error: null };
+        },
+        copy: async (from: string, to: string) => {
+          storageLog.copied.push([from, to]);
+          return storageLog.copyError ? { data: null, error: storageLog.copyError } : { data: { path: to }, error: null };
+        },
         download: async () => ({ data: { arrayBuffer: async () => new ArrayBuffer(16) }, error: null }),
       }),
     },
@@ -100,10 +107,16 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
   };
 }
 
+/** What the fake storage was asked to copy and remove (PR4: a job photo's copy in the job folder). */
+const storageLog = { copied: [] as [string, string][], removed: [] as string[], copyError: null as unknown };
+
 let calls: Call[];
 beforeEach(() => {
   calls = [];
   ai.systems = [];
+  storageLog.copied = [];
+  storageLog.removed = [];
+  storageLog.copyError = null;
 });
 const did = (table: string, verb: string) => calls.find((c) => c.table === table && c.verb === verb);
 const lastDid = (table: string, verb: string) => [...calls].reverse().find((c) => c.table === table && c.verb === verb);
@@ -993,11 +1006,15 @@ describe("AI Suggest never takes money out of the tray", () => {
     });
   }
 
-  it("a handwritten note may still be kept, inside this org, only while it is waiting, and read back", async () => {
+  // PR2, ERIK'S CALL (audit v994): "AI Suggest on a note or kept paper PROPOSES; a person taps to
+  // confirm". It used to make the task and file the note itself.
+  const NOTE = { id: "oi-2", kind: "note", status: "needs_review", title: "call the inspector about Herringbone", summary: "call the inspector about Herringbone", category: "Note", org_id: "org-1", proposal: null };
+
+  it("keep_note on a note is a PROPOSAL kept on the row: nothing is filed, nothing leaves the tray", async () => {
     ai.parsed = { action: "keep_note", reason: "Reference." };
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { id: "oi-2", kind: "note", status: "needs_review", title: "gate code 4411", summary: "gate code 4411", org_id: "org-1", proposal: null }, error: null }],
+        "organized_items.select": [{ data: NOTE, error: null }],
         "jobs.select": [{ data: [], error: null }],
         "organizations.select": [{ data: { settings: {} }, error: null }],
         "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
@@ -1006,11 +1023,93 @@ describe("AI Suggest never takes money out of the tray", () => {
     );
     const res = await aiReviewItem("oi-2");
     expect(res.ok).toBe(true);
+    expect(res.message).toContain("Tap Keep As Note on the row");
     const u = did("organized_items", "update")!;
-    expect(u.payload).toEqual({ status: "filed" });
+    expect(u.payload.status).toBeUndefined();
+    expect(u.payload.proposal).toMatchObject({ suggestKeep: true, suggestTask: null, why: "Reference." });
     expect(u.eqs).toContainEqual(["org_id", "org-1"]);
     expect(u.eqs).toContainEqual(["status", "needs_review"]);
     expect(u.selected).toBe(true);
+  });
+
+  it("task on a note is a PROPOSAL: no task is made until a person taps Make Task", async () => {
+    ai.parsed = { action: "task", task_title: "Call the inspector", task_category: "office", reason: "Something to do." };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: NOTE, error: null }],
+        "jobs.select": [{ data: [], error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
+      },
+      calls,
+    );
+    const res = await aiReviewItem("oi-2");
+    expect(res.ok).toBe(true);
+    expect(did("tasks", "insert")).toBeUndefined();
+    expect(did("organized_items", "update")!.payload.proposal).toMatchObject({ suggestTask: { title: "Call the inspector", category: "office" } });
+  });
+
+  it("Make Task makes the task, files the note with the task's id, and Undo takes the task off and brings the note back", async () => {
+    const proposed = { ...NOTE, proposal: { suggestTask: { title: "Call the inspector", category: "office" }, why: "Something to do." } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: proposed, error: null }],
+        "tasks.insert": [{ data: { id: "task-1" }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
+      },
+      calls,
+    );
+    const made = await makeTaskFromPaper("oi-2");
+    expect(made.ok).toBe(true);
+    expect(did("tasks", "insert")!.payload).toMatchObject({ title: "Call the inspector", category: "office", status: "open" });
+    const filed = did("organized_items", "update")!;
+    expect(filed.payload).toMatchObject({ status: "filed", category: "Task", proposal: { filed: { how: "task", taskId: "task-1", category: "Note" } } });
+    expect(filed.eqs).toContainEqual(["status", "needs_review"]);
+
+    calls = [];
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...proposed, status: "filed", category: "Task", proposal: filed.payload.proposal }, error: null }],
+        "tasks.delete": [{ data: [{ id: "task-1" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
+      },
+      calls,
+    );
+    const undone = await undoPaperwork("oi-2");
+    expect(undone.ok).toBe(true);
+    expect(did("tasks", "delete")!.eqs).toContainEqual(["id", "task-1"]);
+    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", category: "Note", proposal: expect.objectContaining({ filed: null }) });
+  });
+
+  it("Make Task on a note filed meanwhile takes its own task back out: never a task and a waiting note both", async () => {
+    const proposed = { ...NOTE, proposal: { suggestTask: { title: "Call the inspector", category: "office" } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: proposed, error: null }],
+        "tasks.insert": [{ data: { id: "task-1" }, error: null }],
+        "organized_items.update": [{ data: [], error: null }],
+        "tasks.delete": [{ data: [{ id: "task-1" }], error: null }],
+      },
+      calls,
+    );
+    const made = await makeTaskFromPaper("oi-2");
+    expect(made.ok).toBe(false);
+    expect(did("tasks", "delete")).toBeDefined();
+  });
+
+  it("Keep As Note files it as a note, only while it is waiting, and a receipt is never kept as a note", async () => {
+    state.client = fakeSupabase(
+      { "organized_items.select": [{ data: { ...NOTE, proposal: { suggestKeep: true } }, error: null }], "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }] },
+      calls,
+    );
+    expect((await keepAsNote("oi-2")).ok).toBe(true);
+    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "filed", proposal: { filed: { how: "note" } } });
+
+    calls = [];
+    state.client = fakeSupabase({ "organized_items.select": [{ data: RECEIPT_ROW, error: null }] }, calls);
+    const refused = await keepAsNote("oi-1");
+    expect(refused.ok).toBe(false);
+    expect(did("organized_items", "update")).toBeUndefined();
   });
 
   it("its prompt speaks in the org's trade", async () => {
@@ -1162,7 +1261,15 @@ describe("Tie and Undo", () => {
   it("Undo under a live claim refuses in a sentence, and nothing is undone", async () => {
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046" }, error: null }],
+        "organized_items.select": [
+          { data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046" }, error: null },
+          { data: [], error: null }, // papers tied to the bill
+        ],
+        "bills.select": [
+          { data: { id: "bill-2", amount: 653.25, on_shelf: false, bill_line_items: [] }, error: null },
+          { data: [], error: null }, // copies set aside against it
+        ],
+        "documents.select": [{ data: { id: "doc-1", created_at: "2026-09-25T10:00:00Z", file_url: "org-1/organize/ced.pdf" }, error: null }],
         "bills.delete": [
           {
             data: null,
@@ -1182,7 +1289,15 @@ describe("Tie and Undo", () => {
   it("Undo of a filing takes its bill down and puts the paper back as it was read", async () => {
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046", category: "Gas & Truck" }, error: null }],
+        "organized_items.select": [
+          { data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046", category: "Gas & Truck" }, error: null },
+          { data: [], error: null },
+        ],
+        "bills.select": [
+          { data: { id: "bill-2", amount: 653.25, on_shelf: false, bill_line_items: [] }, error: null },
+          { data: [], error: null },
+        ],
+        "documents.select": [{ data: { id: "doc-1", created_at: "2026-09-25T10:00:00Z", file_url: "org-1/organize/ced.pdf" }, error: null }],
         "bills.delete": [{ data: [{ id: "bill-2" }], error: null }],
         "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
         "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
@@ -1192,6 +1307,190 @@ describe("Tie and Undo", () => {
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(true);
     expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", bill_id: null, document_id: null, category: "Bill" });
+  });
+});
+
+describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994, TD1-TD5)", () => {
+  const FILED = { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046", created_at: "2026-09-20T10:00:00Z" };
+  const OWN_DOC = { data: { id: "doc-1", created_at: "2026-09-20T10:05:00Z", file_url: "org-1/organize/ced.pdf" }, error: null };
+  const bill = (lines: any[] = [], extra: Record<string, unknown> = {}) => ({
+    data: { id: "bill-2", amount: 653.25, on_shelf: false, bill_line_items: lines, ...extra },
+    error: null,
+  });
+
+  it("TD2: a copy set aside as this bill's duplicate refuses the Undo, names the copy, and nothing is deleted", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: FILED, error: null }, { data: [], error: null }],
+        "bills.select": [
+          bill(),
+          { data: [{ id: "bill-copy", supplier: "Swigard's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Dino" } }], error: null },
+        ],
+        "documents.select": [OWN_DOC],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("The copy on J-044 Dino (Swigard's, $95.27, 2026-09-10) was set aside as a duplicate of this bill");
+    expect(res.error).toContain("Change Your Mind");
+    expect(res.error).toContain("Nothing was undone.");
+    expect(did("bills", "delete")).toBeUndefined();
+    expect(did("documents", "delete")).toBeUndefined();
+    expect(did("organized_items", "update")).toBeUndefined();
+  });
+
+  it("TD2: papers tied to the bill go back to the tray with it, named, instead of staying filed over nothing", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: FILED, error: null },
+          { data: [{ id: "oi-tied", title: "CED counter copy", vendor: "CED", proposal: { po: "X", filed: { how: "tie" } } }], error: null },
+        ],
+        "bills.select": [bill(), { data: [], error: null }],
+        "documents.select": [OWN_DOC],
+        "bills.delete": [{ data: [{ id: "bill-2" }], error: null }],
+        "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
+        "organized_items.update": [
+          { data: [{ id: "oi-tied" }], error: null },
+          { data: [{ id: "oi-9" }], error: null },
+        ],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain('"CED counter copy" was tied to that bill and is back in the tray too.');
+    const tiedWrite = all("organized_items", "update")[0];
+    expect(tiedWrite.payload).toMatchObject({ status: "needs_review", tied_bill_id: null, job_id: null, proposal: { po: "X", filed: null } });
+    expect(tiedWrite.eqs).toContainEqual(["org_id", "org-1"]);
+    expect(tiedWrite.selected).toBe(true);
+  });
+
+  it("TD3: the choices made on the bill (a line switched off, a box part-used) ride back onto the paper, and File It carries them again", async () => {
+    const lines = [
+      { description: "Klein 11-in-1 driver", quantity: 1, unit_price: 24.97, amount: 24.97, category: "Tools", billable: false, billed_amount: null, is_stock: false, sort_order: 0 },
+      { description: "Wire nuts, box of 500", quantity: 1, unit_price: 60, amount: 60, category: "Materials", billable: true, billed_amount: 7.2, is_stock: false, sort_order: 1 },
+    ];
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: FILED, error: null }, { data: [], error: null }],
+        "bills.select": [bill(lines, { amount: 84.97 }), { data: [], error: null }],
+        "documents.select": [OWN_DOC],
+        "bills.delete": [{ data: [{ id: "bill-2" }], error: null }],
+        "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(true);
+    const back = did("organized_items", "update")!.payload;
+    expect(back.amount).toBe(84.97);
+    expect(back.line_items).toEqual([
+      expect.objectContaining({ description: "Klein 11-in-1 driver", billable: false }),
+      expect.objectContaining({ description: "Wire nuts, box of 500", billable: true, billed_amount: 7.2 }),
+    ]);
+    expect(back.line_items[0].billed_amount).toBeUndefined();
+    expect(res.message).toContain("The choices made on the bill (1 line switched off, 1 part-used) stay with it");
+
+    // ...and filed again, the bill's lines carry them.
+    calls = [];
+    const again = { ...PAPER, amount: 84.97, line_items: back.line_items };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: again, error: null }],
+        ...books([]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }, { data: [{ id: "oi-9" }], error: null }],
+        "documents.insert": [{ data: { id: "doc-2" }, error: null }],
+        "bills.insert": [{ data: { id: "bill-3" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "l1" }, { id: "l2" }], error: null }],
+      },
+      calls,
+    );
+    const filed = await fileItem("oi-9", { type: "job", jobId: "job-046" });
+    expect(filed.ok).toBe(true);
+    const written = did("bill_line_items", "insert")!.payload;
+    expect(written[0]).toMatchObject({ billable: false });
+    expect(written[0].billed_amount).toBeUndefined();
+    expect(written[1]).toMatchObject({ billable: true, billed_amount: 7.2 });
+  });
+
+  it("TD3: a line with a roll on the shop shelf refuses the Undo, and points at Take It Off The Shelf", async () => {
+    const lines = [{ description: "12/2 Romex, 250 ft", quantity: 1, unit_price: 180, amount: 180, category: "Materials", billable: true, billed_amount: 36, is_stock: true, sort_order: 0 }];
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: FILED, error: null }, { data: [], error: null }],
+        "bills.select": [bill(lines), { data: [], error: null }],
+        "documents.select": [OWN_DOC],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("(12/2 Romex, 250 ft) is on the shop shelf");
+    expect(res.error).toContain("Take It Off The Shelf");
+    expect(did("bills", "delete")).toBeUndefined();
+  });
+
+  it("TD1: Undo on a receipt recorded as a cost on the job page takes the bill down and NEVER the job's own receipt", async () => {
+    const LINK = { ...FILED, source: "organize", created_at: "2026-09-20T10:00:00Z", file_url: "org-1/job-046/1780000000000-swigards.jpg" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: LINK, error: null }, { data: [], error: null }],
+        "bills.select": [bill(), { data: [], error: null }],
+        // The job's own upload: older than the link row, so the filing never made it.
+        "documents.select": [{ data: { id: "doc-1", created_at: "2026-09-18T08:00:00Z", file_url: LINK.file_url }, error: null }],
+        "bills.delete": [{ data: [{ id: "bill-2" }], error: null }],
+        "organized_items.delete": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(true);
+    expect(did("documents", "delete")).toBeUndefined();
+    expect(did("organized_items", "update")).toBeUndefined();
+    expect(did("organized_items", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
+    expect(res.message).toContain("The receipt stays on the job; press Record as Cost there");
+  });
+
+  it("TD1: a link row written by Record as Cost says so (source 'job'), whatever its dates", async () => {
+    state.client = fakeSupabase(
+      {
+        "documents.select": [{ data: { id: "doc-9", name: "ced-467.jpg", file_url: "org-1/job-046/ced-467.jpg", size_bytes: 1000, job_id: "job-046" }, error: null }],
+        "organized_items.select": [{ data: null, error: null }],
+        "bills.insert": [{ data: { id: "bill-new" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "l1" }], error: null }],
+        "organized_items.insert": [{ data: [{ id: "oi-new" }], error: null }],
+      },
+      calls,
+    );
+    ai.parsed = { vendor: "CED", amount: 12, line_items: [{ description: "Wire", amount: 12 }], confidence: "high" };
+    const res = await billJobReceipt("doc-9");
+    expect(res.ok).toBe(true);
+    expect(did("organized_items", "insert")!.payload).toMatchObject({ source: "job", document_id: "doc-9" });
+  });
+
+  it("TD4: Delete takes off the CED documents the paper added, inside this org, and keeps the ones something points at", async () => {
+    const CEDP = { ...PAPER, status: "filed", doc_type: "supplier_documents", proposal: { ced: { numbers: ["8802-1"], total: 1, kinds: ["invoice"], text: "x", name: "a.pdf" }, filed: { how: "supplier_documents", landed: ["8802-1", "8802-2"] } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: CEDP, error: null },
+          { data: [], error: null }, // papers tied to them
+        ],
+        "supplier_invoices.select": [{ data: [{ id: "si-1", invoice_number: "8802-1", job_id: null }, { id: "si-2", invoice_number: "8802-2", job_id: null }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [{ supplier_invoice_id: "si-2" }], error: null }],
+        "supplier_invoices.delete": [{ data: [{ id: "si-1" }], error: null }],
+        "organized_items.delete": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await deleteOrganizedItem("oi-9");
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
+    expect(res.message).toContain("8802-2 stayed on the CED documents list");
+    expect(did("organized_items", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
 });
 
@@ -1232,7 +1531,12 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     );
     const res = await fileItem("oi-p", { type: "photo", jobId: "job-046" });
     expect(res.ok).toBe(true);
-    expect(did("documents", "insert")!.payload).toMatchObject({ job_id: "job-046", category: "Photo", kind: "other", file_url: "org-1/organize/panel.jpg" });
+    // IN THE JOB'S OWN FOLDER (audit v994, PR4): the tech on the job can see it and Show On Portal
+    // takes it. The paper keeps its organize original for the tray.
+    expect(storageLog.copied).toHaveLength(1);
+    expect(storageLog.copied[0][0]).toBe("org-1/organize/panel.jpg");
+    expect(storageLog.copied[0][1]).toMatch(/^org-1\/job-046\/\d+-panel\.jpg$/);
+    expect(did("documents", "insert")!.payload).toMatchObject({ job_id: "job-046", category: "Photo", kind: "other", file_url: storageLog.copied[0][1] });
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("bill_line_items", "insert")).toBeUndefined();
     expect(lastDid("organized_items", "update")!.payload).toMatchObject({
@@ -1260,6 +1564,27 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/photo didn't save/);
     expect(lastDid("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", document_id: null });
+    // The copy this press put in the job's folder comes back out with it.
+    expect(storageLog.removed).toEqual([storageLog.copied[0][1]]);
+  });
+
+  it("a copy that won't land in the job's folder puts the picture back, with no document on the job", async () => {
+    storageLog.copyError = { message: "denied" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: PICTURE, error: null }],
+        "organized_items.update": [
+          { data: [{ id: "oi-p" }], error: null },
+          { data: [{ id: "oi-p" }], error: null },
+        ],
+      },
+      calls,
+    );
+    const res = await fileItem("oi-p", { type: "photo", jobId: "job-046" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/couldn't be copied onto the job/);
+    expect(did("documents", "insert")).toBeUndefined();
+    expect(lastDid("organized_items", "update")!.payload).toMatchObject({ status: "needs_review" });
   });
 
   it("a bill or receipt can never be filed as a job photo: refused before anything is written", async () => {
@@ -1278,6 +1603,7 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
         "organized_items.select": [
           { data: { ...PICTURE, status: "filed", job_id: "job-046", document_id: "doc-p", proposal: { picture: true, filed: { how: "photo" } } }, error: null },
         ],
+        "documents.select": [{ data: { id: "doc-p", created_at: "2026-09-25T10:00:00Z", file_url: "org-1/job-046/1790000000000-panel.jpg" }, error: null }],
         "documents.delete": [{ data: [{ id: "doc-p" }], error: null }],
         "organized_items.update": [{ data: [{ id: "oi-p" }], error: null }],
       },
@@ -1286,6 +1612,8 @@ describe("a picture: What is this? (Erik, 2026-09-24)", () => {
     const res = await undoPaperwork("oi-p");
     expect(res.ok).toBe(true);
     expect(did("bills", "delete")).toBeUndefined();
+    // The job-folder copy comes off with its row; the organize original stays for the tray.
+    expect(storageLog.removed).toEqual(["org-1/job-046/1790000000000-panel.jpg"]);
     expect(did("organized_items", "update")!.payload).toMatchObject({
       status: "needs_review",
       document_id: null,
@@ -1465,6 +1793,20 @@ describe("Drop Paperwork: the row a file becomes", () => {
     const row = did("organized_items", "insert")!.payload;
     expect(row).toMatchObject({ doc_type: "supplier_documents", doc_number: "8802-1101363", amount: 162.45, source: "bills_drop", status: "needs_review" });
     expect(row.proposal.ced.numbers).toEqual(["8802-1101363"]);
+    expect(ai.systems).toHaveLength(0);
+  });
+
+  it("PR3: the same CED PDF dropped on ORGANIZE is read from its own text too, and says which door it came in by", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: [], error: null }],
+        "organized_items.insert": [{ data: { id: "oi-6" }, error: null }],
+      },
+      calls,
+    );
+    const res = await addPaperwork({ ...input, source: "organize", pdfText: TIMBER_CREEK });
+    expect(res).toMatchObject({ ok: true, id: "oi-6", needsRead: false });
+    expect(did("organized_items", "insert")!.payload).toMatchObject({ doc_type: "supplier_documents", source: "organize", amount: 162.45 });
     expect(ai.systems).toHaveLength(0);
   });
 
@@ -1805,5 +2147,135 @@ describe("loadBooks reads the bills that can match, in SQL, newest first", () =>
     expect(bills.ops).toContainEqual(["or", "bill_number.not.is.null,supplier_invoice_number.not.is.null"]);
     expect(bills.ops).toContainEqual(["is", "superseded_by_bill_id", null]);
     expect(bills.ops).toContainEqual(["order", "created_at", { ascending: false }]);
+  });
+});
+
+describe("audit v994 wave 2: the paperwork doors say what they did", () => {
+  it("DB5: a bill carrying the same long number under another spelling WARNS and never refuses; the bill says a person filed it anyway", async () => {
+    const elsewhere = { ...BOOKED_BILL, supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" };
+    const paper = { ...PAPER, vendor: "Consolidated Electrical Distributors (CED)" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: paper, error: null }],
+        ...books([elsewhere]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }, { data: [{ id: "oi-9" }], error: null }],
+        "documents.insert": [{ data: { id: "doc-2" }, error: null }],
+        "bills.insert": [{ data: { id: "bill-3" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "l1" }], error: null }],
+      },
+      calls,
+    );
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
+    expect(res.ok).toBe(true);
+    const notes = String(did("bills", "insert")!.payload.notes);
+    expect(notes).toContain("A person filed this with a bill carrying the same number under another supplier spelling on the books: Consolidated Electrical Dist. #8802-1108330");
+    // Never decides the account for them: the paper's spelling is on no account, so none is written.
+    expect(did("bills", "insert")!.payload.supplier_account_id).toBeUndefined();
+  });
+
+  it("DB5: Same Purchase: Tie Them ties to a bill the warning found", async () => {
+    const elsewhere = { ...BOOKED_BILL, supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...PAPER, vendor: "Consolidated Electrical Distributors (CED)" }, error: null },
+          { data: [], error: null },
+        ],
+        ...books([elsewhere]),
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await tiePaperwork("oi-9", { billId: "bill-1" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toMatch(/^Tied\. Filed against Consolidated Electrical Dist\. #8802-1108330/);
+    expect(res.message).not.toContain("spelled another way");
+    expect(did("organized_items", "update")!.payload).toMatchObject({ tied_bill_id: "bill-1", status: "filed" });
+  });
+
+  it("MR6: a total that doesn't match its lines is written into the bill's notes, never corrected and never refused", async () => {
+    const paper = { ...PAPER, doc_number: null, amount: 1284, line_items: [{ description: "Breakers", quantity: 1, unit_price: 684, amount: 684, category: "Materials" }] };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: paper, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }, { data: [{ id: "oi-9" }], error: null }],
+        "documents.insert": [{ data: { id: "doc-2" }, error: null }],
+        "bills.insert": [{ data: { id: "bill-3" }, error: null }],
+        "bill_line_items.insert": [{ data: [{ id: "l1" }], error: null }],
+      },
+      calls,
+    );
+    const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
+    expect(res.ok).toBe(true);
+    const bill = did("bills", "insert")!.payload;
+    expect(bill.amount).toBe(1284);
+    expect(String(bill.notes)).toContain("add up to $684.00, $600.00 less than the $1284.00 total");
+  });
+
+  it("TD6: a read that lands after the paper was filed changes nothing, and says so", async () => {
+    ai.parsed = { paper_type: "receipt", kind: "receipt", title: "Home Depot", vendor: "Home Depot", amount: 12, confidence: "high" };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { id: "oi-r", title: "hd.jpg", file_url: "org-1/organize/hd.jpg", status: "needs_review" }, error: null }],
+        "jobs.select": [{ data: [], error: null }],
+        "organizations.select": [{ data: { settings: {} }, error: null }],
+        // Filed from another screen during the read: the guarded write matches nothing.
+        "organized_items.update": [{ data: [], error: null }],
+      },
+      calls,
+    );
+    const { readPaperworkItem } = await import("./actions");
+    const res = await readPaperworkItem("oi-r");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("filed while it was being read");
+    expect(did("organized_items", "update")!.eqs).toContainEqual(["status", "needs_review"]);
+  });
+
+  it("TD5: deleting a tray-filed bill from Bills puts its paper back, with the copy on the job taken off", async () => {
+    const { deleteBill } = await import("@/app/(app)/jobs/actions");
+    state.client = fakeSupabase(
+      {
+        "bills.select": [
+          { data: { id: "bill-2", amount: 653.25, on_shelf: false, bill_line_items: [] }, error: null },
+          { data: [], error: null },
+        ],
+        "organized_items.select": [
+          { data: [], error: null }, // tied papers
+          {
+            data: [{ id: "oi-9", title: "CED — $653.25", source: "bills_drop", created_at: "2026-09-20T10:00:00Z", document_id: "doc-1", file_url: "org-1/organize/ced.pdf", doc_type: "bill", category: "Bill", kind: "receipt", proposal: { po: "X", filed: { how: "bill" } } }],
+            error: null,
+          },
+        ],
+        "bills.delete": [{ data: [{ id: "bill-2" }], error: null }],
+        "documents.select": [{ data: { id: "doc-1", created_at: "2026-09-20T10:05:00Z", file_url: "org-1/organize/ced.pdf" }, error: null }],
+        "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await deleteBill("bill-2", "job-046");
+    expect(res.ok).toBe(true);
+    expect(res.warning).toContain('Its paper, "CED — $653.25", is back in Sort These');
+    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", bill_id: null, document_id: null, job_id: null, category: "Bill", proposal: { po: "X", filed: null } });
+    expect(did("documents", "delete")).toBeDefined();
+  });
+
+  it("TD2 at the trash: a bill with a copy set aside against it refuses to delete, and names the copy", async () => {
+    const { deleteBill } = await import("@/app/(app)/jobs/actions");
+    state.client = fakeSupabase(
+      {
+        "bills.select": [
+          { data: { id: "bill-2", amount: 95.27, on_shelf: false, bill_line_items: [] }, error: null },
+          { data: [{ id: "bill-c", supplier: "Swigard's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Dino" } }], error: null },
+        ],
+        "organized_items.select": [{ data: [], error: null }],
+      },
+      calls,
+    );
+    const res = await deleteBill("bill-2", "job-046");
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("The copy on J-044 Dino");
+    expect(res.error).toContain("Nothing was deleted.");
+    expect(did("bills", "delete")).toBeUndefined();
   });
 });

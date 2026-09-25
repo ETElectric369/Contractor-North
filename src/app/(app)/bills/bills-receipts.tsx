@@ -365,7 +365,7 @@ export function BillsReceipts({
                       <Pencil className="h-4 w-4" />
                     </button>
                     <button
-                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { const res = await deleteBill(b.id, b.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; } toast("Bill deleted", "success"); router.refresh(); }); }}
+                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { const res = await deleteBill(b.id, b.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; } toast(res.warning ?? "Bill deleted", "success"); router.refresh(); }); }}
                       className="text-slate-400 hover:text-red-600"
                       title="Delete"
                     >
