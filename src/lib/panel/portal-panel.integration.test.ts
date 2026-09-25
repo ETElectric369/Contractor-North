@@ -230,7 +230,9 @@ d("the panel on the customer's page (0335)", { timeout: 30_000 }, () => {
     try {
       await setShown(panelId, true);
       await setShown(otherPanelId, true);
-      expect((await view(tokenA, jobA)).panels.map((p: { name: string }) => p.name)).toEqual(["Main Panel", "Garage Sub"]);
+      // Both panels were made in this one transaction, so they share created_at and their order
+      // falls to the random id: the test asks WHICH panels show, not in what order.
+      expect((await view(tokenA, jobA)).panels.map((p: { name: string }) => p.name).sort()).toEqual(["Garage Sub", "Main Panel"]);
       await setShown(otherPanelId, false);
       expect((await view(tokenA, jobA)).panels.map((p: { name: string }) => p.name)).toEqual(["Main Panel"]);
       await as(staffId);
