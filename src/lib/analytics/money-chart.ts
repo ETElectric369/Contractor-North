@@ -14,7 +14,7 @@ import type { OwnerMoney } from "@/lib/analytics/owner-money";
 
 // ── Series ───────────────────────────────────────────────────────────────────
 
-export type MoneySeriesKey = "collected" | "left" | "materials" | "crewPay" | "mileage" | "business";
+export type MoneySeriesKey = "collected" | "left" | "materials" | "crewPay" | "mileage" | "business" | "shelf" | "lost";
 
 export type MoneySeries = {
   key: MoneySeriesKey;
@@ -37,8 +37,11 @@ const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label"> & { labe
   crewPay: { label: "Crew Pay", fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
   mileage: { label: "Crew Mileage", fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
   business: { label: "Business Costs", fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
+  // Shop stock (0303): offered only in a year that has some, like every cost series.
+  shelf: { label: "Put On The Shelf", fill: "fill-teal-600", swatch: "bg-teal-600", defaultOn: false },
+  lost: { label: "Shop Stock Lost", fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
 };
-export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "left", "materials", "crewPay", "mileage", "business"];
+export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "left", "materials", "crewPay", "mileage", "business", "shelf", "lost"];
 
 export type MoneyChartMonth = { month: string; values: Partial<Record<MoneySeriesKey, number>> };
 export type MoneyChartData = { series: MoneySeries[]; months: MoneyChartMonth[] };
@@ -75,6 +78,10 @@ export function buildMoneyChartData(money: OwnerMoney, opts: { ownerFigures: boo
         return m.crewMileagePaid;
       case "business":
         return m.businessCostsTotal;
+      case "shelf":
+        return m.putOnShelf;
+      case "lost":
+        return m.shopStockLost;
     }
   };
   // What decides "nothing happened" is every money line the viewer may see. For the owner that is

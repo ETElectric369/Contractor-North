@@ -49,7 +49,7 @@ const laborEntry = (jobId: string, hours: number, rate: number) => ({
 });
 // a payment of `amount` on `jobId`'s invoice (THE cash definition — not invoices.amount_paid)
 const pay = (jobId: string, amount: number, status = "paid") => ({ amount, invoices: { job_id: jobId, status } });
-const empty = { jobs: [], payments: [], pos: [], bills: [], jobRefunds: [], entries: [], pettyCash: [] };
+const empty = { jobs: [], payments: [], pos: [], bills: [], jobRefunds: [], entries: [], pettyCash: [], shelfNet: [] };
 
 describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort)", () => {
   it("profit = revenue collected − (labor at pay rate + materials)", () => {
@@ -342,6 +342,37 @@ describe("computeJobProfitRows — petty cash finally counts", () => {
       pettyCash: [{ job_id: null, amount: 379.35, kind: "expense" }],
     });
     expect(rows[0].cost).toBe(0);
+  });
+});
+
+/**
+ * THE SHELF (Shop Stock, 0303): job material cost = bills - off_shelf + from_shelf, read from the
+ * job_shelf_net view. The numbers are Herringbone's: the 8/19 12/2 coil ($180.17 with its tax
+ * share) goes on the shelf from J-011, and 60 ft of it ($43.24) goes onto another job.
+ */
+describe("computeJobProfitRows — cost follows the piece", () => {
+  it("no shelf rows: every job costs exactly its bills (the Phase 1 zero-lot identity)", () => {
+    const base = { ...empty, jobs: [job("A")], payments: [pay("A", 1000)], bills: [{ job_id: "A", amount: 199.48 }] };
+    expect(computeJobProfitRows(base)[0].cost).toBe(199.48);
+    expect(computeJobProfitRows({ ...base, shelfNet: [{ job_id: "A", off_shelf: 0, from_shelf: 0 }] })[0].cost).toBe(199.48);
+  });
+
+  it("a roll put on the shelf comes off the job that bought it; a piece taken lands on the job that took it", () => {
+    const rows = computeJobProfitRows({
+      ...empty,
+      jobs: [job("H"), job("B")],
+      payments: [pay("H", 1000), pay("B", 500)],
+      bills: [{ job_id: "H", amount: 199.48 }],
+      shelfNet: [
+        { job_id: "H", off_shelf: "180.17", from_shelf: "0.00" },
+        { job_id: "B", off_shelf: "0.00", from_shelf: "43.24" },
+      ],
+    });
+    const h = rows.find((r) => r.id === "H")!;
+    const b = rows.find((r) => r.id === "B")!;
+    expect(Math.round(h.cost * 100) / 100).toBe(19.31);
+    expect(b.cost).toBe(43.24);
+    expect(b.profit).toBe(456.76);
   });
 });
 

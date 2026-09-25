@@ -101,3 +101,51 @@ describe("editedRemainderDrift — the tax rows his markup change left behind", 
     expect(billItemisation(CED, LINES[CED.id], 30).some((r) => r.import_key === remainderKey(CED.id))).toBe(true);
   });
 });
+
+/**
+ * THE WALDOW BOX ON PAID INV-069 (Shop Stock plan, Phase 4's cleanup, tested in Phase 1).
+ *
+ * Bill c0535cdb, $653.25 of CED on J-046, is claimed by eight lines of INV-069, which Jason has
+ * paid. Erik typed the Twister row down to 60 nuts at 27 cents by hand (edited), and the invoice's
+ * "Supplies & tax" row was never touched. The cleanup sets the Twister line's billed_amount to the
+ * 60 nuts so the receipt agrees with the paper he already sent, and the other 440 go on the shelf.
+ * That must not wake a drift banner on the paid invoice: its remainder row is not an edited row,
+ * so there is nothing of his to be left behind, whatever the itemisation now says.
+ */
+describe("editedRemainderDrift: fixing the Waldow line stays quiet on paid INV-069", () => {
+  const WALDOW = { id: "c0535cdb-e485-4679-8e56-fd0918fd728b", supplier: "Contractors Electrical Distributors", amount: 653.25 };
+  const lines = (twisterBilled: number | null): BillLine[] => [
+    { id: "90cf614c", description: "ITE PN1632L1125C 125A Plug On Neutral Load Center", quantity: 1, amount: 119.26, category: "Electrical" },
+    { id: "374b0d23", description: "3M 33+SUPER3/4X76FT 3/4 x 76 33+ Super Vinyl Tape", quantity: 2, amount: 20.6, category: "Electrical" },
+    { id: "24bfd5db", description: "IDEAL 30641 500/5000 Twister 341-Tan", quantity: 500, amount: 77.39, category: "Electrical", billed_amount: twisterBilled },
+    { id: "ox", description: "IDEAL 30030 8-Oz Anti Oxidant Comp", quantity: 1, amount: 2.95, category: "Electrical" },
+    { id: "eb753e54", description: "SQD HOM120 Miniature Circuit", quantity: 3, amount: 23.13, category: "Electrical" },
+    { id: "266c063c", description: "SQD HOMT1515 Miniature Circuit", quantity: 4, amount: 75.6, category: "Electrical" },
+    { id: "1c3216e4", description: "SQD HOMT2020 Miniature Circuit", quantity: 4, amount: 75.6, category: "Electrical" },
+    { id: "99fb20d5", description: "SQD HOMT230250 Miniature Ckt Brkr", quantity: 2, amount: 94.48, category: "Electrical" },
+    { id: "wc", description: "WIRE CONNECTOR (30641J)", quantity: 500, amount: 104.85, category: "Electrical", billable: false },
+    { id: "tx", description: "Sales Tax (Invoice 8802-1108330)", quantity: 1, amount: 59.39, category: "Tax" },
+  ];
+  /** INV-069's rows for this bill, as they sit in the books: the Twister row edited, the rest not. */
+  const inv069 = [
+    { import_key: "bli:90cf614c", line_total: 134.16, edited: false },
+    { import_key: "bli:374b0d23", line_total: 20.6, edited: false },
+    { import_key: "bli:24bfd5db", line_total: 16.2, edited: true },
+    { import_key: "bli:eb753e54", line_total: 23.13, edited: false },
+    { import_key: "bli:266c063c", line_total: 75.6, edited: false },
+    { import_key: "bli:1c3216e4", line_total: 75.6, edited: false },
+    { import_key: "bli:99fb20d5", line_total: 94.48, edited: false },
+    { import_key: remainderKey(WALDOW.id), line_total: 0.46, edited: false },
+  ];
+  const offered = (twisterBilled: number | null) =>
+    billItemisation(WALDOW, lines(twisterBilled), 25).map((r) => ({ ...r, source_ids: [WALDOW.id] }));
+
+  it("says nothing before the fix, and nothing after it (60 of 500 nuts = $9.29 billed)", () => {
+    expect(editedRemainderDrift([WALDOW], offered(null), inv069)).toEqual([]);
+    expect(editedRemainderDrift([WALDOW], offered(9.29), inv069)).toEqual([]);
+  });
+
+  it("and says nothing on any other invoice, which is never offered a bill INV-069 holds", () => {
+    expect(editedRemainderDrift([WALDOW], [], inv069)).toEqual([]);
+  });
+});

@@ -227,12 +227,6 @@ export async function receiveItem(
   receivedQty: number,
 ): Promise<Result> {
   const supabase = await createClient();
-  const { data: item } = await supabase
-    .from("purchase_order_items")
-    .select("received_qty, part_number, description, unit, unit_cost")
-    .eq("id", itemId)
-    .maybeSingle();
-  const oldQty = Number(item?.received_qty ?? 0);
   const newQty = Math.max(0, receivedQty);
   const { error } = await supabase
     .from("purchase_order_items")
@@ -240,33 +234,11 @@ export async function receiveItem(
     .eq("id", itemId);
   if (error) return { ok: false, error: dbError(error) };
 
-  // Received goods flow into stock: add the delta to the matching inventory item
-  // (by part number), creating it if it's new. Lines with no part number are
-  // skipped (nothing reliable to match on).
-  const delta = newQty - oldQty;
-  const pn = item?.part_number?.trim();
-  if (delta !== 0 && pn) {
-    const { data: inv } = await supabase
-      .from("inventory_items")
-      .select("id, quantity_on_hand")
-      .eq("part_number", pn)
-      .limit(1)
-      .maybeSingle();
-    if (inv) {
-      await supabase
-        .from("inventory_items")
-        .update({ quantity_on_hand: Number(inv.quantity_on_hand) + delta, updated_at: new Date().toISOString() })
-        .eq("id", inv.id);
-    } else if (delta > 0) {
-      await supabase.from("inventory_items").insert({
-        name: item?.description || pn,
-        part_number: pn,
-        unit: item?.unit || "ea",
-        quantity_on_hand: delta,
-        unit_cost: item?.unit_cost ?? null,
-      });
-    }
-  }
+  // RECEIVED GOODS NO LONGER FLOW INTO THE SHELF (Shop Stock, 0303). This added the delta to an
+  // inventory item's count, unchecked: a job's delivery landed on the shop shelf as if it were the
+  // van's, at no cost, and any error was dropped. On-hand is the shelf's own record now (rolls put
+  // on it, pieces taken off), and a PO for a job is that job's material. What a person decides is
+  // stock goes on the shelf from its receipt line, with what it cost.
 
   // Recompute status: received if every line is fully received, else partial.
   const { data: items } = await supabase
@@ -285,7 +257,6 @@ export async function receiveItem(
 
   revalidatePath(`/purchasing/${poId}`);
   revalidatePath("/purchasing");
-  revalidatePath("/inventory"); // received goods flowed into stock — refresh the inventory board
   return { ok: true };
 }
 

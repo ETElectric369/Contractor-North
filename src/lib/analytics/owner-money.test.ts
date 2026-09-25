@@ -75,10 +75,17 @@ const base = (): OwnerMoneyInputs => ({
 
 const cents = (n: number) => Math.round(n * 100);
 const bizTotal = (f: OwnerMoneyFigures) => BUSINESS_COST_BUCKETS.reduce((s, b) => s + cents(f.businessCosts[b]), 0);
-/** THE INVARIANT, in cents: received = materials + crew pay + mileage + business costs + left. */
+/** THE INVARIANT, in cents: received = materials + crew pay + mileage + business costs
+ *  + put on the shelf + shop stock lost (0303) + left. */
 const holds = (f: OwnerMoneyFigures) =>
   cents(f.received) ===
-  cents(f.materialsAndBills) + cents(f.crewPay) + cents(f.crewMileagePaid) + cents(f.businessCostsTotal) + cents(f.left);
+  cents(f.materialsAndBills) +
+    cents(f.crewPay) +
+    cents(f.crewMileagePaid) +
+    cents(f.businessCostsTotal) +
+    cents(f.putOnShelf) +
+    cents(f.shopStockLost) +
+    cents(f.left);
 
 /** A realistic ET-shaped year, small enough to check by hand. */
 const yearInputs = (): OwnerMoneyInputs => ({
@@ -116,6 +123,82 @@ const yearInputs = (): OwnerMoneyInputs => ({
     shift("j-sep", JIMMY, "2026-09-03", 7),
   ],
   runs: [{ profile_id: BRIAN, kind: "mileage", period_start: "2026-08-03", period_end: "2026-08-17", gross: 0, mileage_amount: 62.5, created_at: "2026-08-20T18:00:00Z" }],
+});
+
+/**
+ * SHOP STOCK (0303; Erik's decision 1, 2026-09-24: "the month i buy it"). A ticket bought for the
+ * shelf, and the part of a job's ticket that went on the shelf, count as Put On The Shelf in the
+ * month the ticket is dated - never in Materials & Bills or a business bucket. A piece taken off
+ * the shelf later moves cost onto a job's profit only; it never adds to a month again. So filing a
+ * STOCK ticket leaves the month's total cost unchanged, and the formula reconciles to the cent.
+ */
+describe("computeOwnerMoney: the shelf counts in the month it is bought", () => {
+  const AUG = ownerMoneyWindow("2026-08", TODAY);
+  const stockTicket = { id: "s1", job_id: null, amount: 199.48, bill_date: "2026-08-19", created_at: "2026-08-19T18:00:00Z", category: "Shop Stock", status: "unpaid" };
+  const jobTicket = { id: "h1", job_id: "J-011", amount: 199.48, bill_date: "2026-08-19", created_at: "2026-08-19T18:00:00Z", category: "Receipt", status: "unpaid" };
+  const inputs = (bills: any[], shelfLots: any[] = []): OwnerMoneyInputs => ({
+    ...base(),
+    payments: [payment(1000, "2026-08-20T18:00:00Z")],
+    bills,
+    shelfLots,
+  });
+  const costOf = (f: OwnerMoneyFigures) =>
+    cents(f.materialsAndBills) + cents(f.businessCostsTotal) + cents(f.putOnShelf) + cents(f.shopStockLost);
+
+  it("with no lots and no shelf tickets, nothing moves: every figure is what it was", () => {
+    const m = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
+    expect(m.totals.materialsAndBills).toBe(199.48);
+    expect(m.totals.putOnShelf).toBe(0);
+    expect(m.totals.shopStockLost).toBe(0);
+    expect(m.onShelfNow).toBe(0);
+    expect(m.totals.left).toBe(800.52);
+    expect(holds(m.totals)).toBe(true);
+  });
+
+  it("a STOCK ticket is Put On The Shelf in its month, never a business cost, and the month's total cost is unchanged", () => {
+    const asJob = computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY);
+    const lots = [{ lot_id: "L1", bill_id: "s1", cost: 180.17, cost_left: 180.17, lost_cost: 0, live: true }];
+    const asStock = computeOwnerMoney(inputs([{ ...stockTicket, on_shelf: true }], lots), AUG, TZ, TODAY);
+    expect(asStock.totals.putOnShelf).toBe(199.48);
+    expect(asStock.totals.businessCostsTotal).toBe(0);
+    expect(asStock.totals.businessCosts.Other).toBe(0);
+    expect(asStock.totals.materialsAndBills).toBe(0);
+    expect(costOf(asStock.totals)).toBe(costOf(asJob.totals));
+    expect(asStock.totals.left).toBe(asJob.totals.left);
+    expect(asStock.onShelfNow).toBe(180.17);
+    expect(holds(asStock.totals)).toBe(true);
+    for (const x of asStock.months) expect(holds(x)).toBe(true);
+  });
+
+  it("the shelf's part of a JOB ticket leaves Materials & Bills for Put On The Shelf, same month, same total", () => {
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 136.93, lost_cost: 0, live: true }];
+    const m = computeOwnerMoney(inputs([jobTicket], lots), AUG, TZ, TODAY);
+    expect(m.totals.materialsAndBills).toBe(19.31);
+    expect(m.totals.putOnShelf).toBe(180.17);
+    expect(m.totals.left).toBe(800.52); // a take ($43.24 onto another job) never adds to a month
+    expect(m.onShelfNow).toBe(136.93);
+    expect(holds(m.totals)).toBe(true);
+  });
+
+  it("a write-off is Shop Stock Lost in the roll's month; the draw does not move a cent", () => {
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, lost_cost: 36.93, live: true }];
+    const m = computeOwnerMoney(inputs([jobTicket], lots), AUG, TZ, TODAY);
+    expect(m.totals.putOnShelf).toBe(143.24);
+    expect(m.totals.shopStockLost).toBe(36.93);
+    expect(m.totals.left).toBe(800.52);
+    expect(holds(m.totals)).toBe(true);
+  });
+
+  it("a roll taken off the shelf (unshelved) is the job's again, and an opening count is on the shelf but never a month's cost", () => {
+    const lots = [
+      { lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 180.17, lost_cost: 0, live: false },
+      { lot_id: "L2", bill_id: null, cost: 40, cost_left: 40, lost_cost: 0, live: true },
+    ];
+    const m = computeOwnerMoney(inputs([jobTicket], lots), AUG, TZ, TODAY);
+    expect(m.totals.materialsAndBills).toBe(199.48);
+    expect(m.totals.putOnShelf).toBe(0);
+    expect(m.onShelfNow).toBe(40);
+  });
 });
 
 describe("computeOwnerMoney: what is left for the owner", () => {

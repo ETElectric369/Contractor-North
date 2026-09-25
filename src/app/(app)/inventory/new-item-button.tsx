@@ -67,20 +67,12 @@ export function NewItemButton() {
               <Input id="category" name="category" placeholder="Wire, Breakers…" />
             </div>
             <div>
-              <Label htmlFor="quantity_on_hand">On hand</Label>
-              <Input id="quantity_on_hand" name="quantity_on_hand" type="number" step="any" defaultValue={0} />
-            </div>
-            <div>
               <Label htmlFor="unit">Unit</Label>
               <Input id="unit" name="unit" defaultValue="ea" />
             </div>
             <div>
               <Label htmlFor="reorder_point">Reorder at</Label>
               <Input id="reorder_point" name="reorder_point" type="number" step="any" defaultValue={0} />
-            </div>
-            <div>
-              <Label htmlFor="unit_cost">Unit cost ($)</Label>
-              <Input id="unit_cost" name="unit_cost" type="number" step="any" />
             </div>
             <div>
               <Label htmlFor="vendor">Vendor</Label>

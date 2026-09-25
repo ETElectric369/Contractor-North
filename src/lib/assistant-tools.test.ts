@@ -18,7 +18,7 @@ import { runDataTool } from "@/lib/assistant-tools";
 
 /** Enough of the PostgREST builder for these two tools, recording the select list and the filters
  *  so a projection can be asserted on directly — the missing column IS the bug here. */
-function fakeDb(result: { data: any; error?: any }) {
+function fakeDb(result: { data: any; error?: any }, lots: any[] = []) {
   const calls: { table: string | null; select: string | null; filters: string[] } = {
     table: null,
     select: null,
@@ -39,6 +39,11 @@ function fakeDb(result: { data: any; error?: any }) {
     },
     order: () => builder,
     limit: () => builder,
+    in: () => builder,
+    or(expr: string) {
+      calls.filters.push(`or:${expr}`);
+      return builder;
+    },
     maybeSingle: async () => ({
       data: Array.isArray(result.data) ? (result.data[0] ?? null) : result.data,
       error: result.error ?? null,
@@ -51,7 +56,18 @@ function fakeDb(result: { data: any; error?: any }) {
     calls,
     client: {
       from(table: string) {
-        calls.table = table;
+        // THE SHELF (0303): get_bill also reads the bill's live lots. They answer from `lots`, and
+        // the recorded table stays the tool's own first read.
+        if (table === "stock_lot_balance") {
+          const lotBuilder: any = {
+            select: () => lotBuilder,
+            eq: () => lotBuilder,
+            in: () => lotBuilder,
+            then: (ok: any, err: any) => Promise.resolve({ data: lots, error: null }).then(ok, err),
+          };
+          return lotBuilder;
+        }
+        if (calls.table === null) calls.table = table;
         return builder;
       },
     },
@@ -99,7 +115,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     expect(byDesc["Kettle Chips Salt/Pepper"]).toMatchObject({ billable: false, billed_to_customer: 0 });
     expect(byDesc["Ice Cream Bar Choc Almond"]).toMatchObject({ billable: false, billed_to_customer: 0 });
     // The fastener is the customer's, unchanged — the two states that already worked do not move.
-    expect(byDesc["Bulk Fastener"]).toMatchObject({ billable: true, billed_to_customer: 6.1, is_stock: false });
+    expect(byDesc["Bulk Fastener"]).toMatchObject({ billable: true, billed_to_customer: 6.1, on_the_shelf: false });
   });
 
   it("answers 'what did that run cost the customer' with $6.50, not the $16.28 receipt", async () => {
@@ -138,12 +154,31 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
         { id: "t3", description: "Sales Tax", quantity: "1.00", unit_price: "10.64", amount: "10.64", category: "Sales Tax", billable: true, billed_amount: null, is_stock: false },
       ],
     };
-    const { client } = fakeDb({ data: split });
+    // The rest of the box is on the shelf as a roll (0303): 440 nuts, $104.72 with its tax share.
+    const lot = { bill_id: "c0535cdb", bill_line_id: "t1", cost: "104.72", pieces: "440.000", pieces_left: "440.000", unit: "ea", live: true };
+    const { client } = fakeDb({ data: split }, [lot]);
     const out = await parse("get_bill", { bill_id: split.id }, client);
-    expect(out.items[0]).toMatchObject({ billable: true, billed_to_customer: 13, is_stock: true });
+    expect(out.items[0]).toMatchObject({ billable: true, billed_to_customer: 13, on_the_shelf: true, shelf_cost: 104.72, shelf_left: "440 of 440 ea" });
+    expect(out.items[1]).toMatchObject({ on_the_shelf: false });
     // The shelf's 95.36 of the box, and its share of the tax, come off the customer's figure.
     expect(out.billable_amount).toBeLessThan(139.65 - 95.36 + 0.01);
     expect(out.amount).toBe(139.65);
+    // And off the job's cost, which Nort is told in so many words.
+    expect(out.shelf_amount).toBe(104.72);
+    expect(out.money_note).toContain("shop shelf");
+  });
+
+  it("never calls a line shop stock because a flag says so: only a roll on the shelf makes it so", async () => {
+    // is_stock with no live lot is exactly the claim 0303 stopped: nothing is on the shelf.
+    const flagged = {
+      ...oshBill,
+      bill_line_items: [{ id: "f1", description: "Box", quantity: "1.00", unit_price: "10.00", amount: "10.00", category: "Electrical", billable: true, billed_amount: "0", is_stock: true }],
+    };
+    const { client } = fakeDb({ data: flagged });
+    const out = await parse("get_bill", { bill_id: flagged.id }, client);
+    expect(out.items[0].on_the_shelf).toBe(false);
+    expect(out.shelf_amount).toBeUndefined();
+    expect(out.money_note).toContain("nothing from it is on the shop shelf");
   });
 
   it("says out loud when a receipt was replaced, or priced off a counter ticket", async () => {
@@ -310,5 +345,23 @@ describe("list_inquiries — Nort can read what a lead said", () => {
     const { client } = fakeDb({ data: [{ ...lead, message: "   " }] });
     const out = await parse("list_inquiries", {}, client);
     expect(out.inquiries[0].message).toBeNull();
+  });
+});
+
+describe("list_inventory — the shelf's items by name, and nothing claimed that is not there (0302)", () => {
+  it("selects the item's name and searches by name, part number and category", async () => {
+    const { calls, client } = fakeDb({ data: [{ id: "i1", name: "12/2 NM-B", part_number: "NMB122", category: "Wire", quantity_on_hand: "190.000", reorder_point: "0", unit: "ft", location: null }] });
+    const out = await parse("list_inventory", { search: "12/2" }, client);
+    expect(calls.table).toBe("inventory_items");
+    expect(calls.select).toContain("name");
+    expect(calls.filters.find((f) => f.startsWith("or:"))).toMatch(/name\.ilike.*part_number\.ilike.*category\.ilike/);
+    expect(out.items[0]).toMatchObject({ name: "12/2 NM-B", part: "NMB122", unit: "ft" });
+  });
+
+  it("says the shelf is empty rather than inventing stock", async () => {
+    const { client } = fakeDb({ data: [] });
+    const out = await parse("list_inventory", {}, client);
+    expect(out.count).toBe(0);
+    expect(out.note).toContain("Nothing is on the shelf");
   });
 });

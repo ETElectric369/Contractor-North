@@ -31,6 +31,8 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
   const crewPay = f.crewPay ?? 0;
   const crewMileagePaid = f.crewMileagePaid ?? 0;
   const businessCostsTotal = f.businessCostsTotal ?? 0;
+  const putOnShelf = f.putOnShelf ?? 0;
+  const shopStockLost = f.shopStockLost ?? 0;
   return {
     month,
     received,
@@ -40,7 +42,9 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
     businessCostsTotal,
     processorFees: 0,
-    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - businessCostsTotal) * 100) / 100,
+    putOnShelf,
+    shopStockLost,
+    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
     ownerHours: 0,
     perOwnerHour: null,
   };
@@ -51,6 +55,7 @@ const money = (months: OwnerMoneyMonth[]): OwnerMoney => ({
   months,
   caveats: [],
   owners: [],
+  onShelfNow: 0,
 });
 
 /** ET's shape, 2026: nothing Oct-Mar, two cost-only months, then money. */

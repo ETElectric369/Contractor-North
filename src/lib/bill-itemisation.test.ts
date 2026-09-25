@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { billableBillCost, billItemisation, billLineCost, billLineBilledCost, billedPortion, excludedReceiptCost, type BillLine } from "@/lib/bill-itemisation";
+import { billableBillCost, billItemisation, billLineCost, billLineBilledCost, billedPortion, excludedReceiptCost, isTaxLine, shelfLotCost, type BillLine } from "@/lib/bill-itemisation";
 
 /** The invariant, said once: a bill's rows sum to the marked-up BILLABLE total, to the cent. */
 const sum = (rows: { quantity: number; unit_price: number }[]) =>
@@ -424,5 +424,143 @@ describe("lines that add up to more than the receipt", () => {
     expect(rows.length).toBeGreaterThan(1);
     expect(rows[rows.length - 1].description).toContain("Supplies & tax");
     expect(rows[rows.length - 1].unit_price).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * ── THE SHELF'S SHARE (Shop Stock, 0303) ──────────────────────────────────────────────────────
+ * shelfLotCost is ONE LINE'S part of excludedReceiptCost, and excludedReceiptCost is the SUM of the
+ * parts. The identity is the whole point: a roll on the shelf and the receipt it came off can never
+ * disagree about a cent, because there is one copy of the tax arithmetic.
+ */
+const sumShares = (lines: BillLine[]) => Math.round(lines.reduce((s, l) => s + Math.round(shelfLotCost(l, lines) * 100), 0)) / 100;
+
+/** excludedReceiptCost exactly as it was written before 0303 (cn-v966), kept here as the witness
+ *  that the refactor into per-line parts changed no receipt anywhere by a cent. */
+function legacyExcludedReceiptCost(allLines: BillLine[]): number {
+  const sumBy = (ls: BillLine[], f: (l: BillLine) => number) => ls.reduce((sum, l) => Math.round((sum + f(l)) * 100) / 100, 0);
+  const notBilled = (l: BillLine) => Math.round((billLineCost(l) - billLineBilledCost(l)) * 100) / 100;
+  const purchased = allLines.filter((l) => !isTaxLine(l));
+  const purchasedCost = sumBy(purchased, billLineCost);
+  const excludedPurchasedCost = sumBy(purchased, notBilled);
+  const taxLines = allLines.filter(isTaxLine);
+  const excludedTaxDirect = sumBy(taxLines, notBilled);
+  const untouchedTax = taxLines.filter((l) => l.billable !== false && billedPortion(billLineCost(l), l.billed_amount) == null);
+  const sharedTax = sumBy(untouchedTax, billLineCost);
+  const excludedShare = purchasedCost > 0 ? excludedPurchasedCost / purchasedCost : 0;
+  const excludedTaxShare = Math.round(sharedTax * excludedShare * 100) / 100;
+  return Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
+}
+
+/** Herringbone's 7/31 CED ticket (bill 387341c7), line for line from the books. */
+const herringbone731 = (): BillLine[] => [
+  { id: "h1", description: "Flexbox single gang 20.5 cu in", quantity: 33, unit_price: 1.34, amount: 44.22, category: "Electrical" },
+  { id: "h2", description: "Flexbox two gang 40 cu in OWB", quantity: 2, unit_price: 6.79, amount: 13.57, category: "Electrical" },
+  { id: "h3", description: "Flexbox two gang 43.5 cu in", quantity: 10, unit_price: 2.58, amount: 25.8, category: "Electrical" },
+  { id: "h4", description: "Flexbox 3.5 in ceiling", quantity: 8, unit_price: 3.71, amount: 29.68, category: "Electrical" },
+  { id: "h5", description: "4 in LED shallow IC housing", quantity: 3, unit_price: 11.83, amount: 35.49, category: "Electrical" },
+  { id: "h6", description: "6 in LED housing", quantity: 1, unit_price: 12.33, amount: 12.33, category: "Electrical" },
+  { id: "h7", description: "NMB 12/2 w/gnd 250 ft coil", quantity: 250, unit_price: 0.66, amount: 165.29, category: "Electrical" },
+  { id: "h8", description: "NMB 14/2 w/gnd 250 ft coil", quantity: 250, unit_price: 0.45, amount: 111.6, category: "Electrical", billed_amount: 0 },
+  { id: "h9", description: "Tax @ 9.000%", quantity: 1, unit_price: 39.42, amount: 39.42, category: "Tax" },
+];
+
+describe("shelfLotCost: one line's share, and the parts add up to the receipt's figure", () => {
+  it("Herringbone 7/31: the 14/2 coil taken off the invoice is $121.64 on the shelf, tax share and all", () => {
+    const lines = herringbone731();
+    expect(shelfLotCost(lines[7], lines)).toBe(121.64);
+    expect(sumShares(lines)).toBe(excludedReceiptCost(lines));
+    // Nothing else on the ticket was taken off, so nothing else has a share.
+    for (const l of lines.filter((x) => x.id !== "h8")) expect(shelfLotCost(l, lines)).toBe(0);
+  });
+
+  it("Herringbone 7/31 with the 12/2 coil also at 0 used: $180.17 + $121.64, and the parts are the bill's figure", () => {
+    const lines = herringbone731();
+    lines[6] = { ...lines[6], billed_amount: 0 };
+    // 39.42 x 165.29 / 437.98 = 14.877 and 39.42 x 111.60 / 437.98 = 10.044 cents-wise: the split
+    // must land on the once-per-bill figure, 24.92.
+    expect(shelfLotCost(lines[6], lines)).toBe(180.17);
+    expect(shelfLotCost(lines[7], lines)).toBe(121.64);
+    expect(excludedReceiptCost(lines)).toBe(301.81);
+    expect(sumShares(lines)).toBe(301.81);
+    // The receipt's own identity: what the job keeps plus what goes on the shelf is the bill.
+    expect(Math.round((billableBillCost(477.4, lines) + sumShares(lines)) * 100) / 100).toBe(477.4);
+  });
+
+  it("the 8/19 ticket (bill 11e96fc3): the 12/2 coil at 0 used is $180.17 on the shelf", () => {
+    const lines: BillLine[] = [
+      { id: "a", description: "Flexbox BH bar hanger ground", quantity: 1, amount: 8.82, category: "Electrical" },
+      { id: "b", description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, amount: 165.29, category: "Electrical", billed_amount: 0 },
+      { id: "c", description: "Flexbox single gang 16 cu in", quantity: 2, amount: 8.9, category: "Electrical" },
+      { id: "t", description: "Tax at 9.000 percent", quantity: 1, amount: 16.47, category: "Tax" },
+    ];
+    expect(shelfLotCost(lines[1], lines)).toBe(180.17);
+    expect(sumShares(lines)).toBe(excludedReceiptCost(lines));
+    expect(Math.round((billableBillCost(199.48, lines) + sumShares(lines)) * 100) / 100).toBe(199.48);
+  });
+
+  it("the Twister box: 60 used of 500, the rest on the shelf with its share of the tax", () => {
+    const lines = [{ ...twister, billed_amount: 13 }, oxide, twisterTax];
+    expect(sumShares(lines)).toBe(excludedReceiptCost(lines));
+    expect(shelfLotCost(lines[0], lines)).toBe(excludedReceiptCost(lines));
+    expect(shelfLotCost(oxide, lines)).toBe(0);
+  });
+
+  it("three lines off one bill where rounding each share alone misses the bill's figure by a cent", () => {
+    // $1 of tax over three equal $10 lines out of $30 purchased: each line's exact share is 33.33...
+    // cents. Rounded alone they are 0.33 x 3 = $0.99; the bill's figure is $1.00. The split gives
+    // the odd cent to the first line (ties go to the earlier line), so the parts sum to $31.00.
+    const lines: BillLine[] = [
+      { id: "x", description: "Box A", quantity: 1, amount: 10, billable: false },
+      { id: "y", description: "Box B", quantity: 1, amount: 10, billable: false },
+      { id: "z", description: "Box C", quantity: 1, amount: 10, billable: false },
+      { id: "t", description: "Sales Tax", quantity: 1, amount: 1, category: "Tax" },
+    ];
+    expect(excludedReceiptCost(lines)).toBe(31);
+    expect(lines.map((l) => shelfLotCost(l, lines))).toEqual([10.34, 10.33, 10.33, 0]);
+    expect(sumShares(lines)).toBe(31);
+  });
+
+  it("finds the line by id when handed a copy, and gives a stranger no share", () => {
+    const lines = herringbone731();
+    expect(shelfLotCost({ ...lines[7] }, lines)).toBe(121.64);
+    expect(shelfLotCost({ id: "nobody", amount: 5 }, lines)).toBe(0);
+  });
+
+  it("changed no receipt by a cent: the sum of parts equals the pre-0303 arithmetic on 4,000 random receipts", () => {
+    // A seeded generator, so a failure is reproducible: mixes of switched-off lines, split lines,
+    // returns, $0 lines, untouched tax, split tax and switched-off tax.
+    let seed = 20260924;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const money = (max: number) => Math.round(rnd() * max * 100) / 100;
+    for (let n = 0; n < 4000; n++) {
+      const lines: BillLine[] = [];
+      const count = 1 + Math.floor(rnd() * 7);
+      for (let i = 0; i < count; i++) {
+        const amount = rnd() < 0.08 ? -money(40) : rnd() < 0.05 ? 0 : money(300);
+        const r = rnd();
+        lines.push({
+          id: `l${i}`,
+          amount,
+          quantity: 1,
+          category: "Electrical",
+          ...(r < 0.25 ? { billable: false } : r < 0.5 ? { billed_amount: money(Math.max(amount, 0)) } : {}),
+        });
+      }
+      const taxes = Math.floor(rnd() * 3);
+      for (let t = 0; t < taxes; t++) {
+        const r = rnd();
+        lines.push({
+          id: `t${t}`,
+          amount: money(30),
+          quantity: 1,
+          category: "Sales Tax",
+          ...(r < 0.15 ? { billable: false } : r < 0.3 ? { billed_amount: money(10) } : {}),
+        });
+      }
+      const legacy = legacyExcludedReceiptCost(lines);
+      expect(excludedReceiptCost(lines)).toBe(legacy);
+      expect(sumShares(lines)).toBe(legacy);
+    }
   });
 });

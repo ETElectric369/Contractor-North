@@ -1,13 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Boxes, AlertTriangle, Search } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
+import { requireStaff } from "@/lib/staff-guard";
+import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
-import { NewItemButton } from "./new-item-button";
-import { QtyControl } from "./qty-control";
 import { ItemActions } from "./item-actions";
 import { sanitizeSearch } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
@@ -18,19 +18,27 @@ export const dynamic = "force-dynamic";
  * WHAT IS ON HAND, WHAT IT COST, WHERE IT CAME FROM, AND WHAT IS RUNNING OUT.
  *
  * This page had zero rows to show for the whole life of the app, because nothing ever put a row
- * in it. cn-v964 changed that: stock ARRIVES from a receipt line marked as the company's own
- * container (lib/stock-flow.ts, migration 0272) and LEAVES when it goes on a job, so the count
- * moves when the money moves and there is no separate list to remember to keep.
+ * in it. The shelf is a ledger now (lib/stock-ledger.ts, 0303): a roll ARRIVES from a receipt line
+ * with what it cost, and pieces LEAVE onto a job at what they cost, so the count moves when the
+ * money moves and there is no separate list to remember to keep.
  *
  * So the page had to earn its keep. Erik reads it on a phone, in a truck, usually to answer one
  * of two questions: "have I got any of these" and "what am I about to run out of". Hence the
  * reorder filter, the count as the biggest thing in the row, and the provenance line under the
  * name saying what the last box cost.
  *
- * THE FOOTNOTE IS NOT AN APOLOGY, IT IS THE HONEST PART. `unit_cost` is numeric(12,2), so a nut
- * that truly costs $0.21672 is stored as $0.22 and 500 of them multiply back out to $110.00 for a
- * box that cost $108.36. A page that prints a total has to say what the total is made of, or it
- * is a confidently wrong number - which is the one thing a stock list must never be.
+ * OFFICE ONLY, ON THE SERVER (Shop Stock, 0302). The dock hid this page from a tech, and the table
+ * behind it let any member read it: a hidden link is a convention, not a refusal. requireStaff is
+ * the refusal, and 0302 made the table itself staff-only to read.
+ *
+ * NO DOOR IN YET, SO NO BUTTON THAT PRETENDS ONE (review of Shop Stock Phase 1). Until Phase 2 ships
+ * Put On The Shelf, nothing in the app can move an item's count, so New Item is not offered: an item
+ * made now would sit at 0 on hand (and read "Reorder" forever if it had a reorder point). The page
+ * says the limit in words instead. new-item-button.tsx comes back with the Phase 2 door.
+ *
+ * WHAT IT IS WORTH COMES FROM THE SHELF'S RECORD (0303). On hand is the ledger's (rolls in, pieces
+ * out) and never typed; value is every live roll's dollars left, to the cent, straight off the
+ * paper - not a rounded unit cost times a count, which read a 500-count box of nuts $1.64 high.
  */
 export default async function InventoryPage({
   searchParams,
@@ -39,11 +47,15 @@ export default async function InventoryPage({
 }) {
   const { q, low } = await searchParams;
   const lowOnly = low === "1";
-  const supabase = await createClient();
+  const ctx = await requireStaff();
+  if ("error" in ctx) redirect("/planner");
+  const { supabase } = ctx;
 
+  // Named columns, never "*": the projection law, and a cost column added later must not reach a
+  // page by default.
   let query = supabase
     .from("inventory_items")
-    .select("*")
+    .select("id, name, part_number, description, category, unit, quantity_on_hand, reorder_point, vendor, location, active, created_at, updated_at, org_id")
     .eq("active", true)
     .order("name");
 
@@ -54,23 +66,31 @@ export default async function InventoryPage({
     );
   }
 
-  const { data } = await query;
+  const [{ data }, lots] = await Promise.all([
+    query,
+    supabase.from("stock_lot_balance").select("item_id, cost_left").eq("live", true).limit(50000),
+  ]);
+  // No shelf ledger yet (a database before 0303) means no rolls; any other failure is said, never
+  // read as a shelf worth $0.
+  const lotsReadFailed = !!lots.error && !isMissingShelf(lots.error);
+  const valueByItem = new Map<string, number>();
+  for (const l of ((lots.error ? [] : lots.data) ?? []) as { item_id: string; cost_left: unknown }[]) {
+    valueByItem.set(l.item_id, Math.round(((valueByItem.get(l.item_id) ?? 0) + (Number(l.cost_left) || 0)) * 100) / 100);
+  }
   // Number() everything the comparisons below touch. These arrive as JSON numbers today, but the
   // Supabase client is untyped and the failure mode is silent rather than loud: "9.00" <= "10.00"
   // is FALSE as strings, which is the item that is nearly out missing off the one list that
   // exists to catch it.
-  const items = ((data ?? []) as InventoryItem[]).map((i) => ({
+  const items = ((data ?? []) as unknown as InventoryItem[]).map((i) => ({
     ...i,
     quantity_on_hand: Number(i.quantity_on_hand ?? 0),
     reorder_point: Number(i.reorder_point ?? 0),
-    unit_cost: i.unit_cost == null ? null : Number(i.unit_cost),
+    unit_cost: null,
   }));
 
   const isLow = (i: InventoryItem) => i.reorder_point > 0 && i.quantity_on_hand <= i.reorder_point;
   const lowStock = items.filter(isLow);
-  const priced = items.filter((i) => i.unit_cost != null);
-  const totalValue = priced.reduce((s, i) => s + (i.unit_cost ?? 0) * i.quantity_on_hand, 0);
-  const unpriced = items.length - priced.length;
+  const totalValue = items.reduce((s, i) => s + (valueByItem.get(i.id) ?? 0), 0);
 
   // What is running out goes first, because that is the half of this page that is urgent.
   const shown = (lowOnly ? lowStock : items)
@@ -85,9 +105,7 @@ export default async function InventoryPage({
       <PageHeader
         title="Inventory"
         description="What's on hand, what it cost, and what's running low."
-      >
-        <NewItemButton />
-      </PageHeader>
+      />
 
       {items.length > 0 && (
         <div className="mb-4 grid grid-cols-3 gap-3 sm:max-w-lg sm:gap-4">
@@ -100,7 +118,7 @@ export default async function InventoryPage({
           <Card>
             <CardContent className="py-4">
               <div className="text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">
-                {formatCurrency(totalValue)}
+                {lotsReadFailed ? "—" : formatCurrency(totalValue)}
               </div>
               <div className="text-xs text-slate-500">Stock value</div>
             </CardContent>
@@ -146,15 +164,13 @@ export default async function InventoryPage({
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Stock lands here from your receipts: a receipt line that's a whole container you'll use across jobs, marked as the company's own, shows up here with what you paid for it. You can also add an item by hand."
+                : "Rolls and boxes you keep for more than one job will live here, with what they cost. Putting a roll on the shelf from a receipt comes in the next update; until then there is nothing to add here."
           }
         >
-          {lowOnly || q ? (
+          {(lowOnly || q) && (
             <Link href={withQuery({})} className={`${linkClass} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>
               Show All
             </Link>
-          ) : (
-            <NewItemButton />
           )}
         </EmptyState>
       ) : (
@@ -183,8 +199,8 @@ export default async function InventoryPage({
                     <p className="mt-1 text-xs text-slate-500">{it.description}</p>
                   )}
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <span className="text-xs text-slate-500">{costLine(it)}</span>
-                    <QtyControl id={it.id} name={it.name} quantity={it.quantity_on_hand} unit={it.unit} />
+                    <span className="text-xs text-slate-500">{costLine(it, valueByItem.get(it.id))}</span>
+                    <OnHand quantity={it.quantity_on_hand} unit={it.unit} />
                   </div>
                 </li>
               ))}
@@ -197,7 +213,7 @@ export default async function InventoryPage({
                   <tr>
                     <th className="px-5 py-3 font-semibold">Item</th>
                     <th className="px-3 py-3 font-semibold">Where it came from</th>
-                    <th className="px-3 py-3 text-right font-semibold">Unit cost</th>
+                    <th className="px-3 py-3 text-right font-semibold">Value</th>
                     <th className="px-5 py-3 text-right font-semibold">On hand</th>
                     <th className="px-3 py-3 text-right font-semibold" aria-label="Actions"></th>
                   </tr>
@@ -223,10 +239,10 @@ export default async function InventoryPage({
                         )}
                       </td>
                       <td className="px-3 py-3 text-right tabular-nums text-slate-600">
-                        {it.unit_cost != null ? `${formatCurrency(it.unit_cost)} each` : "—"}
+                        {valueByItem.has(it.id) ? formatCurrency(valueByItem.get(it.id) ?? 0) : "—"}
                       </td>
-                      <td className="px-5 py-3">
-                        <QtyControl id={it.id} name={it.name} quantity={it.quantity_on_hand} unit={it.unit} />
+                      <td className="px-5 py-3 text-right">
+                        <OnHand quantity={it.quantity_on_hand} unit={it.unit} />
                       </td>
                       <td className="px-3 py-3">
                         <ItemActions item={it} />
@@ -238,14 +254,11 @@ export default async function InventoryPage({
             </div>
           </Card>
 
-          {priced.length > 0 && (
-            <p className="mt-3 max-w-2xl text-xs text-slate-400">
-              Stock value is each item&rsquo;s unit cost times what&rsquo;s on hand. Unit cost is stored to the
-              cent, so a big box of small parts can read a dollar or two high.
-              {unpriced > 0 &&
-                ` ${unpriced} ${unpriced === 1 ? "item has" : "items have"} no unit cost yet, so ${unpriced === 1 ? "it isn't" : "they aren't"} counted in it.`}
-            </p>
-          )}
+          <p className="mt-3 max-w-2xl text-xs text-slate-400">
+            {lotsReadFailed
+              ? "The value of what is on the shelf couldn't be read just now, so none is shown. Reload to try again."
+              : "Stock value is what the rolls and boxes on the shelf cost, off their receipts to the cent, less what has been taken off them. Putting rolls on the shelf and taking pieces off it come in the next update; until then these counts don't move."}
+          </p>
         </>
       )}
     </div>
@@ -259,9 +272,18 @@ function subtitle(it: InventoryItem): string {
     .join(" · ");
 }
 
-function costLine(it: InventoryItem): string {
-  const cost = it.unit_cost != null ? `${formatCurrency(it.unit_cost)} each` : "No unit cost yet";
+function costLine(it: InventoryItem, value: number | undefined): string {
+  const cost = value != null ? `${formatCurrency(value)} on the shelf` : "Nothing on the shelf's record";
   return it.vendor ? `${cost} · ${it.vendor}` : cost;
+}
+
+/** How many are on hand: the shelf's record, read only. Counting it is a recount move (Phase 2). */
+function OnHand({ quantity, unit }: { quantity: number; unit: string }) {
+  return (
+    <span className="text-base font-semibold tabular-nums text-slate-900">
+      {Number.isInteger(quantity) ? quantity : Math.round(quantity * 1000) / 1000} <span className="text-xs font-normal text-slate-500">{unit}</span>
+    </span>
+  );
 }
 
 function withQuery(params: { q?: string; low?: string }): string {

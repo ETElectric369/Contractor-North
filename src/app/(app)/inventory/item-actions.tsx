@@ -93,10 +93,6 @@ export function ItemActions({ item }: { item: InventoryItem }) {
               <Input id="ii-reorder" name="reorder_point" type="number" step="any" defaultValue={item.reorder_point} />
             </div>
             <div>
-              <Label htmlFor="ii-cost">Unit cost</Label>
-              <Input id="ii-cost" name="unit_cost" type="number" step="any" defaultValue={item.unit_cost ?? ""} />
-            </div>
-            <div>
               <Label htmlFor="ii-vendor">Vendor</Label>
               <Input id="ii-vendor" name="vendor" defaultValue={item.vendor ?? ""} />
             </div>

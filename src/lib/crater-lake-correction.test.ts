@@ -124,9 +124,9 @@ describe("518 Crater Lake - the corrected bill and two cost-only memos", () => {
 
   it("costs the job what CED actually charged: $455.82 of CED, $1,064.34 of materials in all", () => {
     const otherReceipts = [155.19, 400.85, 9.87, 16.28, 26.33].map((amount, i) => ({ id: `r${i}`, job_id: JOB, amount, po_id: null }));
-    const cedOnly = computeJobProfitRows({ jobs: [{ id: JOB, job_number: "J-046", name: "Jason Waldow", status: "complete" }], payments: [], pos: [], bills: cedBills, jobRefunds: [], entries: [], pettyCash: [] });
+    const cedOnly = computeJobProfitRows({ jobs: [{ id: JOB, job_number: "J-046", name: "Jason Waldow", status: "complete" }], payments: [], pos: [], bills: cedBills, jobRefunds: [], entries: [], pettyCash: [], shelfNet: [] });
     expect(Math.round(cedOnly[0].cost * 100) / 100).toBe(455.82);
-    const all = computeJobProfitRows({ jobs: [{ id: JOB, job_number: "J-046", name: "Jason Waldow", status: "complete" }], payments: [], pos: [], bills: [...cedBills, ...otherReceipts], jobRefunds: [], entries: [], pettyCash: [] });
+    const all = computeJobProfitRows({ jobs: [{ id: JOB, job_number: "J-046", name: "Jason Waldow", status: "complete" }], payments: [], pos: [], bills: [...cedBills, ...otherReceipts], jobRefunds: [], entries: [], pettyCash: [], shelfNet: [] });
     expect(Math.round(all[0].cost * 100) / 100).toBe(1064.34);
   });
 

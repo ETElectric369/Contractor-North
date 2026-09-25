@@ -10,6 +10,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { formatCurrency } from "@/lib/utils";
 import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
+import { readJobShelfNet } from "@/lib/job-cost";
 import { computeArAging, computeQuoteStats } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
@@ -65,7 +66,7 @@ export default async function AnalyticsPage({
     : [];
   const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
 
-  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }] =
+  const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }, shelf] =
     await Promise.all([
       // A/R aging reads the WHOLE book or it isn't aging (audit 9) — unbounded meant the 1000
       // newest, so the oldest unpaid invoices, which are exactly what aging is FOR, fell out.
@@ -113,7 +114,12 @@ export default async function AnalyticsPage({
       // REQUIRED field on the type: the compiler is what caught that this second caller existed.
       // Job-linked only; petty cash with no job is overhead, not a job's cost.
       supabase.from("petty_cash").select("job_id, amount, kind").not("job_id", "is", null).limit(50000),
+      // THE SHELF (0303): what went on the shelf from each job's tickets and what each job took from
+      // it, from the same view every job-cost reader reads (src/lib/job-cost.ts).
+      readJobShelfNet(supabase),
     ]);
+  // A job's cost missing its shelf part would be a confident wrong number on every row below.
+  if (shelf.error) throw shelf.error;
 
   // ── Money metrics — the SAME computations Nort's revenue_trend / ar_aging / quote_win_rate
   // tools call, so the dashboard and what Nort says can never diverge.
@@ -153,6 +159,7 @@ export default async function AnalyticsPage({
     bills: bills ?? [],
     jobRefunds: jobRefunds ?? [],
     entries: entries ?? [],
+    shelfNet: shelf.rows,
   }).slice(0, 8);
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They

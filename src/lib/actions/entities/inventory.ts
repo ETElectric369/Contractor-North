@@ -1,17 +1,11 @@
-import { z } from "zod";
-import { adjustQuantity } from "@/app/(app)/inventory/actions";
 import type { ActionDef } from "../types";
 
-export const inventoryActions: Record<string, ActionDef> = {
-  "inventory.adjust": {
-    name: "inventory.adjust",
-    group: "inventory",
-    label: "Adjust stock",
-    description:
-      "Adjust an inventory item's quantity on hand by a signed delta — 'used 5 breakers' (delta -5) or 'received 20' (delta +20). Find the item with list_inventory and pass its id + the delta. Reversible (adjust back).",
-    input: z.object({ id: z.string(), delta: z.number() }),
-    auth: "staff",
-    effect: "write",
-    handler: (i) => adjustQuantity(i.id, i.delta),
-  },
-};
+/**
+ * THE SHELF'S ACTIONS. Empty for now, on purpose (Shop Stock, 0303).
+ *
+ * inventory.adjust typed a signed delta over quantity_on_hand. That column is a cache the shelf's
+ * own record keeps now and the database refuses a typed count, so the action could only ever fail.
+ * It is retired rather than left as a door that says no. Nort's way to move stock comes back as
+ * stock.take (Phase 3): it FILLS the Took From Stock card and a person taps Take It.
+ */
+export const inventoryActions: Record<string, ActionDef> = {};
