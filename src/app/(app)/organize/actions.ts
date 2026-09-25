@@ -36,6 +36,7 @@ import {
 import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib/shelf-plan";
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
+import { jobInOrg } from "@/lib/job-in-org";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -786,6 +787,11 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
   if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
     return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
+  // THE JOB IS OURS, asked before anything is claimed or torn down (audit v994 TL2). The job id
+  // arrives from the browser; a crafted call naming another company's job would write a bill and a
+  // document pointing at a job this company can't see (0340 refuses it in the database too).
+  if ((dest.type === "job" || dest.type === "photo") && !(await jobInOrg(supabase, ctx.orgId, dest.jobId)))
+    return { ok: false, error: "That job isn't in your book. Nothing was filed." };
 
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "Item not found." };
