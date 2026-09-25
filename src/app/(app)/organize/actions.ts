@@ -537,7 +537,11 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     const books = await loadBooks(supabase, ctx.orgId);
     const same = billsCarryingNumber(docNumber, { accountId, supplier: vendor }, books.bills, books.aliases);
     if (same.length) {
-      const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice. If this is a different purchase, press Different Purchase: Record It Anyway on this paper under the job's Receipts & Documents.`;
+      // THE FACT ONLY, NO DOOR (review of the fix). Each caller names the button it actually
+      // renders: the Add Cost sheet and Snap the Bill offer Different Purchase in place, and a
+      // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
+      // after another Record as Cost press (another paid read).
+      const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
       return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
     }
   }

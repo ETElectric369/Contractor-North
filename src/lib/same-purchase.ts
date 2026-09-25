@@ -87,8 +87,13 @@ const isLive = (b: LedgerBill) => !b.superseded_by_bill_id;
 /**
  * EVERY LIVE BILL THAT ALREADY CARRIES THIS NUMBER, from the same supplier: in bill_number (what
  * the tray and the job page write), in supplier_invoice_number (what Record It As A Bill writes),
- * or named on its own lines or file name (a scanned statement). A bill whose supplier is on no
- * account yet, with no exact spelling in common: a long number is still the purchase on its own.
+ * or named on its own lines or file name (a scanned statement).
+ *
+ * CERTAIN ONLY: the same account, or the exact same spelling. This answer hides doors (File It
+ * refuses, /bills counts the document covered and drops it from Purchases Not In Your Books), so
+ * it never leans on a number alone. Whether a long number under ANOTHER spelling is enough is
+ * Erik's open question (audit v994, DB5); until he answers, that case is only ever a "maybe" a
+ * person looks at (billsMaybeCarryingNumber, offered by samePurchaseCandidates).
  */
 export function billsCarryingNumber(
   number: string | null | undefined,
@@ -107,18 +112,39 @@ export function billsCarryingNumber(
       normalizeDocNumber(b.supplier_invoice_number) === n ||
       (b.named_numbers ?? []).some((x) => normalizeDocNumber(x) === n);
     if (!carries) continue;
-    const mine = { name: who.supplier ?? null, account: who.accountId ?? null };
-    const theirs = { name: b.supplier, account: b.supplier_account_id ?? null };
-    const aAcct = mine.account || accountForSupplier(mine.name, aliases);
-    const bAcct = theirs.account || accountForSupplier(theirs.name, aliases);
-    // Both on accounts: the accounts decide. Otherwise the exact spelling, and, only for a BILL
-    // whose supplier is on no account yet (an unfiled spelling), a long number on its own. A bill
-    // filed on an account is never matched to a paper from a supplier nobody tied to it: "Home
-    // Depot" and CED's 8802-1108330 are two purchases.
-    const agrees = aAcct && bAcct ? aAcct === bAcct : sameSupplier(mine, theirs, aliases) || (!bAcct && isLongNumber(n));
-    if (agrees) out.push(b);
+    // Both on accounts: the accounts decide. Otherwise the exact spelling. "Home Depot" and CED's
+    // 8802-1108330 are two purchases.
+    if (sameSupplier({ name: who.supplier ?? null, account: who.accountId ?? null }, { name: b.supplier, account: b.supplier_account_id ?? null }, aliases))
+      out.push(b);
   }
   return out;
+}
+
+/**
+ * THE SAME LONG NUMBER UNDER ANOTHER SPELLING: a live bill whose supplier is on no account yet (an
+ * unfiled spelling, "CED Truckee counter"), carrying this number of 7+ digits, that
+ * billsCarryingNumber did not already find. Maybe the same purchase, never certain (audit v994,
+ * DB5 is Erik's call): offered for a person to tie or pass over, never counted as covering
+ * anything and never a refusal.
+ */
+export function billsMaybeCarryingNumber(
+  number: string | null | undefined,
+  who: { accountId?: string | null; supplier?: string | null },
+  bills: readonly LedgerBill[],
+  aliases: SupplierAliasIndex | null = null,
+): LedgerBill[] {
+  const n = normalizeDocNumber(number);
+  if (!n || !isLongNumber(n)) return [];
+  const certain = new Set(billsCarryingNumber(number, who, bills, aliases).map((b) => b.id));
+  return bills.filter(
+    (b) =>
+      isLive(b) &&
+      !certain.has(b.id) &&
+      !(b.supplier_account_id || accountForSupplier(b.supplier, aliases)) &&
+      (normalizeDocNumber(b.bill_number) === n ||
+        normalizeDocNumber(b.supplier_invoice_number) === n ||
+        (b.named_numbers ?? []).some((x) => normalizeDocNumber(x) === n)),
+  );
 }
 
 /** A supplier's own document, as the near-match needs it. */
@@ -156,6 +182,9 @@ export type SamePurchaseCandidate = {
   billId: string;
   /** The bill carries the document's own number: certain, not a maybe. */
   exact: boolean;
+  /** Not exact, but the bill carries this long number under a supplier name on no account yet
+   *  (billsMaybeCarryingNumber): a maybe, said as such. */
+  otherSpelling?: boolean;
   dollarsOff: number;
   daysApart: number | null;
   jobId: string | null;
@@ -202,6 +231,8 @@ export function billLabel(b: LedgerBill): string {
  * THE BILLS THAT MAY BE THIS SUPPLIER DOCUMENT'S PURCHASE, best first.
  *
  *   · a live bill carrying the document's own number is certain (exact), whatever else it covers;
+ *   · a live bill carrying it under a supplier name on no account yet is a maybe (otherSpelling),
+ *     never certain (audit v994, DB5), not a statement and covered by no document;
  *   · otherwise a live bill on the SAME account (never another account, never a guessed one), not
  *     a statement, that no supplier document covers yet, on the document's job when the document
  *     has one (a no-job document is offered the account's bills on any job, or none), within
@@ -220,14 +251,16 @@ export function samePurchaseCandidates(
   const docDate = ymd(doc.invoice_date);
   const out: SamePurchaseCandidate[] = [];
   const exactIds = new Set(billsCarryingNumber(doc.invoice_number, { accountId }, bills, aliases).map((b) => b.id));
+  const otherSpellingIds = new Set(billsMaybeCarryingNumber(doc.invoice_number, { accountId }, bills, aliases).map((b) => b.id));
   for (const b of bills) {
     if (!isLive(b)) continue;
     const amount = Number(b.amount);
     const dollarsOff = Number.isFinite(amount) && Number.isFinite(total) ? Math.round(Math.abs(amount - total) * 100) / 100 : Infinity;
     const daysApart = daysBetween(ymd(b.bill_date), docDate);
-    const candidate = (exact: boolean): SamePurchaseCandidate => ({
+    const candidate = (exact: boolean, otherSpelling = false): SamePurchaseCandidate => ({
       billId: b.id,
       exact,
+      ...(otherSpelling ? { otherSpelling: true } : {}),
       dollarsOff: Number.isFinite(dollarsOff) ? dollarsOff : 0,
       daysApart,
       jobId: b.job_id ?? null,
@@ -235,6 +268,10 @@ export function samePurchaseCandidates(
     });
     if (exactIds.has(b.id)) {
       out.push(candidate(true));
+      continue;
+    }
+    if (otherSpellingIds.has(b.id)) {
+      if (!b.is_statement && !covered.has(b.id)) out.push(candidate(false, true));
       continue;
     }
     if (!accountId) continue;
@@ -250,6 +287,7 @@ export function samePurchaseCandidates(
   return out.sort(
     (a, b) =>
       Number(b.exact) - Number(a.exact) ||
+      Number(!!b.otherSpelling) - Number(!!a.otherSpelling) ||
       a.dollarsOff - b.dollarsOff ||
       (a.daysApart ?? SAME_PURCHASE_DAYS + 1) - (b.daysApart ?? SAME_PURCHASE_DAYS + 1),
   );
@@ -258,6 +296,8 @@ export function samePurchaseCandidates(
 /** The sentence a candidate is offered with, the same on the card and in a refusal. */
 export function samePurchaseSentence(c: SamePurchaseCandidate): string {
   if (c.exact) return `Already on the books with this number: ${c.label}.`;
+  if (c.otherSpelling)
+    return `Maybe already on the books: ${c.label}. It carries this number, under a supplier name that is on no supplier account yet.`;
   const days = c.daysApart === null ? "" : c.daysApart === 0 ? ", the same day" : `, ${c.daysApart} day${c.daysApart === 1 ? "" : "s"} apart`;
   const off = c.dollarsOff < 0.005 ? "the same total" : `${money(c.dollarsOff)} apart`;
   return `Maybe already on the books: ${c.label} (${off}${days}). A counter ticket carries its own number, never the one on the supplier's invoice.`;

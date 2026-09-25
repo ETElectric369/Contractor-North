@@ -370,8 +370,13 @@ export function PaperworkRow({
    * already copied. Shown whenever the paper's own pick isn't what is showing; hidden when the
    * "picked from the PO" line already says the same words. The company's own names are taken out
    * of the reader's hint on the server (rematchTray), since they are on every ticket.
+   *
+   * NULL IS AN ANSWER (review of audit v994's fix): the server sends null when nothing is left
+   * once the company's own names are out ("ERIK TAYLOR" alone). `??` read that null as "never
+   * computed" and fell back to the unstripped hint, printing "On the paper: ERIK TAYLOR". Only a
+   * row the server never looked at (no key at all) is worked out here, without the names.
    */
-  const onPaper = item.on_paper ?? onPaperWords(p);
+  const onPaper = item.on_paper !== undefined ? item.on_paper : onPaperWords(p);
   const onPaperLine =
     onPaper && !(because && prePick && dest === prePick) ? (
       <p className="text-xs text-slate-500">On the paper: {onPaper}</p>

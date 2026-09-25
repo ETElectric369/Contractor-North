@@ -521,10 +521,17 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .from("bills")
         // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
         // A Bill wrote carries the number in supplier_invoice_number, and a set-aside copy (0271)
-        // is not on the books at all. billsCarryingNumber reads all three, and passes over a bill
-        // with neither number in code (one read, no OR filter to keep in step with it).
+        // is not on the books at all.
+        //
+        // FILTERED IN SQL, NEWEST FIRST (review of that fix). Reading every bill in the org under a
+        // 5000 cap with no order would, past the cap, drop an arbitrary set, and a match missed
+        // here is a second bill. Only a bill with a number in either column can match, only a live
+        // one counts, and if the cap is ever reached it is the oldest that fall off.
         .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
         .eq("org_id", orgId)
+        .or("bill_number.not.is.null,supplier_invoice_number.not.is.null")
+        .is("superseded_by_bill_id", null)
+        .order("created_at", { ascending: false })
         .limit(5000),
     ),
     safe<BookedPaper>(

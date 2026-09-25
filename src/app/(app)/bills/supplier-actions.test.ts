@@ -503,4 +503,29 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     expect(res.message).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555");
     expect(res.message).toContain("Same Purchase: Tie Them");
   });
+
+  it("a bill carrying the invoice's own number is said as a fact, and no button is named (/bills shows none)", async () => {
+    // /bills counts a bill carrying the number as covering the invoice, so it is never listed
+    // under Purchases Not In Your Books and neither Tie nor Different Purchase renders for it.
+    const trayBill = { ...SO_BILL, id: "tray-1", bill_number: "8802-1109999", amount: "400.00", bill_date: "2026-08-01" };
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "jobs.select": [{ data: { id: "job-j011", name: "13897 Herringbone", job_number: "J-011" }, error: null }],
+        "supplier_invoices.update": [
+          { data: [{ id: CED_INVOICE.id, invoice_number: "8802-1109999", supplier_account_id: "acct-ced", total: "323.71", invoice_date: "2026-09-26" }], error: null },
+        ],
+        "bill_supplier_invoices.select": [{ data: [], error: null }, { data: [], error: null }],
+        "supplier_invoices.select": [{ data: [CED_INVOICE], error: null }],
+        ...ledger([trayBill]),
+      },
+      calls,
+    );
+    const res = await setSupplierInvoiceJob({ invoiceId: CED_INVOICE.id, jobId: "job-j011" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe(
+      "8802-1109999 is on 13897 Herringbone now, and a bill already carries its number: Consolidated Electrical Dist. #8802-1109999, $400.00, 2026-08-01, on J-011 13897 Herringbone.",
+    );
+    expect(res.message).not.toMatch(/Tie Them|Record It Anyway|Record It As A Bill/);
+  });
 });

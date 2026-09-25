@@ -1535,11 +1535,17 @@ export async function setSupplierInvoiceJob(input: {
   revalidatePath("/bills");
   return {
     ok: true,
+    // A BILL CARRYING THIS NUMBER IS NOT A QUESTION (review of audit v994's fix). /bills counts
+    // that bill as covering the invoice (billsCarryingNumber), so the invoice is never listed under
+    // Purchases Not In Your Books and neither Tie nor Different Purchase is on the screen. Say
+    // what is already true and name no button; the two buttons are only for a near match.
     message: hasLiveBill
       ? `${number} is on ${label} now, and its bill is already in your books.`
-      : maybe
-        ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press Same Purchase: Tie Them on it down in Purchases Not In Your Books; if not, Different Purchase: Record It Anyway puts the cost on the job.`
-        : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
+      : maybe?.exact
+        ? `${number} is on ${label} now, and a bill already carries its number: ${maybe.label}.`
+        : maybe
+          ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press Same Purchase: Tie Them on it down in Purchases Not In Your Books; if not, Different Purchase: Record It Anyway puts the cost on the job.`
+          : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
   };
 }
 

@@ -3,6 +3,7 @@ import { indexSupplierAliases } from "@/lib/supplier-identity";
 import {
   billsCarryingNumber,
   billsCoveredByDocuments,
+  billsMaybeCarryingNumber,
   normalizeDocNumber,
   samePurchaseCandidates,
   samePurchaseSentence,
@@ -74,10 +75,21 @@ describe("billsCarryingNumber: the one reading every door uses", () => {
     expect(billsCarryingNumber("8802-1109000", { accountId: "acct-other" }, [trayTicket], aliases)).toEqual([]);
   });
 
-  it("a bill on no account yet still matches a long number, never a short one", () => {
+  it("a long number under another spelling is never certain (DB5 is Erik's call): only a maybe, never a short one", () => {
     const unfiled: LedgerBill = { ...trayTicket, supplier: "CED Truckee counter", supplier_account_id: null };
-    expect(billsCarryingNumber("8802-1109000", { accountId: CED }, [unfiled], aliases)).toHaveLength(1);
-    expect(billsCarryingNumber("1234", { accountId: CED }, [{ ...unfiled, bill_number: "1234" }], aliases)).toEqual([]);
+    expect(billsCarryingNumber("8802-1109000", { accountId: CED }, [unfiled], aliases)).toEqual([]);
+    // A paper from any vendor is not refused as "already on the books" by a number alone.
+    expect(billsCarryingNumber("8802-1109000", { supplier: "Home Depot" }, [unfiled], aliases)).toEqual([]);
+    expect(billsMaybeCarryingNumber("8802-1109000", { accountId: CED }, [unfiled], aliases).map((b) => b.id)).toEqual(["tray-1"]);
+    expect(billsMaybeCarryingNumber("1234", { accountId: CED }, [{ ...unfiled, bill_number: "1234" }], aliases)).toEqual([]);
+    // A bill filed on an account, or already certain, is never a maybe.
+    expect(billsMaybeCarryingNumber("8802-1109000", { accountId: CED }, [trayTicket], aliases)).toEqual([]);
+    expect(billsMaybeCarryingNumber("8802-1109000", { accountId: "acct-other" }, [trayTicket], aliases)).toEqual([]);
+  });
+
+  it("the exact spelling on no account is still certain", () => {
+    const unfiled: LedgerBill = { ...trayTicket, supplier: "CED Truckee counter", supplier_account_id: null };
+    expect(billsCarryingNumber("8802-1109000", { supplier: "CED Truckee counter" }, [unfiled], aliases)).toHaveLength(1);
   });
 
   it("normalises the printed number one way", () => {
@@ -146,5 +158,29 @@ describe("billsCoveredByDocuments", () => {
     const docs: SupplierDoc[] = [{ id: "si-1", invoice_number: "8802-1109000", supplier_account_id: CED, total: 400, invoice_date: "2026-09-12" }];
     const covered = billsCoveredByDocuments([trayTicket, paperB, paperA], docs, [{ bill_id: "fef38cb9", supplier_invoice_id: "si-9" }], aliases);
     expect([...covered].sort()).toEqual(["fef38cb9", "tray-1"]);
+  });
+
+  it("never by a long number under another spelling: that would drop a real purchase from Purchases Not In Your Books", () => {
+    const docs: SupplierDoc[] = [{ id: "si-1", invoice_number: "8802-1109000", supplier_account_id: CED, total: 400, invoice_date: "2026-09-12" }];
+    const unfiled: LedgerBill = { ...trayTicket, supplier: "Some Other Supply", supplier_account_id: null };
+    expect([...billsCoveredByDocuments([unfiled], docs, [], aliases)]).toEqual([]);
+  });
+});
+
+describe("the same long number under another spelling is offered, never assumed", () => {
+  const doc: SupplierDoc = { id: "si-1", invoice_number: "8802-1109000", supplier_account_id: CED, job_id: "job-other", total: 999, invoice_date: "2026-01-01" };
+  const unfiled: LedgerBill = { ...trayTicket, supplier: "CED Truckee counter", supplier_account_id: null };
+
+  it("is a maybe candidate whatever the money, days or job, and says why", () => {
+    const c = samePurchaseCandidates(doc, [unfiled], new Set(), aliases);
+    expect(c).toEqual([expect.objectContaining({ billId: "tray-1", exact: false, otherSpelling: true })]);
+    expect(samePurchaseSentence(c[0])).toBe(
+      "Maybe already on the books: CED Truckee counter #8802-1109000, $400.00, 2026-09-10, on a job. It carries this number, under a supplier name that is on no supplier account yet.",
+    );
+  });
+
+  it("not when a document already covers it, or it is a statement", () => {
+    expect(samePurchaseCandidates(doc, [unfiled], new Set(["tray-1"]), aliases)).toEqual([]);
+    expect(samePurchaseCandidates(doc, [{ ...unfiled, is_statement: true }], new Set(), aliases)).toEqual([]);
   });
 });

@@ -82,6 +82,8 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
         eq(col: string, val: unknown) { mine.eqs.push([col, val]); return chain; },
         order() { return chain; },
         not() { return chain; },
+        or() { return chain; },
+        is() { return chain; },
         limit() { return chain; },
         neq() { return chain; },
         in() { return chain; },
@@ -1412,8 +1414,9 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     const res = await billJobReceipt("doc-2");
     expect(res).toMatchObject({ ok: true, already: true });
     expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone.");
-    expect(res.sameAs).toContain("Different Purchase: Record It Anyway");
-    // The Add Cost sheet prints `warning` and never falls back to a typed second bill on an ok.
+    // The fact only: each door names the button it renders (never "under Receipts & Documents").
+    expect(res.sameAs).toBe("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone. Nothing was recorded twice.");
+    // The Add Cost sheet never falls back to a typed second bill on an ok.
     expect(res.warning).toBe(res.sameAs);
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("organized_items", "insert")).toBeUndefined();
@@ -1473,5 +1476,38 @@ describe("TOOLS in the PO box, read fresh (Erik, 2026-09-24)", () => {
     expect(proposal.companyUse).toEqual({ bucket: "Tools & Supplies", from: "po", words: "TOOLS" });
     expect(proposal.bucketFrom).toBe("reader");
     expect(did("bills", "insert")).toBeUndefined();
+  });
+});
+
+// ── loadBooks: the read every "already on the books?" door leans on (review of audit v994) ─────
+describe("loadBooks reads the bills that can match, in SQL, newest first", () => {
+  it("only bills with a number in either column, only live ones, ordered, under the cap", async () => {
+    const { loadBooks } = await import("./paperwork-core");
+    const seen: { table: string; ops: [string, ...unknown[]][] }[] = [];
+    const client = {
+      from(table: string) {
+        const rec = { table, ops: [] as [string, ...unknown[]][] };
+        seen.push(rec);
+        const chain: any = new Proxy(
+          {},
+          {
+            get(_t, prop: string) {
+              if (prop === "then") return (resolve: any) => resolve({ data: [], error: null });
+              return (...args: unknown[]) => {
+                rec.ops.push([prop, ...args]);
+                return chain;
+              };
+            },
+          },
+        );
+        return chain;
+      },
+    };
+    await loadBooks(client, "org-1");
+    const bills = seen.find((s) => s.table === "bills")!;
+    expect(bills.ops).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(bills.ops).toContainEqual(["or", "bill_number.not.is.null,supplier_invoice_number.not.is.null"]);
+    expect(bills.ops).toContainEqual(["is", "superseded_by_bill_id", null]);
+    expect(bills.ops).toContainEqual(["order", "created_at", { ascending: false }]);
   });
 });

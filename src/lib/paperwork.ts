@@ -824,7 +824,12 @@ export function storedMarks(p: PaperProposal): PaperMarks {
  * itself has not already settled (no pick, no conflict said) is matched again from what was
  * stored: the same exact rules, no model call, and NOTHING WRITTEN. The row shows the pick and why,
  * and a person still presses File It. A paper a person has filed, set aside, or that already
- * carries a pick or a conflict is returned as it is.
+ * carries a job pick or a conflict is returned as it is.
+ *
+ * A COMPANY WORD IS NOT SETTLED (review of audit v994's fix). A PO STOCK or TOOLS paper read
+ * before its job existed was frozen by the word alone, and never showed the conflict a read today
+ * would find ("TOOLS" in the PO box and the job's street in the address). It is placed again like
+ * any other row; the same answer returns the row untouched.
  */
 export function rematchPaper<T extends PaperItem>(
   item: T,
@@ -834,18 +839,23 @@ export function rematchPaper<T extends PaperItem>(
 ): T {
   if (item.status && item.status !== "needs_review") return item;
   const p = proposalOf(item);
-  if (markedJob(p) || p.jobConflict || p.ced || p.companyUse) return item;
+  if (markedJob(p) || p.jobConflict || p.ced) return item;
   if (!isRead(item)) return item;
   const { job: r, companyUse } = placeFromMarks(storedMarks(p), jobs, pos, selfNames, {
     feeShaped: looksLikeSupplierFee(item.title, item.vendor, item.summary),
   });
-  if (r.kind === "none" && !companyUse) return item;
+  const had = p.companyUse ?? null;
+  const sameUse =
+    (!companyUse && !had) ||
+    (!!companyUse && !!had && companyUse.bucket === had.bucket && companyUse.from === had.from && companyUse.words === had.words);
+  if (r.kind === "none" && sameUse) return item;
   // A job a model wrote before marks existed stays offered, as the guess it always was.
   const guessJobId = p.guessJobId ?? (p.jobId && !p.jobFrom ? p.jobId : null);
-  const withUse = companyUse ? { companyUse } : {};
+  // The word as it reads today; a stored word the rules no longer read is cleared, never kept.
+  const withUse = companyUse ? { companyUse } : had ? { companyUse: null } : {};
   if (r.kind === "conflict") return { ...item, proposal: { ...p, ...withUse, jobId: null, jobFrom: null, guessJobId, jobConflict: r.sentence } };
   if (r.kind === "none") return { ...item, proposal: { ...p, ...withUse, jobId: null, jobFrom: null, guessJobId } };
-  return { ...item, proposal: { ...p, jobId: r.jobId, jobFrom: r.from, jobHint: r.words || p.jobHint || null, guessJobId } };
+  return { ...item, proposal: { ...p, ...withUse, jobId: r.jobId, jobFrom: r.from, jobHint: r.words || p.jobHint || null, guessJobId } };
 }
 
 /**

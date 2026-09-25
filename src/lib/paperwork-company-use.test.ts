@@ -133,6 +133,40 @@ describe("Paper A in the tray, replayed from its stored row", () => {
   });
 });
 
+describe("a stored company word is placed again on every load, like any other row", () => {
+  const STOCK_USE = { bucket: null, from: "po", words: "STOCK" };
+  const TOOLS_USE = { bucket: "Tools & Supplies", from: "po", words: "TOOLS" };
+
+  it("the same answer returns the row untouched", () => {
+    const row = paperA({ ...LIVE_A, companyUse: TOOLS_USE });
+    expect(rematchPaper(row, JOBS, [], SELF)).toBe(row);
+  });
+
+  it("PO STOCK read before its job existed shows the conflict a read today would find", () => {
+    // Read when J-011 did not exist yet: the hint's street matched nothing, so only STOCK was kept.
+    const row = paperA({ ...LIVE_A, po: "STOCK", bucket: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE", companyUse: STOCK_USE });
+    expect(rematchPaper(row, [], [], SELF)).toBe(row);
+    const now = rematchPaper(row, JOBS, [], SELF);
+    expect(now.proposal).toMatchObject({ companyUse: STOCK_USE, jobId: null });
+    expect((now.proposal as { jobConflict?: string }).jobConflict).toContain('the PO "STOCK"');
+    expect(suggestedDestination(now, ["j11"])).toBe("");
+  });
+
+  it("PO TOOLS stops picking the bucket once the address names a job too: a person decides", () => {
+    const row = paperA({ ...LIVE_A, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE", companyUse: TOOLS_USE });
+    const now = rematchPaper(row, JOBS, [], SELF);
+    expect(suggestedDestination(now, ["j11"])).toBe("");
+    expect(paperPickOf(now)).toBe("");
+  });
+
+  it("a job the owner later named after the word takes the row, and the stored word is cleared", () => {
+    const toolsJob: MarkJob = { id: "jt", job_number: "J-099", name: "Tools", address: null, customerNames: [] };
+    const now = rematchPaper(paperA({ ...LIVE_A, companyUse: TOOLS_USE }), [...JOBS, toolsJob], [], SELF);
+    expect(now.proposal).toMatchObject({ jobId: "jt", jobFrom: "po", companyUse: null });
+    expect(paperPickOf(now)).toBe("job:jt");
+  });
+});
+
 describe("the reader's guess is the reader's, and says so", () => {
   it("a bucket with no `why` is the reader's; AI Suggest's always carries one", () => {
     expect(bucketIsReaders({ bucket: "Tools & Supplies" })).toBe(true);

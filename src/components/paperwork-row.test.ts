@@ -231,6 +231,12 @@ describe("PaperworkRow", () => {
     expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
   });
 
+  it("a hint that was only the company's own name says nothing: the server's null is an answer", () => {
+    const html = render({ ...TOOLS_TICKET, proposal: { jobHint: "ERIK TAYLOR" }, on_paper: null });
+    expect(html).not.toContain("On the paper:");
+    expect(html).not.toContain("ERIK TAYLOR");
+  });
+
   it("every control is a 44px target", () => {
     const html = render({ proposal: { guessJobId: "job-046" } });
     for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b).toMatch(/h-11/);
