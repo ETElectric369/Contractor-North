@@ -12,7 +12,7 @@ import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat, typ
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
   LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff,
+  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye,
 } from "./job-tab-icons";
 import { createClient } from "@/lib/supabase/server";
 import { acceptedQuoteTotal } from "@/lib/payment-schedule-math";
@@ -37,8 +37,10 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { unbilledWorkForJob } from "@/lib/unbilled-work";
+import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { JobPhotos } from "./job-photos";
+import { JobCustomerPage } from "./job-customer-page";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTasks } from "./job-tasks";
@@ -87,7 +89,7 @@ export const dynamic = "force-dynamic";
 // lead in this order; everything else clusters into the More chip in this order.
 const JOB_TAB_ORDER = [
   "job", "time", "materials", "costs", "invoices", "photos", "tasks", "appointments",
-  "notes", "quotes", "change-orders", "permits", "wos",
+  "notes", "quotes", "change-orders", "permits", "wos", "customer",
 ];
 // THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
 // seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
@@ -98,7 +100,8 @@ const JOB_TAB_ORDER = [
 // of its four "primaries" at 343px, so the money tabs never once stayed inline.
 const JOB_PINNED_STAFF = new Set(["job", "time", "materials", "costs", "invoices"]);
 const JOB_PINNED_TECH = new Set(["job", "time", "materials", "photos"]);
-const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders"]);
+// "customer" (what the customer sees): the link, the stretches and the picks are the office's.
+const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders", "customer"]);
 // Tabs whose chip is NOT drawn on the strip or in More, because a better door to them already
 // exists on the page. Only Tasks so far: the action dock carries it.
 const JOB_OFF_STRIP = new Set(["tasks"]);
@@ -122,6 +125,7 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   "change-orders": { group: "Money", icon: FileDiff },
   notes: { group: "Docs", icon: StickyNote },
   permits: { group: "Docs", icon: Stamp },
+  customer: { group: "Money", icon: Eye },
 };
 
 /** Order the job tabs and tag each with its pin + cluster + staff-gating, so
@@ -327,8 +331,9 @@ export default async function JobDetailPage({
   // contract. On any of those, "Create Invoice for $X" would not draft $X, so the Overview carries
   // no UnbilledCard at all (a quoted job's "time since INV-061" would also be every hour ever
   // worked, since no labor line ever claims them) and the page skips the read.
-  const liveQuotes = (quotes ?? []).filter((q: any) => q.status !== "declined" && q.status !== "expired");
-  const billsActuals = j.billing_type === "tm" && liveQuotes.length === 0 && (paymentMilestones ?? []).length === 0;
+  // One rule with the customer portal (jobBillsItsActuals), so the customer is shown "not on a
+  // bill yet" on exactly the jobs the office is.
+  const billsActuals = jobBillsItsActuals(j.billing_type, (quotes ?? []).map((q: any) => q.status), (paymentMilestones ?? []).length);
   const [
     { data: canonicalItems },
     { data: permits },
@@ -614,6 +619,16 @@ export default async function JobDetailPage({
     signedUrl: (d.file_url && docUrls.get(d.file_url)) || null,
   }));
 
+  // WHICH PHOTOS THE CUSTOMER SEES (0300's job_shared_photos): the office's own table, read only
+  // for the office (a tech's Photos tab has no Show Customer control, and RLS would give it no rows
+  // anyway). null = the table isn't on this database yet, so the control stays hidden rather than
+  // offering a switch that can only fail.
+  let sharedPhotoIds: string[] | null = null;
+  if (viewerIsStaff) {
+    const { data: shared, error: sharedErr } = await supabase.from("job_shared_photos").select("document_id").eq("job_id", id);
+    sharedPhotoIds = sharedErr ? null : ((shared ?? []) as { document_id: string }[]).map((r) => r.document_id);
+  }
+
   const empty = (label: string) => (
     <p className="px-1 py-6 text-center text-sm text-slate-400">No {label} yet.</p>
   );
@@ -875,11 +890,22 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} />
+            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} sharedIds={sharedPhotoIds} />
           </CardContent>
         </Card>
       ),
     },
+    // WHAT THE CUSTOMER SEES ON THIS JOB (office only): the link to their page, the stretches of
+    // work, the picks. Live, so it loads when the tab opens rather than on every hub load.
+    ...(viewerIsStaff
+      ? [
+          {
+            id: "customer",
+            label: "Customer Page",
+            content: <JobCustomerPage jobId={j.id} orgId={j.org_id} customerName={j.customers?.name ?? null} />,
+          },
+        ]
+      : []),
     {
       id: "tasks",
       label: "Tasks",

@@ -42,6 +42,9 @@ describe("dbError — the shapes people actually hit", () => {
   it("a check constraint, a too-long value, and a mid-deploy column", () => {
     expect(dbError(pg('new row for relation "appointments" violates check constraint "appointments_type_check"')))
       .toMatch(/isn't one this field accepts/);
+    // A named check with its own sentence says it (0300's portal constraints).
+    expect(dbError(pg('new row for relation "job_stretches" violates check constraint "job_stretches_dates_in_order"')))
+      .toBe("The stretch ends before it starts. Check the two dates.");
     expect(dbError(pg("value too long for type character varying(40)"))).toMatch(/shorten it/);
     expect(dbError(pg('column quotes.unit does not exist'))).toMatch(/mid-update/);
   });

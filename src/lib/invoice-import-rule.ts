@@ -19,3 +19,20 @@ export function shouldImportActuals(
   if (flag === false) return false; // caller deliberately declined
   return !fromQuote;                // unspecified: the contract decides
 }
+
+/**
+ * DOES THIS JOB BILL ITS ACTUALS? The rule behind the job page's UnbilledCard, shared so the
+ * customer portal shows "work not on a bill yet" on exactly the jobs the office sees it on.
+ *
+ * A T&M job with no live quote (a declined or expired one does not count) and no payment schedule
+ * bills the hours and receipts it logs. Anywhere else the next bill is the contract or a draw, and
+ * "not billed yet" would be every hour ever worked, which nobody will be billed for.
+ */
+export function jobBillsItsActuals(
+  billingType: string | null | undefined,
+  quoteStatuses: readonly (string | null | undefined)[],
+  milestoneCount: number,
+): boolean {
+  const liveQuotes = quoteStatuses.filter((s) => s !== "declined" && s !== "expired").length;
+  return billingType === "tm" && liveQuotes === 0 && milestoneCount === 0;
+}

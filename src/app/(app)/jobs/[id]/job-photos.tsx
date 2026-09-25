@@ -1,14 +1,17 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
-import { Camera, Upload, Trash2, Loader2, ImageOff } from "lucide-react";
+import { Camera, Upload, Trash2, Loader2, ImageOff, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { useToast } from "@/components/toast";
 import { deleteDocument } from "../actions";
 import { uploadJobPhotos } from "./upload-job-photos";
+import { setPhotoShared } from "../portal-share-actions";
+import { PHOTO_NOT_IN_JOB_FOLDER } from "@/lib/portal/share-input";
+import { isJobPhotoPath } from "@/lib/portal/job-view-shape";
 
 interface Doc {
   id: string;
@@ -29,8 +32,25 @@ function onPhone() {
   );
 }
 
-/** Photos tab: every job photo as a tappable thumbnail grid. */
-export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string; docs: Doc[] }) {
+/** Photos tab: every job photo as a tappable thumbnail grid.
+ *
+ *  SHOW CUSTOMER (office only; `sharedIds` is null for a tech, or before 0300): under each PHOTO
+ *  a switch puts it on the customer's job page, live. Only a document filed as a Photo gets one: a
+ *  receipt is an image in the same folder, and the database refuses to share it by name. The
+ *  portal picks photos by this switch's row, never by the folder. A Photo filed outside this job's
+ *  own folder (Organize files papers under <org>/organize/) can't reach the customer's page, so its
+ *  switch says so when pressed instead of pretending to share it. */
+export function JobPhotos({
+  orgId,
+  jobId,
+  docs,
+  sharedIds = null,
+}: {
+  orgId: string;
+  jobId: string;
+  docs: Doc[];
+  sharedIds?: string[] | null;
+}) {
   const router = useRouter();
   const toast = useToast();
   const photos = docs.filter(isImage);
@@ -39,6 +59,42 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
   const [pending, start] = useTransition();
   const [viewing, setViewing] = useState<Doc | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [shown, setShown] = useState<Set<string>>(() => new Set(sharedIds ?? []));
+  const [sharing, setSharing] = useState<string | null>(null);
+  // A server refresh (another tab, Undo) brings the database's list: take it.
+  const sharedKey = (sharedIds ?? []).join(",");
+  useEffect(() => {
+    setShown(new Set(sharedKey ? sharedKey.split(",") : []));
+  }, [sharedKey]);
+
+  async function share(d: Doc, next: boolean, undoable = true) {
+    if (next && !isJobPhotoPath(d.file_url, orgId, jobId)) {
+      toast(PHOTO_NOT_IN_JOB_FOLDER, "error");
+      return;
+    }
+    setSharing(d.id);
+    setShown((s) => {
+      const n = new Set(s);
+      if (next) n.add(d.id);
+      else n.delete(d.id);
+      return n;
+    });
+    const res = await setPhotoShared(d.id, next);
+    setSharing(null);
+    if (!res.ok) {
+      setShown((s) => {
+        const n = new Set(s);
+        if (next) n.delete(d.id);
+        else n.add(d.id);
+        return n;
+      });
+      toast(res.error ?? "That didn't take. Try again.", "error");
+      return;
+    }
+    const msg = next ? "Shown on the customer's page." : "Taken off the customer's page.";
+    if (undoable) toast(msg, "success", { label: "Undo", onClick: () => void share(d, !next, false) });
+    else toast(msg, "success");
+  }
   const captureRef = useRef<HTMLInputElement>(null);
 
   async function upload(files: File[]) {
@@ -116,6 +172,29 @@ export function JobPhotos({ orgId, jobId, docs }: { orgId: string; jobId: string
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
+              {sharedIds && d.category === "Photo" ? (
+                // The position lives on a wrapper: .seaglass-btn is unlayered CSS and sets
+                // position: relative, which beats Tailwind's layered `absolute` on the same element.
+                // The ON state is .seaglass-btn (it carries the white glass base as its last layer),
+                // so the dark ink stays readable over a dark or busy photo.
+                <div className="absolute inset-x-1 bottom-1">
+                  <button
+                    type="button"
+                    onClick={() => void share(d, !shown.has(d.id))}
+                    disabled={sharing === d.id}
+                    aria-pressed={shown.has(d.id)}
+                    title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
+                    className={`inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm ${
+                      shown.has(d.id) ? "seaglass-btn" : "bg-black/55 text-white backdrop-blur"
+                    }`}
+                  >
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
+                    </span>
+                  </button>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

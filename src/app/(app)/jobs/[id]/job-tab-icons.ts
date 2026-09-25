@@ -23,4 +23,6 @@ export {
   StickyNote,
   Stamp,
   FileDiff,
+  // The Customer Page tab (what the customer sees on this job).
+  Eye,
 } from "lucide-react";

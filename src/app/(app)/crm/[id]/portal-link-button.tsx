@@ -125,7 +125,7 @@ export function PortalLinkButton({
     <div className="space-y-2">
       {/* Say whose page it is BEFORE the verbs, so no button has to carry that job alone. */}
       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-        Their own page — estimates, invoices, contracts
+        Their own page — jobs, bills, estimates, contracts
       </div>
       <p className="text-sm text-slate-600">
         {on ? (

@@ -43,6 +43,9 @@ const BY_CONSTRAINT: Record<string, string> = {
   // 0240 made a price-list code unique per org. Without a sentence here the edit modal's six
   // fields all looked equally guilty (audit v921) — name the field that actually collided.
   price_list_items_org_code_uidx: "That code is already on another item in your price list.",
+  // 0300: the customer's page. share-input says these first; the database says them if a door didn't.
+  job_stretches_dates_in_order: "The stretch ends before it starts. Check the two dates.",
+  job_picks_file_is_its_own: "That file isn't filed on this job's picks.",
 };
 
 /** Column names that read badly in a sentence. Anything else is title-cased as-is. */
@@ -86,7 +89,7 @@ export function dbError(err: unknown): string {
 
   // CHECK — a value outside what the column allows (a status, a type, a range).
   const chk = raw.match(/violates check constraint "([^"]+)"/);
-  if (chk) return "That value isn't one this field accepts.";
+  if (chk) return BY_CONSTRAINT[chk[1]] ?? "That value isn't one this field accepts.";
 
   // LENGTH.
   if (/value too long for type/.test(raw)) return "That's longer than this field can hold — shorten it.";
