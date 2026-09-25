@@ -21,6 +21,8 @@ import { useToast } from "@/components/toast";
 export interface OpenEntry {
   id: string;
   clock_in: string;
+  /** When the SHIFT began (lib/shift-chain): the first part's clock-in after a Switch Job. */
+  shift_start?: string | null;
   job_id: string | null;
   /** A time code with no job (Drive, Shop) is still a part of the day: switch_job cuts it. */
   job_code?: string | null;
@@ -160,7 +162,7 @@ export function JobTimeButton({
   /** The running clock has gone LONG_SHIFT_HOURS: the out door goes to Timeclock's stop picker. So
    *  does a Switch that would CUT it (a running entry with a job or a code): 0288 closes the old
    *  part at now, the same one-tap mistake, and switchJob refuses it. A re-point closes nothing. */
-  const longRunning = !!openEntry && isLongOpenShift(new Date(openEntry.clock_in).getTime(), now);
+  const longRunning = !!openEntry && isLongOpenShift(new Date(openEntry.shift_start ?? openEntry.clock_in).getTime(), now);
   const longShift =
     longRunning && (state === "here" || (state === "switch" && (!!openEntry?.job_id || !!openEntry?.job_code)));
 
@@ -303,7 +305,7 @@ export function JobTimeButton({
               <p className="text-sm text-slate-600">
                 Clock <span className="font-medium">yourself</span> in to {jobNumber} — you stay right here on the job.
               </p>
-              <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} />
+              <ClockStartPicker onChange={(iso) => setStartAt(iso ?? "")} staff={isStaff} tz={tz} />
               {logHoursSection}
             </>
           )}

@@ -119,11 +119,28 @@ export function clockedOutWords(
   };
 }
 
-/** The office's sheet treats this shift as forgotten: it has run LONG_SHIFT_HOURS, or it began on
- *  an earlier org-local day. Then the sheet ("Clock Out Brian" either way) starts its clock-out
- *  time empty and asks when the work really ended; otherwise the clock-out time is now. */
-export function isForgottenShift(clockInMs: number, nowMs: number, tz: string): boolean {
-  return isLongOpenShift(clockInMs, nowMs) || startedEarlierDay(clockInMs, nowMs, tz);
+/**
+ * Why the office's sheet treats this shift as possibly forgotten, or null when it doesn't:
+ *   "long":        it has run LONG_SHIFT_HOURS;
+ *   "earlier_day": it began on an earlier org-local day (a callback past midnight, say) but has not
+ *                  run that long.
+ * Then the sheet ("Clock Out Brian" either way) starts its clock-out time empty and asks when the
+ * work really ended, and says WHICH of the two it is: a 7 PM callback stopped at 12:40 AM has not
+ * been "running a long time" (audit v994 SI9). The Now chip is offered either way (Erik, 2026-09-24).
+ *
+ * Pass the SHIFT's start (lib/shift-chain), not the running piece's: after a Switch Job the 12
+ * hours count from the first piece (audit v994 SW1).
+ */
+export function forgottenReason(shiftStartMs: number, nowMs: number, tz: string): "long" | "earlier_day" | null {
+  if (!Number.isFinite(shiftStartMs) || !Number.isFinite(nowMs)) return null;
+  if (isLongOpenShift(shiftStartMs, nowMs)) return "long";
+  if (startedEarlierDay(shiftStartMs, nowMs, tz)) return "earlier_day";
+  return null;
+}
+
+/** The office's sheet treats this shift as forgotten (forgottenReason is not null). */
+export function isForgottenShift(shiftStartMs: number, nowMs: number, tz: string): boolean {
+  return forgottenReason(shiftStartMs, nowMs, tz) != null;
 }
 
 /** The instants a stated stop may take: a minute after the clock-in, up to a minute from now, and
@@ -175,8 +192,8 @@ export function quietHold(nowMs: number, tz: string): boolean {
   return min >= 21 * 60 || min < 6 * 60;
 }
 
-/** The clock-in's org-local day is before today's: the office sheet names the date and never
- *  offers "now" as a stop. */
+/** The clock-in's org-local day is before today's: the office sheet names the date and starts the
+ *  clock-out empty (it still offers Now as a chip: audit v994 SI9). */
 export function startedEarlierDay(clockInMs: number, nowMs: number, tz: string): boolean {
   const z = tz || DEFAULT_TIMEZONE;
   return todayStrInTz(z, new Date(clockInMs)) < todayStrInTz(z, new Date(nowMs));
@@ -186,7 +203,20 @@ export type LongShiftCandidate = {
   clock_in: string;
   long_shift_warned_at?: string | null;
   long_shift_nudged_at?: string | null;
+  /** When the SHIFT began (lib/shift-chain): the first piece's clock_in after a Switch Job. The
+   *  hours are counted from here, never from the switch (audit v994 SW1). Absent = clock_in. */
+  shift_start?: string | null;
+  /** Some earlier piece of this shift already had its bell line / its question (the step went out
+   *  before the switch; the new piece's own columns start empty). */
+  shift_warned?: boolean;
+  shift_nudged?: boolean;
 };
+
+/** When a candidate's shift began, as epoch ms: its shift_start, else its own clock_in. */
+export function candidateStartMs(r: LongShiftCandidate): number {
+  const s = r.shift_start ? Date.parse(r.shift_start) : NaN;
+  return Number.isFinite(s) ? s : Date.parse(r.clock_in);
+}
 
 /**
  * What the hourly job owes each open shift right now, in its two steps (0291 claims each once):
@@ -195,6 +225,9 @@ export type LongShiftCandidate = {
  *          silent, so the night does not hold it.
  *   nudge: running LONG_SHIFT_HOURS and nobody has been asked. It pushes (the crew member, and the
  *          office's phones), so nothing goes out between 9 PM and 6 AM; the 6 AM run does it.
+ *
+ * Hours are counted from the SHIFT's start (shift_start, the first piece after a Switch Job), and a
+ * step that already went out on an earlier piece of the shift is not sent again on the new one.
  *
  * A row can be in both lists on one run (the job was down at 10 hours, or both marks fell in one
  * hour): the office gets its line and its buzz, never one in place of the other.
@@ -206,11 +239,11 @@ export function pickLongShiftSteps<T extends LongShiftCandidate>(
 ): { bell: T[]; nudge: T[] } {
   const held = quietHold(nowMs, tz);
   const ran = (r: T, hours: number) => {
-    const ci = Date.parse(r.clock_in);
+    const ci = candidateStartMs(r);
     return Number.isFinite(ci) && Number.isFinite(nowMs) && nowMs - ci >= hours * H;
   };
   return {
-    bell: openRows.filter((r) => !r.long_shift_warned_at && ran(r, OFFICE_BELL_HOURS)),
-    nudge: held ? [] : openRows.filter((r) => !r.long_shift_nudged_at && ran(r, LONG_SHIFT_HOURS)),
+    bell: openRows.filter((r) => !r.long_shift_warned_at && !r.shift_warned && ran(r, OFFICE_BELL_HOURS)),
+    nudge: held ? [] : openRows.filter((r) => !r.long_shift_nudged_at && !r.shift_nudged && ran(r, LONG_SHIFT_HOURS)),
   };
 }

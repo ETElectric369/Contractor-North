@@ -12,6 +12,7 @@
  * they always have (see payroll-math).
  */
 import { isLongOpenShift } from "@/lib/long-shift";
+import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc } from "@/lib/tz";
 
 /**
  * The clock-out instant to persist for an explicitly supplied `at` (the geofence "time they left",
@@ -135,4 +136,175 @@ export function withStopCrumb(notes: string | null | undefined, crumb: string): 
   const base = (notes ?? "").trim();
   if (base.includes(crumb)) return base;
   return base ? `${base}\n${crumb}` : crumb;
+}
+
+// ── "BRIAN WORKED 8 HOURS TODAY" (audit v994 SI6) ────────────────────────────────────────────────
+
+/**
+ * The placeholder span for a duration-entered shift ("Brian worked 8 hours Tuesday"): centred on
+ * midday in the org's clock, lengthened by the lunch so the paid hours come out as stated.
+ *
+ * TODAY IS NOT OVER. 0291 refuses a shift that ends in the future for everyone, so "8 hours today"
+ * logged at 3 PM invented an 8 AM to 4 PM span and was refused with "Pick the time it really stopped",
+ * on a form with no time field. Now a span that would end after now ends AT now instead, when the
+ * hours fit between the org's midnight and now, and says so; when they don't fit, the refusal says
+ * what to do in words that match the form. A later day is refused outright: nobody has worked it.
+ */
+export function durationSpan(input: {
+  workDate: string;
+  hours: number;
+  lunchMin: number;
+  tz: string;
+  nowMs: number;
+}): { ok: true; clockIn: string; clockOut: string; warning?: string } | { ok: false; error: string } {
+  const spanMin = Math.round(input.hours * 60) + Math.max(0, input.lunchMin);
+  const startMin = Math.max(0, 12 * 60 - Math.round(spanMin / 2));
+  const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
+  const mm = String(startMin % 60).padStart(2, "0");
+  const startIso = tzDateTimeUtc(input.workDate, `${hh}:${mm}`, input.tz);
+  if (!startIso) return { ok: false, error: "I couldn't read that date." };
+  const endMs = Date.parse(startIso) + spanMin * 60_000;
+  const today = todayStrInTz(input.tz, new Date(input.nowMs));
+  if (input.workDate > today) {
+    return { ok: false, error: "That day hasn't happened yet. Log the hours once they're worked." };
+  }
+  if (endMs <= input.nowMs) {
+    return { ok: true, clockIn: startIso, clockOut: new Date(endMs).toISOString() };
+  }
+  // Today, and the midday span runs past now: end it at now, if the hours fit since midnight.
+  const midnight = tzDayStartUtc(input.workDate, input.tz).getTime();
+  const nowMin = Math.floor(input.nowMs / 60_000) * 60_000; // whole minutes, like every other span
+  const start = nowMin - spanMin * 60_000;
+  if (start < midnight) {
+    const h = Number.isInteger(input.hours) ? String(input.hours) : input.hours.toFixed(2);
+    return {
+      ok: false,
+      error: `Today isn't over yet, and ${h} hours${input.lunchMin > 0 ? " plus the lunch" : ""} don't fit between midnight and now. Give the hours after the work is done, or give the start and stop times.`,
+    };
+  }
+  const clockIn = new Date(start).toISOString();
+  const clockOut = new Date(nowMin).toISOString();
+  const clock = (ms: number) =>
+    new Date(ms).toLocaleTimeString("en-US", { timeZone: input.tz, hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " ");
+  return {
+    ok: true,
+    clockIn,
+    clockOut,
+    warning: `Today isn't over yet, so the hours are logged ending now: ${clock(start)} to ${clock(nowMin)}. Change the times on Timecards if that's not right.`,
+  };
+}
+
+// ── WHERE A LUNCH LANDS AFTER A SWITCH JOB (0288; audit v994 SW3, SW6) ────────────────────────────
+
+/** The touching part before the switch, as the lunch rule needs it. */
+export type LunchPart = {
+  id: string;
+  clock_in: string;
+  clock_out: string | null;
+  lunch_minutes: number | null;
+  /** A paid part is frozen: its hours are in a payroll_runs snapshot (SW6). */
+  paid_at?: string | null;
+};
+
+/** A lunch fits a part when at least a minute of work is left after it. */
+export function lunchFits(startIso: string, endIso: string | null, lunchMin: number): boolean {
+  if (!endIso) return false;
+  const span = Date.parse(endIso) - Date.parse(startIso);
+  return Number.isFinite(span) && span - Math.max(0, lunchMin) * 60_000 >= 60_000;
+}
+
+export type LunchPlacement =
+  | {
+      ok: true;
+      /** The lunch this part carries. */
+      here: number;
+      /** The lunch written onto the part before the switch (raise-only: never below what it has). */
+      prior: { id: string; lunch: number } | null;
+      /** Said to the person when the lunch did not land where it was asked for. */
+      warning?: string;
+    }
+  | { ok: false; error: string };
+
+/**
+ * CAN A STATED LUNCH GO ON THE PART BEFORE THE SWITCH? Only when this part carries none (audit v994
+ * SW3). A lunch already on this part (the office set it on the running piece, and the close kept it)
+ * IS the day's lunch: putting the stated one on the part before as well docks the one lunch twice, and
+ * the crew guard can't lower this part's. It stays here, and the answer says so.
+ */
+export function lunchOnPriorAllowed(input: { lunchOnPrior: boolean; lunch: number; existingHere: number }): {
+  onPrior: boolean;
+  warning?: string;
+} {
+  const lunch = Math.max(0, Math.round(Number(input.lunch) || 0));
+  const existing = Math.max(0, Math.round(Number(input.existingHere) || 0));
+  if (!input.lunchOnPrior || lunch === 0) return { onPrior: false };
+  if (existing > 0) return { onPrior: false, warning: `This part already has a ${existing}-minute lunch on it, so it stays here.` };
+  return { onPrior: true };
+}
+
+/**
+ * THE LUNCH HAS TO FIT THE PART IT LANDS ON. ONE RULE FOR EVERY DOOR THAT STATES A LUNCH AFTER A
+ * SWITCH: the clock-out, and the "finish your timecard" prompt after a geofence close (which used to
+ * write the whole day's lunch onto a 20-minute last part, where hoursBetween clamps it to 0 and the
+ * day is paid for minutes nobody worked, SW3).
+ *
+ *   - A lunch the person put on the part before the switch goes there when that part is the touching
+ *     one, is not paid, and has room; otherwise it lands on this part and the answer says why.
+ *   - A lunch on this part that does not fit it goes on the part before when it fits there (and the
+ *     answer says so).
+ *   - A lunch that fits neither is refused in words (`refuse`), or, when nobody can be asked (the
+ *     unattended geofence close), stays on this part as it always did.
+ *   - A PAID part before the switch never takes a lunch (SW6): its hours are already in a payroll
+ *     snapshot, and the office's editor refuses the same change ("Undo on Payroll first").
+ *
+ * `here` is this part's span (its clock-in, and the clock-out it has or is about to get). `prior` is
+ * the caller's OWN touching closed part before it (ended when this one began), or null.
+ */
+export function placeLunch(input: {
+  hereLunch: number;
+  /** A lunch the person put on the part before the switch, and the part they meant. */
+  priorLunch?: number;
+  priorId?: string | null;
+  here: { clock_in: string; clock_out: string };
+  prior: LunchPart | null;
+  refuse: boolean;
+}): LunchPlacement {
+  let here = Math.max(0, Math.round(Number(input.hereLunch) || 0));
+  const asked = Math.max(0, Math.round(Number(input.priorLunch) || 0));
+  const p = input.prior;
+  const paid = !!p?.paid_at;
+  const room = (lunch: number) => !!p && !paid && lunchFits(p.clock_in, p.clock_out, Math.max(Number(p.lunch_minutes) || 0, lunch));
+  let prior: { id: string; lunch: number } | null = null;
+  let warning: string | undefined;
+
+  if (asked > 0) {
+    if (p && (!input.priorId || input.priorId === p.id) && room(asked)) {
+      prior = { id: p.id, lunch: Math.max(Number(p.lunch_minutes) || 0, asked) };
+    } else {
+      here = Math.max(here, asked);
+      warning =
+        p && paid && (!input.priorId || input.priorId === p.id)
+          ? "The part before the switch is already paid, so the lunch went on this part of your shift."
+          : "The lunch didn't fit on the part before the switch, so it went on this part of your shift.";
+    }
+  }
+
+  if (here > 0 && !lunchFits(input.here.clock_in, input.here.clock_out, here)) {
+    if (!prior && p && room(here)) {
+      prior = { id: p.id, lunch: Math.max(Number(p.lunch_minutes) || 0, here) };
+      warning = `The ${here}-minute lunch is longer than this part of your shift, so it went on the part before the switch.`;
+      here = 0;
+    } else if (input.refuse) {
+      const spanMs = Date.parse(input.here.clock_out) - Date.parse(input.here.clock_in);
+      const workedMin = Math.max(0, Math.floor((Number.isFinite(spanMs) ? spanMs : 0) / 60_000));
+      return {
+        ok: false,
+        error:
+          `A ${here}-minute lunch is longer than the ${workedMin} ${workedMin === 1 ? "minute" : "minutes"} on ${p ? "this part of your shift" : "this shift"}.` +
+          (paid ? " The part before the switch is already paid, so it can't go there." : "") +
+          " Untick the lunch, or ask the office to fix it on Timecards.",
+      };
+    }
+  }
+  return { ok: true, here, prior, ...(warning ? { warning } : {}) };
 }

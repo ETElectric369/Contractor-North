@@ -7,7 +7,8 @@ import { orgStaffIdsOrThrow, sendPushToProfiles } from "@/lib/push";
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { isStaffRole } from "@/lib/actions/perms";
 import { jobLabel } from "@/lib/schedule-options";
-import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, candidateStartMs, clockDoorWords, pickLongShiftSteps, quietHold } from "@/lib/long-shift";
+import { loadShiftChains } from "@/lib/shift-chain";
 
 /**
  * THE LONG-SHIFT JOB (2026-09-24). Hourly (vercel.json "0 * * * *").
@@ -44,6 +45,13 @@ import { LONG_SHIFT_HOURS, OFFICE_BELL_HOURS, clockDoorWords, pickLongShiftSteps
  * was. Each push respects the reader's own switch in Settings: the crew member's rides clock_out,
  * the office's rides long_shift. A removed person's phone is never pushed, but the office still
  * hears about the clock he left running: that is exactly the one nobody else will stop.
+ *
+ * THE SHIFT, NOT THE PIECE (audit v994 SW1). A Switch Job cuts the running entry (0288), so the
+ * open row may be only the part since the last switch. Every hour here counts from the SHIFT's
+ * start (lib/shift-chain: the first touching piece of the same family and person), and a step that
+ * went out on an earlier piece is not sent again on the new one. Brian in at 7:00 AM, switched at
+ * 3:00 PM and forgot: the bell comes at 5:00 PM and says "Clocked in Tue 7:00 AM ... 10 hours ago",
+ * not at 1:00 AM with the switch's time.
  *
  * The service client bypasses RLS: every query is org-scoped by hand.
  *
@@ -83,7 +91,7 @@ export async function GET(request: Request) {
       const { data: open, error } = await supabase
         .from("time_entries")
         .select(
-          "id, profile_id, clock_in, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
+          "id, profile_id, clock_in, split_from, job_code, long_shift_warned_at, long_shift_nudged_at, job:job_id(job_number, name), profiles:profile_id(full_name, role, active, phone)",
         )
         .eq("org_id", org.id)
         .eq("status", "open")
@@ -96,13 +104,29 @@ export async function GET(request: Request) {
         id: string;
         profile_id: string;
         clock_in: string;
+        split_from: string | null;
+        job_code?: string | null;
         long_shift_warned_at: string | null;
         long_shift_nudged_at: string | null;
+        shift_start?: string | null;
+        shift_warned?: boolean;
+        shift_nudged?: boolean;
         job?: Job | Job[] | null;
         profiles?: Person | Person[] | null;
       };
       const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
-      const { bell, nudge } = pickLongShiftSteps((open ?? []) as unknown as Row[], nowMs, tz);
+      const rows = (open ?? []) as unknown as Row[];
+      // One read for the families of the switched clocks; it throws on failure (never a silent
+      // fall back to the piece), which fails this org's run loudly below.
+      const chains = await loadShiftChains(supabase, rows, org.id);
+      for (const r of rows) {
+        const info = chains.get(r.id);
+        if (!info) continue;
+        r.shift_start = info.startIso;
+        r.shift_warned = info.warned;
+        r.shift_nudged = info.nudged;
+      }
+      const { bell, nudge } = pickLongShiftSteps(rows, nowMs, tz);
       counts.bells_due += bell.length;
       counts.nudges_due += nudge.length;
       if (!bell.length && !nudge.length) continue;
@@ -142,19 +166,37 @@ export async function GET(request: Request) {
       const facts = (r: Row) => {
         const person = one(r.profiles);
         const job = one(r.job);
-        const inAt = new Date(r.clock_in);
-        const since = `${inAt.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${inAt
-          .toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
-          .replace(/ /g, " ")}`; // ICU's narrow no-break space before AM/PM, as a plain space
+        // The SHIFT's start, not the switch's (audit v994 SW1).
+        const inAt = new Date(candidateStartMs(r));
+        const clock = (d: Date) =>
+          d.toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/\u202f/g, " "); // ICU's narrow no-break space before AM/PM, as a plain space
+        const day = (d: Date) => d.toLocaleDateString("en-US", { timeZone: tz, weekday: "short" });
+        const since = `${day(inAt)} ${clock(inAt)}`;
         const name = (person?.full_name ?? "").trim();
+        const label = job ? jobLabel(job) : (r.job_code ?? "").trim() || null;
+        const hours = Math.floor((nowMs - inAt.getTime()) / 3_600_000);
+        // AFTER A SWITCH JOB the running piece's job is not where the day began (audit v994): the
+        // start is the shift's and the job is named with the time the switch put him there, the
+        // way the office's Stop Clock sheet words it. "Clocked in Tue 7:00 AM at Job B" was false.
+        const pieceAt = new Date(Date.parse(r.clock_in));
+        const switched = Number.isFinite(pieceAt.getTime()) && pieceAt.getTime() - inAt.getTime() >= 60_000;
+        const switchAt = switched ? (day(pieceAt) === day(inAt) ? clock(pieceAt) : `${day(pieceAt)} ${clock(pieceAt)}`) : "";
         return {
           person,
           crew: !isStaffRole(person?.role ?? ""),
-          label: job ? jobLabel(job) : null,
+          label,
           since,
           first: name.split(/\s+/)[0] || "A crew member",
           door: clockDoorWords(name).clockOut,
-          hours: Math.floor((nowMs - inAt.getTime()) / 3_600_000),
+          hours,
+          /** The office's lead, no closing stop: "Clocked in Thu 7:00 AM at Job A, 10 hours ago". */
+          officeLead: switched
+            ? `On the clock since ${since}, ${hours} hours${label ? `; at ${label} since ${switchAt}` : ""}`
+            : `Clocked in ${since}${label ? ` at ${label}` : ""}, ${hours} hours ago`,
+          /** The crew member's lead, no closing stop: "You've been clocked in at Job A since Thu 7:00 AM". */
+          crewLead: switched
+            ? `You've been on the clock since ${since}${label ? ` (at ${label} since ${switchAt})` : ""}`
+            : `You've been clocked in${label ? ` at ${label}` : ""} since ${since}`,
         };
       };
 
@@ -168,7 +210,7 @@ export async function GET(request: Request) {
         // really come: at 12 hours, or in the morning when 12 hours falls in the night's hold. A
         // row already at 12 (the job was down, or it is 0291's first run) is asked in step two of
         // this same run or the 6 AM one, so its bell line promises nothing.
-        const askAtMs = Date.parse(r.clock_in) + LONG_SHIFT_HOURS * 3_600_000;
+        const askAtMs = candidateStartMs(r) + LONG_SHIFT_HOURS * 3_600_000;
         const tail =
           f.person?.active === false || !(askAtMs > nowMs)
             ? ""
@@ -179,7 +221,7 @@ export async function GET(request: Request) {
           type: "long_shift",
           title: `${f.first} Is Still On The Clock`,
           body:
-            `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago. ` +
+            `${f.officeLead}. ` +
             `If the shift is over, ${f.door} on Timecards.${tail}`,
           url: `/timecards?entry=${r.id}`,
         });
@@ -201,7 +243,7 @@ export async function GET(request: Request) {
 
         if (f.person?.active !== false) {
           const title = "Still On The Clock?";
-          const body = `You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}. Tap to set when you stopped.`;
+          const body = `${f.crewLead}. Tap to set when you stopped.`;
           await sendPushToProfiles([r.profile_id], "clock_out", { title, body, url: "/timeclock" });
           // The push has gone, so the claim stays spent (giving it back would push twice); a bell
           // line the database refused is reported by createNotifications and counted here.
@@ -222,7 +264,7 @@ export async function GET(request: Request) {
             } else {
               const who = ((org as { name?: string | null }).name ?? "").trim();
               const text =
-                `${who ? `${who}: ` : ""}You've been clocked in${f.label ? ` at ${f.label}` : ""} since ${f.since}, ` +
+                `${who ? `${who}: ` : ""}${f.crewLead}, ` +
                 `more than ${LONG_SHIFT_HOURS} hours. Open Timeclock to set when you stopped.`;
               // A refusal or a dropped connection answers false (sendSms logs why). The catch is the
               // belt: nothing about a text may cost the office its buzz below.
@@ -241,7 +283,7 @@ export async function GET(request: Request) {
           await sendPushToProfiles(to, "long_shift", {
             title: `${f.first} Is Still On The Clock`,
             body:
-              `Clocked in ${f.since}${f.label ? ` at ${f.label}` : ""}, ${f.hours} hours ago` +
+              f.officeLead +
               `${f.person?.active === false ? " (no longer on your crew)" : `. ${f.first} has been asked when the shift ended`}. ` +
               `${f.door} on Timecards if you know.`,
             url: `/timecards?entry=${r.id}`,

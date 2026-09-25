@@ -40,6 +40,7 @@ import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-wo
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
+import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
 import { JobCustomerPage } from "./job-customer-page";
 import { JobNotes } from "./job-notes";
@@ -396,7 +397,7 @@ export default async function JobDetailPage({
     // part started, and the "Switch here" confirm names now - clock_in as the outgoing hours.
     supabase
       .from("time_entries")
-      .select("id, clock_in, job_id, job_code, job:job_id(job_number, name)")
+      .select("id, profile_id, clock_in, job_id, job_code, split_from, job:job_id(job_number, name)")
       .eq("profile_id", user?.id ?? "")
       .eq("status", "open")
       .maybeSingle(),
@@ -466,10 +467,20 @@ export default async function JobDetailPage({
           lastInvoiceAt: unbilled.lastInvoiceAt,
         };
   const oe = openEntryRow as any;
+  // THE SHIFT, NOT THE PIECE (audit v994 SW1): the long-shift door counts from the first part.
+  let oeShiftStart: string | null = null;
+  if (oe?.split_from) {
+    try {
+      oeShiftStart = (await loadShiftChains(supabase as any, [oe], null)).get(String(oe.id))?.startIso ?? null;
+    } catch (e) {
+      reportError("jobs.[id].shiftChain", e, { jobId: id });
+    }
+  }
   const openEntry = oe
     ? {
         id: oe.id as string,
         clock_in: oe.clock_in as string,
+        shift_start: oeShiftStart,
         job_id: (oe.job_id ?? null) as string | null,
         job_code: (oe.job_code ?? null) as string | null,
         jobLabel: oe.job ? jobLabel(oe.job) : null,
@@ -1028,7 +1039,7 @@ export default async function JobDetailPage({
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
             <div className="flex flex-wrap items-center gap-2">
-              <JobClockButton jobId={j.id} isStaff={viewerIsStaff} />
+              <JobClockButton jobId={j.id} isStaff={viewerIsStaff} tz={tz} />
               {viewerIsStaff && (
                 <JobAddTimeEntry
                   jobId={j.id}

@@ -338,7 +338,8 @@ export async function settleMileage(input: {
 
   const { data: entries } = await supabase
     .from("time_entries")
-    .select("id, clock_in, miles")
+    // split_from: a split shift's miles count on the day the shift began (summarizeMileage, SW5).
+    .select("id, clock_in, miles, split_from")
     .eq("profile_id", input.profileId)
     .eq("status", "closed")
     .is("mileage_paid_at", null)

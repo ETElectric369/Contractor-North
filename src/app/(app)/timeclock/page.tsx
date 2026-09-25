@@ -18,6 +18,8 @@ import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } 
 import { translator } from "@/lib/i18n";
 import type { JobCode, TimeEntry } from "@/lib/types";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
+import { loadShiftChains } from "@/lib/shift-chain";
+import { reportError } from "@/lib/observe";
 
 export const dynamic = "force-dynamic";
 
@@ -142,6 +144,9 @@ export default async function TimeclockPage() {
       .eq("profile_id", user.id)
       .eq("status", "closed")
       .eq("clock_out", openEntry.clock_in)
+      // A PAID part is frozen (audit v994 SW6): its hours are in a payroll snapshot, so the lunch
+      // box never offers it. The clock-out refuses it too (close-math placeLunch).
+      .is("paid_at", null)
       .maybeSingle();
     const p = prev as any;
     if (p?.clock_out) {
@@ -159,21 +164,25 @@ export default async function TimeclockPage() {
     }
   }
   const week = (weekRes.data ?? []) as TimeEntry[];
-  // THE SHIFT SO FAR. After one or more Switch Jobs the running entry is only the latest part; walk
-  // back through the caller's own touching closed entries (each ended when the next began) and add
-  // them up, so the panel can say the whole shift beside the running part's timer.
+  // THE SHIFT SO FAR. After one or more Switch Jobs the running entry is only the latest part. The
+  // shift is the ONE shared notion (lib/shift-chain, which every shift-level rule reads: the bell,
+  // the twelve-hour question, the forgotten-shift sheet, Nort): the touching parts of the same split
+  // family and person. Their hours are said beside the running part's timer, and the long-shift
+  // question counts from the first one (audit v994 SW1).
   let earlierShiftHours = 0;
+  let shiftStartIso: string | null = null;
   if (openEntry) {
-    let cursor = Date.parse(openEntry.clock_in);
-    const seen = new Set<string>();
-    for (let hop = 0; hop < 12; hop++) {
-      const prev = week.find(
-        (e) => e.status === "closed" && e.clock_out && !seen.has(e.id) && Math.abs(Date.parse(e.clock_out) - cursor) < 1000,
-      );
-      if (!prev?.clock_out) break;
-      seen.add(prev.id);
-      earlierShiftHours += hoursBetween(prev.clock_in, prev.clock_out, prev.lunch_minutes);
-      cursor = Date.parse(prev.clock_in);
+    try {
+      const chains = await loadShiftChains(supabase as any, [openEntry as any], null);
+      const info = chains.get(openEntry.id);
+      if (info) {
+        shiftStartIso = info.startIso;
+        for (const p of info.earlier) {
+          if (p.clock_out) earlierShiftHours += hoursBetween(p.clock_in, p.clock_out, p.lunch_minutes ?? 0);
+        }
+      }
+    } catch (e) {
+      reportError("timeclock-shift-chain", e);
     }
   }
 
@@ -189,6 +198,7 @@ export default async function TimeclockPage() {
         jobLabel: string;
       }
     | null = null;
+  let autoPrevious: { id: string; jobLabel: string; clock_in: string; clock_out: string; lunch_minutes: number | null } | null = null;
   if (user) {
     const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000).toISOString();
     const { data: autoEntry } = await supabase
@@ -218,6 +228,31 @@ export default async function TimeclockPage() {
               : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null })
             : "the jobsite",
         };
+        // THE PART BEFORE THE SWITCH (audit v994 SW3): the caller's own unpaid closed entry that ended
+        // when the auto-closed one began. The prompt offers the lunch there, by default, the way the
+        // clock-out does, instead of putting the whole day's lunch on a short last part.
+        const { data: prev } = await supabase
+          .from("time_entries")
+          .select("id, clock_in, clock_out, lunch_minutes, job_code, job:job_id(job_number, name, address, customers(name))")
+          .eq("profile_id", user.id)
+          .eq("status", "closed")
+          .eq("clock_out", (autoEntry as any).clock_in)
+          .is("paid_at", null)
+          .maybeSingle();
+        const p = prev as any;
+        if (p?.clock_out) {
+          autoPrevious = {
+            id: String(p.id),
+            clock_in: String(p.clock_in),
+            clock_out: String(p.clock_out),
+            lunch_minutes: p.lunch_minutes ?? null,
+            jobLabel: p.job
+              ? jobCodesOn
+                ? jobLabel(p.job)
+                : jobSiteLabel({ ...p.job, customer_name: p.job.customers?.name ?? null })
+              : (p.job_code ?? "the part before"),
+          };
+        }
       }
     }
   }
@@ -365,12 +400,14 @@ export default async function TimeclockPage() {
             jobCodesEnabled={jobCodesOn}
             isStaff={isStaff}
             tz={orgSettings.timezone}
+            previousPiece={autoPrevious}
           />
         )}
         <TimeclockPanel
           openEntry={openEntry}
           previousPiece={previousPiece}
           earlierShiftHours={earlierShiftHours}
+          shiftStartIso={shiftStartIso}
           jobCodes={(codesRes.data ?? []) as JobCode[]}
           jobs={jobOptions}
           lang={lang}

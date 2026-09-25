@@ -13,7 +13,7 @@ import { splitPreview } from "@/lib/split-preview";
 import { resolveOfflinePunchTime } from "@/lib/offline/punch-time";
 import { runOnce } from "@/lib/offline/run-once";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tzDateTimeUtc, todayBoundsInTz } from "@/lib/tz";
+import { todayBoundsInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { setJobCrew } from "../schedule/actions";
@@ -21,7 +21,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { lastSwitchMs, switchBreadcrumb } from "./switch-breadcrumb";
-import { clampCloseAtMs, needsStatedStop, stopCrumb, withAutoConfirmedCrumb, withStopCrumb } from "./close-math";
+import {
+  clampCloseAtMs,
+  durationSpan,
+  lunchFits,
+  needsStatedStop,
+  placeLunch,
+  lunchOnPriorAllowed,
+  stopCrumb,
+  withAutoConfirmedCrumb,
+  withStopCrumb,
+  type LunchPart,
+} from "./close-math";
+import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
@@ -380,7 +392,7 @@ export async function switchJob(input: {
 
   const { data: entry } = await supabase
     .from("time_entries")
-    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in, profiles:profile_id(full_name)")
+    .select("id, org_id, profile_id, job_id, job_code, notes, rate_override, clock_in, split_from, profiles:profile_id(full_name)")
     .eq("id", input.entry_id)
     .eq("status", "open")
     .maybeSingle();
@@ -394,11 +406,20 @@ export async function switchJob(input: {
    * labor import bills. So the switch asks the same question the clock-out does. A re-point (no job
    * and no code yet) closes nothing and moves the whole running shift, so it is left alone.
    */
-  const ciMs = entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
+  // The SHIFT's start (audit v994 SW1): a second switch late in a forgotten day is the same
+  // one-tap close at now as the first.
+  const { shift: shiftSw, failed: shiftUnread } = await shiftOf(
+    supabase,
+    entry as { id: string; profile_id: string; clock_in: string; split_from?: string | null },
+  );
   const wouldCut = !!entry.job_id || !!entry.job_code;
+  if (shiftUnread && wouldCut) {
+    return { ok: false, error: "I couldn't check how long this clock has been running. Nothing was switched; try again." };
+  }
+  const ciMs = shiftSw ? shiftSw.startMs : entry.clock_in ? Date.parse(String(entry.clock_in)) : NaN;
   if (wouldCut && isLongOpenShift(ciMs, Date.now())) {
     const tz = await orgTz(supabase);
-    const since = dayClock(String(entry.clock_in), tz);
+    const since = dayClock(shiftSw ? shiftSw.startIso : String(entry.clock_in), tz);
     if (entry.profile_id === user.id) {
       return {
         ok: false,
@@ -518,6 +539,53 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
   };
 }
 
+/**
+ * The caller's OWN closed part that ended when this one began (a Switch Job closes one part and opens
+ * the next at the same instant, 0288). paid_at rides along: a paid part never takes a lunch (SW6).
+ */
+async function touchingPartBefore(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  profileId: string,
+  clockInIso: string,
+): Promise<LunchPart | null> {
+  const { data } = await supabase
+    .from("time_entries")
+    .select("id, clock_in, clock_out, lunch_minutes, paid_at")
+    .eq("profile_id", profileId)
+    .eq("status", "closed")
+    .eq("clock_out", clockInIso)
+    .maybeSingle();
+  const p = data as LunchPart | null;
+  return p?.clock_out ? p : null;
+}
+
+/**
+ * The SHIFT this running entry is part of (lib/shift-chain): after a Switch Job, its start is the
+ * first piece's clock-in. `shift` is null for an entry that never switched (no read is made).
+ *
+ * `failed`: the read of a switched entry's family failed (reported). The caller does NOT quietly
+ * judge the day from the piece (shift-chain's own law: a failed read is never an answer); a person
+ * standing there is told in words and nothing is written. Only a door nobody is answering (the
+ * unattended geofence close) or a stated stop time goes on with the piece's own start.
+ */
+async function shiftOf(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  entry: { id?: string; profile_id?: string | null; clock_in?: string; split_from?: string | null } | null,
+): Promise<{ shift: ShiftInfo | null; failed: boolean }> {
+  if (!entry?.id || !entry.clock_in || !entry.split_from) return { shift: null, failed: false };
+  try {
+    const chains = await loadShiftChains(
+      supabase as unknown as SupabaseClient,
+      [{ id: entry.id, profile_id: entry.profile_id ?? null, clock_in: entry.clock_in, split_from: entry.split_from }],
+      null,
+    );
+    return { shift: chains.get(entry.id) ?? null, failed: false };
+  } catch (e) {
+    reportError("shift-chain", e, { entryId: entry.id });
+    return { shift: null, failed: true };
+  }
+}
+
 export async function clockOut(input: {
   entry_id: string;
   /** Unpaid lunch in minutes. Every clock-out door STATES this now, 0 included (the box
@@ -556,11 +624,14 @@ export async function clockOut(input: {
   // "already closed" from "entry is gone" in the zero-row branch below (audit v921, the projection law).
   const { data: entRow } = await supabase
     .from("time_entries")
-    .select("clock_in, lunch_minutes, status, notes, org_id")
+    .select("clock_in, lunch_minutes, status, notes, org_id, id, profile_id, split_from")
     .eq("id", input.entry_id)
     .eq("profile_id", user.id)
     .maybeSingle();
   const ent = entRow as {
+    id?: string;
+    profile_id?: string | null;
+    split_from?: string | null;
     clock_in?: string;
     lunch_minutes?: number | null;
     status?: string | null;
@@ -598,12 +669,22 @@ export async function clockOut(input: {
   if (ent?.status === "open" && Number.isFinite(ciMsForStop)) {
     const picked = !!input.picked;
     const unattended = !!input.autoClosedReason;
-    if (needsStatedStop({ clockInMs: ciMsForStop, closeMs, nowMs, picked, unattended })) {
+    // THE TWELVE HOURS COUNT FROM THE START OF THE DAY (Erik, 2026-09-24, audit v994 SW1). After a
+    // Switch Job the running entry began at the switch; the forgotten-clock question reads the
+    // whole shift (lib/shift-chain). The 18-hour ceiling below stays per entry, as the database
+    // enforces it.
+    const { shift, failed: shiftUnread } = await shiftOf(supabase, ent);
+    if (shiftUnread && !picked && !unattended) {
+      return { ok: false, error: "I couldn't check how long you've been on the clock. You're still clocked in; try again." };
+    }
+    const shiftStartMs = shift ? shift.startMs : ciMsForStop;
+    const shiftStartIso = shift ? shift.startIso : (entClockIn as string);
+    if (needsStatedStop({ clockInMs: shiftStartMs, closeMs, nowMs, picked, unattended })) {
       const tz = await orgTz(supabase);
       return {
         ok: false,
         needsTime: true,
-        error: `You've been on the clock since ${dayClock(entClockIn as string, tz)}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock.`,
+        error: `You've been on the clock since ${dayClock(shiftStartIso, tz)}, ${LONG_SHIFT_PHRASE}. Pick when you stopped on Timeclock.`,
       };
     }
     if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
@@ -617,7 +698,7 @@ export async function clockOut(input: {
     // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
     // a LONG_SHIFT_HOURS-to-18-hour close by a person, however it arrived, must never land without a trace. Only
     // the unattended geofence close is exempt, and auto_closed_reason already flags that one.
-    if (!unattended && isLongOpenShift(ciMsForStop, nowMs)) {
+    if (!unattended && isLongOpenShift(shiftStartMs, nowMs)) {
       const tz = await orgTz(supabase);
       const { data: me } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
       lateStop = { tz, name: ((me as { full_name?: string | null } | null)?.full_name ?? "").trim() };
@@ -637,63 +718,34 @@ export async function clockOut(input: {
     lunchAsked ? (input.lunch_minutes as number) : Number(ent?.lunch_minutes) || 0,
   );
 
-  // A lunch for the part before the switch: checked BEFORE anything is written, so a lunch that
-  // cannot go there lands on this shift instead of vanishing.
+  // A LUNCH AFTER A SWITCH JOB LANDS WHERE IT FITS (close-math placeLunch, the one rule the
+  // "finish your timecard" prompt uses too). Decided BEFORE anything is written:
+  //   - a lunch put on the part before the switch goes there when that part is the touching one,
+  //     has room and is not paid (audit v994 SW6: a paid part is frozen); otherwise it lands on
+  //     this part and the answer says why;
+  //   - THE LUNCH HAS TO FIT THE PART IT LANDS ON. A 30-minute lunch on a 20-minute part deducts
+  //     20 (hoursBetween clamps the part at 0), so the day would be paid 10 minutes more than the
+  //     lunch anyone stated. A lunch that does not fit here goes on the part before when it fits
+  //     there; if it fits neither, nothing is written and the sentence says why. The geofence close
+  //     has nobody to ask, so it keeps the old behaviour.
   const priorLunch = Math.max(0, Math.round(Number(input.lunch_on_minutes) || 0));
   let lunchOnPrior: { id: string; lunch: number } | null = null;
   let lunchWarning: string | undefined;
-  if (input.lunch_on_entry_id && priorLunch > 0) {
-    const { data: prior } = await supabase
-      .from("time_entries")
-      .select("id, clock_in, clock_out, lunch_minutes, status")
-      .eq("id", input.lunch_on_entry_id)
-      .eq("profile_id", user.id)
-      .eq("status", "closed")
-      .maybeSingle();
-    const p = prior as { id: string; clock_in: string; clock_out: string | null; lunch_minutes: number | null } | null;
-    const touches = !!p?.clock_out && !!entClockIn && Math.abs(Date.parse(p.clock_out) - Date.parse(entClockIn)) < 1000;
-    const next = Math.max(Number(p?.lunch_minutes) || 0, priorLunch);
-    const fits = !!p?.clock_out && Date.parse(p.clock_out) - Date.parse(p.clock_in) - next * 60_000 >= 60_000;
-    if (p && touches && fits) {
-      lunchOnPrior = { id: p.id, lunch: next };
-    } else {
-      lunchMinutes = Math.max(lunchMinutes, priorLunch);
-      lunchWarning = "The lunch didn't fit on the part before the switch, so it went on this part of your shift.";
-    }
-  }
-
-  // THE LUNCH HAS TO FIT THE PART IT LANDS ON. After a Switch Job the running entry is only the part
-  // since the switch (0288), and a 30-minute lunch on a 20-minute part deducts 20: hoursBetween
-  // clamps the part at 0, so the day is paid 10 minutes more than the lunch anyone stated, and the
-  // timecard reads "lunch 30m" on a 0.00 h part. Before the switch the lunch sat on the whole shift
-  // and always fit. So: a lunch that does not fit here goes on the touching part before the switch
-  // when it fits there (and the answer says so); if it fits neither, nothing is written and the
-  // sentence says why. The geofence close has nobody to ask, so it keeps the old behaviour.
-  if (!lunchOnPrior && lunchMinutes > 0 && entClockIn) {
-    const spanMs = Date.parse(clockOutIso) - Date.parse(entClockIn);
-    if (Number.isFinite(spanMs) && spanMs - lunchMinutes * 60_000 < 60_000) {
-      const { data: prior } = await supabase
-        .from("time_entries")
-        .select("id, clock_in, clock_out, lunch_minutes")
-        .eq("profile_id", user.id)
-        .eq("status", "closed")
-        .eq("clock_out", entClockIn)
-        .maybeSingle();
-      const p = prior as { id: string; clock_in: string; clock_out: string | null; lunch_minutes: number | null } | null;
-      const next = Math.max(Number(p?.lunch_minutes) || 0, lunchMinutes);
-      const fitsPrior = !!p?.clock_out && Date.parse(p.clock_out) - Date.parse(p.clock_in) - next * 60_000 >= 60_000;
-      if (p && fitsPrior) {
-        lunchOnPrior = { id: p.id, lunch: next };
-        lunchWarning = `The ${lunchMinutes}-minute lunch is longer than this part of your shift, so it went on the part before the switch.`;
-        lunchMinutes = 0;
-      } else if (!input.auto) {
-        const workedMin = Math.max(0, Math.floor(spanMs / 60_000));
-        return {
-          ok: false,
-          error: `A ${lunchMinutes}-minute lunch is longer than the ${workedMin} ${workedMin === 1 ? "minute" : "minutes"} on ${p ? "this part of your shift" : "this shift"}. Untick the lunch, or ask the office to fix it on Timecards. You're still clocked in.`,
-        };
-      }
-    }
+  const wantsPrior = !!input.lunch_on_entry_id && priorLunch > 0;
+  if (entClockIn && (wantsPrior || (lunchMinutes > 0 && !lunchFits(entClockIn, clockOutIso, lunchMinutes)))) {
+    const prior = await touchingPartBefore(supabase, user.id, entClockIn);
+    const placed = placeLunch({
+      hereLunch: lunchMinutes,
+      priorLunch: wantsPrior ? priorLunch : 0,
+      priorId: input.lunch_on_entry_id ?? null,
+      here: { clock_in: entClockIn, clock_out: clockOutIso },
+      prior,
+      refuse: !input.auto,
+    });
+    if (!placed.ok) return { ok: false, error: `${placed.error} You're still clocked in.` };
+    lunchMinutes = placed.here;
+    lunchOnPrior = placed.prior;
+    lunchWarning = placed.warning;
   }
 
   // The stop time a person picked after a long run is written on the card in the same UPDATE, so
@@ -788,11 +840,14 @@ export async function clockOut(input: {
   }
 
   if (lunchOnPrior) {
-    // The tech's own finished row: 0143 lets him RAISE a lunch there, never lower it.
+    // The tech's own finished row: 0143 lets him RAISE a lunch there, never lower it. Never a paid
+    // one (SW6): staff skip the database's paid lock, so the filter is the lock here.
     const { data: upd, error: lErr } = await supabase
       .from("time_entries")
       .update({ lunch_minutes: lunchOnPrior.lunch })
       .eq("id", lunchOnPrior.id)
+      .eq("status", "closed")
+      .is("paid_at", null)
       .select("id");
     if (lErr || !upd?.length) {
       lunchWarning = "You're clocked out, but the lunch didn't save on the part before the switch. Ask the office to add it on Timecards.";
@@ -882,7 +937,7 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
 
   const { data: open } = await supabase
     .from("time_entries")
-    .select("id, clock_in, gps_in, notes")
+    .select("id, clock_in, gps_in, notes, split_how")
     .eq("id", entryId)
     .eq("profile_id", user.id)
     .eq("status", "open")
@@ -894,15 +949,23 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
   // site's centre armed), so the fence has to be allowed to re-arm at the new site
   // or it stays dead for the rest of the day. Bounded either way — an app reopened
   // from home hours later can still never become "where the job is".
+  //
+  // SINCE 0288 A SWITCH IS A CUT (audit v994 SW2): the part after a switch is a NEW entry
+  // (split_how 'live') that begins at the switch, and no breadcrumb is written for it (that note is
+  // only for a re-point). So a live piece is itself the "after a switch" case, timed from its own
+  // clock-in; before this, every cut switch got the 15-minute window and a switch with no fix (every
+  // Nort switch) left the fence off for the rest of the day.
   const ciMs = Date.parse((open as { clock_in: string }).clock_in);
   const swMs = lastSwitchMs((open as { notes: string | null }).notes);
+  const livePiece = (open as { split_how?: string | null }).split_how === "live";
   const openedAt = Math.max(isNaN(ciMs) ? 0 : ciMs, swMs ?? 0);
-  const windowMs = swMs != null && swMs >= (isNaN(ciMs) ? 0 : ciMs) ? ADOPT_AFTER_SWITCH_MS : ADOPT_AFTER_CLOCK_IN_MS;
+  const windowMs =
+    livePiece || (swMs != null && swMs >= (isNaN(ciMs) ? 0 : ciMs)) ? ADOPT_AFTER_SWITCH_MS : ADOPT_AFTER_CLOCK_IN_MS;
   if (!openedAt || Date.now() - openedAt > windowMs) {
     return { ok: false, error: "Too long since clock-in to backfill a location." };
   }
 
-  const { error } = await supabase
+  const { data: anchored, error } = await supabase
     .from("time_entries")
     .update({
       gps_in: {
@@ -915,8 +978,13 @@ export async function adoptGeofenceAnchor(entryId: string, gps: GeoPoint): Promi
     })
     .eq("id", entryId)
     .eq("profile_id", user.id)
-    .eq("status", "open");
+    .eq("status", "open")
+    .is("gps_in", null)
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // A zero-row update is a 204, not an anchor (the silent-write law): the shift closed or switched
+  // meanwhile, or another tab anchored it first.
+  if (!anchored?.length) return { ok: false, error: "That shift changed before the location saved." };
   return { ok: true };
 }
 
@@ -1004,10 +1072,20 @@ export async function geoClockOut(
  *
  * Answering stamps AUTO_CONFIRMED_CRUMB onto the notes (every piece, after a split), which is what
  * stops the prompt asking again.
+ *
+ * AFTER A SWITCH JOB (audit v994 SW3) the auto-closed entry is only the part since the switch, and
+ * the day's lunch was usually taken before it. The lunch goes through the clock-out's own rule
+ * (close-math placeLunch): on the part before the switch when the person says so (or when it does
+ * not fit this part), never on a paid part, raise-only there, and refused in words when it fits
+ * neither. Before this the whole lunch landed on a 20-minute last part, which hoursBetween clamps
+ * to 0: the day was paid ten minutes nobody worked, and a tech could never lower it again.
  */
 export async function completeAutoClockOut(input: {
   entry_id: string;
   lunch_minutes: number;
+  /** The lunch was taken on the part before the switch (the touching part that ended when this
+   *  one began). Ignored when there is no such part. */
+  lunch_on_prior?: boolean;
   /** Staff only: the shift was really two jobs. `at` must fall inside it. */
   switched?: { at: string; job_id: string | null; job_code?: string | null } | null;
 }): Promise<ClockResult & { split?: SplitResult }> {
@@ -1028,8 +1106,37 @@ export async function completeAutoClockOut(input: {
     .maybeSingle();
   if (!entry) return { ok: false, error: "Entry not found." };
   const lunch = Math.max(0, Math.round(Number(input.lunch_minutes) || 0));
+  const existingHere = Math.max(0, Number(entry.lunch_minutes) || 0);
 
-  const claims = await claimsOnSources(supabase, [input.entry_id]);
+  // WHERE THE LUNCH LANDS, decided before anything is written (the one rule, close-math).
+  let hereLunch = lunch;
+  let priorWrite: { id: string; lunch: number } | null = null;
+  let priorBefore: LunchPart | null = null;
+  let lunchWarning: string | undefined;
+  // A lunch already on THIS part is the day's lunch: it is never ALSO put on the part before (SW3).
+  const priorRule = lunchOnPriorAllowed({ lunchOnPrior: !!input.lunch_on_prior, lunch, existingHere });
+  const onPrior = priorRule.onPrior;
+  lunchWarning = priorRule.warning;
+  // Only a lunch being STATED here is placed: a lunch the part already carried (a Switch Job moved it
+  // there) is its own business, and re-placing it could put it on both parts.
+  if (entry.clock_out && (onPrior || (lunch > existingHere && !lunchFits(entry.clock_in, entry.clock_out, lunch)))) {
+    priorBefore = await touchingPartBefore(supabase, user.id, entry.clock_in);
+    const placed = placeLunch({
+      hereLunch: onPrior ? 0 : lunch,
+      priorLunch: onPrior ? lunch : 0,
+      priorId: priorBefore?.id ?? null,
+      here: { clock_in: entry.clock_in, clock_out: entry.clock_out },
+      prior: priorBefore,
+      refuse: true,
+    });
+    if (!placed.ok) return { ok: false, error: `${placed.error} Nothing was changed.` };
+    priorWrite = placed.prior;
+    lunchWarning = placed.warning ?? lunchWarning;
+    // The lunch went on the part before: this part keeps what it already carries.
+    hereLunch = placed.here > 0 ? placed.here : existingHere;
+  }
+
+  const claims = await claimsOnSources(supabase, priorWrite ? [input.entry_id, priorWrite.id] : [input.entry_id]);
   if ("error" in claims) return { ok: false, error: claims.error };
 
   // A split is decided BEFORE anything is written, so a refusal leaves the shift as it was.
@@ -1041,16 +1148,16 @@ export async function completeAutoClockOut(input: {
     const jobCode = (input.switched.job_code ?? "").trim() || null;
     if (!jobId && !jobCode) return { ok: false, error: "Pick the job you switched to." };
     const preview = splitPreview(
-      { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: lunch },
+      { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: hereLunch },
       input.switched.at,
     );
     // THE LUNCH LANDS WHERE IT FITS: the longer part by default, the other part if it only fits
     // there. If it fits neither, the split cannot be made with that lunch, and the answer says so
     // rather than guessing a lunch nobody stated.
     let lunchOn = preview.lunchOn;
-    if (!preview.ok && lunch > 0) {
+    if (!preview.ok && hereLunch > 0) {
       const other = splitPreview(
-        { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: lunch },
+        { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: hereLunch },
         input.switched.at,
         preview.lunchOn === "left" ? "right" : "left",
       );
@@ -1062,15 +1169,43 @@ export async function completeAutoClockOut(input: {
     splitPlan = { at: preview.at, lunchOn, jobId, jobCode };
   }
 
+  // The part before the switch first: if it refuses, nothing has been written and the prompt stays.
+  // Raise-only (placeLunch never goes below what it carries), never a paid part, the caller's own row.
+  if (priorWrite) {
+    const { data: priorUpd, error: priorErr } = await supabase
+      .from("time_entries")
+      .update({ lunch_minutes: priorWrite.lunch })
+      .eq("id", priorWrite.id)
+      .eq("profile_id", user.id)
+      .eq("status", "closed")
+      .is("paid_at", null)
+      .select("id");
+    if (priorErr || !priorUpd?.length) {
+      return {
+        ok: false,
+        error: priorErr
+          ? dbError(priorErr)
+          : "The part before the switch didn't take the lunch (it may have just been paid). Nothing was changed; reload and try again.",
+      };
+    }
+  }
+
   const { data: lunchUpd, error: lunchErr } = await supabase
     .from("time_entries")
-    .update({ lunch_minutes: lunch, notes: withAutoConfirmedCrumb(entry.notes) })
+    .update({ lunch_minutes: hereLunch, notes: withAutoConfirmedCrumb(entry.notes) })
     .eq("id", input.entry_id)
     .select("id");
   // A zero-row update is a 204, not a success (the silent-write law): without this, a confirmed
   // meal that never landed still reported ok and the shift stayed paid gross.
   if (lunchErr || !lunchUpd?.length) {
-    return { ok: false, error: lunchErr ? dbError(lunchErr) : "That shift didn't take the lunch — reload and try again." };
+    return {
+      ok: false,
+      error: priorWrite
+        ? `The lunch is saved on the part before the switch, but this shift didn't take the answer. ${lunchErr ? dbError(lunchErr) : "Reload and try again."}`
+        : lunchErr
+          ? dbError(lunchErr)
+          : "That shift didn't take the lunch — reload and try again.",
+    };
   }
 
   let split: SplitResult | undefined;
@@ -1105,11 +1240,20 @@ export async function completeAutoClockOut(input: {
   const holder = claims.get(input.entry_id);
   const closed = !!entry.clock_in && !!entry.clock_out;
   const hoursWere = closed ? hoursBetween(entry.clock_in, entry.clock_out as string, Number(entry.lunch_minutes) || 0) : null;
-  const hoursNow = closed ? hoursBetween(entry.clock_in, entry.clock_out as string, lunch) : null;
+  const hoursNow = closed ? hoursBetween(entry.clock_in, entry.clock_out as string, hereLunch) : null;
   const warnings: string[] = [];
+  if (lunchWarning) warnings.push(lunchWarning);
   if (holder && hoursWere != null && hoursNow != null && Math.abs(hoursWere - hoursNow) >= 0.01) {
     warnings.push(billedPartMoved(holder, hoursWere, hoursNow));
   }
+  // The part before the switch can be billed too: its trim is said the same way.
+  const priorHolder = priorWrite ? claims.get(priorWrite.id) : null;
+  if (priorWrite && priorHolder && priorBefore?.clock_out) {
+    const was = hoursBetween(priorBefore.clock_in, priorBefore.clock_out, Number(priorBefore.lunch_minutes) || 0);
+    const now = hoursBetween(priorBefore.clock_in, priorBefore.clock_out, priorWrite.lunch);
+    if (Math.abs(was - now) >= 0.01) warnings.push(billedPartMoved(priorHolder, was, now));
+  }
+  if (priorWrite) revalidatePath("/timecards");
   if (split?.warning) warnings.push(split.warning);
   return { ok: true, ...(split ? { split } : {}), ...(warnings.length ? { warning: warnings.join(" ") } : {}) };
 }
@@ -1245,6 +1389,7 @@ export async function createManualEntry(input: {
   let clockIn = input.clock_in;
   let clockOut = input.clock_out;
   let notes = input.notes;
+  let spanWarning: string | undefined;
   // Lunch: whatever was stated, otherwise none. Nothing here infers a meal from the span.
   const lunchMin = Math.max(0, Number(input.lunch_minutes) || 0);
   if ((!clockIn || !clockOut) && input.work_date && input.hours != null) {
@@ -1253,14 +1398,11 @@ export async function createManualEntry(input: {
     // net paid hours come out exactly as stated (payroll deducts lunch from the span).
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
-    const spanMin = Math.round(input.hours * 60) + lunchMin;
-    const startMin = Math.max(0, 12 * 60 - Math.round(spanMin / 2));
-    const hh = String(Math.floor(startMin / 60)).padStart(2, "0");
-    const mm = String(startMin % 60).padStart(2, "0");
-    const startIso = tzDateTimeUtc(input.work_date, `${hh}:${mm}`, tz);
-    if (!startIso) return { ok: false, error: "I couldn't read that date." };
-    clockIn = startIso;
-    clockOut = new Date(new Date(startIso).getTime() + spanMin * 60_000).toISOString();
+    const plan = durationSpan({ workDate: input.work_date, hours: input.hours, lunchMin, tz, nowMs: Date.now() });
+    if (!plan.ok) return { ok: false, error: plan.error };
+    clockIn = plan.clockIn;
+    clockOut = plan.clockOut;
+    spanWarning = plan.warning;
     // Flag it so a reviewer knows the times are a placeholder span, not observed times.
     notes = [notes?.trim(), `[duration-entered: ${input.hours}h]`].filter(Boolean).join(" ");
   }
@@ -1310,7 +1452,7 @@ export async function createManualEntry(input: {
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }
-  return { ok: true };
+  return spanWarning ? { ok: true, warning: spanWarning } : { ok: true };
 }
 
 /**
@@ -1346,20 +1488,59 @@ export async function stopShift(input: {
   notes?: string;
   miles?: number;
   rate_override?: number | null;
-}): Promise<ClockResult & { hours?: number; sentence?: string }> {
+}): Promise<ClockResult & { hours?: number; sentence?: string; still_open_entry_id?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
 
+  /**
+   * SWITCHED, NOT CLOCKED OUT (audit v994 SW4). Since 0288 a Switch Job closes the running entry and
+   * opens the next, so the office's sheet, opened on the old entry, finds it closed (or loses the race
+   * to the switch) while the person is still on the clock on the new job. Telling the office "he was
+   * already clocked out" there made them walk away from a clock that was still running. So a closed
+   * entry is checked against the same person's OPEN one, and the answer names the switch and hands
+   * back that entry's id for the sheet to open, pre-filled, never applied.
+   *
+   * Only a piece of THE SAME SHIFT counts: the open entry a Switch Job cut from this one carries its
+   * family (split_from = the first piece's id, 0288). A fresh clock-in after a real clock-out has no
+   * family, and calling that a "switch" would send the office to stop a shift that should keep
+   * running; it gets the plain "already clocked out" answer instead.
+   */
+  const stillOpen = async (familyId: string, profileId: string, orgId: string, fullName: string, isSelf: boolean, tz: string) => {
+    const { data: next } = await supabase
+      .from("time_entries")
+      .select("id, clock_in, job_code, job:job_id(job_number, name)")
+      .eq("profile_id", profileId)
+      .eq("org_id", orgId)
+      .eq("status", "open")
+      .eq("split_from", familyId)
+      .eq("split_how", "live")
+      .maybeSingle();
+    const n = next as { id?: string; clock_in?: string; job_code?: string | null; job?: unknown } | null;
+    if (!n?.id || !n.clock_in) return null;
+    const j = (Array.isArray(n.job) ? n.job[0] : n.job) as { job_number?: string | null; name?: string | null } | null;
+    const where = j ? jobLabel(j) : n.job_code || "another job";
+    const w = clockedOutWords(fullName, isSelf);
+    const is = isSelf ? "are" : "is";
+    return {
+      ok: false as const,
+      still_open_entry_id: n.id,
+      error: `${w.subject} switched to ${where} at ${dayClock(n.clock_in, tz)} and ${is} still on the clock. Nothing was changed. Open that shift to ${clockDoorWords(fullName, { self: isSelf }).clockOut}.`,
+    };
+  };
+
   const { data: row } = await supabase
     .from("time_entries")
-    .select("id, profile_id, org_id, clock_in, clock_out, status, job_id, notes, paid_at, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .select(
+      "id, profile_id, org_id, clock_in, clock_out, status, job_id, notes, paid_at, split_from, profiles:profile_id(full_name), job:job_id(job_number, name)",
+    )
     .eq("id", input.entry_id)
     .maybeSingle();
   const stored = row as {
     id: string;
     profile_id: string;
     org_id: string;
+    split_from: string | null;
     clock_in: string;
     clock_out: string | null;
     status: string;
@@ -1376,6 +1557,8 @@ export async function stopShift(input: {
   const said = clockedOutWords(ownerFull, self);
   const tz = await orgTz(supabase);
   if (stored.status !== "open") {
+    const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
+    if (moved) return moved;
     return {
       ok: false,
       error: stored.clock_out
@@ -1451,6 +1634,8 @@ export async function stopShift(input: {
   // The silent-write law: zero rows means somebody else stopped it first. Nothing here was saved.
   if (!upd?.length) {
     revalidateTime([stored.job_id]);
+    const moved = await stillOpen(stored.split_from ?? stored.id, stored.profile_id, stored.org_id, ownerFull, self, tz);
+    if (moved) return moved;
     return { ok: false, error: `${said.subject} ${said.was} clocked out a moment ago somewhere else. Reload to see it.` };
   }
 
@@ -1579,10 +1764,11 @@ export async function updateTimeEntry(input: {
   // diverging the books.
   const { data: prev } = await supabase
     .from("time_entries")
-    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason, status, profiles:profile_id(full_name)")
+    .select("job_id, clock_in, clock_out, lunch_minutes, rate_override, profile_id, miles, paid_at, mileage_paid_at, auto_closed_reason, status, split_from, profiles:profile_id(full_name)")
     .eq("id", input.id)
     .maybeSingle();
   const stored = prev as {
+    split_from?: string | null;
     profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
     job_id: string | null;
     clock_in: string;
@@ -1614,6 +1800,23 @@ export async function updateTimeEntry(input: {
       miles: input.miles,
       rate_override: input.rate_override,
     });
+  }
+
+  /**
+   * A SPLIT SHIFT IS ONE PERSON'S (audit v994 SW7; 0319 refuses it underneath). Handing one piece
+   * of a split shift (or its first entry) to somebody else left one "Split from one shift" bracket
+   * across two people, with no Join Back and no Move The Split. Said here first, in the same words.
+   */
+  if (input.profile_id && input.profile_id !== stored.profile_id) {
+    let splitShift = !!stored.split_from;
+    if (!splitShift) {
+      const { data: kids, error: kidsErr } = await supabase.from("time_entries").select("id").eq("split_from", input.id).limit(1);
+      if (kidsErr) return { ok: false, error: dbError(kidsErr) };
+      splitShift = !!kids?.length;
+    }
+    if (splitShift) {
+      return { ok: false, error: "This shift was split into parts. Join the split back first, then move the shift to someone else." };
+    }
   }
 
   const ci = new Date(input.clock_in);

@@ -47,7 +47,12 @@ export interface SplitPreview {
    *  rounded once: the footer's "Total 5.5 h, same as the shift"). */
   shiftHours: number;
   totalHours: number;
-  /** true when the pieces add back to exactly the shift's worked time. */
+  /** What payroll will PAY for the two parts: each entry rounded to 0.01 h on its own (hoursBetween),
+   *  then added. Can differ from shiftHours by a hundredth (audit v994 SW9). */
+  paidHours: number;
+  /** paidHours minus shiftHours, to the hundredth: 0, or a rounding hundredth either way. */
+  roundingDrift: number;
+  /** true when the parts will be PAID exactly what the shift was (the footer's green "same"). */
   sameAsShift: boolean;
 }
 
@@ -239,6 +244,11 @@ export function splitPreview(
     Math.max(0, workedSeconds(left.start, left.end, left.lunchMinutes)) +
     Math.max(0, workedSeconds(right.start, right.end, right.lunchMinutes));
   const totalHours = Math.round((summed / 3600) * 100) / 100;
+  // PAYROLL ROUNDS EACH ENTRY (audit v994 SW9): 08:00:20 to 13:00:50 cut at 10:00 is 1.99 + 3.01 =
+  // 5.00 paid, while the summed seconds say 5.01. The green "same as the shift" is only said when
+  // the parts will be PAID what the shift was; otherwise the footer names the hundredth.
+  const paidHours = Math.round((left.hours + right.hours) * 100) / 100;
+  const roundingDrift = Math.round((paidHours - shiftHours) * 100) / 100;
 
   const problem = ((): string | null => {
     if (!entry.clock_out || (entry.status != null && entry.status !== "closed")) {
@@ -276,6 +286,8 @@ export function splitPreview(
     milesOn,
     shiftHours,
     totalHours,
-    sameAsShift: problem === null && totalHours === shiftHours,
+    paidHours,
+    roundingDrift,
+    sameAsShift: problem === null && paidHours === shiftHours,
   };
 }

@@ -4,7 +4,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
-import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
+import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
+import { loadShiftChains } from "@/lib/shift-chain";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
@@ -527,7 +528,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "needs_attention",
     description:
-      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone clocked in " + LONG_SHIFT_HOURS + "h+ — probably forgot to clock out; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -2211,10 +2212,39 @@ export async function runDataTool(
             .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_contact: daysSince(l.last_contacted_at) ?? daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
         }, []);
 
+        // THE SHIFT, NOT THE PIECE (audit v994 SW1). A Switch Job cuts the running entry (0288), so an
+        // open row may be only the part since the last switch: the clock_in prefilter missed a
+        // 7 AM-to-now shift switched at 3 PM until 3 AM, and then said "12 hours" for 20. Every open
+        // clock is read (a handful at most), its shift resolved (lib/shift-chain), and the rule is the
+        // Timecards page's own: LONG_SHIFT_HOURS of the shift, or begun on an earlier org-local day.
         const clocks_running = await safe(async () => {
-          const { data } = await supabase.from("time_entries").select("clock_in, profiles(full_name)")
-            .is("clock_out", null).lte("clock_in", iso(now - LONG_SHIFT_HOURS * 36e5)).limit(20);
-          return (data ?? []).map((e: any) => ({ person: e.profiles?.full_name ?? null, hours_running: Math.round((now - new Date(e.clock_in).getTime()) / 36e5) }));
+          const { data, error } = await supabase
+            .from("time_entries")
+            .select("id, profile_id, clock_in, split_from, profiles(full_name)")
+            .eq("status", "open")
+            .is("clock_out", null)
+            .limit(200);
+          if (error) throw error;
+          const rows = (data ?? []) as any[];
+          const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+          const tz = getOrgSettings((orgRow as any)?.settings).timezone;
+          const chains = await loadShiftChains(supabase as any, rows, null);
+          return rows
+            .map((e: any) => {
+              const startIso = chains.get(String(e.id))?.startIso ?? String(e.clock_in);
+              const startMs = Date.parse(startIso);
+              return { e, startIso, startMs, reason: forgottenReason(startMs, now, tz) };
+            })
+            .filter((r) => r.reason != null)
+            .sort((a, b) => a.startMs - b.startMs)
+            .slice(0, 20)
+            .map((r) => ({
+              person: r.e.profiles?.full_name ?? null,
+              hours_running: Math.round((now - r.startMs) / 36e5),
+              since: new Date(r.startIso).toLocaleString("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+              why: r.reason === "long" ? `running ${LONG_SHIFT_HOURS}+ hours` : "started on an earlier day",
+              switched_jobs: (chains.get(String(r.e.id))?.earlier.length ?? 0) > 0,
+            }));
         }, []);
 
         const total = past_due_jobs.length + unbilled.length + overdueInvoices.length + stale_estimates.length + leads_to_follow_up.length + clocks_running.length;
@@ -2242,7 +2272,7 @@ export async function runDataTool(
         const endIso = tzDayStartUtc(period.end, settings.timezone).toISOString();
         const { data: entries, error } = await supabase
           .from("time_entries")
-          .select("profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, profiles(full_name)")
+          .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, paid_at, mileage_paid_at, rate_override, split_from, profiles(full_name)")
           .eq("status", "closed")
           .not("clock_out", "is", null)
           .gte("clock_in", startIso)
@@ -2287,7 +2317,8 @@ export async function runDataTool(
             settled: [],
             rateHours: new Map(),
           };
-          const m = { clock_in: e.clock_in, miles: Number(e.miles ?? 0) };
+          // id + split_from: a split shift's miles count on the day it began (SW5).
+          const m = { clock_in: e.clock_in, miles: Number(e.miles ?? 0), id: e.id ?? null, split_from: e.split_from ?? null };
           acc.all.push(m);
           (e.mileage_paid_at ? acc.settled : acc.held).push(m);
           const rate = round(payRateForEntry(e));

@@ -31,6 +31,8 @@ import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
+import { loadShiftChains } from "@/lib/shift-chain";
+import { reportError } from "@/lib/observe";
 
 export const dynamic = "force-dynamic";
 
@@ -196,11 +198,27 @@ export default async function TimecardsPage({
     .or("status.eq.open,auto_closed_reason.not.is.null")
     .order("clock_in", { ascending: true });
   const todayStartMs = tzDayStartUtc(todayStrInTz(tz), tz).getTime();
+  // THE SHIFT, NOT THE PIECE (audit v994 SW1). After a Switch Job (0288) the running entry began at
+  // the switch; the long-shift line, the "since" on the On The Clock rows and the clock-out sheet's
+  // forgotten test all count from the first piece of the shift (lib/shift-chain). A failed read is
+  // reported and each clock falls back to its own start, which is what the page said before.
+  const openOnly = ((openNow ?? []) as any[]).filter((e) => e.status === "open");
+  let shiftStartById = new Map<string, string>();
+  try {
+    const chains = await loadShiftChains(supabase, openOnly, null);
+    shiftStartById = new Map([...chains].map(([id, info]) => [id, info.startIso]));
+  } catch (e) {
+    reportError("timecards-shift-chain", e);
+  }
+  const shiftStartOf = (e: { id: string; clock_in: string }) => shiftStartById.get(String(e.id)) ?? String(e.clock_in);
+  for (const e of [...openOnly, ...((entries ?? []) as any[]).filter((r) => r.status === "open")]) {
+    e.shift_start = shiftStartOf(e);
+  }
   const needsAttention = (openNow ?? []).filter((e: any) => {
     // A zero-closed row needs the office WHENEVER it happened — it is not a forgotten shift any
     // more, it is a shift with no hours on it, and that never ages out of being wrong.
     if (e.auto_closed_reason) return true;
-    const inMs = new Date(e.clock_in).getTime();
+    const inMs = new Date(shiftStartOf(e)).getTime();
     // The shared long-shift rule (lib/long-shift), not a threshold of this page's own.
     return inMs < todayStartMs || Date.now() - inMs >= LONG_SHIFT_HOURS * 3_600_000;
   });
@@ -277,8 +295,8 @@ export default async function TimecardsPage({
    *  tap (the ?entry= door below fetches the row it needs), so an older row is never a dead end.
    *
    *  A SPLIT SHIFT IS ENTRIES (0288). The pieces of one shift are ordinary rows; the editor offers
-   *  Move The Split and Join Back between two touching pieces of the same family, found here from
-   *  the same week's rows. */
+   *  Move The Split and Join Back between two touching pieces of the same family, found from the
+   *  same rows the bracket reads (familyRows below), never the anchored week alone (audit v994 SW8). */
   const weekRows = (entries ?? []) as any[];
   const neighborLabel = (r: any) => (r?.job ? jobLabel(r.job) : (r?.job_code ?? "no job"));
   const neighborsOf = (rows: any[], id: string) => {
@@ -304,6 +322,19 @@ export default async function TimecardsPage({
     const key = splitFamilies(rows).get(id);
     return !!key && familyWasConverted(rows, key);
   };
+  /* WHICH ROWS ARE ONE SHIFT: families over everything the stack draws (the wide read plus the
+     anchored week), so the bracket holds whichever pieces are on screen. Join Back and Move The
+     Split read the SAME rows (audit v994 SW8): built from the anchored week alone, a Saturday
+     10 PM to Sunday 3 AM callback cut at 1 AM had its two pieces in two weeks, so neither editor
+     found its neighbour while the bracket still said one shift. Deduped by id, the week's rows
+     (the editor's whole projection) winning. */
+  const familyRows = (() => {
+    const byId = new Map<string, any>();
+    for (const r of (stackRows ?? []) as any[]) byId.set(String(r.id), r);
+    for (const r of weekRows) byId.set(String(r.id), r);
+    return [...byId.values()];
+  })();
+  const familyById = splitFamilies(familyRows);
   const detailById = new Map<string, { controls: ReactNode }>();
   for (const e of weekRows) {
     detailById.set(String(e.id), {
@@ -325,8 +356,8 @@ export default async function TimecardsPage({
             isStaff
             jobCodesEnabled={orgSettings.timeclock_job_codes}
             tz={tz}
-            neighbors={neighborsOf(weekRows, String(e.id))}
-            rebuiltFromOldSplit={rebuiltOf(weekRows, String(e.id))}
+            neighbors={neighborsOf(familyRows, String(e.id))}
+            rebuiltFromOldSplit={rebuiltOf(familyRows, String(e.id))}
             workDayEnd={workWin.end}
             viewerId={user?.id}
           />
@@ -334,11 +365,6 @@ export default async function TimecardsPage({
       ),
     });
   }
-  /* WHICH ROWS ARE ONE SHIFT: families over everything the stack draws (the wide read plus the
-     anchored week), so the bracket holds whichever pieces are on screen. */
-  const familyRows = [...((stackRows ?? []) as any[]), ...weekRows];
-  const familyById = splitFamilies(familyRows);
-
   const toStackEntry = (e: any): StackEntry => {
     const { dayStr, startMin, endMin } = timeEntryGridSpan(e.clock_in, e.clock_out, tz);
     /* ONE WEEK, ONE NUMBER (Erik: "it looks like duplicates").
@@ -582,11 +608,13 @@ export default async function TimecardsPage({
    *  fix, and nothing else. */
   const brokenRows = (needsAttention as any[]).map((e) => {
     const day = todayStrInTz(tz, new Date(e.clock_in));
-    const openHrs = formatDuration(hoursBetween(e.clock_in, new Date(), 0));
+    // A running clock is timed from the start of its SHIFT (audit v994 SW1); a closed row is its own.
+    const since = e.auto_closed_reason ? String(e.clock_in) : shiftStartOf(e);
+    const openHrs = formatDuration(hoursBetween(since, new Date(), 0));
     return {
       id: String(e.id),
       name: e.profiles?.full_name ?? "—",
-      when: formatDateTimeTz(e.clock_in, tz),
+      when: formatDateTimeTz(since, tz),
       job: e.job ? jobLabel(e.job) : null,
       /* A zero-closed row is NOT open (audit 7: "Brian · open 98h" on a shift 0193 closed at zero
          on Monday was a lie that grew by the hour). Say what the system actually did, with its
@@ -594,7 +622,7 @@ export default async function TimecardsPage({
       badge: e.auto_closed_reason
         ? // Older reasons were written with an em-dash (0193, the geofence close); the card says them plainly.
           `auto-closed: ${String(e.auto_closed_reason).replace(/_/g, " ").replace(/\s*—\s*/g, ": ")}`
-        : new Date(e.clock_in).getTime() < todayStartMs
+        : new Date(since).getTime() < todayStartMs
           ? `open ${openHrs} · past day`
           : `open ${openHrs}`,
       // The row names what tapping it does.
@@ -629,6 +657,23 @@ export default async function TimecardsPage({
       }
       focusEntry = one as any;
     }
+  }
+  /* THE FOCUSED ENTRY'S OWN FAMILY (audit v994 SW8). A link with no week (payroll, an invoice, the
+     long-shift bell) can open a piece whose neighbour lies outside everything read above, so the
+     family is read by its first entry: Join Back and Move The Split never depend on the span. */
+  let focusFamilyRows: any[] = familyRows;
+  if (focusEntry) {
+    const root = String((focusEntry as any).split_from || (focusEntry as any).id);
+    const { data: fam } = await supabase
+      .from("time_entries")
+      .select(
+        "id, profile_id, clock_in, clock_out, lunch_minutes, job_id, job_code, source, notes, miles, split_from, split_how, profiles:profile_id(full_name), job:job_id(job_number, name)",
+      )
+      .or(`id.eq.${root},split_from.eq.${root}`);
+    const byId = new Map<string, any>();
+    for (const r of [...familyRows, ...((fam ?? []) as any[])]) if (!byId.has(String(r.id))) byId.set(String(r.id), r);
+    byId.set(String((focusEntry as any).id), focusEntry);
+    focusFamilyRows = [...byId.values()];
   }
   // NORT'S FILL NAMES ITS JOB. time.splitEntry resolves any job the office can see, and the list
   // above is only the 50 newest: without this the sheet's second part read "That job", and a person
@@ -702,13 +747,17 @@ export default async function TimecardsPage({
                     running LONG_SHIFT_HOURS or more is tinted, because it was probably forgotten,
                     and its sheet asks when it really stopped. */}
                 {onClock.map((c) => {
-                  const inMs = c.clockIn ? Date.parse(c.clockIn) : NaN;
+                  // "since" is when the SHIFT began (the first piece after a Switch Job), and the
+                  // tint counts from there too (audit v994 SW1). The link still opens the running entry.
+                  const since0 = c.entryId && c.clockIn ? shiftStartOf({ id: c.entryId, clock_in: c.clockIn }) : c.clockIn;
+                  const inMs = since0 ? Date.parse(since0) : NaN;
                   const long = Number.isFinite(inMs) && isLongOpenShift(inMs, Date.now());
                   const inDay = c.clockIn ? todayStrInTz(tz, new Date(c.clockIn)) : todayStr;
-                  const since = c.clockIn
-                    ? inDay === todayStr
-                      ? formatTime(c.clockIn, tz)
-                      : `${new Date(c.clockIn).toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${formatTime(c.clockIn, tz)}`
+                  const sinceDay = since0 ? todayStrInTz(tz, new Date(since0)) : todayStr;
+                  const since = since0
+                    ? sinceDay === todayStr
+                      ? formatTime(since0, tz)
+                      : `${new Date(since0).toLocaleDateString("en-US", { timeZone: tz, weekday: "short" })} ${formatTime(since0, tz)}`
                     : null;
                   const body = (
                     <>
@@ -817,8 +866,8 @@ export default async function TimecardsPage({
           members={members ?? []}
           jobCodesEnabled={orgSettings.timeclock_job_codes}
           tz={tz}
-          neighbors={neighborsOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
-          rebuiltFromOldSplit={rebuiltOf([...weekRows.filter((r) => r.id !== focusEntry.id), focusEntry], String(focusEntry.id))}
+          neighbors={neighborsOf(focusFamilyRows, String(focusEntry.id))}
+          rebuiltFromOldSplit={rebuiltOf(focusFamilyRows, String(focusEntry.id))}
           workDayEnd={workWin.end}
           viewerId={user?.id}
           /* Nort's fill (time.splitEntry): the sheet opens with its cut in it; a person taps Split Shift. */

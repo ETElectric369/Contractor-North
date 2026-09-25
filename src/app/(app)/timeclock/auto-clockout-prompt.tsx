@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/input";
 import { formatDuration } from "@/lib/utils";
+import { lunchFits } from "./close-math";
 import { lunchMinutesFor, LUNCH_MIN } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { atFromClockTime, clockInputValue, defaultSplitAt, splitClock, splitPreview } from "@/lib/split-preview";
@@ -31,6 +32,15 @@ type Entry = {
   jobId: string | null;
   jobLabel: string;
 };
+/** The part of the day before a Switch Job: the caller's own unpaid closed entry that ended when
+ *  this one began (0288). Where the lunch usually was (audit v994 SW3). */
+type PriorPart = {
+  id: string;
+  jobLabel: string;
+  clock_in: string;
+  clock_out: string;
+  lunch_minutes: number | null;
+};
 
 /**
  * Shown on /timeclock when a shift closed with nobody answering: the geofence auto-clocked the tech
@@ -52,8 +62,10 @@ export function AutoClockoutPrompt({
   jobCodesEnabled = true,
   isStaff = false,
   tz = "America/Los_Angeles",
+  previousPiece = null,
 }: {
   entry: Entry;
+  previousPiece?: PriorPart | null;
   jobCodes: JobCode[];
   jobs: JobOpt[];
   /** org setting timeclock_job_codes — false hides every code control here. */
@@ -69,6 +81,29 @@ export function AutoClockoutPrompt({
   const storedLunch = Math.max(0, Number(entry.lunch_minutes) || 0);
   const [tookLunch, setTookLunch] = useState(storedLunch > 0);
   const lunchMin = Math.max(storedLunch, lunchMinutesFor(tookLunch));
+  // AFTER A SWITCH JOB the lunch was usually taken before it: offered on the part before, by default,
+  // when there is one (audit v994 SW3). A lunch already on this part stays where it is: the choice is
+  // only offered when this part carries none, or the one lunch would be docked on both parts.
+  const canMoveLunch = !!previousPiece && storedLunch === 0;
+  const [lunchOnPrior, setLunchOnPrior] = useState(canMoveLunch);
+  const onPrior = canMoveLunch && tookLunch && lunchOnPrior;
+  const priorNext = previousPiece ? Math.max(Number(previousPiece.lunch_minutes) || 0, lunchMin) : 0;
+  const lunchFitsHere = lunchFits(entry.clock_in, entry.clock_out, onPrior ? 0 : lunchMin);
+  const lunchFitsPrior = !!previousPiece && lunchFits(previousPiece.clock_in, previousPiece.clock_out, priorNext);
+  // Said before Save, in the same words the server uses: a lunch that fits neither part is refused.
+  const lunchNote = !tookLunch
+    ? null
+    : onPrior
+      ? lunchFitsPrior
+        ? null
+        : lunchFitsHere
+          ? "The lunch doesn't fit the part before the switch, so it will go on this part."
+          : `A ${lunchMin}-minute lunch doesn't fit either part of this shift. Untick it, or ask the office to fix it on Timecards.`
+      : lunchFitsHere
+        ? null
+        : lunchFitsPrior
+          ? `The ${lunchMin}-minute lunch is longer than this part of your shift, so it will go on the part before the switch.`
+          : `A ${lunchMin}-minute lunch is longer than this ${previousPiece ? "part of your shift" : "shift"}. Untick it, or ask the office to fix it on Timecards.`;
 
   const [switched, setSwitched] = useState(false);
   const firstAt = defaultSplitAt({ clock_in: entry.clock_in, clock_out: entry.clock_out }, tz);
@@ -78,7 +113,7 @@ export function AutoClockoutPrompt({
   const [error, setError] = useState<string | null>(null);
 
   const at = switched ? atFromClockTime({ clock_in: entry.clock_in, clock_out: entry.clock_out }, hm, tz) : null;
-  const shiftLike = { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: lunchMin };
+  const shiftLike = { clock_in: entry.clock_in, clock_out: entry.clock_out, status: "closed", lunch_minutes: onPrior ? storedLunch : lunchMin };
   const preview = splitPreview(shiftLike, at ?? "not a time", null, { tz });
   // The lunch lands on the part it fits; the server tries the other part when the longer one can't
   // hold it, and says so when neither can.
@@ -97,6 +132,7 @@ export function AutoClockoutPrompt({
         res = await completeAutoClockOut({
           entry_id: entry.id,
           lunch_minutes: lunchMin,
+          lunch_on_prior: onPrior,
           switched:
             switched && at
               ? { at, job_id: kind === "job" ? val : null, job_code: kind === "code" ? val : null }
@@ -156,6 +192,23 @@ export function AutoClockoutPrompt({
         ) : (
           <LunchCheckbox id="ac-lunch" checked={tookLunch} onChange={setTookLunch} className="border-amber-200 bg-white/60" />
         )}
+
+        {previousPiece && storedLunch > 0 && storedLunch <= LUNCH_MIN && (
+          <p className="text-xs text-slate-600">{`This part already has a ${storedLunch}-minute lunch on it, so it stays here.`}</p>
+        )}
+        {canMoveLunch && tookLunch && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white/60 px-3 py-1 text-xs text-slate-600">
+            <span>
+              {onPrior
+                ? `The lunch goes on ${previousPiece.jobLabel} (${splitClock(previousPiece.clock_in, tz)}–${splitClock(previousPiece.clock_out, tz)}), before the switch.`
+                : `The lunch goes on ${entry.jobLabel}, this part of your shift.`}
+            </span>
+            <button type="button" onClick={() => setLunchOnPrior((v) => !v)} className="min-h-[44px] font-semibold text-brand hover:underline">
+              {onPrior ? "Put It On This Part" : `Put It On ${previousPiece.jobLabel}`}
+            </button>
+          </div>
+        )}
+        {lunchNote && <p className="text-xs font-medium text-amber-800">{lunchNote}</p>}
 
         {isStaff && (
           <div className="space-y-2 rounded-lg border border-amber-200 bg-white/60 p-3">
