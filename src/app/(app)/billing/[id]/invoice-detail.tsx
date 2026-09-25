@@ -119,6 +119,8 @@ export function InvoiceDetail({
   customerName = null,
   customerHoldsOlderCopy = false,
   runningClocks = [],
+  importMode,
+  importHeld = null,
   textReady = true,
   tz = "America/Los_Angeles",
 }: {
@@ -140,6 +142,13 @@ export function InvoiceDetail({
   /** 0269: revised_at is later than sent_at — the bill in their hands is not this one. Decided by
    *  lib/invoice-revision.ts on the server, never re-derived here. */
   customerHoldsOlderCopy?: boolean;
+  /** What the Import row may offer (page.tsx decides, lib/actuals-draw): "standard" = every import;
+   *  "actuals" = a draw built from actuals, refreshed like an invoice (no From Estimate); "none" = a
+   *  draw billing a slice of the contract. Absent = by kind, the rule before J-011. */
+  importMode?: "standard" | "actuals" | "none";
+  /** Why an actuals draw's Import row is closed (a deposit not yet taken off a bill) - said where
+   *  the row would be. */
+  importHeld?: string | null;
   /** Shifts still running on this invoice's job (page.tsx reads them). Their hours bill nothing
    *  until somebody stops the clock, so the card says so. */
   /** `door` is the trigger's words ("Clock Out Brian"; "Clock Out" on the viewer's own clock). */
@@ -213,6 +222,8 @@ export function InvoiceDetail({
    * more — it is a line-level money edit, it follows `linesLocked`, and the totals card says so.
    */
   const linesLocked = invoice.status === "void";
+  /** The Import row's reach (see importMode). Without the page's answer, by kind as before J-011. */
+  const importRow = importMode ?? (isDrawKind((invoice as any).invoice_kind) ? "none" : "standard");
   /* 0267's sent_at: stamped ONLY where a bill really reached the customer. INV-069 carries NULL
    * here because no card was ever tapped, and that difference is the whole point — an invoice
    * that merely left Draft must not be told it went out, and it must not be trapped out of Draft
@@ -859,14 +870,26 @@ export function InvoiceDetail({
             halves disagreed in silence. It is also the tool Erik actually needs on a delivered
             bill: labor he forgot, a change order signed after the invoice went out. Same word as
             the rest of the card. */}
+        {/* A DRAW BUILT FROM ACTUALS GETS THE ROW TOO (J-011, INV-078). The row hid for every draw
+            kind, so a time-and-materials progress report could never pull the hours and bills
+            logged since, nor take a new markup: Erik, "theres no way to recalculate from the
+            invoice itself ... or adjust the markup %". Such a draw is refreshed exactly like a
+            standard invoice (Labor, Materials with the % box, Change Orders); From Estimate stays
+            off every draw; a draw billing a slice of the contract gets no row. The server's
+            importers hold the same line (contractDrawGuard), so this is not the boundary. */}
+        {!linesLocked && importHeld && importRow === "none" && (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5 text-xs text-slate-500">{importHeld}</p>
+        )}
         {!linesLocked &&
           (invoice.job_id || (invoice as any).quote_id) &&
-          !isDrawKind((invoice as any).invoice_kind) && (
+          importRow !== "none" && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
             <span className="text-xs font-medium text-slate-500">Import:</span>
-            <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length, "quote")} disabled={pending}>
-              From Estimate
-            </Button>
+            {importRow === "standard" && (
+              <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length, "quote")} disabled={pending}>
+                From Estimate
+              </Button>
+            )}
             {invoice.job_id && (
               <>
                 <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length, "labor")} disabled={pending}>

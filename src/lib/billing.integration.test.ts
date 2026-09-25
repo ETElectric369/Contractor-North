@@ -6,6 +6,9 @@ import pg from "pg";
 // far the real guards drifted from them.
 import { DRAW_KINDS, isStandardBillingBlocker } from "./invoice-math";
 import { foldClaims } from "./unbilled-work";
+import { isActualsDraw } from "./actuals-draw";
+import { planLaborOffer } from "./labor-offer";
+import { computeJobLaborBilling, withoutClaimedLabor } from "./labor-billing";
 
 // Integration test of the draw-billing invariants the H1/H3/H4 guards rely on,
 // exercised against the REAL schema in a rolled-back transaction — the SQL behaviour
@@ -299,6 +302,138 @@ d("billing draw invariants (DB integration)", () => {
       );
       const { rows: [lineC] } = await client.query(`select source_ids from invoice_items where invoice_id=$1`, [invC.id]);
       expect(lineC.source_ids).toEqual([e1.id]);
+    } finally {
+      await client.query("rollback");
+    }
+  });
+
+  it("J-011: a T&M progress draft takes the new hour and bill on the SAME draft, with claims; a fixed draw is not refreshable", async () => {
+    const { rows: col } = await client.query(
+      `select 1 from information_schema.columns
+        where table_schema='public' and table_name='invoice_items' and column_name='source_ids'`,
+    );
+    if (!col.length) {
+      console.warn("[billing.integration] invoice_items.source_ids is not on this database yet — apply migration 0255 to exercise J-011.");
+      return;
+    }
+    await client.query("begin");
+    try {
+      const { orgId, custId, jobId } = await scaffold();
+      const { rows: [person] } = await client.query("select id, full_name from profiles where org_id=$1 limit 1", [orgId]);
+
+      // The draw as createProgressReportInvoice builds it: a draft 'progress' invoice itemizing the
+      // job's actuals — one shift at the person's rate and one supplier bill.
+      const { rows: [e1] } = await client.query(
+        `insert into time_entries (org_id, profile_id, job_id, clock_in, clock_out, status)
+         values ($1,$2,$3,'2026-08-20T15:00:00Z','2026-08-20T23:00:00Z','closed') returning id, clock_in, clock_out`,
+        [orgId, person.id, jobId],
+      );
+      const { rows: [b1] } = await client.query(
+        `insert into bills (org_id, job_id, supplier, amount) values ($1,$2,'TEST CED',100) returning id`,
+        [orgId, jobId],
+      );
+      const { rows: [draw] } = await client.query(
+        `insert into invoices (org_id, customer_id, job_id, invoice_number, status, invoice_kind, total, amount_paid)
+         values ($1,$2,$3,'TEST-INV-078','draft','progress',0,0) returning id`,
+        [orgId, custId, jobId],
+      );
+      const laborKey = `labor:${person.id}`;
+      await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb)`, [
+        draw.id,
+        JSON.stringify([{ import_key: laborKey, description: "Labor - Test", quantity: 8, unit: "hr", unit_price: 115, source_ids: [e1.id] }]),
+      ]);
+      const costRow = (id: string, amt: number) => ({ import_key: `bill:${id}`, description: "Materials — TEST CED", quantity: 1, unit: "lot", unit_price: amt, source_ids: [id] });
+      await client.query(`select public.upsert_imported_invoice_items($1, 'costs', $2::jsonb)`, [draw.id, JSON.stringify([costRow(b1.id, 115)])]);
+      // Andrew's personal rate: the office negotiates the labor line by hand (INV-078's three lines).
+      await client.query(`update invoice_items set unit_price = 100, edited = true where invoice_id=$1 and import_key=$2`, [draw.id, laborKey]);
+
+      // THE SERVER'S RULE, fed what the database says about this draw.
+      const shapeOf = async (invoiceId: string, jid: string) => {
+        const { rows: lines } = await client.query(`select import_source from invoice_items where invoice_id=$1`, [invoiceId]);
+        const { rows: sched } = await client.query(`select id from payment_milestones where job_id=$1 limit 1`, [jid]);
+        const { rows: [inv] } = await client.query(`select invoice_kind, dismissed_import_keys from invoices where id=$1`, [invoiceId]);
+        return { invoiceKind: inv.invoice_kind, scheduleActive: sched.length > 0, lineSources: lines.map((l: any) => l.import_source), dismissedKeys: inv.dismissed_import_keys ?? [] };
+      };
+      expect(isActualsDraw(await shapeOf(draw.id, jobId))).toBe(true);
+
+      // New work since: a 6-hour shift and a $323.71 bill.
+      const { rows: [e2] } = await client.query(
+        `insert into time_entries (org_id, profile_id, job_id, clock_in, clock_out, status)
+         values ($1,$2,$3,'2026-09-22T15:00:00Z','2026-09-22T21:00:00Z','closed') returning id, clock_in, clock_out`,
+        [orgId, person.id, jobId],
+      );
+      const { rows: [b2] } = await client.query(
+        `insert into bills (org_id, job_id, supplier, amount) values ($1,$2,'TEST CED',323.71) returning id`,
+        [orgId, jobId],
+      );
+
+      // What "Add to TEST-INV-078" offers, built by the app's own planner over the database's rows:
+      // the entries no OTHER invoice claims, this draw's own lines, its tombstones.
+      const claimsSql = `select i.id, i.invoice_number, i.status, i.created_at::text as created_at,
+                                json_agg(json_build_object('import_key', it.import_key, 'source_ids', it.source_ids)) as invoice_items
+                           from invoices i join invoice_items it on it.invoice_id = i.id
+                          where i.job_id=$1 and i.status<>'void' and i.id<>$2
+                          group by i.id`;
+      const others = foldClaims((await client.query(claimsSql, [jobId, draw.id])).rows, true);
+      const entries = [e1, e2].map((e: any) => ({ ...e, lunch_minutes: 0, job_code: null, profiles: { id: person.id, full_name: person.full_name, bill_rate: 115 } }));
+      const free = withoutClaimedLabor(entries, new Set(others.owner.keys()));
+      const { rows: own } = await client.query(`select import_key, edited, source_ids from invoice_items where invoice_id=$1 and import_source='labor'`, [draw.id]);
+      const offer = planLaborOffer({ entries: free.jobEntries, ownLines: own, dismissed: new Set(), bill: (es) => computeJobLaborBilling(es, 95, null).lines });
+      const laborRows = offer.map(({ importKey, line }) => ({ import_key: importKey, description: `Labor - ${line.name}`, quantity: line.quantity, unit: "hr", unit_price: line.rate, source_ids: line.sourceIds }));
+      const { rows: [repL] } = await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb) as r`, [draw.id, JSON.stringify(laborRows)]);
+      expect(repL.r.kept_edited).toBe(1); // the negotiated line is left alone
+      expect(repL.r.inserted).toBe(1);    // the new hours get their own line
+      await client.query(`select public.upsert_imported_invoice_items($1, 'costs', $2::jsonb)`, [draw.id, JSON.stringify([costRow(b1.id, 115), costRow(b2.id, 372.27)])]);
+
+      // Landed on the SAME draft: e2 on its own line, e1 still only on the negotiated one; b2 claimed.
+      const { rows: after } = await client.query(
+        `select import_key, edited, source_ids, unit_price::float as unit_price, quantity::float as quantity from invoice_items where invoice_id=$1 order by sort_order`,
+        [draw.id],
+      );
+      const byKey = Object.fromEntries(after.map((r: any) => [r.import_key, r]));
+      expect(byKey[laborKey]).toMatchObject({ edited: true, source_ids: [e1.id], unit_price: 100 });
+      expect(byKey[`${laborKey}:2`]).toMatchObject({ edited: false, source_ids: [e2.id], quantity: 6, unit_price: 115 });
+      expect(byKey[`bill:${b2.id}`]).toMatchObject({ source_ids: [b2.id], unit_price: 372.27 });
+      const { rows: invoicesNow } = await client.query(`select id, status from invoices where job_id=$1`, [jobId]);
+      expect(invoicesNow).toEqual([{ id: draw.id, status: "draft" }]); // one document, still a draft
+
+      // Never the same hour twice: another invoice on the job cannot claim e2 now (0258 trigger).
+      const { rows: [std] } = await client.query(
+        `insert into invoices (org_id, customer_id, job_id, invoice_number, status, invoice_kind, total, amount_paid)
+         values ($1,$2,$3,'TEST-INV-079','draft','standard',0,0) returning id`,
+        [orgId, custId, jobId],
+      );
+      await client.query("savepoint twice");
+      let refusal: { code?: string; message?: string } | null = null;
+      try {
+        await client.query(`select public.upsert_imported_invoice_items($1, 'labor', $2::jsonb)`, [
+          std.id,
+          JSON.stringify([{ import_key: laborKey, description: "Labor - Test", quantity: 6, unit: "hr", unit_price: 115, source_ids: [e2.id] }]),
+        ]);
+      } catch (e) {
+        refusal = e as { code?: string; message?: string };
+      }
+      await client.query("rollback to savepoint twice");
+      expect(refusal?.code).toBe("P0001");
+      expect(refusal?.message).toMatch(/TEST-INV-078/);
+
+      // A FIXED-PRICE percent draw on another job (createProgressInvoice's shape: one hand line) is
+      // not refreshable, so the importers refuse it and the card offers "Open", not "Add to".
+      const { rows: [job2] } = await client.query(
+        `insert into jobs (org_id, name, job_number, status, billing_type, customer_id)
+         values ($1,'TEST integ fixed','TEST-J3','scheduled','fixed',$2) returning id`,
+        [orgId, custId],
+      );
+      const { rows: [pct] } = await client.query(
+        `insert into invoices (org_id, customer_id, job_id, invoice_number, status, invoice_kind, total, amount_paid)
+         values ($1,$2,$3,'TEST-INV-080','draft','progress',5000,0) returning id`,
+        [orgId, custId, job2.id],
+      );
+      await client.query(
+        `insert into invoice_items (org_id, invoice_id, description, quantity, unit_price) values ($1,$2,'Progress payment — 50% of remaining estimate',1,5000)`,
+        [orgId, pct.id],
+      );
+      expect(isActualsDraw(await shapeOf(pct.id, job2.id))).toBe(false);
     } finally {
       await client.query("rollback");
     }

@@ -319,7 +319,9 @@ export const invoiceActions: Record<string, ActionDef> = {
     handler: async (i) => {
       const r = await requestNextPayment(i.job_id);
       if (!r.ok) return { ok: false, error: r.error };
-      return { ok: true, speak: "Next draw drafted — read it back before sending." };
+      // An open time-and-materials draw is brought up to date rather than a second one drafted
+      // (J-011): the note says which happened and what landed, so it is spoken instead.
+      return { ok: true, speak: r.note ? `${r.note} Read it back before sending.` : "Next draw drafted — read it back before sending." };
     },
   },
 };
