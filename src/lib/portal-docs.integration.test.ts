@@ -277,8 +277,10 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
       expect(await docIds(tokenA, jobA)).toEqual([v2]);
       expect(await one("select removed_by from public.job_shared_documents where document_id = $1", [v3])).toEqual({ removed_by: staffId });
 
-      // Deleting the oldest paper (a crew member may delete documents) lets the link go quietly.
-      await as(techId);
+      // The oldest paper is the office's record of what the customer was shown: the crew can't
+      // delete it (documents_write would let them); the office can, and the link goes quietly.
+      expect(await refused(async () => { await as(techId); await c.query("delete from public.documents where id = $1", [v1]); })).toBe("42501");
+      await as(staffId);
       const gone = await c.query("delete from public.documents where id = $1 returning id", [v1]);
       await asServer();
       expect(gone.rowCount).toBe(1);
@@ -406,6 +408,90 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
       expect((await view(tokenA, jobA)).photos.map((p: { id: string }) => p.id)).toEqual([photo]);
     } finally {
       await c.query("rollback to savepoint photos");
+      await asServer();
+    }
+  });
+
+  it("the paper under a share can't be pulled out from under it: deleted, moved, re-pointed", async () => {
+    if (!needs()) return;
+    await c.query("savepoint underneath");
+    try {
+      const v1 = await doc(jobA, "test-0326-under-v1.pdf", "Plan");
+      const v2 = await doc(jobA, "test-0326-under-v2.pdf", "Plan");
+      await as(staffId);
+      await show(v1, jobA, { kind: "drawing", title: "Drawing" });
+      await show(v2, jobA, { kind: "drawing", title: "Drawing", replaces_document_id: v1 });
+      await asServer();
+      expect(await docIds(tokenA, jobA)).toEqual([v2]);
+
+      // A crew member deleting the newest would have put v1 back on the page and erased v2's row.
+      expect(await refusedWith(async () => { await as(techId); await c.query("delete from public.documents where id = $1", [v2]); })).toBe(
+        "This paper is on the customer's page, so only the office can take it down. Ask the office to take it off first.",
+      );
+      // Moving it, re-filing it or re-pointing its file: the office only.
+      for (const set of [`job_id = '${jobB}'`, "file_url = file_url || '.x'", "category = 'Other'"]) {
+        expect(await refused(async () => { await as(techId); await c.query(`update public.documents set ${set} where id = $1`, [v2]); })).toBe("42501");
+      }
+      // Renaming is free: the customer reads the office's title.
+      expect(await refused(async () => { await as(techId); await c.query("update public.documents set name = 'x' where id = $1", [v2]); })).toBeNull();
+      expect(await docIds(tokenA, jobA)).toEqual([v2]);
+      expect(await one("select count(*)::int as n from public.job_shared_documents where document_id in ($1, $2) and removed_at is null", [v1, v2])).toEqual({ n: 2 });
+
+      // The office, too, takes it off before deleting it: out loud, with Undo, never by a delete.
+      expect(await refusedWith(async () => { await as(staffId); await c.query("delete from public.documents where id = $1", [v2]); })).toBe(
+        `"Drawing" is on the customer's page. Take it off with Take Off Portal on the job's Customer Page tab first, then delete it.`,
+      );
+      await as(staffId);
+      await c.query("update public.job_shared_documents set removed_at = now() where document_id = $1", [v2]);
+      await asServer();
+      expect(await docIds(tokenA, jobA)).toEqual([v1]);
+
+      // While it is down a crew member re-points it at job B (another customer's) and a file there.
+      await as(techId);
+      await c.query("update public.documents set job_id = $1, file_url = $2 where id = $3", [jobB, `${orgId}/${jobB}/test-0326-swapped.pdf`, v2]);
+      await asServer();
+      // Undo / Put Back on job A would have moved the row to job B and shown customer B the new file.
+      expect(await refusedWith(async () => { await as(staffId); await c.query("update public.job_shared_documents set removed_at = null where document_id = $1", [v2]); })).toBe(
+        "This paper has moved to another job since it was on this job's page, so it can't go back up here.",
+      );
+      // Same job, different file: refused too, so Undo never publishes a file nobody looked at.
+      await c.query("update public.documents set job_id = $1, file_url = $2 where id = $3", [jobA, `${orgId}/${jobA}/test-0326-swapped.pdf`, v2]);
+      expect(await refusedWith(async () => { await as(staffId); await c.query("update public.job_shared_documents set removed_at = null where document_id = $1", [v2]); })).toBe(
+        "This paper's file was changed after it came off the customer's page. Upload the new file and show that one.",
+      );
+      expect(await docIds(tokenA, jobA)).toEqual([v1]);
+      expect(await docIds(tokenB, jobB)).toEqual([]);
+      expect(await one("select job_id, removed_at is not null as down from public.job_shared_documents where document_id = $1", [v2])).toEqual({ job_id: jobA, down: true });
+
+      // Down, it is the office's to delete (its row goes with it); v1 stays up.
+      await as(staffId);
+      expect((await c.query("delete from public.documents where id = $1 returning id", [v2])).rowCount).toBe(1);
+      await asServer();
+      expect(await docIds(tokenA, jobA)).toEqual([v1]);
+    } finally {
+      await c.query("rollback to savepoint underneath");
+      await asServer();
+    }
+  });
+
+  it("deleting the job itself still takes its shown papers with it", async () => {
+    if (!needs()) return;
+    await c.query("savepoint jobgone");
+    try {
+      const jobC = (
+        await one("insert into public.jobs (org_id, name, job_number, status, billing_type, customer_id) values ($1, 'TEST-0326-C', 'TEST-0326-C', 'in_progress', 'tm', $2) returning id", [orgId, custA])
+      ).id as string;
+      const plan = await doc(jobC, "test-0326-c-plan.pdf", "Plan");
+      const photo = await doc(jobC, "test-0326-c-photo.jpg", "Photo");
+      await as(staffId);
+      await show(plan, jobC, { kind: "plan" });
+      await show(photo, jobC, { kind: "photo" });
+      await asServer();
+      expect((await c.query("delete from public.jobs where id = $1 returning id", [jobC])).rowCount).toBe(1);
+      expect(await one("select count(*)::int as n from public.documents where id in ($1, $2)", [plan, photo])).toEqual({ n: 0 });
+      expect(await one("select count(*)::int as n from public.job_shared_documents where job_id = $1", [jobC])).toEqual({ n: 0 });
+    } finally {
+      await c.query("rollback to savepoint jobgone");
       await asServer();
     }
   });

@@ -55,6 +55,10 @@
 --
 -- WHO: the office only, for every verb (RLS, plus the trigger for the service role's writes). A
 -- tech cannot share, replace, retitle or take down anything; the crew never reads these rows.
+-- Nor through the documents underneath (section 3b, from the review): while a paper is up, nobody
+-- deletes the version the customer sees (the office takes it off first, out loud, with Undo), the
+-- crew can't delete an earlier version or move, re-file or re-point a shown paper, and putting a
+-- paper back refuses one that moved to another job or had its file changed while it was down.
 --
 -- SELF-CHECK: every portal job page that opens today is read before and after. The only change
 -- allowed is the new 'documents' key (empty today: production has no share rows). Plus the grants.
@@ -244,6 +248,18 @@ begin
   end if;
 
   if v_restamp then
+    -- Back up after a take-down: the row puts back THIS job's paper as the office last saw it, never
+    -- whatever the documents row has been pointed at since (review of 0326: a crew member may
+    -- update documents while the row is down, and Undo must not move the paper to another job's,
+    -- or another customer's, page, nor publish a different file).
+    if tg_op = 'UPDATE' and (d.org_id is distinct from old.org_id or d.job_id is distinct from old.job_id) then
+      raise exception 'This paper has moved to another job since it was on this job''s page, so it can''t go back up here.'
+        using errcode = '23514';
+    end if;
+    if tg_op = 'UPDATE' and d.file_url is distinct from old.file_url_at_share then
+      raise exception 'This paper''s file was changed after it came off the customer''s page. Upload the new file and show that one.'
+        using errcode = '23514';
+    end if;
     if coalesce(d.category, '') in ('Receipt', 'Bill', 'Invoice') then
       raise exception 'A % is the company''s own paper and is never shown to the customer.', lower(d.category)
         using errcode = '23514';
@@ -359,6 +375,71 @@ create trigger job_shared_documents_stamp
   before insert or update on public.job_shared_documents
   for each row execute function public.job_shared_documents_stamp();
 drop function if exists public.job_shared_photos_stamp();
+
+-- ── 3b. the paper under a share can't be pulled out from under it ────────────────────────────────
+-- documents_write (0013) lets any member update or delete any document in the org, and the share
+-- row goes with its document (0300's ON DELETE CASCADE). Without this, a crew member deleting the
+-- newest version would silently put the older one back on the customer's page and erase what the
+-- customer was shown; repointing its job, file or category would silently take it down. So, while
+-- a paper is up (a live share row):
+--   DELETE  refused while it is the version the customer sees, for everyone: the office takes it
+--           off first (Take Off Portal, or the photo's Customer Sees It switch), which is visible,
+--           says what shows instead, and has Undo. An earlier version a live newer one stands in
+--           for changes nothing on the page: the office may delete it; the crew may not (it is the
+--           office's record of what the customer was shown). When the job or the company itself
+--           is being deleted, everything on it goes together.
+--   UPDATE  of its org, job, file or category: the office only (a re-file by the office still
+--           drops it off the page, fail-closed, as section 2 says). The name is free: the customer
+--           reads the office's title.
+create or replace function public.documents_keep_customer_share()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  s public.job_shared_documents%rowtype;
+  v_staff boolean := public.is_org_staff();
+begin
+  select * into s from public.job_shared_documents where document_id = old.id and removed_at is null;
+  if not found then
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if new.org_id is not distinct from old.org_id and new.job_id is not distinct from old.job_id
+       and new.file_url is not distinct from old.file_url and new.category is not distinct from old.category then
+      return new;
+    end if;
+    if public.is_privileged_writer() or v_staff then
+      return new;
+    end if;
+    raise exception 'This paper is on the customer''s page, so only the office can move it, re-file it or change its file.'
+      using errcode = '42501';
+  end if;
+
+  -- DELETE. The job or the company is being deleted (a cascade): everything on it goes together.
+  if not exists (select 1 from public.jobs j where j.id = s.job_id)
+     or not exists (select 1 from public.organizations o where o.id = s.org_id) then
+    return old;
+  end if;
+  -- An earlier version a live newer paper stands in for: the page doesn't change; the office may.
+  if (v_staff or public.is_privileged_writer())
+     and exists (select 1 from public.job_shared_documents r
+                  where r.replaces_document_id = old.id and r.removed_at is null) then
+    return old;
+  end if;
+  if not v_staff and not public.is_privileged_writer() then
+    raise exception 'This paper is on the customer''s page, so only the office can take it down. Ask the office to take it off first.'
+      using errcode = '42501';
+  end if;
+  raise exception '%', case when s.kind = 'photo'
+      then 'This photo is on the customer''s page. Turn off Customer Sees It on the Photos tab first, then delete it.'
+      else format('"%s" is on the customer''s page. Take it off with Take Off Portal on the job''s Customer Page tab first, then delete it.', s.title) end
+    using errcode = '23514';
+end $$;
+revoke execute on function public.documents_keep_customer_share() from public, anon, authenticated;
+
+drop trigger if exists documents_keep_customer_share on public.documents;
+create trigger documents_keep_customer_share
+  before update of org_id, job_id, file_url, category or delete on public.documents
+  for each row execute function public.documents_keep_customer_share();
 
 -- ── 4. RLS: the office, every verb; an update is now a verb (retitle, replace, take down) ──────
 revoke all on public.job_shared_documents from public, anon, authenticated;
@@ -492,6 +573,10 @@ begin
      or has_function_privilege('anon', 'public.portal_job_view(text, uuid)', 'execute')
      or has_function_privilege('authenticated', 'public.portal_job_view(text, uuid)', 'execute') then
     raise exception '0326: a portal rule became callable without the service role. Nothing was changed.';
+  end if;
+  if not exists (select 1 from pg_trigger where tgrelid = 'public.documents'::regclass
+                    and tgname = 'documents_keep_customer_share' and not tgisinternal) then
+    raise exception '0326: the documents under a share are not guarded. Nothing was changed.';
   end if;
   if public.document_category_is_showable('Receipt') or public.document_category_is_showable('Bill')
      or public.document_category_is_showable('Invoice') or public.document_category_is_showable(null)

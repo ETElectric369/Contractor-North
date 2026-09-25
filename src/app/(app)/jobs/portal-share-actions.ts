@@ -353,9 +353,16 @@ async function paperIsMoney(s: Staff, documentId: string): Promise<boolean> {
   return ((data ?? []) as Parameters<typeof organizeRowIsMoney>[0][]).some(organizeRowIsMoney);
 }
 
-async function readShare(s: Staff, documentId: string): Promise<{ row: SharedPaperRow | null; error: unknown }> {
-  const { data, error } = await s.supabase.from(SHARES).select(SHARE_COLS).eq("document_id", documentId).eq("org_id", s.orgId).maybeSingle();
-  return { row: (data as SharedPaperRow | null) ?? null, error };
+async function readShare(s: Staff, documentId: string): Promise<{ row: SharedPaperRow | null; jobId: string | null; error: unknown }> {
+  const { data, error } = await s.supabase
+    .from(SHARES)
+    .select(`${SHARE_COLS}, job_id`)
+    .eq("document_id", documentId)
+    .eq("org_id", s.orgId)
+    .maybeSingle();
+  if (!data) return { row: null, jobId: null, error };
+  const { job_id: jobId, ...row } = data as SharedPaperRow & { job_id: string };
+  return { row, jobId, error };
 }
 
 /**
@@ -377,6 +384,11 @@ export async function showPaper(documentId: string, patch: SharedPaperPatch = {}
 
   const cur = await readShare(s, doc.id);
   if (cur.error) return { ok: false, error: sharesNotReady(cur.error) ? NOT_READY : dbError(cur.error as never) };
+  // Back up means back up on the job it came off (0326's stamp refuses the rest too): a paper
+  // pointed at another job since would otherwise land on that job's, maybe another customer's, page.
+  if (cur.row && cur.jobId !== doc.job_id) {
+    return { ok: false, error: "This paper has moved to another job since it was on this job's page, so it can't go back up here." };
+  }
   const v = normalizeSharedPaper(patch, doc, !cur.row);
   if (!v.ok) return v;
 
