@@ -8,17 +8,23 @@
  * with the Inspector; the only job door was inside Edit Details. So he made J-055 by hand and
  * backdated his clock, and the visit pointed at nothing.
  *
- * Four states, one card:
+ * Five states, one card:
  *   start    office, no job yet:   Start The Job And Clock In (a small sheet: what the job will be,
  *                                  when the clock starts) · Start The Job. When this customer has
- *                                  exactly one open job made on the visit's day, Link To J-055
+ *                                  exactly one job (open or finished) made on the visit's day, Link To J-055
  *                                  Instead LEADS and Make A New Job Anyway is the second door; when
  *                                  the tapper is on the clock on that very job, there is no switch at
  *                                  all (it would cut the right shift onto a duplicate). The app
  *                                  offers; a person taps.
+ *            A visit that is OVER (marked completed) never leads with a clock: it leads with
+ *                                  Link To J-055 when there is one, else a quiet Start A Job From This
+ *                                  Visit (the job only). The same-day job is offered open OR finished:
+ *                                  Tom Goodman's J-055 was finished and invoiced before anybody came
+ *                                  back to the visit, and an open-only rule led with a duplicate.
  *   ask      crew, no job yet:     Ask The Office (the bell) · Call / Text The Office. No dead end.
  *   linked   anybody, job linked:  Clock In On J-055 (Switch To J-055 when on the clock elsewhere)
  *                                  · Open J-055.
+ *   closed   the visit is over and its job is finished: Open J-055 only. No clock to start.
  *   here     already on it:        You're On The Clock Here · Open J-055.
  *
  * Every time shown or picked is the ORG's clock.
@@ -33,26 +39,30 @@ import { useToast } from "@/components/toast";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 import { formatDateTimeTz } from "@/lib/tz";
-import { clockWords, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
+import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem, visitIsOver } from "@/lib/appointments/visit-start";
 import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
 import { clockIn, switchJob, deleteTimeEntry } from "../../timeclock/actions";
 import { askOfficeToStartJob, linkVisitInstead, startJobFromVisit, type OnClock, type StartJobResult } from "../start-job-actions";
 
-export type VisitStartJob = { id: string; job_number: string | null; name: string | null };
+export type VisitStartJob = { id: string; job_number: string | null; name: string | null; status?: string | null };
 /** `whole`: the running entry has no job and no code, so a switch moves the WHOLE shift onto the
  *  new job (0288 re-points it) rather than ending a part now. */
 export type VisitStartOpenEntry = { id: string; job_id: string | null; label: string; clock_in: string; whole?: boolean };
 
-export type VisitStartState = "start" | "ask" | "linked" | "switch" | "here";
+export type VisitStartState = "start" | "ask" | "linked" | "switch" | "closed" | "here";
 
 /** Which face the card shows. Pure, so the render test and the page agree. */
 export function visitStartState(input: {
   isStaff: boolean;
   job: VisitStartJob | null;
   openEntry: VisitStartOpenEntry | null;
+  /** The appointment's own status: "completed" means the visit is over. */
+  visitStatus?: string | null;
 }): VisitStartState {
   if (!input.job) return input.isStaff ? "start" : "ask";
   if (input.openEntry?.job_id === input.job.id) return "here";
+  // The visit is over and its job is finished: paperwork, not a clock-in.
+  if (!clockOffered(input.visitStatus, input.job.status)) return "closed";
   return input.openEntry ? "switch" : "linked";
 }
 
@@ -98,6 +108,7 @@ export function VisitStartCard({
   preview,
   officePhone,
   lastClockOut = null,
+  visitStatus = null,
 }: {
   appointmentId: string;
   tz: string;
@@ -110,6 +121,8 @@ export function VisitStartCard({
   officePhone: string | null;
   /** The end of the tapper's latest finished shift: a Visit Time start inside it is not offered. */
   lastClockOut?: string | null;
+  /** The appointment's status. A completed visit is over: the card never leads with a clock. */
+  visitStatus?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -136,8 +149,11 @@ export function VisitStartCard({
   // move is the link. A switch would cut that shift onto a brand-new duplicate job.
   const onLinkJob = !!linkInstead && !!onClock?.jobId && onClock.jobId === linkInstead.id;
 
-  const state = visitStartState({ isStaff, job, openEntry });
+  const state = visitStartState({ isStaff, job, openEntry, visitStatus });
   const jobNo = job ? jobShort(job) : "";
+  // The visit is over: nothing on the start face starts a clock (a new job is the job only).
+  const over = visitIsOver(visitStatus);
+  const linkFinished = !!linkInstead && jobIsFinished(linkInstead.status);
 
   const nowMs = Date.now();
   // Visit Time is offered only when it is a real start: in the window, and not inside hours already
@@ -263,7 +279,7 @@ export function VisitStartCard({
     >
       {state === "start" && (
         <>
-          <h2 className="text-base font-semibold text-slate-900">Here to do the work?</h2>
+          <h2 className="text-base font-semibold text-slate-900">{over ? "This visit is done" : "Here to do the work?"}</h2>
           {linkInstead ? (
             onLinkJob ? (
               <p className="mt-0.5 text-sm text-slate-700">
@@ -276,17 +292,23 @@ export function VisitStartCard({
               <p className="mt-0.5 text-sm text-slate-700">
                 {linkInstead.customer ?? "This customer"} already has{" "}
                 <span className="font-semibold">{jobShort(linkInstead)}</span>
-                {linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : ""}, made that day. Use it
-                instead of making a second job?
+                {linkInstead.name && linkInstead.job_number ? ` · ${linkInstead.name}` : ""}, made that day
+                {linkFinished ? " and finished" : ""}.{" "}
+                {over ? "Link this visit to it?" : "Use it instead of making a second job?"}
               </p>
             )
+          ) : over ? (
+            <p className="mt-0.5 text-sm text-slate-600">
+              It has no job. If the work goes on, start one from it: it brings {preview.customer ?? "the customer"}, the
+              address and the visit time along, and it doesn&rsquo;t start your clock.
+            </p>
           ) : (
             <p className="mt-0.5 text-sm text-slate-600">
               Start a job from this visit. It brings {preview.customer ?? "the customer"}, the address and the visit time
               along.
             </p>
           )}
-          {onClock && !onLinkJob && (
+          {onClock && !onLinkJob && !over && (
             <p className="mt-1 text-sm text-amber-700">
               You&rsquo;re on the clock on {onClock.label} since {onClock.since}.{" "}
               {onClock.whole
@@ -298,19 +320,26 @@ export function VisitStartCard({
             {linkInstead ? (
               <>
                 <Button className={btn} onClick={linkInsteadTap} disabled={pending}>
-                  <Link2 /> {onLinkJob ? `Link To ${jobShort(linkInstead)}` : `Link To ${jobShort(linkInstead)} Instead`}
+                  <Link2 />{" "}
+                  {onLinkJob || over ? `Link To ${jobShort(linkInstead)}` : `Link To ${jobShort(linkInstead)} Instead`}
                 </Button>
                 {/* The second door. On the clock on the linkable job it makes the job only: moving
-                    that clock is exactly the mistake this card exists to prevent. */}
+                    that clock is exactly the mistake this card exists to prevent. On a visit that is
+                    over it is the job only too: the visit starts no clock. */}
                 <Button
                   variant="outline"
                   className={btn}
-                  onClick={onLinkJob ? startOnly : openSheet}
+                  onClick={onLinkJob || over ? startOnly : openSheet}
                   disabled={pending}
                 >
                   <Briefcase /> Make A New Job Anyway
                 </Button>
               </>
+            ) : over ? (
+              // Quiet on purpose: the visit is over, so this is the job only, and never the lead door.
+              <Button variant="outline" className={btn} onClick={startOnly} disabled={pending}>
+                <Briefcase /> Start A Job From This Visit
+              </Button>
             ) : (
               <>
                 <Button className={btn} onClick={openSheet} disabled={pending}>
@@ -349,7 +378,7 @@ export function VisitStartCard({
         </>
       )}
 
-      {(state === "linked" || state === "switch" || state === "here") && job && (
+      {(state === "linked" || state === "switch" || state === "here" || state === "closed") && job && (
         <>
           <h2 className="text-base font-semibold text-slate-900">
             This visit is {jobNo}
@@ -363,6 +392,11 @@ export function VisitStartCard({
                 : "Switching ends that part now and starts this one."}
             </p>
           )}
+          {state === "closed" && (
+            <p className="mt-0.5 text-sm text-slate-600">
+              The visit is done and {jobNo} is finished, so there&rsquo;s no clock to start here.
+            </p>
+          )}
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             {state === "here" ? (
               <span
@@ -371,7 +405,7 @@ export function VisitStartCard({
               >
                 <Clock className="h-4 w-4" /> You&rsquo;re On The Clock Here
               </span>
-            ) : (
+            ) : state === "closed" ? null : (
               <Button className={btn} onClick={clockHere} disabled={pending}>
                 {state === "switch" ? <ArrowLeftRight /> : <Play />}
                 {state === "switch" ? `Switch To ${jobNo}` : `Clock In On ${jobNo}`}
@@ -395,7 +429,7 @@ export function VisitStartCard({
         </p>
       )}
 
-      {state === "start" && (
+      {state === "start" && !over && (
         <Modal
           open={sheet}
           onClose={() => setSheet(false)}

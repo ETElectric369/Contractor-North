@@ -28,7 +28,8 @@ import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
 import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
-import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS } from "@/lib/invoice-math";
+import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
+import { readPriceBookUnits } from "@/lib/price-book-kind";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
@@ -777,23 +778,36 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     // the invoice total with no warning (the confirm counts rows by import_source, so it read
     // "0 replacing" and never fired). Keyed identically to importQuoteItemsIntoInvoice, a
     // re-import now refreshes these rows in place.
-    const copies = items.map((it: any) => ({
-      invoice_id: invoice.id,
-      description: it.description,
-      quantity: it.quantity,
-      unit: it.unit,
-      unit_price: it.unit_price,
-      sort_order: it.sort_order,
-      import_source: "quote",
-      import_key: `quote:${it.id}`,
-      // THE CLAIM (0255): this line bills that estimate line, so no other invoice on the job pulls it in.
-      source_ids: [String(it.id)],
-    }));
+    // AN ESTIMATE LINE PRICED FROM THE BOOK IS STILL A BOOK LINE ON THE BILL (0342): its leading
+    // code finds its book item, which says labor (sold by the hour) or materials (it names a
+    // supplier), so the customer's breakdown files it there instead of under Other. A line the book
+    // does not know, or whose item says neither (installed work, a job-cost code), says nothing.
+    const book = await readPriceBookUnits(supabase, ctx.orgId);
+    let copies: Record<string, unknown>[] = items.map((it: any) => {
+      const kind = kindFromPriceBook(it, book);
+      return {
+        invoice_id: invoice.id,
+        description: it.description,
+        quantity: it.quantity,
+        unit: it.unit,
+        unit_price: it.unit_price,
+        sort_order: it.sort_order,
+        import_source: "quote",
+        import_key: `quote:${it.id}`,
+        // THE CLAIM (0255): this line bills that estimate line, so no other invoice on the job pulls it in.
+        source_ids: [String(it.id)],
+        ...(kind ? { line_kind: kind } : {}),
+      };
+    });
     let itemsErr = (await supabase.from("invoice_items").insert(copies)).error;
-    // 0255 not applied yet: land the lines without their claim rather than fail the whole invoice —
-    // the key still names the source, and the backfill (0256) derives the claim from it.
-    if (itemsErr && isMissingColumn(itemsErr, "source_ids")) {
-      itemsErr = (await supabase.from("invoice_items").insert(copies.map(({ source_ids: _claim, ...rest }) => rest))).error;
+    // A column that is not on this database yet (0255's claim, 0342's kind): land the lines without
+    // it rather than fail the whole invoice. The key still names the source (the 0256 backfill
+    // derives the claim from it) and a line with no kind reads as it always did.
+    for (const col of ["line_kind", "source_ids"] as const) {
+      if (itemsErr && isMissingColumn(itemsErr, col) && copies.some((c) => col in c)) {
+        copies = copies.map(({ [col]: _gone, ...rest }) => rest);
+        itemsErr = (await supabase.from("invoice_items").insert(copies)).error;
+      }
     }
     if (itemsErr) {
       /**
@@ -984,7 +998,11 @@ export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[
 
 export async function addInvoiceItem(
   invoiceId: string,
-  item: { description: string; quantity: number; unit: string; unit_price: number },
+  /** `kind`: what the line IS when the door knows (0342): the price-book picker and a linked kit
+   *  line say labor for a book item sold by the hour, materials for one that names a supplier.
+   *  Omitted, the server reads the line's leading code against this org's price book by the same
+   *  rule; no code, or an item that says neither, and the line says nothing. */
+  item: { description: string; quantity: number; unit: string; unit_price: number; kind?: PickableLineKind | null },
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1024,14 +1042,30 @@ export async function addInvoiceItem(
     .maybeSingle();
   const nextSort = Number((last as { sort_order?: number } | null)?.sort_order ?? -1) + 1;
 
-  const { error } = await supabase.from("invoice_items").insert({
+  /**
+   * A PRICE-BOOK LINE SAYS WHAT IT IS (Erik, INV-079: "Other instead of materials in invoice").
+   * The door's word first (the picker knows the item it priced); failing that, the line's own
+   * leading code against this org's book (hours = labor, a supplier = materials), the rule 0342's
+   * backfill ran on the lines already out.
+   * Neither, and the line stores nothing and is read by its words as it always was.
+   */
+  const said = pickableLineKind(item.kind);
+  const lineKind = said ?? kindFromPriceBook(item, await readPriceBookUnits(supabase, ctx.orgId));
+  const row: Record<string, unknown> = {
     invoice_id: invoiceId,
     description: item.description,
     quantity: item.quantity || 1,
     unit: item.unit || "ea",
     unit_price: item.unit_price || 0,
     sort_order: nextSort,
-  });
+  };
+  if (lineKind) row.line_kind = lineKind;
+  let { error } = await supabase.from("invoice_items").insert(row);
+  // 0342 not applied yet: land the line without its kind rather than refuse it. It reads as before.
+  if (error && lineKind && isMissingColumn(error, "line_kind")) {
+    delete row.line_kind;
+    ({ error } = await supabase.from("invoice_items").insert(row));
+  }
   if (error) return { ok: false, error: dbError(error) };
   await stampInvoiceRevised(supabase, invoiceId, "addInvoiceItem");
   await recalcInvoice(supabase, invoiceId);
@@ -1207,8 +1241,12 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // What the invoice's estimate lines claim BEFORE the RPC, so the toast counts only what this tap
   // added (withClaimStats diffs it against the read-back after).
   const before = await landedSourceIds(supabase, invoiceId, "quote", rows);
+  // The estimate lines already on this invoice, by id: only a line this tap ADDS is filed from the
+  // book, so a line the office handed back with "Read It From The Line" stays as they left it.
+  const standing = await estimateLineIds(supabase, ctx.orgId, invoiceId);
   const rep = await upsertImportedItems(supabase, invoiceId, "quote", rows);
   if (rep.error) return { ok: false, error: rep.error };
+  await fileEstimateLinesFromBook(supabase, ctx.orgId, invoiceId, standing);
   if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importQuoteItemsIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
@@ -1217,6 +1255,106 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // and it is the one that tells the office whether their negotiated prices survived.
   const after = await landedSourceIds(supabase, invoiceId, "quote", rows);
   return { ok: true, stats: sayRemoved(withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "estimate lines"), rep.removed) };
+}
+
+/** The ids of the estimate lines on this invoice right now (null = the read failed). */
+async function estimateLineIds(supabase: any, orgId: string | null, invoiceId: string): Promise<Set<string> | null> {
+  if (!orgId) return null;
+  const { data, error } = await supabase
+    .from("invoice_items")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .eq("org_id", orgId)
+    .eq("import_source", "quote");
+  if (error) {
+    reportError("estimateLineIds", error, { invoiceId });
+    return null;
+  }
+  return new Set(((data ?? []) as { id: string }[]).map((r) => String(r.id)));
+}
+
+/**
+ * THE ESTIMATE'S BOOK LINES, FILED (0342). From Estimate lands its lines through the import RPC,
+ * which knows nothing of kinds; this reads what landed and gives each estimate line THIS IMPORT
+ * ADDED (not in `standing`, the ids read before the RPC) that starts with one of the org's codes
+ * the kind its book item says (createInvoiceFromQuote does the same as it inserts). A line that was
+ * already on the invoice is never touched: its kind is whatever it landed with or a person set,
+ * and a null there may be the office's own "Read It From The Line", which a re-import must not
+ * undo. No `standing` (the read failed) files nothing: the lines then read by their words.
+ * Classification only - no words, amount or order - so a failure costs the import nothing; it is
+ * reported, and the line reads by its words as before.
+ */
+async function fileEstimateLinesFromBook(supabase: any, orgId: string | null, invoiceId: string, standing: Set<string> | null): Promise<void> {
+  if (!orgId || !standing) return;
+  const { data: lines, error } = await supabase
+    .from("invoice_items")
+    .select("id, description, unit, line_kind")
+    .eq("invoice_id", invoiceId)
+    .eq("org_id", orgId)
+    .eq("import_source", "quote")
+    .is("line_kind", null);
+  if (error) {
+    if (!isMissingColumn(error, "line_kind")) reportError("fileEstimateLinesFromBook.read", error, { invoiceId });
+    return;
+  }
+  const added = ((lines ?? []) as { id: string; description: string | null; unit: string | null }[]).filter((ln) => !standing.has(String(ln.id)));
+  if (!added.length) return;
+  const book = await readPriceBookUnits(supabase, orgId);
+  for (const ln of added) {
+    const kind = kindFromPriceBook(ln, book);
+    if (!kind) continue;
+    const { data: done, error: upErr } = await supabase
+      .from("invoice_items")
+      .update({ line_kind: kind })
+      .eq("id", ln.id)
+      .eq("invoice_id", invoiceId)
+      .eq("org_id", orgId)
+      .is("line_kind", null)
+      .select("id");
+    if (upErr || !done?.length) reportError("fileEstimateLinesFromBook.write", upErr ?? new Error("zero rows"), { invoiceId, itemId: ln.id });
+  }
+}
+
+/**
+ * THE OFFICE SAYS WHAT A LINE IS (0342): the Kind chip on the line editor, and Nort.
+ *
+ * Labor, Materials or Other, on any line of any live invoice; `null` hands the line back to the
+ * app's own reading (its import, then its words and unit). Classification only: the line's words,
+ * amount, unit and order are untouched, so nothing the customer owes moves, no revision is stamped
+ * and the importer still refreshes the line (mark_invoice_item_edited looks only at description /
+ * quantity / unit_price / unit, so new hours still join a labor line). The draw's own credit and
+ * milestone lines stay locked, as every line write does. The stored PDF is dropped, because the
+ * customer's Cost Breakdown is printed from this.
+ */
+export async function setInvoiceItemKind(
+  itemId: string,
+  invoiceId: string,
+  kind: PickableLineKind | null,
+): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  if (!ctx.orgId) return { ok: false, error: "No company on this account." };
+  const next = kind === null ? null : pickableLineKind(kind);
+  if (kind !== null && !next) return { ok: false, error: "A line is Labor, Materials or Other." };
+  const block = await requireLiveInvoice(supabase, invoiceId);
+  if (block) return block;
+  if (await isProtectedCreditLine(supabase, itemId)) return CREDIT_LINE_LOCKED;
+  const { data: touched, error } = await supabase
+    .from("invoice_items")
+    .update({ line_kind: next })
+    .eq("id", itemId)
+    .eq("invoice_id", invoiceId) // L3: the item must belong to THIS invoice
+    .eq("org_id", ctx.orgId)
+    .select("id");
+  if (error) {
+    if (isMissingColumn(error, "line_kind")) return { ok: false, error: "Line kinds aren't switched on yet. Try again after the next update." };
+    return { ok: false, error: dbError(error) };
+  }
+  if (!touched?.length) return { ok: false, error: "That line isn't on this invoice." };
+  await bustDocPdf("invoice", invoiceId);
+  revalidateMoney(invoiceId);
+  return { ok: true, message: next ? `Filed under ${LINE_KIND_LABEL[next]}` : "Back to reading it from the line" };
 }
 
 // ── H4: one billing path per job ────────────────────────────────────────────

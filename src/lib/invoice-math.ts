@@ -273,6 +273,9 @@ export type InvoiceLine = {
   import_source?: string | null;
   /** The unit the contractor billed in. A line sold in HOURS is labor, whoever typed it. */
   unit?: string | null;
+  /** What the line was SAID to be (0342): set by the door that knew (a price-book line) or by the
+   *  office's Kind chip. Read before anything else; null = infer it. */
+  line_kind?: string | null;
 };
 export type LineBreakdown = {
   labor: { lines: InvoiceLine[]; subtotal: number };
@@ -288,6 +291,151 @@ const HOURS_UNIT = /^(hr|hrs|hour|hours|man-?hours?)$/;
 /** Is this unit hours? (The unit box, trimmed and lower-cased; "hr", "hrs", "hours", "man-hours".) */
 export function isHoursUnit(unit: string | null | undefined): boolean {
   return HOURS_UNIT.test(String(unit ?? "").trim().toLowerCase());
+}
+
+/**
+ * WHAT A LINE WAS SAID TO BE (Erik, 2026-09-25, INV-079: "Other instead of materials in invoice").
+ *
+ * Three switches and receptacles picked from his price list printed under Other, because a line
+ * with no importer behind it was read only by its words, and "TM870LA — S5A 125V 1P SWITCH" is a
+ * code and a catalog name, not the word "Materials". The words cannot settle it; the door the line
+ * came through can. So invoice_items.line_kind (0342) holds what the line IS, when somebody knows:
+ *
+ *  - a line added FROM THE PRICE BOOK is labor when the book prices it in hours, and materials
+ *    when the book item names a SUPPLIER (a part bought from someone: ET's CED catalog). A book
+ *    item with neither says nothing (priceBookLineKind): TAHOE DECK's "D1 — New Construction —
+ *    Deck Build" and Vivian's "1605 — Electrical - Rough In & Finish (Labor)" are installed work
+ *    and job-cost codes, not parts, so "it is in the book" is not "it is materials". The doors:
+ *    the picker, a linked kit line, Nort's add line, the estimate's copy;
+ *  - the office's Kind chip on the line editor sets any line to Labor, Materials or Other;
+ *  - null means nobody said, and the line is read as it always was (import_source, then the words
+ *    and the unit).
+ *
+ * A stored kind is read FIRST by every reader (groupInvoiceLines here, lineGroup on the portal), so
+ * the customer's bill, the print, the /i link and the portal can never file one line in two places.
+ * It is a classification only: it never changes a line's words, amount or order.
+ */
+export type StoredLineKind = "labor" | "materials" | "other" | "credit";
+/** The kinds the office's Kind chip offers (credit is the draw's own line, never picked by hand). */
+export const PICKABLE_LINE_KINDS = ["labor", "materials", "other"] as const;
+export type PickableLineKind = (typeof PICKABLE_LINE_KINDS)[number];
+export const LINE_KIND_LABEL: Readonly<Record<StoredLineKind, string>> = {
+  labor: "Labor",
+  materials: "Materials",
+  other: "Other",
+  credit: "Credit",
+};
+
+/** A stored line_kind, or null when there is none (or it is a word this app does not know). */
+export function storedLineKind(v: unknown): StoredLineKind | null {
+  return v === "labor" || v === "materials" || v === "other" || v === "credit" ? v : null;
+}
+
+/** A kind a person (or a door) may set: Labor, Materials or Other. Anything else is null. */
+export function pickableLineKind(v: unknown): PickableLineKind | null {
+  return v === "labor" || v === "materials" || v === "other" ? v : null;
+}
+
+/** Anything but blank: the book item names who it is bought from. */
+function hasSupplier(supplier: string | null | undefined): boolean {
+  return String(supplier ?? "").trim().length > 0;
+}
+
+/**
+ * WHAT A PRICE-BOOK LINE IS, from what its book item says: labor when the book (or the line) prices
+ * it in hours; materials when the book item names a supplier, because it is a part bought from
+ * someone; otherwise null. Being in the book is NOT being materials: a book of installed work
+ * ("D1 — New Construction — Deck Build", SQ FT) or job-cost codes ("125 — Project Management &
+ * Supervision", "035 — Permits & Fees") names no supplier, and its lines are read by their words
+ * as before, with the office's Kind chip to say what they are. The app suggests, a person decides.
+ */
+export function priceBookLineKind(
+  bookUnit: string | null | undefined,
+  lineUnit?: string | null,
+  supplier?: string | null,
+): "labor" | "materials" | null {
+  if (isHoursUnit(bookUnit) || isHoursUnit(lineUnit)) return "labor";
+  return hasSupplier(supplier) ? "materials" : null;
+}
+
+/** The code a price-book line starts with: the text before " — " (lineDisplayName and
+ *  baseLineDescription write "CODE — description"), trimmed and lower-cased; null when the line has
+ *  no such lead. The SQL twin is 0342's backfill: lower(btrim(split_part(description, ' — ', 1))). */
+export function priceBookCodeKey(description: string | null | undefined): string | null {
+  const d = String(description ?? "");
+  const at = d.indexOf(" — ");
+  if (at < 0) return null;
+  const key = d.slice(0, at).trim().toLowerCase();
+  return key || null;
+}
+
+const BRACKETED = /\[([^\]]+)\]/g;
+
+/**
+ * EVERY PLACE A LINE MAY NAME ITS BOOK CODE, in the order they are tried (Erik, 2026-09-25: "Also
+ * price list items I added from stock"). A line typed from the book leads with it ("TM870LA — S5A
+ * 125V 1P SWITCH"); a line copied from an estimate carries it in brackets instead (the estimate's
+ * line-map writes "<desc> [CODE]": INV-056's "Single-gang remodel box (FLEXBOX 16 cu in) [P116OW]").
+ * So the keys are, trimmed and lower-cased, deduplicated:
+ *   1. the leading code (priceBookCodeKey);
+ *   2. each bracketed token "[X]", WHOLE, in the order they appear.
+ * Never a word out of a bracket: "[Smith Home]" is not "home" (ET's book has a CED code HOME), and
+ * "[PO 4400]" is not "4400". The estimate writes the book's code whole ("[RACO 936]" is the code
+ * "RACO 936"), so a piece of a bracket names nothing but a collision, and a stored kind outranks
+ * the line's own words.
+ * The caller takes the FIRST key that is a code in the org's book, by exact equality: never a
+ * substring, never fuzzy. "[see note]" is a key like any other, and names nothing unless the book
+ * has a code "see note". The SQL twin is 0342's backfill (rank 0 / n).
+ */
+export function priceBookCodeKeys(description: string | null | undefined): string[] {
+  const d = String(description ?? "");
+  const out: string[] = [];
+  const add = (k: string | null | undefined) => {
+    if (k && !out.includes(k)) out.push(k);
+  };
+  add(priceBookCodeKey(d));
+  for (const m of d.matchAll(BRACKETED)) add(m[1].trim().toLowerCase());
+  return out;
+}
+
+/** One code of the org's book, as the kind rule reads it: its unit and its supplier. */
+export type PriceBookFacts = { unit: string | null; supplier: string | null };
+
+/** The org's price book as the kind rule reads it: code key -> the book's unit and supplier. One
+ *  code on two rows (an archived twin): hours on either wins, and a supplier on either counts, the
+ *  same bool_or pair 0342's backfill uses. */
+export function priceBookUnits(
+  items: Iterable<{ code?: string | null; unit?: string | null; supplier?: string | null }>,
+): Map<string, PriceBookFacts> {
+  const out = new Map<string, PriceBookFacts>();
+  for (const it of items) {
+    const key = String(it.code ?? "").trim().toLowerCase();
+    if (!key) continue;
+    const prev = out.get(key);
+    const unit = prev && isHoursUnit(prev.unit) ? prev.unit : (it.unit ?? null);
+    const supplier = prev && hasSupplier(prev.supplier) ? prev.supplier : hasSupplier(it.supplier) ? String(it.supplier).trim() : (prev?.supplier ?? null);
+    out.set(key, { unit, supplier });
+  }
+  return out;
+}
+
+/**
+ * THE KIND A LINE GETS WHEN IT CAME FROM THE PRICE BOOK, read from the code it names (its lead, or
+ * a bracketed "[CODE]": priceBookCodeKeys, first key in the book wins): the rule the server applies
+ * when a door did not say (a typed "TM870LA — ..." line, Nort's add line, the estimate's copy), and
+ * the one 0342's backfill applied to the lines already out. Null when the line names none of this
+ * org's codes, or the book item it names says neither hours nor a supplier: then nobody knows, and
+ * it is read as before.
+ */
+export function kindFromPriceBook(
+  line: { description?: string | null; unit?: string | null },
+  book: ReadonlyMap<string, PriceBookFacts>,
+): "labor" | "materials" | null {
+  for (const key of priceBookCodeKeys(line.description)) {
+    const facts = book.get(key);
+    if (facts) return priceBookLineKind(facts.unit, line.unit, facts.supplier);
+  }
+  return null;
 }
 
 /**
@@ -307,7 +455,10 @@ export function isHoursUnit(unit: string | null | undefined): boolean {
  * and materials" is a lump and stays Other, and "10/3 romex" is not guessed at. A line the words do
  * not settle needs the office to say what it is; that is a stored kind, not a longer word list.
  */
-export function handLineKind(line: { description?: string | null; unit?: string | null }): "labor" | "materials" | "credit" | null {
+export function handLineKind(line: { description?: string | null; unit?: string | null; line_kind?: string | null }): "labor" | "materials" | "credit" | null {
+  // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342). "Other" said out loud is still Other: null.
+  const stored = storedLineKind(line.line_kind);
+  if (stored) return stored === "other" ? null : stored;
   const desc = String(line.description ?? "").trim();
   if (/less previous billings/i.test(desc)) return "credit";
   if (isHoursUnit(line.unit)) return "labor";
@@ -353,9 +504,14 @@ export function groupInvoiceLines(items: InvoiceLine[]): LineBreakdown {
      * HOURS. A line sold by the hour is labor no matter how it was worded. (2026-09-24: a colon,
      * the word alone, "Erik Labor", and the same for "Materials", in handLineKind.)
      */
+    // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342): a price-book line, or the office's Kind chip.
+    const stored = storedLineKind(it.line_kind);
     const worded = handLineKind(it);
-    const bucket: keyof LineBreakdown =
-      src === "draw_credit" || worded === "credit"
+    const bucket: keyof LineBreakdown = stored
+      ? stored === "credit"
+        ? "credits"
+        : stored
+      : src === "draw_credit" || worded === "credit"
         ? "credits"
         : src === "labor" || worded === "labor"
           ? "labor"

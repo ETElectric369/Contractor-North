@@ -91,6 +91,8 @@ export type LedgerLineIn = {
   unit_price: number | string | null;
   line_total: number | string | null;
   import_source: string | null;
+  /** What the line was said to be (0342; absent before 0342 is applied): read first by lineGroup. */
+  line_kind?: string | null;
   entries?: LedgerEntryIn[] | null;
   sources?: LedgerSourceIn[] | null;
 };
@@ -329,8 +331,10 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
     const src = ln.import_source ?? null;
     const priceCents = toCents(ln.unit_price);
     const qty = Number(ln.quantity) || 0;
+    // Where the line is filed: what it was said to be first (line_kind, 0342), then what it stored.
+    const group = lineGroup({ import_source: src, unit: ln.unit, description: ln.description, line_kind: ln.line_kind ?? null }, inv.invoice_kind ?? null);
 
-    if (src === "labor") {
+    if (src === "labor" && group === "labor") {
       const entries = [...(ln.entries ?? [])]
         .filter((e) => e && e.clock_in)
         .sort((a, b) => Date.parse(a.clock_in) - Date.parse(b.clock_in));
@@ -368,8 +372,7 @@ export function buildJobLedger(input: LedgerInput): JobLedger {
       }
       if (date) datedBy = "purchase";
     }
-    const kind: ItemKind = src === "costs" ? "material" : src === "draw_credit" ? "credit" : "charge";
-    const group = lineGroup({ import_source: src, unit: ln.unit, description: ln.description }, inv.invoice_kind ?? null);
+    const kind: ItemKind = src === "costs" || group === "materials" ? "material" : src === "draw_credit" ? "credit" : "charge";
     const pieces = creditPieces.get(ln);
     if (pieces) {
       // A credit is listed once per bill it takes off, each piece on that bill's day (MR5).

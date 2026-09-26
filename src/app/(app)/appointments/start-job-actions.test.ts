@@ -9,8 +9,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  *     goes through the Timeclock's switchJob, never a second open clock;
  *   - a tech is refused before anything is read or made;
  *   - a start in the future, or before midnight yesterday, is refused with nothing made;
- *   - "Link To J-055 Instead" is offered only for exactly one open job of the same customer made on
- *     the visit's day, and the link re-asks that rule before it writes;
+ *   - "Link To J-055 Instead" is offered only for exactly one job of the same customer made on the
+ *     visit's day that is not cancelled (open OR finished: Tom Goodman's J-055 was finished and
+ *     invoiced before anybody came back to the visit), and the link re-asks that rule before it writes;
  *   - a switch never cuts the shift on that very job onto a duplicate (Tom Goodman as it stood);
  *   - a start in the past that lands on hours already recorded is refused before anything is made;
  *   - a job-less clock is MOVED whole, and the sentence says so;
@@ -28,6 +29,7 @@ const state = vi.hoisted(() => ({
   staffIds: ["office-1"],
   closed: [] as any[], // the tapper's recorded shifts, for the overlap read
   writes: [] as { table: string; patch: any; filters: [string, string, unknown][] }[],
+  jobReads: [] as { neq?: string; gte?: string; lt?: string }[], // the same-day job reads, as asked
 }));
 const spies = vi.hoisted(() => ({
   createJob: vi.fn(),
@@ -53,7 +55,15 @@ vi.mock("./actions", () => ({ createJobFromAppointment: spies.createJob, linkApp
 vi.mock("../timeclock/actions", () => ({ clockIn: spies.clockIn, switchJob: spies.switchJob }));
 
 import { startJobFromVisit, linkVisitInstead, askOfficeToStartJob } from "./start-job-actions";
-import { linkInsteadPick, startedAtProblem, startFloorMs, visitDay } from "@/lib/appointments/visit-start";
+import {
+  clockOffered,
+  linkInsteadPick,
+  linkableStatus,
+  startedAtProblem,
+  startFloorMs,
+  visitDay,
+  visitDayBounds,
+} from "@/lib/appointments/visit-start";
 
 const TZ = "America/Los_Angeles";
 
@@ -75,8 +85,22 @@ function fake() {
       return { data: { id: f("id"), job_number: "J-056", name: "Inspection — Tom Goodman" }, error: null };
     }
     if (q.table === "jobs" && f("customer_id")) {
-      const statuses = f("status") as string[];
-      return { data: state.jobs.filter((j) => j.customer_id === f("customer_id") && statuses.includes(j.status)), error: null };
+      // The read the page and the link share: this customer, not cancelled, made inside [gte, lt).
+      const op = (o: string, col: string) => q.filters.find(([x, c]) => x === o && c === col)?.[2] as string | undefined;
+      const not = op("neq", "status");
+      const from = op("gte", "created_at");
+      const to = op("lt", "created_at");
+      state.jobReads.push({ neq: not, gte: from, lt: to });
+      return {
+        data: state.jobs.filter(
+          (j) =>
+            j.customer_id === f("customer_id") &&
+            j.status !== not &&
+            (!from || Date.parse(j.created_at) >= Date.parse(from)) &&
+            (!to || Date.parse(j.created_at) < Date.parse(to)),
+        ),
+        error: null,
+      };
     }
     if (q.table === "inquiries") return { data: { customer_id: state.inquiryCustomer }, error: null };
     if (q.table === "profiles") return { data: { full_name: "Brian Tech", org_id: "org-et", active: true }, error: null };
@@ -106,6 +130,14 @@ function fake() {
         },
         gte(c: string, v: unknown) {
           q.filters.push(["gte", c, v]);
+          return chain;
+        },
+        lt(c: string, v: unknown) {
+          q.filters.push(["lt", c, v]);
+          return chain;
+        },
+        neq(c: string, v: unknown) {
+          q.filters.push(["neq", c, v]);
           return chain;
         },
         lte(c: string, v: unknown) {
@@ -154,6 +186,7 @@ beforeEach(() => {
   state.staffIds = ["office-1"];
   state.closed = [];
   state.writes = [];
+  state.jobReads = [];
   state.client = fake().client;
   for (const s of Object.values(spies)) s.mockReset();
   spies.createJob.mockResolvedValue({ ok: true, id: "job-56" });
@@ -401,15 +434,89 @@ describe("Link To J-055 Instead", () => {
     expect(linkInsteadPick([j55], visitDay(tomVisit.starts_at, TZ), TZ)?.id).toBe("job-55");
   });
 
-  it("offers nothing for two such jobs, a closed one, or one made another day", () => {
+  it("Tom Goodman as it stands: J-055 FINISHED (INV-079 sent) is still the one to offer", () => {
+    const day = visitDay(tomVisit.starts_at, TZ);
+    expect(linkInsteadPick([{ ...j55, status: "complete" }], day, TZ)?.id).toBe("job-55");
+    // Every standing status counts; cancelled and a status the app does not know never do.
+    for (const st of ["to_be_scheduled", "scheduled", "in_progress", "on_hold", "complete", "invoiced"]) {
+      expect(linkableStatus(st), st).toBe(true);
+    }
+    for (const st of ["cancelled", "completed", "", null, undefined]) expect(linkableStatus(st), String(st)).toBe(false);
+  });
+
+  it("an open job and a finished one made the same day: the open one is offered", () => {
+    // The morning service call J-054 is finished; the office made J-055 for the afternoon work.
+    const day = visitDay(tomVisit.starts_at, TZ);
+    const j54 = { ...j55, id: "job-54", job_number: "J-054", status: "complete", created_at: "2026-09-25T16:00:00Z" };
+    expect(linkInsteadPick([j54, j55], day, TZ)?.id).toBe("job-55");
+    expect(linkInsteadPick([j55, { ...j54, status: "invoiced" }], day, TZ)?.id).toBe("job-55");
+  });
+
+  it("links the open J-055 when a finished J-054 was made the same day, and makes nothing new", async () => {
+    state.jobs = [{ ...j55, id: "job-54", job_number: "J-054", status: "complete", created_at: "2026-09-25T16:00:00Z" }, j55];
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res).toMatchObject({ ok: true, jobId: "job-55" });
+    expect(spies.link).toHaveBeenCalledWith("appt-tom", "job", "job-55");
+    expect(spies.createJob).not.toHaveBeenCalled();
+    // The finished one is not the offer, so a stale tap on it changes nothing.
+    spies.link.mockClear();
+    const stale = await linkVisitInstead("appt-tom", "job-54");
+    expect(stale).toMatchObject({ ok: false });
+    expect(spies.link).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing for two open jobs, two finished ones, a cancelled one, or one made another day", () => {
     const day = visitDay(tomVisit.starts_at, TZ);
     expect(linkInsteadPick([j55, { ...j55, id: "job-57", job_number: "J-057" }], day, TZ)).toBeNull();
-    expect(linkInsteadPick([{ ...j55, status: "completed" }], day, TZ)).toBeNull();
+    // Two open ones plus a finished one is still a question.
+    expect(
+      linkInsteadPick([j55, { ...j55, id: "job-57", job_number: "J-057" }, { ...j55, id: "job-54", status: "complete" }], day, TZ),
+    ).toBeNull();
+    // No open one and two finished ones is a question too.
+    expect(
+      linkInsteadPick([{ ...j55, status: "complete" }, { ...j55, id: "job-57", job_number: "J-057", status: "invoiced" }], day, TZ),
+    ).toBeNull();
+    expect(linkInsteadPick([{ ...j55, status: "cancelled" }], day, TZ)).toBeNull();
     expect(linkInsteadPick([{ ...j55, created_at: "2026-09-24T22:00:00Z" }], day, TZ)).toBeNull();
     // 11:30 PM Pacific on the 25th is 06:30 UTC on the 26th: still the visit's day on the org's clock.
     expect(linkInsteadPick([{ ...j55, created_at: "2026-09-26T06:30:00Z" }], day, TZ)?.id).toBe("job-55");
-    // A closed job alongside the open one does not spoil the offer.
-    expect(linkInsteadPick([j55, { ...j55, id: "job-40", status: "completed" }], day, TZ)?.id).toBe("job-55");
+    // A cancelled job alongside the standing one does not spoil the offer.
+    expect(linkInsteadPick([j55, { ...j55, id: "job-40", status: "cancelled" }], day, TZ)?.id).toBe("job-55");
+  });
+
+  it("the read asks for this customer's standing jobs made on the visit's org-local day, and no other", async () => {
+    state.jobs = [
+      { ...j55, status: "complete" },
+      // An older job of Tom's, and a cancelled duplicate from the same afternoon: neither is on offer.
+      { ...j55, id: "job-12", job_number: "J-012", status: "complete", created_at: "2026-03-02T18:00:00Z" },
+      { ...j55, id: "job-58", job_number: "J-058", status: "cancelled", created_at: "2026-09-25T23:10:00Z" },
+    ];
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(res).toMatchObject({ ok: true, jobId: "job-55" });
+    const day = visitDayBounds("2026-09-25", TZ);
+    expect(day).toEqual({ start: "2026-09-25T07:00:00.000Z", end: "2026-09-26T07:00:00.000Z" });
+    expect(state.jobReads).toEqual([{ neq: "cancelled", gte: day.start, lt: day.end }]);
+  });
+
+  it("the day window follows the org's clock across a time change", () => {
+    // 2026-11-01 is the fall-back day in Los Angeles: 25 hours long.
+    expect(visitDayBounds("2026-11-01", TZ)).toEqual({ start: "2026-11-01T07:00:00.000Z", end: "2026-11-02T08:00:00.000Z" });
+  });
+
+  it("links a FINISHED J-055 to the completed visit through linkAppointmentTo, and says nothing new was made", async () => {
+    state.jobs = [{ ...j55, status: "complete" }];
+    const res = await linkVisitInstead("appt-tom", "job-55");
+    expect(spies.link).toHaveBeenCalledWith("appt-tom", "job", "job-55");
+    expect(res).toMatchObject({ ok: true, jobId: "job-55", message: "Linked this visit to J-055. Nothing new was made." });
+    expect(spies.createJob).not.toHaveBeenCalled();
+  });
+
+  it("a visit that is over offers no clock on a finished job; any other pairing still does", () => {
+    expect(clockOffered("completed", "complete")).toBe(false);
+    expect(clockOffered("completed", "invoiced")).toBe(false);
+    expect(clockOffered("completed", "in_progress")).toBe(true);
+    expect(clockOffered("scheduled", "complete")).toBe(true);
+    expect(clockOffered(null, null)).toBe(true);
   });
 
   it("links through linkAppointmentTo when the rule still names that job", async () => {

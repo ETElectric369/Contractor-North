@@ -31,6 +31,11 @@ export interface DraftLineItem {
   /** Set when the estimator priced this line from a FALLBACK (Home Depot / rough estimate) instead
    *  of the price book, or when the book and the model disagree about the unit. Build-time only. */
   flag?: string;
+  /** What the line IS when the door that made it knows (0342): a price-book line is labor when the
+   *  book prices it in hours, materials when its item names a supplier. An invoice stores it as
+   *  line_kind; an estimate does not keep it. Absent = nobody said, and the line is read by its
+   *  words as before. */
+  kind?: "labor" | "materials";
 }
 
 /** One row of the org's price book, as selected by runEstimator. */
