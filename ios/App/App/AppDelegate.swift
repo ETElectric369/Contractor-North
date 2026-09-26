@@ -7,8 +7,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // A fresh process holds no picked file, so every copy a past one left behind can go.
+        AppDelegate.sweepPickedFileCopies(olderThan: 0)
+        // A long-lived process keeps today's copies (a form may still hold one) and drops the rest.
+        NotificationCenter.default.addObserver(forName: UIApplication.willEnterForegroundNotification,
+                                               object: nil, queue: nil) { _ in
+            AppDelegate.sweepPickedFileCopies(olderThan: 24 * 60 * 60)
+        }
         return true
+    }
+
+    // ── THE CAMERA'S LEFTOVERS ────────────────────────────────────────────────────────────────
+    // Every photo taken or picked through an <input type=file> is copied by WebKit into
+    // tmp/WKWebFileUpload-XXXX/ and never removed. On Erik's phone (2026-09-25) that was 26
+    // photos, 74 MB, back to 9/11, and it only grows. Only those folders are touched: the rest of
+    // tmp belongs to WebKit and the Stripe reader.
+    static func sweepPickedFileCopies(olderThan age: TimeInterval) {
+        DispatchQueue.global(qos: .utility).async {
+            let fm = FileManager.default
+            let tmp = fm.temporaryDirectory
+            guard let names = try? fm.contentsOfDirectory(atPath: tmp.path) else { return }
+            let cutoff = Date().addingTimeInterval(-age)
+            for name in names where name.hasPrefix("WKWebFileUpload-") {
+                let url = tmp.appendingPathComponent(name)
+                let made = (try? fm.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
+                if age > 0 && made > cutoff { continue }
+                try? fm.removeItem(at: url)
+            }
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
