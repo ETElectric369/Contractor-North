@@ -6,6 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError, isTransportError } from "@/lib/chunk-reload";
+import { useTryAgain } from "@/lib/try-again";
 
 /** Segment error boundary for the whole (app) shell. A render crash in any (app) PAGE now
  *  shows this recoverable card in the content area while the dock, topbar, and back nav stay
@@ -21,6 +22,7 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { tryAgain, trying } = useTryAgain(reset);
   useEffect(() => {
     // A tab left open across a deploy → silently reload into the fresh build instead of
     // showing this card (and don't log the benign stale-chunk error).
@@ -46,7 +48,9 @@ export default function AppError({
           : "Something went wrong loading this screen. Your data is safe — try again, or head back to your day."}
       </p>
       <div className="mt-5 flex gap-2">
-        <Button onClick={reset}>Try Again</Button>
+        <Button onClick={tryAgain} disabled={trying}>
+          {trying ? "Trying Again…" : "Try Again"}
+        </Button>
         <Link href="/planner">
           <Button variant="outline">My Day</Button>
         </Link>

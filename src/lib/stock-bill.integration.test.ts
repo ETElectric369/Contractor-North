@@ -8,16 +8,17 @@ import { defineStockBillSuite } from "./stock-bill.db-suite";
  * live. The suite is stock-bill.db-suite.ts; this file points it at a database inside ONE
  * transaction that is always rolled back.
  *
- * OPT-IN, AND ONLY IN ITS OWN THROWAWAY COMPANY (review of this branch). Creds alone do not run it:
- * it needs STOCK_BILL_DB=1. It mints a TEST org with an owner and a tech inside its one transaction
+ * ONLY IN ITS OWN THROWAWAY COMPANY, ON THE TEST DATABASE. The TEST_DB_* creds run it, in CI too
+ * (audit v1018: the STOCK_BILL_DB=1 opt-in kept it out of CI; assertTestDatabase is what keeps it
+ * off production). It mints a TEST org with an owner and a tech inside its one transaction
  * and rolls it back (throwaway-org.db-fixture.ts); the live companies are refused by id and no
  * sandbox org has to exist. STOCK_BILL_APPLY=1 (apply 0343 inside the test transaction when the database
  * lacks it) is refused outright against the production project: DDL there locks every company's
  * invoices for as long as the test runs.
- *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… STOCK_BILL_DB=1 npm test
+ *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npm test
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_BILL_DB, STOCK_BILL_APPLY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && STOCK_BILL_DB === "1" ? describe : describe.skip;
+const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_BILL_APPLY } = process.env;
+const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 /** The production project (its pooler user names it). */
 const PRODUCTION_REF = "rbpokaozcxqownollqlx";
 const isProduction = `${TEST_DB_HOST ?? ""} ${TEST_DB_USER ?? ""}`.includes(PRODUCTION_REF);

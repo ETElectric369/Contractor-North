@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { groupInvoiceLines } from "@/lib/invoice-math";
 
 /**
@@ -59,8 +59,7 @@ d("0342: a line says what it is, and every customer document reads it", () => {
     }
   };
   const ready = () => {
-    if (waiting) console.warn("[line-kind] 0342 is not on this database yet; set LINEKIND_APPLY_0342=1 to apply it inside the rolled-back transaction.");
-    return !waiting;
+    return !waiting || notOnThisDatabase("[line-kind] 0342 is not on this database yet; set LINEKIND_APPLY_0342=1 to apply it inside the rolled-back transaction.");
   };
 
   beforeAll(async () => {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0341: a vendor has a kind (vendor import, Phase 1).
@@ -66,8 +66,7 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
     }
   };
   const ready = () => {
-    if (waiting) console.warn("[vendor-kinds] 0341 is not on this database yet; set VENDOR_APPLY_0341=1 to apply it inside the rolled-back transaction.");
-    return !waiting;
+    return !waiting || notOnThisDatabase("[vendor-kinds] 0341 is not on this database yet; set VENDOR_APPLY_0341=1 to apply it inside the rolled-back transaction.");
   };
 
   beforeAll(async () => {

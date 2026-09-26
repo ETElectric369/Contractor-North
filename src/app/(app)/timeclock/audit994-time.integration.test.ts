@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migrations 0319, 0320 and 0321 (audit v994, the time clock wave), exercised where the rules live.
@@ -71,8 +71,7 @@ d("audit v994 time wave: 0319, 0320, 0321", () => {
     }
   };
   const needs = (m: keyof typeof has) => {
-    if (!has[m]) console.warn(`[audit994-time] migration ${m} is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.`);
-    return has[m];
+    return has[m] || notOnThisDatabase(`[audit994-time] migration ${m} is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.`);
   };
   /** A fixture row, written as the server (a privileged writer). */
   const entry = async (e: {

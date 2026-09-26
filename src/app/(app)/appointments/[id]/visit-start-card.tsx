@@ -16,8 +16,8 @@
  *                                  the tapper is on the clock on that very job, there is no switch at
  *                                  all (it would cut the right shift onto a duplicate). The app
  *                                  offers; a person taps.
- *            A visit that is OVER (marked completed) never leads with a clock: it leads with
- *                                  Link To J-055 when there is one, else a quiet Start A Job From This
+ *            A visit that is OVER (marked completed, or its day has passed: visitIsOver) never
+ *                                  leads with a clock: it leads with Link To J-055 when there is one, else a quiet Start A Job From This
  *                                  Visit (the job only). The same-day job is offered open OR finished:
  *                                  Tom Goodman's J-055 was finished and invoiced before anybody came
  *                                  back to the visit, and an open-only rule led with a duplicate.
@@ -39,7 +39,7 @@ import { useToast } from "@/components/toast";
 import { getPosition } from "@/lib/geo";
 import type { GeoPoint } from "@/lib/types";
 import { formatDateTimeTz } from "@/lib/tz";
-import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem, visitIsOver } from "@/lib/appointments/visit-start";
+import { clockOffered, clockWords, jobIsFinished, jobShort, startedAtProblem } from "@/lib/appointments/visit-start";
 import { ClockStartPicker, pickerInstant, pickerParts } from "../../timeclock/clock-start-picker";
 import { clockIn, switchJob, deleteTimeEntry } from "../../timeclock/actions";
 import { askOfficeToStartJob, linkVisitInstead, startJobFromVisit, type OnClock, type StartJobResult } from "../start-job-actions";
@@ -56,13 +56,13 @@ export function visitStartState(input: {
   isStaff: boolean;
   job: VisitStartJob | null;
   openEntry: VisitStartOpenEntry | null;
-  /** The appointment's own status: "completed" means the visit is over. */
-  visitStatus?: string | null;
+  /** The visit is over (visitIsOver: marked completed, or its day has passed on the org's clock). */
+  visitOver?: boolean;
 }): VisitStartState {
   if (!input.job) return input.isStaff ? "start" : "ask";
   if (input.openEntry?.job_id === input.job.id) return "here";
   // The visit is over and its job is finished: paperwork, not a clock-in.
-  if (!clockOffered(input.visitStatus, input.job.status)) return "closed";
+  if (!clockOffered(!!input.visitOver, input.job.status)) return "closed";
   return input.openEntry ? "switch" : "linked";
 }
 
@@ -108,7 +108,7 @@ export function VisitStartCard({
   preview,
   officePhone,
   lastClockOut = null,
-  visitStatus = null,
+  visitOver = false,
 }: {
   appointmentId: string;
   tz: string;
@@ -121,8 +121,8 @@ export function VisitStartCard({
   officePhone: string | null;
   /** The end of the tapper's latest finished shift: a Visit Time start inside it is not offered. */
   lastClockOut?: string | null;
-  /** The appointment's status. A completed visit is over: the card never leads with a clock. */
-  visitStatus?: string | null;
+  /** The visit is over (visitIsOver, decided by the page on the org's clock): the card never leads with a clock. */
+  visitOver?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -149,10 +149,10 @@ export function VisitStartCard({
   // move is the link. A switch would cut that shift onto a brand-new duplicate job.
   const onLinkJob = !!linkInstead && !!onClock?.jobId && onClock.jobId === linkInstead.id;
 
-  const state = visitStartState({ isStaff, job, openEntry, visitStatus });
+  const state = visitStartState({ isStaff, job, openEntry, visitOver });
   const jobNo = job ? jobShort(job) : "";
   // The visit is over: nothing on the start face starts a clock (a new job is the job only).
-  const over = visitIsOver(visitStatus);
+  const over = visitOver;
   const linkFinished = !!linkInstead && jobIsFinished(linkInstead.status);
 
   const nowMs = Date.now();
@@ -358,7 +358,9 @@ export function VisitStartCard({
         <>
           <h2 className="text-base font-semibold text-slate-900">Ask the office to start the job</h2>
           <p className="mt-0.5 text-sm text-slate-600">
-            This visit has no job yet, and only the office can start one. Once they do, you can clock in right here.
+            {over
+              ? "This visit is done and has no job. If the work goes on, ask the office to start one."
+              : "This visit has no job yet, and only the office can start one. Once they do, you can clock in right here."}
           </p>
           <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <Button className={btn} onClick={ask} disabled={pending}>

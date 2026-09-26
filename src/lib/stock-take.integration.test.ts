@@ -9,18 +9,17 @@ import { defineStockTakeSuite } from "./stock-take.db-suite";
  * takes with no cost. The suite is stock-take.db-suite.ts, over ONE connection, each case in its own
  * transaction that is always rolled back.
  *
- * OPT-IN, AND ONLY IN ITS OWN THROWAWAY COMPANIES (integration of feat/stock-phase3, the same gate
- * as the bill suite). Creds alone do NOT run it (it writes fixtures and takes an org's claim lock;
- * CI's creds once pointed at production, and db-guard.ts now refuses anything but the test
- * database). It needs STOCK_TAKE_DB=1; each case mints its own TEST
+ * ONLY IN ITS OWN THROWAWAY COMPANIES, ON THE TEST DATABASE. The TEST_DB_* creds run it, in CI too
+ * (audit v1018: the STOCK_TAKE_DB=1 opt-in dated from when CI's creds pointed at production and kept
+ * it out of CI; db-guard.ts now refuses anything but the test database). Each case mints its own TEST
  * org (and a stranger's) inside its transaction and rolls them back (throwaway-org.db-fixture.ts),
  * so no sandbox org has to exist. STOCK_TAKE_APPLY=1 (apply 0343/0344 inside each
  * case's transaction when the database lacks them) is refused outright against the production
  * project: 0343's trigger DDL locks every company's invoices for as long as the case runs.
- *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… STOCK_TAKE_DB=1 npm test
+ *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npm test
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_TAKE_DB, STOCK_TAKE_APPLY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && STOCK_TAKE_DB === "1" ? describe : describe.skip;
+const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_TAKE_APPLY } = process.env;
+const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 /** The production project (its pooler user names it). */
 const PRODUCTION_REF = "rbpokaozcxqownollqlx";
 const isProduction = `${TEST_DB_HOST ?? ""} ${TEST_DB_USER ?? ""}`.includes(PRODUCTION_REF);

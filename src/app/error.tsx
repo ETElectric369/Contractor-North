@@ -6,6 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError, isTransportError } from "@/lib/chunk-reload";
+import { useTryAgain } from "@/lib/try-again";
 
 export default function Error({
   error,
@@ -14,6 +15,7 @@ export default function Error({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { tryAgain, trying } = useTryAgain(reset);
   useEffect(() => {
     // A STALE TAB ACROSS A DEPLOY IS NOT AN ERROR, IT IS AN UPDATE (audit 8). This boundary
     // covers /login, /estimate, /intake, /i, /q, /portal, /print — every page a CUSTOMER sees.
@@ -41,7 +43,9 @@ export default function Error({
           : "An unexpected error occurred. You can try again, or head back to the dashboard."}
       </p>
       <div className="mt-5 flex gap-2">
-        <Button onClick={reset}>Try Again</Button>
+        <Button onClick={tryAgain} disabled={trying}>
+          {trying ? "Trying Again…" : "Try Again"}
+        </Button>
         <Link href="/planner">
           <Button variant="outline">Dashboard</Button>
         </Link>

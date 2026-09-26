@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { aggregatePayrollEntries } from "./payroll-math";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -88,8 +89,7 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
   };
   const needs = (what: "0288" | "0290" | "0313") => {
     const ok = what === "0288" ? has0288 : what === "0290" ? has0290 : has0313;
-    if (!ok) console.warn(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
-    return ok;
+    return ok || notOnThisDatabase(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
   };
 
   // ── fixture writers, as the server ──

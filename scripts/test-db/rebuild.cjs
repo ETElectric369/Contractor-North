@@ -48,8 +48,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
-const crypto = require("node:crypto");
 const pg = require("pg");
+// The steps and their md5s: one list, shared with check-test-db.cjs (CI's is-the-test-database-behind check).
+const { stepsOnDisk } = require("./steps.cjs");
 
 // ── The one database this script may write to. Constants on purpose. ────────────────────────────
 const TEST_HOST = "aws-0-us-east-2.pooler.supabase.com";
@@ -60,12 +61,6 @@ const MARKER_VALUE = "contractor-north-test";
 // Production's project ref. If it ever shows up anywhere in the connection, refuse.
 const PROD_REF = "rbpokaozcxqownollqlx";
 
-const repo = path.resolve(__dirname, "..", "..");
-const migDir = path.join(repo, "supabase", "migrations");
-const shimDir = path.join(repo, "supabase", "test-db");
-const bootstrapFile = path.join(shimDir, "bootstrap.sql");
-const beforeDir = path.join(shimDir, "before");
-const afterDir = path.join(shimDir, "after");
 const RESET = process.argv.slice(2).includes("--reset");
 const unknownArgs = process.argv.slice(2).filter((a) => a !== "--reset");
 
@@ -141,33 +136,6 @@ async function guard(client) {
   const { rows: mv } = await client.query(`select value from public.cn_test_database_marker`);
   if (mv.length !== 1 || mv[0].value !== MARKER_VALUE) die(`cn_test_database_marker does not hold exactly one '${MARKER_VALUE}' row. Refusing.`);
   console.log(`Guard passed: ${TEST_USER} @ ${TEST_HOST}, marker '${MARKER_VALUE}'.`);
-}
-
-// The md5 of a step: every part's label and text, in order. A shim added, removed or edited changes it.
-function md5Of(parts) {
-  const h = crypto.createHash("md5");
-  for (const [label, file] of parts) h.update(`-- part: ${label}\n`).update(fs.readFileSync(file, "utf8")).update("\n");
-  return h.digest("hex");
-}
-
-function stepsOnDisk() {
-  const steps = [];
-  if (fs.existsSync(bootstrapFile)) steps.push({ name: "test-db/bootstrap.sql", kind: "bootstrap", parts: [["test-db/bootstrap.sql", bootstrapFile]] });
-  for (const f of fs.readdirSync(migDir).filter((x) => x.endsWith(".sql")).sort()) {
-    const num = f.split("_")[0];
-    const parts = [];
-    const shim = path.join(beforeDir, `${num}.sql`);
-    if (fs.existsSync(shim)) parts.push([`test-db/before/${num}.sql`, shim]);
-    parts.push([f, path.join(migDir, f)]);
-    steps.push({ name: f, kind: "migration", parts });
-  }
-  if (fs.existsSync(afterDir)) {
-    for (const f of fs.readdirSync(afterDir).filter((x) => x.endsWith(".sql")).sort()) {
-      steps.push({ name: `test-db/after/${f}`, kind: "after", parts: [[`test-db/after/${f}`, path.join(afterDir, f)]] });
-    }
-  }
-  for (const s of steps) s.md5 = md5Of(s.parts);
-  return steps;
 }
 
 // --reset: empty public (keeping the schema itself, Supabase's grants and default privileges on it,

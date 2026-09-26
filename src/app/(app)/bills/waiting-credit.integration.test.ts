@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0346: a supplier bill can wait on a credit (Erik, 2026-09-26; the Hillside switch).
@@ -45,8 +45,7 @@ d("0346: a supplier bill can wait on a credit", () => {
     await c.query("select set_config('request.jwt.claims', '', true)");
   };
   const ready = () => {
-    if (waiting) console.warn("[waiting-credit] 0346 is not on this database yet; set WAIT_APPLY_0346=1 to apply it inside the rolled-back transaction.");
-    return !waiting;
+    return !waiting || notOnThisDatabase("[waiting-credit] 0346 is not on this database yet; set WAIT_APPLY_0346=1 to apply it inside the rolled-back transaction.");
   };
   const stamp = async (uid: string) => {
     await as(uid);

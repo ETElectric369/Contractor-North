@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 // audit v921: the draw kinds and the blocker predicate come from the APP's own module, not
 // re-typed here. This test used to hand-write `invoice_kind in ('deposit','progress','final')`
 // and the `total > 0.005 or exists(items)` predicate — copies that stayed green no matter how
@@ -160,7 +160,7 @@ d("billing draw invariants (DB integration)", () => {
         where table_schema='public' and table_name='invoice_items' and column_name='source_ids'`,
     );
     if (!col.length) {
-      console.warn("[billing.integration] invoice_items.source_ids is not on this database yet — apply migration 0255 to exercise the claim invariant.");
+      notOnThisDatabase("[billing.integration] invoice_items.source_ids is not on this database yet — apply migration 0255 to exercise the claim invariant.");
       return;
     }
     await client.query("begin");
@@ -315,7 +315,7 @@ d("billing draw invariants (DB integration)", () => {
         where table_schema='public' and table_name='invoice_items' and column_name='source_ids'`,
     );
     if (!col.length) {
-      console.warn("[billing.integration] invoice_items.source_ids is not on this database yet — apply migration 0255 to exercise J-011.");
+      notOnThisDatabase("[billing.integration] invoice_items.source_ids is not on this database yet — apply migration 0255 to exercise J-011.");
       return;
     }
     await client.query("begin");

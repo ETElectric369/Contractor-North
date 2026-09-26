@@ -40,6 +40,22 @@ export async function assertTestDatabase(c: GuardedClient): Promise<void> {
 }
 
 /**
+ * A case whose migration is not on this database. On the Mac that is a warning and the case does not
+ * run (a branch's suite before its migration is applied to the test database). In CI it FAILS: CI
+ * checks the test database carries every file in supabase/migrations before npm test
+ * (scripts/test-db/check-test-db.cjs), so a case that still finds its migration missing there would
+ * otherwise pass having asserted nothing (audit v1018, class 10). Every suite's ready()/needs() gate
+ * goes through here; tests/db-guard.test.ts pins that no suite merely warns.
+ */
+export function notOnThisDatabase(message: string): false {
+  if (process.env.CI) {
+    throw new Error(`${message} In CI the test database carries every migration, so this case must run: fix its check, or run node scripts/test-db/rebuild.cjs.`);
+  }
+  console.warn(message);
+  return false;
+}
+
+/**
  * PRODUCTION REPLAYS (*.prod-replay.test.ts) are the one exception, and they cannot write: they read
  * a live company's books to prove a plan against real data. They connect with REPLAY_DB_HOST /
  * REPLAY_DB_USER / REPLAY_DBPW (never TEST_DB_*), run only when their opt-in flag is set, never in

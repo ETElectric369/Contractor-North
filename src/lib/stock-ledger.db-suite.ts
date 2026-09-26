@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { shelfLotCost, type BillLine } from "./bill-itemisation";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -36,8 +37,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
   let ready = false;
   /** Every case starts here: false (with a console line) when the migrations are not on this database. */
   const needs = () => {
-    if (!ready) console.warn("[stock-ledger] 0302-0304 are not on this database yet; set SHELF_SUITE_APPLY=1 to apply them inside the test's rolled-back transaction.");
-    return ready;
+    return ready || notOnThisDatabase("[stock-ledger] 0302-0304 are not on this database yet; set SHELF_SUITE_APPLY=1 to apply them inside the test's rolled-back transaction.");
   };
   let orgId = "";
   let staffId = "";

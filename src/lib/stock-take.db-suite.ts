@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { shelfLotCost, type BillLine } from "./bill-itemisation";
 import { LIVE_ORGS, mintThrowawayOrg } from "./throwaway-org.db-fixture";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -200,7 +201,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       ready = !!has?.ledger && ((has0343 && applied0344 && applied0345) || opts.allowDdl);
       if (!has?.ledger) return;
       if (!ready) {
-        console.warn("[stock-take] 0343/0344 are not on this database, and this run may not apply DDL (never on production); nothing to exercise.");
+        notOnThisDatabase("[stock-take] 0343/0344 are not on this database, and this run may not apply DDL (never on production); nothing to exercise.");
         return;
       }
     } finally {
@@ -214,8 +215,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
   });
 
   const needs = () => {
-    if (!ready) console.warn("[stock-take] the shelf's ledger (0303) or the claim boundary (0343/0344) is not here, and may not be applied; nothing to exercise.");
-    return ready;
+    return ready || notOnThisDatabase("[stock-take] the shelf's ledger (0303) or the claim boundary (0343/0344) is not here, and may not be applied; nothing to exercise.");
   };
 
   it("a tech's take shows on the job for the crew with no cost, and only he (or the office) may undo it", async () => {

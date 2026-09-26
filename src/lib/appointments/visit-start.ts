@@ -59,17 +59,34 @@ export function jobIsFinished(status: string | null | undefined): boolean {
   return status === "complete" || status === "invoiced";
 }
 
-/** The visit is over (marked completed): it never starts a clock itself. */
-export function visitIsOver(status: string | null | undefined): boolean {
-  return status === "completed";
+/**
+ * The visit is over: it never starts a clock itself. Marked completed, OR its day has passed on the
+ * org's clock: it ended (else started) on a day before today (visitDay, the same day the rest of this
+ * file reads).
+ *
+ * WHY THE DAY AND NOT ONLY THE STATUS (audit v1018, class 18): visits are routinely left "scheduled"
+ * after they end (every one of ET's scheduled visits was in the past), so Matt Warren's visit, linked
+ * to the finished J-045 and ended 2026-09-02, still led with Clock In On J-045. WHY NOT THE END TIME
+ * ITSELF: the Tom Goodman visit ran an hour and the work went on all afternoon; a visit whose hour
+ * has passed but whose day has not is exactly when Start The Job And Clock In is wanted.
+ */
+export function visitIsOver(
+  visit: { status?: string | null; starts_at?: string | null; ends_at?: string | null },
+  tz: string,
+  nowMs: number = Date.now(),
+): boolean {
+  if (visit.status === "completed") return true;
+  const when = visit.ends_at || visit.starts_at;
+  if (!when || isNaN(new Date(when).getTime())) return false;
+  return visitDay(when, tz, nowMs) < visitDay(null, tz, nowMs);
 }
 
 /**
  * Whether the card may offer a clock (Clock In On / Switch To) on the visit's linked job. Not when
- * the visit is over AND its job is finished: that is paperwork, and the door is Open J-055.
+ * the visit is over (visitIsOver) AND its job is finished: that is paperwork, and the door is Open J-055.
  */
-export function clockOffered(visitStatus: string | null | undefined, jobStatus: string | null | undefined): boolean {
-  return !(visitIsOver(visitStatus) && jobIsFinished(jobStatus));
+export function clockOffered(visitOver: boolean, jobStatus: string | null | undefined): boolean {
+  return !(visitOver && jobIsFinished(jobStatus));
 }
 
 /** The org-local day as a UTC window [start, end): the read narrows to it, the pick re-checks it. */

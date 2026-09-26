@@ -1,7 +1,7 @@
 import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { quoteCircuitsToSuggestions } from "./panel/model";
@@ -82,7 +82,7 @@ d("the job's panel: the crew and the office boundary (0333)", () => {
     const { rows: [has] } = await client.query("select to_regclass('public.job_circuits') is not null as yes");
     if (!has.yes && PANEL_APPLY_0333 !== "1") {
       waiting = true;
-      console.warn("[panel] 0333 is not on this database yet; the suite waits for it (PANEL_APPLY_0333=1 applies it in a rolled-back transaction, locally only).");
+      notOnThisDatabase("[panel] 0333 is not on this database yet; the suite waits for it (PANEL_APPLY_0333=1 applies it in a rolled-back transaction, locally only).");
       return;
     }
     await client.query("begin");
