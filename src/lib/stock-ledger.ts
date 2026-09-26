@@ -15,6 +15,7 @@ import {
   type ShelfPickerItem,
   type StoredLineLot,
 } from "@/lib/shelf-plan";
+import { parseShelf, parseTakes, type JobTake, type ShelfRow } from "@/lib/stock-take";
 
 /**
  * THE SHOP SHELF, AS A LEDGER (Shop Stock, Phase 1; migrations 0303 + 0304).
@@ -41,8 +42,9 @@ import {
  *    back, never a cost.
  *
  * Phase 2 wires the doors that put a roll ON the shelf (shelveLines: the receipt card, the tray,
- * Record To Shelf) and the office's Count It; the doors that take a piece OFF it (takeFromStock)
- * arrive with their screens in Phase 3.
+ * Record To Shelf) and the office's Count It. Phase 3 wires the door that takes a piece OFF it:
+ * Took From Stock (src/app/(app)/materials/took-from-stock.tsx and stock-actions.ts, through
+ * takeFromStock / undoTake below), and the job's takes list (jobTakes, 0344).
  *
  * This is deliberately NOT a "use server" module (same reason as bill-itemisation.ts): the pure
  * half has to be importable by tests. Call the server functions from your own action.
@@ -350,6 +352,30 @@ export async function takeFromStock(input: {
     onHand: Number(d.on_hand ?? 0),
     ...(d.cost != null ? { cost: Number(d.cost) } : {}),
   };
+}
+
+/**
+ * THE JOB'S TAKES, for the crew and the office alike (0344's stock_takes_for_job): date, item,
+ * count, who, the claim, and whether this caller may undo it. Never a cost. Before 0344 is applied
+ * the list is simply empty, and says so to the caller (`missing`), so a deploy window can't take the
+ * job page down.
+ */
+export async function jobTakes(supabase: Sb, jobId: string): Promise<{ takes: JobTake[]; missing: boolean; error: string | null }> {
+  if (!supabase.rpc) return { takes: [], missing: true, error: null };
+  const { data, error } = await supabase.rpc("stock_takes_for_job", { p_job: jobId });
+  if (error) {
+    if (isMissingShelfRpc(error) || isMissingShelf(error)) return { takes: [], missing: true, error: null };
+    return { takes: [], missing: false, error: dbError(error) };
+  }
+  return { takes: parseTakes(data), missing: false, error: null };
+}
+
+/** The shelf as the crew sees it (0302's shelf_for_crew): names, units and counts, never a cost. */
+export async function shelfForCrew(supabase: Sb): Promise<{ ok: true; rows: ShelfRow[] } | { ok: false; error: string }> {
+  if (!supabase.rpc) return { ok: false, error: "This connection can't read the shelf." };
+  const { data, error } = await supabase.rpc("shelf_for_crew");
+  if (error) return { ok: false, error: isMissingShelfRpc(error) ? "The shelf isn't switched on for this database yet." : dbError(error) };
+  return { ok: true, rows: parseShelf(data) };
 }
 
 /** Undo a take, until an invoice bills it. The refusal names the invoice to take it off first. */

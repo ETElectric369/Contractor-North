@@ -41,7 +41,8 @@ export type ActionKind =
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "job_needs_return" // a job worked recently with nothing scheduled next (the forgotten return visit)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
-  | "job_on_hold"; // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
+  | "job_on_hold" // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
+  | "stock_short"; // pieces taken from stock past what the shelf showed ($0, billing nothing) — Recount until settled or undone
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -86,6 +87,9 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
   materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
   job_on_hold: "waiting", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
+  // A short costs the job $0 and bills nothing until the office counts the shelf or files the roll:
+  // dollars leaking off the invoice, the same species as job_unbilled_work.
+  stock_short: "money",
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -136,6 +140,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "Materials needed", tone: "blue" },
   job_on_hold: { label: "On hold", tone: "amber" },
+  stock_short: { label: "Recount", tone: "amber" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -189,6 +194,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Open the job to resume it, change status, or clear the blocker (like the other derived
   // job detectors — the decision happens on the job page, so it nags until actually acted on).
   job_on_hold: ["open"],
+  // Settled on Shop Stock (Settle From The Shelf once a roll is on it, or Undo the take). Derived
+  // from the shelf's own record, so there is nothing a dismiss could write: it stays until settled.
+  stock_short: ["open"],
 };
 
 /**

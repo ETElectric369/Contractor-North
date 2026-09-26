@@ -312,3 +312,34 @@ describe("action registry — material entity (the job's one materials list)", (
     expect(Object.keys(props)).toEqual(expect.arrayContaining(["job_id", "list_id", "to_buy_only"]));
   });
 });
+
+// TOOK FROM STOCK (Shop Stock, Phase 3): Nort FILLS the card, a person taps Take It. So stock.take is
+// a READ in the registry, open to every role (the crew's own verb), offered to Nort through the
+// read set and never the write set, and it takes no money in. list_shelf is its read, open to all.
+describe("action registry — stock.take is a fill, never a take", () => {
+  it("is a read open to every role, offered to a tech and to the office, and not a write power", () => {
+    const a = REGISTRY["stock.take"];
+    expect(a).toBeDefined();
+    expect(a.auth).toBe("any");
+    expect(a.effect).toBe("read");
+    expect(a.confirm).toBeUndefined();
+    expect(AGENT_WRITE_ALLOWED.has("stock.take")).toBe(false);
+    for (const role of ["tech", "office", "owner"]) expect(agentWriteToolsForRole(role).tools.map((t) => t.name)).toContain("stock__take");
+    expect(agentWriteToolsForRole("tech").resolve("stock__take")).toBe("stock.take");
+  });
+
+  it("takes a job, an item, a count and a unit: no money field, and the item and job are required", () => {
+    const schema = REGISTRY["stock.take"].input as any;
+    expect(Object.keys(schema.shape).sort()).toEqual(["item", "job_id", "qty", "unit"]);
+    expect(schema.safeParse({ job_id: "Herringbone", item: "12/2", qty: 60 }).success).toBe(true);
+    expect(schema.safeParse({ job_id: "Herringbone", item: "12/2" }).success).toBe(true); // the pad asks how many
+    expect(schema.safeParse({ item: "12/2", qty: 60 }).success).toBe(false); // which job?
+    expect(schema.safeParse({ job_id: "Herringbone", qty: 60 }).success).toBe(false); // which item?
+    expect(REGISTRY["stock.take"].description).toMatch(/does NOT take anything/);
+  });
+
+  it("list_shelf is a data tool for everyone; inventory.adjust stays retired", () => {
+    expect(DATA_TOOLS.find((d) => d.name === "list_shelf")).toBeDefined();
+    expect(REGISTRY["inventory.adjust"]).toBeUndefined();
+  });
+});

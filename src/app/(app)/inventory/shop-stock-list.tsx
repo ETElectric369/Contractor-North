@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
 import { addOpeningRoll, countItem, takeLotOffShelf, undoShelfMove, undoShelfTake } from "./actions";
 import { ItemActions } from "./item-actions";
+import { settleShortAction } from "../materials/stock-actions";
 
 export type ShelfLotView = {
   id: string;
@@ -93,11 +94,19 @@ const qty = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(
  * Take It Off The Shelf (a roll nothing was taken from), and Undo on a count or a take. A take an
  * invoice already bills refuses its Undo in words that name the invoice.
  */
-export function ShopStockList({ items }: { items: ShelfItemView[] }) {
+export function ShopStockList({ items, openItem = null }: { items: ShelfItemView[]; openItem?: string | null }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // A Recount item links here with ?item=<id>: that item starts open, so Settle From The Shelf is
+  // on screen instead of somewhere down a list of closed rows.
+  const [open, setOpen] = useState<Record<string, boolean>>(() => (openItem ? { [openItem]: true } : {}));
+  useEffect(() => {
+    if (!openItem) return;
+    setOpen((o) => (o[openItem] ? o : { ...o, [openItem]: true }));
+    const el = typeof document !== "undefined" ? document.getElementById(`stock-item-${openItem}`) : null;
+    el?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }, [openItem]);
   const [counting, setCounting] = useState<ShelfItemView | null>(null);
   const [adding, setAdding] = useState<ShelfItemView | null>(null);
 
@@ -122,7 +131,7 @@ export function ShopStockList({ items }: { items: ShelfItemView[] }) {
           const liveLots = it.lots.filter((l) => l.live);
           const pastLots = it.lots.filter((l) => !l.live);
           return (
-            <li key={it.id} className={low ? "bg-amber-50/40" : ""}>
+            <li key={it.id} id={`stock-item-${it.id}`} className={`scroll-mt-20 ${low ? "bg-amber-50/40" : ""}`}>
               <button
                 type="button"
                 onClick={() => setOpen((o) => ({ ...o, [it.id]: !o[it.id] }))}
@@ -258,6 +267,18 @@ export function ShopStockList({ items }: { items: ShelfItemView[] }) {
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
                                   Undo
+                                </button>
+                              )}
+                              {/* The answer to a Recount item (Phase 3): once a roll is on the shelf,
+                                  the pieces taken past it are settled at that roll's cost. */}
+                              {!m.undone && m.kind === "short" && !m.settled && (
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={() => act(() => settleShortAction(m.id), "Settled from the shelf.")}
+                                  className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                                >
+                                  Settle From The Shelf
                                 </button>
                               )}
                             </li>
