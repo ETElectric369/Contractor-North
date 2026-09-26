@@ -18,6 +18,7 @@
  */
 
 import type { ClaimantInvoice, CostRowVerdict, NothingToBill } from "@/lib/unbilled-work";
+import { formatCurrency } from "@/lib/utils";
 
 export type CostRow = { id: string; kind: "bill" | "po"; amount: number };
 
@@ -31,18 +32,23 @@ export type BilledGroup = CostPile & {
 };
 
 export type JobCostGroups = {
+  /** Its total is what the next bill picks up before markup (billsAmount − returnsAmount), not the
+   *  bills' face value: a line that is the company's own is not in it. */
   open: CostPile;
+  /** Open rows whose face value is more than the next bill picks up: id → dollars that stay the
+   *  company's own. Said on the row, so the pile's total never reads as a typo. */
+  openOwn: Record<string, number>;
   billed: BilledGroup[];
   nothing: { id: string; why: NothingToBill }[];
 };
 
 const cents = (n: number) => Math.round(n * 100) / 100;
 const pile = (): CostPile => ({ ids: [], bills: 0, pos: 0, total: 0 });
-const add = (p: CostPile, r: CostRow) => {
+const add = (p: CostPile, r: CostRow, amount: number = Number(r.amount) || 0) => {
   p.ids.push(r.id);
   if (r.kind === "po") p.pos += 1;
   else p.bills += 1;
-  p.total = cents(p.total + (Number(r.amount) || 0));
+  p.total = cents(p.total + amount);
 };
 
 /**
@@ -54,6 +60,7 @@ const add = (p: CostPile, r: CostRow) => {
 export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostRowVerdict[], jobId: string | null = null): JobCostGroups {
   const byId = new Map(verdicts.map((v) => [v.id, v] as const));
   const open = pile();
+  const openOwn: Record<string, number> = {};
   const billed = new Map<string, BilledGroup>();
   const nothing: JobCostGroups["nothing"] = [];
   for (const r of rows) {
@@ -62,7 +69,12 @@ export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostR
       if (r.kind === "bill") add(open, r);
       continue;
     }
-    if (v.state === "open") add(open, r);
+    if (v.state === "open") {
+      // The engine's own figure for this row, so the pile adds up to what the button bills.
+      add(open, r, v.cost);
+      const own = cents(Math.abs(Number(r.amount) || 0) - Math.abs(v.cost));
+      if (own > 0) openOwn[r.id] = own;
+    }
     else if (v.state === "nothing") nothing.push({ id: r.id, why: v.why });
     else {
       const g =
@@ -79,6 +91,7 @@ export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostR
   }
   return {
     open,
+    openOwn,
     billed: [...billed.values()].sort((a, b) => b.invoice.created_at.localeCompare(a.invoice.created_at)),
     nothing,
   };
@@ -98,6 +111,11 @@ export function billedOnLabel(g: Pick<BilledGroup, "invoice" | "draft" | "offJob
   const num = g.invoice.invoice_number ?? "An unnumbered invoice";
   const tags = [g.offJobNumber, g.draft ? "draft" : null].filter(Boolean);
   return tags.length ? `${num} (${tags.join(", ")})` : num;
+}
+
+/** Said under an open row that is partly the company's own: "$9.17 of it is your own". */
+export function openOwnNote(own: number | undefined): string | undefined {
+  return own && own > 0 ? `${formatCurrency(own)} of it is your own` : undefined;
 }
 
 /** Why a row is on no invoice and never will be, in the office's words. */

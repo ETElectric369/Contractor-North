@@ -75,7 +75,9 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string)
       .order("invoice_date", { ascending: false })
       .limit(2000),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
-    loadMarkContext(supabase, orgId),
+    // strict: a lost jobs read would match no paper and read as "nothing missing"; it throws, and
+    // the page says it couldn't check.
+    loadMarkContext(supabase, orgId, { strict: true }),
   ]);
   if (docsRes.error) throw docsRes.error;
   if (linksRes.error) throw linksRes.error;

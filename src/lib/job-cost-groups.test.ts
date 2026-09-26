@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { billedOnLabel, groupJobCosts, nothingToBillWhy, pileCount } from "@/lib/job-cost-groups";
+import { billedOnLabel, groupJobCosts, nothingToBillWhy, openOwnNote, pileCount } from "@/lib/job-cost-groups";
 import type { CostRowVerdict } from "@/lib/unbilled-work";
 
 /**
@@ -42,10 +42,29 @@ describe("groupJobCosts — 85 Whitney while INV-081 is a draft", () => {
   it("the $187.64 paper, once recorded, is the one row Not Billed Yet holds", () => {
     const g = groupJobCosts(
       [...rows, { id: "f", kind: "bill", amount: 187.64 }],
-      [...verdicts, { id: "f", kind: "bill", state: "open" }],
+      [...verdicts, { id: "f", kind: "bill", state: "open", cost: 187.64 }],
       "j28",
     );
     expect(g.open).toEqual({ ids: ["f"], bills: 1, pos: 0, total: 187.64 });
+    expect(g.openOwn).toEqual({});
+  });
+
+  it("J-046's OSH run: the pile adds up what the next bill picks up, and the row says the rest is his own", () => {
+    // $16.28 on the receipt; $9.17 of it chips and an ice cream bar, switched off. $7.11 bills.
+    const g = groupJobCosts([{ id: "osh", kind: "bill", amount: 16.28 }], [{ id: "osh", kind: "bill", state: "open", cost: 7.11 }]);
+    expect(g.open.total).toBe(7.11);
+    expect(g.openOwn).toEqual({ osh: 9.17 });
+    expect(openOwnNote(g.openOwn.osh)).toBe("$9.17 of it is your own");
+    expect(openOwnNote(undefined)).toBeUndefined();
+  });
+
+  it("an open return counts only its credit", () => {
+    const g = groupJobCosts(
+      [{ id: "buy", kind: "bill", amount: 400 }, { id: "ret", kind: "bill", amount: -51.58 }],
+      [{ id: "buy", kind: "bill", state: "open", cost: 400 }, { id: "ret", kind: "bill", state: "open", cost: -47.32 }],
+    );
+    expect(g.open.total).toBe(352.68);
+    expect(g.openOwn).toEqual({ ret: 4.26 });
   });
 
   it("a bill newer than the verdicts is open (no invoice can hold it yet); an order with no verdict is not a live cost", () => {
@@ -68,7 +87,7 @@ describe("groupJobCosts — 85 Whitney while INV-081 is a draft", () => {
         { id: "snacks", kind: "bill", amount: 4.18 },
         { id: "po-2", kind: "po", amount: 200 },
       ],
-      [billed("moved", INV58), { id: "snacks", kind: "bill", state: "nothing", why: "own_cost" }, { id: "po-2", kind: "po", state: "open" }],
+      [billed("moved", INV58), { id: "snacks", kind: "bill", state: "nothing", why: "own_cost" }, { id: "po-2", kind: "po", state: "open", cost: 200 }],
       "j28",
     );
     expect(billedOnLabel(g.billed[0])).toBe("INV-058 (J-021)");

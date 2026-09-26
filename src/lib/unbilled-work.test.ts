@@ -497,7 +497,7 @@ describe("computeUnbilledWork.costRows — where each bill stands (the Costs tab
       bills: [{ id: "bill-x", amount: 450, po_id: "po-1" }],
     });
     const byId = new Map(w.costRows.map((r) => [r.id, r] as const));
-    expect(byId.get("po-2")).toEqual({ id: "po-2", kind: "po", state: "open" });
+    expect(byId.get("po-2")).toEqual({ id: "po-2", kind: "po", state: "open", cost: 200 });
     expect(byId.get("bill-x")).toEqual({ id: "bill-x", kind: "bill", state: "nothing", why: "po_billed" });
   });
 
@@ -516,5 +516,8 @@ describe("computeUnbilledWork.costRows — where each bill stands (the Costs tab
     expect(byId.get("ret-off")).toEqual({ id: "ret-off", kind: "bill", state: "nothing", why: "own_return" });
     expect(byId.get("ret-on")?.state).toBe("open");
     expect(w.returnsCount).toBe(1);
+    // The Costs tab's Not Billed Yet total is the engine's own figure, never the bills' face value.
+    const open = w.costRows.reduce((s, r) => (r.state === "open" ? s + r.cost : s), 0);
+    expect(Math.round(open * 100) / 100).toBe(Math.round((w.billsAmount - w.returnsAmount) * 100) / 100);
   });
 });

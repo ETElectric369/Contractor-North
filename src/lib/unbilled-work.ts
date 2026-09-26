@@ -89,7 +89,10 @@ export type UnbilledWork = {
 
 /** One bill or live purchase order, and what the claims rule says about it (UnbilledWork.costRows). */
 export type CostRowVerdict =
-  | { id: string; kind: "bill" | "po"; state: "open" }
+  /** `cost`: what the next bill picks up from this row, before markup - the engine's own reading
+   *  (billableBillCost for a bill, the total for a PO, minus the credit for a return). Differs from
+   *  the row's amount when lines on it are the company's own. */
+  | { id: string; kind: "bill" | "po"; state: "open"; cost: number }
   | { id: string; kind: "bill" | "po"; state: "billed"; invoice: ClaimantInvoice }
   | { id: string; kind: "bill" | "po"; state: "nothing"; why: NothingToBill };
 
@@ -355,7 +358,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsAmount = cents(billsAmount + cost);
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
-    costRows.push({ id: p.id, kind: "po", state: "open" });
+    costRows.push({ id: p.id, kind: "po", state: "open", cost });
   }
   let returnsAmount = 0;
   let returnsCredit = 0;
@@ -399,7 +402,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
       returnsAmount = cents(returnsAmount + back);
       returnsCredit = cents(returnsCredit + mk(back));
       returnsCount += 1;
-      costRows.push({ id: b.id, kind: "bill", state: "open" });
+      costRows.push({ id: b.id, kind: "bill", state: "open", cost: -back });
       continue;
     }
     /**
@@ -426,7 +429,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     billsAmount = cents(billsAmount + cost);
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
-    costRows.push({ id: b.id, kind: "bill", state: "open" });
+    costRows.push({ id: b.id, kind: "bill", state: "open", cost });
   }
 
   const last = input.claims.invoices[0] ?? null;

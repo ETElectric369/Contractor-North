@@ -4,7 +4,7 @@ import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight, Plus, Trash2, Pencil } from "lucide-react";
-import { billedOnLabel, nothingToBillWhy, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
+import { billedOnLabel, nothingToBillWhy, openOwnNote, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -176,7 +176,7 @@ export function JobBills({
     </li>
   );
 
-  const rowsOf = (ids: string[], whyOf?: (id: string) => string) => (
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined) => (
     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
       {ids.map((id) => {
         const b = billById.get(id);
@@ -280,7 +280,7 @@ export function JobBills({
         <>
           {openAside}
           {groups.open.ids.length > 0 ? (
-            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids)}</div>
+            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]))}</div>
           ) : (
             <p className="py-3 text-sm text-slate-500">
               {bills.length === 0
