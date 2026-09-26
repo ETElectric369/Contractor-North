@@ -243,19 +243,16 @@ export function booksBeginOn(settings: unknown, liveBills: { bill_date?: string 
 }
 
 /**
- * THE TWO SETTINGS A SUPPLIER-PAPER READ NEEDS, and nothing else of the settings jsonb: the day
- * the company's books begin and its clock. Org-filtered; throws on a failed read so the caller
- * says it couldn't check rather than drawing the line in the wrong place.
+ * THE TWO SETTINGS A SUPPLIER-PAPER READ NEEDS: the day the company's books begin and its clock,
+ * read off the company's settings the way every page reads them (getOrgSettings). Org-filtered;
+ * throws on a failed read so the caller says it couldn't check rather than drawing the line in the
+ * wrong place.
  */
 export async function readPaperSettings(supabase: any, orgId: string): Promise<{ books_begin: string | null; timezone: string }> {
-  const { data, error } = await supabase
-    .from("organizations")
-    .select("books_begin:settings->>books_begin, timezone:settings->>timezone")
-    .eq("id", orgId)
-    .maybeSingle();
+  const { data, error } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
   if (error) throw error;
-  const row = (data && !Array.isArray(data) ? data : {}) as { books_begin?: unknown; timezone?: unknown };
-  return { books_begin: supplierPaperLine(row), timezone: getOrgSettings({ timezone: row.timezone }).timezone };
+  const settings = getOrgSettings(data && !Array.isArray(data) ? (data as { settings?: unknown }).settings : null);
+  return { books_begin: settings.books_begin, timezone: settings.timezone };
 }
 
 /** The cards, from rows already read. The ONE call My Day and /bills both make. */

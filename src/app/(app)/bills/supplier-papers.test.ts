@@ -182,13 +182,13 @@ describe("the June 8 line (Erik: \"june 8 is good\")", () => {
         return chain;
       },
     });
-    expect(await readPaperSettings(client({ data: { books_begin: "2026-06-08", timezone: "America/New_York" }, error: null }), "org-9")).toEqual({
+    expect(await readPaperSettings(client({ data: { settings: { books_begin: "2026-06-08", timezone: "America/New_York" } }, error: null }), "org-9")).toEqual({
       books_begin: "2026-06-08",
       timezone: "America/New_York",
     });
     expect(seen).toContain("id=org-9");
     // Nothing named, a bad zone: no line, the default clock.
-    expect(await readPaperSettings(client({ data: { books_begin: null, timezone: "Mars/Olympus" }, error: null }), "org-9")).toEqual({
+    expect(await readPaperSettings(client({ data: { settings: { books_begin: null, timezone: "Mars/Olympus" } }, error: null }), "org-9")).toEqual({
       books_begin: null,
       timezone: "America/Los_Angeles",
     });
