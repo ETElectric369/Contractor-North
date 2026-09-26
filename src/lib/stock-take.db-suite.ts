@@ -1,16 +1,24 @@
 /**
- * TOOK FROM STOCK, AT THE DATABASE (Shop Stock, Phase 3; migration 0344), written once and run against
- * any Postgres. stock-take.integration.test.ts points it at production over ONE connection.
+ * TOOK FROM STOCK, AT THE DATABASE (Shop Stock, Phase 3; migrations 0343 + 0344), written once and
+ * run against any Postgres over ONE connection.
  *
- * EVERY CASE IS ITS OWN TRANSACTION, ALWAYS ROLLED BACK: begin, lock and statement timeouts, 0344
- * applied from supabase/migrations when the database does not have it yet, the case's fixtures, the
- * case, rollback. Nothing is ever written outside a transaction that is rolled back. Short
- * transactions on purpose: a claim takes the org's claim lock (0260) until its transaction ends, and
- * the office may be building an invoice in the live app while this runs.
+ * EVERY CASE IS ITS OWN TRANSACTION, ALWAYS ROLLED BACK: begin, lock and statement timeouts, the
+ * case's fixtures, the case, rollback. Nothing is ever written outside a transaction that is rolled
+ * back. Short transactions on purpose: a claim takes the org's claim lock (0260) until its
+ * transaction ends.
  *
- * THE COMPANY IT SPEAKS IN: the one with the most active techs (it needs a tech and the office),
- * never "the first organization". Another company's office is the stranger. Fixtures are dated 2001
- * and named TEST.
+ * WHOSE BOOKS IT WRITES IN (integration of feat/stock-phase3, mirroring the bill suite's review): ONLY
+ * the sandbox org named by `sandboxOrgId` (TEST_SANDBOX_ORG); the three live companies are refused
+ * by id and no company is ever picked by query. The stranger (another company's office) comes from
+ * `strangerOrgId` (TEST_SANDBOX_ORG_2), also never a live company; without it the stranger checks
+ * are skipped and say so.
+ *
+ * 0343 / 0344 NOT APPLIED YET: applied inside each case's transaction ONLY when `allowDdl` is set,
+ * which the caller refuses for the production database (0343's triggers take table locks on
+ * invoices and invoice_items: at 8:35 PM on 2026-09-25 a test that applied DDL blanked the lines on
+ * a live invoice). Otherwise every case says so and returns. Fixtures are dated 2001 and named TEST.
+ *
+ * The claim refusals are 0343's words (it fires before 0258's guard); 0344 is the two reads.
  */
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
@@ -22,14 +30,32 @@ export interface SqlClient {
   end: () => Promise<void>;
 }
 
-const MIGRATION = "0344_a_piece_from_the_shelf_is_billed_once.sql";
+const MIGRATIONS = ["0343_a_piece_is_billed_once.sql", "0344_the_crew_reads_the_jobs_takes.sql"];
+const readMigration = (f: string) => readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${f}`, import.meta.url)), "utf8");
+
+/** The live companies, refused by id whatever the environment says. */
+const LIVE_ORGS = new Set([
+  "60195593-2e18-4230-bc8e-7a32d36d038d", // ET Electric
+  "7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed", // Vivian
+  "b4854fcd-50de-46de-a0cb-dff642b4b97b", // TAHOE DECK
+]);
+
+export type StockTakeSuiteOptions = {
+  /** The one org this suite writes fixtures into (TEST_SANDBOX_ORG). Never a live company. */
+  sandboxOrgId: string;
+  /** A second sandbox org for the stranger checks (TEST_SANDBOX_ORG_2). Optional. */
+  strangerOrgId?: string;
+  /** May a case apply 0343/0344 inside its own transaction? Only ever on a non-production database. */
+  allowDdl: boolean;
+};
 const num = (v: unknown) => Number(v);
 /** Every key stock_takes_for_job may hand anyone. A cost, a lot or a supplier is never one of them. */
 const TAKE_KEYS = ["back", "billed_invoice_id", "billed_on", "can_undo", "draw_group", "item", "item_id", "mine", "qty", "short", "taken_at", "unit", "who"];
 
-export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
+export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: StockTakeSuiteOptions) {
   let c: SqlClient;
   let ready = false;
+  let has0343 = false;
   let applied0344 = false;
   let orgId = "";
   let staffId = "";
@@ -69,7 +95,8 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
     try {
       await c.query("set local lock_timeout = '3s'");
       await c.query("set local statement_timeout = '15s'");
-      if (!applied0344) await c.query(readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${MIGRATION}`, import.meta.url)), "utf8"));
+      if (!has0343) await c.query(readMigration(MIGRATIONS[0]));
+      if (!applied0344) await c.query(readMigration(MIGRATIONS[1]));
       const job = async (n: string) =>
         (
           await one(
@@ -152,49 +179,57 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
   const moveIds = (r: { moves: { move_id: string }[] }) => r.moves.map((m) => m.move_id);
 
   beforeAll(async () => {
+    const sandbox = String(opts.sandboxOrgId ?? "").trim().toLowerCase();
+    const stranger = String(opts.strangerOrgId ?? "").trim().toLowerCase();
+    if (!/^[0-9a-f-]{36}$/.test(sandbox)) throw new Error("stock-take: name the sandbox org to write in (TEST_SANDBOX_ORG). It never picks a company by query.");
+    if (LIVE_ORGS.has(sandbox) || LIVE_ORGS.has(stranger)) throw new Error("stock-take: that is a live company's org. The suite writes only in sandbox orgs.");
+    if (stranger && stranger === sandbox) throw new Error("stock-take: the stranger must be a different sandbox org.");
     c = await connect();
     await c.query("begin");
     try {
       const has = await one(
-        "select to_regclass('public.stock_moves') is not null as ledger, to_regprocedure('public.stock_takes_for_job(uuid)') is not null as takes",
+        `select to_regclass('public.stock_moves') is not null as ledger,
+                to_regprocedure('public.guard_stock_piece_claim()') is not null as claim,
+                to_regprocedure('public.stock_takes_for_job(uuid)') is not null as takes`,
       );
-      ready = !!has?.ledger;
+      has0343 = !!has?.claim;
       applied0344 = !!has?.takes;
-      if (!ready) return;
-      // The company with the most active techs, and a stranger's office from any other company.
+      ready = !!has?.ledger && ((has0343 && applied0344) || opts.allowDdl);
+      if (!has?.ledger) return;
+      if (!ready) {
+        console.warn("[stock-take] 0343/0344 are not on this database, and this run may not apply DDL (never on production); nothing to exercise.");
+        return;
+      }
       const fx = await one(
-        `select p.org_id,
-                (array_agg(p.id order by p.id) filter (where p.role = 'tech'))[1] as tech_id,
+        `select (array_agg(p.id order by p.id) filter (where p.role = 'tech'))[1] as tech_id,
                 (array_agg(p.id order by p.id) filter (where p.role = 'tech'))[2] as tech2_id,
                 (array_agg(p.full_name order by p.id) filter (where p.role = 'tech'))[1] as tech_name,
                 (array_agg(p.id order by (p.role = 'owner') desc, p.id) filter (where p.role in ('owner', 'admin', 'office')))[1] as staff_id
            from public.profiles p
-          where p.org_id is not null and coalesce(p.active, true)
-          group by p.org_id
-         having count(*) filter (where p.role = 'tech') > 0 and count(*) filter (where p.role in ('owner', 'admin', 'office')) > 0
-          order by count(*) filter (where p.role = 'tech') desc, p.org_id
-          limit 1`,
+          where p.org_id = $1 and coalesce(p.active, true)`,
+        [sandbox],
       );
-      if (!fx) throw new Error("take suite fixture: no company has both an active tech and active office staff.");
-      orgId = fx.org_id;
+      if (!fx?.tech_id || !fx?.staff_id) throw new Error("take suite fixture: the sandbox org needs an active tech and active office staff.");
+      orgId = sandbox;
       techId = fx.tech_id;
       tech2Id = fx.tech2_id ?? "";
       techName = String(fx.tech_name ?? "").trim();
       staffId = fx.staff_id;
-      const other = await one(
-        `select p.id, p.org_id from public.profiles p
-          where p.org_id is not null and p.org_id <> $1 and p.role in ('owner', 'admin', 'office') and coalesce(p.active, true)
-          order by (select count(*) from public.profiles t where t.org_id = p.org_id and t.role = 'tech') asc, p.id
-          limit 1`,
-        [orgId],
-      );
-      if (!other) throw new Error("take suite fixture: no office staff in a second company, so the stranger cannot be tested.");
-      otherStaffId = other.id;
-      otherOrgId = other.org_id;
+      if (stranger) {
+        const other = await one(
+          `select p.id from public.profiles p
+            where p.org_id = $1 and p.role in ('owner', 'admin', 'office') and coalesce(p.active, true)
+            order by p.id limit 1`,
+          [stranger],
+        );
+        if (!other) throw new Error("take suite fixture: the stranger sandbox org needs active office staff.");
+        otherStaffId = other.id;
+        otherOrgId = stranger;
+      }
     } finally {
       await c.query("rollback");
     }
-    if (!applied0344) console.warn("[stock-take] 0344 is not on this database yet; each case applies it inside its own rolled-back transaction.");
+    if (ready && !(has0343 && applied0344)) console.warn("[stock-take] 0343/0344 are not on this database yet; each case applies them inside its own rolled-back transaction.");
   });
 
   afterAll(async () => {
@@ -202,7 +237,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
   });
 
   const needs = () => {
-    if (!ready) console.warn("[stock-take] the shelf's ledger (0303) is not on this database; nothing to exercise.");
+    if (!ready) console.warn("[stock-take] the shelf's ledger (0303) or the claim boundary (0343/0344) is not here, and may not be applied; nothing to exercise.");
     return ready;
   };
 
@@ -231,9 +266,11 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
         await asServer();
       }
       // A stranger's office reads nothing of this job.
-      await as(otherStaffId);
-      expect((await refusal(() => c.query("select public.stock_takes_for_job($1)", [jobB])))?.code).toBe("42501");
-      await asServer();
+      if (otherStaffId) {
+        await as(otherStaffId);
+        expect((await refusal(() => c.query("select public.stock_takes_for_job($1)", [jobB])))?.code).toBe("42501");
+        await asServer();
+      } else console.warn("[stock-take] no TEST_SANDBOX_ORG_2: the stranger's read was not checked.");
       // Nobody signed in reads nothing at all.
       expect((await one("select has_function_privilege('anon', 'public.stock_takes_for_job(uuid)', 'execute') as yes")).yes).toBe(false);
       // His own Undo goes through, and the job's list is empty again.
@@ -272,8 +309,11 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
       const second = await refusal(async () => claim(await invoice(jobB, `TEST-TAKE-INV-${++seq}`), moveIds(r)));
       expect(second?.message).toBe(`materials already billed on ${n1}`);
       // One piece of the take is enough to be refused (a partial re-claim is still a double bill).
-      const partial = await refusal(async () => claim(await invoice(jobA, `TEST-TAKE-INV-${++seq}`), [moveIds(r)[0]]));
+      const partial = await refusal(async () => claim(await invoice(jobB, `TEST-TAKE-INV-${++seq}`), [moveIds(r)[0]]));
       expect(partial?.message).toBe(`materials already billed on ${n1}`);
+      // And a take is billed on its own job's invoice (0343), never another job's.
+      const elsewhere = await refusal(async () => claim(await invoice(jobA, `TEST-TAKE-INV-${++seq}`), [moveIds(r)[0]]));
+      expect(elsewhere?.message).toMatch(/^Those pieces were taken for TEST-TAKE-B-\d+, so they can't be billed on this invoice\.$/);
     });
   });
 
@@ -291,18 +331,20 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
       // A short: taken past the shelf, $0 until settled.
       const s = await draw(staffId, it1, jobB, 300);
       expect(num(s.short)).toBe(50);
-      expect((await refusal(() => claim(inv, [s.short_id!])))?.message).toContain("no cost yet");
+      expect((await refusal(() => claim(inv, [s.short_id!])))?.message).toContain("Pieces taken past the shelf aren't billed");
       // A count is never a customer's.
       await as(staffId);
       await c.query("select public.stock_undo($1)", [s.draw_group]);
       const count = (await one("select public.stock_recount($1, 240, 'TEST count') as r", [it1])).r;
       await asServer();
       const countId = count.moves[0].move_id;
-      expect((await refusal(() => claim(inv, [countId])))?.message).toContain("only pieces taken for a job");
+      expect((await refusal(() => claim(inv, [countId])))?.message).toContain("Only pieces taken onto a job are billed");
       // Another company's invoice cannot name this company's piece.
       const d = await draw(staffId, it1, jobB, 5);
-      const strangers = await invoice(null, `TEST-TAKE-X-${++seq}`, otherOrgId);
-      expect((await refusal(() => claim(strangers, moveIds(d), otherOrgId)))?.code).toBe("42501");
+      if (otherOrgId) {
+        const strangers = await invoice(null, `TEST-TAKE-X-${++seq}`, otherOrgId);
+        expect((await refusal(() => claim(strangers, moveIds(d), otherOrgId)))?.code).toBe("42501");
+      } else console.warn("[stock-take] no TEST_SANDBOX_ORG_2: another company's claim was not checked.");
       // And the live take itself bills fine.
       expect(await refusal(() => claim(inv, moveIds(d)))).toBeNull();
     });
@@ -324,7 +366,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
       expect((await one("select public.stock_undo($1) as r", [gone.draw_group])).r.undone).toBe(1);
       await asServer();
       const back = await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invGone]));
-      expect(back?.message).toContain("were taken back off the job after it was voided");
+      expect(back?.message).toContain("went back on the shelf, so it can't come back from void");
       // Nothing undone behind the other one: it comes back from void as it always could.
       expect(await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invKept]))).toBeNull();
     });
@@ -354,7 +396,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
       const settledIds = (await c.query("select id from public.stock_moves where draw_group = (select settled_by from public.stock_moves where id = $1)", [r.short_id])).rows.map((x) => x.id);
       const inv = await invoice(jobB, `TEST-TAKE-INV-${++seq}`);
       expect(await refusal(() => claim(inv, [...moveIds(r), ...settledIds]))).toBeNull();
-      expect((await refusal(() => claim(inv, [r.short_id!])))?.message).toContain("no cost yet");
+      expect((await refusal(() => claim(inv, [r.short_id!])))?.message).toContain("Pieces taken past the shelf aren't billed");
       expect((await takes(techId, jobB))[0].billed_on).toBeTruthy();
     });
   });
@@ -384,7 +426,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
     });
   });
 
-  it("the guard still names hours and bills the way it did before 0344", async () => {
+  it("the core guard still names hours and bills the way it did before 0343/0344", async () => {
     if (!needs()) return;
     await tx(async () => {
       const t = await coilTicket(jobA, "2001-08-19");

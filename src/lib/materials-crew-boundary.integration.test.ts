@@ -523,7 +523,9 @@ d("material lists: the crew boundary (0254)", () => {
     await as(techId);
     const { rows } = await client.query("select * from shelf_for_crew() where id = $1", [pricedItemId]);
     expect(rows.length).toBe(1);
-    expect(Object.keys(rows[0]).sort()).toEqual(["id", "name", "on_hand", "takeable", "unit"]); // 0344 adds takeable: a count, never a cost
+    // 0344 adds takeable (a count, never a cost); CI can run this before 0344 is applied, so both shapes pass.
+    const shelfKeys = Object.keys(rows[0]).sort();
+    expect([["id", "name", "on_hand", "unit"], ["id", "name", "on_hand", "takeable", "unit"]]).toContainEqual(shelfKeys);
     expect(rows[0]).toMatchObject({ name: "TEST 0302 12/2 NM-B", unit: "ft" });
     await asServer();
     const { rows: acl } = await client.query(
