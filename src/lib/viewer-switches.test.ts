@@ -23,7 +23,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
-import { SWITCHES_UNREAD, switchesFromRow, viewerSwitches } from "./viewer-switches";
+import { SWITCHES_UNREAD, featureOffSentence, switchesFromRow, viewerSwitches } from "./viewer-switches";
 import { ALL_ON } from "./features";
 
 describe("switchesFromRow", () => {
@@ -71,5 +71,11 @@ describe("viewerSwitches", () => {
     row = { role: "owner", organizations: { settings: { features: { permits: false } } } };
     readError = { code: "42P01" };
     expect(await viewerSwitches()).toEqual(SWITCHES_UNREAD);
+  });
+});
+
+describe("featureOffSentence", () => {
+  it("names the feature and who can turn it on, in plain words", () => {
+    expect(featureOffSentence("recurring_billing")).toBe("Recurring Billing is off. The owner can turn it on in Settings, Features.");
   });
 });

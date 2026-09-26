@@ -13,7 +13,7 @@ import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import { featureOn } from "@/lib/features";
-import { featureOffSentence } from "@/lib/viewer-features";
+import { featureOffSentence } from "@/lib/viewer-switches";
 
 /** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
  *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw

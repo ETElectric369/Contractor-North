@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
-import { ALL_ON, type FeatureMap } from "@/lib/features";
+import { ALL_ON, FEATURE_BY_KEY, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 export type ViewerSwitches = { features: FeatureMap; isOwner: boolean };
 
@@ -47,3 +47,9 @@ export const viewerSwitches = cache(async (): Promise<ViewerSwitches> => {
     return SWITCHES_UNREAD;
   }
 });
+
+/** The plain refusal a server door gives while its feature is off: what is off, and who can turn it
+ *  on. One sentence, so every door says it the same way. */
+export function featureOffSentence(key: FeatureKey): string {
+  return `${FEATURE_BY_KEY[key].label} is off. The owner can turn it on in Settings, Features.`;
+}

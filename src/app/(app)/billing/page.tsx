@@ -16,7 +16,7 @@ import { getCollected } from "@/lib/analytics/money-metrics";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { featureOn } from "@/lib/features";
-import { readViewerFeatures } from "@/lib/viewer-features";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { InvoiceJobButton } from "./invoice-job-button";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +60,7 @@ export default async function BillingPage() {
       // without a re-send: the customer paid the corrected bill in full after it changed (INV-071).
       supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, customers(name), payments(paid_at)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
       // The switches (0352): Sales Tax off means a new invoice starts untaxed, with no tax field.
-      readViewerFeatures(),
+      viewerSwitches(),
     ]);
   const salesTax = featureOn(viewer.features, "sales_tax");
 
