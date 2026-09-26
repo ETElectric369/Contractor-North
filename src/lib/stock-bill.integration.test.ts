@@ -1,5 +1,6 @@
 import { describe } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { defineStockBillSuite } from "./stock-bill.db-suite";
 
 /**
@@ -36,6 +37,7 @@ d("a piece from the shelf is billed once (0343)", () => {
         ssl: { rejectUnauthorized: false },
       });
       await client.connect();
+      await assertTestDatabase(client);
       return client;
     },
     { allowDdl: STOCK_BILL_APPLY === "1" && !isProduction },

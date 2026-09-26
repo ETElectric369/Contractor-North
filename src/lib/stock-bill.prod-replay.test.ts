@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import pg from "pg";
+import { assertReadOnlyReplay } from "@/lib/db-guard";
 import { billItemisation, type BillLine } from "./bill-itemisation";
 import { markupReading } from "./invoice-markup";
 import { stockImportRows, stockTakesOnJob, stockTotals, type StockItemRow, type StockMoveRow } from "./stock-billing";
@@ -15,16 +16,19 @@ import { computeJobProgress } from "./job-progress-math";
  * stock line. Opt-in (STOCK_BILL_REPLAY=1) as well as creds-gated, because it reads live data that
  * stops matching the day a piece is taken.
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_BILL_REPLAY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && STOCK_BILL_REPLAY === "1" ? describe : describe.skip;
+// A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
+//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… STOCK_BILL_REPLAY=1 npx vitest run <this file>
+const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, STOCK_BILL_REPLAY } = process.env;
+const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && STOCK_BILL_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 
 d("INV-078 and INV-079, replayed read-only: an empty shelf changes nothing", () => {
   for (const number of ["INV-078", "INV-079"]) {
     it(`${number}: the materials offer, Unbilled and work to date are identical with the stock half on`, async () => {
-      const c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
+      const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
       await c.connect();
+      await assertReadOnlyReplay(c);
       try {
         await c.query("begin transaction read only");
         const inv = (

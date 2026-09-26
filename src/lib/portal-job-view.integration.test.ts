@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { buildJobLedger } from "./portal/stretch-ledger";
 
 /**
@@ -92,6 +94,7 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     // Practice runs only (TEST_APPLY_PENDING=1): 0326 renames the share table and rewrites the
     // door; every case below must still hold through it, inside this rolled-back transaction.
@@ -121,21 +124,14 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
     ).ok;
     if (!ready) return;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id, o.name as org_name
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-         join public.organizations o on o.id = t.org_id
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0301 test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    orgName = fx.org_name;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0301");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    orgName = fx.orgName;
     otherStaffId =
-      (await one("select id from public.profiles where org_id <> $1 and role in ('owner','admin','office') and coalesce(active, true) limit 1", [orgId]))?.id ?? "";
+      fx.otherStaffId;
 
     const cust = async (name: string) =>
       (await one("insert into public.customers (org_id, name, notes) values ($1, $2, 'SECRET CUSTOMER NOTE') returning id", [orgId, name])).id as string;

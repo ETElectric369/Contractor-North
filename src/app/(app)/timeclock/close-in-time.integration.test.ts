@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0291: a running clock can be stopped, but never in the future, by anybody.
@@ -82,6 +84,7 @@ d("a running clock can be stopped, never in the future (0291)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     // Both of the long-shift job's claims: the office's bell line at 10 hours, the question at 12.
     const col = await one(
@@ -97,27 +100,11 @@ d("a running clock can be stopped, never in the future (0291)", () => {
     );
     has0291 = !!col?.ok && !!trg;
 
-    const staff = await one(
-      `select id, org_id from public.profiles
-        where role in ('owner', 'admin', 'office') and coalesce(active, true) and org_id is not null
-        order by (role = 'owner') desc, id
-        limit 1`,
-    );
-    if (!staff) throw new Error("close-in-time fixture: no active office staff in any org.");
-    staffId = staff.id;
-    orgId = staff.org_id;
-    const idle = await one(
-      `select p.id from public.profiles p
-        where p.org_id = $1 and coalesce(p.active, true)
-          and not exists (select 1 from public.time_entries x where x.profile_id = p.id and x.status = 'open')
-          and not exists (select 1 from public.time_entries x
-                           where x.profile_id = p.id and x.clock_in < '2001-01-03' and x.clock_out > '2000-12-31')
-        order by (p.role = 'tech') desc, p.id
-        limit 1`,
-      [orgId],
-    );
-    if (!idle) throw new Error("close-in-time fixture: everybody in the org is on the clock right now.");
-    idleId = idle.id;
+    // Minted here and rolled back (never a live one): a fresh tech has nothing on the clock.
+    const fx = await mintOrgAndStranger(c, "close-in-time");
+    staffId = fx.staffId;
+    orgId = fx.orgId;
+    idleId = fx.techId;
   });
 
   /** Deletes the rows this suite made, and only those. After every case, because the person has

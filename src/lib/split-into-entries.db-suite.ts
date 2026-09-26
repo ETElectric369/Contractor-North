@@ -21,6 +21,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { aggregatePayrollEntries } from "./payroll-math";
 
 export interface SqlClient {
@@ -193,26 +194,12 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
 
     // An org with active staff and an active tech, and staff of some OTHER org. Without them the
     // boundary cannot be exercised, and that has to be loud (tests/ci-guard.test.ts), not a skip.
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner', 'admin', 'office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        order by (s.role = 'owner') desc, t.id
-        limit 1`,
-    );
-    if (!fx) throw new Error("split test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    const other = await one(
-      `select id from public.profiles
-        where org_id is not null and org_id <> $1 and role in ('owner', 'admin', 'office') and coalesce(active, true)
-        limit 1`,
-      [orgId],
-    );
-    if (!other) throw new Error("split test fixture: no staff member in a second org, so the cross-org refusal cannot be tested.");
-    otherStaffId = other.id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "split");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    otherStaffId = fx.otherStaffId;
     const idle = await one(
       `select p.id from public.profiles p
         where p.org_id = $1 and coalesce(p.active, true)

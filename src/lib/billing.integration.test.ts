@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 // audit v921: the draw kinds and the blocker predicate come from the APP's own module, not
 // re-typed here. This test used to hand-write `invoice_kind in ('deposit','progress','final')`
 // and the `total > 0.005 or exists(items)` predicate — copies that stayed green no matter how
@@ -33,15 +35,15 @@ d("billing draw invariants (DB integration)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
   });
   afterAll(async () => {
     await client?.end();
   });
 
-  /** A throwaway customer + T&M job in the first org, inside the caller's open transaction. */
+  /** A throwaway TEST org (owner + tech), customer and T&M job, inside the caller's open transaction. */
   async function scaffold() {
-    const { rows: [org] } = await client.query("select id from organizations limit 1");
-    const orgId = org.id;
+    const { orgId } = await mintThrowawayOrg(client, { label: "billing", techs: 1 });
     const { rows: [cust] } = await client.query(
       "insert into customers (org_id, name) values ($1,'TEST integ cust') returning id",
       [orgId],
@@ -164,7 +166,7 @@ d("billing draw invariants (DB integration)", () => {
     await client.query("begin");
     try {
       const { orgId, custId, jobId } = await scaffold();
-      const { rows: [person] } = await client.query("select id from profiles where org_id=$1 limit 1", [orgId]);
+      const { rows: [person] } = await client.query("select id from profiles where org_id=$1 order by (role = 'tech') desc limit 1", [orgId]);
       expect(person?.id).toBeTruthy(); // every org has at least its owner
 
       // Two closed shifts on the job, a week apart — the "nine July/August entries" and Brian's 09-10 one, in miniature.
@@ -319,7 +321,7 @@ d("billing draw invariants (DB integration)", () => {
     await client.query("begin");
     try {
       const { orgId, custId, jobId } = await scaffold();
-      const { rows: [person] } = await client.query("select id, full_name from profiles where org_id=$1 limit 1", [orgId]);
+      const { rows: [person] } = await client.query("select id, full_name from profiles where org_id=$1 order by (role = 'tech') desc limit 1", [orgId]);
 
       // The draw as createProgressReportInvoice builds it: a draft 'progress' invoice itemizing the
       // job's actuals — one shift at the person's rate and one supplier bill.

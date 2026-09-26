@@ -2,6 +2,8 @@ import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0335: the panel on the customer's page, only once the office turns it on, and only the
@@ -85,6 +87,7 @@ d("the panel on the customer's page (0335)", { timeout: 30_000 }, () => {
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     // FIRST: nothing below may write outside this transaction.
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
@@ -103,18 +106,11 @@ d("the panel on the customer's page (0335)", { timeout: 30_000 }, () => {
     }
     if (!ready) return;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        order by (s.role = 'owner') desc, t.id
-        limit 1`,
-    );
-    if (!fx) throw new Error("0335 test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0335");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
 
     const cust = async (name: string) => (await one("insert into public.customers (org_id, name) values ($1, $2) returning id", [orgId, name])).id as string;
     const custA = await cust("TEST 0335 A");

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -234,6 +235,7 @@ d("Shop Stock Phase 3 cross-check: a crew take, its bell, its bill, its Undo, it
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
     await c.query("set local statement_timeout = '15s'");

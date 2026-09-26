@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0298: a customer's portal link belongs to the office.
@@ -82,30 +84,19 @@ d("the portal link belongs to the office (0298)", { timeout: 30_000 }, () => {
       ssl: { rejectUnauthorized: false },
     });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     has0298 = (await one("select to_regclass('public.customer_portal_access') is not null as ok")).ok;
     if (!has0298) return;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id, o.name as org_name
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-         join public.organizations o on o.id = t.org_id
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0298 test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    orgName = fx.org_name;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0298");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    orgName = fx.orgName;
     otherStaffId =
-      (
-        await one(
-          "select id from public.profiles where org_id <> $1 and role in ('owner','admin','office') and coalesce(active, true) limit 1",
-          [orgId],
-        )
-      )?.id ?? "";
+      fx.otherStaffId;
 
     customerId = (
       await one("insert into public.customers (org_id, name) values ($1, 'TEST 0298 portal') returning id", [orgId])

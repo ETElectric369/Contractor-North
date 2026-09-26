@@ -18,6 +18,11 @@ const eslintConfig = [
       ],
     },
   },
+  {
+    // CommonJS scripts (scripts/test-db/*.cjs) load their modules with require by definition.
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 ];
 
 export default eslintConfig;

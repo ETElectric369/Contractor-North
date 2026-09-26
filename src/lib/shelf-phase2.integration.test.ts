@@ -1,5 +1,6 @@
 import { describe } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { defineShelfPhase2Suite } from "./shelf-phase2.db-suite";
 
 /**
@@ -23,6 +24,7 @@ d("putting things on the shelf (0328)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     return client;
   });
 });

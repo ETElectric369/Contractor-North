@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0296: a vendor is a brand, and a brand has a phone number.
@@ -69,20 +71,15 @@ d("vendor cards: one per name, org reads, staff writes, never another org's (029
       ssl: { rejectUnauthorized: false },
     });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     has0296 = !!(await one("select to_regclass('public.price_list_vendors') is not null as ok"))?.ok;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from profiles t
-         join profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0296 fixture: no org has both an active tech and active staff, so the read/write split can't be exercised.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0296");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
 
     const item = await one(
       `insert into price_list_items (org_id, code, description, unit, buy_price, markup_pct)

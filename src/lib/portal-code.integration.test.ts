@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "fs";
 import path from "path";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { codeMatches, hashCode, hashSecret, newSalt, newSessionSecret } from "./portal/code";
 
 /**
@@ -114,6 +116,7 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
     await c.query("set local statement_timeout = '15s'");
@@ -124,25 +127,14 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     }
     ready = true;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id, o.name as org_name
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-         join public.organizations o on o.id = t.org_id
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0331 test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    orgName = fx.org_name;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    const other = await one(
-      "select id, org_id from public.profiles where org_id <> $1 and role in ('owner','admin','office') and coalesce(active, true) limit 1",
-      [orgId],
-    );
-    otherStaffId = other?.id ?? "";
-    otherOrgId = other?.org_id ?? "";
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0331");
+    orgId = fx.orgId;
+    orgName = fx.orgName;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    otherStaffId = fx.otherStaffId;
+    otherOrgId = fx.otherOrgId;
 
     const cust = async (org: string, name: string, email: string | null) =>
       (await one("insert into public.customers (org_id, name, email) values ($1, $2, $3) returning id", [org, name, email])).id as string;

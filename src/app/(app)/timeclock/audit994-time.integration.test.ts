@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migrations 0319, 0320 and 0321 (audit v994, the time clock wave), exercised where the rules live.
@@ -111,6 +113,7 @@ d("audit v994 time wave: 0319, 0320, 0321", () => {
       ssl: { rejectUnauthorized: false },
     });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     await c.query("set local lock_timeout = '5s'");
 
@@ -140,21 +143,11 @@ d("audit v994 time wave: 0319, 0320, 0321", () => {
     }
 
     // An org with an active tech who has nothing on the clock, and active office staff.
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner', 'admin', 'office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-          and not exists (select 1 from public.time_entries x where x.profile_id = t.id and x.status = 'open')
-          and not exists (select 1 from public.time_entries x
-                           where x.profile_id in (t.id, s.id) and x.clock_in < '2001-01-03' and x.clock_out > '2000-12-31')
-        order by (s.role = 'owner') desc, t.id
-        limit 1`,
-    );
-    if (!fx) throw new Error("audit994-time fixture: no org has an idle active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
+    // Minted here and rolled back (never a live one): a fresh tech has nothing on the clock.
+    const fx = await mintOrgAndStranger(c, "audit994-time");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
   });
 
   afterAll(async () => {

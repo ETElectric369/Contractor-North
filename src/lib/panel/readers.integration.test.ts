@@ -1,5 +1,7 @@
 import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { PANEL_SAYS, NORT_SAYS, readerSuggestions, type ReadRow } from "./readers";
 
 /**
@@ -73,6 +75,7 @@ d("the readers' writes (0333's guard, phase 4)", () => {
   beforeAll(async () => {
     client = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await client.connect();
+    await assertTestDatabase(client);
     const { rows: [has] } = await client.query("select to_regclass('public.job_circuits') is not null as yes");
     if (!has.yes) {
       waiting = true;
@@ -82,15 +85,9 @@ d("the readers' writes (0333's guard, phase 4)", () => {
     await client.query("begin");
     await client.query("set local lock_timeout = '3s'");
     await client.query("set local statement_timeout = '15s'");
-    const { rows: fx } = await client.query(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from profiles t
-         join profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and s.active
-        where t.role = 'tech' and t.active
-        limit 1`,
-    );
-    if (!fx.length) throw new Error("fixture: no org has both an active tech and an active staff member.");
-    ({ org_id: orgId, tech_id: techId, staff_id: staffId } = fx[0]);
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(client, "fixture");
+    ({ orgId, techId, staffId } = fx);
     custId = (await one("insert into customers (org_id, name) values ($1, 'TEST P4 cust') returning id", [orgId])).id;
     jobId = (
       await one(
