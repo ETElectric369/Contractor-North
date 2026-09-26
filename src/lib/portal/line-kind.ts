@@ -6,8 +6,9 @@
  * separation of labor and materials". Every figure on the portal (the money card, each stretch,
  * each day, the bill) is split by the one rule here, so the four places cannot disagree.
  *
- * A LINE'S KIND IS WHAT IT STORED FIRST. What the importer stored on it (import_source) or what its
- * bill is (a deposit bill's own lines):
+ * A LINE'S KIND IS WHAT IT STORED FIRST. What somebody SAID it is (line_kind, 0342: a line added
+ * from the price book, or the office's Kind chip) wins over everything below; then what the
+ * importer stored on it (import_source) or what its bill is (a deposit bill's own lines):
  *   labor         -> Labor            (the time importer)
  *   costs         -> Materials        (bills, orders, receipts, returns)
  *   change_orders -> Change Orders
@@ -24,7 +25,7 @@
  * A typed line the words do not settle ("Emergency service call", "10/3 romex") is Other: shown,
  * never guessed at. So is anything the rule does not know yet (a new importer).
  */
-import { handLineKind, isHoursUnit } from "@/lib/invoice-math";
+import { handLineKind, isHoursUnit, storedLineKind } from "@/lib/invoice-math";
 
 export type LineGroup = "labor" | "materials" | "change_orders" | "estimate" | "contract" | "deposit" | "credit" | "tax" | "other";
 
@@ -59,9 +60,13 @@ export { isHoursUnit };
 
 /** Which group a bill's line belongs to. `invoiceKind` is the kind of the bill the line is on. */
 export function lineGroup(
-  line: { import_source?: string | null; unit?: string | null; description?: string | null },
+  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null },
   invoiceKind?: string | null,
 ): LineGroup {
+  // WHAT THE LINE WAS SAID TO BE COMES FIRST (0342): a line added from the price book, or one the
+  // office filed with the Kind chip. The same first read groupInvoiceLines makes on /i and print.
+  const stored = storedLineKind(line.line_kind);
+  if (stored) return stored;
   const src = typeof line.import_source === "string" ? line.import_source : null;
   switch (src) {
     case "labor":
@@ -98,7 +103,7 @@ export type LineSection<T> = { group: LineGroup; label: string; lines: T[]; subt
  * group; only groups that have a line appear. Subtotals are summed in whole cents, so the sections
  * add up to the lines exactly.
  */
-export function sectionLines<T extends { import_source?: string | null; unit?: string | null; description?: string | null; line_total?: unknown }>(
+export function sectionLines<T extends { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null; line_total?: unknown }>(
   lines: readonly T[],
   invoiceKind?: string | null,
 ): LineSection<T>[] {

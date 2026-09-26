@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ListPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
+import { priceBookLineKind } from "@/lib/invoice-math";
 import {
   hasItemOptions,
   pickerChoices,
@@ -57,6 +58,10 @@ export type PriceItemLite = {
   unit: string;
   buy_price: number;
   markup_pct: number;
+  /** Who the item is bought from (0342). A book item with a supplier is a part, so its line files
+   *  under Materials; one without (installed work, a job-cost code) says nothing and is read by its
+   *  words. Staff screens only: the page that hands this list over is the office's. */
+  supplier?: string | null;
   /**
    * THE MAKERS UNDER THIS CODE (0282). Andrew, for Justin Vivian: "increase drop down options for
    * each item code, multiple vendors, ie. windows - mfg Andersen, mfg Milgard, mfg Marvin".
@@ -129,7 +134,10 @@ export function AddLineItems({
    *  and the same inputs as every vendor row below it. */
   const addOne = (p: PriceItemLite) => {
     const line = priceBookLine(p, pricing);
-    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice }]);
+    // A LINE FROM THE BOOK SAYS WHAT IT IS WHEN THE BOOK DOES (0342): labor when the book sells it
+    // by the hour, materials when the item names a supplier. Neither, and it says nothing.
+    const kind = priceBookLineKind(p.unit, line.unit, p.supplier);
+    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice, ...(kind ? { kind } : {}) }]);
     setQuery("");
     setOpen(false);
   };
@@ -141,8 +149,9 @@ export function AddLineItems({
    * what the crew orders from: "830 Windows (Andersen 400 Series)", not "830 Windows". The price
    * is the option's own, through the same markup ladder, never recomputed here.
    */
-  const addChoice = (choice: ItemOptionChoice) => {
-    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice }]);
+  const addChoice = (choice: ItemOptionChoice, item: PriceItemLite) => {
+    const kind = priceBookLineKind(item.unit, choice.unit, item.supplier);
+    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice, ...(kind ? { kind } : {}) }]);
     setQuery("");
     setOpen(false);
     setMakersFor(null);
@@ -212,7 +221,7 @@ export function AddLineItems({
                             <button
                               type="button"
                               onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => addChoice(choice)}
+                              onClick={() => addChoice(choice, p)}
                               className="flex min-h-[44px] w-full items-center justify-between gap-3 py-2 pl-7 pr-3 text-left text-sm hover:bg-white"
                             >
                               <span className="min-w-0 truncate">

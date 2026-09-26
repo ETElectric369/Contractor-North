@@ -88,7 +88,9 @@ export default async function InvoicePage({
         // filter the two quote screens read (THE PROJECTION LAW). Without them every code priced
         // at its own allowance here while the price list said it priced at its default vendor
         // (audit v994, VP2): an $830 window billed on the invoice that quoted a $1,610 Marvin.
-        .select(`id, code, description, category, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
+        // `supplier` rides along for one question (0342): a book item bought from a supplier is a
+        // part, so the line it adds files under Materials. Staff page; never on a customer's paper.
+        .select(`id, code, description, category, supplier, unit, buy_price, markup_pct, ${ITEM_OPTIONS_EMBED}`)
         .eq("archived", false)
         .eq("price_list_item_options.archived", false)
         .order("description")

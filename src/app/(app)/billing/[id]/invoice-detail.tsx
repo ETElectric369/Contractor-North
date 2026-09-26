@@ -12,7 +12,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateTime } from "@/lib/utils";
-import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet } from "@/lib/invoice-math";
+import { customerLineWords, invoiceBalance, invoiceOverpayment, isDrawKind, supplierNameSet, storedLineKind } from "@/lib/invoice-math";
+import { LineKindChips } from "./line-kind-chips";
 import { processorFeeLabel } from "@/lib/processor-fee";
 import { markupBoxApplied, markupBoxOnSeed, markupBoxStart, markupBoxTyped, markupBoxWords, materialsImportPlan, type MarkupSeed } from "@/lib/invoice-markup";
 import { paymentMethodKey, paymentMethodLabel } from "@/lib/payment-method";
@@ -610,6 +611,9 @@ export function InvoiceDetail({
     const rank = (it: (typeof items)[number]) => {
       const src = (it as { import_source?: string | null }).import_source;
       const d = it.description ?? "";
+      // What the line was said to be leads (0342), the same first read as the Cost Breakdown.
+      const said = storedLineKind(it.line_kind);
+      if (said) return said === "labor" ? 0 : said === "materials" ? 1 : said === "credit" ? 3 : 2;
       if (src === "draw_credit" || /less previous billings/i.test(d)) return 3;
       if (src === "labor" || /^labor — /i.test(d)) return 0;
       if (src === "costs" || /^materials — /i.test(d)) return 1;
@@ -858,6 +862,8 @@ export function InvoiceDetail({
                   quantity: l.quantity,
                   unit: l.unit,
                   unit_price: l.unit_price,
+                  // A price-book line says what it is (0342), so it files under Materials, not Other.
+                  kind: l.kind ?? null,
                 });
                 if (!res?.ok) {
                   toast(res?.error ?? "Couldn't add the line item — try again.", "error");
@@ -1105,6 +1111,9 @@ export function InvoiceDetail({
                       <X className="h-4 w-4" />
                     </button>
                   </div>
+                  {/* WHAT THE LINE IS on the customer's breakdown (0342): saved on the tap, apart
+                      from the words and price above, which still wait for the check mark. */}
+                  <LineKindChips item={it} invoiceId={invoice.id} disabled={pending} onDone={refresh} />
                   {items.length > 2 && (
                     <div className="flex items-center gap-2">
                       <button
