@@ -178,29 +178,36 @@ describe("the price-book rule (the doors, and 0342's backfill twin)", () => {
 
   it("a bracket that is not a code names nothing", () => {
     const et = priceBookUnits([{ code: "P116OW", unit: "ea", supplier: "CED" }]);
-    expect(priceBookCodeKeys("Move the panel [see note]")).toEqual(["see note", "note"]);
+    expect(priceBookCodeKeys("Move the panel [see note]")).toEqual(["see note"]);
     expect(kindFromPriceBook({ description: "Move the panel [see note]", unit: "ea" }, et)).toBeNull();
     expect(kindFromPriceBook({ description: "Unclosed [P116OW", unit: "ea" }, et)).toBeNull();
     expect(kindFromPriceBook({ description: "Empty [] and [  ]", unit: "ea" }, et)).toBeNull();
     expect(priceBookCodeKeys("Empty [] and [  ]")).toEqual([]);
   });
 
-  it("the estimate's last-word idiom ('[RACO 936]' -> '936') only when the whole token misses", () => {
-    const et = priceBookUnits([{ code: "936", unit: "ea", supplier: "CED" }]);
-    expect(priceBookCodeKeys("4-inch box [RACO 936]")).toEqual(["raco 936", "936"]);
-    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, et)).toBe("materials");
-    // The whole token is a code of its own and says nothing: it wins, and the last word is not tried.
-    const both = priceBookUnits([
-      { code: "RACO 936", unit: "SQ FT", supplier: null },
+  it("a bracket names a code WHOLE, never a word out of it ('[RACO 936]' is not '936')", () => {
+    // ET's own book (CED): plain-word and short numeric codes free text can hit.
+    const et = priceBookUnits([
       { code: "936", unit: "ea", supplier: "CED" },
+      { code: "HOME", unit: "ea", supplier: "CED" },
+      { code: "232", unit: "ea", supplier: "CED" },
+      { code: "4400", unit: "ea", supplier: "CED" },
     ]);
-    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, both)).toBeNull();
-    // Every whole token is tried before any last word.
+    expect(priceBookCodeKeys("4-inch box [RACO 936]")).toEqual(["raco 936"]);
+    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, et)).toBeNull();
+    // A bracket that merely ends in a code is not that code: the words still read the line.
+    expect(kindFromPriceBook({ description: "Labor - Erik [Smith Home]", unit: "ea" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "Service call [PO 4400]", unit: "ls" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "Panel work [Unit 232]", unit: "ea" }, et)).toBeNull();
+    // The estimate writes a multi-word code whole, and whole it matches.
+    const raco = priceBookUnits([{ code: "RACO 936", unit: "ea", supplier: "CED" }]);
+    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, raco)).toBe("materials");
+    // Every whole token is tried, in order.
     const two = priceBookUnits([
       { code: "936", unit: "hr" },
       { code: "P116OW", unit: "ea", supplier: "CED" },
     ]);
-    expect(priceBookCodeKeys("Kit [RACO 936] [P116OW]")).toEqual(["raco 936", "p116ow", "936"]);
+    expect(priceBookCodeKeys("Kit [RACO 936] [P116OW]")).toEqual(["raco 936", "p116ow"]);
     expect(kindFromPriceBook({ description: "Kit [RACO 936] [P116OW]", unit: "ea" }, two)).toBe("materials");
   });
 

@@ -40,8 +40,9 @@
 --    125V 1P SWITCH") or, copied from an estimate, in brackets (the estimate's line-map writes
 --    "<desc> [CODE]": INV-056's "... (FLEXBOX 16 cu in) [P116OW]"; Erik, 2026-09-25: "Also price
 --    list items I added from stock"). The keys are tried in one order and the FIRST that is a code
---    in the book decides: the lead (rank 0), each bracketed token whole (rank n, in order), then the
---    last word of a bracketed token of several words ("[RACO 936]" -> "936", rank 1000 + n).
+--    in the book decides: the lead (rank 0), then each bracketed token WHOLE (rank n, in order).
+--    Never a word out of a bracket: "[Smith Home]" is not ET's CED code HOME, "[PO 4400]" is not
+--    4400 (the estimate writes the code whole, so a piece of a bracket names only a collision).
 --    A line billed in hours, or whose book item is priced in hours, is left
 --    alone: it already reads Labor, and a stored 'materials' would make it read wrong. No words,
 --    amount, unit, order, claim, edited flag or total changes (mark_invoice_item_edited looks only
@@ -170,10 +171,6 @@ begin
         union all
         select lower(btrim(m.t[1])), m.n
           from regexp_matches(coalesce(it.description, ''), '\[([^\]]+)\]', 'g') with ordinality as m(t, n)
-        union all
-        select lower((regexp_match(btrim(m.t[1]), '(\S+)$'))[1]), 1000 + m.n
-          from regexp_matches(coalesce(it.description, ''), '\[([^\]]+)\]', 'g') with ordinality as m(t, n)
-         where btrim(m.t[1]) ~ '\s'
       ) c
      where it.import_source is null
        and it.line_kind is null

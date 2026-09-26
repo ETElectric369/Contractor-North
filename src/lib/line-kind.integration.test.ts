@@ -157,8 +157,7 @@ d("0342: a line says what it is, and every customer document reads it", () => {
                                  and (lower(btrim(p.code)) = lower(btrim(split_part(it.description, ' — ', 1)))
                                       or exists (select 1
                                                    from regexp_matches(coalesce(it.description, ''), '\\[([^\\]]+)\\]', 'g') as m(t)
-                                                  where lower(btrim(p.code)) in (lower(btrim(m.t[1])),
-                                                                                 lower((regexp_match(btrim(m.t[1]), '(\\S+)$'))[1]))))))`,
+                                                  where lower(btrim(p.code)) = lower(btrim(m.t[1]))))))`,
     );
     expect(wrong.n).toBe(0);
     notices.length = 0;

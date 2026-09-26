@@ -378,12 +378,14 @@ const BRACKETED = /\[([^\]]+)\]/g;
  * line-map writes "<desc> [CODE]": INV-056's "Single-gang remodel box (FLEXBOX 16 cu in) [P116OW]").
  * So the keys are, trimmed and lower-cased, deduplicated:
  *   1. the leading code (priceBookCodeKey);
- *   2. each bracketed token "[X]", whole, in the order they appear;
- *   3. then the LAST word of each bracketed token with more than one word ("[RACO 936]" -> "936",
- *      the order sheet's own idiom in materials/actions.ts), tried only after every whole token.
+ *   2. each bracketed token "[X]", WHOLE, in the order they appear.
+ * Never a word out of a bracket: "[Smith Home]" is not "home" (ET's book has a CED code HOME), and
+ * "[PO 4400]" is not "4400". The estimate writes the book's code whole ("[RACO 936]" is the code
+ * "RACO 936"), so a piece of a bracket names nothing but a collision, and a stored kind outranks
+ * the line's own words.
  * The caller takes the FIRST key that is a code in the org's book, by exact equality: never a
  * substring, never fuzzy. "[see note]" is a key like any other, and names nothing unless the book
- * has a code "see note" (or "note"). The SQL twin is 0342's backfill (rank 0 / n / 1000 + n).
+ * has a code "see note". The SQL twin is 0342's backfill (rank 0 / n).
  */
 export function priceBookCodeKeys(description: string | null | undefined): string[] {
   const d = String(description ?? "");
@@ -392,16 +394,7 @@ export function priceBookCodeKeys(description: string | null | undefined): strin
     if (k && !out.includes(k)) out.push(k);
   };
   add(priceBookCodeKey(d));
-  const whole: string[] = [];
-  for (const m of d.matchAll(BRACKETED)) {
-    const k = m[1].trim().toLowerCase();
-    if (k) whole.push(k);
-  }
-  whole.forEach(add);
-  for (const k of whole) {
-    const words = k.split(/\s+/);
-    if (words.length > 1) add(words[words.length - 1]);
-  }
+  for (const m of d.matchAll(BRACKETED)) add(m[1].trim().toLowerCase());
   return out;
 }
 
