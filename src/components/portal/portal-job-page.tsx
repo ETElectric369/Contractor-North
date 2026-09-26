@@ -2,7 +2,7 @@ import { ArrowLeft, Camera, ChevronRight, CircleDollarSign, Clock, DraftingCompa
 import { formatCurrency } from "@/lib/utils";
 import { formatDateTimeTz } from "@/lib/tz";
 import type { PortalInvoice, PortalJobView } from "@/lib/portal/job-view-shape";
-import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
+import { InvoiceDocument } from "@/components/invoice-document";
 import { PortalSection, PortalShell } from "./portal-shell";
 import { PortalLedger, SplitRows } from "./portal-ledger";
 import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
@@ -22,7 +22,7 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
  * separating time and material right at the top, its all mixed in"). The money card leads with
- * Labor (and its hours) and Materials as two lines that add up to Work To Date, then Paid and the
+ * Labor (and its hours) and Materials as two lines that add up to Billed To Date, then Paid and the
  * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
  * headings (and any other kind of line under its own, only when there is one). One rule decides
  * which line is which everywhere: line-kind, from what the line stored, and for a typed line the
@@ -58,7 +58,7 @@ export function PortalJobPage({
   const site = siteLine(job.site);
   const unbilled = view.unbilled && (view.unbilled.hours > 0 || Math.abs(view.unbilled.total) > 0.005) ? view.unbilled : null;
   const payable = view.invoices.filter((i) => i.payToken && i.balance > 0.005);
-  const bills = view.invoices.filter((i) => i.doc);
+  const bills = view.invoices.filter((i) => i.doc || i.docFailed);
   const onlyAllWork = ledger.stretches.length === 1 && !ledger.stretches[0].id;
   const hasWork = ledger.stretches.some((s) => s.days.length > 0 || s.payments.length > 0);
   // Two money ideas must not share one name. While a bill is a draft, the figures above are a
@@ -204,11 +204,14 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
             </span>
           </p>
         ) : null}
-        {/* Labor and Materials first, as two lines that add up to Work To Date (any other kind of
-            line, a change order or a credit, gets its own line between them only when there is
-            one), then what was paid and what is left. */}
+        {/* Labor and Materials first, as two lines that add up to what the bills carry (any other
+            kind of line, a change order or a credit, gets its own line between them only when
+            there is one), then what was paid and what is left. The total is the BILLS' total, not
+            work to date (that is the Progress Summary's figure, tmWorkToDate): it may hold a
+            deposit or tax and leaves out work not on a bill, stated on its own line below. So it
+            never wears the work-to-date name. */}
         <dl data-portal-money className="text-base">
-          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel="Work To Date" />
+          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel={view.running ? "Running Total" : "Billed To Date"} />
           <div className="flex items-baseline justify-between gap-3 py-0.5">
             <dt className="text-slate-700">Paid</dt>
             <dd className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(ledger.paidTotal)}</dd>
@@ -313,9 +316,9 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
 
 /**
  * One bill, closed until tapped (the money card and the stretches already say where things stand;
- * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as /i prints it,
- * drawn by the same PublicInvoiceDocument. `.portal-bill` only changes how it sits on a phone
- * (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
+ * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as the PDF and /i
+ * print it: the same InvoiceDocument, fed by the same readInvoiceDocumentProps. `.portal-bill` only
+ * changes how it sits on a phone (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
  * and each line puts its amount beside its description, so nothing hides behind a sideways scroll.
  * `groupByKind`: the same lines, under Labor and Materials headings with a subtotal each (and any
  * other kind under its own heading only when the bill has one). Same lines, same figures, same
@@ -356,9 +359,16 @@ function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boo
             </a>
           </div>
         ) : null}
-        <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
-          <PublicInvoiceDocument data={b.doc as PublicInvoiceData} groupByKind />
-        </div>
+        {b.doc ? (
+          <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
+            <InvoiceDocument {...b.doc} groupByKind />
+          </div>
+        ) : (
+          // The bill is there; its sheet could not be read just now. Say so, never an empty sheet.
+          <p className="px-4 py-4 text-sm text-slate-700">
+            This bill couldn&apos;t load just now. Please refresh the page in a moment.
+          </p>
+        )}
       </div>
     </details>
   );

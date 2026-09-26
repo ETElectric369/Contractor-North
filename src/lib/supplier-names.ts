@@ -15,14 +15,34 @@ import { supplierNameSet } from "@/lib/invoice-math";
  * and the customer's page must not go blank because a names read hiccuped.
  */
 export async function fetchSupplierNames(supabase: any, orgId?: string | null): Promise<ReadonlySet<string>> {
+  return (await readSupplierNames(supabase, orgId)).names;
+}
+
+/**
+ * The same four reads, saying whether any of them failed. THE CUSTOMER'S DOCUMENT uses this one
+ * (readInvoiceDocumentProps): a bill whose names read failed is not drawn at all, because the one
+ * line it could get wrong is a line that names a supplier to the customer. Every other caller keeps
+ * fetchSupplierNames' lenient answer.
+ */
+export async function readSupplierNames(
+  supabase: any,
+  orgId?: string | null,
+): Promise<{ names: ReadonlySet<string>; failed: boolean }> {
   const scoped = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
+  let failed = false;
   const reads = await Promise.all([
     scoped(supabase.from("bills").select("supplier")),
     scoped(supabase.from("purchase_orders").select("vendor")),
     scoped(supabase.from("supplier_accounts").select("name")),
     scoped(supabase.from("supplier_aliases").select("alias")),
-  ]).catch(() => [] as { data?: Record<string, unknown>[] | null }[]);
+  ]).catch(() => {
+    failed = true;
+    return [] as { data?: Record<string, unknown>[] | null; error?: unknown }[];
+  });
   const names: unknown[] = [];
-  for (const r of reads) for (const row of r?.data ?? []) names.push(...Object.values(row));
-  return supplierNameSet(names);
+  for (const r of reads) {
+    if (r?.error) failed = true;
+    for (const row of r?.data ?? []) names.push(...Object.values(row));
+  }
+  return { names: supplierNameSet(names), failed };
 }

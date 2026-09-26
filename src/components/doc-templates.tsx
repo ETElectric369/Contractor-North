@@ -171,6 +171,7 @@ export type DocPartyCustomer = {
   name?: string | null;
   company_name?: string | null;
   address?: string | null;
+  unit?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;

@@ -1,18 +1,11 @@
 import { notFound } from "next/navigation";
-import { pickSite, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { PrintButton } from "@/components/print-button";
-import { companyFromOrg } from "@/components/doc-letterhead";
-import { templateFor } from "@/components/doc-templates";
-import { getOrgSettings } from "@/lib/org-settings";
-import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
-import { invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { docTitle } from "@/lib/doc-title";
-import { fetchSupplierNames } from "@/lib/supplier-names";
+import { readInvoiceDocumentProps } from "@/lib/invoice-document-props";
 import type { Metadata } from "next";
-import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -27,44 +20,20 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: invoice } = await supabase
-    .from("invoices")
-    .select(`*, customers(name, company_name, email, phone, ${SITE_COLS})`)
-    .eq("id", id)
-    .maybeSingle();
-  if (!invoice) notFound();
-  const inv = invoice as Invoice & { customers: any };
-
-  const [{ data: items }, { data: payments }, supplierNames] = await Promise.all([
-    supabase.from("invoice_items").select("*").eq("invoice_id", id).order("sort_order"),
-    // What the customer's copy prints and nothing more: never `note`, which is the office's
-    // (a check number, a reminder) and which the public invoice door leaves out on purpose (0247).
-    // Oldest first, the order the statement's running balance reads in.
-    supabase.from("payments").select("id, amount, paid_at, method").eq("invoice_id", id).order("paid_at", { ascending: true }),
-    // This page IS the PDF the customer receives: a line naming a supplier prints "Materials"
-    // (audit v994 PL1). The stored row keeps its words for the office's editor.
-    fetchSupplierNames(supabase),
-  ]);
-
-  const { data: org } = await supabase.from("organizations").select("*").maybeSingle();
-  const co = companyFromOrg(org as Organization | null);
-  const template = templateFor(org as Organization | null, "invoice");
-  const settings = getOrgSettings((org as any)?.settings);
-
-  const lineItems = (items ?? []) as InvoiceItem[];
-  const pays = (payments ?? []) as Pick<Payment, "id" | "amount" | "paid_at" | "method">[];
-
-  // A deposit/progress/final invoice on a job shows a progress-report summary.
-  const drawKind = (inv as any).invoice_kind as string | undefined;
-  const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
-  const fin = isDraw ? await jobProgressFinancials(supabase, (inv as any).job_id) : null;
-
-  // A clear "Time & Material vs Fixed-Price" statement from the job's billing model.
-  const jobId = (inv as any).job_id;
-  const { data: jobRow } = jobId
-    ? await supabase.from("jobs").select(`billing_type, ${SITE_COLS}`).eq("id", jobId).maybeSingle()
-    : { data: null };
-  const billingLabel = invoiceTypeLabel((jobRow as any)?.billing_type, drawKind);
+  // THE ONE ASSEMBLY (readInvoiceDocumentProps): the /i link and the portal's bill draw the same
+  // props from the same function, so the PDF and the customer's live page cannot drift apart.
+  const read = await readInvoiceDocumentProps(supabase, id, { kind: "staff" });
+  if (read.kind === "missing") notFound();
+  // A failed read is an error page, never a bill with missing lines: the PDF route stores nothing
+  // from a page that did not answer 200.
+  if (read.kind === "error") throw new Error("This invoice couldn't be read just now.");
+  // The /i page and the portal leave a failed piece off and redraw on the next open. This page is
+  // the stored customer copy: a bill missing its Bill To, job site, payments or Progress Summary
+  // would be kept and served with nothing saying so. Refuse it (logged by the read already), so
+  // /api/pdf stores nothing and the next open renders the whole bill.
+  if (read.degraded.length > 0) {
+    throw new Error(`This invoice couldn't be read in full just now (${read.degraded.join(", ")}).`);
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
@@ -73,46 +42,7 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
         <PrintButton />
       </div>
 
-      <InvoiceDocument
-        site={pickSite([
-          { source: "job", parts: jobRow as never },
-          { source: "customer", parts: (inv as { customers?: never }).customers },
-        ])}
-        co={co}
-        template={template}
-        number={inv.invoice_number}
-        createdAt={inv.created_at}
-        dueDate={inv.due_date}
-        title={inv.title}
-        billingLabel={billingLabel}
-        description={(inv as any).description}
-        customer={inv.customers}
-        items={lineItems as any}
-        subtotal={inv.subtotal}
-        taxRate={inv.tax_rate}
-        tax={inv.tax}
-        total={inv.total}
-        amountPaid={inv.amount_paid}
-        payments={pays}
-        notes={inv.notes}
-        terms={settings.invoice_terms}
-        documentFooter={settings.document_footer}
-        docStyle={settings.doc_style}
-        supplierNames={supplierNames}
-        // Nothing to measure against, nothing to print: a progress bill on a T&M job with no
-        // quote printed "Estimate $0.00" beside its Balance Due (INV-078).
-        progress={
-          fin && fin.estimate > 0
-            ? {
-                estimate: fin.estimate,
-                workToDate: fin.workToDate,
-                received: receivedBeforeThisInvoice(fin, inv.amount_paid),
-                thisAmount: Number(inv.total ?? 0),
-                billingType: fin.billingType,
-              }
-            : null
-        }
-      />
+      <InvoiceDocument {...read.props} />
     </div>
   );
 }

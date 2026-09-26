@@ -42,7 +42,8 @@ export function ProgressInvoiceButton({
   jobId: string;
   billingType?: "fixed" | "tm";
   estimate?: number;
-  worked?: number;
+  /** null = the T&M work to date could not be read (the page logged it): shown as such, never $0. */
+  worked?: number | null;
   invoiced?: number;
   paid?: number;
   openInvoices?: OpenInvoice[];
@@ -61,7 +62,8 @@ export function ProgressInvoiceButton({
 
   const balanceDue = Math.max(0, Math.round((invoiced - paid) * 100) / 100);
   const remainingToEstimate = Math.max(0, Math.round((estimate - invoiced) * 100) / 100);
-  const unbilledWork = Math.max(0, Math.round((worked - invoiced) * 100) / 100);
+  const workKnown = worked != null;
+  const unbilledWork = Math.max(0, Math.round(((worked ?? 0) - invoiced) * 100) / 100);
 
   const [mode, setMode] = useState<"payment" | "invoice">(
     scheduleActive || (balanceDue > 0 && openInvoices.length) ? "payment" : "invoice",
@@ -127,7 +129,7 @@ export function ProgressInvoiceButton({
       : opensDraft
         ? true
         : billMode === "actuals"
-        ? worked > 0
+        ? !workKnown || worked > 0
         : newAmount > 0;
 
   function go() {
@@ -173,7 +175,7 @@ export function ProgressInvoiceButton({
   }
 
   // The money picture — adapts to fixed-price vs Time & Material.
-  const stats: { label: string; value: number; tone?: string }[] = isTM
+  const stats: { label: string; value: number | null; tone?: string }[] = isTM
     ? [
         { label: "Estimate", value: estimate },
         { label: "Work to date", value: worked, tone: "text-slate-900" },
@@ -235,11 +237,11 @@ export function ProgressInvoiceButton({
             {stats.map((s) => (
               <div key={s.label}>
                 <div className="text-[11px] text-slate-400">{s.label}</div>
-                <div className={`text-sm font-semibold ${s.tone ?? "text-slate-800"}`}>{formatCurrency(s.value)}</div>
+                <div className={`text-sm font-semibold ${s.tone ?? "text-slate-800"}`}>{s.value == null ? "Couldn't total" : formatCurrency(s.value)}</div>
               </div>
             ))}
           </div>
-          {isTM && worked > estimate && estimate > 0 && (
+          {isTM && workKnown && worked > estimate && estimate > 0 && (
             <p className="-mt-1 text-xs text-amber-600">
               Work to date is {formatCurrency(worked - estimate)} over the estimate — the final captures the agreed overage.
             </p>
@@ -364,8 +366,8 @@ export function ProgressInvoiceButton({
               {billMode === "actuals" ? (
                 <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Work to date (labor + materials)</span>
-                    <span className="font-medium text-slate-800">{formatCurrency(worked)}</span>
+                    <span className="text-slate-500">Work to date</span>
+                    <span className="font-medium text-slate-800">{workKnown ? formatCurrency(worked) : "Couldn't total"}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Invoiced so far (every line, hand-typed ones too)</span>
@@ -373,11 +375,11 @@ export function ProgressInvoiceButton({
                   </div>
                   <div className="flex justify-between border-t border-slate-200 pt-1">
                     <span className="font-medium text-slate-700">Not yet invoiced (rough)</span>
-                    <span className="font-bold text-brand">{formatCurrency(unbilledWork)}</span>
+                    <span className="font-bold text-brand">{workKnown ? formatCurrency(unbilledWork) : "—"}</span>
                   </div>
                   <p className="pt-1 text-xs text-slate-400">
-                    The {kind === "final" ? "final" : "draw"} bills the hours and bills not yet on any invoice — its total is the real figure. A
-                    hand-typed line on an earlier invoice (a referral, a discount) isn&apos;t work, so this gauge can read low or high.
+                    The {kind === "final" ? "final" : "draw"} bills the hours and bills not yet on any invoice — its total is the real figure. Work to
+                    date is every line already billed, at the price billed, plus that; a deposit counts as invoiced before it is work, so this gauge can read low.
                   </p>
                 </div>
               ) : billMode === "percent" ? (

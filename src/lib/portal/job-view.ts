@@ -4,7 +4,8 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { customerUnbilled, unbilledWorkForJob, type CustomerUnbilled } from "@/lib/unbilled-work";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
-import { fetchSupplierNames } from "@/lib/supplier-names";
+import { readSupplierNames } from "@/lib/supplier-names";
+import { newInvoiceDocCache, readInvoiceDocumentProps, type InvoiceDocRead } from "@/lib/invoice-document-props";
 import { portalPathsToSign, shapePortalJob, type PortalJobRaw, type PortalJobView } from "./job-view-shape";
 
 /**
@@ -69,10 +70,18 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
     Number(raw.billing?.milestones ?? 0),
   );
 
-  const [signed, suppliers, unbilled] = await Promise.all([
+  // THE BILLS: each one the gate returned a document for, through THE one assembly the PDF and the
+  // /i link use (readInvoiceDocumentProps), pinned to this org and this job. One cache, so the
+  // supplier names and the job's progress figures are read once for every bill on the page.
+  const cache = newInvoiceDocCache();
+  const namesP = readSupplierNames(svc, orgId);
+  cache.supplierNames.set(orgId, namesP);
+  const billIds = (raw.invoices ?? []).filter((i) => i.doc && i.id).map((i) => String(i.id));
+
+  const [signed, suppliers, unbilled, docs] = await Promise.all([
     signDocumentUrls(svc, portalPathsToSign(raw), PORTAL_FILE_TTL_SECONDS),
     // The org's supplier names, so no line on the page names one (audit v994 PL1).
-    fetchSupplierNames(svc, orgId),
+    namesP.then((r) => r.names),
     billsActuals
       ? unbilledWorkForJob(svc, raw.scope.job_id, { orgId }).then(
           (u): CustomerUnbilled | null => customerUnbilled(u),
@@ -83,7 +92,18 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
           },
         )
       : Promise.resolve<CustomerUnbilled | null>(null),
+    Promise.all(
+      billIds.map((id) =>
+        readInvoiceDocumentProps(svc, id, { kind: "service", orgId, jobId: raw.scope.job_id }, { cache }).then(
+          (r) => [id, r] as const,
+          (e): readonly [string, InvoiceDocRead] => {
+            reportError("portal.jobView.bill", e, { jobId, invoiceId: id });
+            return [id, { kind: "error" }];
+          },
+        ),
+      ),
+    ).then((pairs) => new Map<string, InvoiceDocRead>(pairs)),
   ]);
 
-  return { kind: "ok", view: shapePortalJob(raw, { signed, unbilled, suppliers, now: new Date() }) };
+  return { kind: "ok", view: shapePortalJob(raw, { signed, unbilled, suppliers, docs, now: new Date() }) };
 }

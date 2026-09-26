@@ -5,15 +5,18 @@
 import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
 import { returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
+import { lumpLineRule } from "@/lib/invoice-math";
+import { lineGroup } from "@/lib/portal/line-kind";
 
 export type JobProgressFinancials = {
   /** Sum of the job's quotes — the agreed estimate (a cap on fixed-price, a
    *  reference on Time & Material). */
   estimate: number;
-  /** Billable work to date: labor at charge rate + materials with markup. Computed
-   *  the SAME way importLabor/importCosts bill, so it reconciles to the penny - which
-   *  since 0268/0272 means a receipt counts for what it BILLS, not what it cost (a line
-   *  switched off, or the shelf's share of a split container, never reaches a customer). */
+  /** Billable work to date. TIME & MATERIAL (given `tmWork`): the work lines already on the job's
+   *  invoices at the price they were billed, plus the unbilled work priced as the next bill would
+   *  price it - see billedWorkOnInvoices. FIXED PRICE: labor at charge rate + materials with
+   *  markup, computed the SAME way importLabor/importCosts bill - which since 0268/0272 means a
+   *  receipt counts for what it BILLS, not what it cost. */
   workToDate: number;
   /** Invoices actually sent to the customer (non-void, non-draft). */
   invoiced: number;
@@ -96,6 +99,56 @@ export function livePurchaseOrders<T extends MaterialPo>(
   return out;
 }
 
+/** One invoice line as the billed-work sum reads it (the classifying columns + its dollars). */
+export type BilledWorkLine = {
+  import_source?: string | null;
+  line_kind?: string | null;
+  unit?: string | null;
+  description?: string | null;
+  line_total?: number | string | null;
+};
+
+/**
+ * THE WORK A JOB'S INVOICES ALREADY CARRY, AT THE PRICE THEY CARRY IT (Tao Zhu, J-002, 2026-09-25).
+ *
+ * INV-080's Progress Summary said "Work completed to date $18,624.14" while Tao had been billed
+ * $19,716.64 for work: the panel priced every hour ever worked at TODAY's bill rate (Erik $125,
+ * Brian $85), and the June hours had gone out on INV-00028 at $150 and $75. A billed line is the
+ * truth for what was billed. So on Time & Material, work to date is these lines plus the unbilled
+ * work (unbilledWorkForJob: what the next bill would charge). No hour or receipt is counted twice:
+ * a row an invoice line claims (source_ids / its key) is off the unbilled figure, and its line is
+ * here; an unclaimed row is there and nowhere here.
+ *
+ * WHICH LINES ARE WORK: labor, materials (returns come off as negatives), change orders, lines
+ * from the estimate, and hand lines - lineGroup, the rule the portal and /i file lines by. NOT
+ * work: a deposit's lines, a milestone line, a lump draw's own amount (lumpLineRule, the rule the
+ * "Less previous billings" credit nets) and the credit lines themselves. Those are money asked
+ * for against work, and counting them would count the same work twice.
+ *
+ * EVERY NON-VOID INVOICE, DRAFTS INCLUDED. A draft is not billed yet, but its lines are the running
+ * bill (INV-078 on J-011): the rows it claims are already off the unbilled figure, so leaving the
+ * draft out would drop that work from both halves. Its work reads at its own line prices, as the
+ * customer will see it.
+ */
+export function billedWorkOnInvoices(
+  invoices: { status: string; invoice_kind?: string | null; invoice_items?: BilledWorkLine[] | null }[] | null | undefined,
+): number {
+  let sum = 0;
+  for (const inv of invoices ?? []) {
+    if (inv.status === "void") continue;
+    const items = inv.invoice_items ?? [];
+    const isLump = lumpLineRule(inv.invoice_kind, items);
+    for (const it of items) {
+      const src = it.import_source ?? null;
+      if (src === "draw_credit" || src === "milestone" || isLump(it)) continue;
+      const g = lineGroup(it, inv.invoice_kind ?? null);
+      if (g === "credit" || g === "deposit" || g === "contract") continue;
+      sum += num(it.line_total);
+    }
+  }
+  return cents(sum);
+}
+
 /** Roll the fetched rows + already-computed billable labor into the progress
  *  financials. Materials are marked up PER ROW (cost > 0 only) exactly like
  *  importCostsIntoInvoice; invoiced excludes void/draft; collected excludes void. */
@@ -107,6 +160,10 @@ export function computeJobProgress(input: {
   pos: MaterialPo[];
   bills: MaterialBill[];
   markupPercent: number;
+  /** Time & Material only: the billed work (billedWorkOnInvoices) and the unbilled work
+   *  (unbilledWorkForJob's total). When given on a T&M job, work to date is their sum; the
+   *  labor/material roll-up below is then the fixed-price figure only. */
+  tmWork?: { billed: number; unbilled: number } | null;
 }): JobProgressFinancials {
   const billingType: "fixed" | "tm" = input.billingTypeRaw === "tm" ? "tm" : "fixed";
 
@@ -158,6 +215,9 @@ export function computeJobProgress(input: {
       return back > 0 ? s + mk(back) : s;
     }, 0);
 
-  const workToDate = cents(num(input.billableLabor) + billableMaterials);
+  const workToDate =
+    billingType === "tm" && input.tmWork
+      ? cents(num(input.tmWork.billed) + num(input.tmWork.unbilled))
+      : cents(num(input.billableLabor) + billableMaterials);
   return { estimate, workToDate, invoiced, collected, billingType };
 }

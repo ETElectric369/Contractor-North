@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobProgress, livePurchaseOrders } from "./job-progress-math";
+import { billedWorkOnInvoices, computeJobProgress, livePurchaseOrders } from "./job-progress-math";
 
 const base = {
   billingTypeRaw: "tm",
@@ -253,5 +253,96 @@ describe("livePurchaseOrders", () => {
   it("tolerates null/undefined inputs", () => {
     expect(livePurchaseOrders(null, null)).toEqual([]);
     expect(livePurchaseOrders(undefined, undefined)).toEqual([]);
+  });
+});
+
+describe("billedWorkOnInvoices — T&M work to date is what was billed, at the price billed (Tao Zhu, J-002)", () => {
+  // J-002 as it stands: the $10,000 deposit, INV-00028 itemizing June at $150 / $75 and netting the
+  // deposit, INV-080 billing September at today's rates.
+  const deposit = { status: "paid", invoice_kind: "deposit", invoice_items: [{ import_source: null, unit: "lot", description: "Deposit — Tao Zhu hot tub feed", line_total: "10000.00" }] };
+  const inv28 = {
+    status: "paid",
+    invoice_kind: "progress",
+    invoice_items: [
+      { import_source: "draw_credit", unit: "lot", description: "Less previous billings (deposit & prior draws)", line_total: "-10000.00" },
+      { import_source: "labor", unit: "hr", description: "Labor — Brian Taylor", line_total: "3712.50" },
+      { import_source: "labor", unit: "hr", description: "Labor — Erik Taylor", line_total: "7575.00" },
+      { import_source: "costs", unit: "lot", description: "Materials — The Home Depot", line_total: "5239.80" },
+    ],
+  };
+  const inv80 = {
+    status: "sent",
+    invoice_kind: "final",
+    invoice_items: [
+      { import_source: "labor", unit: "hr", description: "Labor - Erik Taylor", line_total: 1950 },
+      { import_source: "labor", unit: "hr", description: "Labor - Brian Taylor", line_total: 1105 },
+      { import_source: "costs", unit: "ea", description: "Box 1-Gang", line_total: 134.34 },
+    ],
+  };
+
+  it("J-002: 16,527.30 + 3,189.34 = 19,716.64 - never the deposit, never the credit that nets it", () => {
+    expect(billedWorkOnInvoices([deposit, inv28, inv80])).toBe(19716.64);
+  });
+
+  it("a void bill is nothing; a DRAFT's lines are the running bill and count at their own prices (INV-078)", () => {
+    expect(billedWorkOnInvoices([{ ...inv80, status: "void" }])).toBe(0);
+    expect(billedWorkOnInvoices([{ ...inv80, status: "draft" }])).toBe(3189.34);
+  });
+
+  it("a lump draw's own amount and a milestone line are money asked for against work, not work", () => {
+    const pctDraw = { status: "sent", invoice_kind: "progress", invoice_items: [{ import_source: null, unit: "lot", description: "Progress payment — 50% of estimate", line_total: 8662.5 }] };
+    const milestone = { status: "sent", invoice_kind: "progress", invoice_items: [{ import_source: "milestone", description: "Rough-in complete", line_total: 4000 }] };
+    expect(billedWorkOnInvoices([pctDraw, milestone])).toBe(0);
+  });
+
+  it("hand lines, change orders, estimate lines and a returned part are what was billed; a typed credit is not", () => {
+    const std = {
+      status: "paid",
+      invoice_kind: "standard",
+      invoice_items: [
+        { import_source: null, unit: "ea", description: "Emergency service call", line_total: 250 },
+        { import_source: "change_orders", description: "CO-1 add a circuit", line_total: 400 },
+        { import_source: "quote", description: "Panel swap", line_total: 1200 },
+        { import_source: "costs", description: "Return — LED housings", line_total: -51.58 },
+        { import_source: null, description: "Less previous billings", line_total: -500 },
+        { import_source: null, line_kind: "credit", description: "Goodwill", line_total: -100 },
+      ],
+    };
+    expect(billedWorkOnInvoices([std])).toBe(1798.42);
+  });
+
+  it("a hand line typed on a draw that itemizes is an extra the customer bought: work", () => {
+    const draw = {
+      status: "sent",
+      invoice_kind: "progress",
+      invoice_items: [
+        { import_source: "labor", unit: "hr", description: "Labor - Erik Taylor", line_total: 500 },
+        { import_source: null, unit: "hr", description: "Lift rental", line_total: 120 },
+      ],
+    };
+    expect(billedWorkOnInvoices([draw])).toBe(620);
+  });
+
+  it("tolerates nothing to read", () => {
+    expect(billedWorkOnInvoices(null)).toBe(0);
+    expect(billedWorkOnInvoices([{ status: "sent", invoice_kind: "standard", invoice_items: null }])).toBe(0);
+  });
+});
+
+describe("computeJobProgress — T&M work to date = billed work + unbilled work", () => {
+  it("J-002: the billed lines at their prices, not every hour re-priced at today's rate", () => {
+    // Every hour at today's $125 / $85 is what read 18,624.14; the billed lines say 19,716.64.
+    const r = computeJobProgress({ ...base, billableLabor: 99999, tmWork: { billed: 19716.64, unbilled: 0 } });
+    expect(r.workToDate).toBe(19716.64);
+  });
+
+  it("adds the unbilled half, and a pending return credit comes off it", () => {
+    expect(computeJobProgress({ ...base, tmWork: { billed: 1000, unbilled: 250.5 } }).workToDate).toBe(1250.5);
+    expect(computeJobProgress({ ...base, tmWork: { billed: 1000, unbilled: -51.58 } }).workToDate).toBe(948.42);
+  });
+
+  it("fixed price keeps its contract roll-up whatever is passed", () => {
+    const r = computeJobProgress({ ...base, billingTypeRaw: "fixed", tmWork: { billed: 1, unbilled: 1 } });
+    expect(r.workToDate).toBeCloseTo(11327.87, 2);
   });
 });
