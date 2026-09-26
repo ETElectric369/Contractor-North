@@ -303,18 +303,6 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: "list_bug_reports",
-    description:
-      "List the bug reports / feature requests this company has filed (note, page, status, date, who filed it). Use when the user asks you to review, summarize, cluster, or prioritize their reported bugs — 'what are we complaining about most', 'what's still open'. Read-only and limited to this company by the database.",
-    input_schema: {
-      type: "object",
-      properties: {
-        status: { type: "string", description: "Optional status filter (e.g. open, fixed)." },
-        limit: { type: "integer", description: "Max rows (default 30, max 40)." },
-      },
-    },
-  },
-  {
     name: "get_nort_review",
     description:
       "Read your latest SELF-REVIEW — the digest you generate nightly by clustering the crew's recent Nort conversations + their bug reports into 'what to build/fix next' (a summary + ranked findings: gaps, bugs, recurring pain, wins). Use this when the owner asks what the crew is struggling with, what you should build or fix next, or 'what did you learn / what's the pulse'. Read-only, this company only.",
@@ -1773,31 +1761,6 @@ export async function runDataTool(
         });
       }
 
-      case "list_bug_reports": {
-        const lim = clampLimit(input.limit, 30);
-        let q = supabase
-          .from("bug_reports")
-          .select("id, note, page, status, created_at, profiles:reported_by(full_name)")
-          .order("created_at", { ascending: false })
-          .limit(lim);
-        const st = sanitize(input.status);
-        if (st) q = q.eq("status", st);
-        // RLS already restricts bug_reports to this org AND to staff — a non-staff caller
-        // simply gets zero rows, so no extra guard is needed here.
-        const { data, error } = await q;
-        if (error) throw error;
-        return JSON.stringify({
-          count: data?.length ?? 0,
-          bug_reports: (data ?? []).map((b: any) => ({
-            id: b.id, // pass to bug.resolve
-            note: b.note,
-            page: b.page,
-            status: b.status ?? "open",
-            filed: b.created_at,
-            reporter: b.profiles?.full_name ?? null,
-          })),
-        });
-      }
 
       case "get_nort_review": {
         // The latest self-review row. RLS (nort_reviews_read) restricts to this org + staff, so a

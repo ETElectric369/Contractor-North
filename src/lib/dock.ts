@@ -32,7 +32,6 @@ import {
   IdCard,
   ScrollText,
   Activity,
-  Bug,
   Scale,
   UserCog,
   Pause,
@@ -238,9 +237,10 @@ export const DOCK: DockSection[] = [
       // /settings either — Settings is its own territory now, owned by no dock section, so
       // its OWN side-tab (settings-subnav) drives its clusters instead of Office's list
       // cluttering the settings page (cn-v331).
-      { id: "o-diag-h", label: "Diagnostics", icon: ScrollText, header: true, staffOnly: true },
+      // Bug Watch left the company's dock (Wave 0): bug reports are North's business, reached from
+      // the avatar menu by platform admins only. What stays is the company's own history.
+      { id: "o-diag-h", label: "History", icon: ScrollText, header: true, staffOnly: true },
       { id: "o-activity", label: "Activity", icon: Activity, href: "/activity", staffOnly: true },
-      { id: "o-bugs", label: "Bug Watch", icon: Bug, href: "/bugs", staffOnly: true },
       { id: "o-audit", label: "Activity Audit", icon: ScrollText, href: "/audit", staffOnly: true },
     ],
   },

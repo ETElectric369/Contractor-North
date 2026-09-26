@@ -277,6 +277,12 @@ describe("a tech's dock has no dead doors", () => {
     }
   });
 
+  it("carries no bug door: Bug Watch is North's, in the avatar menu for platform admins", () => {
+    const all = DOCK.flatMap((s) => [s, ...s.children]);
+    expect(all.some((n) => n.href && basePath(n.href) === "/bugs")).toBe(false);
+    expect(all.some((n) => n.label === "Diagnostics")).toBe(false);
+  });
+
   it("shows a tech only My Day and Tasks under Today", () => {
     const today = DOCK.find((s) => s.key === "today")!;
     expect(today.children.filter((c) => !c.staffOnly).map((c) => c.label)).toEqual(["My Day", "Tasks"]);

@@ -24,6 +24,7 @@ export function Topbar({
   branding,
   setup,
   onboarded,
+  platformAdmin = false,
 }: {
   profile: Profile | null;
   lang?: string;
@@ -33,6 +34,8 @@ export function Topbar({
   setup?: Answers;
   /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
   onboarded?: boolean;
+  /** North's own team (is_platform_admin, 0176): the avatar menu adds Bug Watch. */
+  platformAdmin?: boolean;
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
@@ -100,7 +103,7 @@ export function Topbar({
         <span data-tour="bell" className="inline-flex"><NotificationBell /></span>
         {/* The account seek door — always visible, far right: Sign out, language,
             estimate QR. See account-menu.tsx for THE MODAL RULE it hosts. */}
-        <span data-tour="account" className="inline-flex"><AccountMenu profile={profile} lang={lang} /></span>
+        <span data-tour="account" className="inline-flex"><AccountMenu profile={profile} lang={lang} platformAdmin={platformAdmin} /></span>
       </div>
     </header>
   );

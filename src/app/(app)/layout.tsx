@@ -15,6 +15,7 @@ import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { BugReporter } from "@/components/bug-reporter";
+import { isPlatformAdmin } from "@/lib/platform-admin";
 import { NativePushBridge } from "@/components/native-push-bridge";
 import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
 import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
@@ -96,7 +97,7 @@ export default async function AppLayout({
   // geofence read and hands the action-items count its timezone. So: {org, lead badge} together
   // here, {open entry, action items} together below. Each keeps its own try/catch — one failing
   // read still degrades on its own and never takes the shell down.
-  const [org, freshLeads] = await Promise.all([
+  const [org, freshLeads, platformAdmin] = await Promise.all([
     (async (): Promise<OrgLite | null> => {
       try {
         const { data } = await supabase
@@ -130,6 +131,9 @@ export default async function AppLayout({
         return 0;
       }
     })(),
+    // North's own team (0176): Bug Watch in the avatar menu, and triage inside Report A Problem.
+    // In this first stage, beside the org read, so it costs no extra hop; false on any failure.
+    isPlatformAdmin(supabase),
   ]);
 
   const settings = getOrgSettings((org as any)?.settings);
@@ -260,7 +264,7 @@ export default async function AppLayout({
     >
       <Dock branding={branding} role={profile.role} badges={badges} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={!!(profile as any).onboarded_at} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={!!(profile as any).onboarded_at} platformAdmin={platformAdmin} />
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${
@@ -290,7 +294,8 @@ export default async function AppLayout({
           intro card (Apple 3.1–3.3). Both render nothing and no-op on the web. */}
       <TapToPayWarmup />
       <TapToPayAwareness />
-      {isStaff && <BugReporter orgId={profile.org_id} />}
+      {/* Report A Problem is everyone's (Wave 0): a tech hits the bugs first. */}
+      <BugReporter orgId={profile.org_id} platformAdmin={platformAdmin} />
       {openEntry && (
         <GeofenceMonitor
           // A Switch Job closes the running entry and opens the next one (0288): a new entry is a
