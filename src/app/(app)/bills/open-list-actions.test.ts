@@ -194,8 +194,8 @@ describe("Apply", () => {
     expect(added.find((r) => r.invoice_number === "8802-1108648")).toMatchObject({ kind: "credit_memo", job_name_raw: "13897 HERRINGBONE", open_balance: -51.58, discount_amount: -0.47 });
     expect(openSum()).toBe(3304.73);
     // THE PAY CARD FOLLOWS: it reads these same papers. CED's Total Balance ($3,273.94) takes off
-    // every discount on the list, including -$0.47 on credit memo 8802-1108648; the app's discount
-    // rule never lets a negative discount add to a cheque, so its figure is 47 cents under CED's.
+    // every discount on the list, including -$0.47 on credit memo 8802-1108648, and so does the app:
+    // the supplier is the truth about its own balance (documentDiscount).
     const pay = supplierNetIfPaidBy(
       db.supplier_invoices
         .filter((r) => r.org_id === "org-1" && r.supplier_account_id === "acct-1")
@@ -206,7 +206,7 @@ describe("Apply", () => {
       "2026-10-10",
       "2026-09-26",
     );
-    expect(pay).toMatchObject({ gross: 3304.73, discount: 31.26, net: 3273.47 });
+    expect(pay).toMatchObject({ gross: 3304.73, discount: 30.79, net: 3273.94 });
     // Another company's paper under the same number is exactly as it was.
     expect(db.supplier_invoices.find((r) => r.id === "other-1")).toMatchObject({ closed: false, open_balance: 5 });
 

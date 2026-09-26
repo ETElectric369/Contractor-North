@@ -40,6 +40,7 @@ import {
   reversedInvoiceIds,
   reversedPurchaseIds,
   creditArrivedFor,
+  documentDiscount,
 } from "./supplier-balance";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
@@ -275,8 +276,10 @@ export interface DiscountReading {
  * it was taken or it was not, and there is nothing left to decide - so it never reads "live".
  */
 export function discountReading(inv: SupplierInvoiceRow, today: string): DiscountReading {
-  const amount = r2(Number(inv.discountAmount) || 0);
-  if (!(amount > 0.005)) return { state: "none", amount: 0, by: inv.discountBy ?? null, daysLeft: null };
+  // documentDiscount: a credit memo's negative discount is the supplier's too (it comes back off
+  // the credit on the same day), so it reads live and lands in the same sum the supplier makes.
+  const amount = documentDiscount(inv);
+  if (!(Math.abs(amount) > 0.005)) return { state: "none", amount: 0, by: inv.discountBy ?? null, daysLeft: null };
   const by = inv.discountBy ?? null;
   const daysLeft = daysBetweenYmd(today, by);
   // No date on it means nothing can be said about a deadline, and a deadline this app invented
@@ -326,7 +329,8 @@ export function claimableDiscounts(invoices: SupplierInvoiceRow[], today: string
     if (reading.state !== "live") continue;
     rows.push({ invoice, reading });
     total = r2(total + reading.amount);
-    if (reading.by && (!nextDeadline || reading.by < nextDeadline)) nextDeadline = reading.by;
+    // Only a real discount names the deadline: a memo's take-back alone is no reason to pay by a day.
+    if (reading.amount > 0 && reading.by && (!nextDeadline || reading.by < nextDeadline)) nextDeadline = reading.by;
   }
   rows.sort(
     (a, b) =>
@@ -363,7 +367,8 @@ export function missedDiscounts(invoices: SupplierInvoiceRow[], today: string): 
   for (const invoice of invoices ?? []) {
     if (reversed.has(String((invoice as { id?: unknown })?.id ?? ""))) continue;
     const reading = discountReading(invoice, today);
-    if (reading.state !== "expired") continue;
+    // A memo's take-back that ran out is not discount he lost.
+    if (reading.state !== "expired" || !(reading.amount > 0)) continue;
     rows.push({ invoice, reading });
     total = r2(total + reading.amount);
   }

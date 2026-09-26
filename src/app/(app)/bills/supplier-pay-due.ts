@@ -261,7 +261,8 @@ export function supplierPayDue(input: {
       supplier: shortSupplierName(a.name),
       owed,
       saves: claim.dueOnNext,
-      invoices: claim.rows.filter((r) => r.reading.by === payBy).length,
+      // Invoices only: a credit memo's take-back is in `saves` (the supplier's figure) but is not an invoice.
+      invoices: claim.rows.filter((r) => r.reading.by === payBy && r.reading.amount > 0).length,
       sent,
       payBy,
       daysLeft,
