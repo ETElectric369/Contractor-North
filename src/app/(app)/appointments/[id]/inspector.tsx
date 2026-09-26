@@ -157,8 +157,9 @@ export function Inspector({
   initialPhotos: CapturePhoto[];
   orgId: string;
   userId: string | null;
-  /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. */
-  estimateHref: string;
+  /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. null =
+   *  Estimates is switched off (0352), and the button isn't drawn. */
+  estimateHref: string | null;
   /** appointments.location — the address, which is the fact that names everything downstream. */
   initialLocation: string;
   /** What this visit is already connected to — a lead, a customer or a job. */
@@ -1463,9 +1464,11 @@ export function Inspector({
           >
             {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
           </Button>
-          <Link href={estimateHref}>
-            <Button type="button">Start the estimate</Button>
-          </Link>
+          {estimateHref && (
+            <Link href={estimateHref}>
+              <Button type="button">Start the estimate</Button>
+            </Link>
+          )}
         </div>
       </div>
 

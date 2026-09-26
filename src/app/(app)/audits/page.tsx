@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { AuditsManager } from "./audits-manager";
 import { AUDIT_TYPES } from "@/lib/compliance-types";
 
@@ -20,6 +21,7 @@ export default async function AuditsPage() {
         title="Audits"
         description="Safety, OSHA, insurance & financial audits — findings, follow-up dates, nothing missed."
       />
+      <FeatureOffLineFor feature="licenses" />
       <AuditsManager items={(items ?? []) as any} />
     </div>
   );

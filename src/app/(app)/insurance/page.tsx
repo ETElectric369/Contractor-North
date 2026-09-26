@@ -1,6 +1,7 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { InsuranceManager } from "./insurance-manager";
 import { INSURANCE_FILTER } from "@/lib/compliance-types";
 
@@ -39,6 +40,7 @@ export default async function InsurancePage() {
         title="Insurance"
         description="Policies & coverage — workers' comp, general liability, auto — with renewal alerts so nothing lapses."
       />
+      <FeatureOffLineFor feature="licenses" />
       <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} />
     </div>
   );

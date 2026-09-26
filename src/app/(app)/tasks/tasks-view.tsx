@@ -114,6 +114,7 @@ export function NewTaskBox({
   defaultCategory,
   todayStr,
   categories,
+  extras = true,
 }: {
   jobs: JobOption[];
   people: Person[];
@@ -122,6 +123,8 @@ export function NewTaskBox({
   todayStr?: string;
   /** Existing category values for the autocomplete datalist. */
   categories?: string[];
+  /** The To-Do Extras switch (0352): off, no priority picker (a new task is priority 0, as today). */
+  extras?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -234,11 +237,13 @@ export function NewTaskBox({
               </Select>
             )}
             <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
-            <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
-              {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </Select>
+            {extras && (
+              <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
+                {PRIORITIES.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </Select>
+            )}
           </div>
         )}
       </div>
@@ -255,6 +260,7 @@ function TaskEditModal({
   categories,
   open,
   onClose,
+  extras = true,
 }: {
   t: ViewTask;
   jobs: JobOption[];
@@ -264,6 +270,8 @@ function TaskEditModal({
   categories?: string[];
   open: boolean;
   onClose: () => void;
+  /** To-Do Extras (0352): off, no Priority field; the task keeps the priority it has. */
+  extras?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -345,14 +353,16 @@ function TaskEditModal({
               )}
             </MoveToDay>
           </div>
-          <div>
-            <Label htmlFor="te-pri">Priority</Label>
-            <Select id="te-pri" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
-              {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </Select>
-          </div>
+          {extras && (
+            <div>
+              <Label htmlFor="te-pri">Priority</Label>
+              <Select id="te-pri" value={priority} onChange={(e) => setPriority(Number(e.target.value))}>
+                {PRIORITIES.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </Select>
+            </div>
+          )}
         </div>
         <div>
           <Label htmlFor="te-person">Assigned to</Label>
@@ -386,6 +396,7 @@ export function TaskRow({
   showCategory = false,
   overdue = false,
   todayStr,
+  extras = true,
 }: {
   t: ViewTask;
   jobs: JobOption[];
@@ -398,6 +409,8 @@ export function TaskRow({
   overdue?: boolean;
   /** Org-local today — enables the "Do today" pin (focus_date) affordance. */
   todayStr?: string;
+  /** To-Do Extras (0352): off, no Add Subtask; subtasks already there stay listed and tickable. */
+  extras?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -504,9 +517,11 @@ export function TaskRow({
             <Pin className="h-4 w-4" fill={pinnedToday ? "currentColor" : "none"} />
           </button>
         )}
-        <button onClick={() => setAdding((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-brand" title="Add subtask">
-          <Plus className="h-4 w-4" />
-        </button>
+        {extras && (
+          <button onClick={() => setAdding((v) => !v)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-brand" title="Add subtask">
+            <Plus className="h-4 w-4" />
+          </button>
+        )}
         <button onClick={() => setEditing(true)} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Edit">
           <Pencil className="h-4 w-4" />
         </button>
@@ -558,7 +573,7 @@ export function TaskRow({
       )}
 
       {editing && (
-        <TaskEditModal t={t} jobs={jobs} people={people} category={category} categories={categories} open={editing} onClose={() => setEditing(false)} />
+        <TaskEditModal t={t} jobs={jobs} people={people} category={category} categories={categories} open={editing} onClose={() => setEditing(false)} extras={extras} />
       )}
     </li>
   );
@@ -637,6 +652,7 @@ export function TasksView({
   todayStr,
   doneTotal = 0,
   showingAllDone = false,
+  extras = true,
 }: {
   tasks: ViewTask[];
   jobs: JobOption[];
@@ -647,6 +663,8 @@ export function TasksView({
   todayStr: string;
   doneTotal?: number;
   showingAllDone?: boolean;
+  /** The To-Do Extras switch (0352): priority and subtask doors. Omitted = on (as before). */
+  extras?: boolean;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -698,6 +716,7 @@ export function TasksView({
       showCategory={!category && !byCategory}
       overdue={!!t.due_date && t.due_date < todayStr}
       todayStr={todayStr}
+      extras={extras}
     />
   );
 
@@ -734,7 +753,7 @@ export function TasksView({
 
   return (
     <div>
-      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} categories={categories} />
+      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} categories={categories} extras={extras} />
       {/* View toggle — link pills (the app's filter idiom), URL-driven so the
           grouping survives reloads and deep links. Hidden on /tasks/[category]. */}
       {!category && (

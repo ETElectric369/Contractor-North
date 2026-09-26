@@ -3,6 +3,8 @@ import { PageHeader } from "@/components/page-header";
 import { TasksView } from "../tasks-view";
 import { getTasksPageData } from "../query";
 import type { TaskCategory } from "../actions";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,10 @@ export default async function CategoryTasksPage({
   if (!LABELS[category]) notFound();
 
   const showAllDone = sp?.done === "all";
-  const { todayStr, tasks, doneTotal, jobs, people, categories } = await getTasksPageData(category, showAllDone);
+  const [{ todayStr, tasks, doneTotal, jobs, people, categories }, sw] = await Promise.all([
+    getTasksPageData(category, showAllDone),
+    viewerSwitches(),
+  ]);
 
   return (
     <div>
@@ -40,6 +45,7 @@ export default async function CategoryTasksPage({
         todayStr={todayStr}
         doneTotal={doneTotal}
         showingAllDone={showAllDone}
+        extras={featureOn(sw.features, "todo_extras")}
       />
     </div>
   );

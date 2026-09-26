@@ -13,6 +13,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { AddBusinessCostButton } from "./add-business-cost";
 import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import type { ReceiptForBilling } from "./receipt-billing-card";
@@ -277,6 +278,8 @@ export default async function BillsPage({
     supabase.from("inventory_items").select("id, name").limit(5000),
   ]);
   const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+  // The switches and who is looking (0352), for the Purchase Orders tab: one cached read.
+  const switches = await viewerSwitches();
 
   // Sort each bill's embedded line items by sort_order for display.
   const billsWithLines = (bills ?? []).map((b: any) => ({
@@ -1235,6 +1238,7 @@ export default async function BillsPage({
         bills={ledgerBills as any}
         docs={docs as any}
         readFailed={!!billsErr}
+        switches={switches}
       />
 
       {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line

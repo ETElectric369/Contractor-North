@@ -14,6 +14,7 @@ import { WoEditButton } from "./wo-edit-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { workOrderSectionTree } from "@/lib/nav-tree";
 import { deleteWorkOrder } from "../actions";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,7 @@ export default async function WorkOrderDetailPage({
   return (
     <div className="mx-auto max-w-3xl">
       <BackLink fallback="/work-orders" fallbackLabel="Back to Work Orders" />
+      <FeatureOffLineFor feature="estimates" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

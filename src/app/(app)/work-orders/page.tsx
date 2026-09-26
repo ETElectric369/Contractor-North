@@ -8,6 +8,9 @@ import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/utils";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { NewWorkOrderButton } from "./new-wo-button";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +22,7 @@ export default async function WorkOrdersPage({
   const { job } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: wos }, { data: jobs }, { data: techs }] = await Promise.all([
+  const [{ data: wos }, { data: jobs }, { data: techs }, sw] = await Promise.all([
     supabase
       .from("work_orders")
       .select("*, jobs(job_number, name), customers(name)")
@@ -30,7 +33,10 @@ export default async function WorkOrdersPage({
       .order("created_at", { ascending: false })
       .limit(100),
     listActiveTechs(supabase),
+    // The switch board (0352): work orders are part of Estimates.
+    viewerSwitches(),
   ]);
+  const estimatesOn = featureOn(sw.features, "estimates");
 
   const workOrders = wos ?? [];
 
@@ -40,18 +46,21 @@ export default async function WorkOrdersPage({
         title="Work orders"
         description="Field work orders, scopes, and assignments."
       >
-        <NewWorkOrderButton
-          jobs={jobs ?? []}
-          techs={techs ?? []}
-          defaultJob={job}
-        />
+        {estimatesOn && (
+          <NewWorkOrderButton
+            jobs={jobs ?? []}
+            techs={techs ?? []}
+            defaultJob={job}
+          />
+        )}
       </PageHeader>
+      <FeatureOffLine feature="estimates" features={sw.features} isOwner={sw.isOwner} />
 
       {workOrders.length === 0 ? (
         <EmptyState
           icon={ClipboardList}
           title="No work orders yet"
-          description="Create a work order with the button above to dispatch field work."
+          description={estimatesOn ? "Create a work order with the button above to dispatch field work." : "Work orders are part of Estimates, which is off."}
         />
       ) : (
         <Card className="overflow-hidden">

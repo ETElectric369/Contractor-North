@@ -28,6 +28,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +128,13 @@ export default async function AppointmentCapturePage({
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
+  // THE SWITCH BOARD (0352). The Inspector below is the walk-through (Leads & Walk-Throughs): off, it
+  // shows only on a visit that already captured something, never as a blank sheet to start.
+  const estimatesOn = featureOn(orgSettings.features, "estimates");
+  const showInspector =
+    featureOn(orgSettings.features, "leads") ||
+    hasCaptureData((appt as { capture?: unknown }).capture) ||
+    Object.keys((inspection?.inspection_answers ?? {}) as Record<string, unknown>).length > 0;
   const a = appt as any;
   const capture = (a.capture ?? {}) as {
     notes?: string;
@@ -417,46 +426,53 @@ export default async function AppointmentCapturePage({
           Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
           still here, reordered so the ask comes first and everything captured reads as one list. */}
       {/* The walk-through and the estimate, for the visits that need them. Under their own heading
-          so the page reads: start the work (above), or walk it through and price it (here). */}
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Walk Through Or Estimate</h2>
-      <Inspector
-        appointmentId={a.id}
-        orgId={a.org_id}
-        userId={viewerId}
-        templates={sheets ?? []}
-        priceBook={(priceBook ?? []).map((p) => ({
-          code: p.code,
-          description: p.description ?? "",
-          unit: p.unit ?? "EA",
-          price: Number(p.buy_price ?? 0),
-        }))}
-        initialTemplateId={inspection?.inspection_template_id ?? null}
-        initialAnswers={(inspection?.inspection_answers ?? {}) as never}
-        initialCapture={capture}
-        initialPhotos={photos}
-        initialLocation={a.location ?? ""}
-        linked={
-          a.inquiry_id && a.inquiries?.name
-            ? { kind: "lead" as const, name: a.inquiries.name }
-            : a.customer_id && a.customers?.name
-              ? { kind: "customer" as const, name: a.customers.name }
-              : a.job_id
-                ? { kind: "job" as const, name: "This job" }
+          so the page reads: start the work (above), or walk it through and price it (here).
+          THE SWITCH BOARD (0352): the walk-through is Leads', so with Leads off it shows only on a
+          visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
+      {showInspector && (
+        <>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
+          <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
+          <Inspector
+            appointmentId={a.id}
+            orgId={a.org_id}
+            userId={viewerId}
+            templates={sheets ?? []}
+            priceBook={(priceBook ?? []).map((p) => ({
+              code: p.code,
+              description: p.description ?? "",
+              unit: p.unit ?? "EA",
+              price: Number(p.buy_price ?? 0),
+            }))}
+            initialTemplateId={inspection?.inspection_template_id ?? null}
+            initialAnswers={(inspection?.inspection_answers ?? {}) as never}
+            initialCapture={capture}
+            initialPhotos={photos}
+            initialLocation={a.location ?? ""}
+            linked={
+              a.inquiry_id && a.inquiries?.name
+                ? { kind: "lead" as const, name: a.inquiries.name }
+                : a.customer_id && a.customers?.name
+                  ? { kind: "customer" as const, name: a.customers.name }
+                  : a.job_id
+                    ? { kind: "job" as const, name: "This job" }
+                    : null
+            }
+            estimateHref={estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            // The linked lead's preliminary plan report — parsed server-side so the card is in the
+            // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
+            // the pending/failed lifecycle.
+            planBrief={
+              a.inquiry_id
+                ? (() => {
+                    const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
+                    return b?.status === "ready" ? b : null;
+                  })()
                 : null
-        }
-        estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
-        // The linked lead's preliminary plan report — parsed server-side so the card is in the
-        // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
-        // the pending/failed lifecycle.
-        planBrief={
-          a.inquiry_id
-            ? (() => {
-                const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
-                return b?.status === "ready" ? b : null;
-              })()
-            : null
-        }
-      />
+            }
+          />
+        </>
+      )}
     </div>
   );
 }

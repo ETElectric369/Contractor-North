@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { TasksView } from "./tasks-view";
 import { getTasksPageData } from "./query";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +21,10 @@ export default async function TasksPage({
   // matches the door's non-office count. Both keep the door number honest.
   const mine = sp?.mine === "1";
   const noOffice = sp?.else === "1";
-  const { todayStr, tasks, doneTotal, jobs, people, categories } = await getTasksPageData(null, showAllDone, { mine, noOffice });
+  const [{ todayStr, tasks, doneTotal, jobs, people, categories }, sw] = await Promise.all([
+    getTasksPageData(null, showAllDone, { mine, noOffice }),
+    viewerSwitches(),
+  ]);
 
   // The standard header action (every list page's idiom) — it deep-links to the
   // existing quick-add box via ?new=1 (focus + expand), preserving live filters.
@@ -49,6 +54,7 @@ export default async function TasksPage({
         todayStr={todayStr}
         doneTotal={doneTotal}
         showingAllDone={showAllDone}
+        extras={featureOn(sw.features, "todo_extras")}
       />
     </div>
   );

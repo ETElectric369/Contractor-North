@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import { PoDetail, EditPoButton } from "./po-detail";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { purchaseOrderSectionTree } from "@/lib/nav-tree";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { deletePurchaseOrder } from "../actions";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
 
@@ -66,6 +67,7 @@ export default async function PurchaseOrderPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/bills?tab=po" fallbackLabel="Back to Bills" />
+      <FeatureOffLineFor feature="purchase_orders" />
 
       <div className="mb-6 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">

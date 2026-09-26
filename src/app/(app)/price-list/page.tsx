@@ -13,6 +13,8 @@ import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
 import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
 import type { ExistingVendor } from "./vendor-import-math";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 // Look Up and Read With Nort are server actions on this page that call the model (a lookup is up
@@ -97,6 +99,9 @@ export default async function PriceListPage() {
     .limit(500);
   const measurements = measurementOptions(((formRows ?? []) as { schema?: unknown; playbook?: unknown }[]).map((f) => playbookForForm(f)));
   const defaultMarkupPct = getOrgSettings((org as { settings?: unknown } | null)?.settings).default_markup_pct;
+  // KITS OFF (the switch board, 0352): the Kits tab loses its chip; ?tab=kits still opens it, under
+  // the Off line. Only the door: every kit is read and priced exactly as before (rule i).
+  const kitsOn = featureOn(getOrgSettings((org as { settings?: unknown } | null)?.settings).features, "kits");
 
   const allItems = ((itemsRes.data ?? []) as unknown) as PriceItem[];
   const activeItems = allItems.filter((i) => !i.archived);
@@ -245,7 +250,13 @@ export default async function PriceListPage() {
             id: "kits",
             label: "Kits",
             count: kits.length,
-            content: <KitsManager kits={kits} priceItems={activeItems} defaultMarkupPct={defaultMarkupPct} measurements={measurements} />,
+            offStrip: !kitsOn,
+            content: (
+              <>
+                <FeatureOffLineFor feature="kits" />
+                <KitsManager kits={kits} priceItems={activeItems} defaultMarkupPct={defaultMarkupPct} measurements={measurements} />
+              </>
+            ),
           },
           {
             id: "paid",

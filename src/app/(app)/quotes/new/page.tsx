@@ -16,6 +16,8 @@ import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -358,9 +360,14 @@ export default async function NewQuotePage({
   // breakdown, so they're hidden from the estimate picker here. Research orgs (ET Electric)
   // still see every kit — nothing changes for them.
   const catalogMode = settings.estimating_mode === "catalog";
-  const estimateKits = catalogMode
-    ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
-    : (kits ?? []);
+  // KITS OFF (the switch board, 0352) hides the kit chips, a door. Never in catalog mode: there the
+  // kits ARE how an estimate is priced (rule i), so nothing a catalog estimate prices from is gated.
+  const kitDoors = featureOn(settings.features, "kits") || catalogMode;
+  const estimateKits = !kitDoors
+    ? []
+    : catalogMode
+      ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
+      : (kits ?? []);
   // Deck generator rows (catalog orgs) — the deck price codes as RAW {code, buy, markup_pct}
   // rows. The office builder prices them client-side through THE markup rule (effectiveMarkupPct
   // with the selected customer's level + org default), so generator lines re-price when the
@@ -385,8 +392,9 @@ export default async function NewQuotePage({
         {/* Onsite with no capture yet? Start the inspection from where you'll end up — one
             tap creates it (threaded to the lead when this builder came from one) and lands
             on the capture page; Start estimate there routes back here prefilled. */}
-        {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
+        {!capture && featureOn(settings.features, "leads") && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
+      <FeatureOffLineFor feature="estimates" />
       {/* NOTHING SILENT, AND THE CONSEQUENCE NAMED. The price book and its makers arrive in one
           read, so a failure hands the picker below an empty list — which on screen reads as "you
           have no price list" rather than "this did not load". Worse, if the embed alone were ever
