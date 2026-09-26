@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { ALL_ON, featuresFromOffKey, type FeatureMap } from "@/lib/features";
+import { ALL_ON, offFeatureKey, featuresFromOffKey, type FeatureMap } from "@/lib/features";
 import { AFFORDANCES, KIND_STREAM, type ActionKind } from "./types";
 import { FEEDER_SWITCHES, LIVE_OBLIGATIONS, feederOn, inquiryActionItem } from "./switches";
 
@@ -100,5 +100,12 @@ describe("the wiring (structural)", () => {
     expect(query).toContain('isStaff && feederOn("inspection_writeup", features)');
     expect(query).toContain("inquiryActionItem(q, todayStr, leadsOn)");
     expect(query).not.toMatch(/feederOn\("inquiry"/);
+  });
+
+  it("the shell's badge and My Day pass the SAME string, so they share one fan-out", () => {
+    expect(src("src/app/(app)/layout.tsx")).toContain("off: offFeatureKey(features)");
+    expect(src("src/app/(app)/planner/page.tsx")).toContain("off: offFeatureKey(features)");
+    // and it is a value comparison: two maps with the same switches give the same key.
+    expect(offFeatureKey(off("leads", "nort"))).toBe(offFeatureKey({ ...off("nort"), leads: false }));
   });
 });
