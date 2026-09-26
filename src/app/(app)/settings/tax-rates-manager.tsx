@@ -227,7 +227,7 @@ export function TaxRatesManager({
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Pricing levels</h4>
         <p className="mb-3 text-sm text-slate-500">
-          Customer tiers — each level's markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder), and an optional labor rate sets the estimator's $/hr for customers on that level. Assign a level on the customer's page.
+          Customer tiers — each level&apos;s markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder), and an optional labor rate sets the estimator&apos;s $/hr for customers on that level. Assign a level on the customer&apos;s page.
         </p>
         {pricingLevels.length > 0 && (
           <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
