@@ -96,10 +96,13 @@ function urlB64ToUint8(base64String: string) {
 export function PushSettings({
   initialPrefs,
   role: initialRole,
+  hiddenKeys = [],
 }: {
   initialPrefs: Record<string, boolean>;
   /** The viewer's role, when the server already has it. Left out, this asks for it once. */
   role?: string | null;
+  /** Alerts whose feature is switched off (0352): not drawn. The stored choice is kept. */
+  hiddenKeys?: string[];
 }) {
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
@@ -286,6 +289,7 @@ export function PushSettings({
 
   // Until the role is known, only the alerts every role receives — never a switch that can't work.
   const visibleTriggers = TRIGGERS.filter((t) => {
+    if (hiddenKeys.includes(t.key)) return false;
     if (t.audience === "all") return true;
     if (!role) return false;
     return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);

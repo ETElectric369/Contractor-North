@@ -16,6 +16,7 @@ export function SchedulingSettings({
   ownerName,
   textReady = true,
   isOwner = false,
+  payroll = true,
 }: {
   settings: OrgSettings;
   employees?: { id: string; full_name: string | null }[];
@@ -24,6 +25,9 @@ export function SchedulingSettings({
   textReady?: boolean;
   /** Only the owner moves the Job Codes switch (0352); everyone else reads it. */
   isOwner?: boolean;
+  /** Crew & Payroll is on and somebody besides the owner is on the team (0352, rule j). Off, the
+   *  pay period isn't drawn; Save still sends the stored one, unchanged. */
+  payroll?: boolean;
 }) {
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
@@ -208,31 +212,33 @@ export function SchedulingSettings({
         <p className="text-xs text-slate-400">Who reviews &amp; approves timecards. Defaults to the owner.</p>
       </div>
 
-      <div className="space-y-3 border-t border-slate-100 pt-4">
-        <div className="text-sm font-medium text-slate-700">Payroll</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="pay-sched">Pay period</Label>
-            <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Every 2 weeks (biweekly)</option>
-              <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
-              <option value="monthly">Monthly</option>
-            </Select>
-          </div>
-          {(paySchedule === "weekly" || paySchedule === "biweekly") && (
+      {payroll && (
+        <div className="space-y-3 border-t border-slate-100 pt-4">
+          <div className="text-sm font-medium text-slate-700">Payroll</div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="pay-anchor">A period start date</Label>
-              <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+              <Label htmlFor="pay-sched">Pay period</Label>
+              <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every 2 weeks (biweekly)</option>
+                <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
+                <option value="monthly">Monthly</option>
+              </Select>
             </div>
-          )}
+            {(paySchedule === "weekly" || paySchedule === "biweekly") && (
+              <div>
+                <Label htmlFor="pay-anchor">A period start date</Label>
+                <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-slate-400">
+            Sets the boundaries for &ldquo;hours this pay period&rdquo; and payroll runs. We report gross
+            hours, pay &amp; mileage in the export — tax deductions &amp; withholdings stay with your
+            accountant / payroll service.
+          </p>
         </div>
-        <p className="text-xs text-slate-400">
-          Sets the boundaries for &ldquo;hours this pay period&rdquo; and payroll runs. We report gross
-          hours, pay &amp; mileage in the export — tax deductions &amp; withholdings stay with your
-          accountant / payroll service.
-        </p>
-      </div>
+      )}
 
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Changes"}</Button>
