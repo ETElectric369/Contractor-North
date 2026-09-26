@@ -256,3 +256,29 @@ describe("the You tile is a tech's door and nobody else's", () => {
     expect(DOCK.find((s) => s.key === "you")?.children).toEqual([]);
   });
 });
+
+/**
+ * NO TECH TILE BOUNCES (Wave 0). The Office tile landed a tech on /team, which sends him straight
+ * back to My Day, and Organize's Take Photo / File It all save through requireStaff. A door that
+ * can't work for this person doesn't render.
+ */
+describe("a tech's dock has no dead doors", () => {
+  const tech = DOCK.filter((s) => !s.staffOnly);
+  const STAFF_REDIRECTS = ["/team", "/schedule", "/leads", "/billing", "/crm", "/organize"];
+
+  it("is Today, Clock, Jobs, You and Tools", () => {
+    expect(tech.map((s) => s.key)).toEqual(["today", "clock", "jobs", "you", "tools"]);
+  });
+
+  it("never lands on a page that sends a tech away", () => {
+    for (const s of tech) {
+      expect(STAFF_REDIRECTS).not.toContain(basePath(s.href));
+      for (const c of s.children) if (!c.staffOnly && c.href) expect(STAFF_REDIRECTS).not.toContain(basePath(c.href));
+    }
+  });
+
+  it("shows a tech only My Day and Tasks under Today", () => {
+    const today = DOCK.find((s) => s.key === "today")!;
+    expect(today.children.filter((c) => !c.staffOnly).map((c) => c.label)).toEqual(["My Day", "Tasks"]);
+  });
+});

@@ -108,7 +108,8 @@ export const DOCK: DockSection[] = [
     children: [
       { id: "t-day", label: "My Day", icon: Sun, href: "/planner" },
       { id: "t-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
-      { id: "t-org", label: "Organize", icon: Wand2, href: "/organize" },
+      // Staff only: Take Photo, Upload, File It and AI Review all save through requireStaff.
+      { id: "t-org", label: "Organize", icon: Wand2, href: "/organize", staffOnly: true },
     ],
   },
   // Schedule PROMOTED to its own tile, between Today and Clock — Erik, by name: "Move: Schedule -
@@ -208,6 +209,9 @@ export const DOCK: DockSection[] = [
     label: "Office",
     icon: Building2,
     href: "/team", // Erik 2026-07-20: Office lands on Team (was /compliance)
+    // Office is the company's desk: /team sends a tech back to My Day, and every form in here
+    // saves through requireStaff. A tech tile that bounces is a dead door (Wave 0).
+    staffOnly: true,
     children: [
       // Liabilities (Alexa's grouping). Insurance (e.g. workers' comp) + compliance Audits are
       // the next pages to build — flagged, not stubbed as dead links.
