@@ -267,11 +267,14 @@ export function supplierPaperFeed(input: {
   accounts: { id: string; name: string | null }[];
   /** The ORG's today: a bill waiting on a credit comes back on its own after 30 days of it. */
   today?: string | null;
+  /** The ORG's timezone: the day a wait was stamped is the company's day. */
+  tz?: string | null;
 }): SupplierPaperFeed {
   const names = new Map((input.accounts ?? []).map((a) => [String(a.id), shortSupplierName(a.name)]));
   const opts = {
     since: input.since,
     today: input.today ?? null,
+    tz: input.tz ?? null,
     supplierName: (accountId: string | null) => (accountId && names.get(accountId)) || "The Supplier",
   };
   const cards = supplierPaperNeeds(input.rows, input.jobs, opts);
@@ -298,7 +301,7 @@ export type SupplierPaperHome = "covered" | "taken_back" | "on_card" | "waiting"
 
 export function supplierPaperHomes(
   rows: SupplierInvoiceRow[],
-  opts: { since: string | null; today?: string | null },
+  opts: { since: string | null; today?: string | null; tz?: string | null },
 ): Map<string, SupplierPaperHome> {
   const out = new Map<string, SupplierPaperHome>();
   const cards = new Set(supplierPaperNeeds(rows, [], opts).map((c) => c.invoiceId));
@@ -353,7 +356,7 @@ export async function readSupplierPaperHomes(supabase: any, orgId: string, today
   for (const r of [docsRes, billsRes, linksRes, aliasRes]) if (r?.error) throw r.error;
   const bills = (billsRes.data ?? []) as any[];
   const { rows } = supplierDocumentRows({ documents: docsRes.data ?? [], bills, links: linksRes.data ?? [], aliasRows: aliasRes.data ?? [] });
-  return supplierPaperHomes(rows, { since: booksBeginOn(paperSettings, bills), today });
+  return supplierPaperHomes(rows, { since: booksBeginOn(paperSettings, bills), today, tz: paperSettings.timezone });
 }
 
 /** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
@@ -433,6 +436,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         jobs: reconcileJobsOf(jobsRes.data ?? []),
         accounts,
         today,
+        tz: settingsRes.data?.timezone ?? null,
       })
     : null;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of

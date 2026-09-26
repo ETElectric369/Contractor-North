@@ -280,7 +280,8 @@ export default async function BillsPage({
     // The items' names, for the same sentence (a view embed is PostgREST's guess; this is not).
     supabase.from("inventory_items").select("id, name").limit(5000),
   ]);
-  const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+  const orgTz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const today = todayStrInTz(orgTz);
 
   // Sort each bill's embedded line items by sort_order for display.
   const billsWithLines = (bills ?? []).map((b: any) => ({
@@ -700,6 +701,7 @@ export default async function BillsPage({
           jobs: reconcileJobs,
           accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
           today,
+          tz: orgTz,
         });
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
@@ -1001,7 +1003,7 @@ export default async function BillsPage({
     const account = accountNameOf.get(String(d.supplierAccountId ?? "")) ?? "";
     const supplier = shortSupplierName(account);
     const creditWaiting = waitingOnCredit.get(d.id);
-    const stampWait = !paperFeed && d.supplierAccountId ? creditWait(d, today) : null;
+    const stampWait = !paperFeed && d.supplierAccountId ? creditWait(d, today, orgTz) : null;
     const waitSince = creditWaiting?.waitingCredit?.since ?? (stampWait && !stampWait.overdue ? stampWait.since : null);
     const where = waitingPapers.has(d.id)
       ? "waiting for you under Needs You"

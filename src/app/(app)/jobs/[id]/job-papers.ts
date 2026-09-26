@@ -29,7 +29,6 @@ import {
   type SupplierInvoiceRow,
 } from "@/app/(app)/bills/supplier-reconcile";
 import { booksBeginOn, readPaperSettings, readSupplierDocuments } from "@/app/(app)/bills/supplier-papers";
-import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
 import { jobFromPaperMarks } from "@/lib/paperwork";
@@ -55,16 +54,16 @@ export type PaperDoc = SupplierInvoiceRow & {
  * paper and a STOCK paper with no job are on no card either, and a link that lands on Needs You
  * for one of those lands where the paper is not. `since` is booksBeginOn, the line /bills draws.
  */
-export function onNeedsYouIds(docs: readonly PaperDoc[], since: string | null, today?: string | null): Set<string> {
+export function onNeedsYouIds(docs: readonly PaperDoc[], since: string | null, today?: string | null, tz?: string | null): Set<string> {
   const rows = docs.map((d) => ({ ...d, supplierAccountId: d.accountId }));
-  return new Set(supplierPaperNeeds(rows, [], { since, today }).map((c) => c.invoiceId));
+  return new Set(supplierPaperNeeds(rows, [], { since, today, tz }).map((c) => c.invoiceId));
 }
 
 /** WHICH ARE WAITING ON A CREDIT (0346), not back yet: folded under their supplier on /bills, by the
  *  same rule (supplierPapersWaitingOnCredit), so the link lands on that fold. */
-export function waitingOnCreditIds(docs: readonly PaperDoc[], since: string | null, today?: string | null): Set<string> {
+export function waitingOnCreditIds(docs: readonly PaperDoc[], since: string | null, today?: string | null, tz?: string | null): Set<string> {
   const rows = docs.map((d) => ({ ...d, supplierAccountId: d.accountId }));
-  return new Set(supplierPapersWaitingOnCredit(rows, [], { since, today }).map((c) => c.invoiceId));
+  return new Set(supplierPapersWaitingOnCredit(rows, [], { since, today, tz }).map((c) => c.invoiceId));
 }
 
 const KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
@@ -189,9 +188,11 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
     d.billCount = billsCarryingNumber(d.invoiceNumber, { accountId: d.accountId }, ledger, aliases).length;
   }
   const since = booksBeginOn(paperSettings, (billsRes.data ?? []) as { bill_date?: string | null }[]);
-  const day = today || todayStrInTz(DEFAULT_TIMEZONE);
-  const onCards = onNeedsYouIds(docs, since, day);
-  const waiting = waitingOnCreditIds(docs, since, day);
+  // The company's day, never the deploy's (Wave 0): an East Coast company's 9pm is tomorrow.
+  const tz = paperSettings.timezone;
+  const day = today || todayStrInTz(tz);
+  const onCards = onNeedsYouIds(docs, since, day, tz);
+  const waiting = waitingOnCreditIds(docs, since, day, tz);
   const mine = papersNamingJob(jobId, docs, mark);
   // WAITING ON A CREDIT IS HONORED HERE TOO (audit v1018, class 4): the row says who from and since
   // when, and offers no Record (job-paper-list). The supplier's short name is read only then; a
@@ -206,7 +207,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
     ...d,
     onNeedsYou: onCards.has(d.id),
     waitingOnCredit: waiting.has(d.id),
-    waitingSince: waiting.has(d.id) ? (creditWait(d, day)?.since ?? null) : null,
+    waitingSince: waiting.has(d.id) ? (creditWait(d, day, tz)?.since ?? null) : null,
     supplier: waiting.has(d.id) ? (names.get(String(d.accountId ?? "")) ?? null) : null,
   }));
 }

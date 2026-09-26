@@ -953,12 +953,14 @@ function addDaysYmd(ymd: string, days: number): string {
 export function creditWait(
   inv: Pick<SupplierInvoiceRow, "waitingCreditSince">,
   today?: string | null,
+  /** The ORG's timezone (Wave 0): the day the stamp fell on is the company's day, not the deploy's. */
+  tz?: string | null,
 ): { since: string; back: string; overdue: boolean } | null {
   const stamp = String(inv?.waitingCreditSince ?? "");
   // The DAY he tapped it, in the business's day (5pm in Truckee is not tomorrow): a full stamp is
-  // read in the default timezone, a bare date as itself.
+  // read in the company's timezone, a bare date as itself.
   const at = /^\d{4}-\d{2}-\d{2}T/.test(stamp) ? new Date(stamp) : null;
-  const since = at && Number.isFinite(at.getTime()) ? todayStrInTz(DEFAULT_TIMEZONE, at) : stamp.slice(0, 10);
+  const since = at && Number.isFinite(at.getTime()) ? todayStrInTz(tz || DEFAULT_TIMEZONE, at) : stamp.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) return null;
   const back = addDaysYmd(since, CREDIT_WAIT_DAYS);
   const days = daysBetweenYmd(since, today || utcToday());
@@ -1036,6 +1038,8 @@ export type PaperCardOpts = {
   supplierName?: (accountId: string | null) => string;
   /** The ORG's today (YYYY-MM-DD): it decides when a bill waiting on a credit comes back. */
   today?: string | null;
+  /** The ORG's timezone, for the day a wait was stamped (creditWait). */
+  tz?: string | null;
 };
 
 function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: PaperCardOpts): SupplierPaperCard[] {
@@ -1077,7 +1081,7 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
     const supplier = opts.supplierName ? opts.supplierName(accountId) : "The Supplier";
     // A wait counts only on a supplier account: the credit pairs there and the fold lives there. A
     // stamp on a paper with no account (its account taken off later) is a card, never hidden.
-    const wait = accountId ? creditWait(inv, opts.today) : null;
+    const wait = accountId ? creditWait(inv, opts.today, opts.tz) : null;
     cards.push({
       invoiceId: String(inv.id),
       invoiceNumber: String(inv.invoiceNumber ?? ""),

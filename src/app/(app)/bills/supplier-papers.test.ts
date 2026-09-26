@@ -617,6 +617,19 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-09-30")).toEqual({ since: "2026-09-01", back: "2026-10-01", overdue: false });
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-10-01")?.overdue).toBe(true);
   });
+
+  // THE COMPANY'S DAY, NOT THE DEPLOY'S (Wave 0): 12:30 AM in New York is still 9:30 PM Pacific.
+  it("reads the stamp's day in the company's timezone", () => {
+    const stamp = { waitingCreditSince: "2026-09-26T04:30:00Z" };
+    expect(creditWait(stamp, "2026-09-26", "America/New_York")?.since).toBe("2026-09-26");
+    expect(creditWait(stamp, "2026-09-26", "America/Los_Angeles")?.since).toBe("2026-09-25");
+  });
+
+  it("no supplier-paper screen works out its day in the deploy's timezone", () => {
+    for (const f of ["src/app/(app)/jobs/[id]/job-papers.ts", "src/app/(app)/inventory/page.tsx"]) {
+      expect(readFileSync(join(process.cwd(), f), "utf8")).not.toContain("DEFAULT_TIMEZONE");
+    }
+  });
 });
 
 /**

@@ -6,7 +6,7 @@ import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { DEFAULT_TIMEZONE, formatCurrency, sanitizeSearch } from "@/lib/utils";
+import { formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
@@ -289,7 +289,7 @@ export default async function ShopStockPage({
   // Record To Shelf is offered only where its fold holds the paper. A paper a bill covers by its
   // number, or a credit memo took back, is not waiting for the shelf at all. A failed read says so.
   const homes = stockCandidates.length
-    ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(DEFAULT_TIMEZONE)).catch((e: unknown) => {
+    ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(orgTz)).catch((e: unknown) => {
         reportError("inventory.stock-paper-homes", e, { orgId });
         return null;
       })
