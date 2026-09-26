@@ -7,13 +7,11 @@ import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat, type LucideIcon } from "lucide-react";
-// The More-panel chip icons must come through a "use client" re-export so the
-// component REFERENCES survive the server→client serialization into <Tabs>.
-import {
-  LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye, Zap,
-} from "./job-tab-icons";
+import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat } from "lucide-react";
+import { ClipboardCheck, ListChecks } from "./job-tab-icons";
+import { arrangeJobTabs } from "./job-tabs";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { createClient } from "@/lib/supabase/server";
 import { acceptedQuoteTotal } from "@/lib/payment-schedule-math";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
@@ -21,7 +19,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
-import { Tabs, type TabDef } from "@/components/tabs";
+import { Tabs } from "@/components/tabs";
 import {
   formatCurrency,
   formatDate,
@@ -97,74 +95,6 @@ import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
 export const dynamic = "force-dynamic";
-
-// In-page nav order — the lifecycle-honest strip. The pinned chips (per role, below)
-// lead in this order; everything else clusters into the More chip in this order.
-const JOB_TAB_ORDER = [
-  "job", "time", "materials", "costs", "invoices", "photos", "tasks", "appointments",
-  "notes", "quotes", "change-orders", "permits", "panel", "wos", "customer",
-];
-// THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
-// seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
-// because the money chips can't render for a tech (tech-job-access: a control a role
-// can't use must not render) — his fourth chip is Photos, the crew's other one-tap door.
-// Pinned chips are never measured or folded (<Tabs look="tiles">), which is what ends
-// Costs and Invoices living behind More on every phone: the old measured strip fit ~3
-// of its four "primaries" at 343px, so the money tabs never once stayed inline.
-const JOB_PINNED_STAFF = new Set(["job", "time", "materials", "costs", "invoices"]);
-const JOB_PINNED_TECH = new Set(["job", "time", "materials", "photos"]);
-// "customer" (what the customer sees): the link, the stretches and the picks are the office's.
-const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders", "customer"]);
-// Tabs whose chip is NOT drawn on the strip or in More, because a better door to them already
-// exists on the page. Only Tasks so far: the action dock carries it.
-const JOB_OFF_STRIP = new Set(["tasks"]);
-
-// Cluster header + icon per tab. The LucideIcon COMPONENT reference is the chip's own
-// 18px glyph on the strip AND the chamfered glass chip in the More panel. The whole
-// Money cluster is staffOnly, so it vanishes for techs as a unit.
-const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
-  job: { icon: LayoutDashboard },
-  time: { icon: Clock },
-  materials: { icon: Package },
-  photos: { group: "Docs", icon: Camera },
-  tasks: { group: "Work", icon: ListChecks },
-  appointments: { group: "Work", icon: CalendarDays },
-  wos: { group: "Work", icon: ClipboardCheck },
-  quotes: { group: "Money", icon: FileText },
-  // DollarSign, not Wallet: a wallet and a box (Materials' Package) share the same
-  // rounded-rect silhouette at glance size — $ vs box can't be confused.
-  costs: { group: "Money", icon: DollarSign },
-  invoices: { group: "Money", icon: ReceiptTab },
-  "change-orders": { group: "Money", icon: FileDiff },
-  notes: { group: "Docs", icon: StickyNote },
-  permits: { group: "Docs", icon: Stamp },
-  // THE PANEL (0333): the job's circuits. Not pinned and not staff-only — the crew works it at the
-  // panel (Erik's decision 1, 2026-09-25) and nothing on it carries a price.
-  panel: { group: "Docs", icon: Zap },
-  customer: { group: "Money", icon: Eye },
-};
-
-/** Order the job tabs and tag each with its pin + cluster + staff-gating, so
- *  <Tabs look="tiles"> keeps the role's five (four) chips put and folds the rest
- *  into a clustered, bloom-skinned "More" chip. staffOnly is honored TWICE: the
- *  page drops those tabs before passing them (so their content never serializes
- *  to a tech), and <Tabs> filters again on the client. */
-function arrangeJobTabs(tabs: TabDef[], viewerIsStaff: boolean): TabDef[] {
-  const pinned = viewerIsStaff ? JOB_PINNED_STAFF : JOB_PINNED_TECH;
-  return [...tabs]
-    .sort((a, b) => JOB_TAB_ORDER.indexOf(a.id) - JOB_TAB_ORDER.indexOf(b.id))
-    .map((t) => ({
-      ...t,
-      ...(JOB_TAB_META[t.id] ?? {}),
-      pinned: pinned.has(t.id),
-      staffOnly: JOB_STAFF_ONLY.has(t.id),
-      // TASKS HAS ITS OWN DOOR. It is a slot in the action dock above (cn-v951, at Erik's ask),
-      // so a chip for it inside More was the same door listed twice — "Remove tasks from the
-      // dropdown menu" (2026-09-18). The TAB itself stays: the dock links to ?tab=tasks and the
-      // content still renders when it is active.
-      offStrip: JOB_OFF_STRIP.has(t.id),
-    }));
-}
 
 export default async function JobDetailPage({
   params,
@@ -714,6 +644,12 @@ export default async function JobDetailPage({
   // timeclock_job_codes=false must hide EVERY code picker (cn-v517) — including the
   // Time tab's add/edit modals here, not just the /timecards mounts.
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
+  // THE SWITCH BOARD (0352): which of this company's features are on, and whether the viewer is the
+  // one person who can turn a switch back on (the Off line's Turn On). A switch hides DOORS on this
+  // page (New Estimate, New PO, Took From Stock, the Inspector...), never a read: every money figure
+  // above (open POs, payment milestones, the shelf) is computed exactly as it was.
+  const switches = { features: getOrgSettings((org as any)?.settings).features, isOwner: (meRow as any)?.role === "owner" };
+  const on = (k: FeatureKey) => featureOn(switches.features, k);
   const laborReadFailed = laborRows === null || jobLevelRate === undefined;
   const billableLabor = laborRows
     ? computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate ?? null, laborRows.nonBillableCodes).total
@@ -818,7 +754,8 @@ export default async function JobDetailPage({
   let sharedPhotoIds: string[] | null = null;
   let portalPapers: Record<string, "shown" | "replaced"> | null = null;
   let staleSharedIds: string[] = [];
-  if (viewerIsStaff) {
+  // Customer Portal off (the switch board): no Show Customer / Show On Portal, so no read for them.
+  if (viewerIsStaff && on("customer_portal")) {
     const [{ data: shared, error: sharedErr }, stale] = await Promise.all([
       supabase.from("job_shared_documents").select("document_id, replaces_document_id").eq("job_id", id).is("removed_at", null),
       staleSharedPhotoIds(supabase, id),
@@ -1126,7 +1063,7 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobTasks jobId={j.id} tasks={(tasks ?? []) as any} />
+            <JobTasks jobId={j.id} tasks={(tasks ?? []) as any} extras={on("todo_extras")} />
           </CardContent>
         </Card>
       ),
@@ -1142,7 +1079,7 @@ export default async function JobDetailPage({
                 portal link on site; adding, editing and deleting are staff writes, and the
                 fee is a money figure. Same rows, read-only, fee omitted. */}
             {viewerIsStaff ? (
-              <JobPermits jobId={j.id} permits={(permits ?? []) as any} />
+              <JobPermits jobId={j.id} permits={(permits ?? []) as any} canAdd={on("permits")} />
             ) : (
               <div>
                 <div className="mb-3 text-sm text-slate-500">
@@ -1444,23 +1381,28 @@ export default async function JobDetailPage({
               </div>
             </CardContent>
           </Card>
-          <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-              <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
-              <NewPoButton jobs={thisJobOpt} lists={lists ?? []} defaultJobId={j.id} />
-            </div>
-            <ul className="divide-y divide-slate-100">
-              {(pos ?? []).map((p: any) => (
-                <li key={p.id}>
-                  <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                    <span>{p.po_number} · {p.vendor || "No vendor"}</span>
-                    <span className="text-slate-700">{formatCurrency(p.total)}</span>
-                  </Link>
-                </li>
-              ))}
-              {(!pos || pos.length === 0) && empty("purchase orders")}
-            </ul>
-          </Card>
+          {/* PURCHASE ORDERS OFF (the switch board): no New PO and no empty card, but a job that
+              already has POs keeps listing them under the Off line. They count in cost either way. */}
+          {(on("purchase_orders") || (pos ?? []).length > 0) && (
+            <Card className="overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+                <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
+                {on("purchase_orders") && <NewPoButton jobs={thisJobOpt} lists={lists ?? []} defaultJobId={j.id} />}
+              </div>
+              <FeatureOffLine feature="purchase_orders" features={switches.features} isOwner={switches.isOwner} className="mx-5 mt-3" />
+              <ul className="divide-y divide-slate-100">
+                {(pos ?? []).map((p: any) => (
+                  <li key={p.id}>
+                    <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
+                      <span>{p.po_number} · {p.vendor || "No vendor"}</span>
+                      <span className="text-slate-700">{formatCurrency(p.total)}</span>
+                    </Link>
+                  </li>
+                ))}
+                {(!pos || pos.length === 0) && empty("purchase orders")}
+              </ul>
+            </Card>
+          )}
 
           <Card>
             <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
@@ -1470,7 +1412,8 @@ export default async function JobDetailPage({
               {/* The job's documents list (plans, permits, every receipt). Its cost role moved up
                   to the tab's header (Snap the Bill); a receipt uploaded here still auto-posts
                   as a job cost (same reader, idempotent), and "Record as Cost" is the retry. */}
-              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} plansDoor={viewerIsStaff} />
+              {/* The plans door points at the Customer Page tab: Customer Portal's (the switch board). */}
+              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} plansDoor={viewerIsStaff && on("customer_portal")} nortOn={on("nort")} />
             </CardContent>
           </Card>
 
@@ -1497,12 +1440,14 @@ export default async function JobDetailPage({
               >
                 <ListChecks className="h-4 w-4 shrink-0" /> Print Pick List
               </Link>
-              <NewPoButton
-                jobs={thisJobOpt}
-                lists={[{ id: canonicalList.id, name: canonicalList.name }]}
-                defaultJobId={j.id}
-                defaultListId={canonicalList.id}
-              />
+              {on("purchase_orders") && (
+                <NewPoButton
+                  jobs={thisJobOpt}
+                  lists={[{ id: canonicalList.id, name: canonicalList.name }]}
+                  defaultJobId={j.id}
+                  defaultListId={canonicalList.id}
+                />
+              )}
             </div>
           )}
           {/* ONE LIST, THE SAME EDITOR FOR EVERYONE (Erik, 2026-09-11): "techs should have easy
@@ -1517,7 +1462,9 @@ export default async function JobDetailPage({
           {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
               it who took what off the shelf for this job, with Undo until an invoice bills it. It
               counts on the job the moment it is tapped (Erik's decision 3). No price, for anyone. */}
-          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} />
+          {/* Shop Stock off (the switch board): no Took From Stock button, but the takes already on
+              this job stay listed with their Undo. */}
+          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} canTake={on("shop_stock")} />
           <ItemEditor
             listId={canonicalList?.id ?? null}
             jobId={j.id}
@@ -1549,14 +1496,16 @@ export default async function JobDetailPage({
       count: quotes?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <Link
-              href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
-              className="btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
-            >
-              <Plus className="h-4 w-4 shrink-0" /> New Estimate
-            </Link>
-          </div>
+          {on("estimates") && (
+            <div className="flex justify-end">
+              <Link
+                href={`/quotes/new?customer=${j.customer_id ?? ""}&job=${j.id}`}
+                className="btn-gloss inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[rgb(var(--glass-ink))] px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[rgb(var(--glass-ink))]/90"
+              >
+                <Plus className="h-4 w-4 shrink-0" /> New Estimate
+              </Link>
+            </div>
+          )}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(quotes ?? []).map((q: any) => (
@@ -1616,36 +1565,48 @@ export default async function JobDetailPage({
             {(!invoices || invoices.length === 0) && empty("invoices")}
           </ul>
           </Card>
-          <PaymentScheduleCard
-            jobId={j.id}
-            billingType={(j as any).billing_type ?? "fixed"}
-            contractTotal={contractTotal}
-            depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
-            milestones={(paymentMilestones as any) ?? []}
-            // Without this the gate inside the card is dead code: it defaults to false meaning
-            // "no draws", so Set Up Schedule kept being offered on a job whose draws have already
-            // been billed, where the server can only refuse.
-            drawsBilled={isDrawBilled}
-          />
-          <ContractCard jobId={j.id} contract={((contractRows as any) ?? [])[0] ?? null} />
-          <LienInsuranceCard
-            jobId={j.id}
-            lien={(lienRecord as any) ?? null}
-            insurance={(insuranceClaim as any) ?? null}
-            /* ONE LAW TWO CLOCKS (audit v921): the card ran its own `new Date()` in the BROWSER,
-               so after 5 PM Pacific it counted from the UTC day — a 20-day preliminary-notice
-               deadline read "past due" an evening early, and one day short of the Needs-action
-               feeder, which has always used the org's day. The org's today, from here. */
-            today={todayStrInTz(tz)}
-            defaults={{
-              ownerName: (j.customers as any)?.name ?? undefined,
-              ownerAddress: formatFullAddress((j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip) || undefined,
-              // ACCEPTED-only, matching what the notice itself prints (audit 8): this prefilled
-              // the sum of every quote, so a job with two unaccepted revisions handed staff a
-              // doubled figure to serve on a legal notice, one Save away from being sworn to.
-              estimatedAmount: acceptedQuoteTotal((quotes ?? []) as any),
-            }}
-          />
+          {/* CONTRACTS & LIEN RIGHTS OFF (the switch board): the three cards below are its doors, so a
+              job with none of them shows none. A job that has a schedule, a contract or a lien record
+              keeps its card under the Off line: milestones bill draws, and a sent contract is live. */}
+          {!on("contracts") && ((paymentMilestones ?? []).length > 0 || (contractRows ?? []).length > 0 || !!lienRecord || !!insuranceClaim) && (
+            <FeatureOffLine feature="contracts" features={switches.features} isOwner={switches.isOwner} />
+          )}
+          {(on("contracts") || (paymentMilestones ?? []).length > 0) && (
+            <PaymentScheduleCard
+              jobId={j.id}
+              billingType={(j as any).billing_type ?? "fixed"}
+              contractTotal={contractTotal}
+              depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
+              milestones={(paymentMilestones as any) ?? []}
+              // Without this the gate inside the card is dead code: it defaults to false meaning
+              // "no draws", so Set Up Schedule kept being offered on a job whose draws have already
+              // been billed, where the server can only refuse.
+              drawsBilled={isDrawBilled}
+            />
+          )}
+          {(on("contracts") || (contractRows ?? []).length > 0) && (
+            <ContractCard jobId={j.id} contract={((contractRows as any) ?? [])[0] ?? null} />
+          )}
+          {(on("contracts") || !!lienRecord || !!insuranceClaim) && (
+            <LienInsuranceCard
+              jobId={j.id}
+              lien={(lienRecord as any) ?? null}
+              insurance={(insuranceClaim as any) ?? null}
+              /* ONE LAW TWO CLOCKS (audit v921): the card ran its own `new Date()` in the BROWSER,
+                 so after 5 PM Pacific it counted from the UTC day — a 20-day preliminary-notice
+                 deadline read "past due" an evening early, and one day short of the Needs-action
+                 feeder, which has always used the org's day. The org's today, from here. */
+              today={todayStrInTz(tz)}
+              defaults={{
+                ownerName: (j.customers as any)?.name ?? undefined,
+                ownerAddress: formatFullAddress((j.customers as any)?.address, (j.customers as any)?.city, (j.customers as any)?.state, (j.customers as any)?.zip) || undefined,
+                // ACCEPTED-only, matching what the notice itself prints (audit 8): this prefilled
+                // the sum of every quote, so a job with two unaccepted revisions handed staff a
+                // doubled figure to serve on a legal notice, one Save away from being sworn to.
+                estimatedAmount: acceptedQuoteTotal((quotes ?? []) as any),
+              }}
+            />
+          )}
         </div>
       ),
     },
@@ -1655,9 +1616,11 @@ export default async function JobDetailPage({
       count: changeOrders?.length ?? 0,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <NewChangeOrderButton jobs={thisJobOpt} />
-          </div>
+          {on("estimates") && (
+            <div className="flex justify-end">
+              <NewChangeOrderButton jobs={thisJobOpt} />
+            </div>
+          )}
           <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
               {(changeOrders ?? []).map((c: any) => (
@@ -1698,7 +1661,7 @@ export default async function JobDetailPage({
       content: (
         <div className="space-y-3">
           {/* Issuing a work order is a staff write; the list of them is job information. */}
-          {viewerIsStaff && (
+          {viewerIsStaff && on("estimates") && (
             <div className="flex justify-end">
               <NewWorkOrderButton jobs={thisJobOpt} techs={techs ?? []} defaultJob={j.id} autoOpen={false} />
             </div>
@@ -1754,7 +1717,8 @@ export default async function JobDetailPage({
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
               away. An access point, not a wall. */}
-          {viewerIsStaff && <OpenInspectorButton jobId={j.id} />}
+          {/* Leads & Walk-Throughs off (the switch board): the Inspector is the walk-through's door. */}
+          {viewerIsStaff && on("leads") && <OpenInspectorButton jobId={j.id} />}
           {/* Provenance backlink → THE STORY, not /leads?focus= — that door resurrected the lead
               as a lead, live convert menu and all. Erik: "a lead not being a lead anymore doesnt
               include putting it back." The origin lives on in the first chapter below. */}
@@ -1807,7 +1771,7 @@ export default async function JobDetailPage({
           never serializes to a tech; <Tabs> filters once more on the client.
           look="tiles": the role's pinned chips stay put, the rest ride the More chip. */}
       <Tabs
-        tabs={arrangeJobTabs(tabs, viewerIsStaff).filter((t) => !t.staffOnly || viewerIsStaff)}
+        tabs={arrangeJobTabs(tabs, viewerIsStaff, switches).filter((t) => !t.staffOnly || viewerIsStaff)}
         viewerIsStaff={viewerIsStaff}
         urlSync
         look="tiles"

@@ -123,6 +123,8 @@ export function PushSettings({
   features?: FeatureMap;
   /** The viewer's role, when the server already has it. Left out, this asks for it once. */
   role?: string | null;
+  /** Alerts whose feature is switched off (0352): not drawn. The stored choice is kept. */
+  hiddenKeys?: string[];
 }) {
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);

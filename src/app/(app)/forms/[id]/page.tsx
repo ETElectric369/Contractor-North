@@ -12,6 +12,7 @@ import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { parsePlaybook } from "@/lib/playbook/parse";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,11 @@ export default async function FormDetailPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
+      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: a
+          walk-through sheet is Leads', and the website's intake form is a public door. */}
+      {!(form as { is_inspection?: boolean | null }).is_inspection && !(form as { is_public_intake?: boolean | null }).is_public_intake && (
+        <FeatureOffLineFor feature="safety_log" />
+      )}
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>

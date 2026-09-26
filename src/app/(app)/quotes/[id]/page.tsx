@@ -26,6 +26,8 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import type { Quote, QuoteLineItem } from "@/lib/types";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +121,13 @@ export default async function QuoteDetailPage({
   // plus Print (the page's only print door) and Delete, danger-styled, last.
   // The Customer and All-quotes links were pruned: the CustomerSelect card and
   // the Back breadcrumb already carry them on-page (one map per territory).
+  // THE SWITCH BOARD (0352), from the settings row already read: Kits off hides the kit chips (never
+  // in catalog mode, where kits price the estimate: rule i), and Panel Map off hides an EMPTY circuit
+  // schedule. An estimate that has circuits keeps them: they are on the proposal the customer signs.
+  const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const kitDoors = featureOn(orgS.features, "kits") || orgS.estimating_mode === "catalog";
+  const showCircuits = featureOn(orgS.features, "panel_map") || (Array.isArray(q.circuits) && q.circuits.length > 0);
+
   const quoteMap: NavTree = {
     center: { label: q.quote_number, icon: "fileText" },
     nodes: [
@@ -154,6 +163,7 @@ export default async function QuoteDetailPage({
   return (
     <div className="mx-auto max-w-3xl">
       <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
+      <FeatureOffLineFor feature="estimates" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
@@ -205,7 +215,9 @@ export default async function QuoteDetailPage({
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" textReady={smsReadiness(orgRow as { settings?: unknown } | null).ready} />
           <StatusControl id={q.id} status={q.status} />
-          <DuplicateQuoteButton id={q.id} />
+          {/* Duplicate makes a new estimate: a door Estimates off takes away. The rest of the row
+              works this one, which still opens from its link under the Off line. */}
+          {featureOn(orgS.features, "estimates") && <DuplicateQuoteButton id={q.id} />}
           <SectionActionsMenu tree={quoteMap} />
         </div>
       </div>
@@ -244,14 +256,16 @@ export default async function QuoteDetailPage({
         lock={await quoteEditLock(q.id)}
         items={lineItems}
         priceItems={(priceItems ?? []) as never}
-        kits={(kits ?? []) as never}
-        defaultMarkupPct={getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).default_markup_pct}
+        kits={(kitDoors ? kits ?? [] : []) as never}
+        defaultMarkupPct={orgS.default_markup_pct}
         // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
         // including 0, so a 0 here would price every customer-without-a-level at net cost — a
         // worse bug than the one this fixes.
         levelMarkupPct={(quote as any)?.customers?.pricing_levels?.markup_pct ?? null}
       />
-      <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} panelJob={await panelJobFor(supabase, q)} />
+      {showCircuits && (
+        <CircuitScheduleCard quoteId={q.id} initial={(q.circuits ?? []) as any} panelJob={await panelJobFor(supabase, q)} />
+      )}
     </div>
   );
 }

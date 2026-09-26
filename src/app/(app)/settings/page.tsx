@@ -56,6 +56,8 @@ import { PostsManager } from "./posts-manager";
 import { PagesManager } from "./pages-manager";
 import { CollaboratorsManager } from "./collaborators-manager";
 import { QuotePlaybookForm } from "./quote-playbook-form";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
@@ -199,6 +201,10 @@ export default async function SettingsPage({
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
   const sitesDomain = process.env.SITES_DOMAIN || "contractornorth.com";
   const settings = getOrgSettings((org as any)?.settings);
+  // THE SWITCH BOARD (0352): which cards this page draws. A switch hides a CARD only: the values
+  // behind it stay stored exactly as they are, and turning the switch back on shows them again.
+  const on = (k: FeatureKey) => featureOn(settings.features, k);
+  const isOwner = profile?.role === "owner";
   // CAN THIS ORG TEXT (lib/sms-readiness)? One answer for the Texting card and every text option.
   // Words and a sender kind only cross to the client, never a key.
   const texting = smsReadiness(org as { name?: string | null; settings?: unknown } | null);
@@ -206,8 +212,11 @@ export default async function SettingsPage({
 
   // The scheduler's crew picker still needs the team names (read-only here — editing
   // the roster itself lives on /team now).
-  const { data: crew } = await supabase.from("profiles").select("id, full_name, role").order("full_name");
-  const members = (crew ?? []) as Pick<Profile, "id" | "full_name" | "role">[];
+  const { data: crew } = await supabase.from("profiles").select("id, full_name, role, active").order("full_name");
+  const members = (crew ?? []) as (Pick<Profile, "id" | "full_name" | "role"> & { active?: boolean | null })[];
+  // CREW & PAYROLL IS QUIET until somebody besides the owner is on the team (rule j): the pay
+  // period means nothing to a company of one, even with the switch on.
+  const payrollDoors = on("crew_payroll") && members.some((m) => m.role !== "owner" && m.active !== false);
 
   // Site articles (the SEO content layer) — RLS scopes to the org; staff-only tab below.
   const { data: sitePosts } = isStaff
@@ -314,6 +323,10 @@ export default async function SettingsPage({
     /** True for the one form the public door serves — the picker says so out loud. */
     isWebsite: !!f.is_public_intake,
   }));
+  // THE WALK-THROUGH'S QUESTIONS ARE LEADS'. With Leads off only the website's intake form stays in
+  // the editor: that door keeps working (rule d), and this is the one place its questions live.
+  const shownPlaybookForms = on("leads") ? playbookForms : playbookForms.filter((f) => f.isWebsite);
+  const showWalkThrough = on("leads") || shownPlaybookForms.length > 0;
 
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
   const youTab = {
@@ -324,13 +337,15 @@ export default async function SettingsPage({
       <div className="space-y-6">
         {/* HOW NORT TALKS TO YOU (0183) — under "You", not under the company, because register is
             personal: the same org holds somebody in a truck and somebody at a desk. */}
-        <Section title="How Nort talks to you">
-          <NortTone
-            humor={clampHumor((profile as any)?.nort_humor)}
-            register={asRegister((profile as any)?.nort_register)}
-            notes={typeof (profile as any)?.nort_notes === "string" ? (profile as any).nort_notes : ""}
-          />
-        </Section>
+        {on("nort") && (
+          <Section title="How Nort talks to you">
+            <NortTone
+              humor={clampHumor((profile as any)?.nort_humor)}
+              register={asRegister((profile as any)?.nort_register)}
+              notes={typeof (profile as any)?.nort_notes === "string" ? (profile as any).nort_notes : ""}
+            />
+          </Section>
+        )}
         <Section title="Your profile">
           <div className="flex flex-wrap items-center gap-5">
             <AvatarUpload
@@ -413,7 +428,8 @@ export default async function SettingsPage({
         // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
         // worth asking. Second in the list on purpose: it is the one thing here that changes what
         // happens on a job site, and there has never been anywhere in this app to read it.
-        {
+        // Leads and Estimates both off with no website form to edit: nothing here to draw.
+        ...(showWalkThrough || on("estimates") ? [{
           id: "playbook",
           label: "Playbook",
           icon: ClipboardList,
@@ -423,32 +439,40 @@ export default async function SettingsPage({
             // phone that column is hidden at zero size and the spotlight falls through to this,
             // the panel itself — which is what he's actually looking at there anyway.
             <div data-tour="settings-playbook" className="space-y-6">
-              <Section title="What your walk-through asks">
-                {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
-                    brief for the tour was that nobody works this out unaided; teaching it on day
-                    one, seventeen steps from this screen, is how it drifted. Offered once —
-                    lessons_seen (0197) — and replayable forever from the cap. */}
-                <LessonOffer
-                  lessonKey="why-lines"
-                  seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
-                  initial={{}}
-                />
-                <p className="mb-4 text-sm text-slate-500">
-                  These are the questions your inspector asks on site, in order, and the reason each one exists.
-                  A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
-                  from the lead, never gets asked at all.
-                </p>
-                <PlaybookManager
-                  forms={playbookForms}
-                  starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
-                />
-              </Section>
-              <Section title="How Nort writes an estimate">
-                <QuotePlaybookForm settings={settings} />
-              </Section>
+              {showWalkThrough && (
+                <Section title={on("leads") ? "What your walk-through asks" : "What your website asks"}>
+                  {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
+                      brief for the tour was that nobody works this out unaided; teaching it on day
+                      one, seventeen steps from this screen, is how it drifted. Offered once —
+                      lessons_seen (0197) — and replayable forever from the cap. */}
+                  <LessonOffer
+                    lessonKey="why-lines"
+                    seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
+                    initial={{}}
+                  />
+                  <p className="mb-4 text-sm text-slate-500">
+                    {on("leads")
+                      ? <>These are the questions your inspector asks on site, in order, and the reason each one exists.
+                        A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
+                        from the lead, never gets asked at all.</>
+                      : <>These are the questions your website asks a customer, in order, and the reason each one exists.</>}
+                  </p>
+                  <PlaybookManager
+                    forms={shownPlaybookForms}
+                    starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
+                  />
+                </Section>
+              )}
+              {/* Estimates off: no card for how one is written. Nort off: same card, plain title
+                  (the estimate draft still uses it). */}
+              {on("estimates") && (
+                <Section title={on("nort") ? "How Nort writes an estimate" : "How an estimate gets written"}>
+                  <QuotePlaybookForm settings={settings} />
+                </Section>
+              )}
             </div>
           ),
-        },
+        }] : []),
         // "Features" — THE SWITCH BOARD (0352): one row per feature, the owner's switches. Its
         // counts are read by FeaturesPanel itself, so they run only when this cluster is open.
         {
@@ -468,7 +492,7 @@ export default async function SettingsPage({
           icon: Wallet,
           content: (
             <div className="space-y-6">
-              <Section title="Tax, pricing & financial defaults"><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
+              <Section title={on("sales_tax") ? "Tax, pricing & financial defaults" : "Pricing & financial defaults"}><TaxRatesManager taxRates={(taxRates ?? []) as any} pricingLevels={(pricingLevels ?? []) as any} settings={settings} /></Section>
               {/* "How we quote" moved to the Playbook cluster — it is the same idea one step
                   later (what you ask on site → how the estimate gets written), and having two
                   things called a playbook in two different clusters was the confusion. */}
@@ -490,21 +514,23 @@ export default async function SettingsPage({
               {/* The other half of the book. Kits are edited on the price-list page like the
                   items are; what belongs here is the door, next to the door for the items —
                   they are one catalog and used to sit in two different clusters. */}
-              <Section title="Kits & job lists">
-                <Link
-                  href="/price-list?tab=kits"
-                  className="block rounded-xl border border-slate-200 p-4 transition hover:border-brand"
-                >
-                  <div className="flex items-center gap-2 font-medium text-slate-800">
-                    <Layers className="h-4 w-4 text-slate-400" />
-                    Open kits &amp; job lists
-                  </div>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Build the lists you pick from when you write an estimate — and set which lines size
-                    themselves from the measurements taken on a walk-through.
-                  </p>
-                </Link>
-              </Section>
+              {on("kits") && (
+                <Section title="Kits & job lists">
+                  <Link
+                    href="/price-list?tab=kits"
+                    className="block rounded-xl border border-slate-200 p-4 transition hover:border-brand"
+                  >
+                    <div className="flex items-center gap-2 font-medium text-slate-800">
+                      <Layers className="h-4 w-4 text-slate-400" />
+                      Open kits &amp; job lists
+                    </div>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Build the lists you pick from when you write an estimate — and set which lines size
+                      themselves from the measurements taken on a walk-through.
+                    </p>
+                  </Link>
+                </Section>
+              )}
               <Section title="Payment methods"><PaymentMethods settings={settings} /></Section>
             </div>
           ),
@@ -518,9 +544,17 @@ export default async function SettingsPage({
           icon: FileText,
           content: (
             <div className="space-y-6">
-              <Section title="Estimate & invoice defaults"><DocumentSettings settings={settings} /></Section>
+              <Section title={on("estimates") ? "Estimate & invoice defaults" : "Invoice defaults"}><DocumentSettings settings={settings} /></Section>
               <Section title="Numbering">
-                <NumberingSettings prefixes={settings.doc_prefixes} counters={docCounters} />
+                <NumberingSettings
+                  prefixes={settings.doc_prefixes}
+                  counters={docCounters}
+                  hiddenKeys={[
+                    ...(on("estimates") ? [] : ["quote", "wo", "co"]),
+                    ...(on("purchase_orders") ? [] : ["po"]),
+                    ...(on("contracts") ? [] : ["contract"]),
+                  ]}
+                />
               </Section>
               {/* The designer + layout cards MOLDED into one surface (Erik: "mold the document
                   layout and designer that are there into one smart thing like we did with the
@@ -682,19 +716,26 @@ export default async function SettingsPage({
                   ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
                   textReady={texting.ready}
                   isOwner={profile?.role === "owner"}
+                  payroll={payrollDoors}
                 />
               </Section>
-              <Section title="Job codes">
-                <JobCodesManager
-                  jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
-                />
-              </Section>
-              <Section title="Job-code templates">
-                <CodeTemplatesManager
-                  templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
-                  codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
-                />
-              </Section>
+              {/* Job Codes off: the codes and templates wait here unchanged; the box above (the
+                  switch itself, the owner's) is how they come back. */}
+              {on("job_codes") && (
+                <>
+                  <Section title="Job codes">
+                    <JobCodesManager
+                      jobCodes={(jobCodes ?? []) as { id: string; code: string; description: string; billable: boolean; active: boolean }[]}
+                    />
+                  </Section>
+                  <Section title="Job-code templates">
+                    <CodeTemplatesManager
+                      templates={(codeTemplates ?? []) as { id: string; name: string; codes: string[] }[]}
+                      codes={((jobCodes ?? []) as { code: string; description: string; active: boolean }[]).filter((c) => c.active).map((c) => ({ code: c.code, description: c.description }))}
+                    />
+                  </Section>
+                </>
+              )}
             </div>
           ),
         },
@@ -726,43 +767,47 @@ export default async function SettingsPage({
                   })()}
                 />
               </Section>
-              <Section title="Public lead link & QR">
-                <p className="mb-2 text-sm text-slate-500">
-                  Post this link online (or text/email it). Anyone who submits the form becomes a new lead in <strong>Leads</strong> — no login needed for them.
-                </p>
-                <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
-                  {inquiryUrl}
-                </code>
-                <div className="mt-4 flex flex-wrap items-center gap-4">
-                  {inquiryQr && (
-                    // Tappable, not just scannable: on a screen (texted screenshot, the digital card)
-                    // nobody can scan the QR they're looking at — tapping it opens the same page.
-                    <a href={inquiryUrl} target="_blank" rel="noopener noreferrer" title="Open the inquiry page">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={inquiryQr} alt="Inquiry page QR code — tap to open" className="h-28 w-28 rounded-lg border border-slate-200" />
-                    </a>
-                  )}
-                  <div className="space-y-2 text-sm">
-                    <p className="text-slate-500">
-                      The QR code opens the same page — put it on trucks, yard signs, and cards.
-                      {inquiryQr && (
-                        <>
-                          {" "}
-                          <a href={inquiryQr} download="inquiry-qr.png" className="font-medium text-brand hover:underline">
-                            Download PNG
-                          </a>
-                        </>
-                      )}
-                    </p>
-                    <a
-                      href="/print/business-card"
-                      className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
-                    >
-                      Print Business Cards →
-                    </a>
+              {/* The lead link and its QR are Leads' (the switch board). The request-an-estimate
+                  link above is a public door that keeps working with Leads off. */}
+              {on("leads") && (
+                <Section title="Public lead link & QR">
+                  <p className="mb-2 text-sm text-slate-500">
+                    Post this link online (or text/email it). Anyone who submits the form becomes a new lead in <strong>Leads</strong> — no login needed for them.
+                  </p>
+                  <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                    {inquiryUrl}
+                  </code>
+                  <div className="mt-4 flex flex-wrap items-center gap-4">
+                    {inquiryQr && (
+                      // Tappable, not just scannable: on a screen (texted screenshot, the digital card)
+                      // nobody can scan the QR they're looking at — tapping it opens the same page.
+                      <a href={inquiryUrl} target="_blank" rel="noopener noreferrer" title="Open the inquiry page">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={inquiryQr} alt="Inquiry page QR code — tap to open" className="h-28 w-28 rounded-lg border border-slate-200" />
+                      </a>
+                    )}
+                    <div className="space-y-2 text-sm">
+                      <p className="text-slate-500">
+                        The QR code opens the same page — put it on trucks, yard signs, and cards.
+                        {inquiryQr && (
+                          <>
+                            {" "}
+                            <a href={inquiryQr} download="inquiry-qr.png" className="font-medium text-brand hover:underline">
+                              Download PNG
+                            </a>
+                          </>
+                        )}
+                      </p>
+                      <a
+                        href="/print/business-card"
+                        className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                      >
+                        Print Business Cards →
+                      </a>
+                    </div>
                   </div>
-                </div>
-              </Section>
+                </Section>
+              )}
             </div>
           ),
         },
@@ -775,40 +820,48 @@ export default async function SettingsPage({
           icon: Globe,
           content: (
             <div className="space-y-6">
-              <Section title="Your website">
+              {/* WEBSITE OFF (the switch board): the site stops rendering, so its design, homepage
+                  and collaborator cards go. The web address stays: the request-an-estimate link, the
+                  estimate page and the customer's links are all built on it (rule e). */}
+              <FeatureOffLine feature="website" features={settings.features} isOwner={isOwner} />
+              <Section title={on("website") ? "Your website" : "Your web address"}>
                 <WebsiteSettings settings={settings} siteUrl={siteUrl} sitesDomain={sitesDomain} />
               </Section>
-              <Section title="Design studio">
-                <p className="mb-2 text-sm text-slate-600">
-                  Redesign the site by describing what you want — every pass is a version you preview before
-                  anything goes live, and any older version can be brought back.
-                </p>
-                <Link
-                  href="/site-studio"
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                >
-                  Open the Design Studio
-                </Link>
-              </Section>
-              <Section title="Homepage">
-                <HomepageCard
-                  settings={settings}
-                  homeBlocks={renderReadyBlocks(settings.home_blocks)}
-                  brand={accentHex(settings.glass_tint)}
-                  orgId={(org as Organization).id}
-                  siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
-                />
-              </Section>
-              <Section title="SEO / content collaborators">
-                <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
-              </Section>
+              {on("website") && (
+                <>
+                  <Section title="Design studio">
+                    <p className="mb-2 text-sm text-slate-600">
+                      Redesign the site by describing what you want — every pass is a version you preview before
+                      anything goes live, and any older version can be brought back.
+                    </p>
+                    <Link
+                      href="/site-studio"
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                    >
+                      Open the Design Studio
+                    </Link>
+                  </Section>
+                  <Section title="Homepage">
+                    <HomepageCard
+                      settings={settings}
+                      homeBlocks={renderReadyBlocks(settings.home_blocks)}
+                      brand={accentHex(settings.glass_tint)}
+                      orgId={(org as Organization).id}
+                      siteUrl={settings.public_handle ? orgPublicBaseUrl(settings) : null}
+                    />
+                  </Section>
+                  <Section title="SEO / content collaborators">
+                    <CollaboratorsManager initial={(siteCollaborators ?? []) as any} />
+                  </Section>
+                </>
+              )}
             </div>
           ),
         },
         // "Photos & pages" — the content ON the site. Four managers that are each a real editing
         // session; nobody opens this one by accident, and nobody hunting for a domain name should
         // have to scroll past it.
-        {
+        ...(on("website") ? [{
           id: "content",
           label: "Photos & Pages",
           icon: Images,
@@ -839,7 +892,7 @@ export default async function SettingsPage({
               </Section>
             </div>
           ),
-        },
+        }] : []),
         // "Connections" — everything that talks to something outside this app. QuickBooks joins
         // the calendar: it was under Money, but connecting an accounting login is the same errand
         // as connecting a calendar, not the same errand as setting a tax rate. NO DEVELOPER TEXT

@@ -10,6 +10,7 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
@@ -198,6 +199,19 @@ export async function POST(req: Request) {
     supabase.from("organizations").select("id, settings").limit(1).maybeSingle(),
   ]);
   const orgId = (org as { id?: string } | null)?.id ?? null;
+  // THE SWITCH BOARD (0352). Nort off: its button is gone from the shell, and a request that still
+  // arrives (an open tab, an old link) is answered in words, before it spends anything. Paper
+  // reading does not come through here, so it keeps working. With Nort on, a switched-off
+  // feature's write tools are not offered (agentWriteToolsForRole, below).
+  const features = getOrgSettings((org as { settings?: unknown } | null)?.settings).features;
+  if (!featureOn(features, "nort")) {
+    return new Response(
+      (prof as { role?: string } | null)?.role === "owner"
+        ? "Nort is off for your company. You can turn it on in Settings, under Features."
+        : "Nort is off for your company. Ask the owner to turn it on.",
+      { status: 403 },
+    );
+  }
 
   // ── SPEND GUARDS (0162) ─────────────────────────────────────────────────────
   // This route had NO rate limit at all, while the PUBLIC site-chat had one. A single
@@ -227,7 +241,7 @@ export async function POST(req: Request) {
   // Phase E: the tier-1 write tools this role may use, generated from the registry. Every
   // call still goes through executeAction (role + audit + confirm/step-up gate).
   const role = (prof as { role?: string } | null)?.role;
-  const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role);
+  const { tools: writeTools, resolve: resolveWrite } = agentWriteToolsForRole(role, features);
   // L5: defense-in-depth — don't even OFFER financial/sales read tools to a tech (the DB RLS
   // already returns zero rows, but least-privilege at the tool layer too).
   const STAFF_ONLY_READ = new Set(["list_invoices", "get_invoice", "list_quotes", "get_quote", "business_summary", "search_price_list", "list_customers", "get_customer", "list_inquiries", "list_payments", "list_bills", "list_purchase_orders", "list_work_orders", "list_material_lists", "list_change_orders", "list_inventory", "list_petty_cash", "list_recurring", "list_compliance", "list_liens", "list_contracts", "hours_summary", "get_payment_schedule",
@@ -746,7 +760,8 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // LIVE prices, specs, and code while estimating — the core "do it like Claude
               // did the Tao Zhu quote" capability. Results are untrusted web text (the
               // input-is-data rule in the system prompt covers them).
-              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+              // The live quote preview is an Estimates door (its Save makes an estimate): off with it.
+              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, ...(featureOn(features, "estimates") ? [QUOTE_DRAFT_TOOL] : []), SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
             // Strip the directive markers from MODEL text so a prompt-injection can't forge a
             // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted

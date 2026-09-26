@@ -19,6 +19,8 @@ import { createBill, deleteDocument } from "../jobs/actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { ALL_ON, featureOn, type FeatureMap } from "@/lib/features";
 import { jobLabel } from "@/lib/schedule-options";
 import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
@@ -109,6 +111,7 @@ export function BillsReceipts({
   bills,
   docs,
   readFailed = false,
+  switches = { features: ALL_ON, isOwner: false },
 }: {
   orgId: string;
   jobs: JobOption[];
@@ -118,7 +121,11 @@ export function BillsReceipts({
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
+  /** The switch board (0352). Purchase Orders off: the tab loses its chip (a ?tab=po link still
+   *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. */
+  switches?: { features: FeatureMap; isOwner: boolean };
 }) {
+  const poOn = featureOn(switches.features, "purchase_orders");
   const router = useRouter();
   const toast = useToast();
   // Open straight to a tab from a deep link (?tab=po, ?tab=receipts), and open the fold with it.
@@ -247,7 +254,7 @@ export function BillsReceipts({
           onChange={(id) => setTab(id as LedgerTab)}
           tabs={[
             { id: "bills", label: "Bills", count: bills.length },
-            { id: "po", label: "Purchase Orders", count: pos.length },
+            { id: "po", label: "Purchase Orders", count: pos.length, offStrip: !poOn },
             { id: "receipts", label: "Receipts", count: docs.length },
           ]}
         />
@@ -429,9 +436,10 @@ export function BillsReceipts({
         </div>
 
         <div hidden={tab !== "po"} className="pb-3">
+          <FeatureOffLine feature="purchase_orders" features={switches.features} isOwner={switches.isOwner} />
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs text-slate-500">{pos.length} POs · {formatCurrency(totalPos)} total</span>
-            <NewPoButton jobs={jobs} lists={lists} />
+            {poOn && <NewPoButton jobs={jobs} lists={lists} />}
           </div>
           {pos.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet.</p>

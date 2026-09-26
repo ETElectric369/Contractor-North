@@ -2,6 +2,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type Anthropic from "@anthropic-ai/sdk";
 import { actionsForRole } from "./registry";
 import { actionRisk } from "./risk";
+import { ALL_ON, featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 // Phase E, step 1: the curated set of TIER-1 (reversible, low-stakes) writes the CHAT
 // agent may perform — task management + the two safe creates. Everything still flows
@@ -157,17 +158,57 @@ export const AGENT_READ_ALLOWED = new Set<string>([
   "stock.take",
 ]);
 
+/**
+ * THE SWITCH BOARD'S NORT DOORS (0352): the write tools a switched-off feature takes with it. A
+ * tool not named here belongs to no switch. Reads stay (list_*, get_*), so Nort can still answer
+ * about a record that exists, and so do the tools that bill an existing record: invoice.fromQuote
+ * (an estimate already made) and payment.requestNext (a schedule already set up).
+ */
+export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
+  "inquiry.create": "leads",
+  "inquiry.contact": "leads",
+  "inquiry.convert": "leads",
+  "quote.create": "estimates",
+  "quote.addItem": "estimates",
+  "quote.updateItem": "estimates",
+  "quote.deleteItem": "estimates",
+  "quote.setStatus": "estimates",
+  "quote.setType": "estimates",
+  "quote.attachJob": "estimates",
+  "quote.setCustomer": "estimates",
+  "quote.convertToJob": "estimates",
+  "contract.generate": "contracts",
+  "lien.update": "contracts",
+  "payment.setSchedule": "contracts",
+  "permit.create": "permits",
+  "compliance.create": "licenses",
+  "safety.log": "safety_log",
+  // Crew checklists are Safety Log's; a walk-through's answers live on its visit, not in a form submission.
+  "form.submit": "safety_log",
+  "panel.suggest": "panel_map",
+  "stock.take": "shop_stock",
+};
+
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
 const toToolName = (name: string) => name.replace(/\./g, "__");
 
 /** The write tools a given role may be OFFERED in chat — generated from the registry so
  *  adding an action to AGENT_WRITE_ALLOWED is the only step. Returns the Anthropic tool
  *  defs + a resolver from tool name back to the canonical action name (null if not a
- *  write tool). */
-export function agentWriteToolsForRole(role: string | null | undefined): {
+ *  write tool). `features` (the company's switches, 0352) takes a switched-off feature's tools
+ *  away, and every tool while Nort itself is off; omitted = everything on, as before. */
+export function agentWriteToolsForRole(
+  role: string | null | undefined,
+  features: FeatureMap = ALL_ON,
+): {
   tools: Anthropic.Tool[];
   resolve: (toolName: string) => string | null;
 } {
+  const switchedOn = (name: string) => {
+    if (!featureOn(features, "nort")) return false;
+    const feature = AGENT_TOOL_FEATURE[name];
+    return !feature || featureOn(features, feature);
+  };
   const allowed = [
     ...actionsForRole(role, { effect: "write" }).filter(
       (a) =>
@@ -181,7 +222,7 @@ export function agentWriteToolsForRole(role: string | null | undefined): {
     ),
     // …plus the registry-owned reads a write above can't be walked without (audit v921).
     ...actionsForRole(role, { effect: "read" }).filter((a) => AGENT_READ_ALLOWED.has(a.name)),
-  ];
+  ].filter((a) => switchedOn(a.name));
   const map = new Map<string, string>();
   const tools: Anthropic.Tool[] = allowed.map((a) => {
     const tn = toToolName(a.name);

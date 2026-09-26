@@ -5,6 +5,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { extractSiteDoc } from "@/lib/site-doc";
 import { PageHeader } from "@/components/page-header";
 import { SiteStudio } from "./studio";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { switchesFromRow } from "@/lib/viewer-switches";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,8 @@ export default async function SiteStudioPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  // The company's switches ride the same row (the switch board, 0352): the studio is Website's.
+  const { data: me } = await supabase.from("profiles").select("role, active, organizations(settings)").eq("id", user?.id ?? "").maybeSingle();
   if (!me || !isStaffRole((me as { role?: string }).role)) redirect("/timeclock");
 
   const [{ data: org }, { data: versions }, { data: publishedRow }] = await Promise.all([
@@ -47,6 +50,7 @@ export default async function SiteStudioPage() {
         title="Design studio"
         description="Describe the change; a new version appears in the preview. Nothing goes live until you publish — and any older version can be published again."
       />
+      <FeatureOffLine feature="website" {...switchesFromRow(me)} />
       <SiteStudio
         orgId={String((org as { id?: string } | null)?.id ?? "")}
         handle={settings.public_handle?.trim() || null}

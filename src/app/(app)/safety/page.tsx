@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { SafetyManager } from "./safety-manager";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +27,7 @@ export default async function SafetyPage() {
   return (
     <div>
       <PageHeader title="Safety / OSHA" description="Log incidents (OSHA recordables) and toolbox-talk safety meetings." />
+      <FeatureOffLineFor feature="safety_log" />
       <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} canEdit={canEdit} />
     </div>
   );

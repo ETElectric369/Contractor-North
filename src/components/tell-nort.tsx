@@ -32,6 +32,7 @@ export function TellNort({
   hint,
   label = "Just tell Nort",
   placeholder = "Two new circuits, one for lights one for outlets, finished room they're converting from storage…",
+  nortOn = true,
 }: {
   /** The server action for THIS surface. One component, one extraction path, many targets —
    *  a surface contributes a target and a projection, never an assistant of its own. */
@@ -42,6 +43,9 @@ export function TellNort({
   hint?: string;
   label?: string;
   placeholder?: string;
+  /** The Nort switch (0352). Off, this still fills the boxes (it isn't the assistant) and says so
+   *  without the name: "Just Say It", and "it only uses what's written here". */
+  nortOn?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -151,7 +155,7 @@ export function TellNort({
           }}
           className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 text-sm font-medium text-slate-600 active:bg-slate-50"
         >
-          <Sparkles className="h-4 w-4 text-brand" /> {label}
+          <Sparkles className="h-4 w-4 text-brand" /> {nortOn ? label : "Just Say It"}
         </button>
         {said && <p className="mt-1.5 text-xs leading-snug text-emerald-700">{said}</p>}
       </div>
@@ -201,7 +205,7 @@ export function TellNort({
       {/* The one thing worth saying out loud about how this behaves, because it is the difference
           between a tool and a liability: it fills what you SAID and nothing else. */}
       <p className="mt-2 text-[11px] leading-snug text-slate-400">
-        Check the words before you fill — Nort only uses what&rsquo;s written here, and it won&rsquo;t work out a
+        Check the words before you fill — {nortOn ? "Nort" : "it"} only uses what&rsquo;s written here, and it won&rsquo;t work out a
         measurement you didn&rsquo;t say. Anything it can&rsquo;t place goes in your notes as-is.
       </p>
     </div>

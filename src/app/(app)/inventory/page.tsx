@@ -16,6 +16,8 @@ import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NewItemButton } from "./new-item-button";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { featureOn } from "@/lib/features";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
 export const dynamic = "force-dynamic";
@@ -329,8 +331,10 @@ export default async function ShopStockPage({
         >
           Export For Accountant
         </Link>
-        <NewItemButton />
+        {/* Shop Stock off (the switch board, 0352): no New Item; the shelf stays readable below. */}
+        {featureOn(getOrgSettings((orgRow.data as { settings?: unknown } | null)?.settings).features, "shop_stock") && <NewItemButton />}
       </PageHeader>
+      <FeatureOffLineFor feature="shop_stock" />
 
       {itemViews.length > 0 && (
         <div className="mb-4 grid grid-cols-3 gap-3 sm:max-w-lg sm:gap-4">

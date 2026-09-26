@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
+import { switchesFromRow } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 import { notFound } from "next/navigation";
 import { Mail, Phone, MapPin, Plus } from "lucide-react";
 import { BackLink } from "@/components/back-link";
@@ -50,8 +52,11 @@ export default async function CustomerDetailPage({
   // Viewer's role gates the staff-only verbs in the Actions menu (New quote/invoice),
   // matching the job page.
   const { data: { user } } = await supabase.auth.getUser();
-  const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  // The company's switches ride the same row (the switch board, 0352): Estimates off hides New
+  // Estimate, Customer Portal off hides the portal link card. No extra round trip.
+  const { data: meRow } = await supabase.from("profiles").select("role, active, organizations(settings)").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  const sw = switchesFromRow(meRow);
 
   // ONE ROUND, NOT THREE (audit v921). The linked-jobs read depends only on `id` and the merge
   // pick-list only on viewerIsStaff — both already known — so they waited behind this batch for
@@ -202,7 +207,7 @@ export default async function CustomerDetailPage({
                 />
               </div>
             )}
-            {viewerIsStaff && (
+            {viewerIsStaff && featureOn(sw.features, "customer_portal") && (
               <div className="border-t border-slate-100 pt-3">
                 <PortalLinkButton
                   customerId={c.id}
@@ -344,11 +349,13 @@ export default async function CustomerDetailPage({
                 staff={toStaffOptions(staffRows)}
                 defaultCustomerId={c.id}
               />
-              <Link href={`/quotes/new?customer=${c.id}`}>
-                <Button>
-                  <Plus className="h-4 w-4" /> New Estimate
-                </Button>
-              </Link>
+              {featureOn(sw.features, "estimates") && (
+                <Link href={`/quotes/new?customer=${c.id}`}>
+                  <Button>
+                    <Plus className="h-4 w-4" /> New Estimate
+                  </Button>
+                </Link>
+              )}
             </>
           )}
           <SectionActionsMenu

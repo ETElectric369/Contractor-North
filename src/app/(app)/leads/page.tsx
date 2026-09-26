@@ -11,6 +11,9 @@ import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +25,7 @@ export default async function InquiriesPage({
   const { focus, due } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: inqData }, { data: custData }] = await Promise.all([
+  const [{ data: inqData }, { data: custData }, sw] = await Promise.all([
     supabase
       .from("inquiries")
       .select("*, referrer:profiles!inquiries_referred_by_fkey(full_name)")
@@ -40,7 +43,12 @@ export default async function InquiriesPage({
       .order("next_follow_up_at", { ascending: true, nullsFirst: true })
       .order("created_at", { ascending: false }),
     listCustomerOptions(supabase),
+    // THE SWITCH BOARD (0352). Leads off: this page still opens from a link (a Needs You card, an
+    // estimate's "from lead"), with the Off line on top, and New Lead goes. Website requests keep
+    // arriving either way. Track Referrals off: no tally. Estimates off: no Estimate on a row.
+    viewerSwitches(),
   ]);
+  const leadsOn = featureOn(sw.features, "leads");
 
   /**
    * WHICH LEADS HAVE ALREADY BEEN WALKED.
@@ -113,13 +121,14 @@ export default async function InquiriesPage({
   return (
     <div>
       <PageHeader title="Leads" description="New requests to follow up and convert — nothing converts automatically.">
-        <InquiryModal />
+        {leadsOn && <InquiryModal />}
       </PageHeader>
+      <FeatureOffLine feature="leads" features={sw.features} isOwner={sw.isOwner} />
 
       {/* Staff-only commission lookup — renders nothing for crew or when no lead
           has a referrer. Sits above the open list because converted referrals
           drop OUT of that list and this is where their credit stays visible. */}
-      <ReferralTally />
+      {featureOn(sw.features, "referrals") && <ReferralTally />}
 
       {inquiries.length > 0 && (
         <FactsGrid cols={2} className="mb-4 sm:max-w-sm">
@@ -142,7 +151,11 @@ export default async function InquiriesPage({
         <EmptyState
           icon={UserPlus}
           title="No open leads"
-          description="Web submissions and manually-added leads show up here to follow up and convert — or add one with New Lead above."
+          description={
+            leadsOn
+              ? "Web submissions and manually-added leads show up here to follow up and convert — or add one with New Lead above."
+              : "Nothing open right now."
+          }
         />
       ) : (
         <Card>
@@ -155,6 +168,7 @@ export default async function InquiriesPage({
                 focused={i.id === focus}
                 inspections={inspectionState.get(i.id) ?? null}
                 businessPhone={businessPhone}
+                estimateDoor={featureOn(sw.features, "estimates")}
               />
             ))}
           </ul>

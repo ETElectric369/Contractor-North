@@ -35,7 +35,8 @@ export interface TabBarItem {
    *  not drawn on the strip or inside More. For a tab that already has a better door somewhere
    *  else on the page — a job's Tasks, which sits in the action dock — a second chip in the
    *  dropdown is the same door listed twice (Erik, 2026-09-18: "Remove tasks from the dropdown
-   *  menu"). Never use it to hide a tab that has no other way in. */
+   *  menu"). Never use it to hide a tab that has no other way in. The one other use: a switched-off
+   *  feature's tab (the switch board, 0352), whose way in is a link and the Off line's Turn On. */
   offStrip?: boolean;
 }
 
@@ -96,7 +97,10 @@ export function Tabs({
   activeId?: string;
   onChange?: (id: string) => void;
 }) {
-  const shown = tabs.filter((t) => (!t.staffOnly || viewerIsStaff) && !t.offStrip);
+  // An offStrip tab stays IN the list (its chip is dropped by <TabBar>, below): it is the one that
+  // opens from a ?tab= link, so its content has to be here to render. Filtering it out here too
+  // meant the link landed on the first tab instead (the job's Tasks, and a switched-off feature's).
+  const shown = tabs.filter((t) => !t.staffOnly || viewerIsStaff);
   if (activeId !== undefined) {
     return <TabView tabs={shown} activeId={activeId} onSelect={onChange ?? (() => {})} maxVisible={maxVisible} look={look} />;
   }
@@ -104,8 +108,11 @@ export function Tabs({
   return <StatefulTabs tabs={shown} maxVisible={maxVisible} look={look} />;
 }
 
+/** The tab a strip opens on when nothing names one: the first with a chip. */
+const firstOnStrip = (tabs: TabDef[]) => (tabs.find((t) => !t.offStrip) ?? tabs[0])?.id;
+
 function StatefulTabs({ tabs, maxVisible, look }: { tabs: TabDef[]; maxVisible: number; look: TabLook }) {
-  const [active, setActive] = useState(tabs[0]?.id);
+  const [active, setActive] = useState(firstOnStrip(tabs));
   return <TabView tabs={tabs} activeId={active} onSelect={setActive} maxVisible={maxVisible} look={look} />;
 }
 
@@ -116,7 +123,7 @@ function UrlSyncedTabs({ tabs, paramKey, maxVisible, look }: { tabs: TabDef[]; p
   // The tab the URL names, when it's one this viewer can see — null otherwise (no param, or a
   // staffOnly id a tech was linked to), in which case the strip keeps whatever it's showing.
   const urlTab = fromUrl != null && tabs.some((t) => t.id === fromUrl) ? fromUrl : null;
-  const [active, setActive] = useState(urlTab ?? tabs[0]?.id);
+  const [active, setActive] = useState(urlTab ?? firstOnStrip(tabs));
 
   // THE STRIP FOLLOWS THE URL. The initial state above is read once; without this, an in-page
   // <Link href="?tab=materials"> (or a "← from lead" backlink to ?tab=job#activity) changed the
@@ -160,7 +167,7 @@ function TabView({
   maxVisible: number;
   look: TabLook;
 }) {
-  const current = tabs.find((t) => t.id === activeId) ?? tabs[0];
+  const current = tabs.find((t) => t.id === activeId) ?? tabs.find((t) => t.id === firstOnStrip(tabs));
   return (
     <div>
       <TabBar items={tabs} activeId={current?.id} onSelect={onSelect} maxVisible={maxVisible} look={look} />

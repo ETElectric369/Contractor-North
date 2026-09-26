@@ -147,6 +147,7 @@ export function Inspector({
   linked,
   planBrief = null,
   readOnly = false,
+  nortOn = true,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -158,8 +159,9 @@ export function Inspector({
   initialPhotos: CapturePhoto[];
   orgId: string;
   userId: string | null;
-  /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. */
-  estimateHref: string;
+  /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. null =
+   *  Estimates is switched off (0352), and the button isn't drawn. */
+  estimateHref: string | null;
   /** appointments.location — the address, which is the fact that names everything downstream. */
   initialLocation: string;
   /** What this visit is already connected to — a lead, a customer or a job. */
@@ -171,6 +173,8 @@ export function Inspector({
    *  staff-writable). Controls go quiet under one disabled fieldset, and the doors that would
    *  only fail (Take, Add, Save, Start the estimate, set up questions) don't render. */
   readOnly?: boolean;
+  /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
+  nortOn?: boolean;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -1040,6 +1044,7 @@ export function Inspector({
             order it happens on a job: he talks first, and what's left over is what gets asked. */}
         {!noSheet && (
           <TellNort
+            nortOn={nortOn}
             hear={(a, said) => hearIntoPlaybook(appointmentId, templateId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
@@ -1480,9 +1485,11 @@ export function Inspector({
           >
             {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
           </Button>
-          <Link href={estimateHref}>
-            <Button type="button">Start the estimate</Button>
-          </Link>
+          {estimateHref && (
+            <Link href={estimateHref}>
+              <Button type="button">Start the estimate</Button>
+            </Link>
+          )}
         </div>
       </div>}
 
