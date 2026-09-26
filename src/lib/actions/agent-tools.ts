@@ -153,6 +153,9 @@ export const AGENT_READ_ALLOWED = new Set<string>([
   // The entry ids time.splitEntry and time.fixEntry need: nothing else Nort can call returns a
   // finished entry's id (hours_summary gives totals, who_is_clocked_in only open rows). Staff only.
   "time.listEntries",
+  // TOOK FROM STOCK (Shop Stock, Phase 3): Nort FILLS the card, a person taps Take It. Open to every
+  // role (taking from stock is the crew's own verb), and it writes nothing and reads no cost.
+  "stock.take",
 ]);
 
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.

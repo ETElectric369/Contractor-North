@@ -176,13 +176,33 @@ export function JobBills({
     </li>
   );
 
+  /** A take from stock in a pile (Shop Stock, Phase 3): what came off the shelf and what it cost.
+   *  Its controls (Undo, Carry Back) live with the takes on the Materials tab, so it goes there. */
+  const stockRow = (id: string, why?: string) => {
+    const t = groups?.stock[id];
+    if (!t) return null;
+    return (
+      <li key={id}>
+        <Link href={`/jobs/${jobId}?tab=materials`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-slate-900">{t.label}</div>
+            <div className="text-xs text-slate-400">Taken {formatDate(t.takenAt)}</div>
+            {why && <div className="text-xs text-slate-500">{why}</div>}
+          </div>
+          <span className="font-medium text-slate-800">{formatCurrency(t.cost)}</span>
+        </Link>
+      </li>
+    );
+  };
+
   const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined) => (
     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
       {ids.map((id) => {
         const b = billById.get(id);
         if (b) return billRow(b, whyOf?.(id));
         const p = poById.get(id);
-        return p ? poRow(p, whyOf?.(id)) : null;
+        if (p) return poRow(p, whyOf?.(id));
+        return stockRow(id, whyOf?.(id));
       })}
     </ul>
   );
@@ -283,7 +303,7 @@ export function JobBills({
             <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]))}</div>
           ) : (
             <p className="py-3 text-sm text-slate-500">
-              {bills.length === 0
+              {bills.length === 0 && !Object.keys(groups.stock).length
                 ? "No supplier bills yet."
                 : groups.nothing.length
                   ? "None. Every bill on this job is on an invoice, or never goes on one (below)."

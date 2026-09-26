@@ -38,6 +38,7 @@ export function ProgressInvoiceButton({
   openInvoices = [],
   scheduleActive = false,
   openDraft = null,
+  warning = null,
 }: {
   jobId: string;
   billingType?: "fixed" | "tm";
@@ -54,6 +55,9 @@ export function ProgressInvoiceButton({
    *  new work - the Save button says "Add to INV-078" - and a contract one is named with its door,
    *  because a second draft draw is refused (one open draft draw per job). */
   openDraft?: { id: string; number: string | null; refreshable: boolean } | null;
+  /** Pieces taken from stock with no roll behind them yet (Shop Stock, Phase 3): the one sentence,
+   *  shown before an Actual T&M draw is built, because the draw leaves them off. Staff only. */
+  warning?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -381,6 +385,7 @@ export function ProgressInvoiceButton({
                     The {kind === "final" ? "final" : "draw"} bills the hours and bills not yet on any invoice — its total is the real figure. Work to
                     date is every line already billed, at the price billed, plus that; a deposit counts as invoiced before it is work, so this gauge can read low.
                   </p>
+                  {warning && <p className="pt-1 text-xs text-amber-800">{warning}</p>}
                 </div>
               ) : billMode === "percent" ? (
                 <div>

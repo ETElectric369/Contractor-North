@@ -365,3 +365,53 @@ describe("list_inventory — the shelf's items by name, and nothing claimed that
     expect(out.note).toContain("Nothing is on the shelf");
   });
 });
+
+describe("list_shelf — the shelf for everyone, its worth for the office only (Shop Stock, Phase 3)", () => {
+  const ORG = "60195593-2e18-4230-bc8e-7a32d36d038d";
+  /** The caller's client: shelf_for_crew, their own profile, and the rolls' balance (staff-only). */
+  function shelfDb(role: string) {
+    const reads: { table: string; filters: string[] }[] = [];
+    const client = {
+      rpc: async (fn: string) => ({
+        data: fn === "shelf_for_crew" ? [
+          { id: "i-122", name: "12/2 NM-B", unit: "ft", on_hand: "190.000" },
+          { id: "i-nut", name: "Twister 341-Tan wire nut", unit: "ea", on_hand: "-5" },
+        ] : null,
+        error: null,
+      }),
+      auth: { getUser: async () => ({ data: { user: { id: "u-1" } } }) },
+      from(table: string) {
+        const r = { table, filters: [] as string[] };
+        reads.push(r);
+        const b: any = {
+          select: () => b,
+          eq: (c: string, v: unknown) => (r.filters.push(`${c}=${String(v)}`), b),
+          in: (c: string) => (r.filters.push(`in:${c}`), b),
+          maybeSingle: async () => ({ data: table === "profiles" ? { role, org_id: ORG } : null, error: null }),
+          then: (ok: any, err: any) =>
+            Promise.resolve({ data: table === "stock_lot_balance" ? [{ item_id: "i-122", cost_left: "136.93" }] : [], error: null }).then(ok, err),
+        };
+        return b;
+      },
+    };
+    return { client, reads };
+  }
+
+  it("a tech gets names, units and counts, and not one dollar", async () => {
+    const { client, reads } = shelfDb("tech");
+    const out = await parse("list_shelf", {}, client);
+    expect(out.items[0]).toEqual({ item_id: "i-122", name: "12/2 NM-B", on_hand: 190, unit: "ft" });
+    expect(JSON.stringify(out)).not.toMatch(/136\.93|value|cost|price/i);
+    expect(reads.map((r) => r.table)).not.toContain("stock_lot_balance");
+    expect(out.items[1].note).toContain("the office will recount");
+  });
+
+  it("the office gets what each item's pieces are worth, read inside its own company", async () => {
+    const { client, reads } = shelfDb("owner");
+    const out = await parse("list_shelf", { search: "12/2" }, client);
+    expect(out.count).toBe(1);
+    expect(out.items[0]).toMatchObject({ name: "12/2 NM-B", value: 136.93 });
+    expect(reads.find((r) => r.table === "stock_lot_balance")?.filters).toEqual(expect.arrayContaining([`org_id=${ORG}`, "live=true"]));
+    expect(out.how_to_take).toContain("stock.take");
+  });
+});

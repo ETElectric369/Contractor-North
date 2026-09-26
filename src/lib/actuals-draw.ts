@@ -230,13 +230,15 @@ const hoursWord = (h: number) => {
  */
 export function pulledIntoSentence(
   number: string,
-  pulled: { hours: number; bills: number; returns?: number; returnsCredit?: number },
-  left?: { hours: number; bills: number; returns?: number } | null,
+  pulled: { hours: number; bills: number; returns?: number; returnsCredit?: number; stock?: number },
+  left?: { hours: number; bills: number; returns?: number; stock?: number } | null,
   money?: (n: number) => string,
 ): string {
+  const takes = (n: number) => (n === 1 ? "1 take from stock" : `${n} takes from stock`);
   const parts: string[] = [];
   if (pulled.hours > 0.005) parts.push(hoursWord(pulled.hours));
   if (pulled.bills > 0) parts.push(`${pulled.bills} ${pulled.bills === 1 ? "bill" : "bills"}`);
+  if ((pulled.stock ?? 0) > 0) parts.push(takes(pulled.stock ?? 0));
   const r = pulled.returns ?? 0;
   if (r > 0) {
     const amt = money && (pulled.returnsCredit ?? 0) > 0.005 ? ` (${money(pulled.returnsCredit ?? 0)} back to the customer)` : "";
@@ -253,13 +255,17 @@ export function pulledIntoSentence(
     rest.push(`${left.bills} ${left.bills === 1 ? "bill" : "bills"}`);
     doors.push("Materials from Costs");
   }
+  if (left && (left.stock ?? 0) > 0) {
+    rest.push(takes(left.stock ?? 0));
+    if (!doors.includes("Materials from Costs")) doors.push("Materials from Costs");
+  }
   if (left && (left.returns ?? 0) > 0) {
     const n = left.returns ?? 0;
     rest.push(n === 1 ? "a supplier return" : `${n} supplier returns`);
     if (!doors.includes("Materials from Costs")) doors.push("Materials from Costs");
   }
   return rest.length
-    ? `${head} Still not on it: ${joinParts(rest)} - open ${number} and tap ${doors.join(" or ")} to see what is holding ${rest.length === 1 && !/s$/.test(rest[0]) ? "it" : "them"} back.`
+    ? `${head} Still not on it: ${joinParts(rest)} - open ${number} and tap ${doors.join(" or ")} to see what is holding ${rest.length === 1 && !/s$/.test(rest[0]) && !/^\d+ takes /.test(rest[0]) ? "it" : "them"} back.`
     : head;
 }
 

@@ -164,6 +164,11 @@ export function computeJobProgress(input: {
    *  (unbilledWorkForJob's total). When given on a T&M job, work to date is their sum; the
    *  labor/material roll-up below is then the fixed-price figure only. */
   tmWork?: { billed: number; unbilled: number } | null;
+  /** FIXED PRICE: every live take from stock on the job (net of pieces carried back), billed or
+   *  not: work to date is everything worked. Each is marked up and rounded on its own, exactly as
+   *  the importer writes one line per take (stock-billing.ts). Absent = none. On Time & Material
+   *  the takes are already in `tmWork` (billed ones as their lines, open ones in the unbilled). */
+  stockTakes?: { cost: number }[];
 }): JobProgressFinancials {
   const billingType: "fixed" | "tm" = input.billingTypeRaw === "tm" ? "tm" : "fixed";
 
@@ -213,7 +218,10 @@ export function computeJobProgress(input: {
     (input.bills ?? []).reduce((s, b) => {
       const back = returnCreditCost(b.amount, returnLines.get(b) ?? b.bill_line_items);
       return back > 0 ? s + mk(back) : s;
-    }, 0);
+    }, 0) +
+    // PIECES TAKEN FROM STOCK (Shop Stock, Phase 3): each take bills its stamped cost at the same
+    // markup, one line per take, so work to date moves with the lines the importer writes.
+    (input.stockTakes ?? []).reduce((s, t) => (num(t.cost) > 0 ? s + mk(num(t.cost)) : s), 0);
 
   const workToDate =
     billingType === "tm" && input.tmWork
