@@ -1,4 +1,5 @@
 import { supplierNameSet } from "@/lib/invoice-math";
+import { readAllPages } from "@/lib/read-all-pages";
 
 /**
  * THE ORG'S SUPPLIER NAMES, for the customer-copy scrub (customerLineWords, audit v994 PL1).
@@ -28,21 +29,29 @@ export async function readSupplierNames(
   supabase: any,
   orgId?: string | null,
 ): Promise<{ names: ReadonlySet<string>; failed: boolean }> {
-  const scoped = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
+  // EVERY ROW, PAGED (audit v1018 links-docs-4). A plain select stops at PostgREST's row cap with no
+  // error, so past 1,000 bills a supplier named only on the later ones would be missing from the
+  // set and print on the customer's page. customer_line_words (the SQL twin) reads every row; so
+  // does this. By id, so the pages neither repeat nor skip a row.
+  const every = (table: string, col: string) =>
+    readAllPages<Record<string, unknown>>((from, to) => {
+      const q = supabase.from(table).select(col);
+      return (orgId ? q.eq("org_id", orgId) : q).order("id").range(from, to);
+    });
   let failed = false;
   const reads = await Promise.all([
-    scoped(supabase.from("bills").select("supplier")),
-    scoped(supabase.from("purchase_orders").select("vendor")),
-    scoped(supabase.from("supplier_accounts").select("name")),
-    scoped(supabase.from("supplier_aliases").select("alias")),
+    every("bills", "supplier"),
+    every("purchase_orders", "vendor"),
+    every("supplier_accounts", "name"),
+    every("supplier_aliases", "alias"),
   ]).catch(() => {
     failed = true;
-    return [] as { data?: Record<string, unknown>[] | null; error?: unknown }[];
+    return [] as { rows: Record<string, unknown>[]; error: unknown }[];
   });
   const names: unknown[] = [];
   for (const r of reads) {
-    if (r?.error) failed = true;
-    for (const row of r?.data ?? []) names.push(...Object.values(row));
+    if (r.error) failed = true;
+    for (const row of r.rows) names.push(...Object.values(row));
   }
   return { names: supplierNameSet(names), failed };
 }

@@ -125,7 +125,7 @@ const ROWS: Rows = {
   supplier_aliases: [{ org_id: ORG, alias: "C.E.D." }],
 };
 
-type Query = { table: string; select: string; filters: [string, string, unknown][] };
+type Query = { table: string; select: string; filters: [string, string, unknown][]; range?: [number, number] };
 
 /**
  * A PostgREST-shaped client over plain rows: select / eq / is / in / order / limit / maybeSingle,
@@ -159,11 +159,17 @@ function client(opts: { rls?: boolean; fail?: string[] } = {}) {
       // PostgREST returns the columns named, no more (an embed returns its row whole here).
       const cols = q.select.split(",").map((c) => c.trim()).filter(Boolean);
       if (!q.select.includes("(") && !cols.includes("*")) r = r.map((x) => Object.fromEntries(cols.filter((c) => c in x).map((c) => [c, x[c]])));
+      if (q.range) r = r.slice(q.range[0], q.range[1] + 1);
       return r;
     };
-    // "table" fails every read of it; "table:words" only the read whose select names those words.
+    // "table" fails every read of it; "table:words" only the read whose select names those words;
+    // "table=select" only the read whose select is exactly that.
     const failed = () =>
       (opts.fail ?? []).some((f) => {
+        if (f.includes("=")) {
+          const [t, exact] = f.split("=");
+          return t === table && q.select === exact;
+        }
         const [t, words] = f.split(":");
         return t === table && (!words || q.select.includes(words));
       });
@@ -175,6 +181,7 @@ function client(opts: { rls?: boolean; fail?: string[] } = {}) {
       neq: (col: string, val: unknown) => (q.filters.push(["neq", col, val]), b),
       overlaps: (col: string, val: unknown[]) => (q.filters.push(["overlaps", col, val]), b),
       order: () => b,
+      range: (from: number, to: number) => ((q.range = [from, to]), b),
       limit: () => b,
       maybeSingle: async () => {
         if (failed()) return { data: null, error: { message: `${table} read failed` } };
@@ -339,17 +346,52 @@ describe("a read that fails degrades honestly", () => {
     expect(reported).toContain("invoiceDoc.progress");
   });
 
+  it("any read behind the Progress Summary that fails leaves it off, never a figure built from an empty read (audit v1018 money-1)", async () => {
+    // Each of these used to read as empty: "Received to date $0.00" (invoices), a fixed-price
+    // contract on a T&M job (the job), no estimate (quotes), no orders, the default rates (org).
+    for (const fail of ["jobs=billing_type", "quotes", "invoices:total, status, amount_paid", "purchase_orders:id, total, status", "organizations=settings"]) {
+      reported.length = 0;
+      for (const access of [{ kind: "staff" } as const, { kind: "service", orgId: ORG } as const]) {
+        const r = await readInvoiceDocumentProps(client({ rls: access.kind === "staff", fail: [fail] }), INV, access);
+        expect(r.kind, fail).toBe("ok");
+        if (r.kind !== "ok") continue;
+        expect(r.props.progress, fail).toBeNull();
+        expect(r.degraded, fail).toEqual(["progress"]);
+        expect(r.props.items, fail).toHaveLength(3);
+      }
+      expect(reported, fail).toContain("invoiceDoc.progress");
+    }
+  });
+
+  it("jobProgressFinancials itself throws on each of those reads (the job page and Nort say so too)", async () => {
+    const { jobProgressFinancials } = await import("@/lib/job-financials");
+    await expect(jobProgressFinancials(client({ rls: true }), JOB)).resolves.toMatchObject({ estimate: 17325, billingType: "tm" });
+    for (const fail of ["jobs=billing_type", "quotes", "invoices:total, status, amount_paid", "purchase_orders:id, total, status", "organizations=settings"]) {
+      await expect(jobProgressFinancials(client({ rls: true, fail: [fail] }), JOB), fail).rejects.toMatchObject({ message: expect.stringContaining("read failed") });
+    }
+  });
+
+  it("the /i page says part of the bill couldn't load when a piece was left off, with a 44px Try Again", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/i/[token]/page.tsx"), "utf8");
+    expect(src).toMatch(/doc\.degraded\.length > 0 &&/);
+    expect(src).toContain("Part of this bill couldn&apos;t load just now.");
+    expect(src).toMatch(/href=\{`\/i\/\$\{token\}`\} className="inline-flex min-h-\[44px\][^"]*"\s*>\s*Try Again/);
+  });
+
   it("a piece left off is named (degraded), so the stored PDF can refuse it; a whole read names none", async () => {
-    const whole = await readInvoiceDocumentProps(client(), INV, { kind: "staff" });
+    // The office reads through RLS (one org row: organizations_select is its own org). Without it the
+    // progress read's "the organization" read finds two orgs and, rightly now, says it failed.
+    const whole = await readInvoiceDocumentProps(client({ rls: true }), INV, { kind: "staff" });
     expect(whole.kind === "ok" && whole.degraded).toEqual([]);
-    for (const [fail, piece] of [
-      ["payments", "payments"],
-      ["customers", "customer"],
-      ["jobs", "job"],
-      ["bills:bill_line_items", "progress"],
+    for (const [fail, pieces] of [
+      ["payments", ["payments"]],
+      ["customers", ["customer"]],
+      // The progress figures read the job too, so a lost job read names both.
+      ["jobs", ["job", "progress"]],
+      ["bills:bill_line_items", ["progress"]],
     ] as const) {
-      const r = await readInvoiceDocumentProps(client({ fail: [fail] }), INV, { kind: "staff" });
-      expect(r.kind === "ok" && r.degraded, fail).toEqual([piece]);
+      const r = await readInvoiceDocumentProps(client({ rls: true, fail: [fail] }), INV, { kind: "staff" });
+      expect(r.kind === "ok" && r.degraded, fail).toEqual(pieces);
     }
   });
 

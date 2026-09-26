@@ -116,6 +116,9 @@ export type PortalInvoice = {
   doc: InvoiceDocumentProps | null;
   /** The gate returned this bill, but its document could not be read: the page says so. */
   docFailed: boolean;
+  /** The sheet is drawn, but a piece of it (payments, Bill To, the job site, the Progress Summary)
+   *  could not be read and was left off (readInvoiceDocumentProps' `degraded`): the page says so. */
+  docPartial: boolean;
 };
 export type PortalPick = {
   id: string;
@@ -277,6 +280,7 @@ export function shapePortalJob(
       payToken: sent ? str(i.public_token) : null,
       doc: read?.kind === "ok" ? read.props : null,
       docFailed: !!i.doc && read?.kind !== "ok",
+      docPartial: read?.kind === "ok" && read.degraded.length > 0,
     };
   });
 

@@ -6,6 +6,7 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { normalizeDocStyle } from "@/lib/doc-style";
 import { docFileName, rowPlace } from "@/lib/doc-place";
+import { printRefusal } from "@/lib/print-refusal";
 
 export const dynamic = "force-dynamic";
 /** Concurrent chromium renders allowed per function instance (each is ~150MB). */
@@ -249,10 +250,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ doc: string
     const res = await page.goto(target, { waitUntil: "networkidle0", timeout: 25_000 });
     // A deleted/cross-org id renders the app's 404, and an expired session renders /login —
     // both come back HTTP 200, so without this the customer gets a beautifully typeset PDF of
-    // an error page. The final-URL check is what catches the login redirect.
-    if (!res || !res.ok() || new URL(res.url()).pathname !== `/print/${path}/${id}`) {
-      return NextResponse.json({ error: "That document isn't available." }, { status: 404 });
-    }
+    // an error page. The final-URL check is what catches the login redirect. A 5xx is a read that
+    // failed just now (the print page refuses a partial bill), said as such (lib/print-refusal).
+    const refusal = printRefusal(doc, res ? { status: res.status(), path: new URL(res.url()).pathname } : null, `/print/${path}/${id}`);
+    if (refusal) return NextResponse.json({ error: refusal.error }, { status: refusal.status });
     // Neutralize the on-screen sheet + toolbar, and set the page margin via CSS @page —
     // Chromium IGNORES pdf()'s margin option whenever the page's stylesheets declare an
     // @page margin (our print CSS does), so CSS is the only channel that actually works

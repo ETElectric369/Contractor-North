@@ -26,7 +26,7 @@ export async function jobProgressFinancials(
 ): Promise<JobProgressFinancials> {
   const orgId = scope?.orgId ?? null;
   const pin = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
-  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }, stock] =
+  const [jobRead, quotesRead, invoicesRead, labor, posRead, billsRead, orgRead, stock] =
     await Promise.all([
       pin(supabase.from("jobs").select("billing_type").eq("id", jobId)).maybeSingle(),
       pin(supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId)),
@@ -51,9 +51,15 @@ export async function jobProgressFinancials(
       readJobStock(supabase, jobId, scope),
     ]);
 
-  // A failed receipt read is tolerated here exactly as the quotes/invoices reads beside it are
-  // (empty data, no throw) so a print or analytics page still renders. It is NOT tolerated in
-  // unbilledWorkForJob, which is the figure a draw actually bills from.
+  // A LOST READ IS NOT AN EMPTY ONE (audit v1018 money-1). Every figure below is printed on a
+  // customer's bill: a failed invoices read reads as "Received to date $0.00", a failed job read as a
+  // fixed-price contract on a Time & Material job, a failed quotes read as no estimate. So each read
+  // throws, as the receipts and stock reads already did, and every caller leaves the Progress
+  // Summary off and says so (readInvoiceDocumentProps marks it degraded: the print page refuses and
+  // stores nothing, /i and the portal say part of the bill couldn't load).
+  for (const r of [jobRead, quotesRead, invoicesRead, posRead, orgRead, billsRead]) if (r.error) throw r.error;
+  const job = jobRead.data;
+  const org = orgRead.data;
   // Labor: the exact helper importLaborIntoInvoice uses (per-person, quarter-hour,
   // default-rate fallback) — so the panel can't diverge from the billed lines.
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
@@ -67,13 +73,6 @@ export async function jobProgressFinancials(
   );
   const { total: billableLabor } = computeJobLaborBilling(labor.jobEntries, defaultRate, levelRate, labor.nonBillableCodes);
 
-  // A LOST RECEIPT READ IS NOT A JOB WITH NO MATERIALS (review, 2026-09-20). unbilled-work throws
-  // on this same failure, deliberately, because a reader that shrugs bills a customer short. This
-  // one was passing `billsRead.data` straight through, so the draw modal's reference figure would
-  // have quietly shown $0 of material on a job carrying thousands - two screens, one read, two
-  // different meanings for the same lost row.
-  if (billsRead.error) throw billsRead.error;
-
   // TIME & MATERIAL: work to date is what was billed at the price billed, plus what the next bill
   // would charge (billedWorkOnInvoices). A failed read throws: a work-to-date missing half its
   // lines is a figure nobody billed. Fixed price keeps the contract roll-up below.
@@ -81,10 +80,10 @@ export async function jobProgressFinancials(
 
   return computeJobProgress({
     billingTypeRaw: (job as any)?.billing_type,
-    quotes: (quotes ?? []) as any,
-    invoices: (invoices ?? []) as any,
+    quotes: (quotesRead.data ?? []) as any,
+    invoices: (invoicesRead.data ?? []) as any,
     billableLabor,
-    pos: (pos ?? []) as any,
+    pos: (posRead.data ?? []) as any,
     bills: billsRead.data as any,
     markupPercent,
     tmWork,
