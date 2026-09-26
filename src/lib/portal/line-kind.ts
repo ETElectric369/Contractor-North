@@ -90,6 +90,34 @@ export function lineGroup(
   return "other";
 }
 
+/**
+ * WHICH KINDS OF LINE ARE WORK COMPLETED (Erik, 2026-09-26: "i don't think fees, referrals and
+ * discounts would necessarily be considered work completed"). Labor, materials, change orders and
+ * lines from the estimate are work. So is a hand line nobody has filed: "Install 20A circuit",
+ * "10/3 romex", a line from a book of installed work ("D1 - New Construction - Deck Build", SQ FT,
+ * no supplier) all read Other on the breakdown because the words do not settle them, and nearly
+ * all of them are the work itself. Left out is only what a line was SAID to be or is by its nature:
+ * a line the office filed as Other (the Kind chip, one tap: a card fee, a referral, a discount),
+ * Sales Tax, Credits, a Deposit, Contract Payments. Decided by the line's KIND, never by its words:
+ * a word list ("fee", "referral") would only ever fit the company that wrote it, and a default that
+ * guesses "fee" for every unsettled line would drop real work for every company that types its
+ * lines. Read by billedWorkOnInvoices (the T&M Progress Summary and the job page's Work To Date)
+ * and by the Kind chip, which says out loud which way the line counts.
+ */
+export const WORK_COMPLETED_GROUPS: ReadonlySet<LineGroup> = new Set<LineGroup>(["labor", "materials", "change_orders", "estimate"]);
+
+/** Is this bill line work completed? Its kind is (WORK_COMPLETED_GROUPS), or it reads Other and
+ *  nobody filed it as Other. */
+export function countsAsWorkCompleted(
+  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null },
+  invoiceKind?: string | null,
+): boolean {
+  const g = lineGroup(line, invoiceKind);
+  if (WORK_COMPLETED_GROUPS.has(g)) return true;
+  if (g !== "other") return false;
+  return storedLineKind(line.line_kind) !== "other";
+}
+
 /** Dollars (number or numeric string) to integer cents; non-numbers are 0. */
 function cents(v: unknown): number {
   const n = Number(v);

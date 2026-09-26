@@ -1113,7 +1113,7 @@ export function InvoiceDetail({
                   </div>
                   {/* WHAT THE LINE IS on the customer's breakdown (0342): saved on the tap, apart
                       from the words and price above, which still wait for the check mark. */}
-                  <LineKindChips item={it} invoiceId={invoice.id} disabled={pending} onDone={refresh} />
+                  <LineKindChips item={it} invoiceId={invoice.id} invoiceKind={(invoice as any).invoice_kind ?? null} disabled={pending} onDone={refresh} />
                   {items.length > 2 && (
                     <div className="flex items-center gap-2">
                       <button
