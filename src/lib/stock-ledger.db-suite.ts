@@ -230,7 +230,9 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       const shelf = (await c.query("select * from public.shelf_for_crew()")).rows;
       const mine = shelf.find((r) => r.id === it1);
       expect(mine).toBeTruthy();
-      expect(Object.keys(mine).sort()).toEqual(["id", "name", "on_hand", "unit"]);
+      // 0344 added `takeable` (the pieces a take can draw today): a count, never a cost.
+      expect(Object.keys(mine).sort()).toEqual(expect.arrayContaining(["id", "name", "on_hand", "unit"]));
+      expect(Object.keys(mine).filter((k) => !["id", "name", "on_hand", "unit", "takeable"].includes(k))).toEqual([]);
       expect(num(mine.on_hand)).toBe(240);
       await asServer();
       // A stranger's session reads no one's shelf.
@@ -557,7 +559,9 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       const r = await draw(staffId, nuts, jobB, 20);
       const invB = await invoice(jobB, "TEST-SHELF-INV-B");
       await claim(invB, r.moves.map((m: any) => m.move_id));
-      expect((await refusal(() => claim(invA, r.moves.map((m: any) => m.move_id))))?.message).toContain("already billed on TEST-SHELF-INV-B");
+      // Since 0343 a take bills only on its own job's invoice, so job A's invoice is refused before
+      // the "already billed" check is reached: the words name job B's take, not INV-B.
+      expect((await refusal(() => claim(invA, r.moves.map((m: any) => m.move_id))))?.message).toContain("Those pieces were taken for");
       expect((await refusal(() => claim(invB, [t.id])))?.message).toContain("already billed on TEST-SHELF-INV-A");
       // Job cost = bills - off_shelf + from_shelf, for each job.
       const a = await shelfNet(jobA);
