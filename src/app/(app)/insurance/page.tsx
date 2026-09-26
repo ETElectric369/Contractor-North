@@ -40,7 +40,7 @@ export default async function InsurancePage() {
     <div>
       <PageHeader
         title="Insurance"
-        description="Policies & coverage — workers' comp, general liability, auto — with renewal alerts so nothing lapses."
+        description="Policies & coverage — workers' comp, general liability, auto — with their renewal dates."
       />
       <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
     </div>

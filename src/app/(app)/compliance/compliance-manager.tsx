@@ -145,7 +145,7 @@ export function ComplianceManager({ items, orgId, canEdit }: { items: Compliance
 
       {items.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
-          Track insurance, workers' comp, bonds, and licenses here so nothing lapses.
+          Track insurance, workers&apos; comp, bonds, and licenses here, with the day each one expires.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

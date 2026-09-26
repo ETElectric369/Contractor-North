@@ -181,7 +181,7 @@ export function InsuranceManager({ items, orgId, canEdit }: { items: InsuranceIt
 
       {items.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
-          Track your policies — workers' comp, general liability, auto — with renewal alerts so coverage never lapses.
+          Track your policies — workers&apos; comp, general liability, auto — and when each one renews.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">

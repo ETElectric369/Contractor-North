@@ -41,7 +41,7 @@ export default async function CompliancePage() {
     <div>
       <PageHeader
         title="Compliance"
-        description="Licenses, certifications & permits — with renewal alerts so nothing lapses. (Policies live in Insurance; reviews in Audits.)"
+        description="Licenses, certifications & permits, with their renewal dates. (Policies live in Insurance; reviews in Audits.)"
       />
       <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
     </div>
