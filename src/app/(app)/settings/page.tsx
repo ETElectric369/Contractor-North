@@ -366,6 +366,7 @@ export default async function SettingsPage({
             /* The server already read this row; passing it skips the client round trip that
                silently lost the role-gated toggles whenever the network hiccuped. */
             role={(profile as any)?.role ?? null}
+            features={settings.features}
           />
         </Section>
       </div>
