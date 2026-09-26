@@ -126,7 +126,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
       (result: any, status: string) => {
         setRouting(false);
         if (status === "OK") rendererRef.current.setDirections(result);
-        else setError("Couldn't build a route. Enable the Directions API for your key.");
+        else setError("Couldn't build a route. Try again in a bit.");
       },
     );
   }
@@ -135,7 +135,7 @@ export function JobsMap({ jobs, homeAddress }: { jobs: MapJob[]; homeAddress?: s
   if (!key) {
     return (
       <div className="rounded-xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center text-sm text-slate-500">
-        Add <code>NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> in Vercel to enable the map.
+        The map isn&apos;t available yet.
       </div>
     );
   }

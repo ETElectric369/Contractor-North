@@ -184,7 +184,7 @@ export function EditMemberButton({
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Login</div>
             {!authConfigured && (
               <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Changing email or password needs <code>SUPABASE_SERVICE_ROLE_KEY</code> in Vercel. Until then this is read-only.
+                Changing a login&apos;s email or password isn&apos;t available yet, so this is read-only.
               </div>
             )}
             <div>
