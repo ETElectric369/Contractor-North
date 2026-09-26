@@ -33,3 +33,28 @@ export async function requireStaff() {
   // repeated papercut that quietly encouraged unscoped queries.
   return { supabase, userId: user.id, orgId: (me as { org_id?: string | null }).org_id ?? null };
 }
+
+/** Resolve a Supabase client for ANY signed-in, active member of a company: the crew as well as
+ *  the office. For the few doors both share (Took From Stock, Shop Stock Phase 3): the database
+ *  decides what each may do (stock_draw hands a tech no cost), and this says who is asking.
+ *  Deactivated is a boundary here exactly as in requireStaff. orgId is required: a door with no
+ *  company to scope to is refused, never run unscoped. */
+export async function requireMember() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Not signed in." as const };
+  const { data: me } = await supabase.from("profiles").select("role, org_id, active, full_name").eq("id", user.id).maybeSingle();
+  if (!me) return { error: "Your profile couldn't be found." as const };
+  const row = me as { role?: string | null; org_id?: string | null; active?: boolean | null; full_name?: string | null };
+  if (row.active === false) return { error: "This account has been deactivated." as const };
+  if (!row.org_id) return { error: "Your sign-in isn't attached to a company yet." as const };
+  return {
+    supabase,
+    userId: user.id,
+    orgId: row.org_id,
+    staff: isStaffRole(row.role),
+    name: row.full_name?.trim() || "A crew member",
+  };
+}

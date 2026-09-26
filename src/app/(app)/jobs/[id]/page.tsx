@@ -86,6 +86,8 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { readJobShelfNet, splitJobMaterialCost } from "@/lib/job-cost";
+import { jobTakes } from "@/lib/stock-ledger";
+import { TookFromStock } from "../../materials/took-from-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
@@ -179,6 +181,9 @@ export default async function JobDetailPage({
   // THE SHELF'S PART OF THIS JOB'S MATERIALS (Shop Stock, 0303), started beside the reads below.
   // Staff only through RLS: a tech reads no rows here, and reads no bills either.
   const shelfNetP = readJobShelfNet(supabase, id);
+  // THE JOB'S TAKES FROM STOCK (Phase 3, 0344): for the crew and the office, never a cost. Started
+  // here too; it needs only the job id.
+  const takesP = jobTakes(supabase, id);
 
   const [
     { data: quotes },
@@ -603,6 +608,9 @@ export default async function JobDetailPage({
    */
   const shelf = await shelfNetP;
   if (shelf.error) throw shelf.error;
+  // A takes read that fails leaves the list empty and is logged; the button still works.
+  const takes = await takesP;
+  if (takes.error) reportError("jobs.page.stockTakes", takes.error, { jobId: id });
   const jobMaterials = splitJobMaterialCost(
     (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0),
     shelf.byJob.get(id),
@@ -1355,6 +1363,10 @@ export default async function JobDetailPage({
               viewerIsStaff=false hides est_cost / vendor / is_tool / the total inside the editor,
               and a DB trigger pins those columns, so the UI is a convenience, not the boundary.
               This replaces the read-only <ul> a tech used to get. */}
+          {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
+              it who took what off the shelf for this job, with Undo until an invoice bills it. It
+              counts on the job the moment it is tapped (Erik's decision 3). No price, for anyone. */}
+          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} />
           <ItemEditor
             listId={canonicalList?.id ?? null}
             jobId={j.id}

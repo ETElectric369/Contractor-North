@@ -166,6 +166,7 @@ function statusLabel(tool: string): string {
     list_invoices: "Checking invoices…", get_invoice: "Opening the invoice…",
     search_price_list: "Checking your price list…", price_material: "Pricing it…", schedule_overview: "Checking the schedule…",
     business_summary: "Crunching the numbers…", hours_summary: "Tallying hours…",
+    list_shelf: "Checking the shelf…",
   };
   return m[tool] ?? "Looking that up…";
 }
@@ -353,7 +354,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     // cached system prefix once (expected — the prefix re-caches on the next request).
     systemPrompt +=
       "\n\nDECOMPOSE EVERY RAMBLE — one utterance often carries SEVERAL actionable items: time worked, materials used, materials needed, a task, a return visit or deadline, a cost, a customer fact. Never act on just the first one. Silently enumerate EVERY item you heard, resolve the job/customer ONCE up front (list_jobs / list_customers) so each record attaches to the right place, then execute EACH item with its own tool in this same turn (you can call tools across several rounds). Map the common phrases:" +
-      "\n- 'we used X' (materials consumed): record it against the job — if they stated the cost, pettycash.add with the job_id; if NO price was given, capture.quick naming the job, items, and quantities, and SAY it's unpriced so it gets priced later. NEVER invent a price." +
+      "\n- 'we used X' (materials consumed): record it against the job. FROM STOCK / off the shelf / from the shop → stock.take with the job, the item and the count: it FILLS the Took From Stock card and the person taps Take It (the shelf's own cost follows the piece; never say a price, and never say it's taken until they tap). Bought, with a stated cost → pettycash.add with the job_id. Bought with NO price given → capture.quick naming the job, items, and quantities, and SAY it's unpriced so it gets priced later. NEVER invent a price." +
       "\n- 'add X to the materials list' / 'put X on the list' / 'X to be purchased for the job' / 'we need X for the job': material.addLine, ONE call per line (the job by name is fine; quantity and unit if said). It lands on the job's one materials list, unpurchased = to be purchased, and the office hears about a crew addition on its own. 'mark X purchased' / 'I picked up X' / 'got the X': material.markPurchased. 'take X off the list': material.removeLine (it confirms). 'what's on the list' / 'what still needs buying': list_material_items. A materials LINE is not a task." +
       "\n- 'I need X' / 'pick up X' / 'grab X' with a DEADLINE or as a personal errand ('pick up X before Friday'): task.create linked to the job (job_id), due BEFORE any deadline they stated. Without a deadline, and about the job's materials, prefer the materials list above." +
       "\n- 'go back before <day>' / 'have to return': schedule the visit — job.scheduleDay (or appointment.create for a timed visit) on a date BEFORE the stated deadline; ask which day if it's ambiguous." +
@@ -380,7 +381,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
       (isStaffCaller
         ? "\n- No entry for them today → 'Did you work today?' If yes → 'How many billable hours, and on which job?' → time.addEntry {work_date, hours}. ASK for the number — NEVER infer or guess hours, dollar amounts, or clock-out times."
         : "\n- No entry for them today → 'Did you work today?' If yes → 'How many hours, and on which job?' → you can't file a time entry yourself, so capture.quick it ('Unlogged time: 6 hrs on Apache Ct, Tue') for the office and say so. ASK for the number — NEVER infer or guess hours or clock-out times.") +
-      "\n- 'Any materials used today — from stock or purchased?' Purchased with a stated price → pettycash.add with the job_id (the app shows a confirm). From stock or no price given → capture.quick naming the job, items, and quantities, and say it's unpriced. NEVER invent a price." +
+      "\n- 'Any materials used today — from stock or purchased?' From stock → stock.take ONE item at a time (the job, the item, the count): it fills the Took From Stock card, they tap Take It, then the next item (the screen holds one card); if two shelf items match the name, ask which. Purchased with a stated price → pettycash.add with the job_id (the app shows a confirm). Purchased with no price given → capture.quick naming the job, items, and quantities, and say it's unpriced. NEVER invent a price." +
       "\n- 'Anything else billable today?' (extra work, a service call, a change the customer asked for → task.create or capture.quick so it isn't lost)." +
       "\n- Each crew mismatch you found: 'X was clocked in at Y — were you there too?' or 'X's entry is still open — did they stay longer?' Report what you see and ASK; NEVER silently edit another person's time." +
       "\n3. FILE EACH ANSWER IMMEDIATELY with its tool and a one-line readback before the next question — never stack answers up to file at the end." +

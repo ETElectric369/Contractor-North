@@ -119,6 +119,19 @@ async function buildActionItems(ctx: {
   const dayAfterTomorrowStr = daysAgoStr(todayStr, -2);
 
   const empty = Promise.resolve({ data: [] as any[] });
+  // The Recount feeder's read (Shop Stock, Phase 3; used at the end), started beside the big wave
+  // below rather than after it: this union is on the app shell's path. Promise.resolve STARTS it (a
+  // query builder does nothing until something calls its then).
+  const shortsP: Promise<{ data: any[] | null; error: unknown }> = isStaff
+    ? Promise.resolve(supabase
+        .from("stock_moves")
+        .select("id, qty, created_at, created_by, job_id, inventory_items(name, unit), jobs(job_number, name)")
+        .eq("kind", "short")
+        .is("settled_by", null)
+        .is("undone_at", null)
+        .order("created_at", { ascending: true })
+        .limit(50))
+    : Promise.resolve({ data: [] as any[], error: null });
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -994,6 +1007,40 @@ async function buildActionItems(ctx: {
           done: false,
           href: `/jobs/${j.id}`,
           affordances: AFFORDANCES.job_on_hold,
+        });
+      }
+    }
+  }
+
+  // RECOUNT — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
+  // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
+  // an invoice can bill until the office counts the shelf or files the roll and settles it. ONE item
+  // per short, and it stays until the short is settled or its take undone: it is a decision the app
+  // cannot defer, and it carries its date (the take's). Staff only; the shelf's record is staff-read
+  // (0303). Before 0303 is applied the read errors and the feeder is simply empty.
+  if (isStaff) {
+    const { data: shorts, error: shortErr } = await shortsP;
+    const rows = shortErr ? [] : ((shorts ?? []) as any[]);
+    if (rows.length) {
+      const whoIds = [...new Set(rows.map((r) => r.created_by).filter(Boolean))];
+      const { data: people } = whoIds.length ? await supabase.from("profiles").select("id, full_name").in("id", whoIds) : { data: [] };
+      const nameOf = new Map(((people ?? []) as any[]).map((p) => [p.id, String(p.full_name ?? "").trim()]));
+      for (const r of rows) {
+        const it = Array.isArray(r.inventory_items) ? r.inventory_items[0] : r.inventory_items;
+        const jb = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
+        const q = Math.round(Number(r.qty ?? 0) * 1000) / 1000;
+        const who = nameOf.get(r.created_by) || "Someone";
+        items.push({
+          id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
+          kind: "stock_short",
+          title: `Recount ${it?.name ?? "an item"}: ${q} ${it?.unit ?? ""} taken past the shelf`.replace(/\s+/g, " "),
+          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. Count it or file the roll, then Settle.`,
+          who: null,
+          when: r.created_at,
+          urgency: 1,
+          done: false,
+          href: "/inventory",
+          affordances: AFFORDANCES.stock_short,
         });
       }
     }

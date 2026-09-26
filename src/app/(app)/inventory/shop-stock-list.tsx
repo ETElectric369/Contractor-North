@@ -13,6 +13,7 @@ import { formatCurrency } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
 import { addOpeningRoll, countItem, takeLotOffShelf, undoShelfMove, undoShelfTake } from "./actions";
 import { ItemActions } from "./item-actions";
+import { settleShortAction } from "../materials/stock-actions";
 
 export type ShelfLotView = {
   id: string;
@@ -258,6 +259,18 @@ export function ShopStockList({ items }: { items: ShelfItemView[] }) {
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
                                   Undo
+                                </button>
+                              )}
+                              {/* The answer to a Recount item (Phase 3): once a roll is on the shelf,
+                                  the pieces taken past it are settled at that roll's cost. */}
+                              {!m.undone && m.kind === "short" && !m.settled && (
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={() => act(() => settleShortAction(m.id), "Settled from the shelf.")}
+                                  className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                                >
+                                  Settle From The Shelf
                                 </button>
                               )}
                             </li>

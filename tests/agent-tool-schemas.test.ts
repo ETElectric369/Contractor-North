@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DATA_TOOLS } from "@/lib/assistant-tools";
+import { DATA_TOOLS, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS } from "@/lib/electrical-calc";
 import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 
@@ -50,5 +50,13 @@ describe("agent tool schemas are valid draft 2020-12", () => {
   it("tool names satisfy the API's name rule", () => {
     const { tools } = agentWriteToolsForRole("owner");
     for (const t of tools) expect(t.name).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+  });
+});
+
+describe("the shelf's tools reach the crew (Shop Stock, Phase 3)", () => {
+  it("a tech is offered stock.take and list_shelf; list_shelf is not an office-only read", () => {
+    expect(agentWriteToolsForRole("tech").tools.map((t) => t.name)).toContain("stock__take");
+    expect(DATA_TOOLS.map((t) => t.name)).toContain("list_shelf");
+    expect(STAFF_ONLY_DATA_TOOLS.has("list_shelf")).toBe(false);
   });
 });
