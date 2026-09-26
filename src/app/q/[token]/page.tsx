@@ -8,7 +8,7 @@ import { templateFor } from "@/components/doc-templates";
 import { PublicQuoteAccept } from "./accept";
 import { QuoteDocument } from "@/components/quote-document";
 import { docLabel } from "@/lib/doc-label";
-import { docTitle } from "@/lib/doc-title";
+import { docPageTitle, projectionPlace } from "@/lib/doc-place";
 import { NO_INDEX } from "@/lib/no-index";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
@@ -20,9 +20,9 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const supabase = await createClient();
   const { data } = await supabase.rpc("public_quote", { p_token: token });
   const q = (data as any)?.quote;
-  const label = docLabel(q);
   // NEVER indexed — permanent bearer token + customer PII + pricing. See @/lib/no-index.
-  return { title: docTitle(q ? `${label} ${q.quote_number}` : "Quote"), robots: NO_INDEX };
+  // "E-017_13897 Herringbone": what Save As PDF names the file (lib/doc-place).
+  return { title: q ? docPageTitle(q.quote_number, projectionPlace(data as any)) : "Quote", robots: NO_INDEX };
 }
 
 export default async function PublicQuotePage({

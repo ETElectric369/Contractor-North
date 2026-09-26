@@ -32,6 +32,7 @@ import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
+import { rowPlace } from "@/lib/doc-place";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -84,7 +85,7 @@ export async function textQuote(
     // document and the public /q link have coalesced onto the inquiry since 0119 — but Send only
     // ever asked for the customer, so texting a perfectly reachable prospect answered "this
     // customer has no phone number" about a customer that was never supposed to exist yet.
-    .select("quote_number, total, public_token, doc_type, status, customers(name, phone), inquiry:inquiry_id(name, phone)")
+    .select("quote_number, total, public_token, doc_type, status, address, customers(name, phone, address), inquiry:inquiry_id(name, phone, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -98,7 +99,7 @@ export async function textQuote(
     return { ok: false, error: "There's no phone number on file for whoever this estimate is for — add one on their lead or contact, then send again." };
 
   const label = docLabel(quote as { doc_type?: string | null });
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token);
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token, rowPlace(quote as any));
   const body = `${org?.name ?? "Your contractor"}: ${label} ${quote.quote_number} ($${Number(quote.total).toFixed(2)}). View: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
@@ -149,7 +150,7 @@ export async function quoteShareText(
   const supabase = ctx.supabase;
   const { data: quote } = await supabase
     .from("quotes")
-    .select("quote_number, total, public_token, doc_type, status")
+    .select("quote_number, total, public_token, doc_type, status, address, customers(address), inquiry:inquiry_id(address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "That estimate could not be found." };
@@ -178,7 +179,7 @@ export async function quoteShareText(
   // from the ORG's settings (its own domain), never NEXT_PUBLIC_SITE_URL.
   const { data: org } = await supabase.from("organizations").select("name, settings").maybeSingle();
   const who = org?.name ?? "Your contractor";
-  const url = orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "q", token);
+  const url = orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "q", token, rowPlace(quote));
   return {
     ok: true,
     title: `${label} ${quote.quote_number} — ${who}`,
@@ -196,7 +197,7 @@ export async function emailQuote(
     .from("quotes")
     // The lead too — same reason as textQuote above: an estimate made out to a lead is a real,
     // sendable document, and the /q link it carries already prints the lead's name.
-    .select("*, customers(name, email), inquiry:inquiry_id(name, email)")
+    .select("*, customers(name, email, address), inquiry:inquiry_id(name, email, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!quote) return { ok: false, error: "Quote not found." };
@@ -210,7 +211,7 @@ export async function emailQuote(
     .select("name, phone, email, settings")
     .maybeSingle();
   // After the org fetch, because the link is built from the org's own domain now.
-  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token);
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "q", (quote as any).public_token, rowPlace(quote as any));
 
   // Link-only notice (no re-rendered line-item table): the canonical document
   // lives at the /q link, so the email can never drift from the print/portal

@@ -2,6 +2,7 @@
 // here with defaults so the app can read settings safely anywhere.
 
 import type { Block } from "@/lib/site-blocks";
+import { withPlace } from "@/lib/doc-place";
 
 export interface OrgSettings {
   // Company
@@ -830,8 +831,9 @@ export function accentHex(glassTintHex?: string | null): string {
  */
 export type DocPrefix = "i" | "q" | "c" | "portal" | "pick" | "inquire" | "estimate";
 
-export function orgDocUrl(settings: OrgSettings, prefix: DocPrefix, token: string): string {
-  return `${orgPublicBaseUrl(settings)}/${prefix}/${token}`;
+export function orgDocUrl(settings: OrgSettings, prefix: DocPrefix, token: string, place?: string | null): string {
+  // `place` (docPlace in lib/doc-place) rides on the end as a slug the page ignores: /i/<token>/235-timbercreek.
+  return withPlace(`${orgPublicBaseUrl(settings)}/${prefix}/${token}`, place);
 }
 
 export function orgPublicBaseUrl(settings: OrgSettings): string {

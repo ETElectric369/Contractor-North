@@ -5,7 +5,7 @@ import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
-import { docTitle } from "@/lib/doc-title";
+import { docPageTitle, projectionPlace } from "@/lib/doc-place";
 import { NO_INDEX } from "@/lib/no-index";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { cardFeeDecision, feePctLabel, payUrl } from "@/lib/org-settings";
@@ -25,7 +25,8 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const inv = (data as any)?.invoice;
   // NEVER indexed. The token is a permanent bearer credential and the page carries the
   // customer's name + address + balance — one forwarded link must not become a search result.
-  return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice"), robots: NO_INDEX };
+  // "INV-080_235 Timbercreek": what Save As PDF names the file (lib/doc-place).
+  return { title: inv ? docPageTitle(inv.invoice_number, projectionPlace(data as any)) : "Invoice", robots: NO_INDEX };
 }
 
 /** What the page reads as the service role, pinned to the one org and the one invoice the link

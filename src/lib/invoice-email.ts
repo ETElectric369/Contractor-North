@@ -1,6 +1,7 @@
 import "server-only";
 import { sendEmail, renderInvoiceNoticeEmail, ownerBcc } from "@/lib/email";
-import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgDocUrl, orgPublicBaseUrl } from "@/lib/org-settings";
+import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -20,7 +21,7 @@ export async function deliverInvoiceEmail(
 ): Promise<{ ok: boolean; error?: string }> {
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("*, customers(name, email)")
+    .select("*, customers(name, email, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -64,7 +65,7 @@ export async function deliverInvoiceEmail(
   if (!items || items.length === 0) return { ok: false, error: "This invoice has no line items to send." };
 
   const site = orgPublicBaseUrl(getOrgSettings((org as any)?.settings));
-  const link = `${site}/i/${(invoice as any).public_token}`;
+  const link = orgDocUrl(getOrgSettings((org as any)?.settings), "i", (invoice as any).public_token, rowPlace(invoice as any));
   const portalLink = portal?.token && portal.enabled ? `${site}/portal/${portal.token}` : undefined;
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   // A basic greeting + the balance + a button to the ONE canonical invoice document

@@ -163,7 +163,8 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
 
   it("a sent bill with a balance keeps its /i pay door and no running-total banner", () => {
     const sent = render(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }));
-    expect(sent).toContain(`href="/i/${"a".repeat(32)}"`);
+    // The street rides on the end (lib/doc-place); the token alone is still the key.
+    expect(sent).toContain(`href="/i/${"a".repeat(32)}/1-main"`);
     expect(text(sent)).toContain("View And Pay INV-078 ($1,558.62 due)");
     expect(text(sent)).not.toContain("Running total, not a bill yet.");
     // The card total is what the bills carry, never "Work To Date" (that is the Progress Summary's rule).

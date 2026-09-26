@@ -22,7 +22,8 @@ import { isReturnBill, returnCreditRows, returnLinesAgainstPurchases, returnsSum
 import { sendSms, smsReadiness } from "@/lib/sms";
 import { TEXT_NOT_READY_REFUSAL, TEXT_REFUSED } from "@/lib/sms-readiness";
 import { pushInvoiceToQbo } from "@/lib/quickbooks";
-import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
+import { getOrgSettings, orgDocUrl, orgPublicBaseUrl } from "@/lib/org-settings";
+import { rowPlace } from "@/lib/doc-place";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
@@ -310,12 +311,12 @@ async function publicInvoiceLink(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string | null | undefined,
   token: string,
+  place: string,
 ): Promise<string> {
   const { data: org } = orgId
     ? await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
     : { data: null };
-  const base = orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings));
-  return `${base}/i/${token}`;
+  return orgDocUrl(getOrgSettings((org as { settings?: unknown } | null)?.settings), "i", token, place);
 }
 
 /**
@@ -339,7 +340,7 @@ export async function invoiceShareText(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { data: invoice } = await ctx.supabase
     .from("invoices")
-    .select("invoice_number, status, total, amount_paid, public_token, org_id, organizations(name)")
+    .select("invoice_number, status, total, amount_paid, public_token, org_id, organizations(name), jobs(address), customers(address)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -406,7 +407,7 @@ export async function invoiceShareText(
 
   const who = (invoice as { organizations?: { name?: string } }).organizations?.name ?? "Your contractor";
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
-  const url = await publicInvoiceLink(ctx.supabase, (invoice as { org_id?: string }).org_id, token);
+  const url = await publicInvoiceLink(ctx.supabase, (invoice as { org_id?: string }).org_id, token, rowPlace(invoice));
   return {
     ok: true,
     title: `Invoice ${invoice.invoice_number} — ${who}`,
@@ -423,7 +424,7 @@ export async function textInvoice(
   const supabase = ctx.supabase;
   const { data: invoice } = await supabase
     .from("invoices")
-    .select("invoice_number, total, amount_paid, status, public_token, org_id, customers(name, phone)")
+    .select("invoice_number, total, amount_paid, status, public_token, org_id, customers(name, phone, address), jobs(address)")
     .eq("id", id)
     .maybeSingle();
   if (!invoice) return { ok: false, error: "Invoice not found." };
@@ -436,7 +437,7 @@ export async function textInvoice(
     return { ok: false, error: "This customer has no phone number." };
 
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
-  const link = await publicInvoiceLink(supabase, (invoice as any).org_id, (invoice as any).public_token);
+  const link = await publicInvoiceLink(supabase, (invoice as any).org_id, (invoice as any).public_token, rowPlace(invoice as any));
   const body = `${org?.name ?? "Your contractor"}: Invoice ${invoice.invoice_number}, balance $${balance.toFixed(2)}. View/pay: ${link}`;
 
   const sent = await sendSms(customer.phone, body, (org as any)?.settings?.sms_from_number);
@@ -4077,6 +4078,8 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
   /** Stripe door — present only when the org can actually accept card payments. */
   payQr?: string;
   payUrl?: string;
+  /** The customer's invoice page (/i/<token>/<place>): the receipt link after a tap. */
+  invoiceUrl?: string;
   /** Venmo door — present only when Settings carries a handle. */
   venmoQr?: string;
   venmoHandle?: string;
@@ -4087,7 +4090,7 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
 
   const { data: inv } = await supabase
     .from("invoices")
-    .select("id, invoice_number, status, total, amount_paid, public_token, org_id")
+    .select("id, invoice_number, status, total, amount_paid, public_token, org_id, jobs(address), customers(address)")
     .eq("id", invoiceId)
     .maybeSingle();
   if (!inv) return { ok: false, error: "Invoice not found." };
@@ -4147,6 +4150,7 @@ export async function collectArtifacts(invoiceId: string, collectAmount?: number
 
   // CARD — only when the door actually opens. A QR to a checkout that will 503 is worse than no QR.
   const token = (inv as { public_token?: string | null }).public_token;
+  if (token) out.invoiceUrl = orgDocUrl(getOrgSettings((org as { settings?: unknown }).settings), "i", token, rowPlace(inv));
   if (token && org && canAcceptPayments(connectStateFromOrg(org as never))) {
     const base = orgPublicBaseUrl(getOrgSettings((org as { settings?: unknown }).settings));
     const payUrl = `${base}/api/pay/${token}`;

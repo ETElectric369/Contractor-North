@@ -3,7 +3,8 @@ import { sendEmail, renderReminderEmail, money } from "@/lib/email";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { todayStrInTz } from "@/lib/tz";
 import { reportError } from "@/lib/observe";
-import { getOrgSettings, accentHex, orgPublicBaseUrl } from "@/lib/org-settings";
+import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
+import { rowPlace } from "@/lib/doc-place";
 import { docLabel } from "@/lib/doc-label";
 import { reminderSuppressed } from "@/lib/automations-math";
 import { pendingTransfers } from "@/lib/bank-transfer";
@@ -40,8 +41,8 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         email: org.email,
       };
       // Links land on THIS org's own domain (custom domain → their subdomain → fallback), so a
-      // customer's invoice/quote button points at the brand they hired, not a generic app URL.
-      const site = orgPublicBaseUrl(s);
+      // customer's invoice/quote button points at the brand they hired, not a generic app URL
+      // (orgDocUrl, with the street on the end).
 
       // Has a reminder of (kind, entity) already gone out within `withinDays`, or hit `cap`?
       // Fail CLOSED: if the dedup read errors, suppress — never risk re-spamming a customer.
@@ -83,7 +84,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
       if (s.remind_invoice_due) {
         const { data: invs } = await supabase
           .from("invoices")
-          .select("id, invoice_number, total, amount_paid, public_token, customers(name, email)")
+          .select("id, invoice_number, total, amount_paid, public_token, customers(name, email, address), jobs(address)")
           .eq("org_id", org.id)
           .in("status", ["sent", "partial"])
           .lt("due_date", today);
@@ -105,7 +106,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
             customerName: cust.name || "there",
             heading: `Payment reminder — Invoice ${inv.invoice_number}`,
             message: `This is a friendly reminder that invoice ${inv.invoice_number} has an outstanding balance of ${money(bal)}, now past its due date. You can review and pay it securely using the button below.`,
-            cta: inv.public_token ? { label: "View & pay invoice", link: `${site}/i/${inv.public_token}` } : undefined,
+            cta: inv.public_token ? { label: "View & pay invoice", link: orgDocUrl(s, "i", inv.public_token, rowPlace(inv as any)) } : undefined,
           });
           const r = await sendEmail({
             to: cust.email,
@@ -129,7 +130,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
         const todayStr = new Date(now).toISOString().slice(0, 10);
         const { data: qs } = await supabase
           .from("quotes")
-          .select("id, quote_number, public_token, doc_type, valid_until, customers(name, email)")
+          .select("id, quote_number, public_token, doc_type, valid_until, address, customers(name, email, address), inquiry:inquiry_id(address), jobs(address)")
           .eq("org_id", org.id)
           .eq("status", "sent")
           .lt("updated_at", cutoff)
@@ -146,7 +147,7 @@ export async function sendDueReminders(supabase: any): Promise<Counts> {
             customerName: cust.name || "there",
             heading: `Following up on ${label} ${q.quote_number}`,
             message: `We wanted to follow up on the ${noun} we sent over (${q.quote_number}). We'd be glad to answer any questions or get your project on the schedule whenever you're ready.`,
-            cta: q.public_token ? { label: `View ${noun}`, link: `${site}/q/${q.public_token}` } : undefined,
+            cta: q.public_token ? { label: `View ${noun}`, link: orgDocUrl(s, "q", q.public_token, rowPlace(q as any)) } : undefined,
           });
           const r = await sendEmail({
             to: cust.email,
