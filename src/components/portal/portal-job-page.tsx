@@ -361,9 +361,17 @@ function BillCard({ b, place, explainBalance }: { b: PortalInvoice; place: strin
           </div>
         ) : null}
         {b.doc ? (
-          <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
-            <InvoiceDocument {...b.doc} groupByKind />
-          </div>
+          <>
+            {b.docPartial ? (
+              // A piece of the sheet was left off (a read failed): the rest is drawn, and says so.
+              <p className="px-4 py-2 text-sm text-slate-700 sm:px-1">
+                Part of this bill couldn&apos;t load just now. Please refresh the page in a moment.
+              </p>
+            ) : null}
+            <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
+              <InvoiceDocument {...b.doc} groupByKind />
+            </div>
+          </>
         ) : (
           // The bill is there; its sheet could not be read just now. Say so, never an empty sheet.
           <p className="px-4 py-4 text-sm text-slate-700">

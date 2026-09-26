@@ -622,7 +622,7 @@ export async function unbilledWorkForJob(
   const orgId = scope?.orgId ?? null;
   let posQ = supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId);
   if (orgId) posQ = posQ.eq("org_id", orgId);
-  const [labor, { data: org }, levelRate, { data: pos }, billsRead, stock] = await Promise.all([
+  const [labor, orgRead, levelRate, posRead, billsRead, stock] = await Promise.all([
     fetchJobLaborRows(supabase, jobId, scope),
     orgId
       ? supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
@@ -639,8 +639,12 @@ export async function unbilledWorkForJob(
   // A LOST RECEIPT READ IS NOT AN EMPTY JOB. Reporting $0 of material because a query failed is a
   // money statement nobody made, and this figure is what the draw gate bills from; the claim read
   // below already refuses the same way.
-  if (billsRead.error) throw billsRead.error;
+  // The org read and the orders read the same way (audit v1018 money-1): a lost org read priced
+  // hours with no bill rate at $0 and materials at the default 25%, a lost orders read dropped them.
+  for (const r of [billsRead, orgRead, posRead]) if (r.error) throw r.error;
   const bills = billsRead.data;
+  const org = orgRead.data;
+  const pos = posRead.data;
   const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   // Claims AFTER the rows, never beside them: the read wants every candidate id so a row billed on
   // another job (moved since) is still seen as claimed. The markup resolver rides along.

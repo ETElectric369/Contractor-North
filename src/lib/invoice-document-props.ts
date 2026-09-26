@@ -38,8 +38,11 @@ import type { Organization } from "@/lib/types";
  * no Progress Summary, and a failed progress read prints no Progress Summary.
  *
  * LEFT OFF IS FOR THE LIVE PAGES ONLY. A read with a piece missing says so (`degraded`, naming the
- * pieces). The /i page and the portal redraw on every open, so they draw what they have. The print
- * page is the PDF, and /api/pdf stores what it renders as the customer's copy with nothing on it
+ * pieces). The /i page and the portal redraw on every open, so they draw what they have and say,
+ * above the sheet, that part of the bill couldn't load (audit v1018): a partial bill is never passed
+ * off as the whole one. A failed progress read is any of jobProgressFinancials' reads (the job, its
+ * quotes, invoices, orders, receipts, stock, org), each of which throws rather than read as empty.
+ * The print page is the PDF, and /api/pdf stores what it renders as the customer's copy with nothing on it
  * saying a piece is missing, so the print page refuses a degraded read (a non-200 is never stored).
  */
 export type InvoiceDocumentProps = Omit<ComponentProps<typeof InvoiceDocument>, "groupByKind">;

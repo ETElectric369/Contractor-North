@@ -1641,11 +1641,24 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   // reconcile to the penny with the "work to date" every panel shows) — MINUS every entry
   // another non-void invoice on the job already CLAIMS (0255). Re-importing into THIS
   // draft excludes only OTHER invoices' claims, so a refresh still works exactly as 0175 promised.
-  const [labor, { data: org }, levelRate] = await Promise.all([
-    fetchJobLaborRows(supabase, inv.job_id),
-    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
-    customerLaborRateForJob(supabase, inv.job_id),
-  ]);
+  // A LOST READ BILLS NOTHING (audit v1018 money-1): no hours read as "No billable hours", no rate
+  // as the default rate. Refused in words; nothing written.
+  let labor: Awaited<ReturnType<typeof fetchJobLaborRows>>;
+  let org: { settings?: unknown } | null;
+  let levelRate: number | null;
+  try {
+    let orgRead: { data: { settings?: unknown } | null; error: unknown };
+    [labor, orgRead, levelRate] = await Promise.all([
+      fetchJobLaborRows(supabase, inv.job_id),
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      customerLaborRateForJob(supabase, inv.job_id),
+    ]);
+    if (orgRead.error) throw orgRead.error;
+    org = orgRead.data;
+  } catch (e) {
+    reportError("importLabor.read", e, { invoiceId, jobId: inv.job_id });
+    return { ok: false, error: "Couldn't read this job's hours or rates just now, so no labor was added. Try again in a moment." };
+  }
   // Claims AFTER the rows, never beside them: the read looks every candidate up BY ID as well as by
   // job, so an entry billed on another job and moved here since is still seen as claimed.
   const claims = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, laborRowIds(labor));
@@ -1943,12 +1956,19 @@ async function importCostsCore(
   // and the progress-draw path use, so every door prices a level customer's materials alike.
   let markup = markupPercent;
   if (markup === undefined) {
-    const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    markup = await customerMaterialMarkupForJob(
-      supabase,
-      inv.job_id,
-      getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).material_markup_percent,
-    );
+    // A lost read is refused, never priced at a default (audit v1018 money-1).
+    try {
+      const { data: orgRow, error: orgErr } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+      if (orgErr) throw orgErr;
+      markup = await customerMaterialMarkupForJob(
+        supabase,
+        inv.job_id,
+        getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).material_markup_percent,
+      );
+    } catch (e) {
+      reportError("importCosts.markup", e, { invoiceId, jobId: inv.job_id });
+      return { ok: false, error: "Couldn't read this customer's markup just now, so no materials were added. Try again in a moment." };
+    }
   }
   const conflict = await standardInvoiceOnDrawJob(supabase, inv, invoiceId);
   if (conflict) return conflict;
@@ -2548,8 +2568,16 @@ async function landOnOpenDraw(
       ...(open.number ? { openDraft: { id: open.id, number: open.number } } : {}),
     };
   }
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const markup = await customerMaterialMarkupForJob(supabase, jobId, getOrgSettings((org as { settings?: unknown } | null)?.settings).material_markup_percent);
+  // A lost read is refused, never priced at a default (audit v1018 money-1).
+  let markup: number;
+  try {
+    const { data: org, error: orgErr } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    if (orgErr) throw orgErr;
+    markup = await customerMaterialMarkupForJob(supabase, jobId, getOrgSettings((org as { settings?: unknown } | null)?.settings).material_markup_percent);
+  } catch (e) {
+    reportError("landOnOpenDraw.markup", e, { jobId, invoiceId: open.id });
+    return { ok: false, error: `Couldn't read this customer's pricing just now, so nothing was added to ${label}. Try again in a moment.` };
+  }
   return refreshActualsDraw(supabase, jobId, open, markup, asKind);
 }
 
@@ -2644,7 +2672,13 @@ export async function createProgressReportInvoice(
   // Seed from the customer's pricing level (falling back to the org default) — the same
   // resolver the manual import box and the work-to-date panel use, so a draw can't bill a
   // level customer's materials at a different rate than a standard invoice would.
-  const markup = await customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent);
+  let markup: number;
+  try {
+    markup = await customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent);
+  } catch (e) {
+    reportError("createProgressReportInvoice.markup", e, { jobId });
+    return { ok: false, error: "Couldn't read this customer's pricing just now, so nothing was billed. Try again in a moment." };
+  }
   const dueDate = await defaultDueDateIso(supabase);
 
   const { data: inv, error } = await supabase

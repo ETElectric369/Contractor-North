@@ -241,9 +241,23 @@ export default async function PublicInvoicePage({
       {/* THE SAME PROPS AS THE PDF (readInvoiceDocumentProps): the org's letterhead color and
           layout, the customer's phone and email, the Progress Summary. No line names a supplier
           (InvoiceDocument's customerLines, audit v994 PL1). A read that failed says so and offers
-          the page again; it never draws a bill with missing lines. */}
+          the page again; it never draws a bill with missing lines. A piece left off (the payment
+          list, Bill To, the job site, the Progress Summary) says so too, above the sheet (audit
+          v1018): the rest of the bill is whole, so it is drawn, never passed off as the whole. */}
       {doc.kind === "ok" ? (
-        <InvoiceDocument {...doc.props} />
+        <>
+          {doc.degraded.length > 0 && (
+            <div className="no-print mx-auto mb-4 max-w-3xl px-4">
+              <div className="flex flex-wrap items-center justify-center gap-x-3 rounded-xl bg-amber-50 px-4 text-center text-sm font-medium text-amber-800">
+                <span className="py-2">Part of this bill couldn&apos;t load just now.</span>
+                <a href={`/i/${token}`} className="inline-flex min-h-[44px] items-center justify-center px-2 underline underline-offset-2">
+                  Try Again
+                </a>
+              </div>
+            </div>
+          )}
+          <InvoiceDocument {...doc.props} />
+        </>
       ) : (
         <div className="mx-auto max-w-3xl px-4">
           <div className="rounded-xl bg-white px-4 py-6 text-center text-sm text-slate-700 shadow-sm">

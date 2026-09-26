@@ -14,6 +14,10 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
  *      quote acceptance refuses the old copy rather than serving a wrong badge.
  *   3. The writes that change what a customer-visible doc RENDERS bust the cache here:
  *      payments (invoice balance) and quote line/meta edits (sent quotes stay editable).
+ *      The JOB's changes that a bill prints (the hours and stock takes behind a draw's Progress
+ *      Summary, the job's site and billing model on every bill) un-stamp the copies at the
+ *      database instead (0349), because they are written from too many doors for an app-side
+ *      hook; the staff door's fingerprint HIT or re-render stamps a fresh copy again.
  *
  * Everything is best-effort: a cache failure must never cost the action that triggered it.
  */
