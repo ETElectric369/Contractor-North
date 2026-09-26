@@ -45,7 +45,9 @@ jobs:
       # The DB suites write (inside rolled-back transactions), so they may only ever reach the TEST
       # database. Until 2026-09 these secrets pointed at production and the suites wrote there. This
       # fails the job unless TEST_DB_* connect as the test project's user and find its marker row
-      # (the same check src/lib/db-guard.ts runs inside every suite).
+      # (the same check src/lib/db-guard.ts runs inside every suite). It also fails, naming the files,
+      # when the test database is behind supabase/migrations (run node scripts/test-db/rebuild.cjs):
+      # a suite whose migration is missing would otherwise pass having asserted nothing.
       - name: TEST_DB_* point at the test database
         run: node scripts/test-db/check-test-db.cjs
         env:

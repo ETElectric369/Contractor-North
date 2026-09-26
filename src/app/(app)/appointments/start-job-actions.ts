@@ -20,7 +20,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
-import { startedAtProblem, startedWords, clockWords, jobShort, type StartedClock } from "@/lib/appointments/visit-start";
+import { startedAtProblem, startedWords, clockWords, jobShort, visitIsOver, type StartedClock } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { overlapRefusal } from "@/lib/overlap-refusal";
 import type { GeoPoint } from "@/lib/types";
@@ -55,6 +55,7 @@ type VisitRow = {
   status: string | null;
   job_id: string | null;
   starts_at: string | null;
+  ends_at?: string | null;
   customer_id: string | null;
   inquiry_id: string | null;
   customers: { name: string | null } | { name: string | null }[] | null;
@@ -66,7 +67,7 @@ const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ?
 async function readVisit(supabase: SupabaseClient, id: string): Promise<VisitRow | null> {
   const { data } = await supabase
     .from("appointments")
-    .select("id, title, status, job_id, starts_at, customer_id, inquiry_id, customers(name), inquiries(name)")
+    .select("id, title, status, job_id, starts_at, ends_at, customer_id, inquiry_id, customers(name), inquiries(name)")
     .eq("id", id)
     .maybeSingle();
   return (data as VisitRow | null) ?? null;
@@ -345,10 +346,15 @@ export async function askOfficeToStartJob(appointmentId: string): Promise<{ ok: 
   }
   const first = (prof.full_name ?? "").trim().split(/\s+/)[0] || "A crew member";
   const who = visitWho(visit);
+  const place = visit.title?.trim() || "a visit";
+  // A visit that is over (audit v1018): he is not "at" it, so the bell says what is true.
+  const over = visitIsOver(visit, await orgTz(supabase as unknown as SupabaseClient));
   const rang = await ringOffice(prof.org_id, recipients, {
     type: "visit_needs_job",
     title: `${first} needs a job started${who ? ` for ${who}` : ""}`,
-    body: `${first} is at ${visit.title?.trim() || "a visit"} and can't clock in until it has a job. Start it from the visit.`,
+    body: over
+      ? `${first} asks for a job on ${place}, a visit that is done, so the work can go on. Start it from the visit.`
+      : `${first} is at ${place} and can't clock in until it has a job. Start it from the visit.`,
     url: `/appointments/${visit.id}`,
     windowMinutes: 15,
     mode: "once_per_window",
@@ -356,5 +362,10 @@ export async function askOfficeToStartJob(appointmentId: string): Promise<{ ok: 
   if (rang === "failed" || rang === "nobody") {
     return { ok: false, error: "That didn't reach the office. Call them instead." };
   }
-  return { ok: true, message: "The office has been asked. Once they start the job, you can clock in right here." };
+  return {
+    ok: true,
+    message: over
+      ? "The office has been asked to start a job for this visit."
+      : "The office has been asked. Once they start the job, you can clock in right here.",
+  };
 }

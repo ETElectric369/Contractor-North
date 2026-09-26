@@ -23,6 +23,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { aggregatePayrollEntries } from "./payroll-math";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -88,8 +89,7 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
   };
   const needs = (what: "0288" | "0290" | "0313") => {
     const ok = what === "0288" ? has0288 : what === "0290" ? has0290 : has0313;
-    if (!ok) console.warn(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
-    return ok;
+    return ok || notOnThisDatabase(`[split-into-entries] migration ${what} is not on this database yet; apply it to exercise this case.`);
   };
 
   // ── fixture writers, as the server ──
@@ -625,10 +625,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
             limit 1`,
           [orgId],
         );
-        if (!t) {
-          console.warn("[split-into-entries] every tech is on the clock right now; Switch Job was not exercised.");
-          return;
-        }
+        // The throwaway org's techs are on no clock but this suite's: a case without one would assert nothing.
+        expect(t, "a tech of the throwaway org with nothing on the clock").toBeTruthy();
         const open = (
           await one(
             `insert into public.time_entries (org_id, profile_id, job_id, clock_in, status, source, notes)

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0326: the customer sees the plans and drawings, only the newest version, and never a
@@ -91,8 +91,7 @@ d("plans and drawings on the customer's page (0326)", { timeout: 30_000 }, () =>
     }
   };
   const needs = () => {
-    if (!ready) console.warn("[portal-docs] migration 0326 is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.");
-    return ready;
+    return ready || notOnThisDatabase("[portal-docs] migration 0326 is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.");
   };
   const view = async (token: string, jobId: string) => (await one("select public.portal_job_view($1, $2) as j", [token, jobId])).j;
   const docIds = async (token: string, jobId: string) => ((await view(token, jobId))?.documents ?? []).map((x: { id: string }) => x.id);

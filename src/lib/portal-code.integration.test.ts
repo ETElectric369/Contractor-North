@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { codeMatches, hashCode, hashSecret, newSalt, newSessionSecret } from "./portal/code";
 
 /**
@@ -78,8 +78,7 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
     }
   };
   const needs = () => {
-    if (!ready) console.warn("[portal-code] 0298 is not on this database; nothing to test.");
-    return ready;
+    return ready || notOnThisDatabase("[portal-code] 0298 is not on this database; nothing to test.");
   };
   const tokenOf = async (id: string) => (await one("select token from public.customer_portal_access where customer_id = $1", [id])).token as string;
   const gate = async (token: string) => (await one("select public.portal_gate($1) as j", [token])).j;
@@ -327,10 +326,8 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
 
   it("cross-org: another org's session opens nothing here, and another org's office can't see or touch it", async () => {
     if (!needs()) return;
-    if (!otherStaffId || !custOther) {
-      console.warn("[portal-code] a one-org database has no neighbour to test against.");
-      return;
-    }
+    // mintOrgAndStranger always mints the neighbour: a case without one would assert nothing.
+    expect(otherStaffId && custOther, "the stranger org and its customer were minted").toBeTruthy();
     await c.query("savepoint s_org");
     const mine = await tokenOf(custA);
     const theirs = await tokenOf(custOther);

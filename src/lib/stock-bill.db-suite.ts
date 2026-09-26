@@ -36,6 +36,7 @@ import { billItemisation, excludedReceiptCost, shelfLotCost, type BillLine } fro
 import { stockImportRows, stockShortsSentence, stockTakesOnJob, unclaimedTakes, type StockItemRow, type StockLotRow, type StockMoveRow } from "./stock-billing";
 import { jobMaterialCostFrom } from "./job-cost";
 import { LIVE_ORGS, mintThrowawayOrg } from "./throwaway-org.db-fixture";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -102,7 +103,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
 
   it("a 250 ft roll on job A's ticket, 60 ft taken back by A and 20 ft by B: each billed once at its markup, costs exact, every other door refused", async () => {
     if (!shelfReady) {
-      console.warn("[stock-bill] the shelf (0303) is not on this database; nothing to test.");
+      notOnThisDatabase("[stock-bill] the shelf (0303) is not on this database; nothing to test.");
       return;
     }
     // ── fixtures, as the server (no table-level locks beyond rows) ──
@@ -220,7 +221,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     const has0343 = (await one("select to_regprocedure('public.guard_stock_piece_claim()') is not null as ok")).ok;
     if (!has0343) {
       if (!opts.allowDdl) {
-        console.warn("[stock-bill] 0343 is not on this database yet, and this run may not apply DDL (never on production); nothing to test.");
+        notOnThisDatabase("[stock-bill] 0343 is not on this database yet, and this run may not apply DDL (never on production); nothing to test.");
         return;
       }
       const t0 = Date.now();

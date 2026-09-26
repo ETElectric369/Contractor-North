@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0341: a vendor has a kind (vendor import, Phase 1).
@@ -66,8 +66,7 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
     }
   };
   const ready = () => {
-    if (waiting) console.warn("[vendor-kinds] 0341 is not on this database yet; set VENDOR_APPLY_0341=1 to apply it inside the rolled-back transaction.");
-    return !waiting;
+    return !waiting || notOnThisDatabase("[vendor-kinds] 0341 is not on this database yet; set VENDOR_APPLY_0341=1 to apply it inside the rolled-back transaction.");
   };
 
   beforeAll(async () => {
@@ -109,17 +108,19 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
     }
   });
 
-  it("backfills every card made before it to 'brand'", async () => {
+  // These two cases can run only where this test applies 0341 itself; anywhere else they are
+  // reported SKIPPED, never counted as passed (audit v1018, class 10).
+  it("backfills every card made before it to 'brand'", async (ctx) => {
     if (!ready()) return;
-    if (!appliedHere) return console.warn("[vendor-kinds] 0341 was already applied; the backfill ran when it was.");
+    if (!appliedHere) return ctx.skip("0341 was already applied here; the backfill ran when it was.");
     const row = await one("select kind, trade, is_person, import_batch from price_list_vendors where id = $1", [oldCardId]);
     expect(row).toEqual({ kind: "brand", trade: null, is_person: false, import_batch: null });
   });
 
-  it("a re-run changes nothing: a card left Not Sorted stays Not Sorted", async () => {
+  it("a re-run changes nothing: a card left Not Sorted stays Not Sorted", async (ctx) => {
     if (!ready()) return;
     // Only where this test applied it: never DDL against a database that already has 0341.
-    if (!appliedHere) return console.warn("[vendor-kinds] 0341 was already applied; the re-run case needs VENDOR_APPLY_0341 on a database without it.");
+    if (!appliedHere) return ctx.skip("0341 was already applied here; the re-run case needs VENDOR_APPLY_0341 on a database without it.");
     const id = (await one("insert into price_list_vendors (org_id, name, kind) values ($1, 'TEST 0341 Not Sorted', null) returning id", [orgId])).id;
     await c.query(readFileSync(MIGRATION, "utf8"));
     expect((await one("select kind from price_list_vendors where id = $1", [id])).kind).toBeNull();

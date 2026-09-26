@@ -63,6 +63,7 @@ import {
   startFloorMs,
   visitDay,
   visitDayBounds,
+  visitIsOver,
 } from "@/lib/appointments/visit-start";
 
 const TZ = "America/Los_Angeles";
@@ -412,6 +413,23 @@ describe("only the office starts a job", () => {
     expect(n).toMatchObject({ title: "Brian needs a job started for Tom Goodman", url: "/appointments/appt-tom", mode: "once_per_window" });
   });
 
+  it("on a visit that is over, the bell never says he is at it or can't clock in (audit v1018)", async () => {
+    // tomVisit is marked completed.
+    const res = await askOfficeToStartJob("appt-tom");
+    expect(res).toMatchObject({ ok: true, message: "The office has been asked to start a job for this visit." });
+    const body = spies.ring.mock.calls[0][2].body as string;
+    expect(body).toBe("Brian asks for a job on Inspection — Tom Goodman, a visit that is done, so the work can go on. Start it from the visit.");
+    expect(body).not.toContain(" is at ");
+    expect(body).not.toContain("clock in");
+  });
+
+  it("on a visit still under way, the bell says he is at it and can't clock in yet", async () => {
+    state.visit = { ...tomVisit, status: "scheduled", starts_at: new Date().toISOString(), ends_at: null };
+    const res = await askOfficeToStartJob("appt-tom");
+    expect(res).toMatchObject({ ok: true, message: "The office has been asked. Once they start the job, you can clock in right here." });
+    expect(spies.ring.mock.calls[0][2].body).toBe("Brian is at Inspection — Tom Goodman and can't clock in until it has a job. Start it from the visit.");
+  });
+
   it("with nobody in the office to ring, it says call them instead", async () => {
     state.staffIds = [];
     const res = await askOfficeToStartJob("appt-tom");
@@ -512,11 +530,40 @@ describe("Link To J-055 Instead", () => {
   });
 
   it("a visit that is over offers no clock on a finished job; any other pairing still does", () => {
-    expect(clockOffered("completed", "complete")).toBe(false);
-    expect(clockOffered("completed", "invoiced")).toBe(false);
-    expect(clockOffered("completed", "in_progress")).toBe(true);
-    expect(clockOffered("scheduled", "complete")).toBe(true);
-    expect(clockOffered(null, null)).toBe(true);
+    expect(clockOffered(true, "complete")).toBe(false);
+    expect(clockOffered(true, "invoiced")).toBe(false);
+    expect(clockOffered(true, "in_progress")).toBe(true);
+    expect(clockOffered(false, "complete")).toBe(true);
+    expect(clockOffered(false, null)).toBe(true);
+  });
+
+  describe("a visit is over when it is marked completed, or when its day has passed on the org's clock (audit v1018)", () => {
+    // 2026-09-26, 9:00 AM in Los Angeles.
+    const now = Date.parse("2026-09-26T16:00:00.000Z");
+    it("Matt Warren: left scheduled, ended 2026-09-02 (J-045 finished) is over, so no Clock In On J-045", () => {
+      const matt = { status: "scheduled", starts_at: "2026-09-01T23:00:00.000Z", ends_at: "2026-09-02T00:00:00.000Z" };
+      expect(visitIsOver(matt, TZ, now)).toBe(true);
+      expect(clockOffered(visitIsOver(matt, TZ, now), "complete")).toBe(false);
+    });
+    it("marked completed is over whatever its date", () => {
+      expect(visitIsOver({ status: "completed", starts_at: "2026-09-30T17:00:00.000Z" }, TZ, now)).toBe(true);
+      expect(visitIsOver({ status: "completed" }, TZ, now)).toBe(true);
+    });
+    it("today's visit is not over even once its hour has passed (the work goes on: Tom Goodman)", () => {
+      const earlier = { status: "scheduled", starts_at: "2026-09-26T14:00:00.000Z", ends_at: "2026-09-26T15:00:00.000Z" };
+      expect(visitIsOver(earlier, TZ, now)).toBe(false);
+      // 11 PM last night on the org's clock is 6 AM UTC today: still yesterday, so over.
+      expect(visitIsOver({ status: "scheduled", ends_at: "2026-09-26T06:00:00.000Z" }, TZ, now)).toBe(true);
+      // 12:30 AM today on the org's clock (7:30 AM UTC): today, not over.
+      expect(visitIsOver({ status: "scheduled", ends_at: "2026-09-26T07:30:00.000Z" }, TZ, now)).toBe(false);
+    });
+    it("the end decides a visit that runs across days; with no end the start does; with neither it is not over", () => {
+      expect(visitIsOver({ status: "scheduled", starts_at: "2026-09-25T16:00:00.000Z", ends_at: "2026-09-26T20:00:00.000Z" }, TZ, now)).toBe(false);
+      expect(visitIsOver({ status: "scheduled", starts_at: "2026-09-25T16:00:00.000Z", ends_at: null }, TZ, now)).toBe(true);
+      expect(visitIsOver({ status: "proposed", starts_at: null, ends_at: null }, TZ, now)).toBe(false);
+      expect(visitIsOver({ status: "scheduled", starts_at: "not a date" }, TZ, now)).toBe(false);
+      expect(visitIsOver({ status: "scheduled", starts_at: "2026-09-29T16:00:00.000Z" }, TZ, now)).toBe(false);
+    });
   });
 
   it("links through linkAppointmentTo when the rule still names that job", async () => {

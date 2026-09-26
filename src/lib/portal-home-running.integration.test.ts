@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { portalHomeRunning } from "./portal/home-shape";
 
 /**
@@ -137,8 +137,7 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
   });
 
   const needs = () => {
-    if (!ready) console.warn("[portal-home-running] customer_portal / job_shared_photos are not on this database; nothing was exercised.");
-    return ready;
+    return ready || notOnThisDatabase("[portal-home-running] customer_portal / job_shared_photos are not on this database; nothing was exercised.");
   };
 
   it("the home lists each of the customer's jobs with a draft as one running bill, summed, and nothing else", async () => {

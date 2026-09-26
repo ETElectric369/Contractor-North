@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0296: a vendor is a brand, and a brand has a phone number.
@@ -57,8 +57,7 @@ d("vendor cards: one per name, org reads, staff writes, never another org's (029
     }
   };
   const needs = () => {
-    if (!has0296) console.warn("[vendor-cards] migration 0296 is not on this database yet; apply it to exercise this case.");
-    return has0296;
+    return has0296 || notOnThisDatabase("[vendor-cards] migration 0296 is not on this database yet; apply it to exercise this case.");
   };
 
   beforeAll(async () => {

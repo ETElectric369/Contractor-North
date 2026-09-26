@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import pg from "pg";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -29,21 +29,21 @@ import { fileURLToPath } from "node:url";
  * The rest of each server action (auth, cookies) is replaced by a thin PostgREST-shaped shim over
  * the one pg connection, which runs every call as the right person inside a savepoint.
  *
- * OPT-IN, ITS OWN THROWAWAY COMPANY, NEVER DDL ON PRODUCTION. It runs only with
- * STOCK_CROSSCHECK_DB=1 as well as the TEST_DB_* creds. No sandbox org is needed: right after BEGIN
- * it mints a TEST organization with an owner and a tech (throwaway-org.db-fixture.ts) inside the
+ * ITS OWN THROWAWAY COMPANY, ON THE TEST DATABASE, NEVER DDL ON PRODUCTION. The TEST_DB_* creds run
+ * it, in CI too (audit v1018: a STOCK_CROSSCHECK_DB=1 opt-in kept it out of CI). No sandbox org is
+ * needed: right after BEGIN it mints a TEST organization with an owner and a tech (throwaway-org.db-fixture.ts) inside the
  * same transaction, writes every fixture into that org, and rolls it all back. The live companies
  * are refused by id. When 0343/0344 are not on the database it applies them inside the transaction
  * ONLY with STOCK_CROSSCHECK_APPLY=1, which is refused outright for the production project: 0343's
  * trigger DDL locks every company's invoices until the rollback.
- *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… STOCK_CROSSCHECK_DB=1 \
+ *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… \
  *     npx vitest run src/lib/stock-phase3-crosscheck.integration.test.ts --testTimeout=30000
  * After a run, scan for leaked rows (organizations/jobs/customers/invoices/stock_* named TEST,
  * created in the last hour); there should be none.
  */
 
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_CROSSCHECK_DB, STOCK_CROSSCHECK_APPLY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && STOCK_CROSSCHECK_DB === "1" ? describe : describe.skip;
+const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, STOCK_CROSSCHECK_APPLY } = process.env;
+const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 const PRODUCTION_REF = "rbpokaozcxqownollqlx";
 const isProduction = `${TEST_DB_HOST ?? ""} ${TEST_DB_USER ?? ""}`.includes(PRODUCTION_REF);
 if (STOCK_CROSSCHECK_APPLY === "1" && isProduction) {
@@ -245,7 +245,7 @@ d("Shop Stock Phase 3 cross-check: a crew take, its bell, its bill, its Undo, it
               to_regprocedure('public.stock_takes_for_job(uuid)') is not null as b0344`,
     );
     if (!has.ledger) {
-      console.warn("[stock cross-check] the shelf (0303) is not on this database; nothing to check.");
+      notOnThisDatabase("[stock cross-check] the shelf (0303) is not on this database; nothing to check.");
       return;
     }
     for (const [present, file] of [
@@ -254,7 +254,7 @@ d("Shop Stock Phase 3 cross-check: a crew take, its bell, its bill, its Undo, it
     ] as const) {
       if (present) continue;
       if (!allowDdl) {
-        console.warn(`[stock cross-check] ${file} is not on this database, and this run may not apply DDL (never on production); nothing to check.`);
+        notOnThisDatabase(`[stock cross-check] ${file} is not on this database, and this run may not apply DDL (never on production); nothing to check.`);
         return;
       }
       await c.query(readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${file}`, import.meta.url)), "utf8"));

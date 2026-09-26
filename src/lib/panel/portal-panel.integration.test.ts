@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0335: the panel on the customer's page, only once the office turns it on, and only the
@@ -49,7 +49,7 @@ d("the panel on the customer's page (0335)", { timeout: 30_000 }, () => {
   const it = (name: string, fn: () => Promise<void>) =>
     vitestIt(name, async (ctx) => {
       if (!ready) {
-        console.warn("[portal-panel] migration 0335 is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.");
+        notOnThisDatabase("[portal-panel] migration 0335 is not on this database yet; apply it (or TEST_APPLY_PENDING=1) to exercise this case.");
         return ctx.skip();
       }
       await fn();

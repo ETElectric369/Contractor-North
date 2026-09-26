@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { assertTestDatabase, TEST_DB_MARKER, TEST_DB_USER_NAME } from "@/lib/db-guard";
+import { createRequire } from "node:module";
+import { assertTestDatabase, notOnThisDatabase, TEST_DB_MARKER, TEST_DB_USER_NAME } from "@/lib/db-guard";
 
 /**
  * Every database suite calls THE ONE DB GUARD (src/lib/db-guard.ts) right after it connects.
@@ -119,5 +120,123 @@ describe("CI runs the same check before npm test", () => {
     const test = ci.indexOf("run: npm test");
     expect(check).toBeGreaterThan(0);
     expect(check).toBeLessThan(test);
+  });
+});
+
+/**
+ * NO DB SUITE GOES GREEN WITHOUT RUNNING (audit v1018, class 10). Three stock suites needed an extra
+ * STOCK_*_DB=1 flag nothing in CI set, so 10 cases were describe.skip on every push; and a case whose
+ * migration was missing returned early, counted as passed, and only warned.
+ */
+describe("every DB suite runs in CI", () => {
+  const suites = files.filter((f) => f.rel.endsWith(".integration.test.ts"));
+  const dbFiles = files.filter((f) => f.rel.endsWith(".integration.test.ts") || f.rel.endsWith(".db-suite.ts"));
+  const GATE = "const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;";
+
+  it("each suite's one gate is the TEST_DB_* creds and nothing else (no extra opt-in flag)", () => {
+    const bad: string[] = [];
+    for (const f of suites) {
+      const skips = f.text.match(/describe\.skip/g) ?? [];
+      if (!f.text.includes(GATE)) bad.push(`${f.rel}: its gate is not "${GATE}"`);
+      if (skips.length !== 1) bad.push(`${f.rel}: ${skips.length} describe.skip (only the one gate may skip)`);
+      if (/\b(it|test|describe)\.(skipIf|runIf)\(/.test(f.text)) bad.push(`${f.rel}: a skipIf/runIf gate`);
+    }
+    expect(suites.length).toBeGreaterThan(20);
+    expect(bad).toEqual([]);
+  });
+
+  it("a case whose migration is missing goes through notOnThisDatabase, never a bare warning", () => {
+    const bad: string[] = [];
+    for (const f of dbFiles) {
+      for (const m of f.text.matchAll(/console\.warn\(([^\n]*)/g)) {
+        if (/applied inside/.test(m[1])) continue; // the migration was applied in the test's transaction: the case runs
+        if (/not on this database|are not here|nothing to (test|check|exercise)|nothing was exercised/.test(m[1])) bad.push(`${f.rel}: ${m[0].slice(0, 90)}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("no case warns and returns (whatever the words): it asserts, or it is reported skipped with ctx.skip", () => {
+    const bad: string[] = [];
+    for (const f of dbFiles) {
+      for (const m of f.text.matchAll(/return console\.warn\(|console\.warn\([^\n]*\);?\s*\n\s*return;/g)) bad.push(`${f.rel}: ${m[0].slice(0, 90)}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("notOnThisDatabase warns on the Mac and throws in CI", () => {
+    const was = process.env.CI;
+    try {
+      delete process.env.CI;
+      const warn = console.warn;
+      const said: unknown[] = [];
+      console.warn = (m: unknown) => void said.push(m);
+      try {
+        expect(notOnThisDatabase("[x] 0999 is not on this database yet.")).toBe(false);
+      } finally {
+        console.warn = warn;
+      }
+      expect(said).toEqual(["[x] 0999 is not on this database yet."]);
+      process.env.CI = "true";
+      expect(() => notOnThisDatabase("[x] 0999 is not on this database yet.")).toThrow(/0999 is not on this database yet\. In CI the test database carries every migration/);
+    } finally {
+      if (was === undefined) delete process.env.CI;
+      else process.env.CI = was;
+    }
+  });
+});
+
+describe("CI refuses a test database that is behind supabase/migrations", () => {
+  const req = createRequire(import.meta.url);
+  const { stepsOnDisk, ledgerBehind, ledgerAhead } = req("../scripts/test-db/steps.cjs") as {
+    stepsOnDisk: () => { name: string; kind: string; md5: string }[];
+    ledgerBehind: (s: { name: string; md5: string }[], r: Map<string, string | null>) => { missing: string[]; changed: string[] };
+    ledgerAhead: (s: { name: string }[], r: Map<string, string | null>) => string[];
+  };
+  const steps = stepsOnDisk();
+
+  it("the steps are every file in supabase/migrations, in order, plus the test-db shims", () => {
+    const onDisk = fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
+    expect(steps.filter((s) => s.kind === "migration").map((s) => s.name)).toEqual(onDisk);
+    expect(onDisk.length).toBeGreaterThan(300);
+  });
+
+  it("names each migration the database never recorded, and each one edited since", () => {
+    const all = new Map<string, string | null>(steps.map((s) => [s.name, s.md5]));
+    expect(ledgerBehind(steps, all)).toEqual({ missing: [], changed: [] });
+
+    const last = steps.filter((s) => s.kind === "migration").at(-1)!;
+    const behind = new Map(all);
+    behind.delete(last.name); // 0346 applied by hand, never recorded (the audit's case)
+    expect(ledgerBehind(steps, behind)).toEqual({ missing: [last.name], changed: [] });
+
+    const edited = new Map(all);
+    edited.set(last.name, "0".repeat(32));
+    expect(ledgerBehind(steps, edited)).toEqual({ missing: [], changed: [last.name] });
+
+    // A checksum from before checksums existed is not judged; another branch's extra row is not ours.
+    const old = new Map(all);
+    old.set(last.name, null);
+    old.set("9999_another_branch.sql", "x");
+    expect(ledgerBehind(steps, old)).toEqual({ missing: [], changed: [] });
+    // ...but it is named, by the same rule in both scripts.
+    expect(ledgerAhead(steps, old)).toEqual(["9999_another_branch.sql"]);
+    expect(ledgerAhead(steps, all)).toEqual([]);
+  });
+
+  it("check-test-db.cjs reads the ledger with the same steps and says how to fix it", () => {
+    const script = fs.readFileSync(path.join(root, "scripts/test-db/check-test-db.cjs"), "utf8");
+    expect(script).toContain('require("./steps.cjs")');
+    expect(script).toContain("ledgerBehind(");
+    expect(script).toContain("the test database is behind: run node scripts/test-db/rebuild.cjs");
+    // An edited step is not fixed by a plain rebuild (it refuses): its message says the real way out.
+    expect(script).toMatch(/const CHANGED =\s*"[^"]*undo the edit, or run node scripts\/test-db\/rebuild\.cjs --reset/);
+    expect(script).toContain("ledgerAhead(");
+    const rebuild = fs.readFileSync(path.join(root, "scripts/test-db/rebuild.cjs"), "utf8");
+    expect(rebuild).toContain('require("./steps.cjs")');
+    expect(rebuild).not.toMatch(/function stepsOnDisk/);
+    // One rule for the ledger: another branch's step is named, never a refusal, in both scripts.
+    expect(rebuild).toContain("ledgerAhead(");
+    expect(rebuild).not.toMatch(/has no file on disk any more/);
   });
 });

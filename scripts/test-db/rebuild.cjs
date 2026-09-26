@@ -33,10 +33,11 @@
 // NOTHING SILENT. It refuses, naming the file, when:
 //   - a recorded step's parts no longer hash to the recorded md5 (an edited migration or shim, or a
 //     before/NNNN.sql added for a migration already applied): it would never be re-applied;
-//   - a recorded step has no file on disk any more;
 //   - bootstrap.sql exists but is unrecorded while migrations are recorded (it would run last, not
 //     first).
-// Each of those needs a --reset rebuild (or the edit undone).
+// Each of those needs a --reset rebuild (or the edit undone). A recorded step with no file on disk
+// (another branch's migration on the shared test database) is NOT a refusal: it is named, and the
+// run goes on (steps.cjs ledgerAhead, the same rule check-test-db.cjs follows).
 //
 // Historical migrations are never edited to make them run here. When one fails on a fresh
 // database, the smallest fix goes in bootstrap.sql or before/NNNN.sql, with a comment saying what
@@ -48,8 +49,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
-const crypto = require("node:crypto");
 const pg = require("pg");
+// The steps and their md5s: one list, shared with check-test-db.cjs (CI's is-the-test-database-behind check).
+const { stepsOnDisk, ledgerAhead } = require("./steps.cjs");
 
 // ── The one database this script may write to. Constants on purpose. ────────────────────────────
 const TEST_HOST = "aws-0-us-east-2.pooler.supabase.com";
@@ -60,12 +62,6 @@ const MARKER_VALUE = "contractor-north-test";
 // Production's project ref. If it ever shows up anywhere in the connection, refuse.
 const PROD_REF = "rbpokaozcxqownollqlx";
 
-const repo = path.resolve(__dirname, "..", "..");
-const migDir = path.join(repo, "supabase", "migrations");
-const shimDir = path.join(repo, "supabase", "test-db");
-const bootstrapFile = path.join(shimDir, "bootstrap.sql");
-const beforeDir = path.join(shimDir, "before");
-const afterDir = path.join(shimDir, "after");
 const RESET = process.argv.slice(2).includes("--reset");
 const unknownArgs = process.argv.slice(2).filter((a) => a !== "--reset");
 
@@ -143,33 +139,6 @@ async function guard(client) {
   console.log(`Guard passed: ${TEST_USER} @ ${TEST_HOST}, marker '${MARKER_VALUE}'.`);
 }
 
-// The md5 of a step: every part's label and text, in order. A shim added, removed or edited changes it.
-function md5Of(parts) {
-  const h = crypto.createHash("md5");
-  for (const [label, file] of parts) h.update(`-- part: ${label}\n`).update(fs.readFileSync(file, "utf8")).update("\n");
-  return h.digest("hex");
-}
-
-function stepsOnDisk() {
-  const steps = [];
-  if (fs.existsSync(bootstrapFile)) steps.push({ name: "test-db/bootstrap.sql", kind: "bootstrap", parts: [["test-db/bootstrap.sql", bootstrapFile]] });
-  for (const f of fs.readdirSync(migDir).filter((x) => x.endsWith(".sql")).sort()) {
-    const num = f.split("_")[0];
-    const parts = [];
-    const shim = path.join(beforeDir, `${num}.sql`);
-    if (fs.existsSync(shim)) parts.push([`test-db/before/${num}.sql`, shim]);
-    parts.push([f, path.join(migDir, f)]);
-    steps.push({ name: f, kind: "migration", parts });
-  }
-  if (fs.existsSync(afterDir)) {
-    for (const f of fs.readdirSync(afterDir).filter((x) => x.endsWith(".sql")).sort()) {
-      steps.push({ name: `test-db/after/${f}`, kind: "after", parts: [[`test-db/after/${f}`, path.join(afterDir, f)]] });
-    }
-  }
-  for (const s of steps) s.md5 = md5Of(s.parts);
-  return steps;
-}
-
 // --reset: empty public (keeping the schema itself, Supabase's grants and default privileges on it,
 // and the marker) and drop archive. Objects the migrations hung on other schemas that depend on
 // public (the auth.users triggers, storage policies calling public functions, the ensure_rls event
@@ -245,8 +214,15 @@ async function main() {
     const byName = new Map(steps.map((s) => [s.name, s]));
     const problems = [];
 
-    // A recorded step with no file on disk: the database holds something the repo no longer says.
-    for (const name of recorded.keys()) if (!byName.has(name)) problems.push(`${name} is recorded as applied here but has no file on disk any more.`);
+    // A recorded step with no file on disk: the shared test database holds another branch's migration
+    // (or a step renamed or deleted since). Said by name, never a refusal: the missing steps still
+    // apply (one rule with check-test-db.cjs, steps.cjs ledgerAhead).
+    const ahead = ledgerAhead(steps, recorded);
+    if (ahead.length) {
+      console.log(`Recorded here but not in this checkout (another branch's step, or one renamed or deleted); left as it is:`);
+      for (const n of ahead) console.log(`  - ${n}`);
+      console.log("");
+    }
 
     // bootstrap.sql must run FIRST; on a database that already has migrations it would run last.
     const migrationsRecorded = [...recorded.keys()].filter((n) => !n.startsWith("test-db/")).length;

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
 import { reportClientError } from "@/app/report-client-error";
 import { recoverFromChunkError } from "@/lib/chunk-reload";
+import { useTryAgain } from "@/lib/try-again";
 
 /** Segment error boundary for the assistant. A render crash anywhere in the chat / Estimator
  *  now shows this graceful fallback (with a reset) instead of blanking the whole app. The crash
@@ -15,6 +16,7 @@ export default function AssistantError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const { tryAgain, trying } = useTryAgain(reset);
   useEffect(() => {
     if (recoverFromChunkError(error)) return; // stale Estimator/chat chunk after a deploy → reload fresh
     // Surface it in the console too, alongside the error_events forward below.
@@ -36,10 +38,11 @@ export default function AssistantError({
         and pick up where you left off.
       </p>
       <button
-        onClick={reset}
-        className="mt-5 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark"
+        onClick={tryAgain}
+        disabled={trying}
+        className="mt-5 min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
       >
-        Restart Nort
+        {trying ? "Restarting Nort…" : "Restart Nort"}
       </button>
     </div>
   );
