@@ -296,11 +296,12 @@ describe("billedWorkOnInvoices — T&M work to date is what was billed, at the p
     expect(billedWorkOnInvoices([pctDraw, milestone])).toBe(0);
   });
 
-  it("change orders, estimate lines and a returned part are what was billed; a typed credit is not", () => {
+  it("hand lines, change orders, estimate lines and a returned part are what was billed; a typed credit is not", () => {
     const std = {
       status: "paid",
       invoice_kind: "standard",
       invoice_items: [
+        { import_source: null, unit: "ea", description: "Emergency service call", line_total: 250 },
         { import_source: "change_orders", description: "CO-1 add a circuit", line_total: 400 },
         { import_source: "quote", description: "Panel swap", line_total: 1200 },
         { import_source: "costs", description: "Return — LED housings", line_total: -51.58 },
@@ -308,7 +309,7 @@ describe("billedWorkOnInvoices — T&M work to date is what was billed, at the p
         { import_source: null, line_kind: "credit", description: "Goodwill", line_total: -100 },
       ],
     };
-    expect(billedWorkOnInvoices([std])).toBe(1548.42);
+    expect(billedWorkOnInvoices([std])).toBe(1798.42);
   });
 
   it("a hand line typed in hours is labor, so it is work, on a draw that itemizes too", () => {
@@ -325,30 +326,30 @@ describe("billedWorkOnInvoices — T&M work to date is what was billed, at the p
 
   // Erik, 2026-09-26: "i don't think fees, referrals and discounts would necessarily be considered
   // work completed". Decided by the line's KIND, never by its words.
-  describe("fees, referrals and discounts are not work completed", () => {
+  describe("fees, referrals and discounts the office files as Other are not work completed", () => {
     const labor = { import_source: "labor", unit: "hr", description: "Labor - Erik Taylor", line_total: 1000 };
     const mat = { import_source: "costs", unit: "ea", description: "Materials - supplier", line_total: 300 };
 
-    it("J-028: INV-061's $400 referral line drops out; the labor and materials stay", () => {
+    it("J-028: INV-061's $400 referral line, filed as Other, drops out; the labor and materials stay", () => {
       const inv61 = {
         status: "paid",
         invoice_kind: "standard",
-        invoice_items: [labor, mat, { import_source: null, unit: "ea", description: "Referral - Rob Walters", line_total: 400 }],
+        invoice_items: [labor, mat, { import_source: null, unit: "ea", line_kind: "other", description: "Referral - Rob Walters", line_total: 400 }],
       };
       expect(billedWorkOnInvoices([inv61])).toBe(1300);
     });
 
-    it("J-046: a $160 voluntary card-fee line drops out", () => {
+    it("J-046: a $160 voluntary card-fee line, filed as Other, drops out", () => {
       const inv77 = {
         status: "paid",
         invoice_kind: "standard",
-        invoice_items: [{ import_source: null, unit: "ea", description: "Voluntary payment from Jason toward the card fees on INV-069", line_total: 160 }],
+        invoice_items: [{ import_source: null, unit: "ea", line_kind: "other", description: "Voluntary payment from Jason toward the card fees on INV-069", line_total: 160 }],
       };
       expect(billedWorkOnInvoices([inv77])).toBe(0);
     });
 
-    it("a hand discount (a negative Other line) neither adds nor takes away work", () => {
-      const inv = { status: "sent", invoice_kind: "standard", invoice_items: [labor, { import_source: null, unit: "ea", description: "Discount", line_total: -150 }] };
+    it("a hand discount filed as Other neither adds nor takes away work", () => {
+      const inv = { status: "sent", invoice_kind: "standard", invoice_items: [labor, { import_source: null, unit: "ea", line_kind: "other", description: "Discount", line_total: -150 }] };
       expect(billedWorkOnInvoices([inv])).toBe(1000);
     });
 
@@ -364,13 +365,29 @@ describe("billedWorkOnInvoices — T&M work to date is what was billed, at the p
         invoice_items: [
           { import_source: null, unit: "ea", line_kind: "labor", description: "Service call", line_total: 150 },
           { import_source: null, unit: "ea", line_kind: "materials", description: "10/3 romex", line_total: 175.5 },
-          // The same words, unfiled, read Other - and so do "fee" words with no kind.
-          { import_source: null, unit: "ea", description: "Service call", line_total: 150 },
-          { import_source: null, unit: "ea", description: "10/3 romex", line_total: 175.5 },
+          // The same words filed as Other are out, and "fee" words filed as Labor are in.
+          { import_source: null, unit: "ea", line_kind: "other", description: "Service call", line_total: 150 },
+          { import_source: null, unit: "ea", line_kind: "other", description: "10/3 romex", line_total: 175.5 },
           { import_source: null, unit: "ea", line_kind: "labor", description: "Card processing fee", line_total: 25 },
         ],
       };
       expect(billedWorkOnInvoices([inv])).toBe(350.5);
+    });
+
+    it("a hand line nobody filed is work, as it always was: J-043's service call, J-018's romex, a book of installed work", () => {
+      const inv = {
+        status: "sent",
+        invoice_kind: "standard",
+        invoice_items: [
+          { import_source: null, unit: "ea", description: "Service call: a customer", line_total: 150 },
+          { import_source: null, unit: "ea", description: "10/3 romex", line_total: 175.5 },
+          { import_source: null, unit: "ft", description: "12/2 Romex", line_total: 28.35 },
+          // Added from a price book of installed work (no supplier, not in hours): no stored kind.
+          { import_source: null, unit: "sq ft", description: "D1 — New Construction — Deck Build", line_total: 22814 },
+          { import_source: null, unit: "ea", description: "Install 20A circuit", line_total: 450 },
+        ],
+      };
+      expect(billedWorkOnInvoices([inv])).toBe(23617.85);
     });
 
     it("J-002 is untouched: every line on it is labor, materials, a deposit or the credit netting it", () => {

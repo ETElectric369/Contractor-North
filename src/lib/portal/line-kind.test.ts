@@ -90,9 +90,15 @@ describe("countsAsWorkCompleted - the KIND decides what is work (Erik, 2026-09-2
     expect(countsAsWorkCompleted({ import_source: null, description: "Deposit" }, "deposit")).toBe(false);
     expect(countsAsWorkCompleted({ import_source: "labor", line_kind: "other" })).toBe(false);
     expect(countsAsWorkCompleted({ import_source: null, description: "Anything at all", line_kind: "materials" })).toBe(true);
-    // A typed line the words do not settle is Other, whatever it says.
-    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Referral - Rob Walters" })).toBe(false);
-    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Service call" })).toBe(false);
+    // A typed line the words do not settle reads Other and still counts, until the office files it
+    // as Other (the Kind chip) - whatever it says.
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Referral - Rob Walters" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Referral - Rob Walters", line_kind: "other" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Service call" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "sq ft", description: "D1 — New Construction — Deck Build" })).toBe(true);
+    // A change order or estimate line reads Other on /i's breakdown but is work; filing it Other takes it out.
+    expect(countsAsWorkCompleted({ import_source: "change_orders", line_kind: "other" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, description: "Goodwill", line_kind: "credit" })).toBe(false);
     // What today's reading already settles still reads the same way.
     expect(countsAsWorkCompleted({ import_source: null, unit: "hr", description: "Lift rental" })).toBe(true);
     expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Materials - CED" })).toBe(true);

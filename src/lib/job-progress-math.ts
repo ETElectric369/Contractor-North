@@ -127,15 +127,13 @@ export type BilledWorkLine = {
  * credit lines themselves - money asked for against work, and counting them would count the same
  * work twice.
  *
- * NOR IS ANYTHING ELSE ON THE BILL (Erik, 2026-09-26: "i don't think fees, referrals and discounts
- * would necessarily be considered work completed"). A card fee, a service charge, a referral, a
- * discount, a sales-tax line: all of them file as Other (or Tax, or Credit), and Other is not work.
- * J-028's INV-061 carried a $400 referral line and J-046 a $160 card fee, and both read as "work
- * completed". The rule is the KIND, never the words: no list of "fee" / "referral" / "discount"
- * spellings, which would only ever fit the one company that wrote them. The price of that: a hand
- * line whose words do not say what it is ("Service call", "10/3 romex") reads Other too, and is
- * left out until the office files it - one tap on its Kind chip (Labor or Materials), which says
- * out loud that Other is not counted.
+ * NOR IS A LINE THE OFFICE FILED AS OTHER (Erik, 2026-09-26: "i don't think fees, referrals and
+ * discounts would necessarily be considered work completed"). J-028's INV-061 carried a $400
+ * referral line and J-046 a $160 card fee; one tap on each line's Kind chip (Other) takes it out.
+ * A hand line nobody filed still counts, as it always did: "Service call", "10/3 romex", a line
+ * from a book of installed work are the work itself for nearly every company. The rule is the
+ * KIND, never the words: no list of "fee" / "referral" spellings, which would only ever fit the
+ * one company that wrote them.
  *
  * EVERY NON-VOID INVOICE, DRAFTS INCLUDED. A draft is not billed yet, but its lines are the running
  * bill (INV-078 on J-011): the rows it claims are already off the unbilled figure, so leaving the

@@ -46,10 +46,12 @@ export function LineKindChips({
   if (src === "draw_credit" || src === "milestone") return null;
   const said = storedLineKind(item.line_kind);
   const now = lineKindNow(item);
-  // NOTHING SILENT (Erik, 2026-09-26): a line that is not work completed (Other: a fee, a referral,
-  // a discount; or a credit) is left out of the Progress Summary's work completed. Say so here,
-  // where the one tap that changes it lives.
-  const notWork = !countsAsWorkCompleted(item, invoiceKind ?? null);
+  // NOTHING SILENT (Erik, 2026-09-26): whether this line counts as work completed on the Progress
+  // Summary, said here where the one tap that changes it lives. A line lit Other with nobody's say
+  // (a typed line, a change order, a line from the estimate) still counts; filing it as Other (a
+  // fee, a referral, a discount) takes it out, and the toast says so.
+  const counts = (kind: string | null) => countsAsWorkCompleted({ ...item, line_kind: kind }, invoiceKind ?? null);
+  const countsNow = counts(item.line_kind ?? null);
 
   const pick = (kind: PickableLineKind | null, undoing = false) =>
     start(async () => {
@@ -60,8 +62,15 @@ export function LineKindChips({
       }
       // THE UNDO TRAIL: one tap back to what it was (nothing to Save, so nothing else to undo).
       const was = said === "credit" ? undefined : said;
+      const countsAfter = counts(kind);
+      const shift =
+        countsNow && !countsAfter
+          ? " — not counted as work completed"
+          : !countsNow && countsAfter
+            ? " — counted as work completed"
+            : "";
       toast(
-        res.message ?? "Saved",
+        (res.message ?? "Saved") + shift,
         "success",
         undoing || was === undefined ? undefined : { label: "Undo", onClick: () => pick(was, true) },
       );
@@ -106,7 +115,11 @@ export function LineKindChips({
           : now === "credit"
             ? "Read from the line: a credit. Tap one to file it yourself."
             : `Read from the line: ${LINE_KIND_LABEL[now]}. Tap one to file it yourself.`}
-        {notWork && " Not counted as work completed."}
+        {countsNow
+          ? now === "other" && !said
+            ? " Counted as work completed; file it as Other to leave it out (a fee, a referral)."
+            : ""
+          : " Not counted as work completed."}
       </p>
     </div>
   );
