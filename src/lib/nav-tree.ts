@@ -165,7 +165,7 @@ export function materialListSectionTree(
  *  list, so the door holds exactly one deliberate verb: Delete. It stays so the
  *  seek door sits in the same slot on every detail page. */
 export function purchaseOrderSectionTree(label: string, del: DeleteVerb): NavTree {
-  return { center: { label, icon: "wallet" }, nodes: [deleteNode("po-del", "Delete PO", del, "/bills")] };
+  return { center: { label, icon: "wallet" }, nodes: [deleteNode("po-del", "Delete PO", del, "/bills?tab=po")] };
 }
 
 /** The customer ⋯ — "New Invoice" rides the /billing ?new=1 contract (opens the

@@ -343,7 +343,23 @@ describe("invoices with no job", () => {
   });
 
   it("puts the biggest money first, because that is the job cost most worth two minutes", () => {
-    expect(rows()[0].invoice.invoiceNumber).toBe("8802-1107695");
+    // 8802-1107695 ($1,062.18) is bigger, and a bill already covers it, so it asks nothing. Of
+    // what is left, from the day his records start, TTP56's $523.47 leads.
+    expect(invoicesNeedingJob(hisBook(), JOBS, { since: RECORDS_START })[0].invoice.invoiceNumber).toBe("8802-1102103");
+  });
+
+  it("never lists a paper a bill already covers: its job is the bill's (Wave A, the 19 covered papers)", () => {
+    const covered = hisBook().filter((i) => (Number(i.billCount) || 0) > 0 && !i.jobId).map((i) => i.invoiceNumber);
+    expect(covered.length).toBeGreaterThan(5);
+    const listed = rows().map((r) => r.invoice.invoiceNumber);
+    for (const n of covered) expect(listed).not.toContain(n);
+  });
+
+  it("leaves out everything dated before his books began, and keeps the day itself", () => {
+    const listed = invoicesNeedingJob(hisBook(), JOBS, { since: "2026-06-08" }).map((r) => r.invoice.invoiceNumber);
+    expect(listed).not.toContain("8802-1100090"); // 5/28 5659 RHODESIA
+    expect(listed).not.toContain("8802-1099048"); // 5/28 3639 SADDLE RD
+    expect(listed).toContain("8802-1100911"); // 6/08 itself counts
   });
 
   it("leaves out an invoice a person has already placed", () => {
@@ -509,7 +525,7 @@ describe("the summary the account card reads", () => {
     expect(s.missed).toBe(25.99);
     expect(s.interest.charged).toBe(60.42);
     expect(s.needsBill.settledTotal).toBe(1765.72);
-    expect(s.needsJob.rows).toBe(invoicesNeedingJob(book, JOBS).length);
+    expect(s.needsJob.rows).toBe(invoicesNeedingJob(book, JOBS, { since: RECORDS_START }).length);
     expect(s.anyOpenQuestions).toBe(true);
   });
 

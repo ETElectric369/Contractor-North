@@ -177,7 +177,11 @@ export function SupplierInvoicesCard({
 
   const says = useMemo(() => supplierSaysOpen(invoices), [invoices]);
   const documents = useMemo(() => openDocuments(invoices), [invoices]);
-  const needJob = useMemo(() => invoicesNeedingJob(invoices, jobs), [invoices, jobs]);
+  // Papers a bill already covers, and papers from before his books began, ask nothing (Wave A).
+  const needJob = useMemo(
+    () => invoicesNeedingJob(invoices, jobs, { since: feed?.recordsSince ?? null }),
+    [invoices, jobs, feed?.recordsSince],
+  );
   const needJobTotals = useMemo(() => needsJobTotals(needJob), [needJob]);
   const needBill = useMemo(
     () => invoicesNeedingBill(invoices, { since: feed?.recordsSince ?? null }),
@@ -623,7 +627,7 @@ export function SupplierInvoicesCard({
             <p className="mt-2 text-xs text-slate-400">
               Another {needBill.olderRows}{" "}
               {needBill.olderRows === 1 ? "purchase" : "purchases"} holding{" "}
-              {formatCurrency(needBill.olderTotal)} are from before your first bill here
+              {formatCurrency(needBill.olderTotal)} are from before your books here began
               {needBill.since ? ` on ${formatDate(needBill.since)}` : ""}, so they were never going
               to be in your books. They are not on this list.
             </p>

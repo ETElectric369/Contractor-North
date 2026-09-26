@@ -12,6 +12,8 @@ import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
+import { loadSupplierPapers, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import { supplierPaperActionItem } from "./supplier-paper-item";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -133,6 +135,14 @@ async function buildActionItems(ctx: {
         .order("created_at", { ascending: true })
         .limit(50))
     : Promise.resolve({ data: [] as any[], error: null });
+
+  // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A). Staff only: the cards carry
+  // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
+  // instead of adding a serial wave; awaited at the end. A failure is "no cards", never a crash of
+  // the inbox, and the same papers are still on /bills.
+  const supplierPapersP: Promise<SupplierPaperFeed | null> = isStaff
+    ? loadSupplierPapers(supabase, userId).catch(() => null)
+    : Promise.resolve(null);
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -1015,7 +1025,7 @@ async function buildActionItems(ctx: {
 
   // RECOUNT — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
   // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
-  // an invoice can bill until the office counts the shelf or files the roll and settles it. ONE item
+  // an invoice can bill until the office files the roll and settles it (or undoes the take). ONE item
   // per short, and it stays until the short is settled or its take undone: it is a decision the app
   // cannot defer, and it carries its date (the take's). Staff only; the shelf's record is staff-read
   // (0303). Before 0303 is applied the read errors and the feeder is simply empty.
@@ -1049,6 +1059,10 @@ async function buildActionItems(ctx: {
       }
     }
   }
+  // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because My Day
+  // shows the top five and the point of the card is that the paper comes to him, not the reverse.
+  const paperItem = supplierPaperActionItem(await supplierPapersP);
+  if (paperItem) items.unshift(paperItem);
 
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
 }
