@@ -70,16 +70,6 @@ const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
   statement: "indigo",
 };
 
-/** "21 days", "today", "3 days ago" - a deadline read the way he would say it out loud. */
-function sayDeadline(days: number | null): string {
-  if (days === null) return "no date on it";
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  if (days > 0) return `${days} days from now`;
-  if (days === -1) return "yesterday";
-  return `${-days} days ago`;
-}
-
 /**
  * WHAT THE SUPPLIER'S OWN PAPER SAYS, INSIDE THAT SUPPLIER'S LINE (Bills plan, Wave B).
  *
@@ -163,6 +153,11 @@ export function SupplierPaperLists({
 
   const says = useMemo(() => supplierSaysOpen(invoices), [invoices]);
   const documents = useMemo(() => openDocuments(invoices), [invoices]);
+  // ONE PAPER, ONE PLACE, in the portal mirror too: the count on the fold is everything CED has
+  // open (it matches "papers open" above), but a paper on a Needs You card is not a row here; one
+  // link line names how many are there instead.
+  const docRows = useMemo(() => documents.filter((d) => !cardIds.has(d.id)), [documents, cardIds]);
+  const docsOnCards = documents.length - docRows.length;
   // Papers a bill already covers, and papers from before his books began, ask nothing (Wave A).
   const allNeedJob = useMemo(
     () => invoicesNeedingJob(invoices, jobs, { since: feed?.recordsSince ?? null }),
@@ -482,7 +477,7 @@ export function SupplierPaperLists({
       {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
         <Fold
           summary={
-            // THE FIGURE IS SAID ONCE: the green sentence under the supplier's numbers, just above,
+            // THE FIGURE IS SAID ONCE: the green sentence on the supplier's own line, just above,
             // already says how much comes off and by when. This line is the list's name and count.
             claimable.total > 0.005 ? (
               listLabel("Discount Still On The Table", claimable.rows.length)
@@ -491,13 +486,12 @@ export function SupplierPaperLists({
             )
           }
         >
-          <p className="text-xs leading-relaxed text-green-900">
-            {claimable.total > 0.005
-              ? claimable.dueOnNext >= claimable.total - 0.005
-                ? `${formatCurrency(claimable.total)} comes off if ${accountName} is paid by ${formatDate(claimable.nextDeadline)}, ${sayDeadline(claimable.daysLeft)}, across ${claimable.rows.length} ${claimable.rows.length === 1 ? "invoice" : "invoices"}.`
-                : `${formatCurrency(claimable.total)} across ${claimable.rows.length} ${claimable.rows.length === 1 ? "invoice" : "invoices"}; ${formatCurrency(claimable.dueOnNext)} of it goes if ${accountName} is not paid by ${formatDate(claimable.nextDeadline)}, ${sayDeadline(claimable.daysLeft)}.`
-              : `Nothing is claimable today. ${accountName} takes a cut off every invoice paid by the tenth of the month after you buy.`}
-          </p>
+          {/* The figure and its date are on the supplier's line; the body is the invoices. */}
+          {!(claimable.total > 0.005) && (
+            <p className="text-xs leading-relaxed text-green-900">
+              Nothing is claimable today. {accountName} takes a cut off every invoice paid by the tenth of the month after you buy.
+            </p>
+          )}
           {claimable.rows.length > 0 && (
             <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
               {(showAll.disc ? claimable.rows : claimable.rows.slice(0, LIST_LIMIT)).map(({ invoice, reading }) => (
@@ -534,55 +528,58 @@ export function SupplierPaperLists({
           <p className="py-2 text-sm text-slate-400">{accountName} has nothing open on this account.</p>
         ) : (
           <>
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {(showAll.docs ? documents : documents.slice(0, LIST_LIMIT)).map((invoice) => {
-                const disc = discountReading(invoice, today);
-                const explain = explainKind(invoice.kind);
-                const amount = documentOpenAmount(invoice);
-                return (
-                  <li key={invoice.id} className="px-3 py-2.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="min-w-0">
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-sm font-medium text-slate-900">{invoice.invoiceNumber}</span>
-                          {invoice.kind !== "invoice" && <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>}
-                        </span>
-                        <span className="block truncate text-xs text-slate-400">
-                          {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
-                          {invoice.jobName
-                            ? ` · ${invoice.jobName}`
-                            : isUsableJobName(invoice.jobNameRaw)
-                              ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
-                              : ""}
-                          {(invoice.billCount ?? 0) > 0
-                            ? " · in your books"
-                            : cardIds.has(invoice.id)
-                              ? " · waiting under Needs You"
-                              : " · not in your books"}
-                        </span>
-                        {explain && <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>}
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span className={`block text-sm font-semibold tabular-nums ${amount < 0 ? "text-green-700" : "text-slate-900"}`}>
-                          {formatCurrency(amount)}
-                        </span>
-                        {disc.state === "live" && (
-                          <span className="block text-xs text-green-700">
-                            {formatCurrency(disc.amount)} off by {formatDate(disc.by)}
+            {docsOnCards > 0 && (
+              <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                {docsOnCards} Of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
+              </a>
+            )}
+            {docRows.length > 0 && (
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {(showAll.docs ? docRows : docRows.slice(0, LIST_LIMIT)).map((invoice) => {
+                  const disc = discountReading(invoice, today);
+                  const explain = explainKind(invoice.kind);
+                  const amount = documentOpenAmount(invoice);
+                  return (
+                    <li key={invoice.id} className="px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-900">{invoice.invoiceNumber}</span>
+                            {invoice.kind !== "invoice" && <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>}
                           </span>
-                        )}
-                        {disc.state === "expired" && (
-                          <span className="block text-xs text-slate-400">
-                            {formatCurrency(disc.amount)} off expired {formatDate(disc.by)}
+                          <span className="block truncate text-xs text-slate-400">
+                            {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
+                            {invoice.jobName
+                              ? ` · ${invoice.jobName}`
+                              : isUsableJobName(invoice.jobNameRaw)
+                                ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
+                                : ""}
+                            {(invoice.billCount ?? 0) > 0 ? " · in your books" : " · not in your books"}
                           </span>
-                        )}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            {more("docs", documents.length, r2(documents.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)))}
+                          {explain && <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className={`block text-sm font-semibold tabular-nums ${amount < 0 ? "text-green-700" : "text-slate-900"}`}>
+                            {formatCurrency(amount)}
+                          </span>
+                          {disc.state === "live" && (
+                            <span className="block text-xs text-green-700">
+                              {formatCurrency(disc.amount)} off by {formatDate(disc.by)}
+                            </span>
+                          )}
+                          {disc.state === "expired" && (
+                            <span className="block text-xs text-slate-400">
+                              {formatCurrency(disc.amount)} off expired {formatDate(disc.by)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {more("docs", docRows.length, r2(docRows.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)))}
           </>
         )}
       </Fold>

@@ -19,8 +19,8 @@ export type JobPaperView = {
   /** Filed on this job by a person already (supplier_invoices.job_id). */
   filed: boolean;
   accountId: string | null;
-  /** Dated on or after the day his books begin, so /bills has it on a Needs You card. A paper from
-   *  before that line is on no card: its link goes to the supplier's own line instead. */
+  /** /bills has it on a Needs You card (onNeedsYouIds, the cards' own rule). A paper on no card
+   *  (before the books line, reversed by a credit memo, $0.00) links to the supplier's own line. */
   onNeedsYou: boolean;
 };
 
@@ -116,9 +116,8 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
         <div className="mt-2 text-sm text-amber-700">
           <p>{refusal}</p>
           {/* The questions only /bills answers (Same Purchase: Tie Them, or any other answer as a
-              different purchase) live on its Needs You cards since Wave B: an unrecorded paper
-              like this one is a card there, unless it is dated before his books began, which no
-              card carries; that one opens its supplier's own line (FoldOpener). */}
+              different purchase) live on its Needs You cards since Wave B. A paper no card carries
+              (onNeedsYouIds says which) opens its supplier's own line instead (FoldOpener). */}
           <Link
             href={
               paper.onNeedsYou

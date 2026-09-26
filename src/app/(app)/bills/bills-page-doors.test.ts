@@ -349,7 +349,8 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Record To Shelf", was: "CED 3b", home: "suppliers" },
   { door: /^Discount Still On The Table/, was: "CED 3c", home: "suppliers" },
   { door: /^What Consolidated Electrical Distributors Has Open \(7\)$/, was: "CED 3d", home: "suppliers" },
-  { door: /^Show The Other 1, Holding/, was: "CED 'Show The Other N' (x4)", home: "suppliers" },
+  // CED 'Show The Other N' (x4): still each list's own switch past six rows. In this fixture no
+  // list is longer than six once the papers on Needs You cards are left out of What CED Has Open.
   // 9 + 10. What Your Customers Get Billed + the tabs -> All Bills
   { door: /^All Bills \(\d+\)/, was: "the tabs under the page", home: "all-bills" },
   { door: "Bills 15", was: "tab", home: "all-bills" },
@@ -414,9 +415,16 @@ describe("every door keeps exactly one home", () => {
     expect(section("all-bills")).toContain('id="bill-b-ticket"');
   });
 
-  it("the discount's figure is said once, under CED's numbers; its fold is a name and a count", () => {
-    const summaries = doors(section(`supplier-invoices-${CED}`)).filter((d) => d.startsWith("Discount Still On The Table"));
+  it("the discount's figure is said once, on CED's closed line; its fold is a name and a count", () => {
+    const ced = section(`supplier-invoices-${CED}`);
+    const summaries = doors(ced).filter((d) => d.startsWith("Discount Still On The Table"));
+    expect(summaries.length).toBe(1);
     for (const s of summaries) expect(s).toMatch(/^Discount Still On The Table \(\d+\)$/);
+    // On the line itself, before he opens anything: money with a deadline is never behind a fold.
+    const line = doors(ced).find((d) => d.startsWith("Consolidated Electrical Distributors Account TR-34426"));
+    expect(line).toMatch(/comes off if they are paid by Oct 10, 2026/);
+    // And nowhere else on the page.
+    expect(text(html).match(/comes off if/g) ?? []).toHaveLength(1);
   });
 
   it("Shop Stock's Record To Shelf door lands on the fold that holds the button (shelf-plan waitingForShelf)", () => {
@@ -441,6 +449,23 @@ describe("every door keeps exactly one home", () => {
     expect(noJob).toContain("8802-1108541");
     expect(noJob).toContain("8802-1103061");
     expect(text(ced)).toContain("4 Are Waiting Under Needs You");
+    // What CED Has Open counts everything CED has open, but a card's paper is not a row there.
+    const open = ced.slice(ced.indexOf("Has Open ("));
+    expect(open).not.toContain("8802-1107820");
+    expect(text(open)).toMatch(/\d+ Of These (Is|Are) Waiting Under Needs You/);
+  });
+});
+
+describe("a one-tap write with no undo says so on screen, not only in a fold", () => {
+  it("Not The Same and Keep Them Separate each carry their warning outside the Why? fold", () => {
+    const more = section("more");
+    expect(text(more)).toContain("Not The Same Can't Be Undone Here");
+    expect(text(more)).toContain("Keeping Them Separate Can't Be Undone Here");
+    // Not inside a Why? fold's body: the warning sits just above the buttons.
+    for (const fold of more.match(/<div class="mb-2 space-y-1 leading-relaxed">[\s\S]*?<\/div>/g) ?? []) {
+      expect(fold).not.toContain("Undone Here");
+    }
+    expect(text(more)).toContain("What Does Each Answer Do?");
   });
 });
 

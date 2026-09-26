@@ -208,7 +208,7 @@ export function SupplierMergeReview({
                   The Same" is not a shrug: it gives each spelling an account of its own, which is
                   the only way a dismissal can stick in this schema. And the door that does not
                   exist is named out loud rather than left for him to go looking for. */}
-              <WhyFold label="What Does Accepting Do?" className="mt-1">
+              <WhyFold label={count > 1 ? "What Does Each Answer Do?" : "What Does Accepting Do?"} className="mt-1">
               <p>
                 {p.existingAccountId
                   ? `Accepting files these ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} onto ${p.existingAccountName ?? "the account you already have"}, so they add up into one balance.`
@@ -227,6 +227,11 @@ export function SupplierMergeReview({
                 )}
               </p>
               </WhyFold>
+              {/* THE ONE-TAP WRITE SAYS SO ON SCREEN. Accept gets a sheet; Not The Same writes at
+                  once and has no undo here, so the warning cannot live only inside a fold. */}
+              {count > 1 && (
+                <p className="mt-1 text-xs font-medium text-amber-800">Not The Same Can&apos;t Be Undone Here</p>
+              )}
 
               <div className="mt-2.5 flex flex-wrap gap-2">
                 <Button onClick={() => openAccept(p)} disabled={pending}>
@@ -527,6 +532,8 @@ export function SupplierCandidateReview({
                 the money first.
               </p>
               </WhyFold>
+              {/* Keep Them Separate writes at once with no undo here: said on screen, not only in the fold. */}
+              <p className="mt-1 text-xs font-medium text-amber-800">Keeping Them Separate Can&apos;t Be Undone Here</p>
 
               {/* TWO DOORS OF EQUAL WEIGHT. Neither is the "right" one: the app genuinely does not
                   know, and a primary button on one side would be it pretending otherwise. */}

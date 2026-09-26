@@ -215,7 +215,15 @@ export function SupplierDuplicates({
                         Change Your Mind
                       </button>
                     ) : (
-                      <a href="#all-bills" className="flex min-h-11 items-center font-medium text-brand hover:underline">
+                      // The set-aside copy's own row in All Bills (FoldOpener opens it), not the
+                      // top of a ledger he would have to search.
+                      <a
+                        href={(() => {
+                          const setAside = g.copies.find((c) => c.billId !== g.resolution?.keptBillId);
+                          return setAside ? `#bill-${setAside.billId}` : "#all-bills";
+                        })()}
+                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
+                      >
                         To Change It, Open That Bill In All Bills
                       </a>
                     )}

@@ -484,6 +484,16 @@ export function SuppliersCard({
                       <span className="min-w-0">
                         <span className="block truncate text-base font-semibold text-slate-900">{account.name}</span>
                         <span className="mt-0.5 block truncate text-xs text-slate-500">{facts.join(" · ") || "Nothing on account."}</span>
+                        {/* THE DISCOUNT'S DEADLINE IS ON THE CLOSED LINE: money with a date on it is
+                            not left behind a fold. Said once, here; the detail lists the invoices.
+                            supplierSays only counts a discount whose date is today or later, and the
+                            builder says nothing when none is live, so this never nags after it. */}
+                        {fromSupplier && discountLine?.sentence && balance.supplierSays && (
+                          <span className="mt-0.5 block text-xs font-medium leading-snug text-green-800">
+                            {discountLine.sentence}
+                            {discountLine.allOnOneDate ? `, which would make it ${formatCurrency(balance.supplierSays.netIfPaidToday)}` : ""}
+                          </span>
+                        )}
                         {fromSupplier && noDocTotal > 0.005 && (
                           <span className="block truncate text-xs font-medium text-amber-700">
                             + {formatCurrency(noDocTotal)} they never sent paper for
@@ -537,12 +547,6 @@ export function SuppliersCard({
                               {balance.firstPayment ? ` Your payments run from ${formatDate(balance.firstPayment.paidOn)}.` : ""}
                             </p>
                           </WhyFold>
-                          {discountLine?.sentence && (
-                            <p className="text-xs font-medium leading-relaxed text-green-800">
-                              {discountLine.sentence}
-                              {discountLine.allOnOneDate ? `, which would make it ${formatCurrency(balance.supplierSays.netIfPaidToday)}.` : "."}
-                            </p>
-                          )}
                         </>
                       )}
 
