@@ -43,7 +43,7 @@ import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
 import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
-import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
+import { estimateIsTheContract, jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
@@ -347,16 +347,14 @@ export default async function JobDetailPage({
   // PROJECTION LAW (cn-v945): the fee is money, and the read-only permit rows a tech gets are
   // rendered from this same array — so the column is never selected for him, not dropped after.
   const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, notes, portal_url";
-  // THE CARD'S MONEY IS THE DOOR'S MONEY (MONEY law). createInvoiceForJob pulls the job's actuals
-  // (unclaimed hours + bills) only when the job has no live quote — a declined or expired one
-  // doesn't count, the same rule as the door's (invoice-import-rule: the contract decides) — and
-  // refuses outright on a payment schedule (draws bill that job). A fixed-bid job bills its
-  // contract. On any of those, "Create Invoice for $X" would not draft $X, so the Overview carries
-  // no UnbilledCard at all (a quoted job's "time since INV-061" would also be every hour ever
-  // worked, since no labor line ever claims them) and the page skips the read.
+  // THE CARD'S MONEY IS THE DOOR'S MONEY (MONEY law). EVERY Time & Material job bills its actuals
+  // (unclaimed hours + bills), estimate or not: on T&M the estimate is a guide, never a block (Erik,
+  // 2026-09-26, Tao J-002, whose accepted estimate hid the running total). A payment schedule is
+  // billed by its milestones and a fixed-price job by its contract; there no door would draft the
+  // card's figure, so the Overview carries no UnbilledCard at all and the page skips the read.
   // One rule with the customer portal (jobBillsItsActuals), so the customer is shown "not on a
   // bill yet" on exactly the jobs the office is.
-  const billsActuals = jobBillsItsActuals(j.billing_type, (quotes ?? []).map((q: any) => q.status), (paymentMilestones ?? []).length);
+  const billsActuals = jobBillsItsActuals(j.billing_type, (paymentMilestones ?? []).length);
   const [
     { data: canonicalItems },
     { data: permits },
@@ -543,7 +541,7 @@ export default async function JobDetailPage({
   // THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25). The job's bills and orders sorted by the Unbilled
   // card's own per-row verdict (UnbilledWork.costRows), so Not Billed Yet is exactly what that
   // card's button bills. Only where the card exists (a job that bills its actuals, the claims
-  // readable): on a quoted or fixed job no invoice bills these rows, so "not billed yet" would be
+  // readable): on a fixed-price or scheduled job no invoice bills these rows, so "not billed yet" would be
   // every bill forever, and the tab keeps its one plain list.
   const costGroups =
     viewerIsStaff && unbilled && unbilled.schemaReady
@@ -902,7 +900,7 @@ export default async function JobDetailPage({
               that bills it. T&M jobs only (billsActuals — the door's own rule); a tech's card is
               hours only (unbilledView is projected above). */}
           {billsActuals && (
-            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} />
+            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
           )}
           <Card>
             <CardContent className="space-y-4 py-5">
@@ -1351,7 +1349,7 @@ export default async function JobDetailPage({
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
-                      <UnbilledDoorButton jobId={j.id} work={unbilled} openDraft={openDraft} lumpToNet={lumpToNet} />
+                      <UnbilledDoorButton jobId={j.id} work={unbilled} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
                       {/* What else the button bills, said, so its figure never reads as a typo
                           beside the bills' cost: the open time, and the markup on the bills. */}
                       {(unbilled.hours > 0 || ((unbilled.billsCount > 0 || unbilled.stockCount > 0) && unbilled.markupPct > 0)) && (
@@ -1764,7 +1762,9 @@ export default async function JobDetailPage({
         jobAddress={navTarget}
         customerPhone={j.customers?.phone ?? null}
         pendingProposal={(pendingProposal as any) ?? null}
-        hasQuote={(quotes ?? []).length > 0}
+        /* On T&M the estimate is a guide, never the bill (estimateIsTheContract): Finish builds the
+           bill from the actuals there, so the modal never says the estimate's lines copy over. */
+        hasQuote={estimateIsTheContract((j as any).billing_type, (quotes ?? []).some((q: any) => q.status !== "declined" && q.status !== "expired"))}
         defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
         isDrawBilled={isDrawBilled}
         /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */

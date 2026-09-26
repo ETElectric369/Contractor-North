@@ -9,6 +9,8 @@
  * (unbilledWorkForJob).
  */
 import { formatCurrency } from "./utils";
+import { isDrawKind } from "./invoice-math";
+import type { CardDoor } from "./actuals-draw";
 
 export type NotBilled = {
   hours: number;
@@ -48,4 +50,38 @@ export function finishedWithWorkOffBill(u: NotBilled | null | undefined): string
 export function finishWouldLeaveOffBill(u: NotBilled | null | undefined): string | null {
   const w = notBilledWords(u);
   return w ? `Not billed yet: ${w}. Finishing marks the job complete and does not bill it. To bill it first: Invoices tab → Progress Payment → Final → Actual T&M.` : null;
+}
+
+/**
+ * A TIME & MATERIAL JOB'S FINISH, SAID BEFORE THE PRESS (Erik, 2026-09-26). Finishing builds the
+ * Final as a draft through the Overview card's own door (unbilledCardDoor), so the sentence is the
+ * door's: what gets built, for how much, and that nothing is sent. `blocked`: the press would
+ * refuse (a contract draft can't take the work). `builds`: the press writes or updates a draft.
+ */
+export function finalFinishWords(
+  door: NonNullable<CardDoor>,
+  draft: { number: string | null; kind: string } | null,
+  work: number,
+): { line: string; blocked: boolean; builds: boolean } {
+  const name = draft?.number ?? "the open draft";
+  if (door.kind === "open") {
+    return {
+      line: `${name} is still a draft and bills a set part of the contract, so the ${formatCurrency(work)} of work not yet billed can't go on it. Send it (or delete it) first, then finish the job.`,
+      blocked: true,
+      builds: false,
+    };
+  }
+  if (door.kind === "covered") return { line: `${door.note} Finishing marks the job complete.`, blocked: false, builds: false };
+  if (door.kind === "add") {
+    return {
+      line: `Finishing adds the ${formatCurrency(door.amount)} of work not yet billed to ${name}${draft && isDrawKind(draft.kind) ? " as the Final" : ""} (still a draft) and marks the job complete. Nothing is sent.`,
+      blocked: false,
+      builds: true,
+    };
+  }
+  return {
+    line: `Finishing starts the Final for ${formatCurrency(door.amount)} of work not yet billed, as a draft, and marks the job complete. Nothing is sent.${door.note ? ` ${door.note}` : ""}`,
+    blocked: false,
+    builds: true,
+  };
 }

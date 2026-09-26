@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { useToast } from "@/components/toast";
 import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
 
@@ -19,22 +20,31 @@ import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
  * ("Not billed yet: 19.5 h ($2,437.50)…"), which finishing would otherwise drop off every screen.
  * And after the press it SHOWS what happened (the server's sentence, and any warning) with a door
  * to the invoice, instead of navigating away blind.
+ *
+ * A TIME & MATERIAL JOB IS FINISHED WITH ITS FINAL (Erik, 2026-09-26). With work not on a bill, the
+ * press builds the Final as a DRAFT through the Overview card's own door and lands on it, the
+ * sentence saying what was built. Nothing is sent, so the modal has no toggles and no email box
+ * there: it says what will be built, for how much, before the press (finishJobPreview.final).
  */
 export function FinishJobButton({
   jobId,
   hasQuote,
   defaultSendInvoice = false,
   isDrawBilled = false,
+  isTm = false,
   menuItem = false,
 }: {
   jobId: string;
   hasQuote: boolean;
   defaultSendInvoice?: boolean;
   isDrawBilled?: boolean;
+  /** A Time & Material job: the modal waits for the server's plan (the Final it would build). */
+  isTm?: boolean;
   /** Render the trigger as a Manage-menu row instead of a standalone button. */
   menuItem?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -49,9 +59,14 @@ export function FinishJobButton({
   // The server's answer wins over the page's (a draw sent since the page rendered); until it
   // answers, the page's flag decides what shows.
   const drawBilled = preview?.ok ? !!preview.drawBilled : isDrawBilled;
-  // The "email now" option only applies to standard invoices — a draw-billed job is billed with its
-  // progress payments, which are sent from their own page.
-  const wantSend = sendInvoice && !drawBilled;
+  // THE FINAL THIS PRESS BUILDS (a T&M job with work not on a bill), in the server's words.
+  const finalLine = preview?.ok ? (preview.final ?? null) : null;
+  const finalBlocked = !!finalLine && !!preview?.finalBlocked;
+  // The server decides what a T&M job's press does; until it answers, the modal doesn't guess.
+  const waitForPlan = (drawBilled || isTm) && !preview;
+  // The "email now" option only applies to standard invoices - a draw-billed job is billed with its
+  // progress payments, which are sent from their own page, and a T&M Final is a draft a person sends.
+  const wantSend = sendInvoice && !drawBilled && !finalLine;
 
   function openModal() {
     setError(null);
@@ -64,9 +79,17 @@ export function FinishJobButton({
   function go() {
     setError(null);
     start(async () => {
-      const res = await finishJob(jobId, drawBilled ? {} : { importLabor, importCosts, sendInvoice: wantSend });
+      const res = await finishJob(jobId, drawBilled || finalLine ? {} : { importLabor, importCosts, sendInvoice: wantSend });
       if (!res.ok) {
         setError(res.error ?? "Could not finish the job.");
+        return;
+      }
+      // THE FINAL WAS BUILT: land on it, with the sentence of what was built (and any heads-up).
+      if (res.final && res.id) {
+        toast(res.speak ?? "Job finished.", "info");
+        if (res.warning) toast(res.warning, "error");
+        setOpen(false);
+        router.push(`/billing/${res.id}`);
         return;
       }
       // Finished, but the email did NOT go out (no customer email, nothing billable, or sending
@@ -91,7 +114,15 @@ export function FinishJobButton({
           ? `${draftNo} is still a draft and bills a set part of the contract. Finishing marks the job complete; send ${draftNo} (or delete it), then bill the rest as the final progress payment.`
           : "This job bills with progress payments. Finishing marks it complete; it doesn't write or send a bill.";
   const offBill = drawBilled ? preview?.offBill ?? null : null;
-  const saveLabel = drawBilled ? (offBill ? "Finish Without Billing" : "Finish Job") : wantSend ? "Finish & Send Invoice" : "Finish & Review Invoice";
+  const saveLabel = finalLine
+    ? preview?.finalBuilds
+      ? "Finish & Draft the Final"
+      : "Finish Job"
+    : drawBilled
+      ? (offBill ? "Finish Without Billing" : "Finish Job")
+      : wantSend
+        ? "Finish & Send Invoice"
+        : "Finish & Review Invoice";
 
   return (
     <>
@@ -122,7 +153,7 @@ export function FinishJobButton({
               onSave={go}
               saving={pending}
               // A draw-billed job waits for the server's answer: the button must not say less than it knows.
-              disabled={!timeIn || !costsIn || (drawBilled && !preview)}
+              disabled={!timeIn || !costsIn || waitForPlan || finalBlocked}
               saveLabel={saveLabel}
             />
           )
@@ -141,7 +172,7 @@ export function FinishJobButton({
           ) : (
             <>
               <p className="text-sm text-slate-600">
-                {drawBilled ? "Quick check before I mark it complete:" : "Quick check before I mark it complete and draft the invoice:"}
+                {drawBilled && !finalLine ? "Quick check before I mark it complete:" : "Quick check before I mark it complete and draft the invoice:"}
               </p>
               <div className="space-y-2">
                 <label className={`flex min-h-11 items-start gap-2 rounded-lg border px-3 py-2 text-sm ${timeIn ? "border-slate-200" : "border-amber-300 bg-amber-50"}`}>
@@ -154,7 +185,12 @@ export function FinishJobButton({
                 </label>
               </div>
 
-              {drawBilled ? (
+              {finalLine ? (
+                <div className="space-y-2 border-t border-slate-100 pt-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Billing</div>
+                  <p className={finalBlocked ? "rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800" : "text-sm text-slate-600"}>{finalLine}</p>
+                </div>
+              ) : drawBilled || waitForPlan || (isTm && preview && !preview.ok) ? (
                 <div className="space-y-2 border-t border-slate-100 pt-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Billing</div>
                   {!preview ? (

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isActualsDraw, refreshesFromActuals, unbilledCardDoor, pulledIntoSentence, contractDrawRefusal } from "./actuals-draw";
+import { isActualsDraw, refreshesFromActuals, unbilledCardDoor, openFigure, pulledIntoSentence, contractDrawRefusal } from "./actuals-draw";
 import { formatCurrency } from "./utils";
 
 /** INV-078 as it sits in Erik's database on 2026-09-24: a progress draw, 31 lines from the
@@ -70,7 +70,8 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
 
   it("J-011: an open actuals draw → Add to INV-078 ($1,572.27)", () => {
     const d = unbilledCardDoor({ ...base, openDraft: { id: "inv-078", number: "INV-078", refreshable: true } });
-    expect(d).toEqual({ kind: "add", label: "Add to INV-078 ($1,572.27)" });
+    expect(d).toEqual({ kind: "add", label: "Add to INV-078 ($1,572.27)", amount: 1572.27 });
+    expect(openFigure(d, base.total)).toBe(1572.27);
   });
 
   it("an open fixed-price draw → Open INV-080, going to it", () => {
@@ -83,7 +84,7 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
   });
 
   it("no draft → Create Invoice for $X; nothing pending → no button", () => {
-    expect(unbilledCardDoor({ ...base, openDraft: null })).toEqual({ kind: "create", label: "Create Invoice for $1,572.27" });
+    expect(unbilledCardDoor({ ...base, openDraft: null })).toEqual({ kind: "create", label: "Create Invoice for $1,572.27", amount: 1572.27 });
     expect(unbilledCardDoor({ ...base, workPending: false, total: 0, newWork: 0, openDraft: null })).toBeNull();
     expect(unbilledCardDoor({ ...base, workPending: false, total: 0, newWork: 0, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toBeNull();
   });
@@ -98,6 +99,7 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
     expect(unbilledCardDoor({ ...base, openDraft: null, lumpToNet: 500 })).toEqual({
       kind: "create",
       label: "Create Invoice for $1,072.27",
+      amount: 1072.27,
       note: "That is $1,572.27 of work less the $500.00 deposit not yet taken off a bill.",
     });
     // An open draft already netted its deposit when it was made: "Add to" is unchanged.
@@ -106,8 +108,57 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
 
   it("a pending return alone reaches an open draft that takes it, never mints one", () => {
     const ret = { ...base, workPending: false, returns: 1, total: -40, newWork: 0 };
-    expect(unbilledCardDoor({ ...ret, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toEqual({ kind: "add", label: "Add to INV-078" });
+    expect(unbilledCardDoor({ ...ret, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toEqual({ kind: "add", label: "Add to INV-078", amount: -40 });
     expect(unbilledCardDoor({ ...ret, openDraft: null })).toBeNull();
+  });
+});
+
+describe("the card on a T&M job billed with draws - Open: $X and the door that bills it (Tao J-002)", () => {
+  const base = { workPending: true, returns: 0, total: 3067.9, newWork: 3067.9, money: formatCurrency };
+
+  it("no draft on a job with a deposit and a progress payment: the DRAW door, never the standard New Invoice", () => {
+    const d = unbilledCardDoor({ ...base, openDraft: null, drawBilled: true });
+    expect(d).toEqual({ kind: "draw", label: "Create Progress Payment for $3,067.90", amount: 3067.9 });
+    expect(openFigure(d, base.total)).toBe(3067.9);
+  });
+
+  it("the draw door nets the deposit not yet taken off a bill, and Open is the net - the figure the button bills", () => {
+    const d = unbilledCardDoor({ ...base, openDraft: null, drawBilled: true, lumpToNet: 1000 });
+    expect(d).toEqual({
+      kind: "draw",
+      label: "Create Progress Payment for $2,067.90",
+      amount: 2067.9,
+      note: "That is $3,067.90 of work less the $1,000.00 deposit not yet taken off a bill.",
+    });
+    expect(openFigure(d, base.total)).toBe(2067.9);
+  });
+
+  it("a deposit that still covers the work: no button, and nothing is open", () => {
+    const d = unbilledCardDoor({ ...base, openDraft: null, drawBilled: true, lumpToNet: 10000 });
+    expect(d?.kind).toBe("covered");
+    expect(openFigure(d, base.total)).toBe(0);
+  });
+
+  it("an open actuals draft still says Add to it, draws or not (Herringbone INV-078)", () => {
+    const d = unbilledCardDoor({ ...base, openDraft: { id: "inv-078", number: "INV-078", refreshable: true }, drawBilled: true });
+    expect(d?.kind).toBe("add");
+    expect(d && "label" in d ? d.label : "").toBe("Add to INV-078 ($3,067.90)");
+  });
+
+  it("a plain T&M job keeps Create Invoice", () => {
+    expect(unbilledCardDoor({ ...base, openDraft: null, drawBilled: false })?.kind).toBe("create");
+  });
+
+  it("everything billed (J-002 today): no button, Open $0.00", () => {
+    const d = unbilledCardDoor({ ...base, workPending: false, total: 0, newWork: 0, openDraft: null, drawBilled: true });
+    expect(d).toBeNull();
+    expect(openFigure(d, 0)).toBe(0);
+  });
+
+  it("a contract draft that can't take the work: Open is the work, the button opens the draft", () => {
+    const d = unbilledCardDoor({ ...base, openDraft: { id: "inv-080", number: "INV-080", refreshable: false }, drawBilled: true });
+    expect(d?.kind).toBe("open");
+    expect(openFigure(d, base.total)).toBe(3067.9);
   });
 });
 

@@ -64,11 +64,8 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
   if (!raw.scope?.org_id || !raw.scope?.job_id || raw.scope.job_id.toLowerCase() !== jobId.toLowerCase()) return { kind: "missing" };
 
   const orgId = raw.scope.org_id;
-  const billsActuals = jobBillsItsActuals(
-    raw.billing?.billing_type ?? null,
-    raw.billing?.quote_statuses ?? [],
-    Number(raw.billing?.milestones ?? 0),
-  );
+  // One rule with the office's Overview card: every T&M job without a schedule, estimate or not.
+  const billsActuals = jobBillsItsActuals(raw.billing?.billing_type ?? null, Number(raw.billing?.milestones ?? 0));
 
   // THE BILLS: each one the gate returned a document for, through THE one assembly the PDF and the
   // /i link use (readInvoiceDocumentProps), pinned to this org and this job. One cache, so the

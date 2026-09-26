@@ -89,14 +89,12 @@ describe("customerRateRow: the customer's page never prices with a pay rate", ()
 });
 
 describe("jobBillsItsActuals: the Unbilled card's rule, shared with the portal", () => {
-  it("a T&M job with no live quote and no schedule bills its actuals", () => {
-    expect(jobBillsItsActuals("tm", [], 0)).toBe(true);
-    expect(jobBillsItsActuals("tm", ["declined", "expired"], 0)).toBe(true);
+  it("EVERY T&M job with no schedule bills its actuals - an estimate is a guide, never a block (Tao J-002)", () => {
+    expect(jobBillsItsActuals("tm", 0)).toBe(true);
   });
-  it("a quote, a schedule or a fixed job bills something else", () => {
-    expect(jobBillsItsActuals("tm", ["accepted"], 0)).toBe(false);
-    expect(jobBillsItsActuals("tm", ["draft"], 0)).toBe(false);
-    expect(jobBillsItsActuals("tm", [], 2)).toBe(false);
-    expect(jobBillsItsActuals("fixed", [], 0)).toBe(false);
+  it("a schedule or a fixed-price job bills something else", () => {
+    expect(jobBillsItsActuals("tm", 2)).toBe(false);
+    expect(jobBillsItsActuals("fixed", 0)).toBe(false);
+    expect(jobBillsItsActuals(null, 0)).toBe(false);
   });
 });

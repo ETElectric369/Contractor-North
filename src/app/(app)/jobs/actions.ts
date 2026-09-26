@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
-import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
+import { openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
@@ -17,11 +17,11 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
-import { shouldImportActuals } from "@/lib/invoice-import-rule";
+import { estimateIsTheContract, jobBillsItsActuals, shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
-import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { claimedSourcesOnJob, fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
-import { finishedWithWorkOffBill, finishWouldLeaveOffBill } from "@/lib/finish-job-words";
+import { finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill } from "@/lib/finish-job-words";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { restampLotsForBill } from "@/lib/stock-ledger";
@@ -254,6 +254,11 @@ export async function createInvoiceForJob(
     .maybeSingle();
   if (milestone)
     return { ok: false, error: "This job bills on a payment schedule — request the next draw from Billing instead." };
+  // The job's billing type decides whether its estimate is the contract (estimateIsTheContract).
+  // A lost read is not "fixed price": that would copy a T&M job's estimate onto its bill.
+  const { data: jobRow, error: jobErr } = await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle();
+  if (jobErr) return { ok: false, error: "Couldn't read this job just now, so nothing was billed. Try again in a moment." };
+  const billingType = (jobRow as { billing_type?: string | null } | null)?.billing_type ?? null;
 
   // THE OPEN DRAFT IS THE DOOR, WHATEVER ITS KIND (J-011, 2026-09-24). This used to look for a
   // STANDARD draft only, so on a job whose open draft is a time-and-materials progress report
@@ -309,7 +314,12 @@ export async function createInvoiceForJob(
   const usableQuotes = ((quoteRows ?? []) as { id: string; status: string | null }[]).filter(
     (q) => q.status !== "declined" && q.status !== "expired",
   );
-  const quote = usableQuotes.find((q) => q.status === "accepted") ?? usableQuotes[0] ?? null;
+  const estimate = usableQuotes.find((q) => q.status === "accepted") ?? usableQuotes[0] ?? null;
+  // ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tao
+  // J-002). Its bills are the hours and receipts, exactly what the Overview card totals - so from
+  // here on `quote` means "the contract", and a T&M job has none: no quote lines copied, the
+  // actuals pulled, and a job with draws billed through the progress report.
+  const quote = estimateIsTheContract(billingType, !!estimate) ? estimate : null;
 
   // THE CONTRACT IS BILLED ONCE. createInvoiceFromQuote is idempotent per quote — asked again it
   // returns the quote's existing invoice, which after a send is the locked one we just stopped
@@ -335,10 +345,10 @@ export async function createInvoiceForJob(
   // the job, a standard invoice is refused (H4, blockStandardCreateOnDrawJob) — so "Create Invoice
   // for $X" on the Overview card after INV-078 went out would be the same dead door. The next bill
   // is a progress report of exactly the unclaimed work, which is what the card priced: on a job with
-  // no live quote, and on a quoted job whose draws already bill its actuals (Tao: INV-00028 was a
-  // T&M report, so Sept 8-9's 19.5 h go on the next one, netting the deposit). A quoted job whose
-  // draws are all slices of the contract is not billed from actuals behind anyone's back: it is told
-  // the door (Progress Payment), with the latest draw to open.
+  // no contract (every T&M job - its estimate is a guide - so Tao's next hours go on the next report,
+  // netting the deposit), and on a fixed-price quoted job whose draws already bill its actuals. A
+  // fixed-price quoted job whose draws are all slices of the contract is not billed from actuals
+  // behind anyone's back: it is told the door (Progress Payment), with the latest draw to open.
   // A STANDARD draft beside a live draw is not a door either (every importer refuses content on it -
   // H4), so it doesn't stop this: the draw door is the one that works (openDraftOnJob agrees, and
   // the card offers "Create Invoice", not "Add to" that draft). The draw door still refuses beside
@@ -617,7 +627,114 @@ export type FinishJobResult = {
   speak?: string;
   /** A hard "it did NOT do all of what you asked" (an import failed): relayed by every surface. */
   warning?: string;
+  /** A Time & Material job's Final was built (or brought up to date) as a DRAFT at `id`: the
+   *  caller lands on it with `speak`, which says what was built. Nothing was sent. */
+  final?: true;
 };
+
+/**
+ * WHAT FINISHING A TIME & MATERIAL JOB BILLS, decided once for the press and for the modal before
+ * it (finishJob, finishJobPreview). The door is the Overview card's own (unbilledCardDoor), so
+ * Finish bills exactly the "Open: $X" the card shows, through the door the card's button uses:
+ * an open draft that takes new work, the draw door on a job with draws, a standard invoice on a
+ * plain T&M job. `skip` = not this rule's business (not T&M, a payment schedule, or nothing
+ * unbilled): the job finishes as it always has. A read that fails is an `error`, never "nothing
+ * to bill" - that would finish the job with its work off every bill.
+ */
+type TmFinishPlan =
+  | { kind: "skip" }
+  | { kind: "error"; error: string }
+  | { kind: "plan"; door: NonNullable<CardDoor>; draft: OpenDraft | null; drawBilled: boolean; work: number };
+
+async function tmFinishPlan(supabase: SupabaseClient, jobId: string): Promise<TmFinishPlan> {
+  const [jobRead, schedRead, drawsRead] = await Promise.all([
+    supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
+    supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1),
+    supabase.from("invoices").select("id").eq("job_id", jobId).neq("status", "void").in("invoice_kind", [...DRAW_KINDS]).limit(1),
+  ]);
+  if (jobRead.error || schedRead.error || drawsRead.error) {
+    return { kind: "error", error: "Couldn't read this job's bills just now, so it wasn't finished. Try again in a moment." };
+  }
+  const billingType = (jobRead.data as { billing_type?: string | null } | null)?.billing_type ?? null;
+  if (!jobBillsItsActuals(billingType, (schedRead.data ?? []).length)) return { kind: "skip" };
+  const drawBilled = (drawsRead.data ?? []).length > 0;
+  let unbilled: Awaited<ReturnType<typeof unbilledWorkForJob>>;
+  let draft: OpenDraft | null;
+  let lump: number;
+  try {
+    [unbilled, draft, lump] = await Promise.all([
+      unbilledWorkForJob(supabase, jobId),
+      openDraftOnJob(supabase, jobId),
+      drawBilled ? fixedBillingsNotYetNetted(supabase, jobId) : Promise.resolve(0),
+    ]);
+  } catch (e) {
+    reportError("finishJob.tmPlan", e, { jobId });
+    return { kind: "error", error: "Couldn't read this job's hours and bills just now, so it wasn't finished and nothing was billed. Try again in a moment." };
+  }
+  if (!unbilled.schemaReady) {
+    return { kind: "error", error: "Billing is mid-upgrade for a few minutes, so the hours not yet billed can't be told apart. The job wasn't finished; try again shortly." };
+  }
+  const stock = unbilled.stockCount ?? 0;
+  const workPending = unbilled.hours > 0 || unbilled.billsCount > 0 || stock > 0;
+  const newWork = Math.round((unbilled.laborAmount + unbilled.billsBilled + (unbilled.stockBilled ?? 0)) * 100) / 100;
+  const door = unbilledCardDoor({
+    openDraft: draft,
+    workPending,
+    // A pending return alone is not work to bill: Finish never builds a bill for a credit.
+    returns: 0,
+    total: unbilled.total,
+    newWork,
+    lumpToNet: lump,
+    drawBilled,
+    money: formatCurrency,
+  });
+  if (!workPending || !door) return { kind: "skip" };
+  return { kind: "plan", door, draft, drawBilled, work: unbilled.total > 0.005 ? unbilled.total : newWork };
+}
+
+/** Build the Final through the plan's door, then (and only then) mark the job complete. */
+async function finishTmWithFinal(
+  supabase: SupabaseClient,
+  jobId: string,
+  plan: Extract<TmFinishPlan, { kind: "plan" }>,
+  complete: () => Promise<{ ok: true } | { ok: false; error: string }>,
+): Promise<FinishJobResult> {
+  const { door, draft } = plan;
+  if (door.kind === "open") return { ok: false, error: `${finalFinishWords(plan.door, plan.draft, plan.work).line} The job was not marked complete.` };
+  if (door.kind === "covered") {
+    const done = await complete();
+    if (!done.ok) return done;
+    return { ok: true, sent: false, speak: `Job finished. ${door.note}` };
+  }
+  // The card's door, exactly: a draft draw (open or new) through the draw door AS THE FINAL, which
+  // flips an open actuals report to final and nets any deposit on a new one; a standard draft or a
+  // plain T&M job through createInvoiceForJob, which pulls the actuals (the estimate is a guide).
+  const viaDraw = door.kind === "draw" || (door.kind === "add" && !!draft && isDrawKind(draft.kind));
+  const built: CreateInvoiceForJobResult = viaDraw ? fromDrawDoor(await createProgressReportInvoice(jobId, "final")) : await createInvoiceForJob(jobId);
+  if (!built.ok || !built.id) {
+    return { ok: false, error: `${built.error ?? "The Final couldn't be built."} The job was not marked complete.`, ...(built.billedOn ? { id: built.billedOn.id } : {}) };
+  }
+  // Said from the document itself: its number and what it bills now.
+  const { data: made } = await supabase.from("invoices").select("invoice_number, total").eq("id", built.id).maybeSingle();
+  const num = (made as { invoice_number?: string | null } | null)?.invoice_number ?? draft?.number ?? "the draft";
+  const total = Number((made as { total?: number | string | null } | null)?.total ?? door.amount);
+  const done = await complete();
+  if (!done.ok) {
+    return { ok: false, id: built.id, error: `${num} is built as a draft (not sent), but the job couldn't be marked complete: ${done.error}` };
+  }
+  const speak =
+    door.kind === "add" && draft?.id === built.id
+      ? `Job finished. Added the work not yet billed to ${num}${viaDraw ? ", now the Final" : ""}: ${formatCurrency(total)}. Review it, then Send.`
+      : `Job finished. Started ${num} for ${formatCurrency(total)} of work not yet billed. Review it, then Send.`;
+  return {
+    ok: true,
+    id: built.id,
+    sent: false,
+    final: true,
+    speak,
+    ...(built.partial && built.importWarning ? { warning: built.importWarning } : {}),
+  };
+}
 
 /**
  * Finish a job: mark it complete and put its billing in front of the office — a draft invoice
@@ -655,6 +772,17 @@ export async function finishJob(
     revalidatePath("/billing");
     return { ok: true };
   };
+
+  // A TIME & MATERIAL JOB IS FINISHED WITH ITS FINAL BUILT, NEVER SENT (Erik, 2026-09-26, Tao J-002).
+  // Finishing used to mark Tao's job complete and bill nothing, leaving 19.5 h to a note. Now the
+  // work not yet billed is built into a DRAFT through the card's own door (tmFinishPlan): the draw
+  // door as the Final on a job with draws, the open draft when one takes it, a standard invoice on
+  // a plain T&M job. Only a draft that was really built completes the job; a door that refuses (or
+  // a read that fails) leaves the job as it was and says why. Nothing is emailed: a draft is not
+  // sent until a person sends it. No unbilled work: the job finishes as it always has, below.
+  const plan = await tmFinishPlan(supabase, jobId);
+  if (plan.kind === "error") return { ok: false, error: plan.error };
+  if (plan.kind === "plan") return finishTmWithFinal(supabase, jobId, plan, complete);
 
   // A draw-billed job is finished with a Final draw, not a standard invoice. Mark it
   // complete without creating a conflicting standard invoice (H4), and hand back the
@@ -785,6 +913,13 @@ export type FinishJobPreview = {
   openDraft?: { number: string | null; refreshable: boolean } | null;
   /** The amber line: work no bill claims that finishing would leave off ("Not billed yet: 19.5 h ($2,437.50)…"). */
   offBill?: string | null;
+  /** A Time & Material job with work not on a bill: what finishing builds ("Finishing starts the
+   *  Final for $X of work not yet billed, as a draft..."). Set only then. */
+  final?: string | null;
+  /** The Final can't be built yet (a contract draft is in the way): the press would refuse. */
+  finalBlocked?: boolean;
+  /** The press builds (or brings up to date) a draft - false when a deposit still covers the work. */
+  finalBuilds?: boolean;
 };
 
 /**
@@ -795,6 +930,22 @@ export async function finishJobPreview(jobId: string): Promise<FinishJobPreview>
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // A T&M job with work not on a bill: the Final finishing builds, said from the plan the press runs.
+  const plan = await tmFinishPlan(supabase, jobId);
+  if (plan.kind === "error") return { ok: false, error: plan.error };
+  if (plan.kind === "plan") {
+    const words = finalFinishWords(plan.door, plan.draft, plan.work);
+    return {
+      ok: true,
+      drawBilled: plan.drawBilled,
+      schedule: false,
+      openDraft: plan.draft && isDrawKind(plan.draft.kind) ? { number: plan.draft.number ?? null, refreshable: !!plan.draft.refreshable } : null,
+      offBill: null,
+      final: words.line,
+      finalBlocked: words.blocked,
+      finalBuilds: words.builds,
+    };
+  }
   const [drawsRead, schedRead] = await Promise.all([
     supabase.from("invoices").select("id").eq("job_id", jobId).neq("status", "void").in("invoice_kind", [...DRAW_KINDS]).limit(1),
     supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1),

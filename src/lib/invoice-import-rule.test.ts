@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shouldImportActuals } from "./invoice-import-rule";
+import { estimateIsTheContract, jobBillsItsActuals, shouldImportActuals } from "./invoice-import-rule";
 
 describe("shouldImportActuals — the contract-vs-actuals rule", () => {
   it("a QUOTED job does not import actuals by default (the double-bill guard)", () => {
@@ -19,5 +19,20 @@ describe("shouldImportActuals — the contract-vs-actuals rule", () => {
   it("an explicit false always suppresses, quote or not", () => {
     expect(shouldImportActuals(true, false)).toBe(false);
     expect(shouldImportActuals(false, false)).toBe(false);
+  });
+});
+
+describe("estimateIsTheContract - on T&M the estimate is a guide (Erik, Tao J-002)", () => {
+  it("a T&M job's accepted estimate is not the bill; the hours and receipts are", () => {
+    expect(estimateIsTheContract("tm", true)).toBe(false);
+    expect(shouldImportActuals(estimateIsTheContract("tm", true), undefined)).toBe(true);
+    // ...so the running total shows on it (the same answer the card and the portal read).
+    expect(jobBillsItsActuals("tm", 0)).toBe(true);
+  });
+  it("a fixed-price job's live estimate is still the contract; no estimate, no contract", () => {
+    expect(estimateIsTheContract("fixed", true)).toBe(true);
+    expect(estimateIsTheContract(null, true)).toBe(true);
+    expect(estimateIsTheContract("fixed", false)).toBe(false);
+    expect(estimateIsTheContract("tm", false)).toBe(false);
   });
 });

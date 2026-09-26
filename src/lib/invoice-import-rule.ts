@@ -21,18 +21,32 @@ export function shouldImportActuals(
 }
 
 /**
+ * ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tao
+ * Zhu J-002: "i dont see a running total anywhere on tao's job page"). Tao's job is T&M with an
+ * accepted $17,325 estimate, a deposit and progress draws; his bills are the hours and receipts,
+ * and the estimate is only what he was told to expect. A fixed-price job's live estimate IS the
+ * contract (a declined or expired one is not). Every door that asks "is the quote the bill?" asks
+ * here: createInvoiceForJob (copy the quote or pull the actuals), the Overview card and the portal.
+ */
+export function estimateIsTheContract(
+  billingType: string | null | undefined,
+  hasLiveQuote: boolean,
+): boolean {
+  return hasLiveQuote && billingType !== "tm";
+}
+
+/**
  * DOES THIS JOB BILL ITS ACTUALS? The rule behind the job page's UnbilledCard, shared so the
  * customer portal shows "work not on a bill yet" on exactly the jobs the office sees it on.
  *
- * A T&M job with no live quote (a declined or expired one does not count) and no payment schedule
- * bills the hours and receipts it logs. Anywhere else the next bill is the contract or a draw, and
- * "not billed yet" would be every hour ever worked, which nobody will be billed for.
+ * EVERY Time & Material job does, estimate or not (estimateIsTheContract): its next bill is the
+ * hours and receipts no bill holds yet, priced the way that bill will price them. A job on a
+ * payment schedule is billed by its milestones, and a fixed-price job by its contract; there "not
+ * billed yet" would be every hour ever worked, which nobody will be billed for.
  */
 export function jobBillsItsActuals(
   billingType: string | null | undefined,
-  quoteStatuses: readonly (string | null | undefined)[],
   milestoneCount: number,
 ): boolean {
-  const liveQuotes = quoteStatuses.filter((s) => s !== "declined" && s !== "expired").length;
-  return billingType === "tm" && liveQuotes === 0 && milestoneCount === 0;
+  return billingType === "tm" && milestoneCount === 0;
 }
