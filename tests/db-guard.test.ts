@@ -156,6 +156,14 @@ describe("every DB suite runs in CI", () => {
     expect(bad).toEqual([]);
   });
 
+  it("no case warns and returns (whatever the words): it asserts, or it is reported skipped with ctx.skip", () => {
+    const bad: string[] = [];
+    for (const f of dbFiles) {
+      for (const m of f.text.matchAll(/return console\.warn\(|console\.warn\([^\n]*\);?\s*\n\s*return;/g)) bad.push(`${f.rel}: ${m[0].slice(0, 90)}`);
+    }
+    expect(bad).toEqual([]);
+  });
+
   it("notOnThisDatabase warns on the Mac and throws in CI", () => {
     const was = process.env.CI;
     try {
@@ -180,9 +188,10 @@ describe("every DB suite runs in CI", () => {
 
 describe("CI refuses a test database that is behind supabase/migrations", () => {
   const req = createRequire(import.meta.url);
-  const { stepsOnDisk, ledgerBehind } = req("../scripts/test-db/steps.cjs") as {
+  const { stepsOnDisk, ledgerBehind, ledgerAhead } = req("../scripts/test-db/steps.cjs") as {
     stepsOnDisk: () => { name: string; kind: string; md5: string }[];
     ledgerBehind: (s: { name: string; md5: string }[], r: Map<string, string | null>) => { missing: string[]; changed: string[] };
+    ledgerAhead: (s: { name: string }[], r: Map<string, string | null>) => string[];
   };
   const steps = stepsOnDisk();
 
@@ -210,6 +219,9 @@ describe("CI refuses a test database that is behind supabase/migrations", () => 
     old.set(last.name, null);
     old.set("9999_another_branch.sql", "x");
     expect(ledgerBehind(steps, old)).toEqual({ missing: [], changed: [] });
+    // ...but it is named, by the same rule in both scripts.
+    expect(ledgerAhead(steps, old)).toEqual(["9999_another_branch.sql"]);
+    expect(ledgerAhead(steps, all)).toEqual([]);
   });
 
   it("check-test-db.cjs reads the ledger with the same steps and says how to fix it", () => {
@@ -217,8 +229,14 @@ describe("CI refuses a test database that is behind supabase/migrations", () => 
     expect(script).toContain('require("./steps.cjs")');
     expect(script).toContain("ledgerBehind(");
     expect(script).toContain("the test database is behind: run node scripts/test-db/rebuild.cjs");
+    // An edited step is not fixed by a plain rebuild (it refuses): its message says the real way out.
+    expect(script).toMatch(/const CHANGED =\s*"[^"]*undo the edit, or run node scripts\/test-db\/rebuild\.cjs --reset/);
+    expect(script).toContain("ledgerAhead(");
     const rebuild = fs.readFileSync(path.join(root, "scripts/test-db/rebuild.cjs"), "utf8");
     expect(rebuild).toContain('require("./steps.cjs")');
     expect(rebuild).not.toMatch(/function stepsOnDisk/);
+    // One rule for the ledger: another branch's step is named, never a refusal, in both scripts.
+    expect(rebuild).toContain("ledgerAhead(");
+    expect(rebuild).not.toMatch(/has no file on disk any more/);
   });
 });

@@ -60,4 +60,17 @@ function ledgerBehind(steps, recorded) {
   return { missing, changed };
 }
 
-module.exports = { md5Of, stepsOnDisk, ledgerBehind };
+/**
+ * What the test database holds that this checkout does not: recorded names with no step on disk. The
+ * test database is shared, so this is usually another branch's migration applied ahead of its merge
+ * (or a step renamed or deleted since). ONE RULE for both scripts: it is said out loud, by name, and
+ * it never blocks: rebuild.cjs still applies what is missing, and check-test-db.cjs still passes. A
+ * suite asserting a shape that such a step changed can fail until that branch merges; the warning
+ * names the step so the failure is never a mystery.
+ */
+function ledgerAhead(steps, recorded) {
+  const onDisk = new Set(steps.map((s) => s.name));
+  return [...recorded.keys()].filter((n) => !onDisk.has(n)).sort();
+}
+
+module.exports = { md5Of, stepsOnDisk, ledgerBehind, ledgerAhead };

@@ -625,10 +625,8 @@ export function defineSplitIntoEntriesSuite(connect: () => Promise<SqlClient>) {
             limit 1`,
           [orgId],
         );
-        if (!t) {
-          console.warn("[split-into-entries] every tech is on the clock right now; Switch Job was not exercised.");
-          return;
-        }
+        // The throwaway org's techs are on no clock but this suite's: a case without one would assert nothing.
+        expect(t, "a tech of the throwaway org with nothing on the clock").toBeTruthy();
         const open = (
           await one(
             `insert into public.time_entries (org_id, profile_id, job_id, clock_in, status, source, notes)

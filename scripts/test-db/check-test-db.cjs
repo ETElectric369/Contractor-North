@@ -10,19 +10,29 @@
 //   (c) the test database is not BEHIND the repo (audit v1018): public.cn_test_migrations records
 //       every step of supabase/migrations (and the test-db shims) that rebuild.cjs would apply, with
 //       the md5 of the files as they are now. A suite whose migration is missing would otherwise pass
-//       having asserted nothing. The fix is always the same: node scripts/test-db/rebuild.cjs.
+//       having asserted nothing. Each failure names its own way out: a step not applied yet ->
+//       node scripts/test-db/rebuild.cjs; a step edited since it was applied -> undo the edit, or
+//       rebuild.cjs --reset (which empties the test database and re-applies THIS checkout's steps,
+//       dropping any other branch's applied migrations until that branch applies them again).
+//   Steps the database holds and this checkout does not (another branch's migration, applied ahead of
+//   its merge) never fail the job: they are named as a warning, because a suite asserting a shape
+//   they changed can fail until that branch merges (steps.cjs ledgerAhead; rebuild.cjs follows the
+//   same rule).
 // Anything else fails the job, in one plain sentence. It reads; it never writes.
 
 "use strict";
 
 const pg = require("pg");
-const { stepsOnDisk, ledgerBehind } = require("./steps.cjs");
+const { stepsOnDisk, ledgerBehind, ledgerAhead } = require("./steps.cjs");
 
 const TEST_DB_USER_NAME = "postgres.olmehzbhtzegjxgswgyk";
 const TEST_DB_MARKER = "contractor-north-test";
 const SENTENCE = "TEST_DB_* point at a database without the contractor-north-test marker - repoint the GitHub secrets at the test project";
 
 const BEHIND = "the test database is behind: run node scripts/test-db/rebuild.cjs";
+const CHANGED =
+  "a step was edited after the test database applied it, so it will never be re-applied: undo the edit, or run node scripts/test-db/rebuild.cjs --reset (it empties the test database and re-applies this checkout's steps; another branch's applied migrations go with it until that branch applies them again)";
+const AHEAD = "the test database holds step(s) this checkout does not (another branch's migration, applied ahead of its merge); a suite asserting a shape they changed can fail until that branch merges";
 
 function fail(detail) {
   console.error(`::error::${SENTENCE}`);
@@ -63,15 +73,25 @@ async function main() {
     console.log(`TEST_DB_* point at the test database (${TEST_DB_USER_NAME}, marker '${TEST_DB_MARKER}').`);
 
     const steps = stepsOnDisk();
-    const { missing, changed } = ledgerBehind(steps, new Map(ledger.map((r) => [r.name, r.md5])));
+    const recorded = new Map(ledger.map((r) => [r.name, r.md5]));
+    const ahead = ledgerAhead(steps, recorded);
+    if (ahead.length) {
+      console.log(`::warning::${AHEAD}: ${ahead.join(", ")}`);
+      console.log(AHEAD);
+      for (const n of ahead) console.log(`  - ${n}`);
+    }
+    const { missing, changed } = ledgerBehind(steps, recorded);
     if (missing.length || changed.length) {
-      const lines = [
-        ...missing.map((n) => `not applied: ${n}`),
-        ...changed.map((n) => `changed since it was applied: ${n}`),
-      ];
-      console.error(`::error::${BEHIND}`);
-      console.error(BEHIND);
-      for (const l of lines) console.error(`  - ${l}`);
+      if (missing.length) {
+        console.error(`::error::${BEHIND}`);
+        console.error(BEHIND);
+        for (const n of missing) console.error(`  - not applied: ${n}`);
+      }
+      if (changed.length) {
+        console.error(`::error::${CHANGED}`);
+        console.error(CHANGED);
+        for (const n of changed) console.error(`  - changed since it was applied: ${n}`);
+      }
       process.exit(1);
     }
     console.log(`The test database carries all ${steps.length} step(s) in the repo (${steps.filter((s) => s.kind === "migration").length} migrations).`);

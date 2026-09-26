@@ -33,10 +33,11 @@
 // NOTHING SILENT. It refuses, naming the file, when:
 //   - a recorded step's parts no longer hash to the recorded md5 (an edited migration or shim, or a
 //     before/NNNN.sql added for a migration already applied): it would never be re-applied;
-//   - a recorded step has no file on disk any more;
 //   - bootstrap.sql exists but is unrecorded while migrations are recorded (it would run last, not
 //     first).
-// Each of those needs a --reset rebuild (or the edit undone).
+// Each of those needs a --reset rebuild (or the edit undone). A recorded step with no file on disk
+// (another branch's migration on the shared test database) is NOT a refusal: it is named, and the
+// run goes on (steps.cjs ledgerAhead, the same rule check-test-db.cjs follows).
 //
 // Historical migrations are never edited to make them run here. When one fails on a fresh
 // database, the smallest fix goes in bootstrap.sql or before/NNNN.sql, with a comment saying what
@@ -50,7 +51,7 @@ const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const pg = require("pg");
 // The steps and their md5s: one list, shared with check-test-db.cjs (CI's is-the-test-database-behind check).
-const { stepsOnDisk } = require("./steps.cjs");
+const { stepsOnDisk, ledgerAhead } = require("./steps.cjs");
 
 // ── The one database this script may write to. Constants on purpose. ────────────────────────────
 const TEST_HOST = "aws-0-us-east-2.pooler.supabase.com";
@@ -213,8 +214,15 @@ async function main() {
     const byName = new Map(steps.map((s) => [s.name, s]));
     const problems = [];
 
-    // A recorded step with no file on disk: the database holds something the repo no longer says.
-    for (const name of recorded.keys()) if (!byName.has(name)) problems.push(`${name} is recorded as applied here but has no file on disk any more.`);
+    // A recorded step with no file on disk: the shared test database holds another branch's migration
+    // (or a step renamed or deleted since). Said by name, never a refusal: the missing steps still
+    // apply (one rule with check-test-db.cjs, steps.cjs ledgerAhead).
+    const ahead = ledgerAhead(steps, recorded);
+    if (ahead.length) {
+      console.log(`Recorded here but not in this checkout (another branch's step, or one renamed or deleted); left as it is:`);
+      for (const n of ahead) console.log(`  - ${n}`);
+      console.log("");
+    }
 
     // bootstrap.sql must run FIRST; on a database that already has migrations it would run last.
     const migrationsRecorded = [...recorded.keys()].filter((n) => !n.startsWith("test-db/")).length;

@@ -326,10 +326,8 @@ d("the portal link asks for a code (0331)", { timeout: 30_000 }, () => {
 
   it("cross-org: another org's session opens nothing here, and another org's office can't see or touch it", async () => {
     if (!needs()) return;
-    if (!otherStaffId || !custOther) {
-      console.warn("[portal-code] a one-org database has no neighbour to test against.");
-      return;
-    }
+    // mintOrgAndStranger always mints the neighbour: a case without one would assert nothing.
+    expect(otherStaffId && custOther, "the stranger org and its customer were minted").toBeTruthy();
     await c.query("savepoint s_org");
     const mine = await tokenOf(custA);
     const theirs = await tokenOf(custOther);
