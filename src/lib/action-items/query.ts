@@ -143,7 +143,7 @@ async function buildActionItems(ctx: {
   // the inbox, and the same papers are still on /bills.
   // The same read brings the Pay By line ("Pay CED $X By Oct 10"): one read of the supplier's papers.
   const supplierDeskP: Promise<SupplierDesk | null> = isStaff
-    ? loadSupplierDesk(supabase, userId, todayStr).catch(() => null)
+    ? loadSupplierDesk(supabase, userId, todayStr, tz).catch(() => null)
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 

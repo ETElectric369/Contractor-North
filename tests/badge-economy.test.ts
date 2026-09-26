@@ -67,7 +67,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).not.toContain('kind: "supplier_pay"');
     expect(KIND_STREAM.supplier_pay).toBe("money");
     expect(AFFORDANCES.supplier_pay).toEqual(["open"]);
-    const due = (accountId: string, payBy: string) => ({ accountId, accountName: "X", supplier: "CED", owed: 100, saves: 1, invoices: 7, payBy, daysLeft: 5 });
+    const due = (accountId: string, payBy: string) => ({ accountId, accountName: "X", supplier: "CED", owed: 100, saves: 1, invoices: 7, sent: 0, payBy, daysLeft: 5 });
     const items = supplierPayActionItems([due("a", "2026-10-10"), due("b", "2026-10-12")]);
     expect(items).toHaveLength(2);
     for (const it of items) expect(it.when).toMatch(/^\d{4}-\d{2}-\d{2}$/);

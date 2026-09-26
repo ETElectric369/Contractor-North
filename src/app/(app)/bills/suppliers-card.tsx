@@ -421,17 +421,28 @@ export function SuppliersCard({
   // (a balance to pay down), and a door that cannot open says why instead of doing nothing. The
   // `pay` param comes off the address afterwards so a refresh after recording does not reopen it.
   const payOnHandled = useRef<string | null>(null);
+  // The why lands where he lands: this card sits below Needs You and Sort These, so on a phone the
+  // red line would be below the fold and the door would look like it did nothing.
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const [showDoorError, setShowDoorError] = useState(false);
+  useEffect(() => {
+    if (!showDoorError || !error) return;
+    setShowDoorError(false);
+    errorRef.current?.scrollIntoView({ block: "center" });
+  }, [showDoorError, error]);
   useEffect(() => {
     if (!payOn || payOnHandled.current === payOn) return;
     payOnHandled.current = payOn;
     const account = accounts.find((a) => a.id === payOn) ?? null;
     if (account && supplierBalance(account, today).owed !== null) openPay(account);
-    else
+    else {
+      setShowDoorError(true);
       setError(
         account
           ? `${account.name} is settled at the register, so there is no balance to pay here.`
           : "That supplier account is not in your books any more, so there is no payment to record.",
       );
+    }
     try {
       const url = new URL(window.location.href);
       url.searchParams.delete("pay");
@@ -606,7 +617,11 @@ export function SuppliersCard({
           </a>
         )}
 
-        {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div ref={errorRef} role="alert" className="mb-3 scroll-mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
         {done && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">

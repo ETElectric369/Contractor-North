@@ -14,6 +14,10 @@ export function supplierPayHref(accountId: string): string {
  * within two weeks (supplierPayDue decides; this only words it). Dated by the deadline, so it
  * carries its own expiry and goes on its own once the discount does: the BADGE INVARIANT
  * (types.ts). The app suggests the date and the figure; he decides what to send, on the sheet.
+ *
+ * "Saves" is only the discount that rides on that date (supplierPayDue: claim.dueOnNext), the same
+ * slice /bills names; a later deadline's discount gets its own line when its turn comes. Money he
+ * has sent since CED's newest papers is already off the figure, and the line says so out loud.
  */
 export function supplierPayActionItems(dues: SupplierPayDue[] | null | undefined): ActionItem[] {
   return (dues ?? []).map((d) => ({
@@ -21,7 +25,9 @@ export function supplierPayActionItems(dues: SupplierPayDue[] | null | undefined
     kind: "supplier_pay" as const,
     stream: KIND_STREAM.supplier_pay,
     title: `Pay ${d.supplier} ${formatCurrency(d.owed)} By ${formatDateShort(d.payBy)}`,
-    subtitle: `Saves ${formatCurrency(d.saves)} on ${d.invoices} ${d.invoices === 1 ? "invoice" : "invoices"}`,
+    subtitle:
+      `Saves ${formatCurrency(d.saves)} on ${d.invoices} ${d.invoices === 1 ? "invoice" : "invoices"}` +
+      (d.sent > 0.005 ? ` · ${formatCurrency(d.sent)} already sent` : ""),
     who: null,
     when: d.payBy,
     // Red "!" only in the last three days, when waiting a little longer loses it.

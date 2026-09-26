@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadSupplierDesk, supplierDocumentRows } from "./supplier-papers";
-import { supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
+import { sentSinceTheirPapers, supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
 import { supplierBalance, supplierNetIfPaidBy, type SupplierAccountRow } from "./supplier-balance";
 import { claimableDiscounts } from "./supplier-reconcile";
 import { supplierPayActionItems, supplierPayHref } from "@/lib/action-items/supplier-pay-item";
@@ -81,7 +81,7 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
   it("tonight: Pay CED $5,174.62 By Oct 10, Saves $35.50 on 7 invoices", () => {
     const due = supplierPayDue({ rows: rowsOf(), accounts: ACCOUNTS, today: TONIGHT });
     expect(due).toHaveLength(1);
-    expect(due[0]).toMatchObject({ accountId: CED, supplier: "CED", owed: 5174.62, saves: 35.5, invoices: 7, payBy: "2026-10-10", daysLeft: 14 });
+    expect(due[0]).toMatchObject({ accountId: CED, supplier: "CED", owed: 5174.62, saves: 35.5, invoices: 7, sent: 0, payBy: "2026-10-10", daysLeft: 14 });
     const [item] = supplierPayActionItems(due);
     expect(item.title).toBe("Pay CED $5,174.62 By Oct 10");
     expect(item.subtitle).toBe("Saves $35.50 on 7 invoices");
@@ -107,8 +107,8 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     expect(due.owed).toBe(supplierBalance(account, TONIGHT).owed);
     // "Discount Still On The Table".
     const claim = claimableDiscounts(rows, TONIGHT);
-    expect(due.saves).toBe(claim.total);
-    expect(due.invoices).toBe(claim.rows.length);
+    expect(due.saves).toBe(claim.dueOnNext);
+    expect(due.invoices).toBe(claim.rows.filter((r) => r.reading.by === claim.nextDeadline).length);
     expect(due.payBy).toBe(claim.nextDeadline);
     // And paying by that day really does claim it all.
     expect(supplierNetIfPaidBy(rows, due.payBy, TONIGHT).discount).toBe(due.saves);
@@ -128,6 +128,24 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     expect(supplierPayDue({ rows: rowsOf(), accounts: ACCOUNTS, today: "2026-10-11" })).toEqual([]);
   });
 
+  it("two deadlines: Saves names only the slice that rides on the soonest date, as /bills does", () => {
+    // Bought Oct 2, so its discount runs to Nov 10. On Oct 8 the Oct 10 slice is running out; the
+    // Nov 10 one is not, and a line saying "Saves $44.50 By Oct 10" would hurry $9.00 for no reason.
+    const later = { ...hisDocuments()[23], id: "si-oct", invoice_number: "8802-1109001", invoice_date: "2026-10-02", total: 900, open_balance: 900, discount_amount: 9, discount_by: "2026-11-10" };
+    const rows = rowsOf([...hisDocuments(), later]);
+    const claim = claimableDiscounts(rows, "2026-10-08");
+    expect(claim.total).toBe(44.5);
+    expect(claim.dueOnNext).toBe(35.5);
+    const [due] = supplierPayDue({ rows, accounts: ACCOUNTS, today: "2026-10-08" });
+    expect(due).toMatchObject({ saves: 35.5, invoices: 7, payBy: "2026-10-10", daysLeft: 2, owed: 6074.62 });
+    const [item] = supplierPayActionItems([due]);
+    expect(item.subtitle).toBe("Saves $35.50 on 7 invoices");
+    expect(item.urgency).toBe(2);
+    // Once Oct 10 passes, the Nov 10 slice gets its own line in its own window.
+    const [next] = supplierPayDue({ rows, accounts: ACCOUNTS, today: "2026-10-27" });
+    expect(next).toMatchObject({ saves: 9, invoices: 1, payBy: "2026-11-10" });
+  });
+
   it("hidden when no document carries a discount", () => {
     const rows = rowsOf(hisDocuments((d) => ({ ...d, discount_amount: null, discount_by: null })));
     expect(supplierPayDue({ rows, accounts: ACCOUNTS, today: TONIGHT })).toEqual([]);
@@ -139,6 +157,62 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
     const paidUp = rowsOf(hisDocuments((d) => ({ ...d, closed: true })));
     expect(supplierPayDue({ rows: paidUp, accounts: ACCOUNTS, today: TONIGHT })).toEqual([]);
     expect(supplierPayDue({ rows, accounts: [ACCOUNTS[1]], today: TONIGHT })).toEqual([]);
+  });
+});
+
+describe("Paying clears the line (CED's papers cannot show a payment until the next download)", () => {
+  const LANDED = "2026-09-24T04:00:00.000Z"; // his newest CED papers, 9:00 pm Sep 23 in Chilcoot
+  const TZ = "America/Los_Angeles";
+  const docs = hisDocuments().map((d) => ({ ...d, created_at: LANDED }));
+  const pay = (amount: number, paid_on: string, created_at: string, voided_at: string | null = null) => ({
+    supplier_account_id: CED, amount, paid_on, created_at, voided_at,
+  });
+  const dueWith = (payments: ReturnType<typeof pay>[], today = "2026-10-03") =>
+    supplierPayDue({ rows: rowsOf(docs), accounts: ACCOUNTS, today, sent: sentSinceTheirPapers({ documents: docs, payments, tz: TZ }) });
+
+  it("his real payments are all older than the papers: nothing is taken off twice", () => {
+    const sent = sentSinceTheirPapers({
+      documents: docs,
+      payments: [
+        pay(1000, "2026-06-22", "2026-09-19T07:39:11Z"),
+        pay(1500, "2026-07-13", "2026-09-19T07:43:12Z"),
+        pay(2000, "2026-08-17", "2026-09-19T07:39:59Z"),
+        pay(1500, "2026-09-10", "2026-09-19T07:40:30Z"),
+      ],
+      tz: TZ,
+    });
+    expect(sent.size).toBe(0);
+    expect(dueWith([])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
+  });
+
+  it("paying the whole cheque on Oct 3 takes the line off My Day", () => {
+    expect(dueWith([pay(5139.12, "2026-10-03", "2026-10-03T18:00:00Z")])).toEqual([]);
+    expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T18:00:00Z")])).toEqual([]);
+  });
+
+  it("a $1,500 chunk comes off the figure, and the line says so", () => {
+    const [due] = dueWith([pay(1500, "2026-10-03", "2026-10-03T18:00:00Z")]);
+    expect(due).toMatchObject({ owed: 3674.62, sent: 1500, saves: 35.5 });
+    const [item] = supplierPayActionItems([due]);
+    expect(item.title).toBe("Pay CED $3,674.62 By Oct 10");
+    expect(item.subtitle).toBe("Saves $35.50 on 7 invoices · $1,500.00 already sent");
+  });
+
+  it("a voided payment, or a cheque written before the download and recorded after, never counts", () => {
+    expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T18:00:00Z", "2026-10-03T19:00:00Z")])[0].owed).toBe(5174.62);
+    expect(dueWith([pay(5174.62, "2026-09-20", "2026-10-03T18:00:00Z")])[0].owed).toBe(5174.62);
+  });
+
+  it("the day a paper landed is the org's day, not UTC's", () => {
+    // Landed 9:00 pm Sep 23 local (Sep 24 UTC): a cheque written Sep 23 evening, recorded after, counts.
+    const sent = sentSinceTheirPapers({ documents: docs, payments: [pay(100, "2026-09-23", "2026-09-24T05:00:00Z")], tz: TZ });
+    expect(sent.get(CED)).toBe(100);
+  });
+
+  it("newer papers swallow an older payment: CED has spoken since", () => {
+    const newer = [...docs, { ...docs[0], id: "si-new", created_at: "2026-10-05T16:00:00Z" }];
+    const sent = sentSinceTheirPapers({ documents: newer, payments: [pay(1500, "2026-10-03", "2026-10-03T18:00:00Z")], tz: TZ });
+    expect(sent.size).toBe(0);
   });
 });
 
@@ -175,8 +249,30 @@ describe("loadSupplierDesk: one read, the cards and the pay line", () => {
     const desk = await loadSupplierDesk(client, "user-1", TONIGHT);
     expect(desk?.payDue).toHaveLength(1);
     expect(desk?.payDue[0]).toMatchObject({ owed: 5174.62, saves: 35.5, invoices: 7 });
-    for (const t of ["supplier_invoices", "bills", "bill_supplier_invoices", "supplier_aliases", "jobs", "supplier_accounts"])
+    for (const t of ["supplier_invoices", "bills", "bill_supplier_invoices", "supplier_aliases", "jobs", "supplier_accounts", "supplier_payments"])
       expect(filters).toContain(`${t}.org_id=${ORG}`);
+  });
+
+  it("reads his payments: a payment since the newest papers clears the line", async () => {
+    const { client } = fakeSupabase({
+      profiles: { data: { org_id: ORG } },
+      supplier_invoices: { data: hisDocuments().map((d) => ({ ...d, created_at: "2026-09-24T04:00:00Z" })) },
+      supplier_accounts: { data: ACCOUNTS },
+      supplier_payments: { data: [{ supplier_account_id: CED, amount: 5174.62, paid_on: "2026-10-03", created_at: "2026-10-03T18:00:00Z", voided_at: null }] },
+    });
+    const desk = await loadSupplierDesk(client, "user-1", "2026-10-03", "America/Los_Angeles");
+    expect(desk?.payDue).toEqual([]);
+  });
+
+  it("a failed payments read is no pay line, never one that ignores a payment he made", async () => {
+    const { client } = fakeSupabase({
+      profiles: { data: { org_id: ORG } },
+      supplier_invoices: { data: hisDocuments() },
+      supplier_accounts: { data: ACCOUNTS },
+      supplier_payments: { data: null, error: { message: "boom" } },
+    });
+    const desk = await loadSupplierDesk(client, "user-1", TONIGHT);
+    expect(desk?.payDue).toEqual([]);
   });
 
   it("a failed accounts read is no pay line (there would be no sheet to open), never a crash", async () => {

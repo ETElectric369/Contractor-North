@@ -521,6 +521,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   }
 
   revalidatePath("/bills");
+  revalidatePath("/planner"); // My Day's supplier cards and Pay By line read these same papers
 
   // ── WHAT HAPPENED, IN THE SERVER'S OWN WORDS ───────────────────────────────────────────────
   const parts: string[] = [];
