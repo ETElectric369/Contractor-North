@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeUnbilledWork, customerUnbilled, foldClaims } from "@/lib/unbilled-work";
+import { computeUnbilledWork, customerUnbilled, foldClaims, netOfDeposit } from "@/lib/unbilled-work";
 import { customerRateRow, payViewRow } from "@/lib/labor-billing";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 
@@ -42,6 +42,20 @@ describe("customerUnbilled", () => {
       expect(text).not.toContain(banned);
     }
     expect(u.billsAmount).toBe(100); // the office still sees its cost
+  });
+});
+
+describe("netOfDeposit: the portal nets the deposit the office card nets", () => {
+  const c = { hours: 19.5, laborByPerson: [], laborAmount: 2437.5, materials: 0, returnsCredit: 0, total: 2437.5 };
+  it("a deposit that covers the work takes all of it (Tao-shaped: $10,000 against $2,437.50)", () => {
+    expect(netOfDeposit(c, 10000).lessDeposit).toBe(2437.5);
+  });
+  it("a smaller deposit takes itself", () => {
+    expect(netOfDeposit(c, 1000).lessDeposit).toBe(1000);
+  });
+  it("no deposit, or a credit-only total, adds nothing", () => {
+    expect(netOfDeposit(c, 0)).toEqual(c);
+    expect(netOfDeposit({ ...c, total: -40 }, 1000).lessDeposit).toBeUndefined();
   });
 });
 

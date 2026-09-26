@@ -203,6 +203,20 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(v2).toContain("Work Not On A Bill Yet");
   });
 
+  it("a deposit the next bill takes off is netted, the office card's number - never more than any bill will ask", () => {
+    const sent = raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] });
+    const work = { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 0, returnsCredit: 0, total: 400 };
+    // The deposit covers the work: nothing more is said to be owed.
+    const covered = text(renderToStaticMarkup(createElement(PortalJobPage, { view: shape(sent, { signed, unbilled: { ...work, lessDeposit: 400 }, now: NOW }), homeHref: "/portal/x" })));
+    expect(covered).toContain("The $400.00 of work not on a bill yet is covered by the deposit.");
+    expect(covered).not.toContain("Plus $400.00");
+    expect(covered).toMatch(/Less Deposit −\$400\.00 Not Billed Yet \$0\.00/);
+    // Part of it: the net, with the deposit named.
+    const part = text(renderToStaticMarkup(createElement(PortalJobPage, { view: shape(sent, { signed, unbilled: { ...work, lessDeposit: 150 }, now: NOW }), homeHref: "/portal/x" })));
+    expect(part).toMatch(/Plus \$250\.00 of work not on a bill yet ?, after the \$150\.00 deposit\./);
+    expect(part).toMatch(/Less Deposit −\$150\.00 Not Billed Yet \$250\.00/);
+  });
+
   it("a photo's date is the day it was added, never claimed as the day it was taken", () => {
     expect(html).not.toMatch(/taken/i);
     expect(html).toContain("added Sep 18");

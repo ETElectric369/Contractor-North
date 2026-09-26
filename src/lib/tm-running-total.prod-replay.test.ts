@@ -260,6 +260,25 @@ d("T&M running total and Finish Job, replayed read-only against ET's live books"
         const newWork = Math.round((w.laborAmount + w.billsBilled + (w.stockBilled ?? 0)) * 100) / 100;
         const workPending = w.hours > 0 || w.billsCount > 0 || takes > 0;
         const door = unbilledCardDoor({ openDraft: draft, workPending, returns: w.returnsCount ?? 0, total: w.total, newWork, lumpToNet: lump, drawBilled, money: formatCurrency });
+        // "ALREADY BILLED" THAT READS AS "OPEN" (review, 2026-09-26: J-039's INV-060 billed three Ace
+        // receipts on one Materials line whose source_ids claim only one, so the other two read as
+        // $145.75 open on a paid job). A claimed materials line that bills more than the bills it
+        // names, priced at the job's markup, holds receipts it doesn't claim: flagged for a person.
+        const overclaimed = (
+          await c.query(
+            `select i.invoice_number, i.status::text as status, ii.line_total::float8 as line_total,
+                    count(b.id)::int as bills_named, coalesce(sum(b.amount), 0)::float8 as bills_cost
+               from public.invoice_items ii
+               join public.invoices i on i.id = ii.invoice_id
+               left join public.bills b on b.org_id = i.org_id and b.id::text = any(ii.source_ids::text[])
+              where i.org_id = $1 and i.job_id = $2 and i.status <> 'void' and ii.import_source = 'costs'
+              group by i.invoice_number, i.status, ii.id, ii.line_total`,
+            [ET, j.id],
+          )
+        ).rows
+          .filter((r) => r.bills_named > 0 && Number(r.line_total) > Number(r.bills_cost) * (1 + (w.markupPct ?? 0) / 100) + 1)
+          .map((r) => `${r.invoice_number} (${r.status}): a Materials line of ${formatCurrency(Number(r.line_total))} claims ${r.bills_named} bill(s) worth ${formatCurrency(Number(r.bills_cost) * (1 + (w.markupPct ?? 0) / 100))} at ${w.markupPct}%`);
+        if (overclaimed.length) console.warn(`[tm-replay] ${j.job_number}: a claimed line bills more than it claims - its "Open" may be already billed: ${overclaimed.join("; ")}`);
         const finishDoor = unbilledCardDoor({ openDraft: draft, workPending, returns: 0, total: w.total, newWork, lumpToNet: lump, drawBilled, money: formatCurrency });
         cards[j.job_number] = {
           job: `${j.job_number} ${j.name} (${j.status})`,
@@ -270,6 +289,7 @@ d("T&M running total and Finish Job, replayed read-only against ET's live books"
           note: door && "note" in door ? door.note ?? null : null,
           unbilled: { hours: w.hours, labor: w.laborAmount, bills: w.billsCount, billsBilled: w.billsBilled, takes, returns: w.returnsCount, total: w.total },
           deposit_to_net: lump,
+          ...(overclaimed.length ? { overclaimed } : {}),
           finish: workPending && finishDoor ? finalFinishWords(finishDoor, draft, w.total > 0.005 ? w.total : newWork).line : "no unbilled work: finishes as before",
         };
       }

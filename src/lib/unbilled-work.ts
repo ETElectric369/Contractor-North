@@ -539,6 +539,9 @@ export type CustomerUnbilled = {
   returnsCredit: number;
   /** laborAmount + materials − returnsCredit. Below zero when only a credit is pending. */
   total: number;
+  /** A deposit (or set-amount draw) no bill has taken off yet, as much of it as the next bill takes
+   *  off this work (netOfDeposit). Absent when there is none. The customer's figure is total − this. */
+  lessDeposit?: number;
 };
 export function customerUnbilled(u: UnbilledWork): CustomerUnbilled {
   return {
@@ -549,6 +552,18 @@ export function customerUnbilled(u: UnbilledWork): CustomerUnbilled {
     returnsCredit: u.returnsCredit,
     total: u.total,
   };
+}
+
+/**
+ * THE CUSTOMER SEES THE OFFICE'S NUMBER (review, 2026-09-26). The office card's "Open: $X" is the
+ * work less a deposit no bill has taken off yet (resolveDrawCredit: the next progress payment nets
+ * it), or $0 when the deposit covers it. The portal nets the same deposit, so the customer is never
+ * told they owe more than any bill will ask. `lump` is fixedBillingsToNet of the job's bills, and 0
+ * while a draft is open (the draft takes the work, as the office card's "Add to" does).
+ */
+export function netOfDeposit(c: CustomerUnbilled, lump: number): CustomerUnbilled {
+  const less = cents(Math.min(Math.max(0, lump), Math.max(0, c.total)));
+  return less > 0.005 ? { ...c, lessDeposit: less } : c;
 }
 
 /**

@@ -43,7 +43,7 @@ import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
 import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
-import { estimateIsTheContract, jobBillsItsActuals } from "@/lib/invoice-import-rule";
+import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
@@ -1762,9 +1762,10 @@ export default async function JobDetailPage({
         jobAddress={navTarget}
         customerPhone={j.customers?.phone ?? null}
         pendingProposal={(pendingProposal as any) ?? null}
-        /* On T&M the estimate is a guide, never the bill (estimateIsTheContract): Finish builds the
-           bill from the actuals there, so the modal never says the estimate's lines copy over. */
-        hasQuote={estimateIsTheContract((j as any).billing_type, (quotes ?? []).some((q: any) => q.status !== "declined" && q.status !== "expired"))}
+        /* On T&M the estimate is a guide, never the bill: Finish builds the bill from the actuals
+           there, so the modal never says the estimate's lines copy over. Every other job keeps the
+           prop it always had (any quote row), so its Finish toggles start where they did. */
+        hasQuote={(j as any).billing_type === "tm" ? false : (quotes ?? []).length > 0}
         defaultSendInvoice={getOrgSettings((org as any)?.settings).auto_send_invoice_on_complete}
         isDrawBilled={isDrawBilled}
         /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */

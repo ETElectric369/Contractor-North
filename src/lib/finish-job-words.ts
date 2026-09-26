@@ -54,34 +54,55 @@ export function finishWouldLeaveOffBill(u: NotBilled | null | undefined): string
 
 /**
  * A TIME & MATERIAL JOB'S FINISH, SAID BEFORE THE PRESS (Erik, 2026-09-26). Finishing builds the
- * Final as a draft through the Overview card's own door (unbilledCardDoor), so the sentence is the
- * door's: what gets built, for how much, and that nothing is sent. `blocked`: the press would
- * refuse (a contract draft can't take the work). `builds`: the press writes or updates a draft.
+ * bill as a draft through the Overview card's own door (unbilledCardDoor), so the sentence is the
+ * door's: what gets built, for how much, and that nothing is sent. `blocked`: the press can't build
+ * it (a draft for set amounts can't take the work) - the modal opens that draft or finishes without
+ * billing. `builds`: the press writes or updates a draft. `doc`: what that draft is - the Final (a
+ * progress payment, on a job billed with draws) or a plain invoice. `lump`: the deposit not yet
+ * taken off a bill, so a deposit that covers the work is said with its figures, never "yet".
  */
 export function finalFinishWords(
   door: NonNullable<CardDoor>,
   draft: { number: string | null; kind: string } | null,
   work: number,
-): { line: string; blocked: boolean; builds: boolean } {
+  lump = 0,
+): { line: string; blocked: boolean; builds: boolean; doc: "final" | "invoice" | null } {
   const name = draft?.number ?? "the open draft";
   if (door.kind === "open") {
     return {
-      line: `${name} is still a draft and bills a set part of the contract, so the ${formatCurrency(work)} of work not yet billed can't go on it. Send it (or delete it) first, then finish the job.`,
+      line: `${name} is still a draft for set amounts, not hours and receipts, so the ${formatCurrency(work)} of work not yet billed can't go on it. Open it to send it (or delete it), then bill the work.`,
       blocked: true,
       builds: false,
+      doc: null,
     };
   }
-  if (door.kind === "covered") return { line: `${door.note} Finishing marks the job complete.`, blocked: false, builds: false };
+  if (door.kind === "covered") return { line: `${depositCoversWords(work, lump)} Finishing marks the job complete.`, blocked: false, builds: false, doc: null };
   if (door.kind === "add") {
+    const asFinal = !!draft && isDrawKind(draft.kind);
     return {
-      line: `Finishing adds the ${formatCurrency(door.amount)} of work not yet billed to ${name}${draft && isDrawKind(draft.kind) ? " as the Final" : ""} (still a draft) and marks the job complete. Nothing is sent.`,
+      line: `Finishing adds the ${formatCurrency(door.amount)} of work not yet billed to ${name}${asFinal ? " as the Final" : ""} (still a draft) and marks the job complete. Nothing is sent.`,
       blocked: false,
       builds: true,
+      doc: asFinal ? "final" : "invoice",
     };
   }
+  const what = door.kind === "draw" ? "the Final" : "an invoice";
   return {
-    line: `Finishing starts the Final for ${formatCurrency(door.amount)} of work not yet billed, as a draft, and marks the job complete. Nothing is sent.${door.note ? ` ${door.note}` : ""}`,
+    line: `Finishing starts ${what} for ${formatCurrency(door.amount)} of work not yet billed, as a draft, and marks the job complete. Nothing is sent.${door.note ? ` ${door.note}` : ""}`,
     blocked: false,
     builds: true,
+    doc: door.kind === "draw" ? "final" : "invoice",
   };
+}
+
+/**
+ * A DEPOSIT THAT COVERS THE WORK, ON A JOB THAT IS FINISHING (review, 2026-09-26). No bill is built
+ * (the draw door refuses one whose net is $0), so the sentence carries the figures: the work, the
+ * deposit, and what the deposit is over the work - money to settle with the customer, never left
+ * behind a "nothing new to bill yet" on a job with no later bill.
+ */
+export function depositCoversWords(work: number, lump: number): string {
+  const left = Math.round((lump - work) * 100) / 100;
+  const base = `The ${formatCurrency(lump)} deposit not yet taken off a bill covers the ${formatCurrency(work)} of work not on a bill, so no bill is built.`;
+  return left > 0.005 ? `${base} The deposit is ${formatCurrency(left)} more than the work: settle the difference with the customer.` : base;
 }

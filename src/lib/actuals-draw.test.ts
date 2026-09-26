@@ -108,8 +108,16 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
 
   it("a pending return alone reaches an open draft that takes it, never mints one", () => {
     const ret = { ...base, workPending: false, returns: 1, total: -40, newWork: 0 };
-    expect(unbilledCardDoor({ ...ret, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toEqual({ kind: "add", label: "Add to INV-078", amount: -40 });
+    expect(unbilledCardDoor({ ...ret, openDraft: { id: "x", number: "INV-078", refreshable: true } })).toEqual({ kind: "add", label: "Add to INV-078", amount: 0 });
     expect(unbilledCardDoor({ ...ret, openDraft: null })).toBeNull();
+    // Never a negative "Open": the credit is said on its own line.
+    expect(openFigure(unbilledCardDoor({ ...ret, openDraft: null }), ret.total)).toBe(0);
+  });
+
+  it("a return worth more than the new work: Open and the button name the work the click adds, never a minus figure", () => {
+    const d = unbilledCardDoor({ ...base, returns: 1, total: -20, newWork: 40, openDraft: { id: "x", number: "INV-078", refreshable: true } });
+    expect(d).toEqual({ kind: "add", label: "Add to INV-078 ($40.00)", amount: 40 });
+    expect(openFigure(d, -20)).toBe(40);
   });
 });
 

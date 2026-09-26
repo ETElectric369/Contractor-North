@@ -117,7 +117,8 @@ export function UnbilledCard({
   // Named only when new work GOES on it — the sentences below that say "is on {draft}" are true
   // only of a draft that takes it.
   const draft = theDraft?.refreshable ? (theDraft.number ?? "the open draft") : null;
-  /** An open draft that bills a set part of the contract: the work waits for the next bill. */
+  /** An open draft for set amounts (a contract draw, or a T&M job's estimate copied onto a draft):
+   *  the work waits for the next bill. */
   const heldDraft = theDraft && !theDraft.refreshable ? (theDraft.number ?? "the open draft") : null;
   // THE DOOR THAT WORKS when there is nothing new: the job's own New Invoice (this card's button,
   // the Invoices tab's) is createInvoiceForJob, which refuses a second invoice with nothing to
@@ -245,7 +246,7 @@ export function UnbilledCard({
               // WHY THE BUTTON OPENS INSTEAD OF ADDS. Said, so "Open" never reads as the card
               // giving up: the server would refuse to put hours on a slice of the contract.
               <p className="mt-1 text-sm text-slate-500">
-                {`${heldDraft} is an open draft for a set part of the contract, so this can't go on it. Send it (or delete it), then bill this on the next progress payment.`}
+                {`${heldDraft} is an open draft for set amounts (a part of the contract, or the estimate's lines), not hours and receipts, so this can't go on it. Send it (or delete it), then bill this.`}
               </p>
             )}
             {(door?.kind === "covered" || ((door?.kind === "create" || door?.kind === "draw") && door.note)) && (
@@ -381,7 +382,7 @@ function DoorButton({
   if (door && door.kind !== "covered") {
     return (
       <Button type="button" onClick={() => go(door)} disabled={pending} className="min-h-11 shrink-0">
-        <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Opening…") : door.label}
+        <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Creating…") : door.label}
       </Button>
     );
   }

@@ -1,7 +1,7 @@
 import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { customerUnbilled, unbilledWorkForJob, type CustomerUnbilled } from "@/lib/unbilled-work";
+import { customerUnbilled, fixedBillingsToNet, netOfDeposit, unbilledWorkForJob, type CustomerUnbilled, type PriorInvoiceRow } from "@/lib/unbilled-work";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { readSupplierNames } from "@/lib/supplier-names";
@@ -47,6 +47,24 @@ function isMissingFunction(err: unknown): boolean {
   return code === "PGRST202" || code === "42883" || (/portal_job_view/i.test(msg) && /could not find|does not exist/i.test(msg));
 }
 
+/**
+ * The deposit the office card nets (fixedBillingsNotYetNetted), read as the service role and pinned
+ * to the org by hand. 0 while a draft is open: the draft takes the work, as the card's "Add to"
+ * does. Throws on a failed read, so the unbilled figure is left off rather than shown gross.
+ */
+async function depositToNet(svc: ReturnType<typeof createServiceClient>, orgId: string, jobId: string): Promise<number> {
+  const { data, error } = await svc
+    .from("invoices")
+    .select("id, status, invoice_kind, invoice_items(import_source, line_total)")
+    .eq("org_id", orgId)
+    .eq("job_id", jobId)
+    .neq("status", "void");
+  if (error) throw error;
+  const rows = (data ?? []) as PriorInvoiceRow[];
+  if (rows.some((r) => r.status === "draft")) return 0;
+  return fixedBillingsToNet(rows);
+}
+
 export async function readPortalJob(token: string, jobId: string): Promise<PortalJobRead> {
   if (typeof token !== "string" || !TOKEN.test(token) || typeof jobId !== "string" || !UUID.test(jobId)) {
     return { kind: "missing" };
@@ -80,8 +98,8 @@ export async function readPortalJob(token: string, jobId: string): Promise<Porta
     // The org's supplier names, so no line on the page names one (audit v994 PL1).
     namesP.then((r) => r.names),
     billsActuals
-      ? unbilledWorkForJob(svc, raw.scope.job_id, { orgId }).then(
-          (u): CustomerUnbilled | null => customerUnbilled(u),
+      ? Promise.all([unbilledWorkForJob(svc, raw.scope.job_id, { orgId }), depositToNet(svc, orgId, raw.scope.job_id)]).then(
+          ([u, lump]): CustomerUnbilled | null => netOfDeposit(customerUnbilled(u), lump),
           (e): CustomerUnbilled | null => {
             // A failed total is left off the page, never shown as $0 of work.
             reportError("portal.jobView.unbilled", e, { jobId });

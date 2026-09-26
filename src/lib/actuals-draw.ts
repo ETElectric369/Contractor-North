@@ -92,12 +92,12 @@ export type OpenDraft = {
 export async function openDraftOnJob(supabase: SupabaseClient, jobId: string): Promise<OpenDraft | null> {
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, invoice_number, invoice_kind, dismissed_import_keys, created_at")
+    .select("id, invoice_number, invoice_kind, dismissed_import_keys, created_at, quote_id")
     .eq("job_id", jobId)
     .eq("status", "draft")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const rows = (data ?? []) as { id: string; invoice_number: string | null; invoice_kind: string | null; dismissed_import_keys: string[] | null }[];
+  const rows = (data ?? []) as { id: string; invoice_number: string | null; invoice_kind: string | null; dismissed_import_keys: string[] | null; quote_id?: string | null }[];
   const pick = rows.find((r) => isDrawKind(r.invoice_kind)) ?? rows[0];
   if (!pick) return null;
   const kind = pick.invoice_kind ?? "standard";
@@ -117,6 +117,18 @@ export async function openDraftOnJob(supabase: SupabaseClient, jobId: string): P
       .limit(1);
     if (drawErr) throw drawErr;
     if ((draws ?? []).length) return null;
+    // AN ESTIMATE COPIED ONTO A T&M JOB'S DRAFT IS NOT A PLACE FOR THE HOURS (review, 2026-09-26).
+    // On Time & Material the estimate is a guide (estimateIsTheContract), but /billing's "from
+    // quote" and Nort's invoice.fromQuote can still copy its lines onto a standard draft. Adding the
+    // actuals to that draft would bill the estimate AND the work on one bill, so it takes no new
+    // work: the card offers "Open INV-0xx", and Finish won't build on it.
+    if (pick.quote_id) {
+      const { data: job, error: jobErr } = await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle();
+      if (jobErr) throw jobErr;
+      if ((job as { billing_type?: string | null } | null)?.billing_type === "tm") {
+        return { id: pick.id, number: pick.invoice_number, kind, refreshable: false };
+      }
+    }
     return { id: pick.id, number: pick.invoice_number, kind, refreshable: true };
   }
   const shape = await readDraftShape(supabase, { id: pick.id, jobId, kind, dismissedKeys: pick.dismissed_import_keys });
@@ -201,7 +213,10 @@ export function unbilledCardDoor(input: {
       return workPending || returns > 0 ? { kind: "open", label: `Open ${name}`, href: `/billing/${openDraft.id}` } : null;
     }
     if (!(workPending || returns > 0)) return null;
-    return { kind: "add", label: total > 0.005 ? `Add to ${name} (${money(total)})` : `Add to ${name}`, amount: total };
+    // What the click adds: the work, net of a pending return - but never below zero. A return worth
+    // more than the new work waits on its own sentence (owedBack); the hours still go on the draft.
+    const amount = total > 0.005 ? total : Math.max(0, newWork);
+    return { kind: "add", label: amount > 0.005 ? `Add to ${name} (${money(amount)})` : `Add to ${name}`, amount };
   }
   if (!workPending) return null;
   const figure = total > 0.005 ? total : newWork;
@@ -236,7 +251,8 @@ export function unbilledCardDoor(input: {
  * contract draft that can't take it, or nothing pending at all).
  */
 export function openFigure(door: CardDoor, total: number): number {
-  if (!door || door.kind === "open") return total;
+  // Never a negative "Open": a return worth more than the work is a credit, said on its own line.
+  if (!door || door.kind === "open") return Math.max(0, total);
   if (door.kind === "covered") return 0;
   return door.amount;
 }

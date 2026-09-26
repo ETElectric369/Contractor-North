@@ -101,7 +101,7 @@ export function PortalJobPage({
         </p>
       </div>
 
-      <MoneyCard view={view} payable={payable} unbilledTotal={unbilled?.total ?? 0} />
+      <MoneyCard view={view} payable={payable} unbilledTotal={unbilled?.total ?? 0} lessDeposit={unbilled?.lessDeposit ?? 0} />
 
       {sections.length > 1 ? (
         <nav aria-label="On this page" className="-mx-4 mt-4 overflow-x-auto px-4 [scrollbar-width:none]">
@@ -191,9 +191,23 @@ export function PortalJobPage({
   );
 }
 
-function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; payable: PortalInvoice[]; unbilledTotal: number }) {
+function MoneyCard({
+  view,
+  payable,
+  unbilledTotal,
+  lessDeposit = 0,
+}: {
+  view: PortalJobView;
+  payable: PortalInvoice[];
+  unbilledTotal: number;
+  /** The deposit the next bill takes off this work (netOfDeposit): the figure said is the net. */
+  lessDeposit?: number;
+}) {
   const { ledger } = view;
   const ahead = ledger.balance < -0.005;
+  // THE OFFICE'S NUMBER: the work less the deposit the next bill takes off it.
+  const netUnbilled = Math.round((unbilledTotal - lessDeposit) * 100) / 100;
+  const notYet = view.running ? "not added to the running total yet" : "not on a bill yet";
   return (
     <div className="portal-glass glass-gloss mt-4 rounded-2xl p-4">
       <div className="relative z-10">
@@ -222,13 +236,21 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
             <dd className="shrink-0 text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">{formatCurrency(Math.abs(ledger.balance))}</dd>
           </div>
         </dl>
-        {unbilledTotal > 0.005 ? (
+        {netUnbilled > 0.005 ? (
           <p className="mt-2 text-sm text-slate-700">
             Plus{" "}
             <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">
-              {formatCurrency(unbilledTotal)} of work {view.running ? "not added to the running total yet" : "not on a bill yet"}
+              {formatCurrency(netUnbilled)} of work {notYet}
             </a>
-            .
+            {lessDeposit > 0.005 ? `, after the ${formatCurrency(lessDeposit)} deposit` : ""}.
+          </p>
+        ) : unbilledTotal > 0.005 && lessDeposit > 0.005 ? (
+          <p className="mt-2 text-sm text-slate-700">
+            The{" "}
+            <a href="#unbilled" className="font-semibold text-[rgb(var(--glass-ink))] underline underline-offset-2">
+              {formatCurrency(unbilledTotal)} of work {notYet}
+            </a>{" "}
+            is covered by the deposit.
           </p>
         ) : null}
         {payable.length ? (
@@ -307,9 +329,15 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
           </ul>
         </section>
       ) : null}
+      {(unbilled.lessDeposit ?? 0) > 0.005 ? (
+        <div className="mx-3 mt-1 flex justify-between gap-3 border-t border-slate-300/80 pt-2">
+          <span className="font-medium text-slate-900">Less Deposit</span>
+          <span className="tabular-nums text-emerald-800">−{formatCurrency(unbilled.lessDeposit ?? 0)}</span>
+        </div>
+      ) : null}
       <div className="mx-3 mt-1 flex justify-between gap-3 border-t border-slate-300/80 pt-2 font-semibold">
         <span>{totalLabel}</span>
-        <span className="tabular-nums">{formatCurrency(unbilled.total)}</span>
+        <span className="tabular-nums">{formatCurrency(Math.round((unbilled.total - (unbilled.lessDeposit ?? 0)) * 100) / 100)}</span>
       </div>
     </div>
   );

@@ -80,7 +80,7 @@ function fake() {
         if (table === "jobs" && cols === "billing_type") return { billing_type: state.billingType };
         if (table === "jobs" && cols === "customer_id, name, description") return { customer_id: "cust-1", name: "Tao Zhu", description: null };
         if (table === "jobs") return null; // pricing levels: none
-        if (table === "invoices" && cols === "invoice_number, total") return state.made;
+        if (table === "invoices" && cols === "invoice_number, total, invoice_kind") return state.made;
         if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) return state.draws; // the live draws
         if (table === "invoices") return single ? null : [];
         if (table === "payment_milestones") return single ? null : [];
@@ -198,19 +198,59 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     state.openDraft = { id: "inv-078", number: "INV-078", kind: "progress", refreshable: true };
     state.draws = [{ id: "inv-078", invoice_number: "INV-078" }];
     state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", note: "Pulled 2.71 hours and 2 bills into INV-078. INV-078 is now the final payment." });
-    state.made = { invoice_number: "INV-078", total: 9505.83 };
+    state.made = { invoice_number: "INV-078", total: 9505.83, invoice_kind: "final" };
     const res = await finishJob(JOB, {});
     expect(state.drawDoor).toHaveBeenCalledWith(JOB, "final");
     expect(res.speak).toBe("Job finished. Added the work not yet billed to INV-078, now the Final: $9,505.83. Review it, then Send.");
     expect(res.final).toBe(true);
   });
 
+  it("the flip to Final failed: the sentence doesn't call it the Final, and the warning says why", async () => {
+    state.openDraft = { id: "inv-078", number: "INV-078", kind: "progress", refreshable: true };
+    state.draws = [{ id: "inv-078", invoice_number: "INV-078" }];
+    const note = "Pulled 2.71 hours into INV-078. But INV-078 couldn't be marked as the final payment just now - it is still a progress payment.";
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", partial: true, note });
+    state.made = { invoice_number: "INV-078", total: 9505.83, invoice_kind: "progress" };
+    const res = await finishJob(JOB, {});
+    expect(res.speak).toBe("Job finished. Added the work not yet billed to INV-078: $9,505.83. Review it, then Send.");
+    expect(res.warning).toBe(note);
+  });
+
   it("an open contract draft can't take the work → refused before anything is written", async () => {
     state.openDraft = { id: "inv-090", number: "INV-090", kind: "progress", refreshable: false };
     const res = await finishJob(JOB, {});
     expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/^INV-090 is still a draft and bills a set part of the contract/);
+    expect(res.error).toMatch(/^INV-090 is still a draft for set amounts/);
     expect(res.error).toMatch(/The job was not marked complete\.$/);
+    expect(state.drawDoor).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([]);
+  });
+
+  it("Finish Without Billing past a draft for set amounts: completes, bills nothing, and the work left off is a warning with the draft to open", async () => {
+    state.openDraft = { id: "inv-090", number: "INV-090", kind: "progress", refreshable: false };
+    const res = await finishJob(JOB, { withoutBilling: true });
+    expect(res).toMatchObject({ ok: true, id: "inv-090", sent: false });
+    expect(res.final).toBeUndefined();
+    expect(res.warning).toBe("$2,437.50 of work is not on a bill. INV-090 is still a draft for set amounts: send it (or delete it), then bill the work.");
+    expect(state.drawDoor).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete" } }]);
+  });
+
+  it("Finish Without Billing when the draft is no longer in the way: nothing is done, never a bill that wasn't asked for", async () => {
+    const res = await finishJob(JOB, { withoutBilling: true });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/bills changed since the Finish window opened/);
+    expect(state.drawDoor).not.toHaveBeenCalled();
+    expect(state.writes).toEqual([]);
+  });
+
+  it("a T&M job's estimate copied onto a standard draft: Finish never adds the actuals to it", async () => {
+    state.draws = [];
+    state.openDraft = { id: "inv-070", number: "INV-070", kind: "standard", refreshable: false };
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/^INV-070 is still a draft for set amounts/);
+    expect(state.blankInvoice).not.toHaveBeenCalled();
     expect(state.drawDoor).not.toHaveBeenCalled();
     expect(state.writes).toEqual([]);
   });
@@ -220,7 +260,11 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     const res = await finishJob(JOB, {});
     expect(res.ok).toBe(true);
     expect(res.final).toBeUndefined();
-    expect(res.speak).toMatch(/^Job finished\. The \$10,000\.00 deposit not yet taken off a bill still covers this/);
+    // A finished job has no later bill: the figures are said, and the deposit over the work is a warning.
+    expect(res.speak).toBe(
+      "Job finished. The $10,000.00 deposit not yet taken off a bill covers the $2,437.50 of work not on a bill, so no bill is built. The deposit is $7,562.50 more than the work: settle the difference with the customer.",
+    );
+    expect(res.warning).toMatch(/\$7,562\.50 more than the work/);
     expect(state.drawDoor).not.toHaveBeenCalled();
     expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete" } }]);
   });
@@ -258,10 +302,25 @@ describe("finishJobPreview — the truth at the button", () => {
   it("T&M: says the Final it will build, for how much, and that nothing is sent", async () => {
     state.billingType = "tm";
     const p = await finishJobPreview(JOB);
-    expect(p).toMatchObject({ ok: true, drawBilled: true, offBill: null, finalBuilds: true, finalBlocked: false });
+    expect(p).toMatchObject({ ok: true, drawBilled: true, offBill: null, finalBuilds: true, finalBlocked: false, finalDoc: "final", finalDraft: null });
     expect(p.final).toBe("Finishing starts the Final for $2,437.50 of work not yet billed, as a draft, and marks the job complete. Nothing is sent.");
     expect(state.writes).toEqual([]);
     expect(state.drawDoor).not.toHaveBeenCalled();
+  });
+
+  it("a plain T&M job (no draws): it drafts an invoice, and says so - not 'the Final'", async () => {
+    state.billingType = "tm";
+    state.draws = [];
+    const p = await finishJobPreview(JOB);
+    expect(p).toMatchObject({ ok: true, finalBuilds: true, finalDoc: "invoice" });
+    expect(p.final).toBe("Finishing starts an invoice for $2,437.50 of work not yet billed, as a draft, and marks the job complete. Nothing is sent.");
+  });
+
+  it("a draft for set amounts in the way: the preview names it, so the modal can open it", async () => {
+    state.billingType = "tm";
+    state.openDraft = { id: "inv-090", number: "INV-090", kind: "progress", refreshable: false };
+    const p = await finishJobPreview(JOB);
+    expect(p).toMatchObject({ finalBlocked: true, finalBuilds: false, finalDraft: { id: "inv-090", number: "INV-090" } });
   });
 
   it("T&M with nothing unbilled: no Final line, the ordinary preview", async () => {
