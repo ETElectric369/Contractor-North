@@ -19,6 +19,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { reportError } from "@/lib/observe";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { smsReadiness } from "@/lib/sms";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
@@ -155,7 +156,11 @@ export default async function InvoicePage({
   const isDraw = !!(inv as any).job_id && isDrawKind(drawKind);
   const [fin, scheduleRows] = isDraw
     ? await Promise.all([
-        jobProgressFinancials(supabase, (inv as any).job_id),
+        // A failed progress read leaves the card off (as the PDF and /i do), never the whole bill.
+        jobProgressFinancials(supabase, (inv as any).job_id).catch((e: unknown) => {
+          reportError("billing.[id].progress", e, { invoiceId: inv.id, jobId: (inv as any).job_id });
+          return null;
+        }),
         supabase.from("payment_milestones").select("id").eq("job_id", (inv as any).job_id).limit(1),
       ])
     : [null, null];

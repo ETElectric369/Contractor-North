@@ -42,7 +42,14 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         throw new Error(j?.error ?? `Couldn't build the PDF (${res.status}).`);
       }
       const cd = res.headers.get("content-disposition") ?? "";
-      const fn = /filename="([^"]+)"/.exec(cd)?.[1];
+      // The UTF-8 name first (RFC 5987, lib/content-disposition), the ASCII fallback second.
+      const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(cd)?.[1];
+      let fn = /filename="([^"]+)"/.exec(cd)?.[1];
+      try {
+        if (utf8) fn = decodeURIComponent(utf8);
+      } catch {
+        /* a malformed escape keeps the ASCII name */
+      }
       const buf = await res.arrayBuffer();
       if (seq !== renderSeq.current) return; // a newer request superseded this one
 

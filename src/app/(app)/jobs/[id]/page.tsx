@@ -37,6 +37,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { tmWorkToDate } from "@/lib/job-financials";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -367,6 +368,7 @@ export default async function JobDetailPage({
     openDraft,
     lumpToNet,
     panelCount,
+    tmWork,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -474,6 +476,16 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
+    // A TIME & MATERIAL JOB'S WORK TO DATE IS WHAT WAS BILLED, AT THE PRICE BILLED, PLUS WHAT THE
+    // NEXT BILL WOULD CHARGE (tmWorkToDate, the reader behind the Progress Summary and Nort). Staff
+    // only: the Progress Payment modal on the Invoices tab is its one reader here. A failed read is
+    // logged and the modal says it couldn't total - never a figure priced some other way.
+    viewerIsStaff && (j as any).billing_type === "tm"
+      ? tmWorkToDate(supabase, id).catch((e: unknown) => {
+          reportError("jobs.[id].tmWorkToDate", e, { jobId: id });
+          return "failed" as const;
+        })
+      : Promise.resolve(null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -627,8 +639,10 @@ export default async function JobDetailPage({
     pos: (pos ?? []) as any,
     bills: (bills ?? []) as any,
     markupPercent: materialMarkup,
+    tmWork: tmWork === "failed" ? null : tmWork,
   });
-  const workedToDate = progress.workToDate;
+  // null = a T&M total that could not be read: the modal says so instead of showing a number.
+  const workedToDate: number | null = tmWork === "failed" ? null : progress.workToDate;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote

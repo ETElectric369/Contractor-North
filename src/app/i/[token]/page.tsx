@@ -1,17 +1,18 @@
 import { notFound } from "next/navigation";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { fetchSupplierNames } from "@/lib/supplier-names";
 import { PrintButton } from "@/components/print-button";
 import { sharePdfReady } from "@/lib/pdf-cache";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { billingEnabled } from "@/lib/stripe";
 import { formatCurrency } from "@/lib/utils";
-import { docTitle } from "@/lib/doc-title";
+import { docPageTitle, projectionPlace } from "@/lib/doc-place";
 import { NO_INDEX } from "@/lib/no-index";
-import { customerLines, invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance } from "@/lib/invoice-math";
 import { cardFeeDecision, feePctLabel, payUrl } from "@/lib/org-settings";
 import { pendingTransfers, transferOnItsWaySentence, type PendingTransfer } from "@/lib/bank-transfer";
-import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
+import { InvoiceDocument } from "@/components/invoice-document";
+import { readInvoiceDocumentProps, resolvePublicInvoice, type InvoiceDocRead } from "@/lib/invoice-document-props";
+import { reportError } from "@/lib/observe";
 import type { Metadata } from "next";
 import type { Organization } from "@/lib/types";
 
@@ -24,29 +25,28 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const inv = (data as any)?.invoice;
   // NEVER indexed. The token is a permanent bearer credential and the page carries the
   // customer's name + address + balance — one forwarded link must not become a search result.
-  return { title: docTitle(inv ? `Invoice ${inv.invoice_number}` : "Invoice"), robots: NO_INDEX };
+  // "INV-080_235 Timbercreek": what Save As PDF names the file (lib/doc-place).
+  return { title: inv ? docPageTitle(inv.invoice_number, projectionPlace(data as any)) : "Invoice", robots: NO_INDEX };
 }
 
-/** What the page needs to know about the org that owns this link, read as the service role and
- *  pinned to that one org and this one invoice. The link is the credential (the same one
- *  public_invoice took). The supplier names are never shown (they are scrubbed out of the lines);
- *  the bank transfers on their way are (audit v994 BK3, 0338). */
-async function linkFacts(token: string): Promise<{ supplierNames: ReadonlySet<string>; pending: PendingTransfer[] }> {
-  const none = { supplierNames: new Set<string>(), pending: [] as PendingTransfer[] };
+/** What the page reads as the service role, pinned to the one org and the one invoice the link
+ *  names (the link is the credential, the same one public_invoice took): the document itself,
+ *  through THE one assembly the PDF uses (readInvoiceDocumentProps), and the bank transfers on
+ *  their way (audit v994 BK3, 0338). */
+async function linkFacts(token: string): Promise<{ doc: InvoiceDocRead; pending: PendingTransfer[] }> {
   try {
     const svc = createServiceClient();
-    const { data } = await svc.from("invoices").select("id, org_id").eq("public_token", token).maybeSingle();
-    const orgId = (data as { org_id?: string | null } | null)?.org_id;
-    const invoiceId = (data as { id?: string | null } | null)?.id;
-    if (!orgId) return none;
-    const [supplierNames, inFlight] = await Promise.all([
-      fetchSupplierNames(svc, orgId).catch(() => new Set<string>()),
-      invoiceId ? pendingTransfers(svc, orgId, [invoiceId]).catch(() => null) : Promise.resolve(null),
+    const link = await resolvePublicInvoice(svc, token);
+    if (link.kind !== "ok") return { doc: link, pending: [] };
+    const [doc, inFlight] = await Promise.all([
+      readInvoiceDocumentProps(svc, link.invoiceId, { kind: "service", orgId: link.orgId }),
+      pendingTransfers(svc, link.orgId, [link.invoiceId]).catch(() => null),
     ]);
     // A read that failed shows no banner; /api/pay refuses a second checkout on its own read anyway.
-    return { supplierNames, pending: (invoiceId && inFlight?.byInvoice.get(String(invoiceId))) || [] };
-  } catch {
-    return none;
+    return { doc, pending: inFlight?.byInvoice.get(link.invoiceId) || [] };
+  } catch (e) {
+    reportError("i.linkFacts", e);
+    return { doc: { kind: "error" }, pending: [] };
   }
 }
 
@@ -64,16 +64,14 @@ export default async function PublicInvoicePage({
   if (!data) notFound();
 
   const inv = data.invoice;
-  const [pdfReady, { supplierNames, pending }] = await Promise.all([
+  const [pdfReady, { doc, pending }] = await Promise.all([
     sharePdfReady("invoice", token, String(inv.status ?? "")),
     linkFacts(token),
   ]);
-  // NO LINE NAMES A SUPPLIER (audit v994 PL1, scrub on read). public_invoice does this itself once
-  // 0315 is applied; until then, and as the last door either way, the page does it with the same
-  // rule (customerLines), including on bills that went out before the rule existed.
-  data.items = customerLines(Array.isArray(data.items) ? data.items : [], supplierNames);
   const org = data.org as Organization | null;
-  const co = companyFromOrg(org);
+  // The Pay buttons wear the letterhead's color: the document's own (the org's tint), which the
+  // public projection does not carry, so reading it from there painted them the platform green.
+  const co = doc.kind === "ok" ? doc.props.co : companyFromOrg(org);
   const balance = invoiceBalance(inv.total, inv.amount_paid);
   // "Pay now" only when the ORG can actually take a card, not merely when the platform has a
   // Stripe key (audit v921 — 0247 ships can_take_card on the org projection). Before this, an org
@@ -240,8 +238,26 @@ export default async function PublicInvoicePage({
         </div>
       )}
 
-      {/* The same mapping the portal job page uses for this bill (one door, one rendering). */}
-      <PublicInvoiceDocument data={data as PublicInvoiceData} />
+      {/* THE SAME PROPS AS THE PDF (readInvoiceDocumentProps): the org's letterhead color and
+          layout, the customer's phone and email, the Progress Summary. No line names a supplier
+          (InvoiceDocument's customerLines, audit v994 PL1). A read that failed says so and offers
+          the page again; it never draws a bill with missing lines. */}
+      {doc.kind === "ok" ? (
+        <InvoiceDocument {...doc.props} />
+      ) : (
+        <div className="mx-auto max-w-3xl px-4">
+          <div className="rounded-xl bg-white px-4 py-6 text-center text-sm text-slate-700 shadow-sm">
+            <p className="font-medium text-slate-900">This bill couldn&apos;t load just now.</p>
+            <p className="mt-1">Please try again in a moment.</p>
+            <a
+              href={`/i/${token}`}
+              className="mt-3 inline-flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Try Again
+            </a>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

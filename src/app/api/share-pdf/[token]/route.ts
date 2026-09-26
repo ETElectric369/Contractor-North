@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { contentDisposition } from "@/lib/content-disposition";
 import { createServiceClient } from "@/lib/supabase/server";
 import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/pdf-cache";
+import { docFileName, rowPlace } from "@/lib/doc-place";
 
 export const dynamic = "force-dynamic";
 
@@ -28,19 +29,23 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
 
   // Token → doc. Service client, but the ONLY filter is the token itself — the same
   // credential the public pages accept — plus the same status sets as the 0187 RPCs.
-  type ShareRow = { id: string; status: string; invoice_number?: string | null };
+  type ShareRow = { id: string; status: string; invoice_number?: string | null; quote_number?: string | null } & Parameters<typeof rowPlace>[0];
   let doc: "invoice" | "quote" | null = null;
   let row: ShareRow | null = null;
   const { data: inv } = await svc
     .from("invoices")
-    .select("id, status, invoice_number")
+    .select("id, status, invoice_number, jobs(address), customers(address)")
     .eq("public_token", token)
     .maybeSingle();
   if (inv && CUSTOMER_VISIBLE_STATUSES.invoice.includes(String((inv as ShareRow).status))) {
     doc = "invoice";
     row = inv as ShareRow;
   } else {
-    const { data: q } = await svc.from("quotes").select("id, status").eq("public_token", token).maybeSingle();
+    const { data: q } = await svc
+      .from("quotes")
+      .select("id, status, quote_number, address, jobs(address), inquiries(address), customers(address)")
+      .eq("public_token", token)
+      .maybeSingle();
     if (q && CUSTOMER_VISIBLE_STATUSES.quote.includes(String((q as ShareRow).status))) {
       doc = "quote";
       row = q as ShareRow;
@@ -63,8 +68,9 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
   const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
   if (!blob) return NextResponse.json({ error: "No PDF available yet." }, { status: 404 });
 
-  const filename =
-    doc === "invoice" && row.invoice_number ? `Invoice ${row.invoice_number}.pdf` : `${doc}-${row.id.slice(0, 8)}.pdf`;
+  // "INV-080_235 Timbercreek.pdf" — the same name the office's download carries (lib/doc-place).
+  const number = doc === "invoice" ? row.invoice_number : row.quote_number;
+  const filename = number ? docFileName(number, rowPlace(row)) : `${doc}-${row.id.slice(0, 8)}.pdf`;
   return new NextResponse(Buffer.from(await blob.arrayBuffer()) as unknown as BodyInit, {
     headers: {
       "Content-Type": "application/pdf",
