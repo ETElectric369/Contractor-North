@@ -96,7 +96,8 @@ describe("PaperworkRow", () => {
 
   it("a statement is named honestly, with no File It at all", () => {
     const html = render({ doc_type: "statement", kind: "job_document" });
-    expect(html).toContain("Not filed: this kind of paper goes in a later update.");
+    // A statement whose open papers couldn't be read says what to drop instead (2026-09-26).
+    expect(html).toContain("A statement, but its list of open papers couldn&#x27;t be read.");
     expect(html).not.toContain(">File It<");
     expect(html).not.toContain("File It</button>");
     expect(html).toContain("Keep It In Files");

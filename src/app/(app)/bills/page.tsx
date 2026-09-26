@@ -38,6 +38,8 @@ import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentR
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
+import { openListViews } from "./open-list-core";
+import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
@@ -363,8 +365,18 @@ export default async function BillsPage({
   const signPapers = async () => {
     paperUrls = await signDocumentUrls(supabase, papers.map((i) => i.file_url));
   };
-  await Promise.all([signPaths(), readClaims(), signPapers()]);
-  const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({ ...i, signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null }));
+  // A SUPPLIER'S OPEN LIST waiting in Sort These is compared against that supplier's papers as
+  // the page loads, so its card is never stale (open-list-core). Nothing waiting, nothing read.
+  let listViews: Record<string, OpenListView> = {};
+  const viewLists = async () => {
+    listViews = await openListViews(supabase, orgId, papers);
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists()]);
+  const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
+    ...i,
+    signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
+    open_list: listViews[i.id] ?? null,
+  }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
   // Open AND finished jobs (audit v994, PR1): a ticket that lands after a job is complete is still
   // that job's cost. Never a cancelled one.
@@ -1266,6 +1278,11 @@ export default async function BillsPage({
                     Pick the PDFs from the CED payment portal, as many as you like. Each is checked against its own
                     arithmetic before it is saved; anything that does not add up is named and left out. Loading the
                     same download twice changes nothing, and the job you filed a document on is never touched.
+                  </p>
+                  <p>
+                    A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), can come in here or anywhere
+                    you drop paper. It waits in Sort These as one card saying which papers it marks paid and which are
+                    new; nothing changes until you press Apply, and Undo puts it all back.
                   </p>
                 </WhyFold>
                 <CedPdfPicker orgId={orgId} />

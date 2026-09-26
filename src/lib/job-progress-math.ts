@@ -6,7 +6,7 @@ import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
 import { returnCreditCost, returnLinesAgainstPurchases } from "@/lib/supplier-returns";
 import { contractTotalFromQuotes } from "@/lib/payment-schedule-math";
 import { lumpLineRule } from "@/lib/invoice-math";
-import { lineGroup } from "@/lib/portal/line-kind";
+import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
 
 export type JobProgressFinancials = {
   /** Sum of the job's quotes — the agreed estimate (a cap on fixed-price, a
@@ -119,11 +119,21 @@ export type BilledWorkLine = {
  * a row an invoice line claims (source_ids / its key) is off the unbilled figure, and its line is
  * here; an unclaimed row is there and nowhere here.
  *
- * WHICH LINES ARE WORK: labor, materials (returns come off as negatives), change orders, lines
- * from the estimate, and hand lines - lineGroup, the rule the portal and /i file lines by. NOT
- * work: a deposit's lines, a milestone line, a lump draw's own amount (lumpLineRule, the rule the
- * "Less previous billings" credit nets) and the credit lines themselves. Those are money asked
- * for against work, and counting them would count the same work twice.
+ * WHICH LINES ARE WORK (countsAsWorkCompleted, in portal/line-kind): labor, materials (returns
+ * come off as negatives), change orders and lines from the estimate - read by the line's KIND,
+ * lineGroup, the rule the portal and /i file lines by (what the line was said to be first, then its
+ * importer, then its words and unit for a hand line with no kind). NOT work: a deposit's lines, a milestone line, a
+ * lump draw's own amount (lumpLineRule, the rule the "Less previous billings" credit nets) and the
+ * credit lines themselves - money asked for against work, and counting them would count the same
+ * work twice.
+ *
+ * NOR IS A LINE THE OFFICE FILED AS OTHER (Erik, 2026-09-26: "i don't think fees, referrals and
+ * discounts would necessarily be considered work completed"). J-028's INV-061 carried a $400
+ * referral line and J-046 a $160 card fee; one tap on each line's Kind chip (Other) takes it out.
+ * A hand line nobody filed still counts, as it always did: "Service call", "10/3 romex", a line
+ * from a book of installed work are the work itself for nearly every company. The rule is the
+ * KIND, never the words: no list of "fee" / "referral" spellings, which would only ever fit the
+ * one company that wrote them.
  *
  * EVERY NON-VOID INVOICE, DRAFTS INCLUDED. A draft is not billed yet, but its lines are the running
  * bill (INV-078 on J-011): the rows it claims are already off the unbilled figure, so leaving the
@@ -141,8 +151,7 @@ export function billedWorkOnInvoices(
     for (const it of items) {
       const src = it.import_source ?? null;
       if (src === "draw_credit" || src === "milestone" || isLump(it)) continue;
-      const g = lineGroup(it, inv.invoice_kind ?? null);
-      if (g === "credit" || g === "deposit" || g === "contract") continue;
+      if (!countsAsWorkCompleted(it, inv.invoice_kind ?? null)) continue;
       sum += num(it.line_total);
     }
   }

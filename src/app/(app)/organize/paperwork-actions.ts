@@ -10,6 +10,8 @@ import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperPr
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 import { isStoredPaperPath } from "@/lib/ced-pdf-store";
 import { cleanDocNumber, insertPaperRow, updateItemTolerant } from "./paperwork-core";
+import { looksLikeStatementText, openListFromStatementText } from "@/lib/supplier-open-list";
+import { createOpenListPaper, openListLine } from "@/app/(app)/bills/open-list-core";
 
 /**
  * DROP PAPERWORK: THE DOORS AROUND FILE IT (dropbox plan, Phase 1; 0295).
@@ -40,6 +42,7 @@ const ALREADY = (row: {
   // says filed. Saying "filed on J-052" for a job with no such cost sent him looking for a bill
   // that isn't there; the way back is the paper's own Undo.
   const how = proposalOf(row).filed?.how;
+  if (how === "open_list") return `Already In: this supplier list was applied ${when}. Undo it in Organize, under Archive, to apply it again.`;
   if (!row.bill_id && !row.tied_bill_id && !row.document_id && !row.petty_cash_id && (!how || how === "bill" || how === "photo"))
     return `Already In: filed ${when}, but what it filed is gone. Find it in Organize, under Archive, and press Back to file it again.`;
   const where = row.jobs?.job_number ? `on ${row.jobs.job_number}${row.jobs.name ? ` ${row.jobs.name}` : ""}` : row.bill_id ? "as a business cost" : "in files";
@@ -131,6 +134,34 @@ export async function addPaperwork(input: {
       amount = total;
       item_date = good[0].invoiceDate;
       doc_number = good.length === 1 ? good[0].invoiceNumber : null;
+    }
+  }
+
+  // A SUPPLIER'S STATEMENT OR OPEN LIST, read from its own text (2026-09-26). It becomes one card
+  // that shows what it changes on that supplier's papers; nothing changes until Apply. A PDF of
+  // invoices never gets here (the CED read above found them), and text that doesn't read as a
+  // list goes to the reader like any other paper.
+  if (!doc_type && text.trim() && looksLikeStatementText(text)) {
+    const list = openListFromStatementText(text, name);
+    if (list) {
+      const placed = await createOpenListPaper(ctx.supabase, {
+        orgId: String(ctx.orgId),
+        userId: ctx.userId,
+        name,
+        stored: { list, needs: null },
+        sha256: input.sha256,
+        fileUrl: input.path,
+        source: input.source ?? "bills_drop",
+      });
+      if ("duplicate" in placed) {
+        const again = await fingerprintSeen(input.sha256);
+        const said = again.seen ?? "Already In.";
+        return { ok: false, already: said, error: `${name}: ${said}` };
+      }
+      if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
+      revalidatePath("/bills");
+      revalidatePath("/organize");
+      return { ok: true, id: placed.id, needsRead: false, line: openListLine({ list, needs: null }) };
     }
   }
 

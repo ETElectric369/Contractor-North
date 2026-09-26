@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
+import { openListViews } from "@/app/(app)/bills/open-list-core";
 
 export const dynamic = "force-dynamic";
 // A 12-page CED PDF or a slow read runs inside this page's server actions; the reader's own time,
@@ -40,10 +41,16 @@ export default async function OrganizePage() {
 
   // ONE signing call for the page (2026-09-08 phone-lag sweep) — this used to open a Storage
   // connection per row. Voice/typed notes have no file and are skipped, not sent as null.
-  const urls = await signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url));
+  // The signing and a waiting supplier list's card ride together (open-list-core: nothing waiting,
+  // nothing read).
+  const [urls, listViews] = await Promise.all([
+    signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url)),
+    openListViews(supabase, org?.id, (items ?? []) as any[]),
+  ]);
   const withUrls: OrganizedItemRow[] = rematchTray((items ?? []) as any[], markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && urls.get(i.file_url)) || null,
+    open_list: listViews[i.id] ?? null,
   }));
 
   return (

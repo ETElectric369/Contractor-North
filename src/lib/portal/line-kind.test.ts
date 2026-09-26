@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LINE_GROUP_LABEL, isHoursUnit, lineGroup, sectionLines } from "./line-kind";
+import { LINE_GROUP_LABEL, LINE_GROUP_ORDER, WORK_COMPLETED_GROUPS, countsAsWorkCompleted, isHoursUnit, lineGroup, sectionLines } from "./line-kind";
 import { groupInvoiceLines } from "@/lib/invoice-math";
 
 describe("which group a line is in: what it stored first, and a typed line by the /i rule", () => {
@@ -72,5 +72,36 @@ describe("which group a line is in: what it stored first, and a typed line by th
       ["Other", -5, [3]],
     ]);
     expect(LINE_GROUP_LABEL.labor).toBe("Labor");
+  });
+});
+
+describe("countsAsWorkCompleted - the KIND decides what is work (Erik, 2026-09-26)", () => {
+  it("labor, materials, change orders and estimate lines are work; nothing else is", () => {
+    expect(LINE_GROUP_ORDER.filter((g) => WORK_COMPLETED_GROUPS.has(g))).toEqual(["labor", "materials", "change_orders", "estimate"]);
+  });
+
+  it("by importer, by stored kind, by a deposit bill - never by a word list", () => {
+    expect(countsAsWorkCompleted({ import_source: "labor" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: "costs" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: "change_orders" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: "quote" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: "milestone" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: "draw_credit" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, description: "Deposit" }, "deposit")).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: "labor", line_kind: "other" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, description: "Anything at all", line_kind: "materials" })).toBe(true);
+    // A typed line the words do not settle reads Other and still counts, until the office files it
+    // as Other (the Kind chip) - whatever it says.
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Referral - Rob Walters" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Referral - Rob Walters", line_kind: "other" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Service call" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "sq ft", description: "D1 — New Construction — Deck Build" })).toBe(true);
+    // A change order or estimate line reads Other on /i's breakdown but is work; filing it Other takes it out.
+    expect(countsAsWorkCompleted({ import_source: "change_orders", line_kind: "other" })).toBe(false);
+    expect(countsAsWorkCompleted({ import_source: null, description: "Goodwill", line_kind: "credit" })).toBe(false);
+    // What today's reading already settles still reads the same way.
+    expect(countsAsWorkCompleted({ import_source: null, unit: "hr", description: "Lift rental" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "ea", description: "Materials - CED" })).toBe(true);
+    expect(countsAsWorkCompleted({ import_source: null, unit: "lot", description: "Less previous billings" })).toBe(false);
   });
 });

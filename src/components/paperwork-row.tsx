@@ -35,6 +35,8 @@ import {
   type PaperItem,
 } from "@/lib/paperwork";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
+import { OpenListCard } from "@/components/open-list-card";
+import type { OpenListView } from "@/lib/supplier-open-list";
 import {
   aiReviewItem,
   archiveItem,
@@ -72,6 +74,8 @@ export type PaperRowItem = PaperItem & {
   created_at: string;
   signedUrl: string | null;
   file_url?: string | null;
+  /** A supplier's open list: what it changes, worked out on the server as the page loads. */
+  open_list?: OpenListView | null;
 };
 
 /** `status` complete: a finished job, offered under Completed Jobs (PR1), never pre-picked. */
@@ -107,6 +111,8 @@ function badgeFor(item: PaperItem) {
     case "ready":
     case "supplier_documents":
       return <Badge tone="green">Ready To File</Badge>;
+    case "open_list":
+      return <Badge tone="blue">Supplier&apos;s List</Badge>;
     case "needs_total":
       return <Badge tone="amber">Needs A Total</Badge>;
     case "not_read":
@@ -588,6 +594,33 @@ export function PaperworkRow({
       {guessChip}
     </div>
   );
+
+  // A SUPPLIER'S OPEN LIST is one sentence and Apply / Not Now; nothing else on this row applies.
+  if (r.state === "open_list") {
+    return (
+      <Card className="border-brand/30">
+        <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
+          <Thumb item={item} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{describePaper(item)}</span>
+              {badgeFor(item)}
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+              <span>Added {formatDate(item.created_at)}</span>
+              <span className="truncate">{item.title}</span>
+            </div>
+            <OpenListCard itemId={item.id} view={item.open_list} run={run} busy={busy} working={working} />
+            {said && (
+              <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${said.tone === "error" ? "bg-red-50 text-red-700" : "bg-brand/5 text-brand-dark"}`} role={said.tone === "error" ? "alert" : "status"}>
+                {said.text}
+              </p>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className={r.state === "ready" || r.state === "supplier_documents" ? "border-emerald-200" : "border-amber-200"}>
