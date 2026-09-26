@@ -42,6 +42,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { JOB_STATUSES, jobStatusLabel, type JobStatus } from "./job-status";
+import { featureOn, type FeatureKey, type FeatureMap } from "./features";
 
 /** A leaf in a dock section — a single page. A node with `header: true` (and no href) is a
  *  non-clickable sub-group label inside the section's nav (e.g. "Money admin" within Office). */
@@ -57,6 +58,10 @@ export interface DockNode {
    *  under a different path than the child's href (e.g. Bills & POs owns /purchasing:
    *  PO detail pages live there but belong to Money). Never rendered as links. */
   owns?: string[];
+  /** The switch this row belongs to (lib/features): off, the row is not drawn (visibleDock). */
+  feature?: FeatureKey;
+  /** The row's words while a switch is off: "Bills & POs" reads "Bills" with Purchase Orders off. */
+  whenOff?: { feature: FeatureKey; label: string };
 }
 
 /** A top-level dock section. `href` is where a one-click on the title goes; `children`
@@ -78,6 +83,9 @@ export interface DockSection {
    *  the whole page behind a rail tile for them is the shortest honest path to their own
    *  handful of switches. */
   techOnly?: boolean;
+  /** The switch the whole tile belongs to (Tools = Calculators). A tile whose rows are all
+   *  switched off goes too, without a tag (visibleDock). */
+  feature?: FeatureKey;
 }
 
 /** First-letter cap for generated labels ("in progress" → "In progress"). The words stay
@@ -145,9 +153,9 @@ export const DOCK: DockSection[] = [
     // The pipeline in order: Leads → Inspections (the site walk-through between a lead and
     // its estimate — an inspection IS an appointment type, Erik 2026-07-14) → Estimates.
     children: [
-      { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads" },
-      { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections" },
-      { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes" },
+      { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads", feature: "leads" },
+      { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections", feature: "leads" },
+      { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes", feature: "estimates" },
     ],
   },
   {
@@ -192,14 +200,17 @@ export const DOCK: DockSection[] = [
       // who-owes-what lives here, fed by invoices, one line per customer.
       { id: "m-ar", label: "Accounts Receivable", icon: Banknote, href: "/billing/ar" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
-      { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"] },
+      // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
+      // a link lights Money (with the Off line on top).
+      { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"], whenOff: { feature: "purchase_orders", label: "Bills" } },
       { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },
       // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
       { id: "m-ma-h", label: "Money admin", icon: Calculator, header: true },
-      { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll" },
+      { id: "ma-payroll", label: "Payroll", icon: Banknote, href: "/payroll", feature: "crew_payroll" },
+      // No switch: the Tax Report carries the mileage deduction, which is not Sales Tax.
       { id: "ma-tax", label: "Tax Report", icon: Calculator, href: "/tax-report" },
       { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
-      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
+      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring", feature: "recurring_billing" },
       { id: "ma-petty", label: "Petty Cash", icon: Coins, href: "/petty-cash" },
     ],
   },
@@ -212,23 +223,25 @@ export const DOCK: DockSection[] = [
       // Liabilities (Alexa's grouping). Insurance (e.g. workers' comp) + compliance Audits are
       // the next pages to build — flagged, not stubbed as dead links.
       { id: "o-liab-h", label: "Liabilities", icon: Scale, header: true },
-      { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance" },
-      { id: "o-insurance", label: "Insurance", icon: Umbrella, href: "/insurance" },
-      { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety" },
-      { id: "o-audits", label: "Audits", icon: ClipboardCheck, href: "/audits" },
+      { id: "o-comply", label: "Compliance", icon: ShieldCheck, href: "/compliance", feature: "licenses" },
+      { id: "o-insurance", label: "Insurance", icon: Umbrella, href: "/insurance", feature: "licenses" },
+      { id: "o-safety", label: "Safety", icon: HardHat, href: "/safety", feature: "safety_log" },
+      { id: "o-audits", label: "Audits", icon: ClipboardCheck, href: "/audits", feature: "licenses" },
       // HR — Team leads: the crew roster with real lifecycle verbs (change role,
       // reset login, deactivate/reactivate, remove) lifted out of Settings into its
       // own page (settings doctrine: Settings keeps zero team UI). Office-only.
       { id: "o-hr-h", label: "HR", icon: UserCog, header: true },
       { id: "o-team", label: "Team", icon: Users, href: "/team", staffOnly: true },
-      { id: "o-docs", label: "Employee Docs", icon: IdCard, href: "/employee-docs", staffOnly: true },
+      { id: "o-docs", label: "Employee Docs", icon: IdCard, href: "/employee-docs", staffOnly: true, feature: "crew_payroll" },
+      // Forms carries no switch: every company's /forms also holds its walk-through sheet and its
+      // intake form, not only the safety checklists.
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
-      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook" },
+      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", feature: "crew_payroll" },
       // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring/Petty cash) was promoted
       // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
-      { id: "ma-stock", label: "Shop Stock", icon: Boxes, href: "/inventory", staffOnly: true },
+      { id: "ma-stock", label: "Shop Stock", icon: Boxes, href: "/inventory", staffOnly: true, feature: "shop_stock" },
       // Diagnostics. Settings is NO LONGER a link here (zero-duplication law): it lives
       // behind the avatar (the predictable phone-app door, cn-v326). Office no longer OWNS
       // /settings either — Settings is its own territory now, owned by no dock section, so
@@ -271,12 +284,52 @@ export const DOCK: DockSection[] = [
     label: "Tools",
     icon: Wrench,
     href: "/tools",
+    feature: "calculators",
     children: [{ id: "tl-all", label: "Calculators & Tools", icon: Wrench, href: "/tools" }],
   },
 ];
 
 /** Path part of an href — the bit before any ?query (shared by every dock renderer). */
 export const basePath = (href: string) => href.split("?")[0];
+
+/**
+ * THE ONE DOCK FILTER (the switch board, 0352): the dock this person sees. The rail, the phone
+ * bar, the section strip/sheet and the command bar all draw from it, so the role rule and the
+ * switch rule can't drift between them (the role filter used to be copied into each renderer).
+ *
+ *   role      staffOnly hides from techs, techOnly hides from staff (tiles and rows).
+ *   switches  a row or tile whose switch is off is not drawn. A heading left with no rows under
+ *             it goes; a tile whose rows were all switched off goes (Sales, with Leads and
+ *             Estimates both off); a tile whose own landing page was switched off lands on its
+ *             first row still drawn (Sales with Leads off: /quotes). "Bills & POs" reads "Bills".
+ *
+ * A SWITCH HIDES DOORS ONLY: a page behind a hidden row still opens from a link, with the Off
+ * line on top (components/route-off-line). `features` is what the layout hands the shell (lib/
+ * feature-doors shellDoors); no map is everything on, which returns exactly the old role filter.
+ */
+export function visibleDock({ isStaff, features }: { isStaff: boolean; features?: FeatureMap | null }): DockSection[] {
+  const on = (k?: FeatureKey) => !k || featureOn(features, k);
+  const mine = (c: DockNode) => isStaff || !c.staffOnly;
+  return DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly) && on(s.feature)).flatMap((s) => {
+    const rows = s.children
+      .filter((c) => mine(c) && on(c.feature))
+      .map((c) => (c.whenOff && !on(c.whenOff.feature) ? { ...c, label: c.whenOff.label } : c));
+    // A heading only labels the rows under it: none left before the next heading, no heading.
+    const children = rows.filter((c, i) => {
+      if (!c.header) return true;
+      const rest = rows.slice(i + 1);
+      const next = rest.findIndex((r) => r.header);
+      return rest.slice(0, next < 0 ? undefined : next).some((r) => r.href);
+    });
+    // Measured against the rows a SWITCH hid, never the ones the role hid: a tech's Office still
+    // lands on /team exactly as before, and the tech-only "You" tile (no rows at all) stays.
+    const switchedOff = s.children.filter((c) => mine(c) && !on(c.feature));
+    if (switchedOff.length && !children.some((c) => c.href)) return [];
+    const landingOff = switchedOff.some((c) => c.href && basePath(c.href) === basePath(s.href));
+    const href = landingOff ? (children.find((c) => c.href)?.href ?? s.href) : s.href;
+    return [{ ...s, href, children }];
+  });
+}
 
 /**
  * THE active-section matcher — the single copy used by the desktop dock rail, the phone
