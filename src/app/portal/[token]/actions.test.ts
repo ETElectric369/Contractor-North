@@ -13,6 +13,19 @@ const reportError = vi.fn();
 const rateLimited = vi.fn();
 const jar = new Map<string, { value: string; opts: Record<string, unknown> }>();
 let requestCookie: string | undefined;
+/** The link's company and its switches (customer_portal_access, 0352). null = no row: switches all on. */
+let portalOrgSettings: unknown = null;
+const from = vi.fn((table: string) => {
+  const b: any = {
+    select: () => b,
+    eq: () => b,
+    maybeSingle: async () => ({
+      data: table === "customer_portal_access" && portalOrgSettings ? { organizations: { name: "Fixture Electric", settings: portalOrgSettings } } : null,
+      error: null,
+    }),
+  };
+  return b;
+});
 
 vi.mock("next/headers", () => ({
   headers: async () => new Headers({ "x-forwarded-for": "203.0.113.9, 10.0.0.1" }),
@@ -21,7 +34,7 @@ vi.mock("next/headers", () => ({
     set: (name: string, value: string, opts: Record<string, unknown>) => jar.set(name, { value, opts }),
   }),
 }));
-vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc }) }));
+vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => ({ rpc, from }) }));
 vi.mock("@/lib/observe", () => ({ reportError: (...a: unknown[]) => reportError(...a) }));
 vi.mock("@/lib/rate-limit", () => ({
   rateLimited: (...a: unknown[]) => rateLimited(...a),
@@ -48,6 +61,7 @@ beforeEach(() => {
   rateLimited.mockReset().mockResolvedValue(false);
   jar.clear();
   requestCookie = undefined;
+  portalOrgSettings = null;
 });
 
 describe("Send My Code", () => {
@@ -209,6 +223,29 @@ describe("Open My Page (the code check)", () => {
     expect(await checkPortalCode(TOKEN, "123456")).toEqual({ ok: false, reason: "busy" });
     expect(rpc).not.toHaveBeenCalled();
     expect(rateLimited.mock.calls[0].slice(0, 3)).toEqual(["portal-code-try:203.0.113.9", 30, 900]);
+  });
+});
+
+describe("the Customer Portal switch (0352, rule f)", () => {
+  it("off: Send My Code sends nothing and says to ask the contractor", async () => {
+    portalOrgSettings = { features: { customer_portal: false } };
+    expect(await sendPortalCode(TOKEN)).toEqual({ ok: false, reason: "off" });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("off: a code sent before the switch went off signs nobody in, and no try is spent", async () => {
+    portalOrgSettings = { features: { customer_portal: false } };
+    expect(await checkPortalCode(TOKEN, "123456")).toEqual({ ok: false, reason: "off" });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(jar.size).toBe(0);
+  });
+
+  it("on (stored) or not stored: exactly today's send", async () => {
+    portalOrgSettings = { features: { customer_portal: true, website: false } };
+    rpc.mockResolvedValue({ data: ISSUED, error: null });
+    expect(await sendPortalCode(TOKEN)).toEqual({ ok: true, maskedEmail: "m*******@comcast.net" });
+    expect(reportError).not.toHaveBeenCalled();
   });
 });
 

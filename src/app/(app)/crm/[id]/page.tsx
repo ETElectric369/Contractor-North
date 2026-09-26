@@ -16,6 +16,8 @@ import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount"
 import { EditCustomerButton } from "./edit-customer-button";
 import { MergeCustomerButton } from "./merge-customer-button";
 import { PortalLinkButton } from "./portal-link-button";
+import { featureOn } from "@/lib/features";
+import { readViewerFeatures } from "@/lib/viewer-features";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
@@ -52,6 +54,8 @@ export default async function CustomerDetailPage({
   const { data: { user } } = await supabase.auth.getUser();
   const { data: meRow } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
+  // The switches (0352), read beside the batch below: Customer Portal off hides the link card.
+  const viewerP = readViewerFeatures();
 
   // ONE ROUND, NOT THREE (audit v921). The linked-jobs read depends only on `id` and the merge
   // pick-list only on viewerIsStaff — both already known — so they waited behind this batch for
@@ -125,6 +129,9 @@ export default async function CustomerDetailPage({
       : Promise.resolve({ data: null }),
   ]);
   const deviceCount = Number(portalDevices?.devices);
+  // CUSTOMER PORTAL OFF (0352, rule f): the office's link controls aren't drawn. The link row is
+  // untouched, and the invoice pay link never depended on it.
+  const portalOn = featureOn((await viewerP).features, "customer_portal");
   const portal = portalRow
     ? {
         token: (portalRow as { token: string }).token,
@@ -198,7 +205,7 @@ export default async function CustomerDetailPage({
                 />
               )}
             </div>
-            {viewerIsStaff && (
+            {viewerIsStaff && portalOn && (
               <div className="border-t border-slate-100 pt-3">
                 <PortalLinkButton
                   customerId={c.id}

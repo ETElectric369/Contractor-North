@@ -7,6 +7,8 @@ import type { PortalOrg } from "@/components/portal/portal-shell";
 import { portalHomeOrg, type PortalHomeOrgRaw } from "./home-shape";
 import { hashSecret, isSessionSecret, maskEmail } from "./code";
 import { PORTAL_COOKIE, PORTAL_OFFICE_COOKIE, isPortalToken } from "./session-cookie";
+import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn, type FeatureMap } from "@/lib/features";
 
 /**
  * WHO MAY SEE THIS PORTAL PAGE (0331). Every page under /portal/<token> asks this FIRST, before it
@@ -14,6 +16,9 @@ import { PORTAL_COOKIE, PORTAL_OFFICE_COOKIE, isPortalToken } from "./session-co
  * (portal-gate.test pins that every page file does.)
  *
  *  - missing:   no such link. The page 404s, as before.
+ *  - portal_off: the company switched its Customer Portal off (the switch board, 0352, rule f).
+ *               Asked FIRST, before any session: a device already signed in is out too, and no code
+ *               is sent. "Ask your contractor", because the same link works again when it's back on.
  *  - off:       the office turned it off or replaced it. "This link was turned off", as before.
  *  - gate:      a real, live link on a device that is not signed in. The sign-in screen: the
  *               business's skin and the address the code goes to, MASKED here on the server, so
@@ -32,6 +37,7 @@ import { PORTAL_COOKIE, PORTAL_OFFICE_COOKIE, isPortalToken } from "./session-co
  */
 export type PortalAccess =
   | { kind: "missing" }
+  | { kind: "portal_off"; orgName: string | null }
   | { kind: "off"; orgName: string | null }
   | { kind: "gate"; org: PortalOrg; maskedEmail: string | null; codeSentMinutesAgo: number | null }
   | { kind: "office_ended"; orgName: string | null }
@@ -55,8 +61,48 @@ function minutesAgo(iso: string | null | undefined): number | null {
   return Math.max(0, Math.floor((Date.now() - t) / 60_000));
 }
 
+/**
+ * THE COMPANY'S SWITCHES BEHIND A PORTAL LINK (0352): the link's company and its feature map, read
+ * as the service role by the token (customer_portal_access holds it; 0298). null = no such live
+ * link row, or the read failed; either way the switches read as today's (all on) and the portal's
+ * own gate answers as it always has. A failure is reported, never a reason to shut a customer out.
+ * cache(): the gate, the page and its metadata ask once per request.
+ */
+export const readPortalSwitches = cache(
+  async (token: string): Promise<{ orgName: string | null; features: FeatureMap } | null> => {
+    if (!isPortalToken(token)) return null;
+    try {
+      const { data, error } = await createServiceClient()
+        .from("customer_portal_access")
+        .select("organizations(name, settings)")
+        .eq("token", token)
+        .maybeSingle();
+      if (error) {
+        reportError("portal.switches", error);
+        return null;
+      }
+      const raw = (data as { organizations?: unknown } | null)?.organizations;
+      const org = (Array.isArray(raw) ? raw[0] : raw) as { name?: string | null; settings?: unknown } | null | undefined;
+      if (!org) return null;
+      return { orgName: org.name ?? null, features: getOrgSettings(org.settings).features };
+    } catch (e) {
+      reportError("portal.switches", e);
+      return null;
+    }
+  },
+);
+
+/** Is this link's company's Customer Portal switched off? Read-failure and no-row both say no. */
+export async function portalSwitchedOff(token: string): Promise<{ off: boolean; orgName: string | null }> {
+  const sw = await readPortalSwitches(token);
+  return { off: !!sw && !featureOn(sw.features, "customer_portal"), orgName: sw?.orgName ?? null };
+}
+
 export const readPortalAccess = cache(async (token: string): Promise<PortalAccess> => {
   if (!isPortalToken(token)) return { kind: "missing" };
+  // THE COMPANY'S SWITCH FIRST (0352, rule f): before any cookie is honoured.
+  const sw = await portalSwitchedOff(token);
+  if (sw.off) return { kind: "portal_off", orgName: sw.orgName };
   const svc = createServiceClient();
 
   const jar = await cookies();

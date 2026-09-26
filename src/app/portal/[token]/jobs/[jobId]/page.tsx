@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { NO_INDEX } from "@/lib/no-index";
 import { readPortalJob } from "@/lib/portal/job-view";
-import { readPortalAccess } from "@/lib/portal/access";
+import { readPortalAccess, readPortalSwitches } from "@/lib/portal/access";
+import { portalViewForSwitches } from "@/lib/portal/job-view-shape";
 import { PortalJobPage } from "@/components/portal/portal-job-page";
 import { PortalNotice, PortalTurnedOff } from "@/components/portal/portal-shell";
 import { gateTitle, portalGate, portalSignOut } from "../../gate";
@@ -82,9 +83,11 @@ export default async function PortalJobRoute({
   }
 
   const office = access.kind === "in" && access.session === "office" ? true : look === "office";
+  // Panel Map off (0352): "Your Panel" isn't drawn. The gate above already read the switches (cached).
+  const view = portalViewForSwitches(r.view, (await readPortalSwitches(token))?.features);
   return (
     <PortalJobPage
-      view={r.view}
+      view={view}
       homeHref={`/portal/${token}${office ? "?look=office" : ""}`}
       footer={portalSignOut(access, token)}
     />

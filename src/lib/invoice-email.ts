@@ -7,6 +7,22 @@ import { companyBlock } from "@/lib/company-lines";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { featureOn, type FeatureMap } from "@/lib/features";
+
+/**
+ * THE PORTAL BUTTON IN AN INVOICE EMAIL: a live link the office hasn't turned off, and a company
+ * whose Customer Portal is on (the switch board, 0352, rule f). Off, and the email carries the
+ * invoice alone; the invoice link (/i, pay included) never depends on it. On, or no switches stored,
+ * exactly the link it always was.
+ */
+export function invoicePortalLink(
+  site: string,
+  portal: { token: string | null; enabled: boolean } | null,
+  features: FeatureMap | null | undefined,
+): string | undefined {
+  if (!featureOn(features, "customer_portal")) return undefined;
+  return portal?.token && portal.enabled ? `${site}/portal/${portal.token}` : undefined;
+}
 
 /**
  * Render + send an invoice email to the customer and mark a draft "sent".
@@ -66,7 +82,7 @@ export async function deliverInvoiceEmail(
 
   const site = orgPublicBaseUrl(getOrgSettings((org as any)?.settings));
   const link = orgDocUrl(getOrgSettings((org as any)?.settings), "i", (invoice as any).public_token, rowPlace(invoice as any));
-  const portalLink = portal?.token && portal.enabled ? `${site}/portal/${portal.token}` : undefined;
+  const portalLink = invoicePortalLink(site, portal, getOrgSettings((org as any)?.settings).features);
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
   // A basic greeting + the balance + a button to the ONE canonical invoice document
   // (viewable, printable, payable) and the portal — never a re-rendered copy of the

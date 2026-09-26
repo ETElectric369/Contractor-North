@@ -23,6 +23,7 @@ import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
 import { docFormat, isPortalDocKind, kindLabel, kindRank, type DocFormat, type PortalDocKind } from "./doc-kinds";
 import { normalizePortalPanels, type DirectoryPanel } from "@/lib/panel/directory";
+import { featureOn, type FeatureMap } from "@/lib/features";
 import type { InvoiceDocRead, InvoiceDocumentProps } from "@/lib/invoice-document-props";
 
 /** What portal_job_view returns (0301), as the server reads it. */
@@ -370,4 +371,14 @@ export function shapePortalJob(
     panels: normalizePortalPanels(raw.panels),
     unbilled: extra.unbilled,
   };
+}
+
+/**
+ * THE SWITCHES ON THE CUSTOMER'S JOB PAGE (the switch board, 0352). "Your Panel" is a Panel Map door:
+ * with Panel Map off the section isn't drawn, whatever the office showed before. Everything else on
+ * the page is the Customer Portal itself, which the gate (readPortalAccess) already decided. With
+ * the switch on, or no switches stored, this is the very same view object: the page is unchanged.
+ */
+export function portalViewForSwitches(view: PortalJobView, features: FeatureMap | null | undefined): PortalJobView {
+  return featureOn(features, "panel_map") || !view.panels.length ? view : { ...view, panels: [] };
 }

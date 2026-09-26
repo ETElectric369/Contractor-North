@@ -56,7 +56,11 @@ export function maskPhone(phone: string | null | undefined): string | null {
 // ── what the customer reads ──────────────────────────────────────────────────────────────────────
 
 /** Why a send didn't go out, as the database says it (0331 portal_code_issue) plus the app's own. */
-export type SendRefusal = "no_link" | "no_email" | "too_many" | "day_limit" | "channel_unavailable" | "busy" | "send_failed";
+export type SendRefusal = "no_link" | "no_email" | "too_many" | "day_limit" | "channel_unavailable" | "busy" | "send_failed" | "off";
+
+/** The company switched its Customer Portal off (the switch board, 0352): the link works again when
+ *  it is back on, so the customer is pointed at their contractor, never told to get a new link. */
+export const PORTAL_OFF_WORDS = "This page is off for now. Ask your contractor.";
 
 /** Minutes until a refused send can go again, rounded up, at least 1. */
 export function minutesUntil(retryAt: string | null | undefined, now: Date = new Date()): number {
@@ -84,6 +88,8 @@ export function sendRefusalWords(reason: SendRefusal, business: string, retryMin
       return "Codes by text aren't available yet. We can email it instead.";
     case "busy":
       return "Too many codes were asked for from this network. Try again in a little while.";
+    case "off":
+      return PORTAL_OFF_WORDS;
     case "send_failed":
     default:
       return "We couldn't send your code just now. Try again in a minute.";
@@ -104,7 +110,7 @@ export function liveCodeWords(maskedEmail: string | null, minutesAgo: number): s
 }
 
 /** Why a code didn't work, as portal_code_try / the comparison says it. */
-export type CheckRefusal = "wrong" | "expired" | "used_up" | "spent" | "no_code" | "no_link" | "format" | "busy" | "error";
+export type CheckRefusal = "wrong" | "expired" | "used_up" | "spent" | "no_code" | "no_link" | "format" | "busy" | "error" | "off";
 
 export function checkRefusalWords(reason: CheckRefusal, business: string, triesLeft?: number): string {
   switch (reason) {
@@ -126,6 +132,8 @@ export function checkRefusalWords(reason: CheckRefusal, business: string, triesL
       return `This link was turned off. Ask ${business} for a new one.`;
     case "busy":
       return "Too many tries from this network. Wait a few minutes and try again.";
+    case "off":
+      return PORTAL_OFF_WORDS;
     case "error":
     default:
       return "We couldn't check your code just now. Try again in a minute.";

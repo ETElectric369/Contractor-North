@@ -7,6 +7,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { formatDate } from "@/lib/utils";
 import { CIRCUIT_MAP_FILE_SUFFIX, asPortalDirectory, directoryFromRows, type DirectoryPanel } from "@/lib/panel/directory";
 import type { JobCircuit, JobPanel } from "@/lib/types";
@@ -73,6 +74,9 @@ export type PanelPortalLoad =
       preview: DirectoryPanel[];
       /** The circuit map on their Plans And Drawings now (the newest of its chain), if any. */
       circuitMap: CircuitMapShown | null;
+      /** false = the company's Panel Map switch is off (0352): the card isn't drawn, and the
+       *  customer's page draws no "Your Panel" either. Absent = on. */
+      panelMapOn?: false;
     }
   | Fail;
 
@@ -101,11 +105,14 @@ export async function loadPanelPortal(jobId: string): Promise<PanelPortalLoad> {
   if ("error" in o) return o;
   const job = await jobOf(o, jobId);
   if (!job) return { ok: false, error: "That job isn't in your book." };
-  const [pRes, cRes, map] = await Promise.all([
+  const [pRes, cRes, map, orgRes] = await Promise.all([
     o.supabase.from("job_panels").select(PANEL_COLS).eq("job_id", jobId).eq("org_id", o.orgId).is("removed_at", null).order("created_at"),
     o.supabase.from("job_circuits").select(CIRCUIT_COLS).eq("job_id", jobId).eq("org_id", o.orgId).eq("state", "kept").is("removed_at", null).order("sort_order").order("created_at"),
     currentCircuitMap(o, jobId),
+    // The Panel Map switch (0352). A failed read is on: today's card.
+    o.supabase.from("organizations").select("settings").eq("id", o.orgId).maybeSingle(),
   ]);
+  const panelMapOn = featureOn(getOrgSettings((orgRes?.data as { settings?: unknown } | null)?.settings).features, "panel_map");
   const err = pRes.error ?? cRes.error;
   if (err) return { ok: false, error: schemaMissing(err) ? NOT_READY : dbError(err) };
   const panels = (pRes.data ?? []) as unknown as (JobPanel & { shown_on_portal: boolean })[];
@@ -117,6 +124,7 @@ export async function loadPanelPortal(jobId: string): Promise<PanelPortalLoad> {
     // what normalizePortalPanels makes of 0335's block.
     preview: panels.map((p) => asPortalDirectory(directoryFromRows(p, circuits))),
     circuitMap: map,
+    ...(panelMapOn ? {} : { panelMapOn: false as const }),
   };
 }
 
