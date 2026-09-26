@@ -10,7 +10,7 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import type { UnbilledWork } from "@/lib/unbilled-work";
 import { createInvoiceForJob } from "../actions";
-import { unbilledCardDoor, type OpenDraft } from "@/lib/actuals-draw";
+import { unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 
 /**
  * What this card is allowed to know, by role. The page builds it (projection law): staff get
@@ -68,8 +68,7 @@ export function UnbilledCard({
   lumpToNet?: number;
 }) {
   const router = useRouter();
-  const toast = useToast();
-  const [pending, start] = useTransition();
+  const { pending, go } = useBillIt(jobId);
 
   if (!view) {
     return (
@@ -102,74 +101,19 @@ export function UnbilledCard({
   }
 
   const w = view;
-  // A pending supplier return is something new: money the customer is owed back (INV-078).
-  const returns = w.returnsCount ?? 0;
+  const { returns, newWork, workPending, theDraft, door } = cardDoorFor(w, openDraft, lumpToNet);
   const nothingNew = w.total <= 0.005 && w.hours <= 0 && w.billsCount === 0 && returns === 0;
-  // The hours and bills on their own, before any return comes off - what an invoice built now
-  // bills at the least. A return lands on it only when it bills more than the credit
-  // (importCostsIntoInvoice holds it otherwise, because an invoice below zero loses the rest).
-  const newWork = Math.round((w.laborAmount + w.billsBilled) * 100) / 100;
-  const workPending = w.hours > 0 || w.billsCount > 0;
   const owedBack = returns > 0 && w.total < -0.005;
-  // THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
-  // open draft when there is one — one draft per job, never a second racing the first for the
-  // same rows — and pulls what's new into it. Said up front, "Add to INV-062 ($X)", not "Create
-  // Invoice": a click that then opens INV-062 must never read as "it made a new one". $X stays
-  // true either way: a draft claims its rows like any non-void invoice, so the total is exactly
-  // what the draft doesn't hold yet — what the click adds to it, or what the next bill carries.
-  //
-  // WHICH DRAFT, AND WHETHER IT TAKES NEW WORK, IS THE SERVER'S ANSWER (J-011, 2026-09-24). This
-  // used to assume "this card mounts only where every invoice on the job is a standard one (no
-  // draws without a schedule)". False: a time-and-materials progress report is a draw with no
-  // schedule, and INV-078 is one. The card said "Add to INV-078 ($1,572.27)" and the server said
-  // "send or delete that draw". Now the page hands over openDraftOnJob's answer: an actuals draw
-  // takes the work like a standard draft; a contract draw (a %, a fixed $) can't, so the button
-  // says "Open INV-0xx" and goes there (unbilledCardDoor).
-  const fallbackDraft =
-    w.lastInvoiceStatus === "draft" ? { id: "", number: w.lastInvoiceNumber, refreshable: true } : null;
-  const theDraft = openDraft === undefined ? fallbackDraft : openDraft;
   // Named only when new work GOES on it — the sentences below that say "is on {draft}" are true
   // only of a draft that takes it.
   const draft = theDraft?.refreshable ? (theDraft.number ?? "the open draft") : null;
   /** An open draft that bills a set part of the contract: the work waits for the next bill. */
   const heldDraft = theDraft && !theDraft.refreshable ? (theDraft.number ?? "the open draft") : null;
-  const door = unbilledCardDoor({
-    openDraft: theDraft,
-    workPending,
-    returns,
-    total: w.total,
-    newWork,
-    lumpToNet,
-    money: formatCurrency,
-  });
   // THE DOOR THAT WORKS when there is nothing new: the job's own New Invoice (this card's button,
   // the Invoices tab's) is createInvoiceForJob, which refuses a second invoice with nothing to
   // carry — by design (never mint an empty invoice silently). A blank invoice for something else
   // (a referral, a fee) is the /billing New Invoice, opened straight onto this customer.
   const blankInvoiceHref = `/billing?new=1${customerId ? `&customer=${encodeURIComponent(customerId)}` : ""}`;
-
-  function go() {
-    start(async () => {
-      const res = await createInvoiceForJob(jobId);
-      if (!res.ok || !res.id) {
-        // A "nothing new" refusal names the invoice that already holds the work — that IS the
-        // door, so the toast carries it (the Invoices tab's New Invoice does the same).
-        const door = res.billedOn;
-        toast(
-          res.error ?? "Could not create the invoice.",
-          "error",
-          door ? { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) } : undefined,
-        );
-        return;
-      }
-      // The action's own sentence ("Pulled 3 new lines into INV-062", "Started INV-063 for
-      // what's new since INV-061…") goes in front of the person BEFORE the redirect; it knows
-      // the count, this card doesn't. `partial` = something did NOT happen (an import failed) —
-      // that is a heads-up, not a receipt, and its tone says so.
-      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info");
-      router.push(`/billing/${res.id}`);
-    });
-  }
 
   return (
     <Card>
@@ -292,17 +236,130 @@ export function UnbilledCard({
               work is real and unbilled. The open draft takes a pending return too (it may already
               bill enough to hold it). With no draft, a credit alone never mints an invoice. The
               figure is named only when it is what the click bills. */}
-          {door?.kind === "open" ? (
-            <Button type="button" onClick={() => router.push(door.href)} className="shrink-0">
-              <FileText /> {door.label}
-            </Button>
-          ) : door && door.kind !== "covered" ? (
-            <Button type="button" onClick={go} disabled={pending} className="shrink-0">
-              <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Opening…") : door.label}
-            </Button>
-          ) : null}
+          <DoorButton door={door} pending={pending} go={go} onOpen={(href) => router.push(href)} />
         </div>
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * THE CARD'S DOOR, DECIDED ONCE. The Overview card and the Costs tab's Not Billed Yet both show
+ * it, so both read this: the same draft, the same figure, the same label.
+ *
+ * THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
+ * open draft when there is one — one draft per job, never a second racing the first for the same
+ * rows — and pulls what's new into it. Said up front, "Add to INV-062 ($X)", not "Create Invoice":
+ * a click that then opens INV-062 must never read as "it made a new one". $X stays true either
+ * way: a draft claims its rows like any non-void invoice, so the total is exactly what the draft
+ * doesn't hold yet — what the click adds to it, or what the next bill carries.
+ *
+ * WHICH DRAFT, AND WHETHER IT TAKES NEW WORK, IS THE SERVER'S ANSWER (J-011, 2026-09-24). A
+ * time-and-materials progress report is a draw with no schedule, and INV-078 is one: the page
+ * hands over openDraftOnJob's answer. An actuals draw takes the work like a standard draft; a
+ * contract draw (a %, a fixed $) can't, so the button says "Open INV-0xx" and goes there.
+ */
+function cardDoorFor(w: UnbilledWork, openDraft: Pick<OpenDraft, "id" | "number" | "refreshable"> | null | undefined, lumpToNet: number) {
+  // A pending supplier return is something new: money the customer is owed back (INV-078).
+  const returns = w.returnsCount ?? 0;
+  // The hours and bills on their own, before any return comes off - what an invoice built now
+  // bills at the least. A return lands on it only when it bills more than the credit
+  // (importCostsIntoInvoice holds it otherwise, because an invoice below zero loses the rest).
+  const newWork = Math.round((w.laborAmount + w.billsBilled) * 100) / 100;
+  const workPending = w.hours > 0 || w.billsCount > 0;
+  const fallbackDraft =
+    w.lastInvoiceStatus === "draft" ? { id: "", number: w.lastInvoiceNumber, refreshable: true } : null;
+  const theDraft = openDraft === undefined ? fallbackDraft : openDraft;
+  const door = unbilledCardDoor({
+    openDraft: theDraft,
+    workPending,
+    returns,
+    total: w.total,
+    newWork,
+    lumpToNet,
+    money: formatCurrency,
+  });
+  return { returns, newWork, workPending, theDraft, door };
+}
+
+/** The click behind "Create Invoice" / "Add to INV-0xx": createInvoiceForJob, then the invoice. */
+function useBillIt(jobId: string) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  function go() {
+    start(async () => {
+      const res = await createInvoiceForJob(jobId);
+      if (!res.ok || !res.id) {
+        // A "nothing new" refusal names the invoice that already holds the work — that IS the
+        // door, so the toast carries it (the Invoices tab's New Invoice does the same).
+        const door = res.billedOn;
+        toast(
+          res.error ?? "Could not create the invoice.",
+          "error",
+          door ? { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) } : undefined,
+        );
+        return;
+      }
+      // The action's own sentence ("Pulled 3 new lines into INV-062", "Started INV-063 for
+      // what's new since INV-061…") goes in front of the person BEFORE the redirect; it knows
+      // the count, this card doesn't. `partial` = something did NOT happen (an import failed) —
+      // that is a heads-up, not a receipt, and its tone says so.
+      if (res.importWarning) toast(res.importWarning, res.partial ? "error" : "info");
+      router.push(`/billing/${res.id}`);
+    });
+  }
+  return { pending, go };
+}
+
+function DoorButton({
+  door,
+  pending,
+  go,
+  onOpen,
+}: {
+  door: CardDoor;
+  pending: boolean;
+  go: () => void;
+  onOpen: (href: string) => void;
+}) {
+  if (door?.kind === "open") {
+    return (
+      <Button type="button" onClick={() => onOpen(door.href)} className="shrink-0">
+        <FileText /> {door.label}
+      </Button>
+    );
+  }
+  if (door && door.kind !== "covered") {
+    return (
+      <Button type="button" onClick={go} disabled={pending} className="shrink-0">
+        <FileText /> {pending ? (door.kind === "add" ? "Adding…" : "Opening…") : door.label}
+      </Button>
+    );
+  }
+  return null;
+}
+
+/**
+ * THE SAME DOOR, ON THE COSTS TAB (Erik, 2026-09-25). Not Billed Yet leads that tab, and the way
+ * to bill what is on it is this card's button, not a second one. It bills the open time too, and
+ * the tab says so beside it. With nothing to add (or a deposit that still covers it) it renders
+ * the card's own sentence instead of a button, so the tab never shows a door the server refuses.
+ */
+export function UnbilledDoorButton({
+  jobId,
+  work,
+  openDraft,
+  lumpToNet = 0,
+}: {
+  jobId: string;
+  work: UnbilledWork;
+  openDraft?: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
+  lumpToNet?: number;
+}) {
+  const router = useRouter();
+  const { pending, go } = useBillIt(jobId);
+  const { door } = cardDoorFor(work, openDraft, lumpToNet);
+  if (door?.kind === "covered") return <p className="text-sm text-slate-500">{door.note}</p>;
+  return <DoorButton door={door} pending={pending} go={go} onOpen={(href) => router.push(href)} />;
 }

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Pencil } from "lucide-react";
+import { ChevronRight, Plus, Trash2, Pencil } from "lucide-react";
+import { billedOnLabel, nothingToBillWhy, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -43,7 +45,31 @@ function poLabel(p: JobPo): string {
   return `${p.po_number} · ${p.vendor} · ${formatCurrency(p.total)}`;
 }
 
-export function JobBills({ jobId, bills, pos = [] }: { jobId: string; bills: Bill[]; pos?: JobPo[] }) {
+/**
+ * THE JOB'S SUPPLIER BILLS. With `groups` (a job that bills its actuals, the claims read in hand)
+ * the list is sorted OPEN FIRST (Erik, 2026-09-25: "in costs i need to know what is open more than
+ * i need to know all the totals"): Not Billed Yet, with the door that bills it (`openAside`), then
+ * Billed folded by invoice and closed until tapped, then anything that never goes on an invoice,
+ * with why. The sorting is lib/job-cost-groups over UnbilledWork.costRows, never a rule here.
+ * Without `groups` it is the one list it always was, and says why when the claims read failed.
+ */
+export function JobBills({
+  jobId,
+  bills,
+  pos = [],
+  groups,
+  openAside,
+  groupsNote,
+}: {
+  jobId: string;
+  bills: Bill[];
+  pos?: JobPo[];
+  groups?: JobCostGroups | null;
+  /** Under the Not Billed Yet heading: the Overview card's door and what else it bills. */
+  openAside?: ReactNode;
+  /** Said above the plain list when the piles could not be read. */
+  groupsNote?: string | null;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -86,16 +112,108 @@ export function JobBills({ jobId, bills, pos = [] }: { jobId: string; bills: Bil
     });
   }
 
+  const billById = new Map(bills.map((b) => [b.id, b] as const));
+  const poById = new Map(pos.map((p) => [p.id, p] as const));
+
+  const billRow = (b: Bill, why?: string) => (
+    <li key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-slate-900">{b.supplier}</div>
+        <div className="text-xs text-slate-400">
+          {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
+          {b.po_id && poNumberById.has(b.po_id)
+            ? ` · pays ${poNumberById.get(b.po_id)}`
+            : ""}
+        </div>
+        {why && <div className="text-xs text-slate-500">{why}</div>}
+      </div>
+      <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
+      <button
+        onClick={() =>
+          start(async () => {
+            const next = b.status === "paid" ? "unpaid" : "paid";
+            const res = await setBillStatus(b.id, next, jobId);
+            if (!res?.ok) { toast(res?.error ?? "Couldn't update bill — try again.", "error"); return; }
+            toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
+            router.refresh();
+          })
+        }
+        title="Toggle paid/unpaid"
+      >
+        <Badge tone={statusTone(b.status)}>{b.status}</Badge>
+      </button>
+      <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
+        <Pencil className="h-4 w-4" />
+      </button>
+      <button
+        onClick={() =>
+          start(async () => {
+            const res = await deleteBill(b.id, jobId);
+            if (!res?.ok) { toast(res?.error ?? "Couldn't delete bill — try again.", "error"); return; }
+            toast(res.warning ?? "Bill deleted", "success");
+            router.refresh();
+          })
+        }
+        className="text-slate-400 hover:text-red-600"
+        title="Delete"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+    </li>
+  );
+
+  /** A live purchase order in a pile: its own page holds its controls. */
+  const poRow = (p: JobPo, why?: string) => (
+    <li key={p.id}>
+      <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-slate-900">{p.vendor}</div>
+          <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
+          {why && <div className="text-xs text-slate-500">{why}</div>}
+        </div>
+        <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
+      </Link>
+    </li>
+  );
+
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string) => (
+    <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+      {ids.map((id) => {
+        const b = billById.get(id);
+        if (b) return billRow(b, whyOf?.(id));
+        const p = poById.get(id);
+        return p ? poRow(p, whyOf?.(id)) : null;
+      })}
+    </ul>
+  );
+
+  const addBillButton = (
+    <Button variant="outline" onClick={() => setAdding((a) => !a)}>
+      <Plus /> Add Bill
+    </Button>
+  );
+
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm text-slate-500">
-          {bills.length} bill{bills.length === 1 ? "" : "s"} · {formatCurrency(total)}
+      {groups ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-semibold text-slate-900">
+            Not Billed Yet{" "}
+            <span className="font-normal text-slate-500">
+              · {pileCount(groups.open)} · {formatCurrency(groups.open.total)}
+            </span>
+          </div>
+          {addBillButton}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}>
-          <Plus className="h-3.5 w-3.5" /> Add Bill
-        </Button>
-      </div>
+      ) : (
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm text-slate-500">
+            {bills.length} bill{bills.length === 1 ? "" : "s"} · {formatCurrency(total)}
+          </div>
+          {addBillButton}
+        </div>
+      )}
+      {!groups && groupsNote && <p className="mb-3 text-sm text-slate-500">{groupsNote}</p>}
 
       <Modal
         open={adding}
@@ -158,56 +276,67 @@ export function JobBills({ jobId, bills, pos = [] }: { jobId: string; bills: Bil
         </div>
       </Modal>
 
-      {bills.length === 0 ? (
+      {groups ? (
+        <>
+          {openAside}
+          {groups.open.ids.length > 0 ? (
+            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids)}</div>
+          ) : (
+            <p className="py-3 text-sm text-slate-500">
+              {bills.length === 0
+                ? "No supplier bills yet."
+                : groups.nothing.length
+                  ? "None. Every bill on this job is on an invoice, or never goes on one (below)."
+                  : "None. Every bill on this job is on an invoice."}
+            </p>
+          )}
+
+          {groups.billed.length > 0 && (
+            <div className="mt-5">
+              <div className="mb-2 text-sm font-semibold text-slate-900">Billed</div>
+              <div className="space-y-2">
+                {groups.billed.map((g) => (
+                  // Closed until tapped: what is already on an invoice is the part he does not
+                  // need to read to find what is missing. A draft says so, so "billed" never
+                  // reads as sent.
+                  <details key={g.invoice.id} className="group rounded-lg border border-slate-200">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 py-2 text-sm [&::-webkit-details-marker]:hidden">
+                      <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-90" />
+                      <span className="min-w-0 flex-1 text-slate-800">
+                        On {billedOnLabel(g)} <span className="text-slate-500">· {pileCount(g)}</span>
+                      </span>
+                      {g.draft && <Badge tone={statusTone("draft")}>Draft</Badge>}
+                      <span className="font-medium text-slate-800">{formatCurrency(g.total)}</span>
+                    </summary>
+                    <div className="border-t border-slate-100 px-3 pb-2 pt-3">
+                      {rowsOf(g.ids)}
+                      <Link
+                        href={`/billing/${g.invoice.id}`}
+                        className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+                      >
+                        Open {g.invoice.invoice_number ?? "The Invoice"}
+                      </Link>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {groups.nothing.length > 0 && (
+            <div className="mt-5">
+              <div className="mb-2 text-sm font-semibold text-slate-900">Nothing To Bill</div>
+              {rowsOf(
+                groups.nothing.map((n) => n.id),
+                (id) => nothingToBillWhy(groups.nothing.find((n) => n.id === id)!.why),
+              )}
+            </div>
+          )}
+        </>
+      ) : bills.length === 0 ? (
         <p className="py-4 text-center text-sm text-slate-400">No supplier bills yet.</p>
       ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {bills.map((b) => (
-            <li key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-              <div className="min-w-0 flex-1">
-                <div className="font-medium text-slate-900">{b.supplier}</div>
-                <div className="text-xs text-slate-400">
-                  {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
-                  {b.po_id && poNumberById.has(b.po_id)
-                    ? ` · pays ${poNumberById.get(b.po_id)}`
-                    : ""}
-                </div>
-              </div>
-              <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
-              <button
-                onClick={() =>
-                  start(async () => {
-                    const next = b.status === "paid" ? "unpaid" : "paid";
-                    const res = await setBillStatus(b.id, next, jobId);
-                    if (!res?.ok) { toast(res?.error ?? "Couldn't update bill — try again.", "error"); return; }
-                    toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
-                    router.refresh();
-                  })
-                }
-                title="Toggle paid/unpaid"
-              >
-                <Badge tone={statusTone(b.status)}>{b.status}</Badge>
-              </button>
-              <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
-                <Pencil className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() =>
-                  start(async () => {
-                    const res = await deleteBill(b.id, jobId);
-                    if (!res?.ok) { toast(res?.error ?? "Couldn't delete bill — try again.", "error"); return; }
-                    toast(res.warning ?? "Bill deleted", "success");
-                    router.refresh();
-                  })
-                }
-                className="text-slate-400 hover:text-red-600"
-                title="Delete"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </li>
-          ))}
-        </ul>
+        rowsOf(bills.map((b) => b.id))
       )}
 
       {editBill && (

@@ -35,8 +35,11 @@ import {
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
-import { UnbilledCard, type UnbilledView } from "./unbilled-card";
+import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { groupJobCosts } from "@/lib/job-cost-groups";
+import { readJobPapers } from "./job-papers";
+import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
@@ -369,6 +372,7 @@ export default async function JobDetailPage({
     lumpToNet,
     panelCount,
     tmWork,
+    papers,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -486,6 +490,16 @@ export default async function JobDetailPage({
           return "failed" as const;
         })
       : Promise.resolve(null),
+    // THE SUPPLIER'S PAPERS THAT NAME THIS JOB AND ARE IN NOBODY'S BOOKS (Erik, 2026-09-25: CED
+    // 8802-1107820, $187.64, "85 WHITNEY", was on no cost list and no invoice). The Costs tab's
+    // Named On A Paper list; staff only (the Costs tab is). A failed read is logged and the list
+    // says it couldn't check - never an empty list, which would read as "nothing missing".
+    viewerIsStaff
+      ? readJobPapers(supabase, j.org_id, id).catch((e: unknown) => {
+          reportError("jobs.[id].papers", e, { jobId: id });
+          return null;
+        })
+      : Promise.resolve([]),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -502,6 +516,37 @@ export default async function JobDetailPage({
           lastInvoiceNumber: unbilled.lastInvoiceNumber,
           lastInvoiceAt: unbilled.lastInvoiceAt,
         };
+  // THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25). The job's bills and orders sorted by the Unbilled
+  // card's own per-row verdict (UnbilledWork.costRows), so Not Billed Yet is exactly what that
+  // card's button bills. Only where the card exists (a job that bills its actuals, the claims
+  // readable): on a quoted or fixed job no invoice bills these rows, so "not billed yet" would be
+  // every bill forever, and the tab keeps its one plain list.
+  const costGroups =
+    viewerIsStaff && unbilled && unbilled.schemaReady
+      ? groupJobCosts(
+          [
+            ...((bills ?? []) as any[]).map((b) => ({ id: String(b.id), kind: "bill" as const, amount: Number(b.amount) || 0 })),
+            ...((pos ?? []) as any[]).map((p) => ({ id: String(p.id), kind: "po" as const, amount: Number(p.total) || 0 })),
+          ],
+          unbilled.costRows,
+          id,
+        )
+      : null;
+  const costGroupsNote =
+    viewerIsStaff && billsActuals && !costGroups
+      ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
+      : null;
+  const paperViews: JobPaperView[] | null = papers
+    ? papers.map((p) => ({
+        id: p.id,
+        invoiceNumber: p.invoiceNumber,
+        invoiceDate: p.invoiceDate,
+        jobNameRaw: p.jobNameRaw,
+        total: p.total,
+        filed: p.jobId === id,
+        accountId: p.accountId,
+      }))
+    : null;
   const oe = openEntryRow as any;
   // THE SHIFT, NOT THE PIECE (audit v994 SW1): the long-shift door counts from the first part.
   let oeShiftStart: string | null = null;
@@ -1247,6 +1292,49 @@ export default async function JobDetailPage({
               and get rid of it below… make it able to take a photo of a bill"). Snap the Bill
               runs the receipt reader per photo and the Supplier bills list below refreshes. */}
           <JobCostCapture orgId={j.org_id} jobId={j.id} billsTotal={billsCost} />
+          {/* OPEN FIRST (Erik, 2026-09-25: "in costs i need to know what is open more than i need
+              to know all the totals because i think theres a bill missing from this but i cant
+              even tell as they are all mixed together"). The bills lead: Not Billed Yet with the
+              Overview card's own door, then Billed folded by invoice, then the supplier's papers
+              that name this job and are in nobody's books. The totals follow. */}
+          <Card>
+            {!costGroups && (
+              <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
+            )}
+            <CardContent className="py-5">
+              <JobBills
+                jobId={j.id}
+                bills={(bills ?? []) as any}
+                pos={(pos ?? []) as any}
+                groups={costGroups}
+                groupsNote={costGroupsNote}
+                openAside={
+                  costGroups && unbilled ? (
+                    <div className="space-y-2">
+                      <UnbilledDoorButton jobId={j.id} work={unbilled} openDraft={openDraft} lumpToNet={lumpToNet} />
+                      {/* What else the button bills, said, so its figure never reads as a typo
+                          beside the bills' cost: the open time, and the markup on the bills. */}
+                      {(unbilled.hours > 0 || (unbilled.billsCount > 0 && unbilled.markupPct > 0)) && (
+                        <p className="text-sm text-slate-500">
+                          {[
+                            unbilled.hours > 0
+                              ? `Also not billed yet: ${formatDuration(unbilled.hours)} of time, ${formatCurrency(unbilled.laborAmount)}.`
+                              : null,
+                            unbilled.billsCount > 0 && unbilled.markupPct > 0
+                              ? `Bills go on the invoice at +${unbilled.markupPct}%.`
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </p>
+                      )}
+                    </div>
+                  ) : null
+                }
+              />
+            </CardContent>
+          </Card>
+          <JobPaperList jobId={j.id} papers={paperViews} />
           <Card>
             <CardContent className="py-5">
               {/* auto-fit, not viewport breakpoints: at ~675px the window LOOKS "tablet" to sm:
@@ -1308,13 +1396,6 @@ export default async function JobDetailPage({
               ))}
               {(!pos || pos.length === 0) && empty("purchase orders")}
             </ul>
-          </Card>
-
-          <Card>
-            <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">Supplier bills</div>
-            <CardContent className="py-5">
-              <JobBills jobId={j.id} bills={(bills ?? []) as any} pos={(pos ?? []) as any} />
-            </CardContent>
           </Card>
 
           <Card>
