@@ -49,6 +49,19 @@ describe("docPlace — the street number and name, without the street label", ()
     expect(docPlace("13897 Herringbone Way Truckee  CA 96161")).toBe("13897 Herringbone");
     expect(docPlace("1871 Apache Ct Olympic Valley CA 96146 United States")).toBe("1871 Apache");
     expect(docPlace("300 W Lake Blvd\nTahoe City")).toBe("300 W Lake");
+    // No street label and a ZIP: the town can't be found, so no place rather than the town.
+    expect(docPlace("123 Main Truckee CA 96161")).toBe("");
+    expect(docPlace("PO Box 44 Loyalton CA 96118")).toBe("");
+    expect(docPlace("12 Eagle Ridge Truckee CA 96161")).toBe("");
+    // A route number is the street's name: it stays, the town goes.
+    expect(docPlace("94248 Highway 70 Portola CA 96122")).toBe("94248 Highway 70");
+    expect(docPlace("12 Old Hwy 40 Truckee CA")).toBe("12 Old Hwy 40");
+  });
+
+  it("a street that only looks like a unit is still the street", () => {
+    expect(docPlace("123 Ste Marie Rd")).toBe("123 Ste Marie");
+    expect(docPlace("100 Outer Space Way")).toBe("100 Outer Space");
+    expect(docPlace("123 Apt 4")).toBe("123 Apt 4");
   });
 
   it("drops a unit suffix", () => {
@@ -58,6 +71,7 @@ describe("docPlace — the street number and name, without the street label", ()
     expect(docPlace("12 Main St Suite 100")).toBe("12 Main");
     expect(docPlace("12 Main St Ste. 5")).toBe("12 Main");
     expect(docPlace("12 Main #4")).toBe("12 Main");
+    expect(docPlace("12 Main St Apt 2B")).toBe("12 Main");
   });
 
   it("falls back in order, and is empty with no address at all", () => {

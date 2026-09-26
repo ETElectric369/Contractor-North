@@ -11,7 +11,6 @@ import { NO_INDEX } from "@/lib/no-index";
 import { PortalNotice, PortalSection, PortalShell, PortalTurnedOff } from "@/components/portal/portal-shell";
 import { portalJobStatus } from "@/components/portal/portal-format";
 import { readPortalAccess } from "@/lib/portal/access";
-import { rowPlace, withPlace } from "@/lib/doc-place";
 import { gateTitle, portalGate, portalSignOut } from "./gate";
 
 export const dynamic = "force-dynamic";
@@ -65,28 +64,6 @@ const readPortal = cache(async (token: string): Promise<PortalRead> => {
   }
   return { kind: "ok", data: (data ?? null) as PortalData | null };
 });
-
-/** The street on the end of each bill and estimate link (lib/doc-place). customer_portal carries
- *  no address, so it is read by the tokens that function just handed back. A failed read is only
- *  bare links, which open the same page. */
-async function linkPlaces(invoiceTokens: string[], quoteTokens: string[]): Promise<Map<string, string>> {
-  const places = new Map<string, string>();
-  try {
-    const svc = createServiceClient();
-    const [inv, qs] = await Promise.all([
-      invoiceTokens.length
-        ? svc.from("invoices").select("public_token, jobs(address), customers(address)").in("public_token", invoiceTokens)
-        : null,
-      quoteTokens.length
-        ? svc.from("quotes").select("public_token, address, jobs(address), inquiries(address), customers(address)").in("public_token", quoteTokens)
-        : null,
-    ]);
-    for (const r of [...(inv?.data ?? []), ...(qs?.data ?? [])]) places.set(String(r.public_token), rowPlace(r as never));
-  } catch {
-    /* bare links */
-  }
-  return places;
-}
 
 export async function generateMetadata({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -143,10 +120,6 @@ export default async function CustomerPortalPage({
   const contracts = data.contracts ?? [];
   const quotes = data.quotes ?? [];
   const jobs = data.jobs ?? [];
-  const places = await linkPlaces(
-    invoices.map((i: any) => String(i.public_token ?? "")).filter(Boolean),
-    quotes.map((q: any) => String(q.public_token ?? "")).filter(Boolean),
-  );
   // The office's See What They See arrives on an office session (0331); ?look=office rides along on
   // its links. Last Opened is stamped by portal_session_check for a customer's own session only, so
   // neither a link preview (no session) nor the office's look reads as "they opened it".
@@ -215,7 +188,7 @@ export default async function CustomerPortalPage({
               return (
                 <Row
                   key={i.public_token}
-                  href={withPlace(`/i/${i.public_token}`, places.get(i.public_token))}
+                  href={`/i/${i.public_token}`}
                   label={i.invoice_number}
                   sub={`${formatDate(i.created_at)} · ${bal > 0.005 ? `${formatCurrency(bal)} due` : "Paid"}`}
                   status={i.status}
@@ -250,7 +223,7 @@ export default async function CustomerPortalPage({
             {quotes.map((q: any) => (
               <Row
                 key={q.public_token}
-                href={withPlace(`/q/${q.public_token}`, places.get(q.public_token))}
+                href={`/q/${q.public_token}`}
                 label={q.quote_number}
                 sub={`${q.doc_type === "estimate" ? "Estimate" : "Quote"} · ${formatCurrency(q.total)}`}
                 status={q.status}
