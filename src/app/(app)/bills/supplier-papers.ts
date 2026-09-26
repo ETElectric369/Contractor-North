@@ -172,6 +172,7 @@ export function reconcileJobsOf(rows: any[]): ReconcileJob[] {
     name: String(j.name ?? ""),
     status: j.status ?? null,
     address: j.address ?? null,
+    createdAt: j.created_at ?? null,
   }));
 }
 
@@ -237,7 +238,7 @@ export async function loadSupplierPapers(supabase: any, userId: string): Promise
       .limit(5000),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
-    supabase.from("jobs").select("id, job_number, name, status, address").eq("org_id", orgId).order("created_at", { ascending: false }).limit(500),
+    supabase.from("jobs").select("id, job_number, name, status, address, created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(500),
     supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).limit(500),
   ]);
   // No supplier documents (or a database without 0273): nothing to bring him.

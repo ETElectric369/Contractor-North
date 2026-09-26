@@ -273,6 +273,43 @@ describe("which papers make a card", () => {
   });
 });
 
+describe("review of Wave A", () => {
+  it("a weak card still brings the nearest jobs, for the top of its picker (5661 RHODESIA)", () => {
+    const c = card(feedTonight(), "8802-1100911")!;
+    expect(c.verdict).toBe("weak");
+    const closest = (c.closest ?? []).map((j) => j.label);
+    expect(closest.length).toBeGreaterThan(0);
+    expect(closest.length).toBeLessThanOrEqual(5);
+    for (const j of closest.slice(0, 3)) expect(["J-006", "J-014", "J-033", "J-034"]).toContain(j);
+    expect(closest).not.toContain("J-099"); // a cancelled job is never offered
+  });
+
+  it("a credit memo from one supplier never reverses another supplier's purchase (the Record button reads per account)", () => {
+    const rows = supplierDocumentRows({
+      documents: [
+        doc({ id: "a-buy", supplier_account_id: "acct-a", invoice_number: "A-1", total: "120.00", job_name_raw: "13897 HERRINGBONE", invoice_date: "2026-09-10" }),
+        doc({ id: "b-memo", supplier_account_id: "acct-b", invoice_number: "B-9", kind: "credit_memo", total: "-120.00", invoice_date: "2026-09-11" }),
+      ],
+      bills: [],
+      links: [],
+      aliasRows: [],
+    }).rows;
+    const cards = supplierPaperNeeds(rows, JOBS, { since: "2026-06-08" });
+    expect(cards.map((c) => c.invoiceId)).toEqual(["a-buy"]);
+    // On one account the same pair IS a return, and makes no card.
+    const same = supplierDocumentRows({
+      documents: [
+        doc({ id: "a-buy", supplier_account_id: "acct-a", invoice_number: "A-1", total: "120.00", invoice_date: "2026-09-10" }),
+        doc({ id: "a-memo", supplier_account_id: "acct-a", invoice_number: "A-9", kind: "credit_memo", total: "-120.00", invoice_date: "2026-09-11" }),
+      ],
+      bills: [],
+      links: [],
+      aliasRows: [],
+    }).rows;
+    expect(supplierPaperNeeds(same, JOBS, { since: "2026-06-08" })).toEqual([]);
+  });
+});
+
 describe("one reading of 'is this paper already in his books?'", () => {
   it("counts a statement's bill once for each invoice it names, and a link and a named number once together", () => {
     const { rows } = supplierDocumentRows({

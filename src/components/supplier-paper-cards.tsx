@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
@@ -29,6 +30,75 @@ const titleCase = (s: string | null | undefined) =>
     .map((w) => w[0].toUpperCase() + w.slice(1))
     .join(" ");
 
+/**
+ * WHAT A CHIP SAYS BEYOND ITS NUMBER (review of Wave A). "J-033 · Complete" and "J-006 · Complete"
+ * read the same on a phone, where a `title` never shows. So a chip carries the job's name when it
+ * is not the name the others share ("J-034 · Panel Upgrade", "J-047 · Jackie Burks"), and the day
+ * the job was made, which is what tells two "5659 Rhodesia, complete" jobs apart.
+ */
+const squash = (s: string | null | undefined) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+export function chipNames(said: string | null, jobs: PaperJob[]): Map<string, string | null> {
+  const names = jobs.map((j) => String(j.name ?? "").trim());
+  // The name that says nothing new: CED's own words when a job carries them, else the most common.
+  const counts = new Map<string, number>();
+  for (const n of names) if (squash(n)) counts.set(squash(n), (counts.get(squash(n)) ?? 0) + 1);
+  const common = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0]?.[0] ?? "";
+  const base = said && counts.has(squash(said)) ? squash(said) : common;
+  const out = new Map<string, string | null>();
+  for (const j of jobs) {
+    const name = String(j.name ?? "").trim();
+    const n = squash(name);
+    if (!n || n === base) {
+      out.set(j.id, null);
+      continue;
+    }
+    // "5659 Rhodesia - Panel Upgrade" beside "5659 Rhodesia" says only "Panel Upgrade".
+    let rest = name;
+    if (base && n.startsWith(`${base} `)) {
+      // Walk his own words until the shared ones are used up; what is left is the news.
+      const tokens = name.split(/\s+/);
+      let need = base.split(" ").length;
+      let i = 0;
+      while (i < tokens.length && need > 0) need -= squash(tokens[i++]).split(" ").filter(Boolean).length;
+      rest = tokens.slice(i).join(" ");
+    }
+    out.set(j.id, rest.replace(/^[\s\-–—·:,]+/, "").trim() || null);
+  }
+  return out;
+}
+
+/** "Opened Jun 11": the day a job was made, in his own day. */
+const openedWords = (j: PaperJob) => (j.opened ? `Opened ${formatDateShort(j.opened)}` : "");
+
+// ── THE DONE LINES, KEPT PAST THE LIST THAT HELD THEM (review of Wave A) ─────────────────────────
+//
+// On My Day the cards ride inside the "Supplier Bills" line, and filing the LAST paper removes
+// that line (the server's fresh list has nothing waiting), unmounting these cards and, with them,
+// the sentence and the Undo he was owed. A scoped store keeps the done lines outside any one
+// mount, and SupplierPaperDoneTrail shows them where the line was while no card set is on screen.
+// Without a `scope` a card set keeps its own (the /bills list never vanishes).
+
+type Scope = { done: Record<string, Done>; live: number };
+/** My Day's scope: its rollup's cards and the trail under them share it. */
+export const SUPPLIER_PAPERS_SCOPE = "my-day";
+const EMPTY_DONE: Record<string, Done> = {};
+/** One frozen "nothing kept" answer: useSyncExternalStore needs the same object back each time. */
+const EMPTY_SCOPE: Scope = { done: EMPTY_DONE, live: 0 };
+const scopes = new Map<string, Scope>();
+const listeners = new Set<() => void>();
+const scopeOf = (key: string) => scopes.get(key) ?? EMPTY_SCOPE;
+const emit = () => listeners.forEach((l) => l());
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => listeners.delete(l);
+};
+function putScope(key: string, next: Partial<Scope>) {
+  scopes.set(key, { ...scopeOf(key), ...next });
+  emit();
+}
+/** Tests only: set what a scope holds, as a tap and a mount would. */
+export const setSupplierPaperScopeForTest = putScope;
+
 /** What the card's headline says the paper names: CED's own words, or where it already sits. */
 function saysLine(c: SupplierPaperCard): string {
   if (c.said) return `It Says ${c.said}`;
@@ -54,36 +124,70 @@ export function SupplierPaperCards({
   feed,
   refreshAfter = true,
   emptyLabel,
+  scope,
+  trail = false,
+  limit,
+  moreHref,
 }: {
   feed: SupplierPaperFeed;
   /** /bills refreshes so its other lists follow; My Day keeps the done line in place instead. */
   refreshAfter?: boolean;
   /** Said when nothing is waiting (never a blank box). */
   emptyLabel?: string;
+  /** Keeps the done lines (and their Undo) past this mount; see SupplierPaperDoneTrail. */
+  scope?: string;
+  /** SupplierPaperDoneTrail's mode: only the kept done lines, and only while no card set is up. */
+  trail?: boolean;
+  /**
+   * How many waiting cards to draw (My Day: one, readable at 60mph). The rest are one plain line
+   * and a link to where they all are (`moreHref`). Absent: every card.
+   */
+  limit?: number;
+  moreHref?: string;
 }) {
   const router = useRouter();
   const [, start] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
-  const [done, setDone] = useState<Record<string, Done>>({});
+  const [ownDone, setOwnDone] = useState<Record<string, Done>>({});
+  // The same answer on the server: nothing there ever writes the store (only taps and mounts do),
+  // so it is always EMPTY_SCOPE at render and hydration cannot disagree.
+  const keptOf = () => (scope ? scopeOf(scope) : null);
+  const kept = useSyncExternalStore(subscribe, keptOf, keptOf);
+  const done = scope ? (kept?.done ?? EMPTY_DONE) : ownDone;
+  const setDone = (fn: (d: Record<string, Done>) => Record<string, Done>) => {
+    if (scope) putScope(scope, { done: fn(scopeOf(scope).done) });
+    else setOwnDone(fn);
+  };
+  // A card set on screen says so, so the trail stays out of its way. The trail itself, leaving the
+  // page, lets the kept lines go: they belong to this visit.
+  useEffect(() => {
+    if (!scope) return;
+    if (trail) return () => putScope(scope, { done: EMPTY_DONE });
+    putScope(scope, { live: scopeOf(scope).live + 1 });
+    return () => putScope(scope, { live: Math.max(0, scopeOf(scope).live - 1) });
+  }, [scope, trail]);
   const [open, setOpen] = useState<Record<string, "job" | "bucket" | undefined>>({});
   /** What he has picked in a card's picker, before he presses. Nothing is preselected, ever. */
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [shelf, setShelf] = useState<{ card: SupplierPaperCard; lines: ShelfCountLine[]; total: number } | null>(null);
 
-  const cards = feed?.cards ?? [];
+  const cards = trail ? [] : (feed?.cards ?? []);
   const jobs = feed?.jobs ?? [];
-  const inFeed = new Set(cards.map((c) => c.invoiceId));
-  // A paper filed and then refreshed away still owes its done line (and its Undo) somewhere.
-  const doneElsewhere = Object.values(done).filter((d) => !inFeed.has(d.card.invoiceId));
+  // Every done line, in the order they were answered: a paper filed and then refreshed away still
+  // owes its sentence (and its Undo) somewhere, and one still in the list shows it in its place.
+  const doneLines = Object.values(done);
+  const waiting = cards.filter((c) => !done[c.invoiceId]);
+  const shown = limit != null && limit >= 0 ? waiting.slice(0, limit) : waiting;
+  const moreCount = waiting.length - shown.length;
 
-  function settle(card: SupplierPaperCard, res: SupplierActionResult, fallback: string) {
+  function settle(card: SupplierPaperCard, res: SupplierActionResult, fallback: string, refresh = true) {
     setBusy(null);
     if (!res.ok) {
       setErrors((e) => ({ ...e, [card.invoiceId]: res.error ?? "That didn't save. Nothing was filed." }));
       // A refusal is often news the card did not have yet (a bill that may be this purchase landed
       // since the page loaded): fresh cards bring its Same Purchase: Tie Them with them.
-      router.refresh();
+      if (refresh) router.refresh();
       return;
     }
     setErrors((e) => ({ ...e, [card.invoiceId]: "" }));
@@ -100,12 +204,20 @@ export function SupplierPaperCards({
         const res = await fileSupplierPaper({
           invoiceId: card.invoiceId,
           ...answer,
-          // He read "maybe already in your books" on this card and pressed an answer anyway.
-          differentPurchase: card.samePurchase.length > 0,
+          // He read "maybe already in your books" on this card and pressed an answer anyway: THOSE
+          // bills, the ones drawn above, are set aside. Any other still stops it on the server.
+          notSameAs: card.samePurchase.map((s) => s.billId),
         });
         settle(card, res, `${card.invoiceNumber} is in your books now.`);
       } catch {
-        settle(card, { ok: false, error: "The connection dropped, so nothing was filed. Try again." }, "");
+        // The answer never came back, so nobody here knows what landed. The card stays put with the
+        // truth (no refresh to whisk it away along with this sentence).
+        settle(
+          card,
+          { ok: false, error: "The connection dropped before the answer came back. Reload the page to see whether it was filed." },
+          "",
+          false,
+        );
       }
     });
   }
@@ -175,7 +287,7 @@ export function SupplierPaperCards({
     </div>
   );
 
-  const jobButton = (card: SupplierPaperCard, job: PaperJob, text: string, variant: "primary" | "outline") => (
+  const jobButton = (card: SupplierPaperCard, job: PaperJob, text: string, variant: "primary" | "outline", className?: string) => (
     <Button
       key={job.id}
       type="button"
@@ -183,6 +295,7 @@ export function SupplierPaperCards({
       disabled={busy === card.invoiceId}
       onClick={() => file(card, { jobId: job.id })}
       title={job.name}
+      className={className}
     >
       {text}
     </Button>
@@ -191,8 +304,11 @@ export function SupplierPaperCards({
   function picker(card: SupplierPaperCard) {
     // His best guesses first, then everything else, so the job he wants is near the top whether
     // or not the matcher liked it. Nothing selected until he selects it.
-    const first = [card.suggestion, ...card.candidates].filter(Boolean) as PaperJob[];
-    const firstIds = new Set(first.map((j) => j.id));
+    // A weak card's nearest jobs ride here too (card.closest), so "The closest are first" is true.
+    const firstIds = new Set<string>();
+    const first = ([card.suggestion, ...card.candidates, ...(card.closest ?? [])].filter(Boolean) as PaperJob[]).filter(
+      (j) => !firstIds.has(j.id) && !!firstIds.add(j.id),
+    );
     const rest = jobs.filter((j) => !firstIds.has(j.id));
     const value = picked[card.invoiceId] ?? "";
     const chosen = jobs.find((j) => j.id === value) ?? first.find((j) => j.id === value) ?? null;
@@ -258,6 +374,7 @@ export function SupplierPaperCards({
     const showing = open[c.invoiceId];
     const toggle = (what: "job" | "bucket") => setOpen((o) => ({ ...o, [c.invoiceId]: o[c.invoiceId] === what ? undefined : what }));
     const hasGuess = c.state === "record" || !!c.suggestion || c.candidates.length > 0;
+    const chips = chipNames(c.said, c.candidates);
     return (
       <div key={c.invoiceId} className="rounded-lg border border-slate-200 bg-white p-3">
         <p className="text-sm font-semibold text-slate-900">
@@ -267,11 +384,17 @@ export function SupplierPaperCards({
           {c.invoiceNumber} · {formatDateShort(c.date)} · {c.closed ? "the supplier shows it paid" : "still open with the supplier"}
           {c.state === "record" && c.onJob ? ` · on ${[c.onJob.label, c.onJob.name].filter(Boolean).join(" ")}, with no bill yet` : ""}
         </p>
-        {c.state === "needs_job" && <p className="mt-0.5 text-xs text-slate-400">{c.because}</p>}
+        {c.state === "needs_job" && (
+          <p className="mt-0.5 text-xs text-slate-400">
+            {/* "The closest are first" only where the picker really has them first. */}
+            {c.verdict === "weak" && !(c.closest ?? []).length ? c.because.replace(/\s*The closest are first\.$/, "") : c.because}
+          </p>
+        )}
 
         {c.samePurchase.length > 0 && (
           <div className="mt-2 space-y-2 rounded-md border border-amber-200 bg-amber-50 p-2">
-            {c.samePurchase.slice(0, 2).map((s) => (
+            {/* Every one drawn: Different Purchase sets aside exactly the bills he was shown. */}
+            {c.samePurchase.map((s) => (
               <div key={s.billId} className="space-y-1">
                 <p className="text-xs text-amber-900">{s.sentence}</p>
                 <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => tie(c, s.billId)}>
@@ -288,7 +411,15 @@ export function SupplierPaperCards({
           {c.state === "record" && c.onJob && jobButton(c, c.onJob, `Record It On ${c.onJob.label}`, "primary")}
           {c.state === "needs_job" && c.suggestion && jobButton(c, c.suggestion, `Put It On ${c.suggestion.label}`, "primary")}
           {c.state === "needs_job" &&
-            c.candidates.map((j) => jobButton(c, j, [j.label, titleCase(j.status)].filter(Boolean).join(" · "), "outline"))}
+            c.candidates.map((j) =>
+              jobButton(
+                c,
+                j,
+                [j.label, titleCase(chips.get(j.id)), titleCase(j.status), openedWords(j)].filter(Boolean).join(" · "),
+                "outline",
+                "h-auto min-h-11 whitespace-normal py-2 text-left",
+              ),
+            )}
           <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => toggle("job")}>
             {hasGuess ? "Another Job" : "Pick A Job"}
           </Button>
@@ -311,11 +442,19 @@ export function SupplierPaperCards({
     );
   }
 
+  // The trail steps aside while a card set is on screen (it shows the same lines itself).
+  if (trail && (!doneLines.length || (kept?.live ?? 0) > 0)) return null;
+
   return (
-    <div className="space-y-2">
-      {emptyLabel && cards.length === 0 && doneElsewhere.length === 0 && <p className="text-sm text-slate-500">{emptyLabel}</p>}
-      {doneElsewhere.map(doneLine)}
-      {cards.map(cardView)}
+    <div className={trail ? "mb-4 space-y-2" : "space-y-2"}>
+      {emptyLabel && waiting.length === 0 && doneLines.length === 0 && <p className="text-sm text-slate-500">{emptyLabel}</p>}
+      {doneLines.map(doneLine)}
+      {shown.map(cardView)}
+      {moreCount > 0 && moreHref && (
+        <Link href={moreHref} className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+          {`See ${moreCount} More Supplier Bill${moreCount === 1 ? "" : "s"}`}
+        </Link>
+      )}
       {shelf && (
         <ShelfTicketSheet
           title={`Record ${shelf.card.invoiceNumber} To The Shelf`}
@@ -327,7 +466,7 @@ export function SupplierPaperCards({
             const card = shelf.card;
             const res = await recordSupplierInvoiceToShelf({
               invoiceId: card.invoiceId,
-              differentPurchase: card.samePurchase.length > 0,
+              notSameAs: card.samePurchase.map((s) => s.billId),
               toShelf: choices,
             });
             if (!res.ok) return { ok: false, error: res.error };
@@ -340,4 +479,13 @@ export function SupplierPaperCards({
       )}
     </div>
   );
+}
+
+/**
+ * WHERE MY DAY'S DONE LINES LAND WHEN THE "SUPPLIER BILLS" LINE IS GONE. Filing the last paper
+ * clears the line (and its cards) at once; this keeps "8802-... is a bill on J-011 now" and its
+ * Undo on screen until he leaves the page. Renders nothing while a card set of the same scope is up.
+ */
+export function SupplierPaperDoneTrail({ scope }: { scope: string }) {
+  return <SupplierPaperCards feed={{ cards: [], jobs: [] }} scope={scope} trail refreshAfter={false} />;
 }

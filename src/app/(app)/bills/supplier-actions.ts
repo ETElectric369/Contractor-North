@@ -1601,8 +1601,23 @@ export async function recordSupplierInvoiceAsBill(input: {
    * Add Business Cost writes. Anything that is not one of the six is refused, never guessed at.
    */
   businessCost?: string | null;
+  /**
+   * THE CARD'S DIFFERENT PURCHASE, NARROWED TO WHAT HE SAW (review of Wave A). The bills the card
+   * showed as "maybe already in your books" when he pressed a job anyway: those, and only those,
+   * are set aside. The check still runs, so a bill the card never drew (a third candidate, one
+   * that landed after the page loaded, one on the other job he picked) still refuses. Present means
+   * the card door, and the refusal is worded for the card's own buttons.
+   */
+  notSameAs?: string[] | null;
+  /**
+   * The job he pressed (fileSupplierPaper). The bill takes its job off the paper row, so if another
+   * tap moved the paper in between, this refuses rather than record on a job he never pressed.
+   */
+  expectJobId?: string | null;
 }): Promise<SupplierActionResult> {
   const toShelf = Array.isArray(input?.toShelf) ? input.toShelf : null;
+  const cardDoor = Array.isArray(input?.notSameAs);
+  const notSameAs = new Set((cardDoor ? (input.notSameAs as unknown[]) : []).map((id) => String(id ?? "")).filter(Boolean));
   const wantsBucket = input?.businessCost != null && String(input.businessCost).trim() !== "";
   if (wantsBucket && !isBusinessCostBucket(input.businessCost))
     return { ok: false, error: `Pick one of the six business-cost buckets: ${BUSINESS_COST_BUCKETS.join(", ")}. Nothing was written.` };
@@ -1655,6 +1670,9 @@ export async function recordSupplierInvoiceAsBill(input: {
   // No job is refused BELOW the "already in your books?" checks: a purchase already on the books
   // is answered with the tie, which needs no job, rather than sent off to pick one first.
   const jobId = text(row.job_id);
+  if (input?.expectJobId !== undefined && !toShelf && !bucket && jobId !== text(input.expectJobId)) {
+    return { ok: false, error: `${number} was moved to another job just now, from another screen or tap. Nothing was written. Reload the page to see where it is.` };
+  }
 
   const accountId = text(row.supplier_account_id);
   const accountName = text(row.supplier_accounts?.name);
@@ -1756,7 +1774,7 @@ export async function recordSupplierInvoiceAsBill(input: {
    * are never offered: every cost reader ignores them.
    */
   if (!input?.differentPurchase) {
-    const found = await samePurchaseFor(ctx.supabase, org.orgId, {
+    const foundAll = await samePurchaseFor(ctx.supabase, org.orgId, {
       id: invoiceId,
       invoice_number: text(row.invoice_number),
       supplier_account_id: accountId,
@@ -1764,13 +1782,20 @@ export async function recordSupplierInvoiceAsBill(input: {
       total: row.total as any,
       invoice_date: text(row.invoice_date),
     });
-    if (!found) return { ok: false, error: `Couldn't check whether ${number} is already in your books, so nothing was written. Try again.` };
+    if (!foundAll) return { ok: false, error: `Couldn't check whether ${number} is already in your books, so nothing was written. Try again.` };
+    // The ones he already looked at on the card and pressed past are his answer; any other is news.
+    const found = { candidates: foundAll.candidates.filter((c) => !notSameAs.has(c.billId)) };
     const first = found.candidates[0];
     if (first) {
       const more = found.candidates.length > 1 ? ` ${found.candidates.length - 1} more bill${found.candidates.length === 2 ? "" : "s"} could be it too; each is listed on the card.` : "";
+      // The card has no Record It Anyway button: after this refusal it redraws with a Same Purchase:
+      // Tie Them for each, and pressing the job again is the card's "different purchase".
+      const how = cardDoor
+        ? "The card now shows it. If it is the same purchase, press Same Purchase: Tie Them. If it is not, press your answer again."
+        : "If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: Record It Anyway.";
       return {
         ok: false,
-        error: `${samePurchaseSentence(first)}${more} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: Record It Anyway. Nothing was written.`,
+        error: `${samePurchaseSentence(first)}${more} ${how} Nothing was written.`,
       };
     }
   }
@@ -2077,8 +2102,11 @@ export async function fileSupplierPaper(input: {
   invoiceId: string;
   jobId?: string | null;
   businessCost?: string | null;
-  /** He read "maybe already in your books" on the card and pressed a job anyway. */
-  differentPurchase?: boolean;
+  /**
+   * The bills the card showed as "maybe already in your books" when he pressed an answer anyway.
+   * Only these are set aside; any other candidate still refuses (recordSupplierInvoiceAsBill).
+   */
+  notSameAs?: string[] | null;
 }): Promise<SupplierActionResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -2105,10 +2133,10 @@ export async function fileSupplierPaper(input: {
   if (String((inv as any).kind ?? "invoice") !== "invoice")
     return { ok: false, error: `${number} isn't a purchase, so there is no bill to record from it. Nothing was filed.` };
   const jobBefore = text((inv as any).job_id);
-  const differentPurchase = input?.differentPurchase === true;
+  const notSameAs = Array.isArray(input?.notSameAs) ? input.notSameAs.map((id) => String(id ?? "")).filter(Boolean) : [];
 
   if (bucket) {
-    const rec = await recordSupplierInvoiceAsBill({ invoiceId, businessCost: bucket, differentPurchase });
+    const rec = await recordSupplierInvoiceAsBill({ invoiceId, businessCost: bucket, notSameAs });
     if (!rec.ok) return { ok: false, error: rec.error };
     return { ...rec, undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo: null, jobBefore } : undefined };
   }
@@ -2120,9 +2148,13 @@ export async function fileSupplierPaper(input: {
     jobSetTo = jobId;
   }
 
-  const rec = await recordSupplierInvoiceAsBill({ invoiceId, differentPurchase });
-  if (!rec.ok) {
-    if (!jobSetTo) return { ok: false, error: rec.error };
+  /**
+   * TAKE BACK THE JOB THIS TAP PUT ON, and say truly where the paper is. Guarded on still being
+   * the job it put on: when another tap moved it since, that tap's job is left alone and the
+   * sentence says so rather than claiming a put-back that did not happen.
+   */
+  const putBack = async (said: string): Promise<SupplierActionResult> => {
+    if (!jobSetTo) return { ok: false, error: said };
     const { data: back, error: backErr } = await ctx.supabase
       .from("supplier_invoices")
       .update({ job_id: jobBefore })
@@ -2131,15 +2163,47 @@ export async function fileSupplierPaper(input: {
       .eq("job_id", jobSetTo)
       .select("id");
     revalidatePath("/bills");
-    if (backErr || !back?.length) {
-      reportError("bills:fileSupplierPaper.rollback", backErr ?? new Error("job rollback wrote no rows"), { invoiceId, jobSetTo });
-      return {
-        ok: false,
-        error: `${rec.error ?? `${number} didn't record.`} ${number} is still on that job with no bill, though: taking the job back off didn't save. Its card stays until it is recorded.`,
-      };
+    revalidatePath("/planner");
+    if (!backErr && back?.length) return { ok: false, error: `${said} The job was taken back off it, so nothing changed.` };
+    // Nothing came back off. Either the put-back failed, or another tap moved the paper since and
+    // the guard rightly left it alone: read where it is now, so the sentence is the true one.
+    const { data: now } = backErr
+      ? { data: null }
+      : await ctx.supabase.from("supplier_invoices").select("job_id").eq("id", invoiceId).eq("org_id", org.orgId).maybeSingle();
+    const nowJob = now ? text((now as { job_id?: string | null }).job_id) : jobSetTo;
+    if (nowJob !== jobSetTo)
+      return { ok: false, error: `${said} Someone moved ${number} to another job in the meantime, so it was left where they put it. Reload the page to see it.` };
+    reportError("bills:fileSupplierPaper.rollback", backErr ?? new Error("job rollback wrote no rows"), { invoiceId, jobSetTo });
+    return {
+      ok: false,
+      error: `${said} ${number} is still on that job with no bill, though: taking the job back off didn't save. Its card stays until it is recorded.`,
+    };
+  };
+
+  let rec: SupplierActionResult;
+  try {
+    // The job he pressed rides along: the bill takes its job off the paper, and a paper another tap
+    // moved in between is refused, never recorded on a job he did not press.
+    rec = await recordSupplierInvoiceAsBill({ invoiceId, notSameAs, expectJobId: jobId });
+  } catch (e) {
+    reportError("bills:fileSupplierPaper.record", e, { invoiceId, jobSetTo });
+    // A THROW IS NOT A REFUSAL: the bill may have been written before it. The job comes off only
+    // when no bill is tied to the paper; a bill that did land keeps its paper on its job.
+    const { data: tied, error: tiedErr } = await ctx.supabase
+      .from("bill_supplier_invoices")
+      .select("bill_id")
+      .eq("org_id", org.orgId)
+      .eq("supplier_invoice_id", invoiceId)
+      .limit(1);
+    if (tiedErr) return { ok: false, error: `Something went wrong recording ${number}. Reload the page to see whether it was filed.` };
+    if (tied?.length) {
+      revalidatePath("/bills");
+      revalidatePath("/planner");
+      return { ok: false, error: `Something went wrong partway, but ${number} did land in your books. Reload the page to see it.` };
     }
-    return { ok: false, error: `${rec.error ?? `${number} didn't record.`} The job was taken back off it, so nothing changed.` };
+    return putBack(`Something went wrong recording ${number}, so no bill was written.`);
   }
+  if (!rec.ok) return putBack(rec.error ?? `${number} didn't record.`);
   return { ...rec, undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo, jobBefore } : undefined };
 }
 
@@ -2213,6 +2277,16 @@ export async function undoFileSupplierPaper(input: {
   if (billJob) revalidatePath(`/jobs/${billJob}`);
 
   if (jobSetTo) {
+    // THE JOB IT GOES BACK TO IS CHECKED, NOT TRUSTED (review of Wave A). `jobBefore` arrives from
+    // the browser, and nothing below this line (no trigger, an RLS policy on the paper's own org,
+    // an FK to any job) would stop a doctored Undo pointing his paper at another org's job.
+    if (jobBefore) {
+      const { data: ours, error: oursErr } = await ctx.supabase.from("jobs").select("id").eq("id", jobBefore).eq("org_id", org.orgId).maybeSingle();
+      if (oursErr || !ours) {
+        if (oursErr) reportError("bills:undoFileSupplierPaper.jobBefore", oursErr, { invoiceId, jobBefore });
+        return { ok: true, message: `${number}'s bill is gone, but the paper is still on the job it was put on: ${oursErr ? "couldn't check" : "couldn't find"} the job it was on before. Its card is back so you can pick again.` };
+      }
+    }
     const { data: back, error: backErr } = await ctx.supabase
       .from("supplier_invoices")
       .update({ job_id: jobBefore })
@@ -2233,10 +2307,17 @@ export async function undoFileSupplierPaper(input: {
 export async function recordSupplierInvoiceToShelf(input: {
   invoiceId: string;
   differentPurchase?: boolean;
+  /** The card door: the "maybe the same purchase" bills it showed (recordSupplierInvoiceAsBill). */
+  notSameAs?: string[] | null;
   toShelf: TicketLineChoice[];
 }): Promise<SupplierActionResult> {
   if (!Array.isArray(input?.toShelf)) return { ok: false, error: "Say for every line how many go on the shelf, or tap Not Stock." };
-  return recordSupplierInvoiceAsBill({ invoiceId: input.invoiceId, differentPurchase: input.differentPurchase, toShelf: input.toShelf });
+  return recordSupplierInvoiceAsBill({
+    invoiceId: input.invoiceId,
+    differentPurchase: input.differentPurchase,
+    ...(Array.isArray(input?.notSameAs) ? { notSameAs: input.notSameAs } : {}),
+    toShelf: input.toShelf,
+  });
 }
 
 export type SupplierShelfLine = {

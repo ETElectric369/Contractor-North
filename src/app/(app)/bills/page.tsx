@@ -157,16 +157,16 @@ export default async function BillsPage({
   // - which reads here as "no accounts yet", exactly the state Erik is in today.
   const [
     { data: pos },
-    { data: bills },
+    { data: bills, error: billsErr },
     { data: docRows },
-    { data: jobs },
+    { data: jobs, error: jobsErr },
     { data: lists },
     { data: accountRows, error: accountsErr },
-    { data: aliasRows },
+    { data: aliasRows, error: aliasErr },
     { data: paymentRows },
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
-    { data: billLinkRows },
+    { data: billLinkRows, error: linksErr },
     { data: paperRows },
     books,
     markCtx,
@@ -190,7 +190,7 @@ export default async function BillsPage({
     // cannot file, which is a dead end wearing a dropdown.
     supabase
       .from("jobs")
-      .select("id, job_number, name, status, address")
+      .select("id, job_number, name, status, address, created_at")
       .order("created_at", { ascending: false })
       .limit(500),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
@@ -634,8 +634,13 @@ export default async function BillsPage({
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" The same cards My Day shows, from the same call
   // (supplierPaperFeed), so the two screens can never disagree about which paper is waiting.
+  //
+  // AND ONLY WHEN THE BOOKS WERE READ. A failed bills, links, aliases or jobs read makes papers his
+  // books already cover look uncovered: false "Needs You" cards on this screen while My Day
+  // (loadSupplierPapers, the same gate) shows none. So it says it couldn't check, instead.
+  const paperBooksUnread = !!(billsErr || linksErr || aliasErr || jobsErr);
   const paperFeed =
-    invoicesErr || accountsErr || !supplierDocuments.length
+    invoicesErr || accountsErr || paperBooksUnread || !supplierDocuments.length
       ? null
       : supplierPaperFeed({
           since: recordsSince,
@@ -1016,6 +1021,14 @@ export default async function BillsPage({
 
       {/* NEEDS YOU: the same "here's a bill, what's it for?" cards My Day shows, from the same
           call (supplierPaperFeed). Only where supplier documents exist; nothing waiting says so. */}
+      {!paperFeed && paperBooksUnread && !invoicesErr && !accountsErr && supplierDocuments.length > 0 && (
+        <Card className="mb-6 p-4" id="needs-you">
+          <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
+          <p className="mt-0.5 text-xs text-slate-500" role="status">
+            Couldn&apos;t check your books just now, so the supplier bills waiting on you aren&apos;t shown. Reload the page to try again.
+          </p>
+        </Card>
+      )}
       {paperFeed && (
         <Card className="mb-6 p-4" id="needs-you">
           <h2 className="text-sm font-semibold text-slate-900">

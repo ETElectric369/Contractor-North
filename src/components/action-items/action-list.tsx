@@ -12,7 +12,7 @@ import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
-import { SupplierPaperCards } from "@/components/supplier-paper-cards";
+import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 
 /**
  * Friendly relative day for the "when" line; times for datetime values.
@@ -414,7 +414,15 @@ export function ActionList({
                       every paper answerable right here with one tap (Bills plan, Wave A). */}
                   {item.kind === "supplier_paper" && item.supplierPapers && (
                     <div className="mt-2">
-                      <SupplierPaperCards feed={item.supplierPapers} refreshAfter={false} />
+                      {/* ONE card at a time here (readable at 60mph); the rest are a link to /bills,
+                          which draws them all. The done lines outlive this line (scope "my-day"). */}
+                      <SupplierPaperCards
+                        feed={item.supplierPapers}
+                        refreshAfter={false}
+                        scope={SUPPLIER_PAPERS_SCOPE}
+                        limit={1}
+                        moreHref="/bills#needs-you"
+                      />
                     </div>
                   )}
                 </div>

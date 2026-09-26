@@ -108,6 +108,8 @@ export interface ReconcileJob {
   name: string;
   status: string | null;
   address: string | null;
+  /** When the job was made (YYYY-MM-DD...). Tells two identically named jobs apart on a card. */
+  createdAt?: string | null;
 }
 
 /** How a job reads in a picker: "J-033 · 5659 Rhodesia · complete · 5659 Rhodesia Rd". Everything
@@ -858,6 +860,9 @@ export interface PaperJob {
   name: string;
   /** "in progress", "complete": the one thing that tells five 5659 Rhodesias apart on a chip. */
   status: string | null;
+  /** When the job was made (its created_at), when known: J-006 and J-033 are both "5659 Rhodesia,
+   *  complete", and only the day tells them apart at a glance. */
+  opened?: string | null;
 }
 
 export interface SupplierPaperCard {
@@ -881,6 +886,12 @@ export interface SupplierPaperCard {
   suggestion: PaperJob | null;
   /** "ask": the jobs that match just as well, offered as chips. Empty otherwise. */
   candidates: PaperJob[];
+  /**
+   * "weak": the matcher's nearest jobs all the same (5661 RHODESIA ranks the three 5659 Rhodesias
+   * first), for the TOP of the picker only. Never a button, never preselected: the card says
+   * "The closest are first", and this is what makes that true.
+   */
+  closest?: PaperJob[];
   /** state "record": the job a person already put it on. */
   onJob: PaperJob | null;
   /** The matcher's sentence, the grey line on the card. */
@@ -894,8 +905,19 @@ const MAX_CHIPS = 5;
 
 export function paperJob(job: ReconcileJob): PaperJob {
   const name = String(job.name ?? "").trim();
-  return { id: job.id, label: String(job.jobNumber ?? "").trim() || name || "That Job", name, status: sayStatus(job.status) || null };
+  // The timestamp as stored: the card says it in his own day (formatDateShort), never UTC's.
+  const opened = /^\d{4}-\d{2}-\d{2}/.test(String(job.createdAt ?? "")) ? String(job.createdAt) : null;
+  return {
+    id: job.id,
+    label: String(job.jobNumber ?? "").trim() || name || "That Job",
+    name,
+    status: sayStatus(job.status) || null,
+    ...(opened ? { opened } : {}),
+  };
 }
+
+/** How many of the matcher's nearest jobs a "weak" card puts at the top of its picker. */
+const MAX_CLOSEST = 5;
 
 /**
  * A supplier's name, short enough to lead a card on a phone. "Consolidated Electrical
@@ -933,7 +955,18 @@ export function supplierPaperNeeds(
   opts: { since?: string | null; supplierName?: (accountId: string | null) => string } = {},
 ): SupplierPaperCard[] {
   const all = invoices ?? [];
-  const reversed = reversedPurchaseIds(all);
+  // ONE ACCOUNT AT A TIME, the way the Record button reads it (recordSupplierInvoiceAsBill's
+  // siblings are one supplier account's documents): a credit memo from one supplier never reverses
+  // another supplier's purchase, and a card the server would record must never silently vanish.
+  const byAccount = new Map<string, SupplierInvoiceRow[]>();
+  for (const inv of all) {
+    const key = String(inv.supplierAccountId ?? "");
+    const group = byAccount.get(key) ?? [];
+    group.push(inv);
+    byAccount.set(key, group);
+  }
+  const reversed = new Set<string>();
+  for (const group of byAccount.values()) for (const id of reversedPurchaseIds(group)) reversed.add(id);
   const jobById = new Map((jobs ?? []).map((j) => [j.id, j]));
   const cards: SupplierPaperCard[] = [];
   for (const inv of all) {
@@ -970,6 +1003,15 @@ export function supplierPaperNeeds(
               .slice(0, MAX_CHIPS)
               .map((g) => paperJob(g.job))
           : [],
+      ...(!jobId && match.verdict === "weak"
+        ? {
+            closest: match.ranked
+              // Cancelled jobs are never offered in a picker (supplierPaperFeed says the same).
+              .filter((g) => g.score > 0 && g.job.status !== "cancelled")
+              .slice(0, MAX_CLOSEST)
+              .map((g) => paperJob(g.job)),
+          }
+        : {}),
       onJob: jobId
         ? onJobRow
           ? paperJob(onJobRow)

@@ -143,24 +143,77 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
   });
 
   it("a put-back that wrote no rows is said out loud, never 'nothing changed'", async () => {
+    const script = happy({
+      "supplier_invoices.select": [
+        OK({ id: INVOICE, invoice_number: NUMBER, kind: "invoice", job_id: null }),
+        docsForSamePurchase,
+        { data: null, error: { message: "connection reset" } },
+        // Where it is now: still the job this tap put on, so the put-back really did not save.
+        OK({ job_id: "j-011" }),
+      ],
+      "supplier_invoices.update": [
+        OK([{ id: INVOICE, invoice_number: NUMBER, supplier_account_id: "acct-ced", total: "301.81", invoice_date: "2026-09-04" }]),
+        OK([]),
+      ],
+    });
+    state.client = fakeSupabase(script, calls);
+    const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("is still on that job with no bill");
+    expect(res.error).not.toContain("nothing changed");
+  });
+
+  it("a paper another tap moved in between is refused, and that tap's job is left alone", async () => {
     state.client = fakeSupabase(
       happy({
         "supplier_invoices.select": [
           OK({ id: INVOICE, invoice_number: NUMBER, kind: "invoice", job_id: null }),
           docsForSamePurchase,
-          { data: null, error: { message: "connection reset" } },
+          recordRow("j-014"), // someone put it on J-014 after this tap put it on J-011
+          OK({ job_id: "j-014" }), // where it is now, after the guarded put-back touched nothing
         ],
         "supplier_invoices.update": [
           OK([{ id: INVOICE, invoice_number: NUMBER, supplier_account_id: "acct-ced", total: "301.81", invoice_date: "2026-09-04" }]),
           OK([]),
         ],
+        "bill_supplier_invoices.select": [OK([]), OK([]), OK([])],
+        "bills.select": [OK([])],
+        "supplier_aliases.select": [OK([])],
       }),
       calls,
     );
     const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("is still on that job with no bill");
+    expect(res.error).toContain("was moved to another job just now");
+    expect(res.error).toContain("Someone moved");
     expect(res.error).not.toContain("nothing changed");
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(false);
+  });
+
+  /** A CED counter ticket already on J-011 for the same money: the near match samePurchaseFor finds. */
+  const counterTicket = OK([
+    { id: "bill-counter", supplier: "Consolidated Electrical Dist.", supplier_account_id: "acct-ced", bill_number: "8802-SO-257555", supplier_invoice_number: null, amount: "301.81", bill_date: "2026-09-04", job_id: "j-011", is_statement: false, notes: null, jobs: { job_number: "J-011", name: "13897 Herringbone" }, bill_line_items: [] },
+  ]);
+
+  it("Different Purchase sets aside only the bills the card showed: one it never drew still stops it", async () => {
+    state.client = fakeSupabase(happy({ "bills.select": [counterTicket, counterTicket], "supplier_invoices.update": [
+      OK([{ id: INVOICE, invoice_number: NUMBER, supplier_account_id: "acct-ced", total: "301.81", invoice_date: "2026-09-04" }]),
+      OK([{ id: INVOICE }]),
+    ] }), calls);
+    const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011", notSameAs: ["some-other-bill"] });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Maybe already on the books");
+    // Worded for the card's own buttons: it has no Record It Anyway.
+    expect(res.error).not.toContain("Record It Anyway");
+    expect(res.error).toContain("press your answer again");
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(false);
+  });
+
+  it("and the bill he was shown and pressed past does not stop it", async () => {
+    state.client = fakeSupabase(happy({ "bills.select": [counterTicket, counterTicket] }), calls);
+    const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011", notSameAs: ["bill-counter"] });
+    expect(res.ok).toBe(true);
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(true);
   });
 
   it("refuses a paper that is not a purchase before any job goes on it", async () => {
@@ -272,6 +325,25 @@ describe("undoFileSupplierPaper", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("INV-078 already bills this receipt.");
     expect(calls.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("never puts the paper on a job outside the org, whatever the Undo token says", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "bill_supplier_invoices.select": [OK([{ bill_id: "bill-new" }])],
+        "bills.select": [BILL, OK({ id: "bill-new", amount: "301.81", on_shelf: false, bill_line_items: [] }), OK([])],
+        "invoice_items.select": [OK([])],
+        "organized_items.select": [OK([])],
+        "bills.delete": [OK([{ id: "bill-new" }])],
+        "jobs.select": [OK(null)], // another org's job: not found in this one
+      },
+      calls,
+    );
+    const res = await undoFileSupplierPaper({ ...TOKEN, jobBefore: "someone-elses-job" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("the paper is still on the job it was put on");
+    expect(calls.some((c) => c.table === "supplier_invoices" && c.verb === "update")).toBe(false);
   });
 
   it("touches nothing when the paper is tied to a different bill (a client's token deletes nothing)", async () => {
