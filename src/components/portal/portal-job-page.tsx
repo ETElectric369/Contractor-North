@@ -9,6 +9,7 @@ import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
 import { PortalDocuments } from "./portal-documents";
 import { PortalPanel } from "./portal-panel";
 import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
+import { docPlace, withPlace } from "@/lib/doc-place";
 
 /**
  * THE CUSTOMER'S JOB PAGE (/portal/<token>/jobs/<jobId>), drawn from PortalJobView and nothing
@@ -181,7 +182,7 @@ export function PortalJobPage({
         <PortalSection id="bills" title={bills.length === 1 ? "The Bill" : "Bills"} icon={<Receipt className="h-4 w-4" />}>
           <div className="space-y-3">
             {bills.map((b, i) => (
-              <BillCard key={`${b.number ?? "bill"}-${i}`} b={b} explainBalance={hasWork && b.amountPaid > 0.005} />
+              <BillCard key={`${b.number ?? "bill"}-${i}`} b={b} place={docPlace(job.site.address)} explainBalance={hasWork && b.amountPaid > 0.005} />
             ))}
           </div>
         </PortalSection>
@@ -232,7 +233,7 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
             {payable.map((b) => (
               <a
                 key={b.payToken!}
-                href={`/i/${b.payToken}`}
+                href={withPlace(`/i/${b.payToken}`, docPlace(view.job.site.address))}
                 rel="nofollow"
                 className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-[rgb(var(--glass-ink))] px-5 py-2.5 text-center text-base font-semibold text-white shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[rgb(var(--glass-ink))]"
               >
@@ -321,7 +322,7 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
  * other kind under its own heading only when the bill has one). Same lines, same figures, same
  * totals; only the order and the headings are the portal's.
  */
-function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boolean }) {
+function BillCard({ b, place, explainBalance }: { b: PortalInvoice; place: string; explainBalance: boolean }) {
   const status = BILL_STATUS[b.status] ?? "Sent";
   return (
     <details className="portal-glass group rounded-2xl">
@@ -350,7 +351,7 @@ function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boo
         ) : null}
         {b.payToken ? (
           <div className="flex justify-end p-2 sm:mb-2 sm:p-0">
-            <a href={`/i/${b.payToken}`} rel="nofollow" className={chip}>
+            <a href={withPlace(`/i/${b.payToken}`, place)} rel="nofollow" className={chip}>
               {b.balance > 0.005 ? "View And Pay" : "Open On Its Own Page"}
               <ChevronRight className="h-4 w-4" aria-hidden />
             </a>

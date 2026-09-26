@@ -81,7 +81,7 @@ type Mode =
   | { source: "appointment" | "job"; id: string; invoiceId?: never; balance?: never }
   | { source: "invoice"; invoiceId: string; balance: number; id?: never };
 
-type Art = { payUrl?: string; payQr?: string; venmoQr?: string; venmoHandle?: string; balance?: number; invoiceNumber?: string | null };
+type Art = { payUrl?: string; invoiceUrl?: string; payQr?: string; venmoQr?: string; venmoHandle?: string; balance?: number; invoiceNumber?: string | null };
 
 /**
  * THE DOOR: the PaymentIntent this screen is holding open on the tenant's Stripe account.
@@ -155,18 +155,6 @@ function outcomeOf(error: string): TapOutcome {
   if (/\bdeclined\b/i.test(error)) return "declined";
   if (/stuck at:/i.test(error)) return "timed-out";
   return "failed";
-}
-
-/**
- * The QR's pay door is `${base}/api/pay/<token>` (collectArtifacts); the invoice itself lives at
- * `${base}/i/<token>` on the same host. A paid invoice on that page IS the receipt; a declined
- * one is the "still open, nothing charged" record. Same token, one path swap — no new server
- * door. null when the shape isn't the one we know (never guess a customer-facing link).
- */
-function receiptLinkOf(payUrl: string | undefined): string | null {
-  if (!payUrl) return null;
-  const m = /^(https?:\/\/[^/]+)\/api\/pay\/([A-Za-z0-9_-]+)$/.exec(payUrl);
-  return m ? `${m[1]}/i/${m[2]}` : null;
 }
 
 /**
@@ -889,18 +877,18 @@ export function PayNowButton(props: Mode & {
           return;
         }
       }
-      type Door = { payUrl?: string; invoiceNumber: string | null };
+      type Door = { invoiceUrl?: string; invoiceNumber: string | null };
       const [got, business] = await Promise.all<[Promise<Door | null>, Promise<string>]>([
         art?.payUrl
-          ? Promise.resolve({ payUrl: art.payUrl, invoiceNumber: art.invoiceNumber ?? null })
+          ? Promise.resolve({ invoiceUrl: art.invoiceUrl, invoiceNumber: art.invoiceNumber ?? null })
           : collectArtifacts(invoiceId).then(
-              (a) => (a.ok ? { payUrl: a.payUrl, invoiceNumber: a.invoiceNumber ?? null } : null),
+              (a) => (a.ok ? { invoiceUrl: a.invoiceUrl, invoiceNumber: a.invoiceNumber ?? null } : null),
               () => null,
             ),
         tapToPayContext().then((c) => (c.ok ? c.merchantDisplayName : ""), () => ""),
       ]);
       if (!live) return;
-      const link = receiptLinkOf(got?.payUrl);
+      const link = got?.invoiceUrl ?? null;
       setReceipt(
         link
           ? { link, business: business === "Invoice payment" ? "" : business, invoiceNumber: got?.invoiceNumber ?? null }

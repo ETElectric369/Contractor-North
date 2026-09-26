@@ -8,7 +8,7 @@ import { templateFor } from "@/components/doc-templates";
 import { getOrgSettings } from "@/lib/org-settings";
 import { QuoteDocument } from "@/components/quote-document";
 import { docLabel } from "@/lib/doc-label";
-import { docTitle } from "@/lib/doc-title";
+import { docPageTitle, rowPlace } from "@/lib/doc-place";
 import type { Metadata } from "next";
 import type { Organization, Quote, QuoteLineItem } from "@/lib/types";
 
@@ -17,9 +17,13 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase.from("quotes").select("quote_number, doc_type, customers(name)").eq("id", id).maybeSingle();
-  const label = docLabel(data as { doc_type?: string | null } | null);
-  return { title: docTitle(data ? `${label} ${(data as any).quote_number}` : "Quote", (data as any)?.customers?.name) };
+  const { data } = await supabase
+    .from("quotes")
+    .select("quote_number, address, jobs(address), inquiries(address), customers(address)")
+    .eq("id", id)
+    .maybeSingle();
+  // "E-017 13897 Herringbone": what Save As PDF names the file (lib/doc-place). Never the customer's name.
+  return { title: data ? docPageTitle((data as any).quote_number, rowPlace(data as any)) : "Quote" };
 }
 
 export default async function QuotePrintPage({

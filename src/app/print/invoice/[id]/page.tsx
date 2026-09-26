@@ -9,7 +9,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { jobProgressFinancials, receivedBeforeThisInvoice } from "@/lib/job-financials";
 import { invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math";
 import { InvoiceDocument } from "@/components/invoice-document";
-import { docTitle } from "@/lib/doc-title";
+import { docPageTitle, rowPlace } from "@/lib/doc-place";
 import { fetchSupplierNames } from "@/lib/supplier-names";
 import type { Metadata } from "next";
 import type { Invoice, InvoiceItem, Organization, Payment } from "@/lib/types";
@@ -19,8 +19,9 @@ export const dynamic = "force-dynamic";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const supabase = await createClient();
-  const { data } = await supabase.from("invoices").select("invoice_number, customers(name)").eq("id", id).maybeSingle();
-  return { title: docTitle(data ? `Invoice ${(data as any).invoice_number}` : "Invoice", (data as any)?.customers?.name) };
+  const { data } = await supabase.from("invoices").select("invoice_number, jobs(address), customers(address)").eq("id", id).maybeSingle();
+  // "INV-080 235 Timbercreek": what Save As PDF names the file (lib/doc-place). Never the customer's name.
+  return { title: data ? docPageTitle((data as any).invoice_number, rowPlace(data as any)) : "Invoice" };
 }
 
 export default async function InvoicePrintPage({ params }: { params: Promise<{ id: string }> }) {

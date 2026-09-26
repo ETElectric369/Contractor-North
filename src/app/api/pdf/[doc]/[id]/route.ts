@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { normalizeDocStyle } from "@/lib/doc-style";
-import { docLabel } from "@/lib/doc-label";
+import { docFileName, rowPlace } from "@/lib/doc-place";
 
 export const dynamic = "force-dynamic";
 /** Concurrent chromium renders allowed per function instance (each is ~150MB). */
@@ -36,37 +36,26 @@ const DOCS: Record<string, string> = {
 /** The one document the crew may print: the panel directory has no price, no supplier, no pay. */
 const MEMBER_DOCS = new Set(["panel"]);
 
-/** Friendly filename — WITH THE JOB NAME for invoices (Erik: "we need to add the job name to
- *  the file name when sharing or exporting a file"). Shared by the stored-bytes and the
- *  fresh-render paths so the two can never disagree. */
+/** Friendly filename — the number and the street, "INV-080 235 Timbercreek.pdf" / "E-017 13897
+ *  Herringbone.pdf" (Erik 2026-09-25; lib/doc-place). Never the customer's name. Shared by the
+ *  stored-bytes and the fresh-render paths so the two can never disagree. */
 async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, doc: string, id: string): Promise<string> {
   let filename = `${doc}-${id.slice(0, 8)}.pdf`;
   if (doc === "invoice") {
     const { data: inv } = await supabase
       .from("invoices")
-      .select("invoice_number, jobs(name)")
+      .select("invoice_number, jobs(address), customers(address)")
       .eq("id", id)
       .maybeSingle();
-    if (inv?.invoice_number) {
-      const job = ((inv as { jobs?: { name?: string | null } | { name?: string | null }[] }).jobs ?? null);
-      const jobName = String((Array.isArray(job) ? job[0]?.name : job?.name) ?? "").trim();
-      filename = `Invoice ${inv.invoice_number}${jobName ? ` — ${jobName.slice(0, 60)}` : ""}.pdf`;
-    }
+    if (inv?.invoice_number) filename = docFileName(inv.invoice_number, rowPlace(inv));
   }
-  // audit v921: quotes fell through to "quote-9f3c1a2b.pdf" — the word "quote" even when doc_type
-  // is 'estimate', and no number to match the email subject the customer is looking at. Same
-  // derivation as every other surface (docLabel), so the file and the page can't disagree.
   if (doc === "quote") {
     const { data: q } = await supabase
       .from("quotes")
-      .select("quote_number, doc_type, customers(name)")
+      .select("quote_number, address, jobs(address), inquiries(address), customers(address)")
       .eq("id", id)
       .maybeSingle();
-    if (q?.quote_number) {
-      const cust = ((q as { customers?: { name?: string | null } | { name?: string | null }[] }).customers ?? null);
-      const custName = String((Array.isArray(cust) ? cust[0]?.name : cust?.name) ?? "").trim();
-      filename = `${docLabel(q as { doc_type?: string | null })} ${q.quote_number}${custName ? ` — ${custName.slice(0, 60)}` : ""}.pdf`;
-    }
+    if (q?.quote_number) filename = docFileName(q.quote_number, rowPlace(q));
   }
   if (doc === "panel") {
     const { data: j } = await supabase.from("jobs").select("name").eq("id", id).maybeSingle();
