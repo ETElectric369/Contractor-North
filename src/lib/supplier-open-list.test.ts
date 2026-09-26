@@ -20,8 +20,9 @@ import {
   type OpenList,
   type OpenListPaper,
 } from "./supplier-open-list";
-import { r2, supplierNetIfPaidBy, supplierSaysBalance, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-balance";
+import { r2, supplierNetIfPaidBy, supplierSaysBalance } from "@/app/(app)/bills/supplier-balance";
 import { supplierPayDue } from "@/app/(app)/bills/supplier-pay-due";
+import type { SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
 
 /**
  * FIXTURE 1: a CED portal Open tab, 2026-09-26 (account TR-34426, Total Balance $3,273.94, 11
@@ -220,10 +221,10 @@ describe("the CED portal's Open tab (fixture 1)", () => {
     const plan = reconcileOpenList(cedList(), papers, ACCOUNT);
     const closedIds = new Set(plan.close.map((c) => c.id));
     const rows: SupplierInvoiceRow[] = [
-      ...papers.map((p) => ({ ...p, jobId: null, ...(closedIds.has(p.id) ? { closed: true, openBalance: 0 } : {}) })),
+      ...papers.map((p) => ({ ...p, kind: p.kind as SupplierInvoiceRow["kind"], jobId: null, jobName: null, billCount: 0, ...(closedIds.has(p.id) ? { closed: true, openBalance: 0 } : {}) })),
       ...plan.add.map((a, i) => ({
-        id: `n${i}`, invoiceNumber: a.number, kind: a.row.kind, invoiceDate: a.row.invoiceDate, dueDate: a.row.dueDate, total: a.row.openBalance ?? 0,
-        openBalance: a.row.openBalance, closed: false, discountAmount: a.row.discountAmount, discountBy: a.row.discountBy, jobNameRaw: a.row.po, jobId: null, supplierAccountId: ACCOUNT,
+        id: `n${i}`, invoiceNumber: a.number, kind: a.row.kind as SupplierInvoiceRow["kind"], invoiceDate: a.row.invoiceDate, dueDate: a.row.dueDate, total: a.row.openBalance ?? 0,
+        openBalance: a.row.openBalance, closed: false, discountAmount: a.row.discountAmount, discountBy: a.row.discountBy, jobNameRaw: a.row.po, jobId: null, jobName: null, billCount: 0, supplierAccountId: ACCOUNT,
       })),
     ];
     expect(supplierNetIfPaidBy(rows, "2026-10-10", "2026-09-26")).toMatchObject({ gross: 3304.73, discount: 30.79, net: 3273.94 });
