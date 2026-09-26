@@ -38,6 +38,7 @@ import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
+import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -1278,7 +1279,18 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
 
   let kept: string[] = [];
   let torn: Extract<Teardown, { refused: null }> | null = null;
-  if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
+  /** A supplier's open list: what Apply changed is put back, and the list waits again. */
+  let listLeft: string[] | null = null;
+  if (p.filed?.how === "open_list") {
+    const applied = p.openList?.applied;
+    if (applied && ctx.orgId) {
+      const down = await undoOpenListCore(supabase, ctx.orgId, applied);
+      if (!down.ok) return { ok: false, error: down.error };
+      listLeft = down.left;
+    } else {
+      listLeft = [];
+    }
+  } else if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
     const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
     if (down.error) return { ok: false, error: `${down.error} Nothing was undone.` };
     kept = down.kept;
@@ -1343,7 +1355,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     patch.tied_bill_id = null;
     patch.tied_supplier_invoice_id = null;
   }
-  if ("proposal" in item) patch.proposal = { ...p, filed: null };
+  if ("proposal" in item) patch.proposal = { ...p, filed: null, ...(p.openList ? { openList: { ...p.openList, applied: null } } : {}) };
   const { data: back, error } = await supabase.from("organized_items").update(patch).eq("id", id).eq("org_id", ctx.orgId).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!back?.length) return { ok: false, error: "Nothing was undone. That paper isn't here any more, or this login can't change it." };
@@ -1352,6 +1364,15 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   revalidatePath("/bills");
   if (p.filed?.how === "task") revalidatePath("/tasks");
   if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+  if (listLeft) {
+    revalidatePath("/planner"); // My Day's supplier cards read the same papers
+    return {
+      ok: true,
+      message:
+        "Undone: every paper the list changed is back as it was, and the list is waiting again." +
+        (listLeft.length ? ` Left as they are now: ${listLeft.join(", ")}.` : ""),
+    };
+  }
   return {
     ok: true,
     message:
@@ -1431,6 +1452,14 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
     if (down.error) return { ok: false, error: `${down.error} Nothing was deleted.` };
     kept = down.kept;
   }
+  // AN APPLIED SUPPLIER LIST: Delete puts back what it changed first (the same Undo), because the
+  // record of what it changed lives on this row and goes with it.
+  let listPutBack: string[] | null = null;
+  if (p.filed?.how === "open_list" && p.openList?.applied && ctx.orgId) {
+    const down = await undoOpenListCore(supabase, ctx.orgId, p.openList.applied);
+    if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };
+    listPutBack = down.left;
+  }
 
   // SAME CEILING, SAME ORDER (0278). A receipt a live invoice is already billing cannot be thrown
   // away, so the bill goes first and a refusal costs nothing: the photo, the copy on the job and
@@ -1468,7 +1497,10 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   const said =
     (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +
     papersBackSaid(torn.papersBack) +
-    (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "");
+    (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
+    (listPutBack
+      ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
+      : "");
   return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }
 

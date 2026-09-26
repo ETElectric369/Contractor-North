@@ -6,6 +6,7 @@ import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/busines
 import { getOrgSettings } from "@/lib/org-settings";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { openListFromReader } from "@/lib/supplier-open-list";
 import {
   findSameNumber,
   isLinelessReturn,
@@ -339,6 +340,7 @@ Respond with ONLY a JSON object (no prose):
   "overhead_category": ${AUTO_FILE_BUCKETS.map((b) => JSON.stringify(b)).join(" | ")} or null — only when destination is "overhead",
   "job_marks": what is PRINTED OR WRITTEN on it that names a job, copied exactly as it appears, each null when it is not there: {"address": the job, ship-to or delivery street address (house number and street only; never the store's or supplier's own address, never the address of the company this is billed or sold to), "job_name": a job name or job reference, "job_number": a job number, "customer": the customer or homeowner the work is for (never the store, never the company this is billed or sold to)},
   "job_hint": the words on the paper that point to a job (a job name, address or customer; never the store's or supplier's own address, never the name or address of the company this is billed or sold to), or null,
+  "statement": statements ONLY, otherwise null — {"date": "YYYY-MM-DD" the statement's own date, or null, "account_number": the account number printed on it, or null, "total_due": the total balance or amount due it prints (a number), or null, "lines": every open item it lists, one per line, exactly as printed: [{"reference": the invoice, credit or document number, "type": the type or code printed beside it (Invoice, Credit Memo, SVC, PP, Payment...), or null, "po": the PO, job name or customer order printed beside it, or null, "date": "YYYY-MM-DD" or null, "due_date": "YYYY-MM-DD" or null, "amount": the original amount (number) or null, "open_balance": what is still open on it (number; negative for a credit or payment), "discount": a discount amount printed beside it (number) or null}]},
   "confidence": "low" | "medium" | "high"
 }
 
@@ -473,6 +475,14 @@ export function readerFields(parsed: any, fallbackTitle: string, opts: ReaderOpt
     // Kept, so the tray can match this paper again when the rules learn something (rematchPaper).
     marks,
     ...(picture ? { picture: true } : {}),
+    // A SCANNED STATEMENT: the open items the reader transcribed, as a supplier's open list. The
+    // card compares it against that supplier's papers and changes nothing until Apply; its own
+    // printed total is what says whether the transcription is the whole list.
+    ...(() => {
+      if (doc_type !== "statement") return {};
+      const list = openListFromReader(parsed?.statement, fallbackTitle);
+      return list ? { openList: { list, needs: null } } : {};
+    })(),
   };
   return {
     kind,

@@ -15,6 +15,8 @@ import { isPdfBytes, readPdfText } from "@/lib/pdf-text";
 import type { NumberMatch } from "@/lib/paperwork";
 import { readPaperworkItem } from "@/app/(app)/organize/actions";
 import { addPaperwork, fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
+import { addOpenList } from "./open-list-actions";
+import { isListFile, LIST_ACCEPT, readListFile } from "@/lib/open-list-file";
 
 /**
  * DROP PAPERWORK (Justin, 2026-09-24 14:14: "drop PDF/JPEG/PNG onto Bills & Purchasing and have it
@@ -34,6 +36,11 @@ import { addPaperwork, fingerprintSeen } from "@/app/(app)/organize/paperwork-ac
  *   3. a PDF's own text layer, read in the browser: CED documents in it go on the CED list, which
  *      is what they are, and never through a language model;
  *   4. upload, the row, and only then the reader.
+ *
+ * A SUPPLIER'S OPEN LIST (Excel or CSV, the portal's Open tab download) comes in here too, with no
+ * button of its own (Erik, 2026-09-26): it is read in the browser into rows and waits in Sort These
+ * as one card saying what it changes on that supplier's papers. A statement PDF is recognised from
+ * its own text on the server (addPaperwork). Nothing changes until a person presses Apply.
  */
 
 const MAX_FILE = 15 * 1024 * 1024;
@@ -41,7 +48,7 @@ const STRIPES = {
   backgroundImage:
     "repeating-linear-gradient(45deg, transparent 0 10px, color-mix(in srgb, var(--color-brand) 10%, transparent) 10px 20px)",
 } as const;
-const ACCEPT = "application/pdf,.pdf,image/*,.heic,.heif";
+const ACCEPT = `application/pdf,.pdf,image/*,.heic,.heif,${LIST_ACCEPT}`;
 
 type Tone = "busy" | "ok" | "warn" | "error";
 type Line = { id: number; name: string; text: string; tone: Tone };
@@ -79,8 +86,9 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
     const pdfByName = /\.pdf$/i.test(name);
     const heic = /image\/hei[cf]/.test(type) || /\.(heic|heif)$/i.test(name);
     const isImage = type.startsWith("image/") || heic;
+    if (!(type === "application/pdf" || pdfByName || isImage) && isListFile(file)) return oneList(id, file);
     if (!(type === "application/pdf" || pdfByName || isImage)) {
-      return say(id, name, "Not added: this takes PDFs, JPEGs and PNGs.", "error");
+      return say(id, name, "Not added: this takes PDFs, JPEGs, PNGs, and a supplier's list as Excel or CSV.", "error");
     }
     if (file.size > MAX_FILE) return say(id, name, "Not added: it is over 15 MB. Save a smaller copy and drop it again.", "error");
 
@@ -157,6 +165,23 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
     const s = it?.suggestion;
     const where = s?.picked && s.jobLabel ? `${s.because ?? "Job picked from the paper"}: ${s.jobLabel}. Waiting below for File It.` : "Waiting below: where does this go?";
     say(id, name, `Read: ${it?.vendor ?? it?.title ?? "paper"}, ${total}. ${where}`, "ok");
+  }
+
+  /** A supplier's open list (Excel, CSV, a text table): rows, then one card in Sort These. */
+  async function oneList(id: number, file: File) {
+    const name = file.name || "A file with no name";
+    say(id, name, "Reading the list…", "busy");
+    const read = await readListFile(file);
+    if (!read.ok) return say(id, name, `Not added: ${read.error}`, "error");
+    let sha: string | null = null;
+    try {
+      sha = await sha256Hex(await file.arrayBuffer());
+    } catch {
+      sha = null; // an old browser: the list still goes in, it just can't be matched as the same file
+    }
+    const added = await addOpenList({ name, sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop" });
+    if (!added.ok) return say(id, name, added.already ? `${added.already} Nothing was added twice.` : added.error ?? "Not added.", added.already ? "warn" : "error");
+    say(id, name, added.line ?? "Waiting below.", "ok");
   }
 
   async function drain() {
