@@ -99,3 +99,22 @@ export async function mintThrowawayOrg(c: FixtureSql, opts: { label: string; tec
     throw e;
   }
 }
+
+/**
+ * The pair most suites need: a TEST company with an owner (its office staff) and one active tech,
+ * and a second TEST company with an owner (the stranger: another company's office). Both minted in
+ * the caller's open transaction, both rolled back with it.
+ */
+export async function mintOrgAndStranger(c: FixtureSql, label: string) {
+  const org = await mintThrowawayOrg(c, { label, techs: 1 });
+  const other = await mintThrowawayOrg(c, { label: `${label} stranger`, techs: 0 });
+  const orgName = String((await c.query("select name from public.organizations where id = $1", [org.orgId])).rows[0]?.name ?? "");
+  return {
+    orgId: org.orgId,
+    orgName,
+    techId: org.techs[0].id,
+    staffId: org.owner.id,
+    otherOrgId: other.orgId,
+    otherStaffId: other.owner.id,
+  };
+}

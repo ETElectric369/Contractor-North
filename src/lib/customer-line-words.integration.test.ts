@@ -2,19 +2,23 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { customerLineWords, supplierNameSet } from "./invoice-math";
 
 /**
  * Migration 0315: a customer never reads a supplier's name (audit v994 PL1).
  *
- * Against the live books of ET Electric and Vivian Builders, inside ONE transaction that is always
- * rolled back. Nothing is written: every invoice, line and bill read here is real, and read only.
+ * Against a TEST company's books, minted inside ONE transaction that is always rolled back
+ * (throwaway-org.db-fixture.ts): CED receipts, a draft invoice carrying the lines the importer
+ * writes (the shapes ET's INV-00028 / INV-061 / INV-078 carry: "Materials — <supplier> (bill #…)",
+ * "Supplies & tax — <supplier>", a labor line), and the customer's portal link.
  *
- *  1. No customer-facing projection of any non-void ET/Vivian invoice line names a supplier from
+ *  1. No customer-facing projection of any non-void invoice line names a supplier from
  *     bills.supplier: the invoice document (/i, and every bill on the portal), the portal's ledger
- *     lines, and the portal job page itself for every live portal link those orgs have.
+ *     lines, and the portal job page itself for every live portal link the org has.
  *  2. The SQL rule (customer_line_words) and the app's (customerLineWords) give the same words for
- *     every live line and for every shape the importer writes: the print page and the portal's last
+ *     every line and for every shape the importer writes: the print page and the portal's last
  *     door run the TS twin, /i and the portal's function run the SQL one.
  *  3. The stored rows are untouched: the office keeps its words.
  *
@@ -26,9 +30,8 @@ import { customerLineWords, supplierNameSet } from "./invoice-math";
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 
-const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
-const VIVIAN = "7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed";
-const ORGS = [ET, VIVIAN];
+/** The TEST company's id, minted in beforeAll. */
+const ORGS: string[] = [];
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** A supplier's name as a whole phrase (so "CED" does not match "PLACED"). */
@@ -43,9 +46,53 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
   /** Every name the rule compares against, per org (the four sources customer_line_words reads). */
   const ruleNames = new Map<string, ReadonlySet<string>>();
 
+  /** A TEST company with CED receipts and a draft invoice carrying the importer's line shapes. */
+  const seedBooks = async () => {
+    const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
+    const { orgId, techs } = await mintThrowawayOrg(c, { label: "0315", techs: 1 });
+    ORGS.push(orgId);
+    const cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST 0315 cust') returning id", [orgId])).id;
+    const job = (
+      await one(
+        "insert into public.jobs (org_id, name, job_number, status, billing_type, customer_id) values ($1, 'TEST 0315 job', 'TEST-0315-J', 'in_progress', 'tm', $2) returning id",
+        [orgId, cust],
+      )
+    ).id;
+    const bill = async (supplier: string, number: string) =>
+      (
+        await one(
+          "insert into public.bills (org_id, job_id, supplier, bill_number, amount, status, bill_date) values ($1, $2, $3, $4, 100, 'unpaid', '2001-01-02') returning id",
+          [orgId, job, supplier, number],
+        )
+      ).id as string;
+    const b1 = await bill("Consolidated Electrical Distributors, Inc. (CED)", "8802-1101363");
+    await bill("CED", "8802-1101364");
+    await bill("The Home Depot", "HD-1");
+    const inv = (
+      await one(
+        `insert into public.invoices (org_id, customer_id, job_id, invoice_number, status, invoice_kind, subtotal, total)
+         values ($1, $2, $3, 'TEST-0315-1', 'draft', 'progress', 0, 0) returning id`,
+        [orgId, cust, job],
+      )
+    ).id;
+    const line = (description: string, src: string | null, key: string | null, edited: boolean, order: number) =>
+      c.query(
+        `insert into public.invoice_items (org_id, invoice_id, description, quantity, unit_price, import_source, import_key, edited, sort_order)
+         values ($1, $2, $3, 1, 10, $4, $5, $6, $7)`,
+        [orgId, inv, description, src, key, edited, order],
+      );
+    await line("Materials — Consolidated Electrical Distributors, Inc. (CED) (bill #8802-1101363)", "costs", `bill:${b1}`, false, 1);
+    await line("Supplies & tax — Consolidated Electrical Distributors, Inc. (CED)", "costs", `bill:${b1}:remainder`, false, 2);
+    await line("Materials — The Home Depot", "costs", null, true, 3);
+    await line(`Labor - ${techs[0].name}`, "labor", `labor:${techs[0].id}`, false, 4);
+    // The customer's portal link (made with the customer): make sure it is on, as a live one is.
+    await c.query("update public.customer_portal_access set enabled = true where customer_id = $1", [cust]);
+  };
+
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     const has = (await c.query("select to_regprocedure('public.customer_line_words(uuid, text, text, text, boolean)') is not null as ok")).rows[0].ok;
     if (!has) {
@@ -54,6 +101,7 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
       const file = path.join(process.cwd(), "supabase/migrations/0315_a_customer_never_reads_a_supplier.sql");
       await c.query(fs.readFileSync(file, "utf8"));
     }
+    await seedBooks();
     for (const org of ORGS) {
       const bills = await c.query("select distinct btrim(supplier) s from public.bills where org_id = $1 and length(btrim(coalesce(supplier, ''))) >= 3", [org]);
       billSuppliers.set(org, bills.rows.map((r) => String(r.s)));
@@ -85,7 +133,7 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
     expect(defs.portal).toMatch(/customer_line_words\(a\.org_id, it\.description/);
   });
 
-  it("no invoice document of a live ET/Vivian bill names a supplier (/i and the portal's bills)", async () => {
+  it("no invoice document names a supplier (/i and the portal's bills)", async () => {
     const leaks: string[] = [];
     let lines = 0;
     for (const org of ORGS) {
@@ -107,7 +155,7 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
     expect(leaks).toEqual([]);
   });
 
-  it("no portal ledger line names a supplier, and neither does any live portal job page", async () => {
+  it("no portal ledger line names a supplier, and neither does the portal job page", async () => {
     const leaks: string[] = [];
     for (const org of ORGS) {
       const names = billSuppliers.get(org) ?? [];
@@ -147,7 +195,7 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
     expect(leaks).toEqual([]);
   });
 
-  it("the SQL rule and the app's rule give the same words for every live line", async () => {
+  it("the SQL rule and the app's rule give the same words for every line", async () => {
     const diffs: string[] = [];
     let n = 0;
     for (const org of ORGS) {
@@ -189,8 +237,8 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
       ["", "costs", null, false],
     ];
     for (const [description, src, key, edited] of shapes) {
-      const sql = (await c.query("select public.customer_line_words($1, $2, $3, $4, $5) as w", [ET, description, src, key, edited])).rows[0].w;
-      expect(customerLineWords({ description, import_source: src, import_key: key, edited }, ruleNames.get(ET)), description).toBe(sql ?? "");
+      const sql = (await c.query("select public.customer_line_words($1, $2, $3, $4, $5) as w", [ORGS[0], description, src, key, edited])).rows[0].w;
+      expect(customerLineWords({ description, import_source: src, import_key: key, edited }, ruleNames.get(ORGS[0])), description).toBe(sql ?? "");
     }
   });
 
@@ -199,10 +247,10 @@ d("a customer never reads a supplier's name (0315)", { timeout: 60_000 }, () => 
       await c.query(
         `select count(*)::int as n from public.invoice_items it join public.invoices i on i.id = it.invoice_id
           where i.org_id = $1 and it.import_source = 'costs' and it.description ~* '^\\s*(materials|supplies\\s*&\\s*tax)\\s*—\\s*\\S'`,
-        [ET],
+        [ORGS[0]],
       )
     ).rows[0];
-    // ET's books carry the supplier on these rows today (INV-00028, INV-061, INV-078).
+    // The books carry the supplier on these rows (as ET's INV-00028, INV-061, INV-078 do).
     expect(r.n).toBeGreaterThan(0);
     if (practised) console.warn("[customer-line-words] all of the above ran against 0315 practised in this transaction; apply it to make it live.");
   });

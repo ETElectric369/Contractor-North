@@ -1,5 +1,6 @@
 import { describe } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { defineSplitIntoEntriesSuite } from "./split-into-entries.db-suite";
 
 /**
@@ -26,6 +27,7 @@ d("a split is a cut into ordinary entries (0288, 0290, 0313)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     return client;
   });
 });

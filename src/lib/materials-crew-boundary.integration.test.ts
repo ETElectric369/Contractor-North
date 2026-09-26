@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -84,25 +86,16 @@ d("material lists: the crew boundary (0254)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     await client.query("begin");
 
     // An org that has BOTH an active tech and active staff. Without one the boundary can't be
     // exercised, and that has to be a loud failure, not a green skip (tests/ci-guard.test.ts).
-    const { rows: fx } = await client.query(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from profiles t
-         join profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and s.active
-        where t.role = 'tech' and t.active
-        limit 1`,
-    );
-    if (!fx.length) {
-      throw new Error(
-        "0254 test fixture: no org has both an active tech and an active staff member — the crew boundary cannot be exercised.",
-      );
-    }
-    orgId = fx[0].org_id;
-    techId = fx[0].tech_id;
-    staffId = fx[0].staff_id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(client, "0254");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
 
     // The org's job, its list, and a line the office priced.
     const { rows: [cust] } = await client.query(

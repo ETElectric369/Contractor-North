@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import pg from "pg";
+import { assertReadOnlyReplay } from "@/lib/db-guard";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { newSuggestionsOnly, offerEstimates, quoteCircuitsToSuggestions, rankEstimateCandidates } from "./model";
@@ -20,8 +21,10 @@ import { JobPanel } from "@/app/(app)/jobs/[id]/job-panel";
  * Opt-in (PANEL_REPLAY=1) as well as creds-gated, because it reads live data that stops matching the
  * moment Erik really taps Bring Them In.
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, PANEL_REPLAY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && PANEL_REPLAY === "1" ? describe : describe.skip;
+// A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
+//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… PANEL_REPLAY=1 npx vitest run <this file>
+const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, PANEL_REPLAY } = process.env;
+const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && PANEL_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const J011 = "8760a051-b6f8-4a6b-b3a5-6ac7078f9ac1";
@@ -29,8 +32,9 @@ const E017 = "0e685ab4-4d2a-4065-bc56-9a59e381cf96";
 
 d("Bring In E-017 on J-011, replayed read-only against ET's live books", () => {
   it("finds E-017 for J-011 and would bring in its 12 circuits as suggestions, writing nothing", async () => {
-    const c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
+    const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertReadOnlyReplay(c);
     try {
       await c.query("begin transaction read only");
       const job = (await c.query("select id, job_number, name, customer_id from public.jobs where id = $1 and org_id = $2", [J011, ET])).rows[0];

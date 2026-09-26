@@ -40,13 +40,24 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # The DB suites write (inside rolled-back transactions), so they may only ever reach the TEST
+      # database. Until 2026-09 these secrets pointed at production and the suites wrote there. This
+      # fails the job unless TEST_DB_* connect as the test project's user and find its marker row
+      # (the same check src/lib/db-guard.ts runs inside every suite).
+      - name: TEST_DB_* point at the test database
+        run: node scripts/test-db/check-test-db.cjs
+        env:
+          TEST_DB_HOST: ${{ secrets.TEST_DB_HOST }}
+          TEST_DB_USER: ${{ secrets.TEST_DB_USER }}
+          TEST_DBPW: ${{ secrets.TEST_DBPW }}
+
       - name: Test
         run: npm test
         env:
-          # DB creds for the RLS-isolation + billing-invariant integration tests
-          # (rls.integration.test.ts / billing.integration.test.ts). They self-skip
-          # without these — tests/ci-guard.test.ts fails the run if they're missing
-          # in CI, so the skip can never be silent again.
+          # DB creds for every *.integration.test.ts (the TEST database only: the step above and
+          # src/lib/db-guard.ts refuse anything else). They self-skip without these;
+          # tests/ci-guard.test.ts fails the run if they're missing in CI, so the skip can never be
+          # silent again.
           TEST_DB_HOST: ${{ secrets.TEST_DB_HOST }}
           TEST_DB_USER: ${{ secrets.TEST_DB_USER }}
           TEST_DBPW: ${{ secrets.TEST_DBPW }}

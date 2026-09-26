@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 // Read-only integration test of the multi-tenant security invariant: every
 // org-scoped table must have RLS on with a policy, and the org-scoping helpers
@@ -24,6 +25,7 @@ d("RLS multi-tenant isolation invariant", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
   });
   afterAll(async () => {
     await client?.end();

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import fs from "fs";
 import path from "path";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { portalHomeRunning } from "./portal/home-shape";
 
 /**
@@ -66,6 +68,7 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     const base = (
       await one(
@@ -80,19 +83,13 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
     }
     ready = true;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0323 test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0323");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
     otherStaffId =
-      (await one("select id from public.profiles where org_id <> $1 and role in ('owner','admin','office') and coalesce(active, true) limit 1", [orgId]))?.id ?? "";
+      fx.otherStaffId;
 
     const cust = async (name: string) => (await one("insert into public.customers (org_id, name) values ($1, $2) returning id", [orgId, name])).id as string;
     const custA = await cust("TEST 0323 A");

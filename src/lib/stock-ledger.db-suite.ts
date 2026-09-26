@@ -19,6 +19,7 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { shelfLotCost, type BillLine } from "./bill-itemisation";
 
 export interface SqlClient {
@@ -42,6 +43,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
   let staffId = "";
   let techId = "";
   let otherStaffId = "";
+  let otherOrgId = "";
   let otherJobId = "";
   let jobA = "";
   let jobB = "";
@@ -170,26 +172,13 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
     }
     if (!ready) return;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner', 'admin', 'office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        order by (s.role = 'owner') desc, t.id
-        limit 1`,
-    );
-    if (!fx) throw new Error("shelf test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    const other = await one(
-      `select id, org_id from public.profiles
-        where org_id is not null and org_id <> $1 and role in ('owner', 'admin', 'office') and coalesce(active, true)
-        limit 1`,
-      [orgId],
-    );
-    if (!other) throw new Error("shelf test fixture: no staff in a second org, so the cross-org refusal cannot be tested.");
-    otherStaffId = other.id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "stock-ledger");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    otherStaffId = fx.otherStaffId;
+    otherOrgId = fx.otherOrgId;
     const job = async (org: string, n: string) =>
       (
         await one(
@@ -200,7 +189,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       ).id as string;
     jobA = await job(orgId, "A");
     jobB = await job(orgId, "B");
-    otherJobId = await job(other.org_id, "X");
+    otherJobId = await job(otherOrgId, "X");
   });
 
   afterAll(async () => {
@@ -230,7 +219,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       const shelf = (await c.query("select * from public.shelf_for_crew()")).rows;
       const mine = shelf.find((r) => r.id === it1);
       expect(mine).toBeTruthy();
-      expect(Object.keys(mine).sort()).toEqual(["id", "name", "on_hand", "unit"]);
+      expect(Object.keys(mine).sort()).toEqual(["id", "name", "on_hand", "takeable", "unit"]);
       expect(num(mine.on_hand)).toBe(240);
       await asServer();
       // A stranger's session reads no one's shelf.
@@ -557,7 +546,10 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       const r = await draw(staffId, nuts, jobB, 20);
       const invB = await invoice(jobB, "TEST-SHELF-INV-B");
       await claim(invB, r.moves.map((m: any) => m.move_id));
-      expect((await refusal(() => claim(invA, r.moves.map((m: any) => m.move_id))))?.message).toContain("already billed on TEST-SHELF-INV-B");
+      // Another job's invoice may not bill B's take at all (0343), and B's second invoice may not bill it twice.
+      expect((await refusal(() => claim(invA, r.moves.map((m: any) => m.move_id))))?.message).toContain("taken for TEST-SHELF-B");
+      const invB2 = await invoice(jobB, "TEST-SHELF-INV-B2");
+      expect((await refusal(() => claim(invB2, r.moves.map((m: any) => m.move_id))))?.message).toContain("already billed on TEST-SHELF-INV-B");
       expect((await refusal(() => claim(invB, [t.id])))?.message).toContain("already billed on TEST-SHELF-INV-A");
       // Job cost = bills - off_shelf + from_shelf, for each job.
       const a = await shelfNet(jobA);
@@ -749,12 +741,14 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
         expect(r?.message).not.toContain("$");
         await asServer();
       }
-      const foreign = await one("select id from public.price_list_items where org_id <> $1 limit 1", [orgId]);
-      if (foreign) {
-        await as(staffId);
-        expect((await refusal(() => c.query("update public.inventory_items set price_item_id = $2 where id = $1", [it1, foreign.id])))?.code).toBe("42501");
-        await asServer();
-      }
+      // The stranger company's own price-book item (minted, rolled back with the rest).
+      const foreign = await one(
+        "insert into public.price_list_items (org_id, code, description, unit, buy_price) values ($1, 'TEST-SHELF-X', 'TEST shelf stranger item', 'ea', 1) returning id",
+        [otherOrgId],
+      );
+      await as(staffId);
+      expect((await refusal(() => c.query("update public.inventory_items set price_item_id = $2 where id = $1", [it1, foreign.id])))?.code).toBe("42501");
+      await asServer();
     });
   });
 

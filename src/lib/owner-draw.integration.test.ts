@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0286 — an owner is paid by owner's draw, checked where it actually lives.
@@ -46,12 +48,12 @@ d("an owner is paid by draw (0286)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     await client.query("begin");
-    const { rows } = await client.query(
-      "select id, org_id from public.profiles where role = 'owner' and active and org_id is not null order by created_at limit 1",
-    );
-    ownerId = rows[0]?.id ?? "";
-    orgId = rows[0]?.org_id ?? "";
+    // A TEST company (owner + tech), minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(client, "0286");
+    ownerId = fx.staffId;
+    orgId = fx.orgId;
   });
   afterAll(async () => {
     await client?.query("rollback").catch(() => undefined);
@@ -86,8 +88,8 @@ d("an owner is paid by draw (0286)", () => {
     if (!crew[0]) return; // an org with nobody but its owner has no crew shift to move
     await client.query("savepoint move");
     try {
-      // A day nobody worked: this runs against real books, and guard_time_entry_sanity refuses a
-      // shift that overlaps one already recorded (the first run used Sep 10 and hit a real shift).
+      // A day nobody worked: guard_time_entry_sanity refuses a shift that overlaps one already
+      // recorded (the first run, on production's books, used Sep 10 and hit a real shift).
       const { rows: [e] } = await client.query(
         `insert into public.time_entries (org_id, profile_id, clock_in, clock_out, status, rate_override)
          values ($1, $2, '2001-01-01T15:00:00Z', '2001-01-01T23:00:00Z', 'closed', 40) returning id`,

@@ -16,6 +16,7 @@
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { excludedReceiptCost, type BillLine } from "./bill-itemisation";
 import { planShelving, restampPayload, type ShelfPick, type StoredLineLot } from "./shelf-plan";
 
@@ -161,26 +162,12 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
     }
     ready = true;
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from public.profiles t
-         join public.profiles s on s.org_id = t.org_id and s.role in ('owner', 'admin', 'office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        order by (s.role = 'owner') desc, t.id
-        limit 1`,
-    );
-    if (!fx) throw new Error("shelf test fixture: no org has both an active tech and active office staff.");
-    orgId = fx.org_id;
-    techId = fx.tech_id;
-    staffId = fx.staff_id;
-    const other = await one(
-      `select id from public.profiles
-        where org_id is not null and org_id <> $1 and role in ('owner', 'admin', 'office') and coalesce(active, true)
-        limit 1`,
-      [orgId],
-    );
-    if (!other) throw new Error("shelf test fixture: no staff in a second org.");
-    otherStaffId = other.id;
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "shelf2");
+    orgId = fx.orgId;
+    techId = fx.techId;
+    staffId = fx.staffId;
+    otherStaffId = fx.otherStaffId;
     jobA = (
       await one(
         `insert into public.jobs (org_id, name, job_number, status, billing_type)

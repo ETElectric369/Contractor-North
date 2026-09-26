@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migrations 0339 and 0340 (audit v994 TL1, TL2): a row may only name a PARENT of its own org.
@@ -58,20 +60,17 @@ d("a row names only its own org's parent (0339, 0340)", () => {
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     await c.query("begin");
     const pol = async (name: string, needle: string) =>
       !!(await one("select position($2 in coalesce(with_check, '')) > 0 as ok from pg_policies where schemaname = 'public' and policyname = $1", [name, needle]))?.ok;
     has0339 = await pol("price_list_item_options_write", "price_list_items");
     has0340 = (await pol("documents_write", "jobs")) && (await pol("bills_write", "jobs")) && (await pol("organized_items_write", "jobs"));
 
-    const fx = await one(
-      `select s.org_id, s.id as staff_id from profiles s
-        where s.role in ('owner','admin','office') and coalesce(s.active, true) and s.org_id is not null
-        limit 1`,
-    );
-    if (!fx) throw new Error("0339/0340 fixture: no active staff member to speak as.");
-    orgId = fx.org_id;
-    staffId = fx.staff_id;
+    // A TEST company with its owner, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0339/0340");
+    orgId = fx.orgId;
+    staffId = fx.staffId;
 
     myItem = (await one("insert into price_list_items (org_id, code, description, unit, buy_price) values ($1, 'TEST-0339', 'TEST 0339 windows', 'ea', 830) returning id", [orgId])).id;
     myJob = (await one("insert into jobs (org_id, job_number, name) values ($1, 'TEST-0340', 'TEST 0340 our job') returning id", [orgId])).id;

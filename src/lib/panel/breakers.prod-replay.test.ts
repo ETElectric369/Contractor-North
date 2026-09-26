@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import pg from "pg";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { assertReadOnlyReplay } from "@/lib/db-guard";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { breakerCard, lineKey, groupLabel, type ListLine } from "./breakers";
@@ -25,20 +24,23 @@ import { BreakersCardView, type BreakersData } from "@/app/(app)/jobs/[id]/job-p
  * Q21530CT, offer Add Q220 To Materials ($18.76 in the book) and the quad swap with "Not Q22020CT2,
  * That Is Two 2-Pole 20s".
  *
- * One transaction, rolled back: if 0334 isn't applied yet it is created inside it (and gone after).
- * Nothing else is written. Opt-in (PANEL_REPLAY=1) as well as creds-gated: it reads live data that
+ * One READ ONLY transaction, rolled back: nothing is written (0334 must already be applied).
+ * Opt-in (PANEL_REPLAY=1) as well as creds-gated: it reads live data that
  * stops matching the moment the job's tickets change.
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, PANEL_REPLAY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && PANEL_REPLAY === "1" ? describe : describe.skip;
+// A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
+//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… PANEL_REPLAY=1 npx vitest run <this file>
+const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, PANEL_REPLAY } = process.env;
+const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && PANEL_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const J011 = "8760a051-b6f8-4a6b-b3a5-6ac7078f9ac1";
 
 d("the Breakers card on J-011, replayed against ET's live tickets", () => {
   it("reads every line on every ET ticket and materials list: each one a breaker it can name, unknown, or not a breaker", async () => {
-    const c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
+    const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertReadOnlyReplay(c);
     try {
       await c.query("begin transaction read only");
       const lines = (
@@ -85,14 +87,15 @@ d("the Breakers card on J-011, replayed against ET's live tickets", () => {
   });
 
   it("says Short One 2P 20A (Bath Floor Heat). One 1P 20A Spare., and offers the Q220 and the quad swap", async () => {
-    const c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
+    const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertReadOnlyReplay(c);
     try {
-      await c.query("begin");
+      await c.query("begin transaction read only");
       await c.query("set local lock_timeout = '3s'");
       await c.query("set local statement_timeout = '15s'");
       const has = (await c.query("select to_regprocedure('public.breakers_bought_for_job(uuid)') is not null as yes")).rows[0].yes;
-      if (!has) await c.query(readFileSync(fileURLToPath(new URL("../../../supabase/migrations/0334_the_crew_sees_what_breakers_came.sql", import.meta.url)), "utf8"));
+      expect(has, "0334 (breakers_bought_for_job) is on this database").toBe(true);
 
       const job = (await c.query("select id, job_number, name from public.jobs where id = $1 and org_id = $2", [J011, ET])).rows[0];
       expect(job?.job_number).toBe("J-011");

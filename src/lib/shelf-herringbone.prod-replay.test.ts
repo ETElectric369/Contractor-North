@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import pg from "pg";
+import { assertReadOnlyReplay } from "@/lib/db-guard";
 import { billItemisation, excludedReceiptCost, type BillLine } from "./bill-itemisation";
 import { planShelving, shelfCountGuess } from "./shelf-plan";
 import { jobMaterialCostFrom } from "./job-cost";
@@ -15,16 +16,19 @@ import { jobMaterialCostFrom } from "./job-cost";
  * The plan's numbers: the lot is $180.17 for 250 ft (the $165.29 coil plus its $14.88 share of the
  * 9% tax), about 72 cents a foot, and Herringbone's cost drops by exactly that.
  */
-const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, SHELF_REPLAY } = process.env;
-const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER && SHELF_REPLAY === "1" ? describe : describe.skip;
+// A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
+//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… SHELF_REPLAY=1 npx vitest run <this file>
+const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, SHELF_REPLAY } = process.env;
+const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && SHELF_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const BILL = "11e96fc3-5bdf-421f-9fa8-e8763427bf93";
 
 d("Herringbone 8/19: Put The Rest On The Shelf, replayed read-only against ET's live books", () => {
   it("would bill Herringbone $0 of the coil, put 250 ft on the shelf at $180.17, and take $180.17 off the job - writing nothing", async () => {
-    const c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
+    const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertReadOnlyReplay(c);
     try {
       await c.query("begin transaction read only");
       const bill = (

@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0341: a vendor has a kind (vendor import, Phase 1).
@@ -71,6 +73,7 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     // BEGIN FIRST: nothing on this connection runs outside the transaction that is rolled back.
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
@@ -84,23 +87,10 @@ d("0341: a vendor has a kind, and Undo can tell an untouched import from an edit
       return;
     }
 
-    const fx = await one(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from profiles t
-         join profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
-        limit 1`,
-    );
-    if (!fx) throw new Error("0341 fixture: no org has both an active tech and active staff.");
-    ({ org_id: orgId, tech_id: techId, staff_id: staffId } = fx);
-    const other = await one(
-      `select s.org_id, s.id from profiles s
-        where s.org_id <> $1 and s.role in ('owner','admin','office') and coalesce(s.active, true)
-        limit 1`,
-      [orgId],
-    );
-    if (!other) throw new Error("0341 fixture: no second org with active staff, so isolation can't be exercised.");
-    ({ org_id: otherOrgId, id: otherStaffId } = other);
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(c, "0341");
+    ({ orgId, techId, staffId } = fx);
+    ({ otherOrgId, otherStaffId } = fx);
 
     if (!has.yes) {
       // A card made BEFORE 0341, to prove the backfill.

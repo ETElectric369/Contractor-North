@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * THE PRICE BOOK READS THE EXTENSION, NOT THE TYPED UNIT PRICE (0274).
@@ -28,17 +30,18 @@ d("learned_prices reads the extension (DB integration)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
   });
   afterAll(async () => {
     await client?.end();
   });
 
-  /** A throwaway bill in the first org, inside the caller's open transaction. */
+  /** A throwaway bill in a throwaway TEST org, inside the caller's open transaction. */
   async function billWithLines(
     lines: { description: string; quantity: number; unit_price: number | null; amount: number | null }[],
     bill: { provisional?: boolean } = {},
   ) {
-    const { rows: [org] } = await client.query("select id from organizations limit 1");
+    const org = { id: (await mintThrowawayOrg(client, { label: "learned-prices", techs: 0 })).orgId };
     const { rows: [b] } = await client.query(
       `insert into bills (org_id, supplier, amount, status, bill_date, pricing_provisional)
        values ($1,'TEST integ supplier',0,'unpaid',current_date,$2) returning id`,

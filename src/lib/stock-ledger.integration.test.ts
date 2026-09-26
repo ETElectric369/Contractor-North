@@ -1,5 +1,6 @@
 import { describe } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { defineStockLedgerSuite } from "./stock-ledger.db-suite";
 
 /**
@@ -25,6 +26,7 @@ d("the shop shelf is a ledger (0302, 0303, 0304)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     return client;
   });
 });

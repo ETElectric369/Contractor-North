@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
+import { assertTestDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { decodeBreaker } from "./breaker-catalog";
@@ -98,6 +100,7 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
   beforeAll(async () => {
     client = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await client.connect();
+    await assertTestDatabase(client);
     await client.query("begin");
     await client.query("set local lock_timeout = '3s'");
     await client.query("set local statement_timeout = '15s'");
@@ -107,15 +110,9 @@ d("breakers_bought_for_job: what the crew may read from a job's tickets (0334)",
       console.warn("[breakers] 0334 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
     }
 
-    const { rows: fx } = await client.query(
-      `select t.org_id, t.id as tech_id, s.id as staff_id
-         from profiles t
-         join profiles s on s.org_id = t.org_id and s.role in ('owner','admin','office') and s.active
-        where t.role = 'tech' and t.active
-        limit 1`,
-    );
-    if (!fx.length) throw new Error("0334 test fixture: no org has both an active tech and an active staff member.");
-    ({ org_id: orgId, tech_id: techId, staff_id: staffId } = fx[0]);
+    // A TEST company (owner + tech) and a stranger company, minted here and rolled back (never a live one).
+    const fx = await mintOrgAndStranger(client, "0334");
+    ({ orgId, techId, staffId } = fx);
 
     const cust = await one("insert into customers (org_id, name) values ($1, 'TEST 0334 cust') returning id", [orgId]);
     const job = (n: string) =>

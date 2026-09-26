@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0143 — the wage-integrity invariant, checked where it actually lives.
@@ -31,6 +32,7 @@ d("time_entries pay-column tamper guard (0143)", () => {
       ssl: { rejectUnauthorized: false },
     });
     await client.connect();
+    await assertTestDatabase(client);
     const { rows } = await client.query(
       "select pg_get_functiondef(p.oid) as def from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname='public' and p.proname='guard_paid_time_entry'",
     );
