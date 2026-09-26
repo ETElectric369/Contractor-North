@@ -1,7 +1,7 @@
 import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
-import { computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
-import { readJobBillsWithLines } from "@/lib/unbilled-work";
+import { billedWorkOnInvoices, computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
+import { readJobBillsWithLines, unbilledWorkForJob } from "@/lib/unbilled-work";
 
 export type { JobProgressFinancials };
 
@@ -68,6 +68,11 @@ export async function jobProgressFinancials(
   // different meanings for the same lost row.
   if (billsRead.error) throw billsRead.error;
 
+  // TIME & MATERIAL: work to date is what was billed at the price billed, plus what the next bill
+  // would charge (billedWorkOnInvoices). A failed read throws: a work-to-date missing half its
+  // lines is a figure nobody billed. Fixed price keeps the contract roll-up below.
+  const tmWork = (job as any)?.billing_type === "tm" ? await tmWorkToDate(supabase, jobId, scope) : null;
+
   return computeJobProgress({
     billingTypeRaw: (job as any)?.billing_type,
     quotes: (quotes ?? []) as any,
@@ -76,7 +81,35 @@ export async function jobProgressFinancials(
     pos: (pos ?? []) as any,
     bills: billsRead.data as any,
     markupPercent,
+    tmWork,
   });
+}
+
+/**
+ * A TIME & MATERIAL JOB'S WORK TO DATE, IN ITS TWO HALVES: the work lines on its non-void invoices
+ * at the price they were billed (billedWorkOnInvoices) and the work no invoice holds yet, priced as
+ * the next bill would price it (unbilledWorkForJob). The one reader behind jobProgressFinancials
+ * (the Progress Summary on the PDF, /i and the portal, and Nort's job numbers) and the job page's
+ * Work To Date, so they cannot disagree. Throws on a failed read, never reports a half.
+ */
+export async function tmWorkToDate(
+  supabase: any,
+  jobId: string,
+  /** The service role: pin the reads to this org by hand (see jobProgressFinancials). */
+  scope?: { orgId: string },
+): Promise<{ billed: number; unbilled: number }> {
+  let q = supabase
+    .from("invoices")
+    .select("status, invoice_kind, invoice_items(import_source, line_kind, unit, description, line_total)")
+    .eq("job_id", jobId)
+    .neq("status", "void");
+  if (scope?.orgId) q = q.eq("org_id", scope.orgId);
+  const [{ data, error }, unbilled] = await Promise.all([q, unbilledWorkForJob(supabase, jobId, scope)]);
+  if (error) throw error;
+  // Before 0255 no labor line says which hours it holds, so every hour would read as unbilled AND
+  // sit on a billed line: the same work twice. Say so rather than show it.
+  if (!unbilled.schemaReady) throw new Error("tmWorkToDate: labor claims unknown (0255 not applied)");
+  return { billed: billedWorkOnInvoices(data ?? []), unbilled: unbilled.total };
 }
 
 /** Dollars already collected on a job BEFORE the invoice being viewed — i.e. every

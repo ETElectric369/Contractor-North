@@ -51,7 +51,7 @@ const ROWS: Rows = {
       subtotal: 3189.34, tax_rate: 0, tax: 0, total: 3189.34, amount_paid: 0, invoice_kind: "final", public_token: "t".repeat(32),
       hold_reason: "INTERNAL HOLD NOTE",
     },
-    { id: PRIOR, org_id: ORG, job_id: JOB, customer_id: CUST, invoice_number: "INV-079", status: "paid", total: 16527.3, amount_paid: 16527.3, invoice_kind: "progress" },
+    { id: PRIOR, org_id: ORG, job_id: JOB, customer_id: CUST, invoice_number: "INV-079", status: "paid", total: 16527.3, amount_paid: 16527.3, invoice_kind: "progress", created_at: "2026-06-30T18:00:00Z" },
     // Another org's invoice on another job: a leak would change "Received to date".
     { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", org_id: OTHER, job_id: OTHER_JOB, customer_id: "x", invoice_number: "INV-001", status: "paid", total: 999, amount_paid: 999 },
   ],
@@ -60,6 +60,9 @@ const ROWS: Rows = {
     { id: "i2", invoice_id: INV, org_id: ORG, sort_order: 1, description: "Materials — Consolidated Electrical Distributors", quantity: 1, unit: "lot", unit_price: 1229.69, line_total: 1229.69, import_source: "costs", import_key: "hand", edited: true, line_kind: null },
     // A name that is only ANOTHER org's supplier: it is the office's own words here and prints as written.
     { id: "i3", invoice_id: INV, org_id: ORG, sort_order: 2, description: "Materials — Acme Supply", quantity: 1, unit: "lot", unit_price: 9.65, line_total: 9.65, import_source: "costs", import_key: "hand", edited: true, line_kind: null },
+    // INV-079's own work, billed at June's prices: work to date counts it at the price it went out at.
+    { id: "p1", invoice_id: PRIOR, org_id: ORG, sort_order: 0, description: "Labor - Erik Taylor", quantity: 75.5, unit: "hr", unit_price: 150, line_total: 11325, import_source: "labor", import_key: "labor:x", edited: false, line_kind: null, source_ids: ["june-entry"] },
+    { id: "p2", invoice_id: PRIOR, org_id: ORG, sort_order: 1, description: "Materials — Consolidated Electrical Distributors", quantity: 1, unit: "lot", unit_price: 5202.3, line_total: 5202.3, import_source: "costs", import_key: "hand", edited: true, line_kind: null },
   ],
   payments: [
     { id: "p0", invoice_id: PRIOR, org_id: ORG, amount: 16527.3, paid_at: "2026-09-20T18:00:00Z", method: "check", note: "check #1044 — call before depositing" },
@@ -137,8 +140,19 @@ function client(opts: { rls?: boolean; fail?: string[] } = {}) {
     const rows = () => {
       let r = [...(ROWS[table] ?? [])];
       if (opts.rls) r = r.filter((x) => (table === "organizations" ? x.id === ORG : !("org_id" in x) || x.org_id === ORG));
+      // The two embeds the money readers use: an invoice's lines, and a line's invoice.
+      if (table === "invoices" && q.select.includes("invoice_items(")) {
+        r = r.map((x) => ({ ...x, invoice_items: (ROWS.invoice_items ?? []).filter((it) => it.invoice_id === x.id) }));
+      }
+      if (table === "invoice_items" && q.select.includes("invoices!inner(")) {
+        r = r.map((x) => ({ ...x, invoices: (ROWS.invoices ?? []).find((i) => i.id === x.invoice_id) ?? null })).filter((x) => x.invoices);
+      }
+      const at = (x: Record<string, unknown>, col: string): unknown =>
+        col.includes(".") ? (x[col.split(".")[0]] as Record<string, unknown> | null)?.[col.split(".")[1]] : x[col];
       for (const [op, col, val] of q.filters) {
         if (op === "eq") r = r.filter((x) => x[col] === val);
+        if (op === "neq") r = r.filter((x) => at(x, col) !== val);
+        if (op === "overlaps") r = r.filter((x) => ((x[col] as unknown[] | undefined) ?? []).some((v) => (val as unknown[]).includes(v)));
         if (op === "is") r = r.filter((x) => (x[col] ?? null) === val);
         if (op === "in") r = r.filter((x) => (val as unknown[]).includes(x[col]));
       }
@@ -158,6 +172,8 @@ function client(opts: { rls?: boolean; fail?: string[] } = {}) {
       eq: (col: string, val: unknown) => (q.filters.push(["eq", col, val]), b),
       is: (col: string, val: unknown) => (q.filters.push(["is", col, val]), b),
       in: (col: string, val: unknown[]) => (q.filters.push(["in", col, val]), b),
+      neq: (col: string, val: unknown) => (q.filters.push(["neq", col, val]), b),
+      overlaps: (col: string, val: unknown[]) => (q.filters.push(["overlaps", col, val]), b),
       order: () => b,
       limit: () => b,
       maybeSingle: async () => {
@@ -233,8 +249,10 @@ describe("what INV-080 now carries on every surface", () => {
     expect(p.documentFooter).toBeNull();
     expect(p.invoiceKind).toBe("final");
     expect(p.progress).toMatchObject({ estimate: 17325, received: 16527.3, thisAmount: 3189.34, billingType: "tm" });
-    // Work to date: 2 h × $150 + the $200 receipt and the $1,000 order, each marked up 10%, all ORG's.
-    expect(p.progress!.workToDate).toBe(1620);
+    // Work to date on Time & Material = what was billed, at the price billed (INV-079's 16,527.30 and
+    // this bill's 3,189.34), plus what the next bill would charge: the 2 h no line claims × $150 and
+    // the $200 receipt and $1,000 order no line claims, each marked up 10% = 1,620. All ORG's.
+    expect(p.progress!.workToDate).toBe(21336.64);
   });
 
   it("never carries a settings object, a note, a pay rate, an internal id or another org's row", async () => {
@@ -314,6 +332,13 @@ describe("a read that fails degrades honestly", () => {
     expect(reported).toContain("invoiceDoc.progress");
   });
 
+  it("the billed lines behind a T&M work to date: a lost read leaves the summary off, never a figure missing its billed half", async () => {
+    const p = ok(await readInvoiceDocumentProps(client({ fail: ["invoices:line_kind"] }), INV, { kind: "service", orgId: ORG }));
+    expect(p.progress).toBeNull();
+    expect(p.items).toHaveLength(3);
+    expect(reported).toContain("invoiceDoc.progress");
+  });
+
   it("a piece left off is named (degraded), so the stored PDF can refuse it; a whole read names none", async () => {
     const whole = await readInvoiceDocumentProps(client(), INV, { kind: "staff" });
     expect(whole.kind === "ok" && whole.degraded).toEqual([]);
@@ -378,13 +403,15 @@ describe("a progress balance never prints as a negative", () => {
   });
 
   it("INV-080: the billed overage is named as billed, so it never reads as a second, different work overage", () => {
-    // Estimate 17,325; work to date 18,624.14 (107%, $1,299.14 of work past it); received
-    // 16,527.30 + this request 3,189.34 = 19,716.64, which is $2,391.64 BILLED past it.
+    // Estimate 17,325; work to date 19,716.64 (114%: every line billed, at the price billed - it
+    // read 18,624.14 while June's hours were re-priced at today's rates); received 16,527.30 + this
+    // request 3,189.34 = 19,716.64, which is $2,391.64 BILLED past it.
     const html = renderToStaticMarkup(
-      createElement(ProgressReportCard, { estimate: 17325, workToDate: 18624.14, received: 16527.3, thisAmount: 3189.34, billingType: "tm" }),
+      createElement(ProgressReportCard, { estimate: 17325, workToDate: 19716.64, received: 16527.3, thisAmount: 3189.34, billingType: "tm" }),
     );
     const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
-    expect(text).toContain("$18,624.14");
+    expect(text).toContain("$19,716.64");
+    expect(text).toContain("114% complete");
     expect(text).toContain("Billed over the estimate $2,391.64");
     expect(text).not.toMatch(/(^|[^d] )Over the estimate/);
     expect(text).not.toContain("-$");

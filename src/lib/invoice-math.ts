@@ -160,20 +160,35 @@ export function lumpDrawAmount(inv: {
   items?: readonly { import_source?: string | null; line_total?: number | string | null }[] | null;
 }): number {
   if (inv.status === "void" || inv.status === "draft") return 0;
-  const kind = inv.invoice_kind ?? "standard";
-  if (kind === "standard") return 0;
-  const items = inv.items ?? [];
-  const itemized = items.some((it) => ITEMIZED_SOURCES.has(it.import_source ?? ""));
-  const lump = kind === "deposit" || !itemized;
+  const isLump = lumpLineRule(inv.invoice_kind, inv.items);
   let sum = 0;
-  for (const it of items) {
+  for (const it of inv.items ?? []) {
     const amt = Number(it.line_total);
     if (!Number.isFinite(amt)) continue;
-    const src = it.import_source ?? null;
-    if (src === "draw_credit") continue;
-    if (src === "milestone" || (lump && !ITEMIZED_SOURCES.has(src ?? ""))) sum += amt;
+    if (isLump(it)) sum += amt;
   }
   return cents(sum);
+}
+
+/**
+ * WHICH OF ONE BILL'S LINES ARE LUMP MONEY, whatever the bill's status: the rule lumpDrawAmount
+ * sums (sent bills only) and billedWorkOnInvoices leaves out (job-progress-math). A milestone line
+ * anywhere; on a deposit, or a draw that itemizes none of the job's rows, every line not imported
+ * from those rows. Never a credit line, never a line on a standard invoice.
+ */
+export function lumpLineRule(
+  invoiceKind: string | null | undefined,
+  items: readonly { import_source?: string | null }[] | null | undefined,
+): (line: { import_source?: string | null }) => boolean {
+  const kind = invoiceKind ?? "standard";
+  if (kind === "standard") return () => false;
+  const itemized = (items ?? []).some((it) => ITEMIZED_SOURCES.has(it.import_source ?? ""));
+  const lump = kind === "deposit" || !itemized;
+  return (it) => {
+    const src = it.import_source ?? null;
+    if (src === "draw_credit") return false;
+    return src === "milestone" || (lump && !ITEMIZED_SOURCES.has(src ?? ""));
+  };
 }
 
 /** The dollar amount a deposit/progress draw bills: a % of the remaining estimate,
@@ -275,9 +290,9 @@ export function progressSummary(
  * "Billed over the contract", each with the positive amount. Same cents either way.
  *
  * BILLED, NOT WORKED: the figure is what was received plus this request, past the estimate. How far
- * the WORK ran past it is a different number (work to date less the estimate, the row two above:
- * INV-080 reads 107% complete, $1,299.14 of work past $17,325, while $2,391.64 is billed past it).
- * A bare "Over the estimate" put the second figure under the first one's name.
+ * the WORK ran past it is a different number (work to date less the estimate, the row two above).
+ * They agree on INV-080 (114%, $19,716.64 of work, all of it billed) and part as soon as a job has
+ * work no bill carries yet. A bare "Over the estimate" put the one figure under the other's name.
  */
 export function progressBalanceRow(
   balance: number,
