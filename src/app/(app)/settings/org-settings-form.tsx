@@ -72,7 +72,7 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
           <Input id="email" name="email" type="email" defaultValue={org.email ?? ""} />
         </div>
         <div>
-          <Label htmlFor="license">License # (TECL/EC)</Label>
+          <Label htmlFor="license">License #</Label>
           <Input id="license" name="license" defaultValue={org.license ?? ""} />
         </div>
         <div>

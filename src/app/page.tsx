@@ -1,6 +1,5 @@
 import Link from "next/link";
 import {
-  Zap,
   Sparkles,
   Users,
   CalendarDays,
@@ -54,9 +53,8 @@ export default async function Home() {
       <header className="sticky top-0 z-30 border-b border-slate-100 bg-white/80 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand text-white">
-              <Zap className="h-5 w-5" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon-192.png" alt="" className="h-9 w-9 rounded-lg" />
             <span className="text-base font-bold text-slate-900">Contractor North</span>
           </div>
           <div className="flex items-center gap-2">
@@ -178,14 +176,10 @@ export default async function Home() {
       <footer className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
         <div className="flex flex-col items-center justify-between gap-4 text-sm text-slate-400 sm:flex-row">
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand text-white">
-              <Zap className="h-4 w-4" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon-192.png" alt="" className="h-7 w-7 rounded-md" />
             <span className="font-semibold text-slate-600">Contractor North</span>
           </div>
-          <span className="font-medium uppercase tracking-wider">
-            Service · Integrity · Reliability
-          </span>
         </div>
       </footer>
     </div>

@@ -157,7 +157,6 @@ export default async function LoginPage({
           </p>
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/60">Service · Integrity · Reliability</p>
       </div>
     </div>
     </>
