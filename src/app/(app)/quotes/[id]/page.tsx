@@ -26,7 +26,6 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import type { Quote, QuoteLineItem } from "@/lib/types";
-import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
@@ -163,7 +162,6 @@ export default async function QuoteDetailPage({
   return (
     <div className="mx-auto max-w-3xl">
       <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
-      <FeatureOffLineFor feature="estimates" />
 
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>

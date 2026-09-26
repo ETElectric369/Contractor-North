@@ -8,7 +8,6 @@ import { DataTable } from "@/components/ui/data-table";
 import { formatDateTime } from "@/lib/utils";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { NewWorkOrderButton } from "./new-wo-button";
-import { FeatureOffLine } from "@/components/feature-off-line";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -54,7 +53,6 @@ export default async function WorkOrdersPage({
           />
         )}
       </PageHeader>
-      <FeatureOffLine feature="estimates" features={sw.features} isOwner={sw.isOwner} />
 
       {workOrders.length === 0 ? (
         <EmptyState

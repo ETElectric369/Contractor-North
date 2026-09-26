@@ -17,7 +17,6 @@ import { DECK_ESTIMATE_CODES } from "@/lib/estimate/deck";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
-import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -394,7 +393,6 @@ export default async function NewQuotePage({
             on the capture page; Start estimate there routes back here prefilled. */}
         {!capture && featureOn(settings.features, "leads") && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
-      <FeatureOffLineFor feature="estimates" />
       {/* NOTHING SILENT, AND THE CONSEQUENCE NAMED. The price book and its makers arrive in one
           read, so a failure hands the picker below an empty list — which on screen reads as "you
           have no price list" rather than "this did not load". Worse, if the embed alone were ever

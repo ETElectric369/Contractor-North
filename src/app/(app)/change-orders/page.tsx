@@ -9,7 +9,6 @@ import { NewChangeOrderButton } from "./new-co-button";
 import { CoStatusControl } from "./co-status-control";
 import { CoRowActions } from "./co-row-actions";
 import { jobLabel } from "@/lib/schedule-options";
-import { FeatureOffLine } from "@/components/feature-off-line";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -49,7 +48,6 @@ export default async function ChangeOrdersPage() {
       >
         {estimatesOn && <NewChangeOrderButton jobs={jobs ?? []} />}
       </PageHeader>
-      <FeatureOffLine feature="estimates" features={sw.features} isOwner={sw.isOwner} />
 
       {changeOrders.length === 0 ? (
         <EmptyState

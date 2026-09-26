@@ -6,7 +6,6 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, type QuoteStatus } from "@/lib/statuses";
 import { QuotesList } from "./quotes-list";
-import { FeatureOffLine } from "@/components/feature-off-line";
 import { switchesFromRow } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -76,7 +75,6 @@ export default async function QuotesPage({
           </Link>
         )}
       </PageHeader>
-      <FeatureOffLine feature="estimates" features={sw.features} isOwner={sw.isOwner} />
 
       {statusFilter && (
         <div className="mb-4">

@@ -2,7 +2,6 @@ import { PageHeader } from "@/components/page-header";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ToolsView } from "./tools-view";
-import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +18,6 @@ export default async function ToolsPage() {
         title="Tools"
         description="Field calculators — measurements, materials, margins."
       />
-      <FeatureOffLineFor feature="calculators" />
       <ToolsView trade={trade} />
     </div>
   );

@@ -11,7 +11,6 @@ import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
-import { FeatureOffLine } from "@/components/feature-off-line";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -44,8 +43,8 @@ export default async function InquiriesPage({
       .order("created_at", { ascending: false }),
     listCustomerOptions(supabase),
     // THE SWITCH BOARD (0352). Leads off: this page still opens from a link (a Needs You card, an
-    // estimate's "from lead"), with the Off line on top, and New Lead goes. Website requests keep
-    // arriving either way. Track Referrals off: no tally. Estimates off: no Estimate on a row.
+    // estimate's "from lead"), with the shell's Off line on top, and New Lead goes. Website requests
+    // keep arriving either way. Track Referrals off: no tally. Estimates off: no Estimate on a row.
     viewerSwitches(),
   ]);
   const leadsOn = featureOn(sw.features, "leads");
@@ -123,7 +122,6 @@ export default async function InquiriesPage({
       <PageHeader title="Leads" description="New requests to follow up and convert — nothing converts automatically.">
         {leadsOn && <InquiryModal />}
       </PageHeader>
-      <FeatureOffLine feature="leads" features={sw.features} isOwner={sw.isOwner} />
 
       {/* Staff-only commission lookup — renders nothing for crew or when no lead
           has a referrer. Sits above the open list because converted referrals

@@ -14,7 +14,6 @@ import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 import { bucketInspections, hasCaptureData } from "@/lib/inspections";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
-import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
@@ -126,7 +125,6 @@ export default async function InspectionsPage({
             appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
         {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
       </PageHeader>
-      <FeatureOffLine feature="leads" features={sw.features} isOwner={sw.isOwner} />
 
       {/* Open work is the default view; settled paperwork files away (estimates pattern). */}
       <div className="mb-4 flex gap-2">

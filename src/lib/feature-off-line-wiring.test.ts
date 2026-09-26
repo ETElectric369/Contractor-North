@@ -2,13 +2,17 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { FEATURE_KEYS, type FeatureKey } from "./features";
+import { featureForPath } from "./feature-doors";
 
 /**
  * EVERY RECORD PAGE OF A SWITCHABLE FEATURE CARRIES ITS OFF LINE (0352). A switch hides the doors
  * to these pages; a link, a bell or a Needs You card still opens them, and the page says the
- * feature is off (with Turn On for the owner) instead of looking like nothing happened. These are
- * server pages with their reads inline, so the wiring is checked in their source: each names its
- * feature in an Off line. The component itself renders nothing while the feature is on.
+ * feature is off (with Turn On for the owner) instead of looking like nothing happened.
+ *
+ * ONE Off line per page. A page under a switch route (lib/feature-doors FEATURE_ROUTES) gets it
+ * from the app layout's RouteOffLine, so the page itself must not draw a second copy; every other
+ * page names its feature in an Off line in its own source. The component renders nothing while
+ * the feature is on.
  */
 const ROOT = join(process.cwd(), "src/app/(app)");
 const PAGES: [string, FeatureKey][] = [
@@ -38,12 +42,29 @@ const PAGES: [string, FeatureKey][] = [
   ["tools/page.tsx", "calculators"],
 ];
 
+/** "quotes/[id]/page.tsx" → "/quotes/x"; a file that isn't a page has no route of its own. */
+const routeOf = (file: string) =>
+  file.endsWith("page.tsx") ? "/" + file.replace(/\/?page\.tsx$/, "").replace(/\[[^\]]+\]/g, "x") : null;
+
 describe("the Off line on every record page", () => {
+  it("the app layout mounts the route Off line with the viewer's own owner check", () => {
+    const src = readFileSync(join(ROOT, "layout.tsx"), "utf8");
+    expect(src).toContain('const isOwner = profile.role === "owner";');
+    expect(src).toContain("<RouteOffLine features={features} isOwner={isOwner} />");
+  });
+
   for (const [file, feature] of PAGES) {
     it(`${file} → ${feature}`, () => {
       expect(FEATURE_KEYS).toContain(feature);
       const src = readFileSync(join(ROOT, file), "utf8");
-      expect(src).toMatch(new RegExp(`<FeatureOffLine(?:For)?\\s+feature="${feature}"`));
+      const own = new RegExp(`<FeatureOffLine(?:For)?\\s+feature="${feature}"`);
+      const route = routeOf(file);
+      if (route && featureForPath(route) === feature) {
+        // The layout draws it; a second copy here would stack two identical lines.
+        expect(src).not.toMatch(own);
+      } else {
+        expect(src).toMatch(own);
+      }
     });
   }
 

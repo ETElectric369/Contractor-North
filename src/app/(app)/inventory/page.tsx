@@ -15,10 +15,7 @@ import { readSupplierPaperHomes, type SupplierPaperHome } from "@/app/(app)/bill
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
-import { FeatureOffLine } from "@/components/feature-off-line";
-import { readViewerFeatures } from "@/lib/viewer-features";
 import { NewItemButton } from "./new-item-button";
-import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
@@ -54,8 +51,6 @@ export default async function ShopStockPage({
   if ("error" in ctx) redirect("/planner");
   const { supabase, orgId } = ctx;
   if (!orgId) redirect("/planner");
-  // The switches (0352) ride beside the reads below, not after them.
-  const viewerP = readViewerFeatures();
 
   // Named columns, never "*": the projection law, and a cost column added later must not reach a
   // page by default.
@@ -327,11 +322,9 @@ export default async function ShopStockPage({
   const linkClass = "inline-flex min-h-[44px] items-center rounded-lg border px-4 text-sm font-medium transition-colors";
 
   // SHOP STOCK OFF (0352): the shelf still opens from a link (and from Needs You's short-stock
-  // card), with the Off line on top. Nothing here is hidden or changed: it is the record.
-  const viewer = await viewerP;
+  // card), with the shell's Off line on top. Nothing here is hidden or changed: it is the record.
   return (
     <div>
-      <FeatureOffLine feature="shop_stock" features={viewer.features} isOwner={viewer.isOwner} />
       <PageHeader title="Shop Stock" description="What's on the shelf, what it cost, where every roll came from and where every piece went.">
         <Link
           href="/analytics/accountant"
@@ -342,7 +335,6 @@ export default async function ShopStockPage({
         {/* Shop Stock off (the switch board, 0352): no New Item; the shelf stays readable below. */}
         {featureOn(getOrgSettings((orgRow.data as { settings?: unknown } | null)?.settings).features, "shop_stock") && <NewItemButton />}
       </PageHeader>
-      <FeatureOffLineFor feature="shop_stock" />
 
       {itemViews.length > 0 && (
         <div className="mb-4 grid grid-cols-3 gap-3 sm:max-w-lg sm:gap-4">
