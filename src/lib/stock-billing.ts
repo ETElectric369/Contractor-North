@@ -24,6 +24,7 @@
  */
 
 import { isMissingShelf } from "@/lib/job-cost";
+import { SHORT_FIX } from "@/lib/stock-take";
 
 const cents = (n: number) => Math.round(n * 100) / 100;
 const qty3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -223,14 +224,23 @@ export function stockShortsSentence(shorts: readonly StockShort[]): string | nul
   }
   const what = joinAnd([...byItem.values()].map((x) => `${qtyWords(x.qty)} ${x.unit} of ${x.item}`));
   const one = shorts.length === 1;
-  return `${what} ${one ? "was" : "were"} taken from stock with no roll behind ${one ? "it" : "them"} yet, so ${one ? "it isn't" : "they aren't"} on the bill: file the roll or count the shelf, then settle ${one ? "it" : "them"} on Shop Stock before billing.`;
+  // The remedy is SHORT_FIX, the bell's and the Recount item's own words: counting can't settle a
+  // short (a count has no roll, and settle_short walks rolls), so it is never offered here.
+  return `${what} ${one ? "was" : "were"} taken from stock with no roll behind ${one ? "it" : "them"} yet, so ${one ? "it isn't" : "they aren't"} on the bill yet. ${SHORT_FIX}`;
 }
+
+/**
+ * What the office can do about a take whose roll has no cost on it. A take's cost is stamped when
+ * it is drawn and nothing re-stamps it (a roll with pieces on a job can't be repriced, 0304), so the
+ * one door that works is the invoice's own line. Said by the importer and the Costs tab alike.
+ */
+export const STOCK_NO_COST_FIX = "add the line to the invoice by hand";
 
 /** The office's words for takes left off because their pieces cost nothing. Null when none. */
 export function stockZeroCostSentence(takes: readonly StockTake[]): string | null {
   if (!takes.length) return null;
   const what = joinAnd(takes.map((t) => stockLineWords(t.item, t.qty, t.unit)));
-  return `${what} came off a roll with no cost on it, so ${takes.length === 1 ? "it isn't" : "they aren't"} on the bill - put a cost on the roll, or add the line by hand`;
+  return `${what} came off a roll with no cost on it, so ${takes.length === 1 ? "it isn't" : "they aren't"} on the bill - ${STOCK_NO_COST_FIX}`;
 }
 
 /** "a take from stock" / "3 takes from stock": the office's noun for what the importer pulled in. */

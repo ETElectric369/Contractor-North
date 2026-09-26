@@ -18,6 +18,7 @@
  */
 
 import type { ClaimantInvoice, CostRowVerdict, NothingToBill } from "@/lib/unbilled-work";
+import { STOCK_NO_COST_FIX } from "@/lib/stock-billing";
 import { formatCurrency } from "@/lib/utils";
 
 export type CostRow = { id: string; kind: "bill" | "po" | "stock"; amount: number };
@@ -143,6 +144,7 @@ export function nothingToBillWhy(why: NothingToBill): string {
   if (why === "po_billed") return "Its PO is already billed";
   if (why === "own_cost") return "All of it is your own cost";
   if (why === "own_return") return "A return of parts the customer was never billed for";
-  if (why === "stock_no_cost") return "Its roll has no cost on it - put a cost on the roll, or add the line by hand";
+  // Nothing re-costs a take once it is drawn, so the words name only the door that works.
+  if (why === "stock_no_cost") return `Its roll has no cost on it, so it isn't billed - ${STOCK_NO_COST_FIX}`;
   return "Nothing on it to bill";
 }

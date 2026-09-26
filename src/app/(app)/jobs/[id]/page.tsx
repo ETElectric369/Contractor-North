@@ -513,8 +513,8 @@ export default async function JobDetailPage({
     // date exactly as the invoice page and the /print report count them (jobProgressFinancials). A
     // Time & Material job's takes are in tmWork above (billed ones as their lines, open ones in
     // unbilledWorkForJob), never counted a second way here. Staff only (a tech's page reads no stock
-    // and builds no invoice). A lost read says nothing here; the importer still reads the takes
-    // itself and refuses in words when it can't.
+    // and builds no invoice). A lost read is SAID (stockReadFailed below): a fixed-price job's work to
+    // date can't be totalled without it, exactly as jobProgressFinancials throws on /i and /print.
     viewerIsStaff
       ? readJobStock(supabase, id).then(
           (s) => s,
@@ -714,9 +714,18 @@ export default async function JobDetailPage({
     tmWork: tmWork === "failed" ? null : tmWork,
     stockTakes: jobStock?.takes ?? [],
   });
-  // null = a T&M total that could not be read: the modal says so instead of showing a number.
-  const workedToDate: number | null = tmWork === "failed" ? null : progress.workToDate;
-  const stockShortsWords = jobStock ? stockShortsSentence(jobStock.shorts) : null;
+  // Staff read the takes; null for staff means the read failed (a database without the shelf reads
+  // as no takes, never null). Never a smaller number in silence.
+  const stockReadFailed = viewerIsStaff && jobStock === null;
+  // null = a total that could not be read: the modal says so instead of showing a number. A T&M
+  // total is tmWork's; a fixed-price one counts the takes, so a lost stock read can't be totalled.
+  const workedToDate: number | null =
+    tmWork === "failed" || (stockReadFailed && progress.billingType !== "tm") ? null : progress.workToDate;
+  const stockShortsWords = jobStock
+    ? stockShortsSentence(jobStock.shorts)
+    : stockReadFailed
+      ? "The pieces taken from stock couldn't be read just now, so any taken past the shelf aren't named here. Reload to try again."
+      : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote

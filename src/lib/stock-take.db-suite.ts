@@ -32,7 +32,7 @@ export interface SqlClient {
   end: () => Promise<void>;
 }
 
-const MIGRATIONS = ["0343_a_piece_is_billed_once.sql", "0344_the_crew_reads_the_jobs_takes.sql"];
+const MIGRATIONS = ["0343_a_piece_is_billed_once.sql", "0344_the_crew_reads_the_jobs_takes.sql", "0345_a_take_billed_in_part_says_so.sql"];
 const readMigration = (f: string) => readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${f}`, import.meta.url)), "utf8");
 
 export type StockTakeSuiteOptions = {
@@ -41,13 +41,14 @@ export type StockTakeSuiteOptions = {
 };
 const num = (v: unknown) => Number(v);
 /** Every key stock_takes_for_job may hand anyone. A cost, a lot or a supplier is never one of them. */
-const TAKE_KEYS = ["back", "billed_invoice_id", "billed_on", "can_undo", "draw_group", "item", "item_id", "mine", "qty", "short", "taken_at", "unit", "who"];
+const TAKE_KEYS = ["back", "billed_invoice_id", "billed_on", "can_undo", "draw_group", "item", "item_id", "mine", "part_billed", "qty", "short", "taken_at", "unit", "who"];
 
 export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: StockTakeSuiteOptions) {
   let c: SqlClient;
   let ready = false;
   let has0343 = false;
   let applied0344 = false;
+  let applied0345 = false;
   let orgId = "";
   let staffId = "";
   let techId = "";
@@ -88,6 +89,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       await c.query("set local statement_timeout = '15s'");
       if (!has0343) await c.query(readMigration(MIGRATIONS[0]));
       if (!applied0344) await c.query(readMigration(MIGRATIONS[1]));
+      if (!applied0345) await c.query(readMigration(MIGRATIONS[2]));
       // THIS CASE'S OWN COMPANIES, in its transaction, rolled back with it: ours (an owner and two
       // techs) and a stranger's (an owner, for the other-company checks).
       const ours = await mintThrowawayOrg(c, { label: "stock take", techs: 2 });
@@ -188,11 +190,14 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       const has = await one(
         `select to_regclass('public.stock_moves') is not null as ledger,
                 to_regprocedure('public.guard_stock_piece_claim()') is not null as claim,
-                to_regprocedure('public.stock_takes_for_job(uuid)') is not null as takes`,
+                to_regprocedure('public.stock_takes_for_job(uuid)') is not null as takes,
+                coalesce((select position('part_billed' in prosrc) > 0 from pg_proc
+                           where oid = to_regprocedure('public.stock_takes_for_job(uuid)')), false) as part`,
       );
       has0343 = !!has?.claim;
       applied0344 = !!has?.takes;
-      ready = !!has?.ledger && ((has0343 && applied0344) || opts.allowDdl);
+      applied0345 = !!has?.part;
+      ready = !!has?.ledger && ((has0343 && applied0344 && applied0345) || opts.allowDdl);
       if (!has?.ledger) return;
       if (!ready) {
         console.warn("[stock-take] 0343/0344 are not on this database, and this run may not apply DDL (never on production); nothing to exercise.");
@@ -201,7 +206,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
     } finally {
       await c.query("rollback");
     }
-    if (ready && !(has0343 && applied0344)) console.warn("[stock-take] 0343/0344 are not on this database yet; each case applies them inside its own rolled-back transaction.");
+    if (ready && !(has0343 && applied0344 && applied0345)) console.warn("[stock-take] 0343/0344/0345 are not all on this database yet; each case applies the missing ones inside its own rolled-back transaction.");
   });
 
   afterAll(async () => {
@@ -366,10 +371,17 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       expect((await takes(staffId, jobB))[0].can_undo).toBe(true);
       // The settlement's pieces bill; the take's short id still never does.
       const settledIds = (await c.query("select id from public.stock_moves where draw_group = (select settled_by from public.stock_moves where id = $1)", [r.short_id])).rows.map((x) => x.id);
+      // 0345: the take's own draw on an invoice, the settled pieces on none: PART billed, as the
+      // Costs tab and the Unbilled card count the settlement (its own group, its own line) open.
+      const invPart = await invoice(jobB, `TEST-TAKE-INV-${++seq}`);
+      await claim(invPart, moveIds(r));
+      expect((await takes(techId, jobB))[0]).toMatchObject({ billed_on: expect.any(String), part_billed: true, can_undo: false });
+      await c.query("update public.invoices set status = 'void' where id = $1", [invPart]);
+      expect((await takes(techId, jobB))[0]).toMatchObject({ billed_on: null, part_billed: false });
       const inv = await invoice(jobB, `TEST-TAKE-INV-${++seq}`);
       expect(await refusal(() => claim(inv, [...moveIds(r), ...settledIds]))).toBeNull();
       expect((await refusal(() => claim(inv, [r.short_id!])))?.message).toContain("Pieces taken past the shelf aren't billed");
-      expect((await takes(techId, jobB))[0].billed_on).toBeTruthy();
+      expect((await takes(techId, jobB))[0]).toMatchObject({ billed_on: expect.any(String), part_billed: false });
     });
   });
 

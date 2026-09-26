@@ -44,6 +44,9 @@ export type JobTake = {
   mine: boolean;
   /** The invoice number that bills this take, or null. */
   billedOn: string | null;
+  /** An invoice bills part of it (the take, or the settlement of its short) and the rest is still
+   *  open, as the Costs tab and the Unbilled card count it (0345; false before 0345). */
+  partBilled: boolean;
   /** The office's door to that invoice (null for the crew). */
   billedInvoiceId: string | null;
   canUndo: boolean;
@@ -93,6 +96,7 @@ export function parseTakes(raw: unknown): JobTake[] {
       who: String(r.who ?? "").trim() || "Someone",
       mine: r.mine === true,
       billedOn: r.billed_on ? String(r.billed_on) : null,
+      partBilled: !!r.billed_on && r.part_billed === true,
       billedInvoiceId: r.billed_invoice_id ? String(r.billed_invoice_id) : null,
       canUndo: r.can_undo === true,
     }));
@@ -183,12 +187,22 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
 /**
  * What a take's row offers: Undo, the invoice to take it off first, or nothing (someone else's).
  * A billed take is the office's door into the invoice (`label`, Title Case, a link); the crew can't
- * open invoices, so for them it is a status in plain words (`status`), never an instruction.
+ * open invoices, so for them it is a status in plain words (`status`), never an instruction. A take
+ * billed in PART (the settled pieces of its short not on an invoice yet, or the other way round)
+ * says so (`part`), so this row never reads billed where the Costs tab reads open.
  */
 export function takeDoor(
-  t: Pick<JobTake, "canUndo" | "billedOn" | "back">,
-): { kind: "undo" } | { kind: "billed"; label: string; status: string } | { kind: "none"; why: string | null } {
-  if (t.billedOn) return { kind: "billed", label: `Take It Off ${t.billedOn} First`, status: `Billed on ${t.billedOn}` };
+  t: Pick<JobTake, "canUndo" | "billedOn" | "back"> & { partBilled?: boolean },
+): { kind: "undo" } | { kind: "billed"; label: string; status: string; part: boolean } | { kind: "none"; why: string | null } {
+  if (t.billedOn) {
+    const part = t.partBilled === true;
+    return {
+      kind: "billed",
+      label: `Take It Off ${t.billedOn} First`,
+      status: part ? `Part billed on ${t.billedOn}, the rest not billed yet` : `Billed on ${t.billedOn}`,
+      part,
+    };
+  }
   if (t.canUndo) return { kind: "undo" };
   // Nothing in the app undoes a return to the shelf yet, so this names no door that isn't there.
   if (t.back > 0) return { kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." };

@@ -2270,10 +2270,12 @@ async function importCostsCore(
   // The takes, counted the same way (new on the invoice since before the RPC), in their own noun.
   // A take counts as landed when a move of it is on the invoice now and was not before; one whose
   // moves are on no line after the RPC was held back by a line the office deleted (tombstoned) or
-  // edited, and is said with the door out, like a bill's.
+  // edited, and is said with the door out, like a bill's. When the read-back failed, withClaimStats
+  // already speaks in the RPC's own line count, and `offered` put the take lines in that count, so
+  // the takes are not counted again on top of it (that said "3 lines ... · 3 takes" for 3 lines).
   const stockLanded = before && after
     ? stockRows.filter((r) => (r.source_ids ?? []).some((id) => after.has(id) && !before.has(id))).length
-    : stockRows.length;
+    : 0;
   const stockHeldBack = after ? stockRows.filter((r) => !(r.source_ids ?? []).some((id) => after.has(id))).length : 0;
   const stockParts: string[] = [];
   if (stockLanded) stockParts.push(`${takesWords(stockLanded)} pulled in`);

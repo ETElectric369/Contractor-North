@@ -44,8 +44,11 @@ describe("the shelf and the takes, as the database hands them back", () => {
     const takes = parseTakes([
       { draw_group: "g1", taken_at: "2026-09-24T17:00:00Z", item_id: "i", item: "12/2 NM-B", unit: "ft", qty: "60.000", short: "0", back: "0", who: "Brian", mine: true, billed_on: null, billed_invoice_id: null, can_undo: true, cost: 43.24 },
     ]);
-    expect(takes[0]).toMatchObject({ drawGroup: "g1", qty: 60, who: "Brian", canUndo: true, billedOn: null });
+    expect(takes[0]).toMatchObject({ drawGroup: "g1", qty: 60, who: "Brian", canUndo: true, billedOn: null, partBilled: false });
     expect(JSON.stringify(takes)).not.toContain("43.24");
+    // 0345's part_billed rides only with a billing invoice; before 0345 it is simply absent (false).
+    const part = parseTakes([{ draw_group: "g2", billed_on: "INV-078", part_billed: true }, { draw_group: "g3", billed_on: null, part_billed: true }, { draw_group: "g4", billed_on: "INV-078" }]);
+    expect(part.map((t) => t.partBilled)).toEqual([true, false, false]);
   });
 });
 
@@ -105,7 +108,14 @@ describe("the words", () => {
 
   it("an Undo becomes Take It Off INV-078 First once an invoice bills the take", () => {
     expect(takeDoor({ canUndo: true, billedOn: null, back: 0 })).toEqual({ kind: "undo" });
-    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 })).toEqual({ kind: "billed", label: "Take It Off INV-078 First", status: "Billed on INV-078" });
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 })).toEqual({ kind: "billed", label: "Take It Off INV-078 First", status: "Billed on INV-078", part: false });
+    // The settled pieces of its short not on an invoice yet: part billed, as the Costs tab counts it.
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0, partBilled: true })).toEqual({
+      kind: "billed",
+      label: "Take It Off INV-078 First",
+      status: "Part billed on INV-078, the rest not billed yet",
+      part: true,
+    });
     // Brought back in part: says why there is no Undo, and names no door the app doesn't have.
     const back = takeDoor({ canUndo: false, billedOn: null, back: 5 });
     expect(back).toEqual({ kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." });

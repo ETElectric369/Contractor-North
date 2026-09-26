@@ -1102,6 +1102,22 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
     expect(res.stats.summary).toContain("1 take from stock not added — on a line you edited or deleted (Start It Over rebuilds it)");
   });
 
+  it("a failed read-back speaks in the RPC's lines once: the take lines are in that count, never added again", async () => {
+    const inner = route([WALDOW_BILL.id, M1, M2, M3]);
+    state.client = fakeSupabase((q) => {
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("import_key, edited")) return { error: { message: "read-back lost" } };
+      if (q.table === "rpc:upsert_imported_invoice_items") return { data: { inserted: 4, updated: 0, kept_edited: 0, removed: 0 } };
+      return inner(q);
+    }, calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    // 1 bill + 3 takes = 4 lines, said once.
+    expect(res.stats.summary).toContain("4 lines added or refreshed");
+    expect(res.stats.summary).not.toContain("takes from stock pulled in");
+    expect(res.stats.pulled_in).toBe(4);
+    expect(res.stats.stock_pulled_in).toBe(0);
+  });
+
   it("a stock-only draft the office moved to 11% stays at 11% on the next refresh (keepInvoiceMarkup reads the stock lines)", async () => {
     // The invoice's own lines: the three takes, priced at 11% (43.24 -> 48.00, 14.41 -> 16.00,
     // 4.35 -> 4.83), no bills on the job. Before, a stock line never voted, the reading was

@@ -212,12 +212,16 @@ export function TakesListView({
                 )}
                 {door.kind === "billed" &&
                   (viewerIsStaff && t.billedInvoiceId ? (
-                    <Link
-                      href={`/billing/${t.billedInvoiceId}`}
-                      className="inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand hover:underline"
-                    >
-                      {door.label}
-                    </Link>
+                    <>
+                      {/* Billed in part: said beside the door, so this row agrees with the Costs tab. */}
+                      {door.part && <span className="text-xs text-amber-700">{door.status}</span>}
+                      <Link
+                        href={`/billing/${t.billedInvoiceId}`}
+                        className="inline-flex min-h-[44px] items-center rounded-lg px-3 text-sm font-medium text-brand hover:underline"
+                      >
+                        {door.label}
+                      </Link>
+                    </>
                   ) : (
                     <span className="inline-flex min-h-[44px] items-center px-3 text-sm text-slate-500">{door.status}</span>
                   ))}

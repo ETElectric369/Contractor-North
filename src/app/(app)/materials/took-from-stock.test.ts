@@ -128,6 +128,7 @@ describe("the job's takes", () => {
     who: "Brian",
     mine: true,
     billedOn: null,
+    partBilled: false,
     billedInvoiceId: null,
     canUndo: true,
   };
@@ -152,6 +153,16 @@ describe("the job's takes", () => {
     const office = list([billed], true);
     expect(office).toMatch(/href="\/billing\/inv-1"[^>]*>Take It Off INV-078 First</);
     expect(office).toMatch(/min-h-\[44px\]/);
+  });
+
+  it("billed in part (its settled pieces on no invoice yet) says so to both, so it never reads billed where the Costs tab reads open", () => {
+    const part = { ...base, canUndo: false, billedOn: "INV-078", billedInvoiceId: "inv-1", partBilled: true };
+    expect(textOf(list([{ ...part, billedInvoiceId: null }], false))).toContain("Part billed on INV-078, the rest not billed yet");
+    const office = list([part], true);
+    expect(textOf(office)).toContain("Part billed on INV-078, the rest not billed yet");
+    expect(office).toMatch(/href="\/billing\/inv-1"[^>]*>Take It Off INV-078 First</);
+    // Wholly billed: no "Part" anywhere.
+    expect(textOf(list([{ ...part, partBilled: false }], true))).not.toContain("Part billed");
   });
 
   it("a take past the shelf says it is waiting on a recount, never a price", () => {

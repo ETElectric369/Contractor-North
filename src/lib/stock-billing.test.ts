@@ -121,7 +121,7 @@ describe("a take's line bills exactly its cost at the invoice's markup", () => {
     const { rows, zeroCost } = stockImportRows([zero], 25);
     expect(rows).toEqual([]);
     expect(zeroCost).toHaveLength(1);
-    expect(stockZeroCostSentence(zeroCost)).toBe("12/2 NM-B, 10 ft came off a roll with no cost on it, so it isn't on the bill - put a cost on the roll, or add the line by hand");
+    expect(stockZeroCostSentence(zeroCost)).toBe("12/2 NM-B, 10 ft came off a roll with no cost on it, so it isn't on the bill - add the line to the invoice by hand");
   });
 });
 
@@ -130,7 +130,7 @@ describe("pieces taken past the shelf are said, in one sentence", () => {
     expect(stockShortsSentence([])).toBeNull();
     const one = stockShortsSentence([{ id: "s", item: "12/2 NM-B", unit: "ft", qty: 20, takenAt: "x" }]);
     expect(one).toBe(
-      "20 ft of 12/2 NM-B was taken from stock with no roll behind it yet, so it isn't on the bill: file the roll or count the shelf, then settle it on Shop Stock before billing.",
+      "20 ft of 12/2 NM-B was taken from stock with no roll behind it yet, so it isn't on the bill yet. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.",
     );
     const two = stockShortsSentence([
       { id: "a", item: "12/2 NM-B", unit: "ft", qty: 15, takenAt: "x" },
@@ -138,7 +138,7 @@ describe("pieces taken past the shelf are said, in one sentence", () => {
       { id: "c", item: "Twister wire nut", unit: "ea", qty: 12, takenAt: "z" },
     ]);
     expect(two).toBe(
-      "20 ft of 12/2 NM-B and 12 ea of Twister wire nut were taken from stock with no roll behind them yet, so they aren't on the bill: file the roll or count the shelf, then settle them on Shop Stock before billing.",
+      "20 ft of 12/2 NM-B and 12 ea of Twister wire nut were taken from stock with no roll behind them yet, so they aren't on the bill yet. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.",
     );
   });
 });
