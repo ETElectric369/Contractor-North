@@ -570,6 +570,7 @@ export default async function JobDetailPage({
         filed: p.jobId === id,
         accountId: p.accountId,
         onNeedsYou: p.onNeedsYou === true,
+        waitingOnCredit: p.waitingOnCredit === true,
       }))
     : null;
   const oe = openEntryRow as any;

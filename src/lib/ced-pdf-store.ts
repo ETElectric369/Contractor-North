@@ -25,6 +25,15 @@ export const CED_PDF_MAX_BYTES = 15 * 1024 * 1024;
 
 export const cedPdfPath = (orgId: string, sha256: string) => `${orgId}/organize/ced/${sha256}.pdf`;
 
+/**
+ * A path cedPdfPath could have made for THIS org, and nothing else: what Choose CED PDFs hands the
+ * importer after the browser stored the PDF itself (a request body is capped at ~4.5 MB on Vercel,
+ * so the bytes never ride in the action). Anything else is ignored, never written to source_file.
+ */
+export function isCedPdfPath(value: unknown, orgId: string | null | undefined): value is string {
+  return typeof value === "string" && !!orgId && value.startsWith(`${orgId}/organize/ced/`) && /^[0-9a-f]{64}\.pdf$/.test(value.slice(`${orgId}/organize/ced/`.length));
+}
+
 /** A path in this org's documents bucket, as opposed to a bare file name ("invoice_8802-1107139.pdf"). */
 export function isStoredPaperPath(value: string | null | undefined, orgId: string | null | undefined): boolean {
   const v = String(value ?? "");
@@ -48,7 +57,9 @@ export function pdfBytesOf(value: unknown): Uint8Array | null {
 export type KeptPdf = { ok: true; path: string; uploaded: boolean } | { ok: false; error: string };
 
 /**
- * Store one CED PDF, or say in words why it wasn't. Never throws: a PDF that did not save never
+ * Store one CED PDF, or say in words why it wasn't. Runs with either client: the importer's (a PDF
+ * Drop Paperwork already holds) and the browser's (Choose CED PDFs uploads straight to storage,
+ * the drop box's way; the staff-only organize prefix is the RLS). Never throws: a PDF that did not save never
  * blocks the documents inside it from landing. `known` is paths this org's rows already name (the
  * importer reads them in one query), so a PDF already stored is not even sent again.
  */

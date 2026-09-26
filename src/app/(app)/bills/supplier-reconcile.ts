@@ -913,6 +913,9 @@ export interface SupplierPaperCard {
   waitingCredit?: { since: string; back: string; overdue: boolean };
   /** "Still no credit from CED after 30 days": said on a card that came back by itself. */
   stillNoCredit?: string;
+  /** The supplier account it is on. Null: on none yet, so it can't wait on a credit (a credit pairs
+   *  on its account, and the folded line lives under it). */
+  accountId?: string | null;
 }
 
 /** How long a bill waits on its credit before it comes back as a card by itself (Erik: 30 days). */
@@ -1061,11 +1064,14 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
     const onJobRow = jobId ? jobById.get(jobId) : null;
     const accountId = inv.supplierAccountId ?? null;
     const supplier = opts.supplierName ? opts.supplierName(accountId) : "The Supplier";
-    const wait = creditWait(inv, opts.today);
+    // A wait counts only on a supplier account: the credit pairs there and the fold lives there. A
+    // stamp on a paper with no account (its account taken off later) is a card, never hidden.
+    const wait = accountId ? creditWait(inv, opts.today) : null;
     cards.push({
       invoiceId: String(inv.id),
       invoiceNumber: String(inv.invoiceNumber ?? ""),
       supplier,
+      accountId,
       date: inv.invoiceDate ?? null,
       total,
       closed: !!inv.closed,

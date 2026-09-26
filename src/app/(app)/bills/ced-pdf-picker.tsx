@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { FileText, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { readPdfText } from "@/lib/pdf-text";
+import { createClient } from "@/lib/supabase/client";
+import { keepCedPdf } from "@/lib/ced-pdf-store";
 import { importCedInvoices } from "./supplier-import-actions";
-
-/** How much PDF one import sends with its text. Under the 22 MB server-action ceiling, with room. */
-const PDF_BUDGET = 16 * 1024 * 1024;
 
 /**
  * THE CED CARD TAKES THE PDFs THEMSELVES (dropbox plan, Phase 0).
@@ -19,10 +18,15 @@ const PDF_BUDGET = 16 * 1024 * 1024;
  * re-import changes nothing, a job a person set is never touched. The documents land when he
  * picks them, exactly as the paste door does today, and the sentence below says what landed.
  *
- * The bytes ride along too: the importer stores each PDF once (lib/ced-pdf-store), so Open Bill on
- * a supplier bill card can open the paper itself, not only the lines read off it.
+ * THE PDF ITSELF GOES BY STORAGE, NOT BY REQUEST BODY (the drop box's and the plan PDFs' way):
+ * Vercel caps a request at ~4.5 MB, a month of CED PDFs is past that, and one oversized request
+ * would lose the whole import. So each PDF is uploaded here, once per file by its SHA-256
+ * (lib/ced-pdf-store, the staff-only organize prefix), and the importer gets only `{ name, text,
+ * path }`, so Open Bill on a supplier bill card can open the paper itself. A PDF that doesn't
+ * upload never blocks its documents: they land with the file's name, and the sentence says which
+ * PDF wasn't kept and how to keep it.
  */
-export function CedPdfPicker() {
+export function CedPdfPicker({ orgId }: { orgId: string }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -32,44 +36,49 @@ export function CedPdfPicker() {
     if (!files.length) return;
     setBusy(true);
     setSaid(null);
-    const read: { name: string; text: string; pdf?: Uint8Array }[] = [];
+    const read: { name: string; text: string; path?: string }[] = [];
     const unread: string[] = [];
-    // One import carries at most this much PDF (the server takes 22 MB a request). Past it, the
-    // documents still land; those PDFs are named below so he can choose them again to keep them.
-    let budget = PDF_BUDGET;
-    const tooMany: string[] = [];
-    for (const file of files) {
-      const bytes = await file.arrayBuffer();
-      // readPdfText reads a copy, so these bytes are still whole: the importer keeps the PDF
-      // itself (once per file, by content), so Open Bill can open it.
-      const r = await readPdfText(bytes, file.name);
-      if (!r.ok) {
-        unread.push(r.error);
-        continue;
+    const notKept: string[] = [];
+    try {
+      const supabase = createClient();
+      for (const file of files) {
+        const bytes = await file.arrayBuffer();
+        // readPdfText reads a copy, so these bytes are still whole for the upload below.
+        const r = await readPdfText(bytes, file.name);
+        if (!r.ok) {
+          unread.push(r.error);
+          continue;
+        }
+        const kept = orgId ? await keepCedPdf(supabase, orgId, new Uint8Array(bytes)) : null;
+        if (kept?.ok) read.push({ name: file.name, text: r.text, path: kept.path });
+        else {
+          notKept.push(`${file.name} (${kept ? kept.error : "this sign-in has no company"})`);
+          read.push({ name: file.name, text: r.text });
+        }
       }
-      if (bytes.byteLength <= budget) {
-        budget -= bytes.byteLength;
-        read.push({ name: file.name, text: r.text, pdf: new Uint8Array(bytes) });
-      } else {
-        tooMany.push(file.name);
-        read.push({ name: file.name, text: r.text });
+      if (notKept.length) {
+        unread.push(
+          `${notKept.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${notKept.length === 1 ? "it" : "them"}: ${notKept.join(", ")}. Choose ${notKept.length === 1 ? "it" : "them"} again to keep the PDF.`,
+        );
       }
-    }
-    if (tooMany.length) {
-      unread.push(
-        `Too much PDF for one go, so these were read but not kept: ${tooMany.join(", ")}. Choose ${tooMany.length === 1 ? "it" : "them"} again to keep the PDF.`,
-      );
-    }
-    if (!read.length) {
+      if (!read.length) {
+        setSaid({ ok: false, text: `Nothing was imported. ${unread.join(" ")}` });
+        return;
+      }
+      const result = await importCedInvoices({ files: read });
+      const head = result.ok ? result.message ?? "Imported." : result.error ?? "Nothing was imported.";
+      setSaid({ ok: result.ok, text: [head, ...unread].join(" ") });
+      router.refresh();
+    } catch {
+      // NOTHING SILENT: a dropped connection is said, and the button is a button again.
+      setSaid({
+        ok: false,
+        text: "The connection dropped before the import answered, so it may not have landed. Reload the page to see what's here, then choose the PDFs again; a re-import changes nothing that's already in.",
+      });
+      router.refresh();
+    } finally {
       setBusy(false);
-      setSaid({ ok: false, text: `Nothing was imported. ${unread.join(" ")}` });
-      return;
     }
-    const result = await importCedInvoices({ files: read });
-    setBusy(false);
-    const head = result.ok ? result.message ?? "Imported." : result.error ?? "Nothing was imported.";
-    setSaid({ ok: result.ok, text: [head, ...unread].join(" ") });
-    router.refresh();
   }
 
   return (

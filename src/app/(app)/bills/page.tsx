@@ -954,7 +954,7 @@ export default async function BillsPage({
     const where = waitingPapers.has(d.id)
       ? "waiting for you under Needs You"
       : creditWaiting?.waitingCredit
-        ? `waiting on a credit from ${supplier} since ${formatDateShort(creditWaiting.waitingCredit.since)}`
+        ? `waiting on a credit from ${supplier || "the supplier"} since ${formatDateShort(creditWaiting.waitingCredit.since)}`
       : d.billCount > 0
         ? "in your books"
         : d.kind !== "invoice"
@@ -1034,7 +1034,8 @@ export default async function BillsPage({
   // Needs You so a card he set aside never just vanishes. One line per supplier account.
   const waitingByAccount = new Map<string, { name: string; count: number }>();
   for (const c of paperFeed?.waiting ?? []) {
-    const accountId = String(supplierDocuments.find((d) => d.id === c.invoiceId)?.supplierAccountId ?? "");
+    // Only a paper on an account waits (paperCards), so every one has its account's fold to point at.
+    const accountId = String(c.accountId ?? "");
     if (!accountId) continue;
     const had = waitingByAccount.get(accountId) ?? { name: c.supplier, count: 0 };
     waitingByAccount.set(accountId, { name: had.name, count: had.count + 1 });
@@ -1205,7 +1206,7 @@ export default async function BillsPage({
                     same download twice changes nothing, and the job you filed a document on is never touched.
                   </p>
                 </WhyFold>
-                <CedPdfPicker />
+                <CedPdfPicker orgId={orgId} />
                 <details>
                   <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-brand [&::-webkit-details-marker]:hidden">
                     Paste Text Instead

@@ -225,15 +225,22 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
 });
 
 describe("Waiting On A Credit (Erik, 2026-09-26: the Hillside switch CED will credit back)", () => {
-  it("every card offers it after Open Bill and before the answers, Title Case", () => {
-    const html = render([base]);
+  it("every card on a supplier account offers it after Open Bill and before the answers, Title Case", () => {
+    const html = render([{ ...base, accountId: "acct-ced" }]);
     expect(allButtons(html).slice(0, 3)).toEqual(["Open Bill", "Waiting On A Credit", "Put It On J-011"]);
     expect(html).not.toContain("Still no credit");
+  });
+
+  it("a card on no supplier account has no Wait door (a credit pairs on its account, and the fold lives there)", () => {
+    const html = render([{ ...base, accountId: null }]);
+    expect(allButtons(html)).not.toContain("Waiting On A Credit");
+    expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Put It On J-011"]);
   });
 
   it("a card that came back by itself says so, and offers another 30 days", () => {
     const back: SupplierPaperCard = {
       ...base,
+      accountId: "acct-ced",
       waitingCredit: { since: "2026-08-20", back: "2026-09-19", overdue: true },
       stillNoCredit: "Still no credit from CED after 30 days",
     };
@@ -246,7 +253,7 @@ describe("Waiting On A Credit (Erik, 2026-09-26: the Hillside switch CED will cr
 
   it("its done line carries Undo, and outlives the list like any other", () => {
     setSupplierPaperScopeForTest("t-wait", {
-      done: { "si-1": { card: base, message: "8802-1106969 is waiting on a credit.", undoWait: true } as never },
+      done: { "si-1": { card: base, message: "8802-1106969 is waiting on a credit.", undoWait: { since: null, by: null } } as never },
       live: 0,
     });
     const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-wait" }));

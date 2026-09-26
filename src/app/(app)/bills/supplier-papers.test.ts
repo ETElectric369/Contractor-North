@@ -485,6 +485,20 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" }).map((c) => c.invoiceId)).toEqual(["hillside"]);
   });
 
+  it("a stamp on a paper with no supplier account never hides it: it stays a card (nowhere to fold, nothing to pair)", () => {
+    const { rows } = supplierDocumentRows({
+      documents: [hillside({ waiting_credit_since: TAPPED, supplier_account_id: null })],
+      bills: [],
+      links: [],
+      aliasRows: [],
+    });
+    const cards = supplierPaperNeeds(rows, JOBS, { today: "2026-10-01" });
+    expect(cards.map((c) => c.invoiceId)).toEqual(["hillside"]);
+    expect(cards[0].accountId).toBeNull();
+    expect(cards[0].waitingCredit).toBeUndefined();
+    expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" })).toEqual([]);
+  });
+
   it("creditWait: no stamp is not waiting; a bare date reads as itself", () => {
     expect(creditWait({ waitingCreditSince: null }, "2026-10-01")).toBeNull();
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-09-30")).toEqual({ since: "2026-09-01", back: "2026-10-01", overdue: false });

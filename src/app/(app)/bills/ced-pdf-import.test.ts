@@ -115,6 +115,26 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
     expect(res.message).not.toContain("didn't save");
   });
 
+  it("Choose CED PDFs stored it from the browser: the path is written, nothing is uploaded here (no bytes in the request)", async () => {
+    state.client = fakeSupabase(fresh(), calls);
+    const res = await importCedInvoices({ files: [{ name: "invoice_8802-1101363.pdf", text: TWO_INVOICE_TEXT, path: PATH }] });
+    expect(res.ok).toBe(true);
+    expect(uploads).toHaveLength(0);
+    const rows = did("supplier_invoices", "insert")[0].payload as any[];
+    expect(rows.map((r) => r.source_file)).toEqual([PATH, PATH]);
+    expect(res.message).not.toContain("didn't save");
+  });
+
+  it("a path that isn't this org's organize/ced/<sha256>.pdf is ignored: the file's name is written", async () => {
+    for (const path of ["org-2/organize/ced/" + "a".repeat(64) + ".pdf", "org-1/organize/ced/../x.pdf", "org-1/jobs/secret.pdf"]) {
+      calls.length = 0;
+      state.client = fakeSupabase(fresh(), calls);
+      await importCedInvoices({ files: [{ name: "invoice_8802-1101363.pdf", text: TWO_INVOICE_TEXT, path }] });
+      const rows = did("supplier_invoices", "insert")[0].payload as any[];
+      expect(rows.map((r) => r.source_file)).toEqual(["invoice_8802-1101363.pdf", "invoice_8802-1101363.pdf"]);
+    }
+  });
+
   it("the same PDF picked twice in one go (renamed) is still one upload", async () => {
     state.client = fakeSupabase(fresh(), calls);
     await importCedInvoices({

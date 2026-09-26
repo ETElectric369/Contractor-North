@@ -13,7 +13,8 @@
 --   waiting_credit_by     the profile id of who tapped it. A plain uuid, NOT a foreign key: a
 --                         foreign key to profiles would lock profiles (share row exclusive) while
 --                         it is added, and every sign-in writes profiles. The server action writes
---                         the signed-in staffer's own id; nothing else ever does.
+--                         the signed-in staffer's own id, or, on Undo, puts back the id the tap
+--                         replaced once it is checked to be a person in the same company.
 --
 -- The card then leaves My Day and Needs You and is listed on /bills as one folded line under its
 -- supplier ("Waiting On A Credit (1)"), so nothing vanishes. It comes back BY ITSELF, saying "Still

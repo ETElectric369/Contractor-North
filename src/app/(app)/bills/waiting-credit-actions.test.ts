@@ -51,7 +51,15 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[], role = "owne
   };
 }
 
-const HILLSIDE = { id: "43cf4f98-7660-4214-9dc0-b797edeaab25", invoice_number: "8802-1107139", kind: "invoice", total: "59.17" };
+const HILLSIDE = {
+  id: "43cf4f98-7660-4214-9dc0-b797edeaab25",
+  invoice_number: "8802-1107139",
+  kind: "invoice",
+  total: "59.17",
+  supplier_account_id: "acct-ced",
+  waiting_credit_since: null,
+  waiting_credit_by: null,
+};
 let calls: Call[];
 beforeEach(() => {
   calls = [];
@@ -91,6 +99,30 @@ describe("waitOnCredit", () => {
     expect(write.selected).toBe("id");
     expect(write.payload.waiting_credit_by).toBe("user-1");
     expect(Date.parse(write.payload.waiting_credit_since)).toBeGreaterThanOrEqual(before - 1000);
+    // Undo's token: it was not waiting, so Undo clears.
+    expect(res.waitBefore).toEqual({ since: null, by: null });
+  });
+
+  it("Wait 30 More Days hands back the first stamp, so Undo can put it back", async () => {
+    const first = { ...HILLSIDE, waiting_credit_since: "2026-08-20T17:00:00+00:00", waiting_credit_by: "user-2" };
+    state.client = fakeSupabase(
+      {
+        "supplier_invoices.select": [{ data: first, error: null }],
+        "supplier_invoices.update": [{ data: [{ id: HILLSIDE.id }], error: null }],
+      },
+      calls,
+    );
+    const res = await waitOnCredit(HILLSIDE.id);
+    expect(res.ok).toBe(true);
+    expect(res.waitBefore).toEqual({ since: "2026-08-20T17:00:00+00:00", by: "user-2" });
+  });
+
+  it("a bill on no supplier account can't wait (a credit pairs on its account): said, nothing written", async () => {
+    state.client = fakeSupabase({ "supplier_invoices.select": [{ data: { ...HILLSIDE, supplier_account_id: null }, error: null }] }, calls);
+    const res = await waitOnCredit(HILLSIDE.id);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("Put it on a supplier account first");
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
   it("a paper in another company is 'not here', and nothing is written", async () => {
@@ -118,7 +150,17 @@ describe("waitOnCredit", () => {
     expect(res.error).toContain("Nothing was changed.");
   });
 
-  it("before 0346 is applied, the button says it needs one database update", async () => {
+  it("before 0346 is applied, the read naming the wait columns fails, and the button says it needs one database update", async () => {
+    state.client = fakeSupabase(
+      { "supplier_invoices.select": [{ data: null, error: { code: "42703", message: 'column supplier_invoices.waiting_credit_since does not exist' } }] },
+      calls,
+    );
+    const res = await waitOnCredit(HILLSIDE.id);
+    expect(res).toEqual({ ok: false, error: WAIT_NEEDS_UPDATE });
+    expect(calls.some((c) => c.verb === "update")).toBe(false);
+  });
+
+  it("before 0346 is applied, a failed write says it needs one database update too", async () => {
     state.client = fakeSupabase(
       {
         "supplier_invoices.select": [{ data: HILLSIDE, error: null }],
@@ -144,6 +186,21 @@ describe("stopWaitingOnCredit (Undo, and Stop Waiting on /bills)", () => {
       ["id", HILLSIDE.id],
     ]);
     expect(write.selected).toBe("id, invoice_number");
+  });
+
+  it("Undo after Wait 30 More Days puts the first stamp back, not a blank one", async () => {
+    state.client = fakeSupabase({ "supplier_invoices.update": [{ data: [{ id: HILLSIDE.id, invoice_number: "8802-1107139" }], error: null }] }, calls);
+    const res = await stopWaitingOnCredit(HILLSIDE.id, { since: "2026-08-20T17:00:00+00:00", by: "user-1" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("back as it was");
+    const write = calls.find((c) => c.verb === "update")!;
+    expect(write.payload).toEqual({ waiting_credit_since: "2026-08-20T17:00:00.000Z", waiting_credit_by: "user-1" });
+  });
+
+  it("a restore stamp that isn't a real past moment is not trusted: the wait is cleared", async () => {
+    state.client = fakeSupabase({ "supplier_invoices.update": [{ data: [{ id: HILLSIDE.id, invoice_number: "8802-1107139" }], error: null }] }, calls);
+    await stopWaitingOnCredit(HILLSIDE.id, { since: "2999-01-01T00:00:00Z", by: "someone" });
+    expect(calls.find((c) => c.verb === "update")!.payload).toEqual({ waiting_credit_since: null, waiting_credit_by: null });
   });
 
   it("a tech is refused", async () => {

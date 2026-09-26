@@ -10,7 +10,7 @@ import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
 // payroll in it, and a second copy here would drift the moment one of them learned about cents.
 import { sayMoney } from "@/lib/payroll-math";
 import { isPdfText } from "@/lib/pdf-text";
-import { isStoredPaperPath, keepCedPdf, pdfBytesOf } from "@/lib/ced-pdf-store";
+import { isCedPdfPath, isStoredPaperPath, keepCedPdf, pdfBytesOf } from "@/lib/ced-pdf-store";
 
 /**
  * LOADING THE SUPPLIER'S OWN INVOICES, SO NEXT MONTH HE DOES NOT NEED ME (Erik, 2026-09-19; 0273).
@@ -69,10 +69,13 @@ import { isStoredPaperPath, keepCedPdf, pdfBytesOf } from "@/lib/ced-pdf-store";
  * the print preview already loads) and posts `{ name, text }`. Raw PDF bytes that reach here anyway
  * are refused by their CONTENT (the %PDF- signature), never by the file's name.
  *
- * AND THE PDF ITSELF IS KEPT (2026-09-26). A file can carry its bytes too (`pdf`): Choose CED PDFs
- * sends them, and Drop Paperwork's Add To CED Documents hands over the file it already stored. The
- * bytes are stored ONCE per file, named by their SHA-256 (lib/ced-pdf-store), and every document
- * read out of that file records the stored path in source_file, so Open Bill can open it. A PDF
+ * AND THE PDF ITSELF IS KEPT (2026-09-26). Stored ONCE per file, named by its SHA-256
+ * (lib/ced-pdf-store), and every document read out of that file records the stored path in
+ * source_file, so Open Bill can open it. Two ways in: Choose CED PDFs uploads the PDF straight to
+ * storage from the browser and sends only its `path` (Vercel caps a request body at ~4.5 MB, so
+ * the bytes never ride in this action; a path is taken only in this org's organize/ced/<sha256>.pdf
+ * shape), and Drop Paperwork's Add To CED Documents hands over the `pdf` bytes it already holds,
+ * server side. A PDF
  * that doesn't save never blocks the import: its documents land with the file's name, as before,
  * and the sentence says which PDF didn't save and how to keep it.
  */
@@ -162,9 +165,10 @@ function orgOf(ctx: { orgId: string | null }): { orgId: string } | { error: stri
 export interface SupplierImportInput {
   /** Text pasted straight out of a PDF viewer. One document or forty; both work. */
   text?: string | null;
-  /** Files whose text has already been read. `text` is the FILE'S TEXT, not its bytes. `pdf` is
-   *  the file's bytes, when the caller has them: stored once (by content), so Open Bill can open it. */
-  files?: { name: string; text: string; pdf?: Uint8Array | ArrayBuffer | null }[] | null;
+  /** Files whose text has already been read. `text` is the FILE'S TEXT, not its bytes. `path` is
+   *  where the browser already stored the PDF (cedPdfPath). `pdf` is the file's bytes, for a SERVER
+   *  caller only (a browser's request body is capped at ~4.5 MB): stored once, by content. */
+  files?: { name: string; text: string; path?: string | null; pdf?: Uint8Array | ArrayBuffer | null }[] | null;
 }
 
 export async function importCedInvoices(input: SupplierImportInput): Promise<SupplierImportResult> {
@@ -175,11 +179,11 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   const supabase = ctx.supabase;
 
   // ── WHAT WE WERE GIVEN ─────────────────────────────────────────────────────────────────────
-  const sources: { name: string | null; text: string; pdf: Uint8Array | null }[] = [];
+  const sources: { name: string | null; text: string; pdf: Uint8Array | null; path: string | null }[] = [];
   const refused: SupplierImportResult["refused"] = [];
 
   const pasted = String(input?.text ?? "").trim();
-  if (pasted) sources.push({ name: null, text: pasted, pdf: null });
+  if (pasted) sources.push({ name: null, text: pasted, pdf: null, path: null });
 
   for (const file of input?.files ?? []) {
     const name = String(file?.name ?? "").trim() || "a file with no name";
@@ -196,7 +200,11 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       refused.push({ invoiceNumber: null, error: `${name} had no text in it.` });
       continue;
     }
-    sources.push({ name, text, pdf: pdfBytesOf(file?.pdf) });
+    // A stored path is taken only in the shape cedPdfPath makes for THIS org; anything else is
+    // ignored (the documents still land, with the file's name).
+    const given = file?.path;
+    const path = isCedPdfPath(given, org.orgId) ? given : null;
+    sources.push({ name, text, pdf: path ? null : pdfBytesOf(file?.pdf), path });
   }
 
   if (!sources.length && !refused.length) {
@@ -326,7 +334,10 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // twice; one PDF with four invoices is one object that all four rows name.
   const pdfPathOf = new Map<number, string>();
   const pdfUnsaved: string[] = [];
-  const pdfSources = [...new Set([...parsed.values()].map((p) => p.source))].filter((i) => sources[i]?.pdf);
+  const parsedSources = [...new Set([...parsed.values()].map((p) => p.source))];
+  // Stored by the browser already (Choose CED PDFs): the path is the answer.
+  for (const i of parsedSources) if (sources[i]?.path) pdfPathOf.set(i, sources[i].path as string);
+  const pdfSources = parsedSources.filter((i) => sources[i]?.pdf);
   if (pdfSources.length) {
     // Paths already named by a row here: stored before, so never uploaded again. A failed read of
     // this only costs a redundant upload, which storage refuses as "already there" anyway.

@@ -25,8 +25,15 @@ import { offLinesWords, type PaperContents } from "@/lib/supplier-paper-contents
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
 /** What's On It, per card: reading, read, or a read that failed (said, with Try Again). */
 export type PaperContentsState = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; contents: PaperContents };
-/** `undoWait`: the tap was Waiting On A Credit, and Undo takes the wait back off (stopWaitingOnCredit). */
-type Done = { card: SupplierPaperCard; message: string; undo?: UndoToken; undoWait?: boolean; error?: string };
+/** `undoWait`: the tap was Waiting On A Credit, and Undo puts back the wait it replaced (none, or the
+ *  first stamp on a card told "Wait 30 More Days") with stopWaitingOnCredit. */
+type Done = {
+  card: SupplierPaperCard;
+  message: string;
+  undo?: UndoToken;
+  undoWait?: { since: string | null; by: string | null };
+  error?: string;
+};
 
 /** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
 const titleCase = (s: string | null | undefined) =>
@@ -372,7 +379,7 @@ export function SupplierPaperCards({
         return;
       }
       setOpen((o) => ({ ...o, [card.invoiceId]: undefined }));
-      setDone((d) => ({ ...d, [card.invoiceId]: { card, message: res.message ?? `${card.invoiceNumber} is waiting on a credit.`, undoWait: true } }));
+      setDone((d) => ({ ...d, [card.invoiceId]: { card, message: res.message ?? `${card.invoiceNumber} is waiting on a credit.`, undoWait: res.waitBefore ?? { since: null, by: null } } }));
       if (refreshAfter) router.refresh();
     });
   }
@@ -384,7 +391,7 @@ export function SupplierPaperCards({
     start(async () => {
       let res: SupplierActionResult;
       try {
-        res = token ? await undoFileSupplierPaper(token) : await stopWaitingOnCredit(d.card.invoiceId);
+        res = token ? await undoFileSupplierPaper(token) : await stopWaitingOnCredit(d.card.invoiceId, d.undoWait);
       } catch {
         res = { ok: false, error: "The connection dropped, so nothing was undone. Try again." };
       }
@@ -532,9 +539,13 @@ export function SupplierPaperCards({
           <Button type="button" variant="outline" aria-expanded={!!reading[c.invoiceId]} onClick={() => toggleContents(c)}>
             {reading[c.invoiceId] ? "Close Bill" : "Open Bill"}
           </Button>
-          <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => wait(c)}>
-            {c.waitingCredit?.overdue ? "Wait 30 More Days" : "Waiting On A Credit"}
-          </Button>
+          {/* Only a bill on a supplier account: the credit pairs on that account, and the folded
+              line lives under it. A bill on no account has no Wait door (the action refuses it too). */}
+          {c.accountId && (
+            <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => wait(c)}>
+              {c.waitingCredit?.overdue ? "Wait 30 More Days" : "Waiting On A Credit"}
+            </Button>
+          )}
         </div>
         {reading[c.invoiceId] && contents[c.invoiceId] && (
           <PaperContentsView cardTotal={c.total} view={contents[c.invoiceId]} onRetry={() => readContents(c)} />
