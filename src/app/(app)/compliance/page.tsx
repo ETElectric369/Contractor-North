@@ -1,6 +1,8 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { readViewerFeatures } from "@/lib/viewer-features";
 import { ComplianceManager } from "./compliance-manager";
 import { EXCLUDED_FROM_COMPLIANCE } from "@/lib/compliance-types";
 
@@ -8,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CompliancePage() {
   const supabase = await createClient();
+  // The switches ride beside the page's own reads, not after them.
+  const viewerP = readViewerFeatures();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -34,8 +38,11 @@ export default async function CompliancePage() {
     signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
   }));
 
+  const viewer = await viewerP;
   return (
     <div>
+      {/* Licenses & Insurance off (0352): still opens from a link, with the Off line on top. */}
+      <FeatureOffLine feature="licenses" features={viewer.features} isOwner={viewer.isOwner} />
       <PageHeader
         title="Compliance"
         description="Licenses, certifications & permits — with renewal alerts so nothing lapses. (Policies live in Insurance; reviews in Audits.)"

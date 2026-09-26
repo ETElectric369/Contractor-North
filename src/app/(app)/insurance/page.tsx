@@ -1,6 +1,8 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { readViewerFeatures } from "@/lib/viewer-features";
 import { InsuranceManager } from "./insurance-manager";
 import { INSURANCE_FILTER } from "@/lib/compliance-types";
 
@@ -8,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function InsurancePage() {
   const supabase = await createClient();
+  // The switches ride beside the page's own reads, not after them.
+  const viewerP = readViewerFeatures();
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -33,8 +37,11 @@ export default async function InsurancePage() {
     signedUrl: ((i.file_url && urls.get(i.file_url)) || null) as string | null,
   }));
 
+  const viewer = await viewerP;
   return (
     <div>
+      {/* Licenses & Insurance off (0352): still opens from a link, with the Off line on top. */}
+      <FeatureOffLine feature="licenses" features={viewer.features} isOwner={viewer.isOwner} />
       <PageHeader
         title="Insurance"
         description="Policies & coverage — workers' comp, general liability, auto — with renewal alerts so nothing lapses."

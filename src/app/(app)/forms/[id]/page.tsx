@@ -11,6 +11,8 @@ import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { parsePlaybook } from "@/lib/playbook/parse";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { readViewerFeatures } from "@/lib/viewer-features";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +42,7 @@ export default async function FormDetailPage({
   // other surface uses, and `{}` or `{needs: []}` must not count as one.
   const isPlaybook = parsePlaybook((form as { playbook?: unknown }).playbook).needs.length > 0;
 
-  const [{ data: jobs }, { data: subs }] = await Promise.all([
+  const [{ data: jobs }, { data: subs }, viewer] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -52,13 +54,18 @@ export default async function FormDetailPage({
       .eq("form_id", id)
       .order("created_at", { ascending: false })
       .limit(25),
+    readViewerFeatures(),
   ]);
+  // SAFETY LOG OFF (0352): a crew checklist still opens from a link, with the Off line on top. The
+  // walk-through sheet and the website's intake form live here too and are not the Safety Log.
+  const crewChecklist = !(form as { is_inspection?: boolean }).is_inspection && !(form as { is_public_intake?: boolean }).is_public_intake;
 
   const submissions = subs ?? [];
 
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
+      {crewChecklist && <FeatureOffLine feature="safety_log" features={viewer.features} isOwner={viewer.isOwner} />}
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>

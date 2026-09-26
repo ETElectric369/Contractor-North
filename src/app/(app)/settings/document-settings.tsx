@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import type { OrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { updateOrgSettings } from "./actions";
 
 export function DocumentSettings({ settings }: { settings: OrgSettings }) {
@@ -64,10 +65,14 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         <Label htmlFor="ds-iterms">Default invoice terms</Label>
         <Textarea id="ds-iterms" rows={2} value={invoiceTerms} onChange={(e) => setInvoiceTerms(e.target.value)} placeholder="e.g. Payment due within 14 days. 1.5% monthly late fee." />
       </div>
-      <div>
-        <Label htmlFor="ds-cterms">Default contract terms</Label>
-        <Textarea id="ds-cterms" rows={4} value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} placeholder="The standard terms section of your service contracts (payment, change orders, warranty, cancellation, governing law)." />
-      </div>
+      {/* Contracts & Lien Rights off (0352): the field isn't drawn; Save still sends the stored terms
+          back unchanged, and a contract already written keeps the terms it was written with. */}
+      {featureOn(settings.features, "contracts") && (
+        <div>
+          <Label htmlFor="ds-cterms">Default contract terms</Label>
+          <Textarea id="ds-cterms" rows={4} value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} placeholder="The standard terms section of your service contracts (payment, change orders, warranty, cancellation, governing law)." />
+        </div>
+      )}
       <div>
         <Label htmlFor="ds-footer">Document footer</Label>
         <Textarea id="ds-footer" rows={2} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder="Shown at the bottom of estimates, invoices & work orders (license #, thank-you note, etc.)" />
