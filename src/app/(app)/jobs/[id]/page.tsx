@@ -1453,7 +1453,7 @@ export default async function JobDetailPage({
               {(pos ?? []).map((p: any) => (
                 <li key={p.id}>
                   <Link href={`/purchasing/${p.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
-                    <span>{p.po_number} · {p.vendor}</span>
+                    <span>{p.po_number} · {p.vendor || "No vendor"}</span>
                     <span className="text-slate-700">{formatCurrency(p.total)}</span>
                   </Link>
                 </li>

@@ -441,7 +441,7 @@ export function BillsReceipts({
                 <li key={p.id}>
                   <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium text-slate-900">{p.po_number} · {p.vendor}</div>
+                      <div className="font-medium text-slate-900">{p.po_number} · {p.vendor || "No vendor"}</div>
                       <div className="text-xs text-slate-400">{p.jobs?.name ?? "No job"}</div>
                     </div>
                     <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>

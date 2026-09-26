@@ -42,7 +42,7 @@ function billablePos(pos: JobPo[]): JobPo[] {
 
 /** Label for the PO picker: "PO-00012 · CED · $2,400.00". */
 function poLabel(p: JobPo): string {
-  return `${p.po_number} · ${p.vendor} · ${formatCurrency(p.total)}`;
+  return `${p.po_number} · ${p.vendor || "No vendor"} · ${formatCurrency(p.total)}`;
 }
 
 /**
@@ -142,7 +142,7 @@ export function JobBills({
     <li key={p.id}>
       <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
         <div className="min-w-0 flex-1">
-          <div className="font-medium text-slate-900">{p.vendor}</div>
+          <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
           <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
           {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>

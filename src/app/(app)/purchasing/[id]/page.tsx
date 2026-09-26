@@ -90,7 +90,7 @@ export default async function PurchaseOrderPage({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
-          <span className="font-medium text-slate-600">{p.vendor}</span>
+          <span className="font-medium text-slate-600">{p.vendor || "No vendor yet"}</span>
           <span>Created {formatDate(p.created_at)}</span>
           {p.ordered_at && <span>Ordered {formatDate(p.ordered_at)}</span>}
           {p.jobs && (

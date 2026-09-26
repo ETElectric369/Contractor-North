@@ -38,6 +38,15 @@ describe("a company's paper says only what the company said", () => {
   });
 });
 
+describe("a purchase order names no supplier until a person does", () => {
+  it("New PO starts empty, and neither the PO page nor Nort's tool falls back to CED", () => {
+    expect(src("src/app/(app)/purchasing/new-po-button.tsx")).toContain('useState("")');
+    expect(src("src/app/(app)/purchasing/actions.ts")).not.toContain('"CED"');
+    expect(src("src/app/(app)/purchasing/[id]/po-detail.tsx")).not.toContain("CED");
+    expect(src("src/lib/actions/entities/purchaseOrder.ts")).not.toContain("CED");
+  });
+});
+
 describe("sign-up, sign-in and Settings carry North's mark and plain labels", () => {
   it("onboarding: the dome asset, no trade icon, no tagline, a made-up example company", () => {
     const s = src("src/app/onboarding/page.tsx");
