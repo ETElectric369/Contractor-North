@@ -37,7 +37,9 @@ export interface Permit {
 }
 
 
-export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[] }) {
+/** `canAdd` = the Permits & Inspections switch (0352). Off, Add Permit goes; the permits already on
+ *  the job stay listed and editable (the tab shows the Off line above them). */
+export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; permits: Permit[]; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -76,10 +78,10 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm text-slate-500">{permits.length} permit{permits.length === 1 ? "" : "s"}</div>
-        <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>
+        {canAdd && <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>}
       </div>
 
-      {adding && (
+      {canAdd && adding && (
         <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

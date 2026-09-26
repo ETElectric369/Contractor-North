@@ -256,12 +256,15 @@ export function TookFromStock({
   takes,
   viewerIsStaff,
   readFailed = false,
+  canTake = true,
 }: {
   jobId: string;
   takes: JobTake[];
   viewerIsStaff: boolean;
   /** The page's read of the job's takes failed (jobTakes' error): said in the list's place. */
   readFailed?: boolean;
+  /** The Shop Stock switch (0352). Off, the button goes; the job's takes stay listed with Undo. */
+  canTake?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -402,13 +405,15 @@ export function TookFromStock({
 
   return (
     <div className="space-y-3">
-      <button
-        type="button"
-        onClick={() => void openSheet(null)}
-        className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
-      >
-        <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
-      </button>
+      {canTake && (
+        <button
+          type="button"
+          onClick={() => void openSheet(null)}
+          className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+        >
+          <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
+        </button>
+      )}
       <TakesListView takes={takes} viewerIsStaff={viewerIsStaff} pendingGroup={pendingGroup} onUndo={(t) => void undo(t.drawGroup)} readFailed={readFailed} />
       <Modal open={open} onClose={() => setOpen(false)} title="Took From Stock" size="md" dirty={step.kind === "count" && entry !== ""}>
         <TakeSheetView
