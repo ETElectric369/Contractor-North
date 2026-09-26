@@ -669,6 +669,7 @@ export default async function SettingsPage({
                   employees={members.map((m) => ({ id: m.id, full_name: m.full_name }))}
                   ownerName={members.find((m) => m.role === "owner")?.full_name ?? undefined}
                   textReady={texting.ready}
+                  isOwner={profile?.role === "owner"}
                 />
               </Section>
               <Section title="Job codes">

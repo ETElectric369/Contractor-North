@@ -3,6 +3,7 @@
 
 import type { Block } from "@/lib/site-blocks";
 import { withPlace } from "@/lib/doc-place";
+import { ALL_ON, normalizeFeatures, normalizeTradeKey, type FeatureMap, type TradeKey } from "@/lib/features";
 
 export interface OrgSettings {
   // Company
@@ -58,6 +59,12 @@ export interface OrgSettings {
    *  an electrician who'd been instructed to calculate conduit fill per NEC. Empty
    *  falls back to the neutral "contractor". */
   trade_label: string;
+  /** The trade picked at sign-up, as a key (lib/trade-codes TRADE_ORDER); "" = blank or not listed.
+   *  trade_label stays the words. Written only at sign-up and by 0355 (the pin trigger, 0352). */
+  trade: TradeKey | "";
+  /** THE SWITCH BOARD (0352, lib/features). Normalized on read: missing = ON. Written only by the
+   *  owner's set_org_feature; updateOrgSettings refuses it. */
+  features: FeatureMap;
   /** Employee handbook text (simple #/## headings + paragraphs). */
   employee_handbook: string;
 
@@ -363,6 +370,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   quote_playbook: "",
   estimating_mode: "research",
   trade_label: "",
+  trade: "",
+  features: ALL_ON,
   employee_handbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",
@@ -616,6 +625,12 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // "false" string or a stray 0 must not quietly hide the card, so only a real boolean false turns
   // it off, and a missing key reads as the default, on.
   merged.office_sees_owner_money = merged.office_sees_owner_money !== false;
+  // THE SWITCH BOARD (0352): missing = ON. The old Job Codes key now READS the switch, so its
+  // readers (timecards, timeclock, planner, the job page) follow it without an edit each; while
+  // the switch is missing, the old checkbox's stored false still reads as off.
+  merged.trade = normalizeTradeKey((stored as { trade?: unknown }).trade);
+  merged.features = normalizeFeatures((stored as { features?: unknown }).features, (stored as { timeclock_job_codes?: unknown }).timeclock_job_codes);
+  merged.timeclock_job_codes = merged.features.job_codes;
   return merged;
 }
 
