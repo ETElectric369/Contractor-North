@@ -108,11 +108,12 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(res).toMatchObject({ ok: true, id: "inv-081" });
   });
 
-  it("Tao J-002: a quoted job whose paid deposit came from the estimate and whose draws bill actuals goes to the progress report — the paid deposit is never reopened", async () => {
+  it("a FIXED-PRICE quoted job whose paid deposit came from the estimate and whose draws bill actuals goes to the progress report — the paid deposit is never reopened", async () => {
     const createInvoiceFromQuote = (await import("../billing/actions")).createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
     createInvoiceFromQuote.mockReset();
     state.client = fake((table, cols, single) => {
       if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return []; // no open draft
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return []; // no standard invoices
       if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
@@ -128,9 +129,10 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(res).toMatchObject({ ok: true, id: "inv-new" });
   });
 
-  it("a quoted job billed only by contract draws is told the door, with the latest draw — never a reopened bill, never actuals behind its back", async () => {
+  it("a FIXED-PRICE quoted job billed only by contract draws is told the door, with the latest draw — never a reopened bill, never actuals behind its back", async () => {
     state.client = fake((table, cols, single) => {
       if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
       if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
       if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
       if (table === "quotes") return [{ id: "q-1", status: "accepted" }];
@@ -144,6 +146,89 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(res.ok).toBe(false);
     expect(res.billedOn).toEqual({ id: "dep-1", number: "INV-090" });
     expect(res.error).toMatch(/Progress Payment/);
+  });
+
+  it("Tao J-002 (T&M): the estimate is a guide - with only the estimate's deposit out, the next bill is still the progress report of the actuals", async () => {
+    const createInvoiceFromQuote = (await import("../billing/actions")).createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
+    createInvoiceFromQuote.mockReset();
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      // Only the deposit, made from the estimate, and no labor/costs line on any draw yet.
+      if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00006", invoice_number: "INV-00006" }];
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-new", note: "Started INV-082 for the work not yet billed, less the $10,000.00 deposit not yet taken off a bill." });
+    const res = await createInvoiceForJob(JOB);
+    expect(createInvoiceFromQuote).not.toHaveBeenCalled();
+    expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
+    expect(res).toMatchObject({ ok: true, id: "inv-new" });
+  });
+
+  it("a T&M job with an accepted estimate and no bills yet: a blank invoice with the actuals pulled in, never the estimate's lines", async () => {
+    const billing = await import("../billing/actions");
+    const createInvoiceFromQuote = billing.createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    const importLabor = billing.importLaborIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    const importCosts = billing.importCostsIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    createInvoiceFromQuote.mockReset();
+    importLabor.mockClear();
+    importCosts.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-first" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Schaffer", description: null };
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+      if (table === "invoices" && cols === "id, invoice_number") return [];
+      if (table === "quotes") return [{ id: "q-010", status: "accepted" }];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    const res = await createInvoiceForJob(JOB);
+    expect(createInvoiceFromQuote).not.toHaveBeenCalled();
+    expect(state.drawDoor).not.toHaveBeenCalled();
+    expect(importLabor).toHaveBeenCalledWith("inv-first");
+    expect(importCosts).toHaveBeenCalled();
+    expect(res).toMatchObject({ ok: true, id: "inv-first" });
+  });
+
+  it("a T&M job whose open standard draft was copied from the estimate: the hours never go on it (estimate + actuals on one bill)", async () => {
+    const billing = await import("../billing/actions");
+    const importLabor = billing.importLaborIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    const importCosts = billing.importCostsIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    importLabor.mockClear();
+    importCosts.mockClear();
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "jobs") return null;
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) {
+        return [{ id: "inv-070", invoice_number: "INV-070", invoice_kind: "standard", dismissed_import_keys: [], quote_id: "q-1" }];
+      }
+      if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) return []; // no draws
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) {
+        return [{ id: "inv-070", invoice_number: "INV-070", status: "draft", quote_id: "q-1" }];
+      }
+      if (table === "quotes") return [{ id: "q-1", status: "accepted" }];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    // The card's rule: that draft takes no new work, so the button opens it.
+    const { openDraftOnJob, unbilledCardDoor } = await import("@/lib/actuals-draw");
+    const draft = await openDraftOnJob(state.client, JOB);
+    expect(draft).toMatchObject({ id: "inv-070", refreshable: false });
+    expect(unbilledCardDoor({ openDraft: draft, workPending: true, returns: 0, total: 900, newWork: 900, money: (n) => String(n) })?.kind).toBe("open");
+    // The New Invoice door agrees: it opens the draft and pulls nothing onto it.
+    const res = await createInvoiceForJob(JOB);
+    expect(importLabor).not.toHaveBeenCalled();
+    expect(importCosts).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ ok: true, id: "inv-070", partial: true });
+    expect(res.importWarning).toMatch(/carries the estimate's lines, so the hours and receipts weren't added/);
   });
 
   it("an open STANDARD draft stays this door's business, as before", async () => {

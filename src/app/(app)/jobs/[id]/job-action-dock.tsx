@@ -161,6 +161,7 @@ export function JobActionDock({
                       hasQuote={hasQuote}
                       defaultSendInvoice={defaultSendInvoice}
                       isDrawBilled={isDrawBilled}
+                      isTm={job.billing_type === "tm"}
                     />
                   </>
                 )}

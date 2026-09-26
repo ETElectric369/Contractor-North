@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeUnbilledWork, customerUnbilled, foldClaims } from "@/lib/unbilled-work";
+import { computeUnbilledWork, customerUnbilled, foldClaims, netOfDeposit } from "@/lib/unbilled-work";
 import { customerRateRow, payViewRow } from "@/lib/labor-billing";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 
@@ -42,6 +42,20 @@ describe("customerUnbilled", () => {
       expect(text).not.toContain(banned);
     }
     expect(u.billsAmount).toBe(100); // the office still sees its cost
+  });
+});
+
+describe("netOfDeposit: the portal nets the deposit the office card nets", () => {
+  const c = { hours: 19.5, laborByPerson: [], laborAmount: 2437.5, materials: 0, returnsCredit: 0, total: 2437.5 };
+  it("a deposit that covers the work takes all of it (Tao-shaped: $10,000 against $2,437.50)", () => {
+    expect(netOfDeposit(c, 10000).lessDeposit).toBe(2437.5);
+  });
+  it("a smaller deposit takes itself", () => {
+    expect(netOfDeposit(c, 1000).lessDeposit).toBe(1000);
+  });
+  it("no deposit, or a credit-only total, adds nothing", () => {
+    expect(netOfDeposit(c, 0)).toEqual(c);
+    expect(netOfDeposit({ ...c, total: -40 }, 1000).lessDeposit).toBeUndefined();
   });
 });
 
@@ -89,14 +103,12 @@ describe("customerRateRow: the customer's page never prices with a pay rate", ()
 });
 
 describe("jobBillsItsActuals: the Unbilled card's rule, shared with the portal", () => {
-  it("a T&M job with no live quote and no schedule bills its actuals", () => {
-    expect(jobBillsItsActuals("tm", [], 0)).toBe(true);
-    expect(jobBillsItsActuals("tm", ["declined", "expired"], 0)).toBe(true);
+  it("EVERY T&M job with no schedule bills its actuals - an estimate is a guide, never a block (Tao J-002)", () => {
+    expect(jobBillsItsActuals("tm", 0)).toBe(true);
   });
-  it("a quote, a schedule or a fixed job bills something else", () => {
-    expect(jobBillsItsActuals("tm", ["accepted"], 0)).toBe(false);
-    expect(jobBillsItsActuals("tm", ["draft"], 0)).toBe(false);
-    expect(jobBillsItsActuals("tm", [], 2)).toBe(false);
-    expect(jobBillsItsActuals("fixed", [], 0)).toBe(false);
+  it("a schedule or a fixed-price job bills something else", () => {
+    expect(jobBillsItsActuals("tm", 2)).toBe(false);
+    expect(jobBillsItsActuals("fixed", 0)).toBe(false);
+    expect(jobBillsItsActuals(null, 0)).toBe(false);
   });
 });

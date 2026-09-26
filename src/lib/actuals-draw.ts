@@ -92,12 +92,12 @@ export type OpenDraft = {
 export async function openDraftOnJob(supabase: SupabaseClient, jobId: string): Promise<OpenDraft | null> {
   const { data, error } = await supabase
     .from("invoices")
-    .select("id, invoice_number, invoice_kind, dismissed_import_keys, created_at")
+    .select("id, invoice_number, invoice_kind, dismissed_import_keys, created_at, quote_id")
     .eq("job_id", jobId)
     .eq("status", "draft")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const rows = (data ?? []) as { id: string; invoice_number: string | null; invoice_kind: string | null; dismissed_import_keys: string[] | null }[];
+  const rows = (data ?? []) as { id: string; invoice_number: string | null; invoice_kind: string | null; dismissed_import_keys: string[] | null; quote_id?: string | null }[];
   const pick = rows.find((r) => isDrawKind(r.invoice_kind)) ?? rows[0];
   if (!pick) return null;
   const kind = pick.invoice_kind ?? "standard";
@@ -117,6 +117,18 @@ export async function openDraftOnJob(supabase: SupabaseClient, jobId: string): P
       .limit(1);
     if (drawErr) throw drawErr;
     if ((draws ?? []).length) return null;
+    // AN ESTIMATE COPIED ONTO A T&M JOB'S DRAFT IS NOT A PLACE FOR THE HOURS (review, 2026-09-26).
+    // On Time & Material the estimate is a guide (estimateIsTheContract), but /billing's "from
+    // quote" and Nort's invoice.fromQuote can still copy its lines onto a standard draft. Adding the
+    // actuals to that draft would bill the estimate AND the work on one bill, so it takes no new
+    // work: the card offers "Open INV-0xx", and Finish won't build on it.
+    if (pick.quote_id) {
+      const { data: job, error: jobErr } = await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle();
+      if (jobErr) throw jobErr;
+      if ((job as { billing_type?: string | null } | null)?.billing_type === "tm") {
+        return { id: pick.id, number: pick.invoice_number, kind, refreshable: false };
+      }
+    }
     return { id: pick.id, number: pick.invoice_number, kind, refreshable: true };
   }
   const shape = await readDraftShape(supabase, { id: pick.id, jobId, kind, dismissedKeys: pick.dismissed_import_keys });
@@ -150,10 +162,16 @@ export async function readDraftShape(
 // ── What the job card's button does ─────────────────────────────────────────────────────────
 
 export type CardDoor =
-  | { kind: "add"; label: string }
+  /** `amount` is what the click adds: the card's "Open" figure. */
+  | { kind: "add"; label: string; amount: number }
   | { kind: "open"; label: string; href: string }
-  /** `note` names a deposit the new bill takes off, so the figure on the button is explained. */
-  | { kind: "create"; label: string; note?: string }
+  /** A standard invoice (a plain T&M job's New Invoice). `note` names a deposit the new bill takes
+   *  off, so the figure on the button is explained. `amount` is what the click bills. */
+  | { kind: "create"; label: string; amount: number; note?: string }
+  /** A progress payment built from the actuals (createProgressReportInvoice, the Progress Payment →
+   *  Actual T&M door). The job already bills with draws, so its next bill is one too, and it nets
+   *  any deposit not yet taken off a bill (resolveDrawCredit). `amount` is what it bills. */
+  | { kind: "draw"; label: string; amount: number; note?: string }
   /** No button: a deposit (or a set-amount draw) not yet taken off a bill still covers the work.
    *  `note` is the sentence the card shows instead. */
   | { kind: "covered"; note: string }
@@ -162,8 +180,11 @@ export type CardDoor =
 /**
  * THE CARD NEVER OFFERS A DOOR THE SERVER REFUSES. An open draft that takes new work → "Add to
  * INV-078 ($X)". An open draft that doesn't (a fixed or % draw) → "Open INV-0xx", which goes there:
- * the work waits for the next bill and the card says why. No draft → "Create Invoice for $X".
- * Nothing pending → no button (the card's sentences carry the door).
+ * the work waits for the next bill and the card says why. No draft on a job that already bills with
+ * draws → "Create Progress Payment for $X": the draw door, which nets the deposit and never reopens
+ * a paid one (Tao J-002, where the standard New Invoice opened his paid deposit). No draft
+ * otherwise → "Create Invoice for $X". Nothing pending → no button (the card's sentences carry the
+ * door).
  */
 export function unbilledCardDoor(input: {
   openDraft: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
@@ -176,9 +197,12 @@ export function unbilledCardDoor(input: {
   /** Hours + bills alone, before a return comes off. */
   newWork: number;
   /** Deposit / set-amount draw money no bill has taken off yet (fixedBillingsNotYetNetted). The
-   *  next progress report nets it (resolveDrawCredit), so a "Create Invoice" figure that ignored it
-   *  would promise more than the click bills - or a click that bills nothing. */
+   *  next progress report nets it (resolveDrawCredit), so a figure that ignored it would promise
+   *  more than the click bills - or a click that bills nothing. */
   lumpToNet?: number;
+  /** The job carries a live draw (a deposit, a progress payment): its next bill is a progress
+   *  payment, never a standard invoice (H4 refuses one there). */
+  drawBilled?: boolean;
   money: (n: number) => string;
 }): CardDoor {
   const { openDraft, workPending, returns, total, newWork, money } = input;
@@ -189,10 +213,15 @@ export function unbilledCardDoor(input: {
       return workPending || returns > 0 ? { kind: "open", label: `Open ${name}`, href: `/billing/${openDraft.id}` } : null;
     }
     if (!(workPending || returns > 0)) return null;
-    return { kind: "add", label: total > 0.005 ? `Add to ${name} (${money(total)})` : `Add to ${name}` };
+    // What the click adds: the work, net of a pending return - but never below zero. A return worth
+    // more than the new work waits on its own sentence (owedBack); the hours still go on the draft.
+    const amount = total > 0.005 ? total : Math.max(0, newWork);
+    return { kind: "add", label: amount > 0.005 ? `Add to ${name} (${money(amount)})` : `Add to ${name}`, amount };
   }
   if (!workPending) return null;
   const figure = total > 0.005 ? total : newWork;
+  const kind = input.drawBilled ? ("draw" as const) : ("create" as const);
+  const verb = kind === "draw" ? "Create Progress Payment" : "Create Invoice";
   if (lump > 0.005) {
     // The server's own decision (createProgressReportInvoice → resolveDrawCredit), made here first.
     const d = resolveDrawCredit(figure, lump);
@@ -203,14 +232,29 @@ export function unbilledCardDoor(input: {
       };
     }
     if (d.credit > 0.005) {
+      const net = Math.round((figure - d.credit) * 100) / 100;
       return {
-        kind: "create",
-        label: `Create Invoice for ${money(Math.round((figure - d.credit) * 100) / 100)}`,
+        kind,
+        label: `${verb} for ${money(net)}`,
+        amount: net,
         note: `That is ${money(figure)} of work less the ${money(d.credit)} deposit not yet taken off a bill.`,
       };
     }
   }
-  return { kind: "create", label: `Create Invoice for ${money(figure)}` };
+  return { kind, label: `${verb} for ${money(figure)}`, amount: figure };
+}
+
+/**
+ * THE ONE NUMBER (Erik, 2026-09-26: "the only thing i was looking for was the amount open"). The
+ * card leads with "Open: $X", and $X is exactly what its button bills: the figure on "Add to" or
+ * "Create ...", $0 when a deposit still covers the work, and otherwise the work not on a bill (a
+ * contract draft that can't take it, or nothing pending at all).
+ */
+export function openFigure(door: CardDoor, total: number): number {
+  // Never a negative "Open": a return worth more than the work is a credit, said on its own line.
+  if (!door || door.kind === "open") return Math.max(0, total);
+  if (door.kind === "covered") return 0;
+  return door.amount;
 }
 
 // ── What a refresh says ──────────────────────────────────────────────────────────────────────
