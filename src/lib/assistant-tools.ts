@@ -1209,7 +1209,7 @@ export async function runDataTool(
             name: r.name,
             on_hand: r.onHand,
             unit: r.unit,
-            ...(r.onHand < 0 ? { note: "More was taken than the shelf showed; the office will recount." } : {}),
+            ...(r.onHand < 0 ? { note: "More was taken than the shelf showed; the office will settle it." } : {}),
             ...(staff ? { value: value.get(r.id) ?? 0 } : {}),
           })),
           how_to_take: "A take is Took From Stock: call stock.take with the job and the item; it fills the card and the person taps Take It.",
@@ -2099,6 +2099,7 @@ export async function runDataTool(
                 // pieces taken past the shelf that can't be billed until their roll is filed.
                 ...(unbilled.stockCount ? { stock_billed: unbilled.stockBilled, stock_takes: unbilled.stockCount } : {}),
                 ...(unbilled.stockShortsWords ? { stock_not_billable_yet: unbilled.stockShortsWords } : {}),
+                ...(unbilled.stockNoCostWords ? { stock_no_cost: unbilled.stockNoCostWords } : {}),
                 total: unbilled.total,
                 last_invoice_number: unbilled.lastInvoiceNumber,
                 by_person: unbilled.laborByPerson,

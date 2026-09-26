@@ -8,7 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatDateShort } from "@/lib/utils";
 import { isTransportError } from "@/lib/chunk-reload";
-import { fmtQty, takeDoor, takeLine, takeShort, takeShortWords, type JobTake, type ShelfRow } from "@/lib/stock-take";
+import { fmtQty, TAKES_READ_FAILED, takeDoor, takeLine, takeShort, takeShortWords, takeUnheardWords, type JobTake, type ShelfRow } from "@/lib/stock-take";
 import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions";
 
 /**
@@ -20,13 +20,15 @@ import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions"
  *   with Undo.
  *
  * A take bigger than the shelf shows still saves, so nobody hits a dead end in the field: the pad
- * says so before the tap ("20 ft more than the shelf shows — the office will recount") and the
- * office gets a Recount item. The warning is worked from what a take can REACH (filed rolls, 0344's
+ * says so before the tap ("20 ft more than the shelf shows — the office will settle it") and the
+ * office gets a Settle item. The warning is worked from what a take can REACH (filed rolls, 0344's
  * takeable), not the bare count, so the sheet and the toast never disagree. Nort fills the same sheet (?take=<item>&qty=60 on the job's link); a
  * person taps Take It.
  *
  * Under the button, the job's takes (stock_takes_for_job, 0344): who took what and when, with Undo
- * until an invoice bills it. Once one does, the Undo reads "Take It Off INV-078 First".
+ * until an invoice bills it. Once one does, the Undo reads "Take It Off INV-078 First". A read of
+ * them that failed says so in the list's place (`readFailed`), never an empty list: an empty list
+ * reads as "nothing taken", and that is the list the sheet sends people to before tapping again.
  *
  * NOT ONE PRICE, for anyone: the rows this draws have no field that could hold one (lib/stock-take).
  */
@@ -182,12 +184,25 @@ export function TakesListView({
   viewerIsStaff,
   pendingGroup,
   onUndo,
+  readFailed = false,
 }: {
   takes: JobTake[];
   viewerIsStaff: boolean;
   pendingGroup: string | null;
   onUndo: (t: JobTake) => void;
+  /** stock_takes_for_job failed: `takes` is empty because nothing was read, not because nothing was taken. */
+  readFailed?: boolean;
 }) {
+  if (readFailed) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-900">Taken From Stock</div>
+        <p data-testid="takes-read-failed" className="px-4 py-2.5 text-sm text-amber-700">
+          {TAKES_READ_FAILED}
+        </p>
+      </div>
+    );
+  }
   if (!takes.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
@@ -240,10 +255,13 @@ export function TookFromStock({
   jobId,
   takes,
   viewerIsStaff,
+  readFailed = false,
 }: {
   jobId: string;
   takes: JobTake[];
   viewerIsStaff: boolean;
+  /** The page's read of the job's takes failed (jobTakes' error): said in the list's place. */
+  readFailed?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -253,6 +271,9 @@ export function TookFromStock({
   const [rows, setRows] = useState<ShelfRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Take It threw: whether it saved is unknown. The words are worked out on render from whether the
+  // takes list read on the refresh, so they never point at a list that isn't there.
+  const [unheard, setUnheard] = useState<{ noSignal: boolean } | null>(null);
   const [search, setSearch] = useState("");
   const [step, setStep] = useState<SheetStep>({ kind: "pick" });
   const [entry, setEntry] = useState("");
@@ -287,6 +308,7 @@ export function TookFromStock({
       setEntry("");
       setSearch("");
       setError(null);
+      setUnheard(null);
       setVia(fill ? "nort" : "sheet");
       setOpen(true);
       const fresh = await read();
@@ -355,6 +377,7 @@ export function TookFromStock({
     const itemId = step.row.id;
     startTake(async () => {
       setError(null);
+      setUnheard(null);
       let r: Awaited<ReturnType<typeof takeFromStockAction>>;
       try {
         r = await takeFromStockAction({ itemId, jobId, qty, via });
@@ -362,11 +385,7 @@ export function TookFromStock({
         // A throw here would reach the page's error card and the sheet would vanish without saying
         // whether the take saved. Each Take It is a new take, so tapping again blind could take the
         // pieces twice: keep the sheet, say so, and show the job's takes as they stand.
-        setError(
-          isTransportError(e)
-            ? "No signal, so Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again."
-            : "Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.",
-        );
+        setUnheard({ noSignal: isTransportError(e) });
         router.refresh();
         return;
       }
@@ -390,13 +409,13 @@ export function TookFromStock({
       >
         <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
       </button>
-      <TakesListView takes={takes} viewerIsStaff={viewerIsStaff} pendingGroup={pendingGroup} onUndo={(t) => void undo(t.drawGroup)} />
+      <TakesListView takes={takes} viewerIsStaff={viewerIsStaff} pendingGroup={pendingGroup} onUndo={(t) => void undo(t.drawGroup)} readFailed={readFailed} />
       <Modal open={open} onClose={() => setOpen(false)} title="Took From Stock" size="md" dirty={step.kind === "count" && entry !== ""}>
         <TakeSheetView
           step={step}
           rows={rows}
           loading={loading}
-          error={error}
+          error={unheard ? takeUnheardWords(unheard.noSignal, !readFailed) : error}
           search={search}
           entry={entry}
           busy={busy}
@@ -405,11 +424,13 @@ export function TookFromStock({
             setStep({ kind: "count", row });
             setEntry("");
             setError(null);
+            setUnheard(null);
           }}
           onKey={(k) => setEntry((e) => padPress(e, k))}
           onBack={() => {
             setStep({ kind: "pick" });
             setError(null);
+            setUnheard(null);
           }}
           onTake={take}
         />

@@ -27,7 +27,7 @@ export type CostRow = { id: string; kind: "bill" | "po" | "stock"; amount: numbe
 export type CostPile = { ids: string[]; bills: number; pos: number; takes: number; total: number };
 
 /** A take from stock as the tab lists it: no bill row stands behind it, so its words ride here. */
-export type StockPileRow = { label: string; cost: number; takenAt: string };
+export type StockPileRow = { label: string; cost: number; takenAt: string; note?: string };
 
 export type BilledGroup = CostPile & {
   invoice: ClaimantInvoice;
@@ -78,7 +78,7 @@ export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostR
   const stockRows: CostRow[] = [];
   for (const v of verdicts) {
     if (v.kind !== "stock") continue;
-    stock[v.id] = { label: v.label, cost: v.cost, takenAt: v.takenAt };
+    stock[v.id] = { label: v.label, cost: v.cost, takenAt: v.takenAt, ...(v.note ? { note: v.note } : {}) };
     stockRows.push({ id: v.id, kind: "stock", amount: v.cost });
   }
   for (const r of [...rows.filter((x) => x.kind !== "stock"), ...stockRows]) {

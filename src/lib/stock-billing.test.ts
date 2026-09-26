@@ -15,6 +15,7 @@ import { billedWorkOnInvoices, computeJobProgress } from "./job-progress-math";
 import { computeUnbilledWork, foldClaims } from "./unbilled-work";
 import { finishWouldLeaveOffBill } from "./finish-job-words";
 import { pulledIntoSentence } from "./actuals-draw";
+import { groupJobCosts } from "./job-cost-groups";
 
 const ITEM = { id: "i1", name: "12/2 NM-B", unit: "ft" };
 const NUTS = { id: "i2", name: "Twister wire nut", unit: "ea" };
@@ -91,7 +92,7 @@ describe("a job's moves fold into takes and shorts", () => {
 });
 
 describe("a take's line bills exactly its cost at the invoice's markup", () => {
-  const take = (qty: number, cost: number, group = "g1") => ({ group, itemId: "i1", item: "12/2 NM-B", unit: "ft", qty, cost, moveIds: [`${group}-m`], takenAt: "2026-09-24T16:00:00Z" });
+  const take = (qty: number, cost: number, group = "g1") => ({ group, itemId: "i1", item: "12/2 NM-B", unit: "ft", qty, cost, zeroQty: 0, moveIds: [`${group}-m`], takenAt: "2026-09-24T16:00:00Z" });
   it("60 ft for Andrew at 15%: $43.24 of cost bills $49.73, as one line with the count in its words", () => {
     const { rows } = stockImportRows([take(60, 43.24)], 15);
     expect(rows).toEqual([{ import_key: "stock:g1", description: "12/2 NM-B, 60 ft", quantity: 1, unit: "ea", unit_price: 49.73, source_ids: ["g1-m"] }]);
@@ -122,6 +123,63 @@ describe("a take's line bills exactly its cost at the invoice's markup", () => {
     expect(rows).toEqual([]);
     expect(zeroCost).toHaveLength(1);
     expect(stockZeroCostSentence(zeroCost)).toBe("12/2 NM-B, 10 ft came off a roll with no cost on it, so it isn't on the bill - add the line to the invoice by hand");
+  });
+});
+
+describe("a take that runs from a roll with no cost into a costed one (audit v1018, stock-1)", () => {
+  // 40 ft off a roll counted in with no cost, then 20 ft off a $100 / 100 ft receipt roll.
+  const moves = [move({ id: "a", qty: 40, cost: 0 }), move({ id: "b", qty: 20, cost: 20 })];
+  it("the take carries how many of its pieces cost nothing", () => {
+    const { takes } = stockTakesOnJob(moves, [ITEM]);
+    expect(takes[0]).toMatchObject({ qty: 60, cost: 20, zeroQty: 40, moveIds: ["a", "b"] });
+    // Pieces carried back off the $0 roll come off the $0 count too.
+    const back = stockTakesOnJob([...moves, move({ id: "r", draw_group: null, kind: "job_return", qty: 15, cost: 0, returns_move_id: "a" })], [ITEM]);
+    expect(back.takes[0]).toMatchObject({ qty: 45, cost: 20, zeroQty: 25 });
+    // Every piece with a cost: nothing to say.
+    expect(stockTakesOnJob([move({ id: "c", qty: 20, cost: 20 })], [ITEM]).takes[0].zeroQty).toBe(0);
+  });
+  it("the priced part still bills, once, and the $0 pieces are said with the hand-add fix", () => {
+    const { takes } = stockTakesOnJob(moves, [ITEM]);
+    const { rows, zeroCost } = stockImportRows(takes, 25);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ import_key: "stock:g1", description: "12/2 NM-B, 60 ft", source_ids: ["a", "b"] });
+    expect(Math.round(rows[0].quantity * rows[0].unit_price * 100) / 100).toBe(25);
+    expect(stockTotals(takes, 25)).toEqual({ count: 1, cost: 20, billed: 25 });
+    expect(zeroCost).toHaveLength(1);
+    expect(stockZeroCostSentence(zeroCost)).toBe(
+      "40 ft of 12/2 NM-B came off a roll with no cost on it, so only 20 ft is priced on the bill - add the rest to the invoice by hand",
+    );
+  });
+  it("a whole-$0 take and a part-$0 take are both named, each in its own words", () => {
+    const { takes } = stockTakesOnJob([...moves, move({ id: "z", draw_group: "g2", item_id: "i2", qty: 12, cost: 0, created_at: "2026-09-24T17:00:00Z" })], [ITEM, NUTS]);
+    const { rows, zeroCost } = stockImportRows(takes, 25);
+    expect(rows.map((r) => r.import_key)).toEqual(["stock:g1"]);
+    expect(stockZeroCostSentence(zeroCost)).toBe(
+      "Twister wire nut, 12 ea came off a roll with no cost on it, so it isn't on the bill - add the line to the invoice by hand. 40 ft of 12/2 NM-B came off a roll with no cost on it, so only 20 ft is priced on the bill - add the rest to the invoice by hand",
+    );
+  });
+  it("the Unbilled card and the Costs tab say it too, from the same rule", () => {
+    const stock = stockTakesOnJob(moves, [ITEM]);
+    const u = computeUnbilledWork({
+      jobEntries: [],
+      nonBillableCodes: new Set<string>(),
+      defaultRate: 100,
+      levelRate: null,
+      pos: [],
+      bills: [],
+      markupPct: 25,
+      claims: foldClaims([], true),
+      stock,
+    });
+    expect([u.stockCount, u.stockBilled]).toEqual([1, 25]);
+    expect(u.stockNoCostWords).toContain("only 20 ft is priced on the bill");
+    const row = u.costRows.find((r) => r.kind === "stock");
+    expect(row).toMatchObject({ state: "open", note: expect.stringContaining("40 ft of 12/2 NM-B came off a roll with no cost on it") });
+    expect(groupJobCosts([], u.costRows).stock["stock:g1"].note).toContain("add the rest to the invoice by hand");
+    // Every piece priced: no words anywhere.
+    const priced = computeUnbilledWork({ jobEntries: [], nonBillableCodes: new Set<string>(), defaultRate: 100, levelRate: null, pos: [], bills: [], markupPct: 25, claims: foldClaims([], true), stock: stockTakesOnJob([move({ id: "c", qty: 20, cost: 20 })], [ITEM]) });
+    expect(priced.stockNoCostWords).toBeNull();
+    expect(priced.costRows.find((r) => r.kind === "stock")).not.toHaveProperty("note");
   });
 });
 

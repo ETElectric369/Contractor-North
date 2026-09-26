@@ -16,6 +16,7 @@ import { materialListSectionTree } from "@/lib/nav-tree";
 import { canonicalMaterialListId, deleteMaterialList } from "../actions";
 import { TookFromStock } from "../took-from-stock";
 import { jobTakes } from "@/lib/stock-ledger";
+import { reportError } from "@/lib/observe";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +70,8 @@ export default async function MaterialListPage({
     // The job's takes from stock (0344), for the Took From Stock door under the list. No cost.
     jobId ? jobTakes(supabase, jobId) : Promise.resolve({ takes: [], missing: true, error: null }),
   ]);
+  // A takes read that fails is logged and said in the list's place, never an empty list.
+  if (takes.error) reportError("materials.page.stockTakes", takes.error, { jobId, listId: id });
 
   // A list with no job is a quote's take-off or a work order's sheet — office paper.
   // A tech can land here from a link, so it renders, but read-only with one sentence
@@ -205,7 +208,7 @@ export default async function MaterialListPage({
         <div className="space-y-3">
           {/* TOOK FROM STOCK (Phase 3): the job's list is a job's, so the shelf door rides here too,
               the same button and the same takes as the job's Materials tab. */}
-          {jobId && <TookFromStock jobId={jobId} takes={takes.takes} viewerIsStaff={viewerIsStaff} />}
+          {jobId && <TookFromStock jobId={jobId} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} />}
           {/* THE SAME editor for both roles (Erik, 2026-09-11) — viewerIsStaff only
               strips the money. My Day's "Materials" button lands a clocked-in tech
               right here, so the ask-the-office door rides under the list here too,

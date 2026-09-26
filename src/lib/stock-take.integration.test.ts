@@ -28,7 +28,7 @@ if (STOCK_TAKE_APPLY === "1" && isProduction) {
   throw new Error("stock-take: STOCK_TAKE_APPLY=1 is refused on the production database. Apply 0343/0344 there as migrations, in a quiet window.");
 }
 
-d("Took From Stock at the database (0343 + 0344)", () => {
+d("Took From Stock at the database (0343 + 0344 + 0345 + 0347 + 0348)", () => {
   defineStockTakeSuite(
     async () => {
       const client = new pg.Client({

@@ -147,7 +147,7 @@ export async function undoTakeAction(drawGroup: string, jobId?: string | null): 
 }
 
 /**
- * SETTLE PIECES TAKEN PAST THE SHELF, once a roll is on it (the office's answer to a Recount item).
+ * SETTLE PIECES TAKEN PAST THE SHELF, once a roll is on it (the office's answer to a Settle item).
  * settle_short writes real draws at the roll's cost, all or nothing; until then the short costs $0
  * and bills nothing.
  */

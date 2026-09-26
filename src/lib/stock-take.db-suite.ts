@@ -32,7 +32,13 @@ export interface SqlClient {
   end: () => Promise<void>;
 }
 
-const MIGRATIONS = ["0343_a_piece_is_billed_once.sql", "0344_the_crew_reads_the_jobs_takes.sql", "0345_a_take_billed_in_part_says_so.sql"];
+const MIGRATIONS = [
+  "0343_a_piece_is_billed_once.sql",
+  "0344_the_crew_reads_the_jobs_takes.sql",
+  "0345_a_take_billed_in_part_says_so.sql",
+  "0347_a_take_leaves_open_shorts_their_pieces.sql",
+  "0348_a_settled_take_says_who_can_undo_it.sql",
+];
 const readMigration = (f: string) => readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${f}`, import.meta.url)), "utf8");
 
 export type StockTakeSuiteOptions = {
@@ -41,7 +47,7 @@ export type StockTakeSuiteOptions = {
 };
 const num = (v: unknown) => Number(v);
 /** Every key stock_takes_for_job may hand anyone. A cost, a lot or a supplier is never one of them. */
-const TAKE_KEYS = ["back", "billed_invoice_id", "billed_on", "can_undo", "draw_group", "item", "item_id", "mine", "part_billed", "qty", "short", "taken_at", "unit", "who"];
+const TAKE_KEYS = ["back", "billed_invoice_id", "billed_on", "can_undo", "draw_group", "item", "item_id", "mine", "part_billed", "qty", "settled_by_office", "short", "taken_at", "unit", "who"];
 
 export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: StockTakeSuiteOptions) {
   let c: SqlClient;
@@ -49,6 +55,8 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
   let has0343 = false;
   let applied0344 = false;
   let applied0345 = false;
+  let applied0347 = false;
+  let applied0348 = false;
   let orgId = "";
   let staffId = "";
   let techId = "";
@@ -90,6 +98,8 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       if (!has0343) await c.query(readMigration(MIGRATIONS[0]));
       if (!applied0344) await c.query(readMigration(MIGRATIONS[1]));
       if (!applied0345) await c.query(readMigration(MIGRATIONS[2]));
+      if (!applied0347) await c.query(readMigration(MIGRATIONS[3]));
+      if (!applied0348) await c.query(readMigration(MIGRATIONS[4]));
       // THIS CASE'S OWN COMPANIES, in its transaction, rolled back with it: ours (an owner and two
       // techs) and a stranger's (an owner, for the other-company checks).
       const ours = await mintThrowawayOrg(c, { label: "stock take", techs: 2 });
@@ -192,12 +202,18 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
                 to_regprocedure('public.guard_stock_piece_claim()') is not null as claim,
                 to_regprocedure('public.stock_takes_for_job(uuid)') is not null as takes,
                 coalesce((select position('part_billed' in prosrc) > 0 from pg_proc
-                           where oid = to_regprocedure('public.stock_takes_for_job(uuid)')), false) as part`,
+                           where oid = to_regprocedure('public.stock_takes_for_job(uuid)')), false) as part,
+                coalesce((select position('v_open' in prosrc) > 0 from pg_proc
+                           where oid = to_regprocedure('public.stock_draw(uuid,uuid,numeric,text,text)')), false) as reserve,
+                coalesce((select position('settled_by_office' in prosrc) > 0 from pg_proc
+                           where oid = to_regprocedure('public.stock_takes_for_job(uuid)')), false) as settled`,
       );
       has0343 = !!has?.claim;
       applied0344 = !!has?.takes;
       applied0345 = !!has?.part;
-      ready = !!has?.ledger && ((has0343 && applied0344 && applied0345) || opts.allowDdl);
+      applied0347 = !!has?.reserve;
+      applied0348 = !!has?.settled;
+      ready = !!has?.ledger && ((has0343 && applied0344 && applied0345 && applied0347 && applied0348) || opts.allowDdl);
       if (!has?.ledger) return;
       if (!ready) {
         console.warn("[stock-take] 0343/0344 are not on this database, and this run may not apply DDL (never on production); nothing to exercise.");
@@ -206,7 +222,8 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
     } finally {
       await c.query("rollback");
     }
-    if (ready && !(has0343 && applied0344 && applied0345)) console.warn("[stock-take] 0343/0344/0345 are not all on this database yet; each case applies the missing ones inside its own rolled-back transaction.");
+    if (ready && !(has0343 && applied0344 && applied0345 && applied0347 && applied0348))
+      console.warn("[stock-take] 0343/0344/0345/0347/0348 are not all on this database yet; each case applies the missing ones inside its own rolled-back transaction.");
   });
 
   afterAll(async () => {
@@ -363,12 +380,19 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       await as(staffId);
       await c.query("select public.settle_short($1)", [r.short_id]);
       await asServer();
+      expect(rows[0].settled_by_office).toBe(false);
       rows = await takes(techId, jobB);
       expect(rows).toHaveLength(1);
       expect(num(rows[0].qty)).toBe(270);
       expect(num(rows[0].short)).toBe(0);
       expect(rows[0].can_undo).toBe(false); // the office settled part of it (0303)
+      // 0348: and the row says why, so his own take never just loses its Undo in silence.
+      expect(rows[0].settled_by_office).toBe(true);
       expect((await takes(staffId, jobB))[0].can_undo).toBe(true);
+      // stock_undo agrees: the tech is refused, in the words the row's reason stands in for.
+      await as(techId);
+      expect((await refusal(() => c.query("select public.stock_undo($1)", [r.draw_group])))?.message).toContain("one the office has settled");
+      await asServer();
       // The settlement's pieces bill; the take's short id still never does.
       const settledIds = (await c.query("select id from public.stock_moves where draw_group = (select settled_by from public.stock_moves where id = $1)", [r.short_id])).rows.map((x) => x.id);
       // 0345: the take's own draw on an invoice, the settled pieces on none: PART billed, as the
@@ -407,6 +431,43 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       // A take of 280 saves a 30 ft short: exactly what takeable predicted, not on_hand.
       const r = await draw(techId, it1, jobB, 280);
       expect(num(r.short)).toBe(30);
+    });
+  });
+
+  it("0347: a new take leaves an open short its pieces, so the sheet, the take and the settle agree (audit v1018)", async () => {
+    if (!needs()) return;
+    await tx(async () => {
+      // An empty shelf: a tech takes 20 ft, all of it a short.
+      const it1 = await item();
+      const first = await draw(techId, it1, jobB, 20);
+      expect(num(first.short)).toBe(20);
+      // The office files a 100 ft roll. The count owes the short its 20 ft, and so does the reach.
+      await lot(it1, await coilTicket(jobA, "2001-08-19"), 100);
+      await as(techId);
+      const row = await one("select * from public.shelf_for_crew() where id = $1", [it1]);
+      await asServer();
+      expect([num(row.on_hand), num(row.takeable)]).toEqual([80, 80]);
+      // A take of 90: the sheet warns 10 past the shelf, and the take records exactly that short.
+      const second = await draw(techId, it1, jobB, 90);
+      expect(num(second.short)).toBe(10);
+      expect((second.moves ?? []).reduce((s, m: any) => s + num(m.qty), 0)).toBe(80);
+      // The older short can still settle: its 20 ft stayed on the roll.
+      await as(staffId);
+      expect(await refusal(() => c.query("select public.settle_short($1)", [first.short_id]))).toBeNull();
+      await asServer();
+      // With no open short, a take reaches every piece on the roll, as before 0347.
+      const it2 = await item();
+      await lot(it2, await coilTicket(jobA, "2001-08-20"), 100);
+      const plain = await draw(techId, it2, jobB, 100);
+      expect(num(plain.short)).toBe(0);
+      // An undone short gives its pieces back to the reach.
+      const it3 = await item();
+      const s3 = await draw(techId, it3, jobB, 30);
+      await lot(it3, await coilTicket(jobA, "2001-08-21"), 50);
+      await as(staffId);
+      await c.query("select public.stock_undo($1)", [s3.draw_group]);
+      await asServer();
+      expect(num((await draw(techId, it3, jobB, 50)).short)).toBe(0);
     });
   });
 

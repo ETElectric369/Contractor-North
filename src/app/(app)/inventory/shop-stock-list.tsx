@@ -98,7 +98,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  // A Recount item links here with ?item=<id>: that item starts open, so Settle From The Shelf is
+  // A Settle item links here with ?item=<id>: that item starts open, so Settle From The Shelf is
   // on screen instead of somewhere down a list of closed rows.
   const [open, setOpen] = useState<Record<string, boolean>>(() => (openItem ? { [openItem]: true } : {}));
   useEffect(() => {
@@ -269,7 +269,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                   Undo
                                 </button>
                               )}
-                              {/* The answer to a Recount item (Phase 3): once a roll is on the shelf,
+                              {/* The answer to a Settle item (Phase 3): once a roll is on the shelf,
                                   the pieces taken past it are settled at that roll's cost. */}
                               {!m.undone && m.kind === "short" && !m.settled && (
                                 <button

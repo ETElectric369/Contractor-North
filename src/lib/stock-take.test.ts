@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  belowZeroWords,
   fmtQty,
   matchShelfItem,
   normUnit,
@@ -14,6 +15,7 @@ import {
   takeLine,
   takeShort,
   takeShortWords,
+  takeUnheardWords,
   tookWords,
   type ShelfRow,
 } from "./stock-take";
@@ -49,6 +51,9 @@ describe("the shelf and the takes, as the database hands them back", () => {
     // 0345's part_billed rides only with a billing invoice; before 0345 it is simply absent (false).
     const part = parseTakes([{ draw_group: "g2", billed_on: "INV-078", part_billed: true }, { draw_group: "g3", billed_on: null, part_billed: true }, { draw_group: "g4", billed_on: "INV-078" }]);
     expect(part.map((t) => t.partBilled)).toEqual([true, false, false]);
+    // 0348's settled_by_office: true only when the database says so (absent before 0348).
+    const settled = parseTakes([{ draw_group: "g5", settled_by_office: true }, { draw_group: "g6", settled_by_office: "yes" }, { draw_group: "g7" }]);
+    expect(settled.map((t) => t.settledByOffice)).toEqual([true, false, false]);
   });
 });
 
@@ -62,9 +67,9 @@ describe("the words", () => {
     expect(shortOf(5, 20)).toBe(15);
     expect(shortOf(250, 60)).toBe(0);
     expect(shortOf(-15, 10)).toBe(10); // a shelf already below zero shows none
-    expect(shortWords(20, "ft")).toBe("20 ft more than the shelf shows — the office will recount");
+    expect(shortWords(20, "ft")).toBe("20 ft more than the shelf shows — the office will settle it");
     expect(tookWords({ qty: 20, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 15 })).toBe(
-      "Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than the shelf shows — the office will recount.",
+      "Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than the shelf shows — the office will settle it.",
     );
   });
 
@@ -83,7 +88,7 @@ describe("the words", () => {
     // Enough on filed rolls: nothing to say.
     expect(takeShortWords({ ...takeShort({ onHand: 100, takeable: 100 }, 40), unit: "ft" })).toBeNull();
     // Past the count as well: the count is what the crew sees, so that is what is said.
-    expect(takeShortWords({ ...takeShort({ onHand: 30, takeable: 10 }, 40), unit: "ft" })).toBe("10 ft more than the shelf shows — the office will recount");
+    expect(takeShortWords({ ...takeShort({ onHand: 30, takeable: 10 }, 40), unit: "ft" })).toBe("10 ft more than the shelf shows — the office will settle it");
   });
 
   it("never sends the office to count a short it can't settle by counting", () => {
@@ -120,7 +125,36 @@ describe("the words", () => {
     const back = takeDoor({ canUndo: false, billedOn: null, back: 5 });
     expect(back).toEqual({ kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." });
     expect(takeDoor({ canUndo: false, billedOn: null, back: 0 })).toEqual({ kind: "none", why: null });
+    // The office settled the short inside a tech's own take: his Undo is gone, and the row says who can (audit v1018).
+    expect(takeDoor({ canUndo: false, billedOn: null, back: 0, settledByOffice: true })).toEqual({
+      kind: "none",
+      why: "The office settled part of this take, so ask the office to undo it.",
+    });
+    // The office's own view of it still has Undo, and a billed one still names its invoice first.
+    expect(takeDoor({ canUndo: true, billedOn: null, back: 0, settledByOffice: true })).toEqual({ kind: "undo" });
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0, settledByOffice: true }).kind).toBe("billed");
     expect(takeLine({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", short: 0, back: 0 })).toBe("Brian took 60 ft of 12/2 NM-B");
+  });
+});
+
+describe("never silent (audit v1018)", () => {
+  it("a take that leaves the shelf below zero with no short says so, in the toast and the bell", () => {
+    expect(belowZeroWords(190, "ft")).toBeNull();
+    expect(belowZeroWords(0, "ft")).toBeNull();
+    expect(belowZeroWords(undefined, "ft")).toBeNull();
+    expect(tookWords({ qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 })).toBe(
+      "Took 90 ft of 12/2 NM-B for Herringbone. The shelf now reads -10 ft, below zero — the office will settle it.",
+    );
+    const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 });
+    expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; the shelf now reads -10 ft");
+    expect(bell.body).toBe("For Herringbone. The shelf is below zero: File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+  });
+
+  it("Take It that didn't hear back points at the takes list only when that list read", () => {
+    expect(takeUnheardWords(true, true)).toBe("No signal, so Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.");
+    expect(takeUnheardWords(false, true)).toBe("Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.");
+    expect(takeUnheardWords(true, false)).toBe("No signal, so Take It didn't hear back. It may have saved: reload before tapping again.");
+    expect(takeUnheardWords(false, false)).not.toContain("Taken From Stock");
   });
 });
 

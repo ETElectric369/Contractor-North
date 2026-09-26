@@ -57,6 +57,10 @@ export type StockTake = {
   qty: number;
   /** What those pieces cost the company, as the database stamped them. */
   cost: number;
+  /** Of `qty`, the pieces that came off a roll with no cost on it (a $0 draw, net of what came
+   *  back): priced at nothing, so the line cannot bill them and the office is told (audit v1018).
+   *  Equal to `qty` when the whole take cost nothing; 0 when every piece had a cost. */
+  zeroQty: number;
   /** The draw moves of the take: the claim. A returned piece's draw stays in it (the draw is what
    *  was taken; the return only lowers what is billed). */
   moveIds: string[];
@@ -111,11 +115,13 @@ export function stockTakesOnJob(moves: readonly StockMoveRow[], items: readonly 
       unit: unitOf(String(m.item_id)),
       qty: 0,
       cost: 0,
+      zeroQty: 0,
       moveIds: [],
       takenAt: m.created_at,
     };
     t.qty = qty3(t.qty + num(m.qty) - r.qty);
     t.cost = cents(t.cost + num(m.cost) - r.cost);
+    if (!(num(m.cost) > 0)) t.zeroQty = qty3(t.zeroQty + Math.max(0, num(m.qty) - r.qty));
     t.moveIds.push(String(m.id));
     if (m.created_at < t.takenAt) t.takenAt = m.created_at;
     byGroup.set(g, t);
@@ -164,18 +170,19 @@ export function stockKey(group: string): string {
  * "Supplies & tax" row behind a take to true up cents, so qty x unit price is shown only when it
  * lands on that figure to the cent (and the count fits the invoice's two decimals); otherwise the
  * row is 1 x the sell, and the count stays in the words ("12/2 NM-B, 60 ft"), never invented.
- * A take whose pieces cost nothing (a roll with no cost on it) bills nothing and is left off:
- * `zeroCost` says so, so the caller can name it.
+ * A take whose pieces cost nothing (a roll with no cost on it) bills nothing and is left off.
+ * A take PART of whose pieces cost nothing (it ran from a $0 roll into a costed one) still bills
+ * its priced part, and the line's words still carry the whole count. Both are in `zeroCost`, so
+ * the caller names them (stockZeroCostSentence): the $0 pieces are claimed with the take's moves,
+ * so no later import can pick them up, and the office adds them by hand or nobody does.
  */
 export function stockImportRows(takes: readonly StockTake[], markupPct: unknown): { rows: StockImportRow[]; zeroCost: StockTake[] } {
   const rows: StockImportRow[] = [];
   const zeroCost: StockTake[] = [];
   for (const t of takes) {
     const sell = markStock(t.cost, markupPct);
-    if (!(sell > 0)) {
-      zeroCost.push(t);
-      continue;
-    }
+    if (!(sell > 0) || t.zeroQty > 0) zeroCost.push(t);
+    if (!(sell > 0)) continue;
     const description = stockLineWords(t.item, t.qty, t.unit);
     const q2 = Math.round(t.qty * 100) / 100;
     const unitPrice = t.qty > 0 ? Math.round((sell / t.qty) * 100) / 100 : sell;
@@ -224,7 +231,7 @@ export function stockShortsSentence(shorts: readonly StockShort[]): string | nul
   }
   const what = joinAnd([...byItem.values()].map((x) => `${qtyWords(x.qty)} ${x.unit} of ${x.item}`));
   const one = shorts.length === 1;
-  // The remedy is SHORT_FIX, the bell's and the Recount item's own words: counting can't settle a
+  // The remedy is SHORT_FIX, the bell's and the Settle item's own words: counting can't settle a
   // short (a count has no roll, and settle_short walks rolls), so it is never offered here.
   return `${what} ${one ? "was" : "were"} taken from stock with no roll behind ${one ? "it" : "them"} yet, so ${one ? "it isn't" : "they aren't"} on the bill yet. ${SHORT_FIX}`;
 }
@@ -236,11 +243,38 @@ export function stockShortsSentence(shorts: readonly StockShort[]): string | nul
  */
 export const STOCK_NO_COST_FIX = "add the line to the invoice by hand";
 
-/** The office's words for takes left off because their pieces cost nothing. Null when none. */
+/** A take whose pieces cost nothing at all (as opposed to only some of them). */
+function wholeNoCost(t: Pick<StockTake, "cost" | "qty" | "zeroQty">): boolean {
+  return !(t.cost > 0) || t.zeroQty >= t.qty;
+}
+
+/**
+ * The office's words for a take only PART of whose pieces cost nothing: the line bills the priced
+ * part, so the rest is named with what to do. Null when every piece had a cost, or none did (that
+ * take is left off whole and stockZeroCostSentence / nothingToBillWhy say so).
+ */
+export function stockPartNoCostWords(t: Pick<StockTake, "item" | "unit" | "qty" | "cost" | "zeroQty">): string | null {
+  if (!(t.zeroQty > 0) || wholeNoCost(t)) return null;
+  const priced = qty3(t.qty - t.zeroQty);
+  return `${qtyWords(t.zeroQty)} ${t.unit} of ${t.item} came off a roll with no cost on it, so only ${qtyWords(priced)} ${t.unit} is priced on the bill - add the rest to the invoice by hand`;
+}
+
+/**
+ * The office's words for takes whose pieces cost nothing: left off whole when none of the pieces
+ * had a cost, priced on the rest when some did. Null when none.
+ */
 export function stockZeroCostSentence(takes: readonly StockTake[]): string | null {
-  if (!takes.length) return null;
-  const what = joinAnd(takes.map((t) => stockLineWords(t.item, t.qty, t.unit)));
-  return `${what} came off a roll with no cost on it, so ${takes.length === 1 ? "it isn't" : "they aren't"} on the bill - ${STOCK_NO_COST_FIX}`;
+  const whole = takes.filter((t) => wholeNoCost(t));
+  const parts: string[] = [];
+  if (whole.length) {
+    const what = joinAnd(whole.map((t) => stockLineWords(t.item, t.qty, t.unit)));
+    parts.push(`${what} came off a roll with no cost on it, so ${whole.length === 1 ? "it isn't" : "they aren't"} on the bill - ${STOCK_NO_COST_FIX}`);
+  }
+  for (const t of takes) {
+    const w = stockPartNoCostWords(t);
+    if (w) parts.push(w);
+  }
+  return parts.length ? parts.join(". ") : null;
 }
 
 /** "a take from stock" / "3 takes from stock": the office's noun for what the importer pulled in. */

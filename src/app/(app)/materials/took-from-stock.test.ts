@@ -79,7 +79,7 @@ describe("the number pad", () => {
   });
   it("a take bigger than the shelf shows says so, and Take It stays open", () => {
     const html = sheet({ step: { kind: "count", row: { ...row, onHand: 0, takeable: 0 } }, entry: "20" });
-    expect(textOf(html)).toContain("20 ft more than the shelf shows — the office will recount.");
+    expect(textOf(html)).toContain("20 ft more than the shelf shows — the office will settle it.");
     const take = buttons(html).find((b) => b.text === "Take It")!;
     expect(take.markup).not.toMatch(/\sdisabled=""/);
     expect(sheet({ step: { kind: "count", row }, entry: "60" })).not.toContain("take-short");
@@ -131,9 +131,10 @@ describe("the job's takes", () => {
     partBilled: false,
     billedInvoiceId: null,
     canUndo: true,
+    settledByOffice: false,
   };
-  const list = (takes: JobTake[], staff: boolean) =>
-    renderToStaticMarkup(createElement(TakesListView, { takes, viewerIsStaff: staff, pendingGroup: null, onUndo: noop }));
+  const list = (takes: JobTake[], staff: boolean, readFailed = false) =>
+    renderToStaticMarkup(createElement(TakesListView, { takes, viewerIsStaff: staff, pendingGroup: null, onUndo: noop, readFailed }));
 
   it("says who took what, with Undo while nothing bills it", () => {
     const html = list([base], false);
@@ -165,7 +166,7 @@ describe("the job's takes", () => {
     expect(textOf(list([{ ...part, partBilled: false }], true))).not.toContain("Part billed");
   });
 
-  it("a take past the shelf says it is waiting on a recount, never a price", () => {
+  it("a take past the shelf says it is waiting on the office, never a price", () => {
     const t = textOf(list([{ ...base, qty: 20, short: 15 }], false));
     expect(t).toContain("15 ft past the shelf, waiting on the office");
     expect(t).not.toMatch(/\$/);
@@ -173,5 +174,24 @@ describe("the job's takes", () => {
 
   it("draws nothing when the job has no takes", () => {
     expect(list([], false)).toBe("");
+  });
+
+  it("a takes read that failed says so in the list's place, never an empty list (audit v1018)", () => {
+    for (const staff of [false, true]) {
+      const html = list([], staff, true);
+      expect(textOf(html)).toContain("Taken From Stock");
+      expect(textOf(html)).toContain("Couldn't read what's been taken for this job just now. Reload before taking more.");
+    }
+  });
+
+  it("a tech's take the office settled says who can undo it, never a bare row (audit v1018)", () => {
+    const settled = { ...base, canUndo: false, settledByOffice: true };
+    const t = textOf(list([settled], false));
+    expect(t).toContain("The office settled part of this take, so ask the office to undo it.");
+    expect(buttons(list([settled], false)).map((b) => b.text)).not.toContain("Undo");
+    // The office can still undo it: the reason is never drawn over a live Undo.
+    const office = list([{ ...settled, canUndo: true }], true);
+    expect(buttons(office).map((b) => b.text)).toContain("Undo");
+    expect(textOf(office)).not.toContain("ask the office");
   });
 });
