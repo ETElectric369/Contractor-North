@@ -93,7 +93,7 @@ export default async function PublicQuotePage({
           // tap was a red "no longer available". Say it before the click, not after.
           q.status === "expired" ? (
             <div className="no-print flex items-center justify-center gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
-              This {label.toLowerCase()} has expired. Call us and we'll send you a fresh one.
+              This {label.toLowerCase()} has expired. Call us and we&apos;ll send you a fresh one.
             </div>
           ) : (
             <PublicQuoteAccept
