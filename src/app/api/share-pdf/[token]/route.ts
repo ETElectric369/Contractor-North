@@ -68,7 +68,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
   const { data: blob } = await svc.storage.from("doc-pdfs").download(hit.path);
   if (!blob) return NextResponse.json({ error: "No PDF available yet." }, { status: 404 });
 
-  // "INV-080 235 Timbercreek.pdf" — the same name the office's download carries (lib/doc-place).
+  // "INV-080_235 Timbercreek.pdf" — the same name the office's download carries (lib/doc-place).
   const number = doc === "invoice" ? row.invoice_number : row.quote_number;
   const filename = number ? docFileName(number, rowPlace(row)) : `${doc}-${row.id.slice(0, 8)}.pdf`;
   return new NextResponse(Buffer.from(await blob.arrayBuffer()) as unknown as BodyInit, {

@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const inv = (data as any)?.invoice;
   // NEVER indexed. The token is a permanent bearer credential and the page carries the
   // customer's name + address + balance — one forwarded link must not become a search result.
-  // "INV-080 235 Timbercreek": what Save As PDF names the file (lib/doc-place).
+  // "INV-080_235 Timbercreek": what Save As PDF names the file (lib/doc-place).
   return { title: inv ? docPageTitle(inv.invoice_number, projectionPlace(data as any)) : "Invoice", robots: NO_INDEX };
 }
 

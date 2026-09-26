@@ -21,7 +21,7 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   const { data } = await supabase.rpc("public_quote", { p_token: token });
   const q = (data as any)?.quote;
   // NEVER indexed — permanent bearer token + customer PII + pricing. See @/lib/no-index.
-  // "E-017 13897 Herringbone": what Save As PDF names the file (lib/doc-place).
+  // "E-017_13897 Herringbone": what Save As PDF names the file (lib/doc-place).
   return { title: q ? docPageTitle(q.quote_number, projectionPlace(data as any)) : "Quote", robots: NO_INDEX };
 }
 

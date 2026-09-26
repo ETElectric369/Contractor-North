@@ -132,26 +132,26 @@ describe("the link: /i/<token>/<street>", () => {
   });
 });
 
-describe("the filename: INV-080 235 Timbercreek.pdf", () => {
+describe("the filename: INV-080_235 Timbercreek.pdf", () => {
   it("number, then street", () => {
-    expect(docFileName("INV-080", "235 Timbercreek")).toBe("INV-080 235 Timbercreek.pdf");
-    expect(docFileName("E-017", "13897 Herringbone")).toBe("E-017 13897 Herringbone.pdf");
+    expect(docFileName("INV-080", "235 Timbercreek")).toBe("INV-080_235 Timbercreek.pdf");
+    expect(docFileName("E-017", "13897 Herringbone")).toBe("E-017_13897 Herringbone.pdf");
     expect(docFileName("INV-080", "")).toBe("INV-080.pdf");
     expect(docFileName(null, null)).toBe("document.pdf");
-    expect(docPageTitle("INV-080", "235 Timbercreek")).toBe("INV-080 235 Timbercreek");
+    expect(docPageTitle("INV-080", "235 Timbercreek")).toBe("INV-080_235 Timbercreek");
   });
 
   it("drops what a filesystem or a header refuses", () => {
-    expect(docFileName("INV-080", '12 A/B "Main": St?')).toBe("INV-080 12 A B Main St.pdf");
-    expect(docFileName("INV-080\r\n", "12 Main")).toBe("INV-080 12 Main.pdf");
+    expect(docFileName("INV-080", '12 A/B "Main": St?')).toBe("INV-080_12 A B Main St.pdf");
+    expect(docFileName("INV-080\r\n", "12 Main")).toBe("INV-080_12 Main.pdf");
   });
 
   it("rides Content-Disposition as ASCII plus RFC 5987 UTF-8", () => {
     expect(contentDisposition(docFileName("INV-080", "235 Timbercreek"))).toBe(
-      `inline; filename="INV-080 235 Timbercreek.pdf"; filename*=UTF-8''INV-080%20235%20Timbercreek.pdf`,
+      `inline; filename="INV-080_235 Timbercreek.pdf"; filename*=UTF-8''INV-080_235%20Timbercreek.pdf`,
     );
     const v = contentDisposition(docFileName("E-017", "12 Peña"));
-    expect(v).toContain('filename="E-017 12 Pea.pdf"');
-    expect(decodeURIComponent(v.split("filename*=UTF-8''")[1])).toBe("E-017 12 Peña.pdf");
+    expect(v).toContain('filename="E-017_12 Pea.pdf"');
+    expect(decodeURIComponent(v.split("filename*=UTF-8''")[1])).toBe("E-017_12 Peña.pdf");
   });
 });

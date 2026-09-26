@@ -109,13 +109,14 @@ export function withPlace(url: string, place: string | null | undefined): string
   return slug ? `${url}/${slug}` : url;
 }
 
-/** "INV-080 235 Timbercreek.pdf" / "E-017 13897 Herringbone.pdf". Characters a filesystem
+/** "INV-080_235 Timbercreek.pdf" / "E-017_13897 Herringbone.pdf". Characters a filesystem
  *  refuses (/ \ : * ? " < > |) are dropped. */
 export function docFileName(number: string | null | undefined, place: string | null | undefined): string {
   const name = [number, place]
     .map((p) => String(p ?? "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim())
     .filter(Boolean)
-    .join(" ")
+    // Erik, 2026-09-25: "just _235 Timbercreek" - one underscore after the number, spaces in the street.
+    .join("_")
     .slice(0, 100)
     .trim();
   return `${name || "document"}.pdf`;

@@ -22,7 +22,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
     .select("quote_number, address, jobs(address), inquiries(address), customers(address)")
     .eq("id", id)
     .maybeSingle();
-  // "E-017 13897 Herringbone": what Save As PDF names the file (lib/doc-place). Never the customer's name.
+  // "E-017_13897 Herringbone": what Save As PDF names the file (lib/doc-place). Never the customer's name.
   return { title: data ? docPageTitle((data as any).quote_number, rowPlace(data as any)) : "Quote" };
 }
 

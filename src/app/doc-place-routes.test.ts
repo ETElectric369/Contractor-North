@@ -52,7 +52,7 @@ describe("/i/<token>/<street> is /i/<token>", () => {
     const a = await bare.generateMetadata({ params: Promise.resolve({ token: TOKEN }) });
     const b = await slugged.generateMetadata({ params: Promise.resolve({ token: TOKEN, place: "235-timbercreek" } as { token: string }) });
     const c = await slugged.generateMetadata({ params: Promise.resolve({ token: TOKEN, place: "anything-at-all" } as { token: string }) });
-    expect(a.title).toBe("INV-080 235 Timbercreek");
+    expect(a.title).toBe("INV-080_235 Timbercreek");
     expect(b.title).toBe(a.title);
     expect(c.title).toBe(a.title);
     for (const call of rpc.mock.calls) expect(call[1]).toEqual({ p_token: TOKEN });
@@ -68,14 +68,14 @@ describe("/q/<token>/<street> is /q/<token>", () => {
 
     const a = await bare.generateMetadata({ params: Promise.resolve({ token: TOKEN }) });
     const b = await slugged.generateMetadata({ params: Promise.resolve({ token: TOKEN, place: "13897-herringbone" } as { token: string }) });
-    expect(a.title).toBe("E-017 13897 Herringbone");
+    expect(a.title).toBe("E-017_13897 Herringbone");
     expect(b.title).toBe(a.title);
     for (const call of rpc.mock.calls) expect(call[1]).toEqual({ p_token: TOKEN });
   });
 });
 
 describe("the customer's PDF door names the file by the street", () => {
-  it("INV-080 235 Timbercreek.pdf, never the customer's name", async () => {
+  it("INV-080_235 Timbercreek.pdf, never the customer's name", async () => {
     rows = {
       invoices: {
         id: "11111111-1111-1111-1111-111111111111",
@@ -90,11 +90,11 @@ describe("the customer's PDF door names the file by the street", () => {
     const res = await GET(new Request(`https://x.test/api/share-pdf/${TOKEN}`) as never, { params: Promise.resolve({ token: TOKEN }) });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toBe(
-      `inline; filename="INV-080 235 Timbercreek.pdf"; filename*=UTF-8''INV-080%20235%20Timbercreek.pdf`,
+      `inline; filename="INV-080_235 Timbercreek.pdf"; filename*=UTF-8''INV-080_235%20Timbercreek.pdf`,
     );
   });
 
-  it("E-017 13897 Herringbone.pdf for an estimate", async () => {
+  it("E-017_13897 Herringbone.pdf for an estimate", async () => {
     rows = {
       quotes: {
         id: "22222222-2222-2222-2222-222222222222",
@@ -108,6 +108,6 @@ describe("the customer's PDF door names the file by the street", () => {
     };
     const { GET } = await import("./api/share-pdf/[token]/route");
     const res = await GET(new Request(`https://x.test/api/share-pdf/${TOKEN}`) as never, { params: Promise.resolve({ token: TOKEN }) });
-    expect(res.headers.get("content-disposition")).toContain('filename="E-017 13897 Herringbone.pdf"');
+    expect(res.headers.get("content-disposition")).toContain('filename="E-017_13897 Herringbone.pdf"');
   });
 });

@@ -36,7 +36,7 @@ const DOCS: Record<string, string> = {
 /** The one document the crew may print: the panel directory has no price, no supplier, no pay. */
 const MEMBER_DOCS = new Set(["panel"]);
 
-/** Friendly filename — the number and the street, "INV-080 235 Timbercreek.pdf" / "E-017 13897
+/** Friendly filename — the number and the street, "INV-080_235 Timbercreek.pdf" / "E-017_13897
  *  Herringbone.pdf" (Erik 2026-09-25; lib/doc-place). Never the customer's name. Shared by the
  *  stored-bytes and the fresh-render paths so the two can never disagree. */
 async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, doc: string, id: string): Promise<string> {

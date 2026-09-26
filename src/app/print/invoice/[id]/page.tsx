@@ -20,7 +20,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const supabase = await createClient();
   const { data } = await supabase.from("invoices").select("invoice_number, jobs(address), customers(address)").eq("id", id).maybeSingle();
-  // "INV-080 235 Timbercreek": what Save As PDF names the file (lib/doc-place). Never the customer's name.
+  // "INV-080_235 Timbercreek": what Save As PDF names the file (lib/doc-place). Never the customer's name.
   return { title: data ? docPageTitle((data as any).invoice_number, rowPlace(data as any)) : "Invoice" };
 }
 
