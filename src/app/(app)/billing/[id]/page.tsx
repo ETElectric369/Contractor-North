@@ -71,7 +71,7 @@ export default async function InvoicePage({
   // draft, so only pay for those lookups then.
   const isDraft = inv.status === "draft";
 
-  const [{ data: items }, { data: payments }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
+  const [{ data: items, error: itemsErr }, { data: payments, error: paymentsErr }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
       supabase
         .from("invoice_items")
@@ -110,6 +110,13 @@ export default async function InvoicePage({
         ? supabase.from("jobs").select("id, name, job_number, customer_id").order("created_at", { ascending: false }).limit(2000)
         : Promise.resolve({ data: [] as { id: string; name: string | null; job_number: string | null; customer_id: string | null }[] }),
     ]);
+  // A FAILED LINES READ IS NOT AN EMPTY INVOICE (2026-09-25, Tao's INV-080). A lock on
+  // invoice_items made this read fail while the invoice row loaded, and the page said "No line
+  // items yet" under a $3,189.34 total: a lie, with an Add row inviting a second copy of every line.
+  // Same for payments ("Paid $0.00" on a paid bill). Throw, as the invoice read above does: the error
+  // page offers Try Again, and nothing is shown that isn't so.
+  if (itemsErr) throw itemsErr;
+  if (paymentsErr) throw paymentsErr;
   const orgSettings = getOrgSettings((org as any)?.settings);
   const paymentMethods = orgSettings.payment_methods;
   // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".

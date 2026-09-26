@@ -46,7 +46,7 @@ export default function AppError({
           : "Something went wrong loading this screen. Your data is safe — try again, or head back to your day."}
       </p>
       <div className="mt-5 flex gap-2">
-        <Button onClick={reset}>Try again</Button>
+        <Button onClick={reset}>Try Again</Button>
         <Link href="/planner">
           <Button variant="outline">My Day</Button>
         </Link>
