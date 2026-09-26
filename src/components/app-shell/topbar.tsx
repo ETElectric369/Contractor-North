@@ -9,6 +9,7 @@ import { NotificationBell } from "@/components/app-shell/notification-bell";
 import { AccountMenu } from "@/components/account-menu";
 import { SetupButton } from "@/components/setup-button";
 import { hasInAppHistory } from "@/components/back-link";
+import { featureOn, type FeatureMap } from "@/lib/features";
 import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
 
@@ -24,6 +25,7 @@ export function Topbar({
   branding,
   setup,
   onboarded,
+  features,
 }: {
   profile: Profile | null;
   lang?: string;
@@ -33,12 +35,17 @@ export function Topbar({
   setup?: Answers;
   /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
   onboarded?: boolean;
+  /** The shell's switch map (the switch board, 0352), read once by the layout. Left out = all on. */
+  features?: FeatureMap;
 }) {
   const router = useRouter();
   // Staff = owner/admin/office — the same rule the layout uses (it already
   // passes the full profile, so no extra plumbing). Gates the staff-only
   // quick-add verbs to match the dock/strip/palette filtering.
   const isStaff = isStaffRole(profile?.role ?? "");
+  // Nort off: his button goes (and with it the ?debrief= / ?attention= openers it hosts). The
+  // bell STAYS whatever the switches say: it is the record of every push (Erik).
+  const nortOn = featureOn(features, "nort");
 
   return (
     // Sea-glass top bar via a TRANSLUCENT bg only — deliberately NO backdrop-filter. A
@@ -78,13 +85,13 @@ export function Topbar({
         {/* ONE assistant — voice + chat + actions — reachable from every screen. */}
         {/* data-tour anchors: the spotlight finds these by attribute at step time. A wrapper span
             rather than a prop on each component — no component has to know a tour exists. */}
-        <span data-tour="nort" className="inline-flex"><GlobalAssistant /></span>
+        {nortOn && <span data-tour="nort" className="inline-flex"><GlobalAssistant /></span>}
         {/* THE INTERVIEW, beside the speak button, on every screen (cn-v633). It used to be a card
             on My Day that hid itself once setup was done — correct for a card, wrong for this:
             the moment somebody wants to change what they said, the thing they used has evaporated.
             Loud while it matters, quiet forever after, never gone. */}
-        {setup && <SetupButton initial={setup} isStaff={isStaff} onboarded={!!onboarded} />}
-        <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} /></span>
+        {setup && <SetupButton initial={setup} isStaff={isStaff} onboarded={!!onboarded} nortOn={nortOn} />}
+        <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} features={features} /></span>
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
           className="flex items-center gap-2 rounded-lg border border-slate-200 h-11 px-2.5 sm:px-3 text-slate-500 hover:bg-slate-50 sm:px-3"
@@ -100,7 +107,7 @@ export function Topbar({
         <span data-tour="bell" className="inline-flex"><NotificationBell /></span>
         {/* The account seek door — always visible, far right: Sign out, language,
             estimate QR. See account-menu.tsx for THE MODAL RULE it hosts. */}
-        <span data-tour="account" className="inline-flex"><AccountMenu profile={profile} lang={lang} /></span>
+        <span data-tour="account" className="inline-flex"><AccountMenu profile={profile} lang={lang} features={features} /></span>
       </div>
     </header>
   );

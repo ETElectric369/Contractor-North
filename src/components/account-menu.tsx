@@ -16,6 +16,7 @@ import {
 } from "@/app/(app)/settings/push-actions";
 import { isNativeShell } from "@/lib/native-shell";
 import { nativePushPermission, registerForNativePush } from "@/lib/native-push";
+import { featureOn, type FeatureMap } from "@/lib/features";
 import type { Profile } from "@/lib/types";
 
 /**
@@ -36,9 +37,12 @@ import type { Profile } from "@/lib/types";
 export function AccountMenu({
   profile,
   lang,
+  features,
 }: {
   profile: Profile | null;
   lang?: string;
+  /** The shell's switch map: the Estimate QR is a Leads door (it hands out the lead link). */
+  features?: FeatureMap;
 }) {
   const [open, setOpen] = useState(false);
   // The TOUR opened it, not the user. While that's true, outside-clicks must not close it: the
@@ -138,11 +142,14 @@ export function AccountMenu({
             <div className="text-xs capitalize text-slate-400">{profile?.role ?? "user"}</div>
           </div>
           {/* Every employee's personal estimate link/QR — leads through it are
-              credited to them. The control keeps its known face from the bar. */}
-          <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
-            <span className="text-sm font-medium text-slate-700">Estimate QR</span>
-            <ShareQrButton />
-          </div>
+              credited to them. The control keeps its known face from the bar. It goes with
+              the Leads switch (0352): it is the lead link, handed out. */}
+          {featureOn(features, "leads") && (
+            <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
+              <span className="text-sm font-medium text-slate-700">Estimate QR</span>
+              <ShareQrButton />
+            </div>
+          )}
           <div className="relative z-10 flex min-h-[44px] items-center justify-between gap-3 px-4 py-1">
             <span className="text-sm font-medium text-slate-700">Language</span>
             <LanguageSwitcher current={lang} />
