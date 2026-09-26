@@ -121,7 +121,8 @@ export default async function JobsPage({
       <PageHeader title="Jobs" description="All jobs across the business.">
         <div className="flex items-center gap-2">
           {isStaff && <JobImportButton />}
-          <NewJobButton customers={customers} />
+          {/* createJob is requireStaff: a tech's New Job failed on Save. */}
+          {isStaff && <NewJobButton customers={customers} />}
         </div>
       </PageHeader>
 
@@ -145,9 +146,9 @@ export default async function JobsPage({
         <EmptyState
           icon={Briefcase}
           title={!status && allJobs.length > 0 ? "No active jobs" : "No jobs"}
-          description="Create a job to get started."
+          description={isStaff ? "Create a job to get started." : "The office adds your jobs."}
         >
-          <NewJobButton customers={customers} />
+          {isStaff && <NewJobButton customers={customers} />}
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">

@@ -226,7 +226,8 @@ export default async function JobDetailPage({
       .order("clock_in", { ascending: false }),
     supabase
       .from("documents")
-      .select("id, name, category, file_url, size_bytes, created_at")
+      // uploaded_by: a tech may delete only the photos he took (deleteDocument's rule).
+      .select("id, name, category, file_url, size_bytes, created_at, uploaded_by")
       .eq("job_id", id)
       .order("created_at", { ascending: false }),
     j.assigned_to?.length
@@ -1094,7 +1095,15 @@ export default async function JobDetailPage({
       content: (
         <Card>
           <CardContent className="py-5">
-            <JobPhotos orgId={j.org_id} jobId={j.id} docs={docs} sharedIds={sharedPhotoIds} staleIds={staleSharedIds} />
+            <JobPhotos
+              orgId={j.org_id}
+              jobId={j.id}
+              docs={docs}
+              sharedIds={sharedPhotoIds}
+              staleIds={staleSharedIds}
+              viewerId={user?.id ?? null}
+              viewerIsStaff={viewerIsStaff}
+            />
           </CardContent>
         </Card>
       ),

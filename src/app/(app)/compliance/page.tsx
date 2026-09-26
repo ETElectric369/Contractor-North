@@ -1,5 +1,6 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
 import { ComplianceManager } from "./compliance-manager";
 import { EXCLUDED_FROM_COMPLIANCE } from "@/lib/compliance-types";
@@ -13,9 +14,11 @@ export default async function CompliancePage() {
   } = await supabase.auth.getUser();
   const { data: me } = await supabase
     .from("profiles")
-    .select("org_id")
+    .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
+  // A tech reads; every write here is requireStaff, so its doors don't render for him.
+  const canEdit = isStaffRole(me?.role);
   const { data: all } = await supabase
     .from("compliance_items")
     .select("id, type, name, policy_number, amount, issued_date, expires_date, notes, file_url")
@@ -40,7 +43,7 @@ export default async function CompliancePage() {
         title="Compliance"
         description="Licenses, certifications & permits — with renewal alerts so nothing lapses. (Policies live in Insurance; reviews in Audits.)"
       />
-      <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} />
+      <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
     </div>
   );
 }

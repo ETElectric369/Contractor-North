@@ -146,6 +146,7 @@ export function Inspector({
   initialLocation,
   linked,
   planBrief = null,
+  readOnly = false,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -166,6 +167,10 @@ export function Inspector({
   /** The lead's preliminary plan report (ready only) — server-parsed, so the card is in the
    *  initial HTML and Zone A's height never shifts after mount (the iOS keyboard law). */
   planBrief?: PlanBrief | null;
+  /** A tech reads the walk-through; every save here is requireStaff (0227 made appointments
+   *  staff-writable). Controls go quiet under one disabled fieldset, and the doors that would
+   *  only fail (Take, Add, Save, Start the estimate, set up questions) don't render. */
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -902,6 +907,8 @@ export function Inspector({
 
   return (
     <Card className="overflow-hidden p-0">
+      {readOnly && <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">Only the office can change the walk-through.</p>}
+      <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
       {/* ── ZONE A — THE ASK ──────────────────────────────────────────────────────────────── */}
       <div className="border-b border-slate-100 p-4">
         <div className="flex items-center justify-between">
@@ -1073,7 +1080,7 @@ export function Inspector({
               You don&rsquo;t have a set of walk-through questions yet. Start with the ones for your trade —
               one question at a time, and only what applies to the job in front of you.
             </p>
-            <div className="mt-3 flex flex-wrap items-center gap-3">
+            {!readOnly && <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button
                 type="button"
                 disabled={seeding}
@@ -1088,7 +1095,7 @@ export function Inspector({
                 {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up…</> : "Set up my questions"}
               </Button>
               <Link href="/forms" className="text-sm text-slate-500 underline-offset-2 hover:underline">or build my own</Link>
-            </div>
+            </div>}
           </div>
         ) : open.length === 0 ? (
           <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
@@ -1302,7 +1309,7 @@ export function Inspector({
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos or PDFs" className="shrink-0">
+            {!readOnly && <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos or PDFs" className="shrink-0">
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
@@ -1311,7 +1318,7 @@ export function Inspector({
                   <Upload className="h-4 w-4" /> Add
                 </Button>
               </div>
-            </DropTarget>
+            </DropTarget>}
           </div>
           <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden"
                  onChange={(e) => { upload(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
@@ -1325,7 +1332,15 @@ export function Inspector({
             <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
               {photos.map((p) => (
                 <div key={p.path} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-100">
-                  {isImage(p.path) ? (
+                  {isImage(p.path) && readOnly ? (
+                    // Read-only: the fieldset quiets every button, so the photo opens as a link.
+                    <a href={p.url ?? "#"} target="_blank" rel="noopener noreferrer" className="block h-full w-full">
+                      {p.url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.url} alt="" className="h-full w-full object-cover" />
+                      )}
+                    </a>
+                  ) : isImage(p.path) ? (
                     <button type="button" onClick={() => p.url && setViewing(p)} className="h-full w-full">
                       {p.url && (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -1405,7 +1420,7 @@ export function Inspector({
             { k: "items", label: "Material", on: () => { open1("items"); setItems((i) => [...i, { id: captureId(), description: "", quantity: null, unit: "ea" }]); } },
             { k: "notes", label: "Note", on: () => open1("notes") },
           ].filter((x) => !shows(x.k, false));
-          if (!hidden.length) return null;
+          if (!hidden.length || readOnly) return null;
           return (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] uppercase tracking-wide text-slate-400">Add</span>
@@ -1424,8 +1439,10 @@ export function Inspector({
         })()}
       </div>
 
+      </fieldset>
+
       {/* ── THE BAR ───────────────────────────────────────────────────────────────────────── */}
-      <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
+      {!readOnly && <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 backdrop-blur">
         <div className="text-xs text-slate-500">
           {/* Counts, never confidence. */}
           {[
@@ -1467,7 +1484,7 @@ export function Inspector({
             <Button type="button">Start the estimate</Button>
           </Link>
         </div>
-      </div>
+      </div>}
 
       {viewing?.url && <MediaLightbox url={viewing.url} name={fileLabel(viewing.path)} onClose={() => setViewing(null)} />}
     </Card>

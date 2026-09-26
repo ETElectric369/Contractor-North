@@ -254,7 +254,11 @@ export default async function AppointmentCapturePage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
+      {viewerIsStaff ? (
+        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
+      ) : (
+        <BackLink fallback="/planner" fallbackLabel="Back to My Day" />
+      )}
 
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
@@ -273,7 +277,10 @@ export default async function AppointmentCapturePage({
               noise. It stays on the visit types where work happens and money changes hands on the
               spot (a legacy service_call/job appointment — new ones become real jobs at booking,
               and pay from the job page). */}
-          {a.status !== "cancelled" && !isInspectionType(a.type) && (
+          {/* THE OFFICE'S VERBS. Pay Now, Mark Complete, Delete, Cancel, Unschedule and Edit Details
+              all save through requireStaff, and Pay Now puts money in front of a tech: a tech gets
+              the badges and the page, not the doors (Wave 0). */}
+          {viewerIsStaff && a.status !== "cancelled" && !isInspectionType(a.type) && (
             <SettleUpButton
               source="appointment"
               id={a.id}
@@ -283,7 +290,7 @@ export default async function AppointmentCapturePage({
               textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
-          {(a.status === "scheduled" || a.status === "proposed") && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
             <MarkCompleteButton
               id={a.id}
               label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
@@ -293,7 +300,7 @@ export default async function AppointmentCapturePage({
               another at 01:10 because the ✗ he tapped said "Cancel" and left the row on his
               screen. Offered ONLY when nothing was captured — see delete-empty-button.tsx for
               why a walk-through with real data stays behind Edit Details. */}
-          {!hasCaptureData(a.capture) &&
+          {viewerIsStaff && !hasCaptureData(a.capture) &&
             !(inspection?.inspection_answers && JSON.stringify(inspection.inspection_answers) !== "{}") && (
               <DeleteEmptyInspectionButton
                 id={a.id}
@@ -303,7 +310,7 @@ export default async function AppointmentCapturePage({
           {/* CANCEL — the filed bug. This page offered only "Mark complete" (a lie, if it never
               happened) and Delete (which destroys the capture and photos with it). The verb
               already existed and was wired up on the calendar row only; it belongs here too. */}
-          {(a.status === "scheduled" || a.status === "proposed") && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
             <ApptQuickActions
               id={a.id}
               status={a.status}
@@ -313,19 +320,21 @@ export default async function AppointmentCapturePage({
           )}
           {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
               everything else kept. Only shown while a date exists to clear. */}
-          {(a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
             <UnscheduleButton id={a.id} />
           )}
           {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
               "need a way to edit inspection/appointment details"). */}
-          <AppointmentButton
-            jobs={picker.jobOpts}
-            customers={picker.custOpts}
-            staff={picker.staffOpts}
-            appointment={apptValue}
-            editLabel="Edit Details"
-            afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
-          />
+          {viewerIsStaff && (
+            <AppointmentButton
+              jobs={picker.jobOpts}
+              customers={picker.custOpts}
+              staff={picker.staffOpts}
+              appointment={apptValue}
+              editLabel="Edit Details"
+              afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
+            />
+          )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
@@ -424,7 +433,9 @@ export default async function AppointmentCapturePage({
         orgId={a.org_id}
         userId={viewerId}
         templates={sheets ?? []}
-        priceBook={(priceBook ?? []).map((p) => ({
+        // The price book carries buy prices: a tech never gets it (and can't save a scope anyway).
+        readOnly={!viewerIsStaff}
+        priceBook={(viewerIsStaff ? (priceBook ?? []) : []).map((p) => ({
           code: p.code,
           description: p.description ?? "",
           unit: p.unit ?? "EA",

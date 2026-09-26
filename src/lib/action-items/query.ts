@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES, KIND_STREAM } from "./types";
+import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
 import { bucketInspections } from "@/lib/inspections";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -512,7 +512,7 @@ async function buildActionItems(ctx: {
       // very same screen — tapping an inspection here still dumped you on the calendar
       // grid to hunt for the row you just tapped. Open the appointment itself.
       href: `/appointments/${a.id}`,
-      affordances: AFFORDANCES.appointment,
+      affordances: appointmentAffordances(isStaff),
     });
   }
 

@@ -1,5 +1,6 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
 import { InsuranceManager } from "./insurance-manager";
 import { INSURANCE_FILTER } from "@/lib/compliance-types";
@@ -13,9 +14,11 @@ export default async function InsurancePage() {
   } = await supabase.auth.getUser();
   const { data: me } = await supabase
     .from("profiles")
-    .select("org_id")
+    .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
+  // A tech reads; every write here is requireStaff, so its doors don't render for him.
+  const canEdit = isStaffRole(me?.role);
 
   // Insurance lives in the shared compliance tracker (compliance_items). This view routes the
   // policy types here; the default-typed legacy "Insurance" rows come along too.
@@ -39,7 +42,7 @@ export default async function InsurancePage() {
         title="Insurance"
         description="Policies & coverage — workers' comp, general liability, auto — with renewal alerts so nothing lapses."
       />
-      <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} />
+      <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
     </div>
   );
 }

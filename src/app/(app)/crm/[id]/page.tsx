@@ -86,7 +86,10 @@ export default async function CustomerDetailPage({
       .select("id, invoice_number, status, total, amount_paid")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
-    supabase.from("pricing_levels").select("id, name, markup_pct").order("created_at"),
+    // A markup is a price: a tech never gets it (and has no Edit to pick one with).
+    viewerIsStaff
+      ? supabase.from("pricing_levels").select("id, name, markup_pct").order("created_at")
+      : Promise.resolve({ data: [] as { id: string; name: string; markup_pct: number }[] }),
     supabase
       .from("customer_credits")
       .select("amount, disposition, status")
@@ -183,21 +186,22 @@ export default async function CustomerDetailPage({
               <div className="border-t border-slate-100 pt-3 text-slate-500">{c.notes}</div>
             )}
             {!c.email && !c.phone && !c.address && !c.notes && (
-              <p className="text-slate-400">No contact details yet — use Edit to add them.</p>
+              <p className="text-slate-400">{viewerIsStaff ? "No contact details yet — use Edit to add them." : "No contact details yet."}</p>
             )}
             {/* Maintenance verbs live WITH the details they maintain (moved out of
                 the header impulse row): Edit, and — staff-only, heavy-confirm — Merge,
                 the cleanup verb for duplicate records. The portal link card below is
                 staff-only too (0298: a tech never sees the link or its switches). */}
-            <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
-              <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
-              {viewerIsStaff && (
+            {/* Edit Customer is requireStaff: a tech reads the details, the office changes them. */}
+            {viewerIsStaff && (
+              <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                <EditCustomerButton customer={c} pricingLevels={(pricingLevels ?? []) as any} />
                 <MergeCustomerButton
                   customer={{ id: c.id, name: c.name }}
                   others={(otherCustomers ?? []) as { id: string; name: string }[]}
                 />
-              )}
-            </div>
+              </div>
+            )}
             {viewerIsStaff && (
               <div className="border-t border-slate-100 pt-3">
                 <PortalLinkButton
@@ -327,21 +331,26 @@ export default async function CustomerDetailPage({
               <Phone className="h-4 w-4 shrink-0" /> Call
             </a>
           )}
-          <NewJobButton
-            customers={[{ id: c.id, name: c.name, address: formatFullAddress(c.address, c.city, c.state, c.zip) || null }]}
-            defaultCustomerId={c.id}
-          />
-          <AppointmentButton
-            jobs={toJobOptions(jobs)}
-            customers={[{ id: c.id, label: c.name }]}
-            staff={toStaffOptions(staffRows)}
-            defaultCustomerId={c.id}
-          />
-          <Link href={`/quotes/new?customer=${c.id}`}>
-            <Button>
-              <Plus className="h-4 w-4" /> New Estimate
-            </Button>
-          </Link>
+          {/* New Job, Appointment and New Estimate all save through requireStaff: a tech gets Call. */}
+          {viewerIsStaff && (
+            <>
+              <NewJobButton
+                customers={[{ id: c.id, name: c.name, address: formatFullAddress(c.address, c.city, c.state, c.zip) || null }]}
+                defaultCustomerId={c.id}
+              />
+              <AppointmentButton
+                jobs={toJobOptions(jobs)}
+                customers={[{ id: c.id, label: c.name }]}
+                staff={toStaffOptions(staffRows)}
+                defaultCustomerId={c.id}
+              />
+              <Link href={`/quotes/new?customer=${c.id}`}>
+                <Button>
+                  <Plus className="h-4 w-4" /> New Estimate
+                </Button>
+              </Link>
+            </>
+          )}
           <SectionActionsMenu
             tree={customerSectionTree(
               c.name,
@@ -380,7 +389,8 @@ export default async function CustomerDetailPage({
         </div>
       )}
 
-      <Tabs tabs={tabs} urlSync />
+      {/* Estimates and invoices are prices: a tech sees the customer's jobs, not what they cost. */}
+      <Tabs tabs={viewerIsStaff ? tabs : tabs.filter((t) => t.id !== "quotes" && t.id !== "invoices")} urlSync />
     </div>
   );
 }
