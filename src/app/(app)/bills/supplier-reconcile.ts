@@ -45,27 +45,33 @@ import {
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 
-// ── THE CLEAR LINE: WHERE HIS BOOKS IN NORTH BEGIN ──────────────────────────────────────────────
+// ── THE CLEAR LINE: WHERE A COMPANY'S BOOKS IN NORTH BEGIN ─────────────────────────────────────
 //
-// "june 8 is good" (Erik, 2026-09-25). ET Electric made its first job in North on 2026-06-08
-// (J-002 Tao Zhu, 03:06 in Truckee). A supplier paper dated BEFORE that day was bought before
-// there was anywhere to put it: it never makes a card and never counts anywhere as needing a
-// person. That drops the two 5/28 Saddle Rd papers already on J-050 and the two 5/28 Rhodesia ones.
+// "june 8 is good" (Erik, 2026-09-25). ET Electric made its first job in North on 2026-06-08. A
+// supplier paper dated BEFORE a company's line was bought before there was anywhere to put it: it
+// never makes a card and never counts anywhere as needing a person.
 //
-// A CONSTANT FOR ET, NOT DERIVED, AND WHY. "The org's first job" reads as 2026-06-08 tonight, but
-// J-001 is already gone: jobs get deleted, and deleting J-002 would quietly move the line to
-// June 11 and hide three days of real CED paper with nothing said. A date Erik named cannot drift.
-// Another org gets no line (every paper counts) until it names one; per-org is a later wave.
+// A DATE A PERSON NAMED, NOT DERIVED, AND WHY. "The org's first job" drifts: jobs get deleted, and
+// deleting the first one would quietly move the line and hide days of real supplier paper with
+// nothing said. A date someone named cannot drift.
+//
+// PER COMPANY (Wave 0): organizations.settings.books_begin, changed from the /bills Needs You card.
+// It was a constant keyed to ET's org id, the one org id in the app's logic, so every other company
+// got a line it never chose and no way to set one. 0354 stores ET's June 8 as ET's own setting. A
+// company that has not named a day falls back to its earliest scanned bill (booksBeginOn).
 
-/** ET Electric's org id. */
-const ET_ELECTRIC_ORG_ID = "60195593-2e18-4230-bc8e-7a32d36d038d";
+/** A real calendar day, "YYYY-MM-DD". */
+const isRealDay = (v: unknown): v is string => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T12:00:00Z`);
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+};
 
-/** The day ET made its first job in North. Supplier paper dated before it never needs a person. */
-export const ET_BOOKS_BEGIN = "2026-06-08";
-
-/** The day an org's books in North begin, or null when it has not named one (every paper counts). */
-export function supplierPaperLine(orgId: string | null | undefined): string | null {
-  return orgId === ET_ELECTRIC_ORG_ID ? ET_BOOKS_BEGIN : null;
+/** The day a company's books in North begin, as it named it (settings.books_begin), or null when
+ *  it has not named one. Takes the settings object (raw or normalized); anything else reads null. */
+export function supplierPaperLine(settings: unknown): string | null {
+  const v = settings && typeof settings === "object" ? (settings as { books_begin?: unknown }).books_begin : null;
+  return isRealDay(v) ? v : null;
 }
 
 /** Dated before the line. An undated paper is never "before": not knowing when is not a reason to

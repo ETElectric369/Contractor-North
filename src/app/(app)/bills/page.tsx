@@ -27,6 +27,7 @@ import {
   isUsableJobName,
   sayKind,
   shortSupplierName,
+  supplierPaperLine,
   type SupplierInvoiceRow as SupplierDocumentRow,
 } from "./supplier-reconcile";
 import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
@@ -37,6 +38,7 @@ import { formatCurrency, formatDateShort } from "@/lib/utils";
 import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
+import { BooksBeginLine } from "./books-begin-line";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import { openListViews } from "./open-list-core";
 import type { OpenListView } from "@/lib/supplier-open-list";
@@ -157,10 +159,12 @@ export default async function BillsPage({
   } = await supabase.auth.getUser();
   const { data: profile } = await supabase
     .from("profiles")
-    .select("org_id")
+    .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const orgId = profile?.org_id ?? "";
+  // Company settings (books_begin among them) are owner/admin writes (organizations_update).
+  const canChangeSettings = profile?.role === "owner" || profile?.role === "admin";
 
   // EVERYTHING THIS PAGE NEEDS, IN ONE BREATH. The supplier reads (0270) join the existing five
   // rather than hanging off them, because a serial hop added to a page read is the phone-lag class
@@ -647,11 +651,13 @@ export default async function BillsPage({
   // His jobs, with enough on each to tell five Rhodesias apart.
   const reconcileJobs = reconcileJobsOf((jobs ?? []) as any[]);
 
-  // THE DAY HIS BOOKS BEGIN (booksBeginOn): the line Erik named for ET ("june 8 is good": the day
-  // ET made its first job in North), else the earliest scanned bill. Purchases the supplier made
+  // THE DAY THE COMPANY'S BOOKS BEGIN (booksBeginOn): the day it named (settings.books_begin; ET's
+  // is June 8, "june 8 is good"), else the earliest scanned bill. Purchases the supplier made
   // before it are counted and named, never nagged about - nothing here could have recorded them.
   // My Day's cards read the same function.
-  const recordsSince = booksBeginOn(orgId, liveBills);
+  const orgSettingsRaw = (orgRow as { settings?: unknown } | null)?.settings;
+  const recordsSince = booksBeginOn(orgSettingsRaw, liveBills);
+  const booksNamed = supplierPaperLine(orgSettingsRaw);
 
   // ── A READ THAT FAILED SAYS SO (audit v1018, class 2) ───────────────────────────────────────
   // Every read the supplier half of this page leans on. Any one of them failing used to read as
@@ -1138,7 +1144,8 @@ export default async function BillsPage({
           <h2 className="text-sm font-semibold text-slate-900">
             Needs You{paperFeed.cards.length ? ` (${paperFeed.cards.length})` : ""}
           </h2>
-          <p className="mb-3 mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
+          <BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />
           <SupplierPaperCards
             feed={paperFeed}
             emptyLabel={

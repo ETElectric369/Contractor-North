@@ -28,7 +28,7 @@ import {
   type SupplierInvoiceKind,
   type SupplierInvoiceRow,
 } from "@/app/(app)/bills/supplier-reconcile";
-import { booksBeginOn, readSupplierDocuments } from "@/app/(app)/bills/supplier-papers";
+import { booksBeginOn, readPaperSettings, readSupplierDocuments } from "@/app/(app)/bills/supplier-papers";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
@@ -153,7 +153,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
   const unlinked = docs.filter((d) => d.kind === "invoice" && d.billCount === 0 && paperNamesJob(d, jobId, mark));
   if (!unlinked.length) return [];
 
-  const [billsRes, aliasRes] = await Promise.all([
+  const [billsRes, aliasRes, paperSettings] = await Promise.all([
     supabase
       .from("bills")
       .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, is_statement, notes, bill_line_items(description)")
@@ -161,6 +161,8 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
       .is("superseded_by_bill_id", null)
       .limit(5000),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
+    // The company's own line and clock; a lost read throws like the two above.
+    readPaperSettings(supabase, orgId),
   ]);
   // A lost read is not "no bill": saying a paper is unrecorded when it may be in the books would
   // offer a second bill for the same money.
@@ -186,7 +188,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
   for (const d of unlinked) {
     d.billCount = billsCarryingNumber(d.invoiceNumber, { accountId: d.accountId }, ledger, aliases).length;
   }
-  const since = booksBeginOn(orgId, (billsRes.data ?? []) as { bill_date?: string | null }[]);
+  const since = booksBeginOn(paperSettings, (billsRes.data ?? []) as { bill_date?: string | null }[]);
   const day = today || todayStrInTz(DEFAULT_TIMEZONE);
   const onCards = onNeedsYouIds(docs, since, day);
   const waiting = waitingOnCreditIds(docs, since, day);

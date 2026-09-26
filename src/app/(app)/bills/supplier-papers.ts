@@ -42,6 +42,7 @@ import {
   type SupplierPaperCard,
 } from "./supplier-reconcile";
 import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
+import { getOrgSettings } from "@/lib/org-settings";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -224,20 +225,37 @@ export interface SupplierPaperFeed {
 }
 
 /**
- * THE DAY HIS BOOKS BEGIN: the line an org named (supplierPaperLine: ET's June 8, "june 8 is
- * good"), or, for an org that has not named one, its earliest scanned bill. A supplier paper dated
- * before it could not have been recorded here, so it never needs a person. /bills and My Day both
- * read this, so a paper cannot be a card on one screen and "from before your books" on the other.
+ * THE DAY A COMPANY'S BOOKS BEGIN: the day it named (settings.books_begin, supplierPaperLine), or,
+ * for a company that has not named one, its earliest scanned bill. A supplier paper dated before it
+ * could not have been recorded here, so it never needs a person. /bills, My Day, Shop Stock and the
+ * job page all read this, so a paper cannot be a card on one screen and "from before your books" on
+ * another. `settings` is the org's settings object (or just `{ books_begin }`, readPaperSettings).
  */
-export function booksBeginOn(orgId: string | null | undefined, liveBills: { bill_date?: string | null }[]): string | null {
+export function booksBeginOn(settings: unknown, liveBills: { bill_date?: string | null }[]): string | null {
   return (
-    supplierPaperLine(orgId) ??
+    supplierPaperLine(settings) ??
     (liveBills ?? [])
       .map((b) => String(b?.bill_date ?? "").slice(0, 10))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
       .sort()[0] ??
     null
   );
+}
+
+/**
+ * THE TWO SETTINGS A SUPPLIER-PAPER READ NEEDS, and nothing else of the settings jsonb: the day
+ * the company's books begin and its clock. Org-filtered; throws on a failed read so the caller
+ * says it couldn't check rather than drawing the line in the wrong place.
+ */
+export async function readPaperSettings(supabase: any, orgId: string): Promise<{ books_begin: string | null; timezone: string }> {
+  const { data, error } = await supabase
+    .from("organizations")
+    .select("books_begin:settings->>books_begin, timezone:settings->>timezone")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = (data && !Array.isArray(data) ? data : {}) as { books_begin?: unknown; timezone?: unknown };
+  return { books_begin: supplierPaperLine(row), timezone: getOrgSettings({ timezone: row.timezone }).timezone };
 }
 
 /** The cards, from rows already read. The ONE call My Day and /bills both make. */
@@ -320,7 +338,7 @@ export function supplierPaperHomes(
  * hold the paper.
  */
 export async function readSupplierPaperHomes(supabase: any, orgId: string, today: string): Promise<Map<string, SupplierPaperHome>> {
-  const [docsRes, billsRes, linksRes, aliasRes] = await Promise.all([
+  const [docsRes, billsRes, linksRes, aliasRes, paperSettings] = await Promise.all([
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
@@ -330,11 +348,12 @@ export async function readSupplierPaperHomes(supabase: any, orgId: string, today
       .limit(5000),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
+    readPaperSettings(supabase, orgId),
   ]);
   for (const r of [docsRes, billsRes, linksRes, aliasRes]) if (r?.error) throw r.error;
   const bills = (billsRes.data ?? []) as any[];
   const { rows } = supplierDocumentRows({ documents: docsRes.data ?? [], bills, links: linksRes.data ?? [], aliasRows: aliasRes.data ?? [] });
-  return supplierPaperHomes(rows, { since: booksBeginOn(orgId, bills), today });
+  return supplierPaperHomes(rows, { since: booksBeginOn(paperSettings, bills), today });
 }
 
 /** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
@@ -369,7 +388,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
   if (meErr) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
   if (!orgId) return null;
-  const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes] = await Promise.all([
+  const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes, settingsRes] = await Promise.all([
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
@@ -388,6 +407,11 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
       .is("voided_at", null)
       .order("paid_on", { ascending: false })
       .limit(500),
+    // The company's own line (books_begin); a lost read is no cards, never the line in the wrong place.
+    readPaperSettings(supabase, orgId).then(
+      (data) => ({ data, error: null }),
+      (error: unknown) => ({ data: null, error }),
+    ),
   ]);
   // The supplier's papers unread: neither the cards nor the pay line can be worked out, and saying
   // nothing would read as "nothing waiting". No supplier documents at all: nothing to bring him.
@@ -395,7 +419,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   if (!(docsRes?.data ?? []).length) return null;
   const accounts = acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]);
   // A failed bills, links or aliases read would make covered papers look uncovered: false cards.
-  const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error);
+  const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error || settingsRes?.error);
   const { rows } = supplierDocumentRows({
     documents: docsRes.data ?? [],
     bills: papersReadable ? (billsRes.data ?? []) : [],
@@ -404,7 +428,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   });
   const papers = papersReadable
     ? supplierPaperFeed({
-        since: booksBeginOn(orgId, (billsRes.data ?? []) as any[]),
+        since: booksBeginOn(settingsRes.data, (billsRes.data ?? []) as any[]),
         rows,
         jobs: reconcileJobsOf(jobsRes.data ?? []),
         accounts,
