@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { assertTestDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0346: a supplier bill can wait on a credit (Erik, 2026-09-26; the Hillside switch).
@@ -60,6 +61,7 @@ d("0346: a supplier bill can wait on a credit", () => {
   beforeAll(async () => {
     c = new pg.Client({ host: TEST_DB_HOST, port: 5432, user: TEST_DB_USER, password: TEST_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
+    await assertTestDatabase(c);
     // BEGIN FIRST: nothing on this connection runs outside the transaction that is rolled back.
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
