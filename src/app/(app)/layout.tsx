@@ -14,6 +14,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
+import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
 import { NativePushBridge } from "@/components/native-push-bridge";
 import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
@@ -274,6 +275,10 @@ export default async function AppLayout({
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
           <Suspense fallback={null}>
             <SectionSubnav isStaff={isStaff} />
+          </Suspense>
+          {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
+          <Suspense fallback={null}>
+            <PageOpenCounter />
           </Suspense>
           <ToastProvider>{children}</ToastProvider>
         </main>

@@ -1062,7 +1062,12 @@ export async function setCustomDomain(
  *  or overwrite the inbound secret. */
 // office_sees_owner_money (0286) is the OWNER's call and has its own owner-only setter
 // (analytics/actions.ts setOfficeSeesOwnerMoney); an admin's general settings save must not carry it.
-const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money"];
+// features, trade and timeclock_job_codes are THE SWITCH BOARD (0352): only the owner moves a
+// switch, through setFeature (features-actions.ts), and the pin_org_features trigger carries them
+// through every other write unchanged. A patch that names one is REFUSED in words, never dropped
+// quietly: a dropped key would let the caller's screen say "Saved" for a switch that didn't move.
+const SWITCH_BOARD_KEYS = ["features", "trade", "timeclock_job_codes"];
+const PROTECTED_SETTINGS_KEYS = ["custom_domain", "public_handle", "lead_inbound_secret", "office_sees_owner_money", ...SWITCH_BOARD_KEYS];
 
 /** Merge a partial settings patch into organizations.settings (JSONB). STAFF get full access
  *  (protected keys stripped — they have dedicated guarded setters). An external site collaborator
@@ -1073,6 +1078,8 @@ export async function updateOrgSettings(
   patch: Record<string, unknown>,
   orgId?: string,
 ): Promise<Result> {
+  if (patch && SWITCH_BOARD_KEYS.some((k) => k in patch))
+    return { ok: false, error: "Only the owner turns features on or off, on the Features page in Settings." };
   const ctx = await resolveSiteContext(orgId);
   if ("error" in ctx) return { ok: false, error: ctx.error };
 
