@@ -29,6 +29,30 @@ describe("timeclock_job_codes default", () => {
     expect(getOrgSettings({ timeclock_job_codes: false }).timeclock_job_codes).toBe(false);
     expect(getOrgSettings({ timeclock_job_codes: true }).timeclock_job_codes).toBe(true);
   });
+
+  // THE SWITCH BOARD (0352): the old key now READS the Job Codes switch, so every reader of it
+  // follows the switch; while the switch is missing, the old stored choice still decides.
+  it("follows the Job Codes switch once there is one", () => {
+    expect(getOrgSettings({ features: { job_codes: false } }).timeclock_job_codes).toBe(false);
+    expect(getOrgSettings({ features: { job_codes: true }, timeclock_job_codes: false }).timeclock_job_codes).toBe(true);
+    expect(getOrgSettings({ features: { leads: false }, timeclock_job_codes: false }).timeclock_job_codes).toBe(false);
+  });
+});
+
+describe("trade and features (0352)", () => {
+  it("no stored map: every switch on and no trade (today's app)", () => {
+    const s = getOrgSettings({});
+    expect(Object.values(s.features).every((v) => v === true)).toBe(true);
+    expect(s.trade).toBe("");
+  });
+
+  it("a stored map and trade are read back, normalized", () => {
+    const s = getOrgSettings({ features: { website: false, kits: "no" }, trade: "deck" });
+    expect(s.features.website).toBe(false);
+    expect(s.features.kits).toBe(true);
+    expect(s.trade).toBe("deck");
+    expect(getOrgSettings({ trade: "other" }).trade).toBe("");
+  });
 });
 
 describe("parseGeoFromMapUrl — geo from a pasted Google Maps link", () => {
