@@ -90,6 +90,13 @@ d("RLS multi-tenant isolation invariant", () => {
     expect(wideOpen).toEqual([]);
   });
 
+  // Tables whose ONLY reader is North's own team, across tenants, and no tenant at all: their one
+  // policy is exactly is_platform_admin() (0176's helper, backed by the server-only platform_admins
+  // table). page_opens (0353) — the page-open counts, no user id; a company can't read its own.
+  // Exempt only when the WHOLE expression is that one call, so an org rule can't hide behind it.
+  const PLATFORM_ONLY = new Set(["page_opens"]);
+  const PLATFORM_ADMIN_EXPR = /^\(*\s*(public\.)?is_platform_admin\(\)\s*\)*$/;
+
   it("every non-deny policy on an org-scoped table scopes by org", async () => {
     const { rows } = await client.query(orgPoliciesSql);
     const unscoped = rows
@@ -98,6 +105,7 @@ d("RLS multi-tenant isolation invariant", () => {
         const expr = [r.qual, r.with_check].filter((e: string) => e && e.trim() !== "false").join(" ");
         if (!expr) return false;
         if (/auth_org_id|org_id/.test(expr)) return false;
+        if (PLATFORM_ONLY.has(r.tbl) && PLATFORM_ADMIN_EXPR.test(expr.trim())) return false;
         return !(USER_SCOPED.has(r.tbl) && /auth\.uid\(\)/.test(expr));
       })
       .map((r: any) => `${r.tbl}.${r.pol}`);
