@@ -139,10 +139,13 @@ export default async function BillsPage({
    * renders it. This page is a server component and the supplier card is another file, so a
    * plain form and a redirect is what lets an import say out loud what landed and what refused
    * without a scrap of JavaScript between him and the answer.
+   *
+   * `pay` is My Day's "Pay CED $X By Oct 10" door (supplier-pay-item.ts): the account whose
+   * Record A Payment sheet opens on arrival. The sheet is the one that already exists.
    */
-  searchParams?: Promise<{ import?: string; importOk?: string }>;
+  searchParams?: Promise<{ import?: string; importOk?: string; pay?: string }>;
 }) {
-  const { import: importSaid, importOk } = (await searchParams) ?? {};
+  const { import: importSaid, importOk, pay: payOn } = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -641,7 +644,7 @@ export default async function BillsPage({
   //
   // AND ONLY WHEN THE BOOKS WERE READ. A failed bills, links, aliases or jobs read makes papers his
   // books already cover look uncovered: false "Needs You" cards on this screen while My Day
-  // (loadSupplierPapers, the same gate) shows none. So it says it couldn't check, instead.
+  // (loadSupplierDesk, the same gate) shows none. So it says it couldn't check, instead.
   const paperBooksUnread = !!(billsErr || linksErr || aliasErr || jobsErr);
   const paperFeed =
     invoicesErr || accountsErr || paperBooksUnread || !supplierDocuments.length
@@ -1101,6 +1104,7 @@ export default async function BillsPage({
           // The slice of an account's unpaid bills the supplier's own documents do not cover.
           // Never folded into a balance: named, so money he does owe is not explained away.
           noSupplierDocument={Object.fromEntries(noSupplierDocument)}
+          payOn={typeof payOn === "string" ? payOn : null}
           actions={{
             recordPayment: recordSupplierPayment,
             voidPayment: voidSupplierPayment,

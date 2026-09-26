@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { NumberInput } from "@/components/ui/number-input";
+import { openFoldsTo } from "@/components/fold-opener";
 import { Fold, WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
@@ -145,6 +146,7 @@ export function SuppliersCard({
   reconcile = null,
   noSupplierDocument = {},
   needsYouIds = [],
+  payOn = null,
   actions,
 }: {
   accounts: SupplierAccountRow[];
@@ -171,6 +173,11 @@ export function SuppliersCard({
   noSupplierDocument?: Record<string, { total: number; bills: number; ids: string[] }>;
   /** Papers on a Needs You card: the supplier's own lists never repeat them. */
   needsYouIds?: string[];
+  /**
+   * MY DAY'S DOOR (/bills?pay=<account>): "Pay CED $5,174.62 By Oct 10" lands here with this
+   * account's Record A Payment sheet already open. The same sheet, the same write; nothing new.
+   */
+  payOn?: string | null;
   actions: SuppliersCardActions;
 }) {
   const router = useRouter();
@@ -307,6 +314,51 @@ export function SuppliersCard({
     setPayFor(account);
   }
 
+  // MY DAY'S DOOR OPENS THE SHEET, ONCE. The same gate as the account row's Record A Payment button
+  // (a balance to pay down), and a door that cannot open says why instead of doing nothing. The
+  // `pay` param comes off the address afterwards so a refresh after recording does not reopen it.
+  const payOnHandled = useRef<string | null>(null);
+  // The why lands where he lands: this card sits below Needs You and Sort These, so on a phone the
+  // red line would be below the fold and the door would look like it did nothing.
+  const errorRef = useRef<HTMLDivElement | null>(null);
+  const [showDoorError, setShowDoorError] = useState(false);
+  useEffect(() => {
+    if (!showDoorError || !error) return;
+    setShowDoorError(false);
+    errorRef.current?.scrollIntoView({ block: "center" });
+  }, [showDoorError, error]);
+  useEffect(() => {
+    if (!payOn || payOnHandled.current === payOn) return;
+    payOnHandled.current = payOn;
+    const account = accounts.find((a) => a.id === payOn) ?? null;
+    const canPay = !!account && supplierBalance(account, today).owed !== null;
+    if (account && canPay) {
+      // WAVE B: the sheet opens INSIDE the account's own detail. The supplier line (a folded
+      // <details>) opens around it, so closing the sheet leaves him on that account's numbers, its
+      // one Record A Payment, and its papers - not on a row of closed lines.
+      openFoldsTo(`supplier-invoices-${account.id}`);
+      openPay(account);
+    } else {
+      setShowDoorError(true);
+      setError(
+        account
+          ? `${account.name} is settled at the register, so there is no balance to pay here.`
+          : "That supplier account is not in your books any more, so there is no payment to record.",
+      );
+    }
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("pay");
+      // A refresh lands on the same account's open detail (FoldOpener), never a second sheet.
+      if (account && canPay) url.hash = `supplier-invoices-${account.id}`;
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // The address keeps its ?pay=; the sheet only ever opens once per visit either way.
+    }
+    // openPay only resets this component's own state; the door runs once per account asked for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payOn, accounts, today]);
+
   function submitPay() {
     if (!payFor || amount === null || amount <= 0) return;
     const account = payFor;
@@ -410,7 +462,11 @@ export function SuppliersCard({
           </a>
         )}
 
-        {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+        {error && (
+          <div ref={errorRef} role="alert" className="mb-3 scroll-mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
         {done && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
