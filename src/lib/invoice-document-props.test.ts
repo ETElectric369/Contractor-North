@@ -18,7 +18,7 @@ import {
 import { InvoiceDocument } from "@/components/invoice-document";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { accentHex } from "@/lib/org-settings";
-import { progressBalanceRow } from "@/lib/invoice-math";
+import { progressBalanceRow, totalToEstimateRow } from "@/lib/invoice-math";
 
 /**
  * ONE ASSEMBLY, THREE SURFACES (Erik, INV-080, 2026-09-25: "the preview pdf is formatted better, are
@@ -270,7 +270,7 @@ describe("what INV-080 now carries on every surface", () => {
     expect(p.items.map((i) => i.description)).toEqual(["Labor - Erik Taylor", "Materials", "Materials — Acme Supply"]);
   });
 
-  it("renders as the PDF does: tinted header, contact under Bill To, and 'Billed over the estimate' in words", async () => {
+  it("renders as the PDF does: tinted header, contact under Bill To, and 'Total to estimate' in words", async () => {
     const p = ok(await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: ORG }));
     const html = renderToStaticMarkup(createElement(InvoiceDocument, p));
     const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
@@ -278,9 +278,9 @@ describe("what INV-080 now carries on every surface", () => {
     expect(text).toContain("(708) 555-0100");
     expect(text).toContain("tao@example.com");
     expect(text).toContain("Progress summary");
-    // 17,325 − 16,527.30 − 3,189.34 = −2,391.64: said in words, never as a negative.
-    expect(text).toContain("Billed over the estimate $2,391.64");
-    expect(text).not.toContain("-$2,391.64");
+    // Work to date 21,336.64 (billed 19,716.64 + 1,620 not on a bill yet) − 17,325: in words, never a negative.
+    expect(text).toContain("Total to estimate $4,011.64 over");
+    expect(text).not.toContain("-$");
     expect(text).not.toContain("Balance to estimate");
     expect(text).not.toMatch(/Consolidated/);
     // Airy rows (py-3) and the 12px column gap from the org's doc_style.
@@ -402,7 +402,7 @@ describe("a progress balance never prints as a negative", () => {
     expect(fixed).not.toContain("-$");
   });
 
-  it("INV-080: the billed overage is named as billed, so it never reads as a second, different work overage", () => {
+  it("INV-080: the last row is the job's total against the estimate (Erik: 'it should be total to estimate')", () => {
     // Estimate 17,325; work to date 19,716.64 (114%: every line billed, at the price billed - it
     // read 18,624.14 while June's hours were re-priced at today's rates); received 16,527.30 + this
     // request 3,189.34 = 19,716.64, which is $2,391.64 BILLED past it.
@@ -412,8 +412,14 @@ describe("a progress balance never prints as a negative", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
     expect(text).toContain("$19,716.64");
     expect(text).toContain("114% complete");
-    expect(text).toContain("Billed over the estimate $2,391.64");
-    expect(text).not.toMatch(/(^|[^d] )Over the estimate/);
+    expect(text).toContain("Total to estimate $2,391.64 over");
+    expect(text).not.toContain("Balance to estimate");
     expect(text).not.toContain("-$");
+  });
+
+  it("totalToEstimateRow: over, under, on the nose", () => {
+    expect(totalToEstimateRow(19716.64, 17325)).toEqual({ label: "Total to estimate", value: 2391.64, note: "over" });
+    expect(totalToEstimateRow(16825, 17325)).toEqual({ label: "Total to estimate", value: 500, note: "under" });
+    expect(totalToEstimateRow(17325, 17325)).toEqual({ label: "Total to estimate", value: 0, note: null });
   });
 });

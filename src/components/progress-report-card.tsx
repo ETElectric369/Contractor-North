@@ -1,5 +1,5 @@
 import { formatCurrency } from "@/lib/utils";
-import { progressBalanceRow, progressSummary } from "@/lib/invoice-math";
+import { progressBalanceRow, progressSummary, totalToEstimateRow } from "@/lib/invoice-math";
 
 /** A progress-billing summary that rides on a deposit/progress/final invoice so a
  *  payment request doubles as a progress report: the agreed estimate, billable
@@ -19,15 +19,17 @@ export function ProgressReportCard({
 }) {
   const { pctComplete: pct, balance } = progressSummary(estimate, workToDate, received, thisAmount);
   const isTM = billingType === "tm";
-  // Never a negative: a job that ran past its estimate or contract says so in words (INV-080).
-  const last = progressBalanceRow(balance, billingType);
+  // Never a negative (INV-080). A T&M job ends on its total against the estimate ("$2,391.64 over");
+  // a fixed-price job on what's left of the contract.
+  const last: { label: string; value: number; note?: string | null } =
+    isTM && estimate > 0 ? totalToEstimateRow(workToDate, estimate) : progressBalanceRow(balance, billingType);
 
-  const rows: { label: string; value: number; sub?: string; strong?: boolean; top?: boolean }[] = [
+  const rows: { label: string; value: number; note?: string | null; sub?: string; strong?: boolean; top?: boolean }[] = [
     { label: isTM ? "Estimate amount" : "Contract", value: estimate },
     { label: "Work completed to date", value: workToDate, sub: estimate > 0 ? `${pct}%` : undefined },
     { label: "Received to date", value: received },
     { label: "This payment request", value: thisAmount, strong: true, top: true },
-    { label: last.label, value: last.value },
+    { label: last.label, value: last.value, note: last.note },
   ];
 
   return (
@@ -45,6 +47,7 @@ export function ProgressReportCard({
             </dt>
             <dd className={r.strong ? "font-bold text-slate-900" : "font-medium text-slate-700"}>
               {formatCurrency(r.value)}
+              {r.note ? ` ${r.note}` : ""}
             </dd>
           </div>
         ))}

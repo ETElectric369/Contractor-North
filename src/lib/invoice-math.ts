@@ -304,6 +304,20 @@ export function progressBalanceRow(
   return { label: tm ? "Balance to estimate" : "Balance remaining", value: b === 0 ? 0 : b };
 }
 
+/**
+ * A T&M JOB'S LAST ROW: THE TOTAL AGAINST THE ESTIMATE (Erik, INV-080, 2026-09-25: "the balance to
+ * estimate doesnt make sense, it should be total to estimate"). Everything the job came to (work to
+ * date: billed at the price billed, plus what the next bill would charge) next to the estimate, in
+ * words: "$2,391.64 over" / "$500.00 under". Never a minus sign. Fixed-price keeps progressBalanceRow.
+ */
+export function totalToEstimateRow(
+  workToDate: number,
+  estimate: number,
+): { label: string; value: number; note: "over" | "under" | null } {
+  const d = cents(fin(workToDate) - fin(estimate));
+  return { label: "Total to estimate", value: Math.abs(d), note: d > 0 ? "over" : d < 0 ? "under" : null };
+}
+
 export type InvoiceLine = {
   description?: string | null;
   line_total?: number | null;
