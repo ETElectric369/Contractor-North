@@ -3,6 +3,7 @@ import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
@@ -17,7 +18,6 @@ import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item
 import { NewInspectionButton } from "../../appointments/new-inspection-button";
 import { QuoteBuilder } from "./quote-builder";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
-import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -434,6 +434,7 @@ export default async function NewQuotePage({
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         deckRateRows={deckRateRows}
+        salesTax={featureOn(settings.features, "sales_tax")}
       />
     </div>
   );

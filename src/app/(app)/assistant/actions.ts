@@ -5,6 +5,7 @@ import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { resolveCustomerId } from "@/lib/actions/resolve-id";
 import { todayStrInTz } from "@/lib/tz";
 import type { AgentDraft } from "@/lib/assistant-protocol";
@@ -166,9 +167,12 @@ export async function saveQuoteFromDraft(
     supabase.from("tax_rates").select("rate").eq("is_default", true).limit(1).maybeSingle(),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
-  const taxRate =
-    draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
   const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  // SALES TAX OFF (the switch board, rule g): a new estimate is untaxed, whatever the default rate or
+  // the draft says. The live preview never offered a rate either (api/chat drops quote_draft's tax_rate).
+  const taxRate = !featureOn(orgS.features, "sales_tax")
+    ? 0
+    : draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
   const expiryDays = orgS.quote_expiry_days;
   // audit v921: expiry was counted off the SERVER's day (UTC on Vercel), so a 6 PM Pacific estimate
   // was dated a day long. Count the calendar days off the ORG's today, noon-anchored so a DST day

@@ -43,6 +43,7 @@ import {
 } from "./supplier-reconcile";
 import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -222,6 +223,9 @@ export interface SupplierPaperFeed {
   /** Papers a person said wait on a credit, not back yet (0346): folded under their supplier on
    *  /bills, never a card. Absent on a feed built by hand (My Day never draws them). */
   waiting?: SupplierPaperCard[];
+  /** false = Shop Stock is switched off (0352): no card offers the shelf. Absent = on, so a feed
+   *  built without the switch is exactly today's. */
+  shopStock?: false;
 }
 
 /**
@@ -266,6 +270,8 @@ export function supplierPaperFeed(input: {
   today?: string | null;
   /** The ORG's timezone: the day a wait was stamped is the company's day. */
   tz?: string | null;
+  /** The Shop Stock switch (0352). false: the cards don't offer the shelf. Absent = on. */
+  shopStock?: boolean;
 }): SupplierPaperFeed {
   const names = new Map((input.accounts ?? []).map((a) => [String(a.id), shortSupplierName(a.name)]));
   const opts = {
@@ -278,7 +284,7 @@ export function supplierPaperFeed(input: {
   const waiting = supplierPapersWaitingOnCredit(input.rows, input.jobs, opts);
   // Cancelled jobs are never offered in a picker; the matcher still sees them, as /bills's does.
   const jobs = (input.jobs ?? []).filter((j) => j.status !== "cancelled").map(paperJob);
-  return { cards, jobs, waiting };
+  return { cards, jobs, waiting, ...(input.shopStock === false ? { shopStock: false as const } : {}) };
 }
 
 /**
@@ -384,8 +390,12 @@ export interface SupplierDesk {
  */
 export async function loadSupplierDesk(supabase: any, userId: string, today: string): Promise<SupplierDesk | null> {
   if (!userId) return null;
-  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+  // The company's settings ride on the same read (the embed follows profiles.org_id): the cards
+  // follow the Shop Stock switch (0352) on My Day exactly as on /bills.
+  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id, organizations(settings)").eq("id", userId).maybeSingle();
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
+  const orgRow = (me as { organizations?: { settings?: unknown } | { settings?: unknown }[] | null } | null)?.organizations;
+  const shopStock = featureOn(getOrgSettings((Array.isArray(orgRow) ? orgRow[0] : orgRow)?.settings).features, "shop_stock");
   if (meErr) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
   if (!orgId) return null;
   const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes, settingsRes] = await Promise.all([
@@ -434,6 +444,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         accounts,
         today,
         tz: settingsRes.data?.timezone ?? null,
+        shopStock,
       })
     : null;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of

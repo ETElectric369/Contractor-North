@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { getPublicOrgByDomain } from "@/lib/public-org";
+// publicSite: the Website switch (0352, rule e). Off, and this page is a 404 like an unpublished site.
+import { getPublicOrgByDomain, publicSite } from "@/lib/public-org";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { OrgSite, orgSiteMetadata } from "../org-site";
 import { getSiteNav } from "../site-chrome";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
  */
 async function orgFromHost() {
   const host = (await headers()).get("host") ?? "";
-  return getPublicOrgByDomain(host);
+  return publicSite(await getPublicOrgByDomain(host));
 }
 
 export async function generateMetadata(): Promise<Metadata> {

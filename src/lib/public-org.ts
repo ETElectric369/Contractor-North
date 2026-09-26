@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings, type OrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 
 export type PublicOrg = {
   id: string;
@@ -51,6 +52,18 @@ export const getPublicOrgByHandle = cache(async (handle: string): Promise<Public
   const { data } = await supabase.from("organizations").select(SELECT).eq("settings->>public_handle", handle).limit(1).maybeSingle();
   return toPublicOrg(data);
 });
+
+/**
+ * THE WEBSITE SWITCH (the switch board, 0352, rule e): the org, only while its public site is on.
+ * Every page of the SITE ITSELF asks through this (the home page, articles, builder pages, the
+ * sitemap and the feed, on the free subdomain and on a custom domain alike), so a switched-off site
+ * stops rendering there and nowhere else. The lookups above stay switch-blind ON PURPOSE: the intake
+ * door, the estimate configurator, site chat, quote, invoice and portal links all ride the same org
+ * and are not the website. On (or no switches stored) it hands back the very same object.
+ */
+export function publicSite(org: PublicOrg | null): PublicOrg | null {
+  return org && featureOn(org.settings.features, "website") ? org : null;
+}
 
 /** Is the org's public intake door (/intake/<handle>) switched ON? The switch is the forms
  *  table's is_public_intake flag (one per org, 0185), not a settings key — so the site chrome

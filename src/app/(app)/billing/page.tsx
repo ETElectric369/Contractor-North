@@ -15,6 +15,8 @@ import { customerHoldsOlderCopy } from "@/lib/invoice-revision";
 import { getCollected } from "@/lib/analytics/money-metrics";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { NewInvoiceButton } from "./new-invoice-button";
+import { featureOn } from "@/lib/features";
+import { readViewerFeatures } from "@/lib/viewer-features";
 import { InvoiceJobButton } from "./invoice-job-button";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +26,7 @@ const money = (n: number) => formatCurrency(n);
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }, { data: revisedInv }] =
+  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }, { data: revisedInv }, viewer] =
     await Promise.all([
       getMoneyPipeline(supabase),
       supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
@@ -57,7 +59,10 @@ export default async function BillingPage() {
       // amount_paid and each payment's date ride along for the one case that settles a revision
       // without a re-send: the customer paid the corrected bill in full after it changed (INV-071).
       supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, sent_at, revised_at, customers(name), payments(paid_at)").not("revised_at", "is", null).neq("status", "void").order("revised_at", { ascending: false }).limit(1000),
+      // The switches (0352): Sales Tax off means a new invoice starts untaxed, with no tax field.
+      readViewerFeatures(),
     ]);
+  const salesTax = featureOn(viewer.features, "sales_tax");
 
   const list = (allInv ?? []) as any[];
   const collected = collectedTotals.allTime;
@@ -88,7 +93,7 @@ export default async function BillingPage() {
   return (
     <div>
       <PageHeader title="Billing" description="Your money pipeline — nothing slips through.">
-        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
+        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} salesTax={salesTax} />
       </PageHeader>
 
       {/* The three numbers that matter */}
@@ -244,7 +249,7 @@ export default async function BillingPage() {
         </div>
         {list.length === 0 ? (
           <EmptyState icon={Receipt} title="No invoices yet" description="Turn an accepted quote into an invoice, or start a blank one.">
-            <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} />
+            <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} salesTax={salesTax} />
           </EmptyState>
         ) : (
           <Card className="overflow-hidden">

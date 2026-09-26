@@ -122,7 +122,8 @@ export function BillsReceipts({
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
   /** The switch board (0352). Purchase Orders off: the tab loses its chip (a ?tab=po link still
-   *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. */
+   *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. Shop
+   *  Stock off: a receipt line isn't offered to the shelf. Absent = all on, today's ledger. */
   switches?: { features: FeatureMap; isOwner: boolean };
 }) {
   const poOn = featureOn(switches.features, "purchase_orders");
@@ -407,7 +408,7 @@ export function BillsReceipts({
                         </div>
                         {b.receipt ? (
                           <div className="mt-2">
-                            <ReceiptLines receipt={b.receipt} />
+                            <ReceiptLines receipt={b.receipt} shopStock={featureOn(switches.features, "shop_stock")} />
                           </div>
                         ) : lineCount > 0 ? (
                           <ul className="mt-2 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">

@@ -2,7 +2,6 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
-import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { ComplianceManager } from "./compliance-manager";
 import { EXCLUDED_FROM_COMPLIANCE } from "@/lib/compliance-types";
 
@@ -44,7 +43,6 @@ export default async function CompliancePage() {
         title="Compliance"
         description="Licenses, certifications & permits, with their renewal dates. (Policies live in Insurance; reviews in Audits.)"
       />
-      <FeatureOffLineFor feature="licenses" />
       <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
     </div>
   );

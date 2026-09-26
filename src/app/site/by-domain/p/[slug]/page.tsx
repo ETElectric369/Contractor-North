@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect } from "next/navigation";
-import { getPublicOrgByDomain } from "@/lib/public-org";
+// publicSite: the Website switch (0352, rule e). Off, and this page is a 404 like an unpublished site.
+import { getPublicOrgByDomain, publicSite } from "@/lib/public-org";
 import { getSiteRedirect } from "@/lib/site-redirects";
 import { isLegacyCmsPath } from "@/lib/site-reserved";
 import { getPublicPageBySlug } from "@/lib/public-pages";
@@ -21,7 +22,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 async function orgFromHost() {
   const host = (await headers()).get("host") ?? "";
-  return getPublicOrgByDomain(host);
+  return publicSite(await getPublicOrgByDomain(host));
 }
 
 export async function generateMetadata({ params, searchParams }: { params: Params; searchParams: SearchParams }): Promise<Metadata> {

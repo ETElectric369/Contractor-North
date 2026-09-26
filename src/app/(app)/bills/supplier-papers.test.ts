@@ -142,6 +142,19 @@ function feedTonight(over: { documents?: any[]; bills?: any[]; links?: any[] } =
 }
 const card = (feed: ReturnType<typeof feedTonight>, number: string) => feed.cards.find((c) => c.invoiceNumber === number);
 
+describe("the Shop Stock switch on the feed (0352)", () => {
+  it("not passed or on: exactly today's feed, no new key; off: the feed says so and nothing else moves", () => {
+    const bills = hisBills();
+    const { rows } = supplierDocumentRows({ documents: hisDocuments(), bills, links: LINKS, aliasRows: [] });
+    const input = { since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS };
+    const today = supplierPaperFeed(input);
+    expect(supplierPaperFeed({ ...input, shopStock: true })).toEqual(today);
+    expect("shopStock" in supplierPaperFeed({ ...input, shopStock: true })).toBe(false);
+    const off = supplierPaperFeed({ ...input, shopStock: false });
+    expect(off).toEqual({ ...today, shopStock: false });
+  });
+});
+
 describe("the June 8 line (Erik: \"june 8 is good\")", () => {
   // A COMPANY'S OWN SETTING (Wave 0), not a constant keyed to ET's org id: ET's June 8 is ET's
   // settings.books_begin (0354), and any company can name its own day.

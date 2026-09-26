@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic";
 import { getPublicOrgByHandle, type PublicOrg } from "@/lib/public-org";
+import { featureOn } from "@/lib/features";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
@@ -357,7 +358,9 @@ export async function POST(req: Request) {
   }
 
   const org = await getPublicOrgByHandle(handle);
-  if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });
+  // Site Chat off (0352, rule e): the bubble isn't drawn, and a page left open (or a direct POST)
+  // gets the same answer as an unknown handle, before a cent is spent at the model.
+  if (!org || !featureOn(org.settings.features, "site_chat")) return NextResponse.json({ error: "Not available." }, { status: 404 });
 
   // DAILY SPEND CEILINGS, resolved AFTER the org (so an unknown handle can't burn a real org's
   // budget) but BEFORE any model call. Per-minute-per-IP alone bounds nothing over a day, and

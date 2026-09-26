@@ -19,6 +19,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { reportError } from "@/lib/observe";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { smsReadiness } from "@/lib/sms";
@@ -418,6 +419,7 @@ export default async function InvoicePage({
         supplierNames={[...supplierNames]}
         noBillRateIds={noBillRateIds}
         tz={orgSettings.timezone}
+        salesTax={featureOn(orgSettings.features, "sales_tax")}
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,
           (inv as { revised_at?: string | null }).revised_at,

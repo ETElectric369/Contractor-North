@@ -73,6 +73,8 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
         <Label htmlFor="ds-iterms">Default invoice terms</Label>
         <Textarea id="ds-iterms" rows={2} value={invoiceTerms} onChange={(e) => setInvoiceTerms(e.target.value)} placeholder="e.g. Payment due within 14 days. 1.5% monthly late fee." />
       </div>
+      {/* Contracts & Lien Rights off (0352): the field isn't drawn; Save still sends the stored terms
+          back unchanged, and a contract already written keeps the terms it was written with. */}
       {contracts && (
         <div>
           <Label htmlFor="ds-cterms">Default contract terms</Label>

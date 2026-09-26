@@ -32,7 +32,8 @@ export function GenerateDueButton({ count }: { count: number }) {
   );
 }
 
-/** `canGenerate` = the Recurring Billing switch (0352): off, Generate One Now goes; Pause stays. */
+/** `canGenerate` false = Recurring Billing is off (0352): Generate One Now isn't drawn, because
+ *  generateOne would refuse it. Pause and Resume stay. Absent = on. */
 export function RecurringRowActions({ id, active, canGenerate = true }: { id: string; active: boolean; canGenerate?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();

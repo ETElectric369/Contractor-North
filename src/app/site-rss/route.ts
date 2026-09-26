@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { getPublicOrgByDomain, getPublicOrgByHandle } from "@/lib/public-org";
+import { getPublicOrgByDomain, getPublicOrgByHandle, publicSite } from "@/lib/public-org";
 import { getPublicPosts } from "@/lib/public-posts";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
 
@@ -23,7 +23,9 @@ export async function GET(req: Request) {
   // in the reader, and duplicate content pointing the wrong way). ?handle= stays supported
   // for the app host, where there is no domain to bind to.
   const byDomain = await getPublicOrgByDomain(host);
-  const org = byDomain ?? (handle ? await getPublicOrgByHandle(handle) : null);
+  // WEBSITE OFF (0352, rule e): the feed goes with the site. publicSite AFTER the host has won, so a
+  // switched-off company's domain can't fall through to someone else's ?handle= either.
+  const org = publicSite(byDomain ?? (handle ? await getPublicOrgByHandle(handle) : null));
   if (!org) return new Response("Not found", { status: 404 });
 
   // audit v921: the feed advertises the CANONICAL base, never the request host — same source as

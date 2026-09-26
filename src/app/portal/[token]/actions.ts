@@ -22,6 +22,7 @@ import {
 } from "@/lib/portal/code";
 import { deliverPortalCode } from "@/lib/portal/deliver-code";
 import { PORTAL_COOKIE, isPortalToken, portalCookieOptions } from "@/lib/portal/session-cookie";
+import { portalSwitchedOff } from "@/lib/portal/access";
 
 /**
  * THE PORTAL'S SIGN-IN, SERVER SIDE (0331). The link token is the only thing the page hands over;
@@ -40,6 +41,8 @@ export async function sendPortalCode(token: string): Promise<SendCodeResult> {
   if (await rateLimited(`portal-code-send:${ip}`, IP_SENDS_PER_HOUR, 3600, { failClosed: true })) {
     return { ok: false, reason: "busy" };
   }
+  // CUSTOMER PORTAL OFF (the switch board, 0352, rule f): no code is sent for a page that won't open.
+  if ((await portalSwitchedOff(token)).off) return { ok: false, reason: "off" };
 
   const code = generateCode();
   const salt = newSalt();
@@ -122,6 +125,9 @@ export async function checkPortalCode(token: string, typed: string): Promise<Che
   if (!code) return { ok: false, reason: "format" };
   const ip = clientIp(await headers());
   if (await rateLimited(`portal-code-try:${ip}`, IP_TRIES_PER_15_MIN, 900)) return { ok: false, reason: "busy" };
+  // CUSTOMER PORTAL OFF (0352, rule f): a code sent before the switch went off signs nobody in, and
+  // no try is spent on it.
+  if ((await portalSwitchedOff(token)).off) return { ok: false, reason: "off" };
 
   const svc = createServiceClient();
   // The try is counted HERE, before the comparison, under the code's row lock (0331).

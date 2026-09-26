@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { todayStrInTz } from "@/lib/tz";
 import {
   findDuplicateBills,
@@ -13,7 +14,6 @@ import {
 import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
-import { viewerSwitches } from "@/lib/viewer-switches";
 import { AddBusinessCostButton } from "./add-business-cost";
 import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import type { ReceiptForBilling } from "./receipt-billing-card";
@@ -281,10 +281,14 @@ export default async function BillsPage({
     // The items' names, for the same sentence (a view embed is PostgREST's guess; this is not).
     supabase.from("inventory_items").select("id, name").limit(5000),
   ]);
-  const orgTz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const orgTz = orgSettings.timezone;
   const today = todayStrInTz(orgTz);
-  // The switches and who is looking (0352), for the Purchase Orders tab: one cached read.
-  const switches = await viewerSwitches();
+  // THE SWITCHES (0352): Shop Stock and Purchase Orders hide their doors on this page. Nothing they
+  // saved is hidden from the books: open POs count, a roll on the shelf keeps its line. The page
+  // already holds the company's settings and the viewer's role, so they need no second read.
+  const shopStock = featureOn(orgSettings.features, "shop_stock");
+  const switches = { features: orgSettings.features, isOwner: profile?.role === "owner" };
 
   // Sort each bill's embedded line items by sort_order for display.
   const billsWithLines = (bills ?? []).map((b: any) => ({
@@ -705,6 +709,7 @@ export default async function BillsPage({
           accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
           today,
           tz: orgTz,
+          shopStock,
         });
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
@@ -1186,7 +1191,7 @@ export default async function BillsPage({
         </a>
       )}
 
-      <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} />
+      <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} shopStock={shopStock} />
 
       {/* ONE LINE PER SUPPLIER. When the accounts read came back an error, the card is its heading
           and one sentence: no buttons that could only refuse, and a My Day ?pay= door lands on
@@ -1230,8 +1235,8 @@ export default async function BillsPage({
             // Same Purchase: Tie Them (audit v994, DB1).
             tieToBill: tieSupplierInvoiceToBill,
             // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
-            shelfLines: supplierInvoiceShelfLines,
-            recordToShelf: recordSupplierInvoiceToShelf,
+            // Shop Stock off (0352): neither half is passed, so it doesn't.
+            ...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {}),
             // Waiting On A Credit's way back: Stop Waiting on the folded line puts it on Needs You.
             stopWaitingOnCredit,
           }}

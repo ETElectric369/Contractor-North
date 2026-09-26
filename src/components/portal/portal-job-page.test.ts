@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { shapePortalJob, type PortalJobRaw, type PublicInvoiceDoc } from "@/lib/portal/job-view-shape";
+import { portalViewForSwitches, shapePortalJob, type PortalJobRaw, type PublicInvoiceDoc } from "@/lib/portal/job-view-shape";
+import { ALL_ON, normalizeFeatures } from "@/lib/features";
 import { INV_078, LINES, PAYMENTS, STRETCHES } from "@/lib/portal/j011-fixture";
 import { assembleInvoiceDocumentProps, type InvoiceDocRead } from "@/lib/invoice-document-props";
 import { accentHex } from "@/lib/org-settings";
@@ -390,6 +391,31 @@ describe("Your Panel (0335), once the office shows it", () => {
       expect(off).not.toContain('href="#panel"');
       expect(text(off)).not.toContain("Your Panel");
     }
+  });
+});
+
+describe("the Panel Map switch on the customer's page (0352)", () => {
+  const panels = [{ name: "Main Panel", main_amps: 125, spaces: 32, circuits: [{ space: 7, half: null, poles: 1, amps: 15, kind: null, room: "Kitchen", label: "Entry Lights", feeds: null, is_new: false }] }];
+  const view = shape(raw({ panels }), { signed, unbilled: null, now: NOW });
+  const page = (v: typeof view) => renderToStaticMarkup(createElement(PortalJobPage, { view: v, homeHref: "/portal/x" }));
+
+  it("on, or no switches stored: the very same view, so the page is byte-for-byte today's", () => {
+    expect(portalViewForSwitches(view, ALL_ON)).toBe(view);
+    expect(portalViewForSwitches(view, normalizeFeatures({}))).toBe(view);
+    expect(portalViewForSwitches(view, null)).toBe(view);
+    expect(page(portalViewForSwitches(view, normalizeFeatures({ panel_map: true })))).toBe(page(view));
+    expect(text(page(view))).toContain("Your Panel");
+  });
+
+  it("off: no Your Panel section and no chip, and nothing else on the page moves", () => {
+    const off = page(portalViewForSwitches(view, normalizeFeatures({ panel_map: false })));
+    expect(off).not.toContain('href="#panel"');
+    expect(text(off)).not.toContain("Your Panel");
+    expect(off).toBe(page({ ...view, panels: [] }));
+  });
+
+  it("another switch off leaves the panel where it is", () => {
+    expect(portalViewForSwitches(view, normalizeFeatures({ website: false, sales_tax: false }))).toBe(view);
   });
 });
 

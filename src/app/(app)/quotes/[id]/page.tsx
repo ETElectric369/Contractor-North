@@ -258,6 +258,7 @@ export default async function QuoteDetailPage({
         priceItems={(priceItems ?? []) as never}
         kits={(kitDoors ? kits ?? [] : []) as never}
         defaultMarkupPct={orgS.default_markup_pct}
+        salesTax={featureOn(orgS.features, "sales_tax")}
         // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
         // including 0, so a 0 here would price every customer-without-a-level at net cost — a
         // worse bug than the one this fixes.

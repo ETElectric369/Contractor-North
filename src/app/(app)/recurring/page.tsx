@@ -9,8 +9,6 @@ import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { RecurringButton, type RecurringValue } from "./recurring-button";
 import { RecurringRowActions, GenerateDueButton } from "./recurring-actions-ui";
-import { FeatureOffLine } from "@/components/feature-off-line";
-import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
@@ -22,20 +20,22 @@ const FREQ_LABEL: Record<string, string> = {
 export default async function RecurringPage() {
   const supabase = await createClient();
 
-  const [{ data: templates }, { data: customers }, { data: orgRow }, sw] = await Promise.all([
+  const [{ data: templates }, { data: customers }, { data: orgRow }] = await Promise.all([
     supabase.from("recurring_templates").select("*, customers(name)").order("next_date"),
     listCustomerOptions(supabase),
     supabase.from("organizations").select("settings").maybeSingle(),
-    viewerSwitches(),
   ]);
+  const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   // RECURRING BILLING OFF (the switch board, 0352): nothing is made, so the doors that make one
-  // (Generate, the per-row Generate One Now, New) go. The list stays readable, and Pause/Resume and
-  // edit stay: they change what the engine would do when the switch comes back on.
-  const recurringOn = featureOn(sw.features, "recurring_billing");
+  // (Generate, the per-row Generate One Now, New) go, and generateOne / generateDue refuse as well.
+  // The list stays readable, and Pause/Resume and edit stay: they change what the engine would do
+  // when the switch comes back on. Opened from a link, the page carries the shell's Off line.
+  const recurringOn = featureOn(orgS.features, "recurring_billing");
+  const salesTax = featureOn(orgS.features, "sales_tax");
   // "Due" is an ORG-LOCAL calendar decision (audit v921). A UTC today rolls over at ~5 PM Pacific,
   // so this page said "Generate 1 Due" while generateDueTemplates — which gates on the org's own
   // today — created nothing and the toast read "Generated 0 invoices". Same clock, both sides.
-  const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+  const today = todayStrInTz(orgS.timezone);
 
   const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, name: c.name }));
   const dueCount = (templates ?? []).filter((t: any) => t.active && t.next_date <= today).length;
@@ -45,10 +45,9 @@ export default async function RecurringPage() {
       <PageHeader title="Recurring" description="Jobs, invoices, and expenses that repeat — generate them on a schedule.">
         <div className="flex items-center gap-2">
           {recurringOn && dueCount > 0 && <GenerateDueButton count={dueCount} />}
-          {recurringOn && <RecurringButton customers={custOpts} />}
+          {recurringOn && <RecurringButton customers={custOpts} salesTax={salesTax} />}
         </div>
       </PageHeader>
-      <FeatureOffLine feature="recurring_billing" features={sw.features} isOwner={sw.isOwner} />
 
       {(templates ?? []).length === 0 ? (
         <Card className="py-12 text-center text-sm text-slate-400">
@@ -86,7 +85,7 @@ export default async function RecurringPage() {
                     </div>
                   </div>
                   <RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn} />
-                  <RecurringButton customers={custOpts} template={value} />
+                  <RecurringButton customers={custOpts} template={value} salesTax={salesTax} />
                 </li>
               );
             })}

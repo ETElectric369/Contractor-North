@@ -133,6 +133,9 @@ export default async function CustomerDetailPage({
       : Promise.resolve({ data: null }),
   ]);
   const deviceCount = Number(portalDevices?.devices);
+  // CUSTOMER PORTAL OFF (0352, rule f): the office's link controls aren't drawn. The link row is
+  // untouched, and the invoice pay link never depended on it.
+  const portalOn = featureOn(sw.features, "customer_portal");
   const portal = portalRow
     ? {
         token: (portalRow as { token: string }).token,
@@ -207,7 +210,7 @@ export default async function CustomerDetailPage({
                 />
               </div>
             )}
-            {viewerIsStaff && featureOn(sw.features, "customer_portal") && (
+            {viewerIsStaff && portalOn && (
               <div className="border-t border-slate-100 pt-3">
                 <PortalLinkButton
                   customerId={c.id}

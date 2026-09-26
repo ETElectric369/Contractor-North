@@ -40,6 +40,8 @@ import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { FeaturesPanel } from "./features-panel";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { PaymentMethods } from "./payment-methods";
 import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
@@ -56,8 +58,6 @@ import { PostsManager } from "./posts-manager";
 import { PagesManager } from "./pages-manager";
 import { CollaboratorsManager } from "./collaborators-manager";
 import { QuotePlaybookForm } from "./quote-playbook-form";
-import { FeatureOffLine } from "@/components/feature-off-line";
-import { featureOn, type FeatureKey } from "@/lib/features";
 import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
 import { PasskeyManager } from "./passkey-manager";
@@ -860,8 +860,9 @@ export default async function SettingsPage({
         },
         // "Photos & pages" — the content ON the site. Four managers that are each a real editing
         // session; nobody opens this one by accident, and nobody hunting for a domain name should
-        // have to scroll past it.
-        ...(on("website") ? [{
+        // have to scroll past it. Website off: it leaves the side nav (CLUSTER_FEATURE, below) and
+        // still opens from a ?tab=content link under the Off line.
+        {
           id: "content",
           label: "Photos & Pages",
           icon: Images,
@@ -892,7 +893,7 @@ export default async function SettingsPage({
               </Section>
             </div>
           ),
-        }] : []),
+        },
         // "Connections" — everything that talks to something outside this app. QuickBooks joins
         // the calendar: it was under Money, but connecting an accounting login is the same errand
         // as connecting a calendar, not the same errand as setting a tax rate. NO DEVELOPER TEXT
@@ -976,6 +977,16 @@ export default async function SettingsPage({
   // the set-once org config leads, personal settings sit at the end (frequency law). This
   // order also fixes the default cluster: the first entry is what ?tab= falls back to.
   const clusters = isStaff ? [...adminTabs, youTab] : [youTab];
+  // THE SWITCH BOARD (0352, rule a): a switched-off feature's group leaves the side nav. A ?tab= link
+  // to it still opens it, under the Off line, so nothing saved there is ever out of reach. Website
+  // off takes only "Photos & Pages": the Website group stays, because the web address in it is what
+  // the request link, the estimate page and the customer's links are built on (rule e); it carries
+  // its own Off line and draws only that address.
+  const CLUSTER_FEATURE: Partial<Record<string, FeatureKey>> = { content: "website" };
+  const clusterOff = (id: string) => {
+    const k = CLUSTER_FEATURE[id];
+    return !!k && !featureOn(settings.features, k);
+  };
 
   // ROUTE-DRIVEN (not client <Tabs>): the left side-tab (settings-subnav) drives which
   // cluster shows via ?tab=<id>, so its own side-tab can replace the Office list that was
@@ -992,7 +1003,8 @@ export default async function SettingsPage({
   // The nav needs only id/label per cluster — the icon is resolved client-side by id in
   // SettingsSubnav. (Passing c.icon, a lucide component/function, across the server→client
   // boundary threw "Functions cannot be passed to Client Components" and crashed /settings.)
-  const navClusters = clusters.map((c) => ({ id: c.id, label: c.label }));
+  const navClusters = clusters.filter((c) => !clusterOff(c.id)).map((c) => ({ id: c.id, label: c.label }));
+  const activeOff = clusterOff(active.id) ? CLUSTER_FEATURE[active.id] : undefined;
 
   return (
     // THE NAV SITS FLUSH, THE CONTENT KEEPS ITS READING WIDTH.
@@ -1014,7 +1026,10 @@ export default async function SettingsPage({
           stretched to the content's full height by the default `stretch`. */}
       <div className="shell:flex shell:items-start shell:gap-6">
         <SettingsSubnav clusters={navClusters} activeTab={active.id} />
-        <div className="min-w-0 max-w-4xl flex-1">{active.content}</div>
+        <div className="min-w-0 max-w-4xl flex-1">
+          {activeOff && <FeatureOffLine feature={activeOff} features={settings.features} isOwner={profile?.role === "owner"} />}
+          {active.content}
+        </div>
       </div>
     </div>
   );

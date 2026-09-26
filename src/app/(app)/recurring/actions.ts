@@ -12,6 +12,8 @@ import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket } from "@/lib/business-cost-buckets";
+import { featureOn } from "@/lib/features";
+import { featureOffSentence } from "@/lib/viewer-features";
 
 /** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
  *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw
@@ -143,6 +145,9 @@ export async function generateOne(id: string): Promise<Result> {
   // Org-local today + settings (tz / work-day window) for the generated occurrence.
   const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
   const raw = (orgRow as { settings?: unknown } | null)?.settings;
+  // RECURRING BILLING OFF (0352, rule h): nothing is generated for this company, by hand or by the
+  // engine. Said plainly, never a quiet "Already generated".
+  if (!featureOn(getOrgSettings(raw).features, "recurring_billing")) return { ok: false, error: featureOffSentence("recurring_billing") };
   const today = todayStrInTz(getOrgSettings(raw).timezone);
   const ok =
     t.kind === "invoice"
@@ -159,6 +164,11 @@ export async function generateDue(): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // Refused in words while Recurring Billing is off (the engine would skip this company anyway, and
+  // "Generated 0 invoices" would read as nothing being due).
+  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", ctx.orgId ?? "").maybeSingle();
+  if (!featureOn(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, "recurring_billing"))
+    return { ok: false, error: featureOffSentence("recurring_billing") };
   const count = await generateDueTemplates(supabase, ctx.userId);
   revalidatePath("/recurring");
   revalidatePath("/jobs");

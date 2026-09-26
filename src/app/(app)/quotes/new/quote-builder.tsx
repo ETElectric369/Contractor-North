@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
+import { taxFieldShown } from "@/lib/sales-tax-switch";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { applyPriceBookReview } from "../../price-list/actions";
 import type { BookUpdate, BookAddition } from "@/lib/pricing/book-review";
@@ -214,6 +215,7 @@ export function QuoteBuilder({
   measured,
   orgId = "",
   leadPlans = [],
+  salesTax = true,
 }: {
   /** For storage-first uploads (#116): the org folder the documents bucket's RLS admits. */
   orgId?: string;
@@ -268,9 +270,13 @@ export function QuoteBuilder({
   /** Deck price-code rows (catalog orgs), NEWEST-FIRST — priced here client-side through THE
    *  markup rule so generator lines re-price with the selected customer, like the hand-picker. */
   deckRateRows?: DeckRateRow[];
+  /** SALES TAX OFF (the switch board, rule g): no default rate seeds this estimate and the tax field
+   *  isn't drawn. A draft that already carries tax keeps it, and its field, so it can be seen and
+   *  changed. Absent = on, today's builder. */
+  salesTax?: boolean;
 }) {
   const router = useRouter();
-  const defaultRate = taxRates.find((t) => t.is_default);
+  const defaultRate = salesTax ? taxRates.find((t) => t.is_default) : undefined;
   const [customerId, setCustomerId] = useState(adoptedSeed?.customerId ?? preselected ?? "");
   // Customers created inline, merged into the server-provided list. The FIRST screen of the whole
   // estimate flow had a picker and no way to create what it picks — cn-v677 fixed the SAVED-quote
@@ -298,6 +304,7 @@ export function QuoteBuilder({
   const [notes, setNotes] = useState(adoptedSeed?.notes ?? "");
   const [taxRate, setTaxRate] = useState(adoptedSeed?.taxRate ?? (defaultRate ? Number(defaultRate.rate) / 100 : 0));
   const [taxChoice, setTaxChoice] = useState(defaultRate ? defaultRate.id : "");
+  const [taxShown, setTaxShown] = useState(taxFieldShown(salesTax, { tax_rate: adoptedSeed?.taxRate }));
   const [validUntil, setValidUntil] = useState(() => {
     if (adoptedSeed?.validUntil) return String(adoptedSeed.validUntil).slice(0, 10);
     const d = new Date();
@@ -503,7 +510,10 @@ export function QuoteBuilder({
       setTitle(d.title ?? "");
       setDescription(d.description ?? "");
       setNotes(d.notes ?? "");
-      if (typeof d.taxRate === "number") setTaxRate(d.taxRate);
+      if (typeof d.taxRate === "number") {
+        setTaxRate(d.taxRate);
+        if (d.taxRate > 0) setTaxShown(true); // a restored draft's tax is never hidden
+      }
       setTaxChoice(d.taxChoice ?? "");
       if (d.validUntil) setValidUntil(d.validUntil);
       if (Array.isArray(d.items) && d.items.length) setItems(d.items);
@@ -1366,36 +1376,40 @@ export function QuoteBuilder({
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="tax">Tax rate</Label>
-                {taxRates.length > 0 ? (
-                  <Select
-                    id="tax"
-                    value={taxChoice}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setTaxChoice(id);
-                      const r = taxRates.find((t) => t.id === id);
-                      setTaxRate(r ? Number(r.rate) / 100 : 0);
-                    }}
-                  >
-                    <option value="">No tax</option>
-                    {taxRates.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({Number(t.rate)}%)
-                      </option>
-                    ))}
-                  </Select>
-                ) : (
-                  <Input
-                    id="tax"
-                    type="number"
-                    step="any"
-                    placeholder="8.25"
-                    onChange={(e) => setTaxRate((Number(e.target.value) || 0) / 100)}
-                  />
-                )}
-              </div>
+              {taxShown && (
+                <div>
+                  <Label htmlFor="tax">Tax rate</Label>
+                  {salesTax && taxRates.length > 0 ? (
+                    <Select
+                      id="tax"
+                      value={taxChoice}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setTaxChoice(id);
+                        const r = taxRates.find((t) => t.id === id);
+                        setTaxRate(r ? Number(r.rate) / 100 : 0);
+                      }}
+                    >
+                      <option value="">No tax</option>
+                      {taxRates.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({Number(t.rate)}%)
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input
+                      id="tax"
+                      type="number"
+                      step="any"
+                      placeholder="8.25"
+                      // Sales Tax off with a carried rate: show that rate, so what is charged is what is read.
+                      value={salesTax ? undefined : taxRate ? +(taxRate * 100).toFixed(4) : ""}
+                      onChange={(e) => setTaxRate((Number(e.target.value) || 0) / 100)}
+                    />
+                  )}
+                </div>
+              )}
               <div>
                 <Label htmlFor="valid">Valid until</Label>
                 <Input
@@ -1424,10 +1438,12 @@ export function QuoteBuilder({
               <span>Subtotal</span>
               <span>{formatCurrency(subtotal)}</span>
             </div>
-            <div className="flex justify-between text-slate-600">
-              <span>Tax</span>
-              <span>{formatCurrency(tax)}</span>
-            </div>
+            {taxFieldShown(salesTax, { tax }) && (
+              <div className="flex justify-between text-slate-600">
+                <span>Tax</span>
+                <span>{formatCurrency(tax)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-slate-100 pt-2 text-base font-semibold text-slate-900">
               <span>Total</span>
               <span>{formatCurrency(total)}</span>

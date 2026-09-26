@@ -263,7 +263,9 @@ export function TookFromStock({
   viewerIsStaff: boolean;
   /** The page's read of the job's takes failed (jobTakes' error): said in the list's place. */
   readFailed?: boolean;
-  /** The Shop Stock switch (0352). Off, the button goes; the job's takes stay listed with Undo. */
+  /** SHOP STOCK OFF (the switch board, 0352): the Took From Stock button isn't drawn and Nort's
+   *  ?take= fill doesn't open the sheet. The takes already made stay listed, Undo and all, and what
+   *  is billed from them never changes. Absent = on. */
   canTake?: boolean;
 }) {
   const router = useRouter();
@@ -333,7 +335,7 @@ export function TookFromStock({
   useEffect(() => {
     // Once the words are off the address, let the next fill through, even for the same item ("make
     // it 40, not 60"): Nort is an overlay, so this page stays mounted between two of its links.
-    if (!takeParam) {
+    if (!takeParam || !canTake) {
       prefill.current = null;
       return;
     }
@@ -344,7 +346,7 @@ export function TookFromStock({
     next.delete("take");
     next.delete("qty");
     router.replace(`${pathname}${next.toString() ? `?${next}` : ""}`, { scroll: false });
-  }, [takeParam, qtyParam, openSheet, params, pathname, router]);
+  }, [takeParam, qtyParam, openSheet, params, pathname, router, canTake]);
 
   const undo = useCallback(
     async (drawGroup: string) => {

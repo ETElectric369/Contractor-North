@@ -42,10 +42,14 @@ export function NewInvoiceButton({
   quotes,
   customers,
   jobs = [],
+  salesTax = true,
 }: {
   quotes: QuoteOption[];
   customers: CustomerOption[];
   jobs?: JobOption[];
+  /** SALES TAX OFF (the switch board, rule g): no default rate seeds a new invoice and the tax
+   *  field isn't drawn, so a blank invoice starts untaxed. Absent = on, today's form. */
+  salesTax?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"quote" | "blank">(
@@ -94,7 +98,7 @@ export function NewInvoiceButton({
   async function openModal() {
     if (draft.restored && dirty) toast("Draft restored — pick up where you left off", "info");
     setOpen(true);
-    if (taxSeeded) return; // only seed once; don't stomp a value the user already typed
+    if (taxSeeded || !salesTax) return; // only seed once; don't stomp a value the user already typed
     setTaxSeeded(true);
     const supabase = createClient();
     const { data } = await supabase
@@ -337,21 +341,23 @@ export function NewInvoiceButton({
                     onChange={(e) => setTitle(e.target.value)}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="inv-tax">Tax rate %</Label>
-                  <Input
-                    id="inv-tax"
-                    type="number"
-                    step="any"
-                    placeholder="8.25"
-                    // Show as a percent; state holds the fraction. Seeded from the
-                    // org default on open so the field isn't a blank 0.
-                    value={taxRate ? +(taxRate * 100).toFixed(4) : ""}
-                    onChange={(e) =>
-                      setTaxRate((Number(e.target.value) || 0) / 100)
-                    }
-                  />
-                </div>
+                {salesTax && (
+                  <div>
+                    <Label htmlFor="inv-tax">Tax rate %</Label>
+                    <Input
+                      id="inv-tax"
+                      type="number"
+                      step="any"
+                      placeholder="8.25"
+                      // Show as a percent; state holds the fraction. Seeded from the
+                      // org default on open so the field isn't a blank 0.
+                      value={taxRate ? +(taxRate * 100).toFixed(4) : ""}
+                      onChange={(e) =>
+                        setTaxRate((Number(e.target.value) || 0) / 100)
+                      }
+                    />
+                  </div>
+                )}
               </div>
             </>
           )}

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { AddLineItems, type PriceItemLite } from "@/components/add-line-items";
 import { useRouter } from "next/navigation";
+import { taxFieldShown } from "@/lib/sales-tax-switch";
 import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -49,6 +50,7 @@ export function QuoteItemsEditor({
   defaultMarkupPct = 0,
   levelMarkupPct = null,
   lock = null,
+  salesTax = true,
 }: {
   quote: Quote;
   items: QuoteLineItem[];
@@ -62,8 +64,12 @@ export function QuoteItemsEditor({
    *  the plain sentence shown where the editing controls were — it must say what the user CAN do
    *  (duplicate it as a revision), because a control that simply vanishes is its own dead end. */
   lock?: { reason: string } | null;
+  /** SALES TAX OFF (the switch board, rule g): an estimate with no tax shows no tax row and no tax
+   *  field. One that already carries tax keeps both: its total is its total. Absent = on. */
+  salesTax?: boolean;
 }) {
   const router = useRouter();
+  const showTax = taxFieldShown(salesTax, quote);
   const [pending, start] = useTransition();
   const refresh = () => router.refresh();
 
@@ -357,10 +363,12 @@ export function QuoteItemsEditor({
               <span>Subtotal</span>
               <span>{formatCurrency(quote.subtotal)}</span>
             </div>
-            <div className="flex justify-between text-slate-600">
-              <span>Tax ({(Number(quote.tax_rate) * 100).toFixed(2)}%)</span>
-              <span>{formatCurrency(quote.tax)}</span>
-            </div>
+            {showTax && (
+              <div className="flex justify-between text-slate-600">
+                <span>Tax ({(Number(quote.tax_rate) * 100).toFixed(2)}%)</span>
+                <span>{formatCurrency(quote.tax)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-slate-100 pt-1.5 text-base font-semibold text-slate-900">
               <span>Total</span>
               <span>{formatCurrency(quote.total)}</span>
@@ -406,24 +414,26 @@ export function QuoteItemsEditor({
             <Textarea id="qd-description" rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Scope summary the customer reads before the line items." />
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="qd-tax">Tax rate (%)</Label>
-              {/* The same substitution the invoice page makes on a sent bill
-                  (billing/[id]/invoice-detail.tsx): the rate as text, not an input that can
-                  only be refused. The number is the one already on the estimate, not a new one. */}
-              {lock ? (
-                <>
-                  <div id="qd-tax" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    {taxPct.toFixed(2)}%
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Changing the rate would change the total. {lock.reason}
-                  </p>
-                </>
-              ) : (
-                <NumberInput id="qd-tax" value={taxPct} onValueChange={setTaxPct} />
-              )}
-            </div>
+            {showTax && (
+              <div>
+                <Label htmlFor="qd-tax">Tax rate (%)</Label>
+                {/* The same substitution the invoice page makes on a sent bill
+                    (billing/[id]/invoice-detail.tsx): the rate as text, not an input that can
+                    only be refused. The number is the one already on the estimate, not a new one. */}
+                {lock ? (
+                  <>
+                    <div id="qd-tax" className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      {taxPct.toFixed(2)}%
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Changing the rate would change the total. {lock.reason}
+                    </p>
+                  </>
+                ) : (
+                  <NumberInput id="qd-tax" value={taxPct} onValueChange={setTaxPct} />
+                )}
+              </div>
+            )}
             <div>
               <Label htmlFor="qd-valid">Valid until</Label>
               <Input id="qd-valid" type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
