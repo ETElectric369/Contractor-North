@@ -238,10 +238,17 @@ export type MarkContext = { markJobs: MarkJob[]; pos: MarkPo[]; selfNames: strin
  * ticket prints "ERIK TAYLOR" as who it was sold to, on every ticket, and that is never the
  * customer). A read that fails is an empty list: no PO match, no names set aside.
  */
-export async function loadMarkContext(supabase: any, orgId: string | null | undefined): Promise<MarkContext> {
+export async function loadMarkContext(
+  supabase: any,
+  orgId: string | null | undefined,
+  /** `strict`: a failed jobs or PO read THROWS instead of reading as no match. For a caller whose
+   *  empty answer says "nothing missing" (the job's Costs tab papers), never for the tray. */
+  opts: { strict?: boolean } = {},
+): Promise<MarkContext> {
   let jq = supabase.from("jobs").select("id, job_number, name, address, status, customers(name, company_name)");
   if (orgId) jq = jq.eq("org_id", orgId);
-  const { data: jobs } = await jq.in("status", PAPER_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
+  const { data: jobs, error: jobsError } = await jq.in("status", PAPER_JOB_STATUSES).order("created_at", { ascending: false }).limit(OPEN_JOBS_FOR_PAPER);
+  if (jobsError && opts.strict) throw jobsError;
   const rows = (jobs ?? []) as any[];
   let pos: MarkPo[] = [];
   let selfNames: string[] = [];
@@ -251,8 +258,10 @@ export async function loadMarkContext(supabase: any, orgId: string | null | unde
         let pq = supabase.from("purchase_orders").select("po_number, job_id");
         if (orgId) pq = pq.eq("org_id", orgId);
         const { data, error } = await pq.not("job_id", "is", null).limit(2000);
+        if (error && opts.strict) throw error;
         if (!error) pos = ((data ?? []) as MarkPo[]).filter((p) => p?.po_number && p?.job_id);
-      } catch {
+      } catch (e) {
+        if (opts.strict) throw e;
         pos = [];
       }
     })(),

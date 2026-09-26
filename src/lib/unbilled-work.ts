@@ -74,7 +74,31 @@ export type UnbilledWork = {
   claimedOn: string[];
   /** false until migration 0255 has landed — labor claims are unknowable before it. */
   schemaReady: boolean;
+  /**
+   * WHERE EACH BILL AND LIVE PO STANDS, ROW BY ROW (the Costs tab, Erik 2026-09-25: "i need to know
+   * what is open more than i need to know all the totals"). The same loop that sums billsAmount
+   * says, per row, which side of the line it fell on, so the tab's Not Billed Yet list and this
+   * card's figure are one decision, never two:
+   *   open     counted above (billsCount / returnsCount): the next bill picks it up
+   *   billed   a non-void invoice claims it (a DRAFT counts: the row is on that draft)
+   *   nothing  on no invoice and never going on one: its PO was billed, it is $0, every line of it
+   *            is the company's own, or it is a return of parts the customer was never billed for
+   */
+  costRows: CostRowVerdict[];
 };
+
+/** One bill or live purchase order, and what the claims rule says about it (UnbilledWork.costRows). */
+export type CostRowVerdict =
+  /** `cost`: what the next bill picks up from this row, before markup - the engine's own reading
+   *  (billableBillCost for a bill, the total for a PO, minus the credit for a return). Differs from
+   *  the row's amount when lines on it are the company's own. */
+  | { id: string; kind: "bill" | "po"; state: "open"; cost: number }
+  | { id: string; kind: "bill" | "po"; state: "billed"; invoice: ClaimantInvoice }
+  | { id: string; kind: "bill" | "po"; state: "nothing"; why: NothingToBill };
+
+/** Why a row is on no invoice and never goes on one. `own_return`: a supplier return of parts the
+ *  customer was never billed for (every line switched off), so no credit is owed (INV-078). */
+export type NothingToBill = "po_billed" | "own_cost" | "own_return" | "zero";
 
 export type ClaimantInvoice = {
   id: string;
@@ -317,16 +341,24 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   let billsCount = 0;
   let excluded = 0;
   let poCoveredBills = 0;
+  const costRows: CostRowVerdict[] = [];
+  const billedOn = (id: string, kind: "bill" | "po"): CostRowVerdict => ({ id, kind, state: "billed", invoice: input.claims.owner.get(id)! });
   for (const p of livePurchaseOrders(input.pos ?? [], input.bills ?? [])) {
     const cost = Number(p.total) || 0;
-    if (!(cost > 0)) continue;
+    // The claim is read before the amount: a $0 order an invoice holds is on that invoice.
     if (claimed.has(p.id)) {
-      skippedIds.push(p.id);
+      costRows.push(billedOn(p.id, "po"));
+      if (cost > 0) skippedIds.push(p.id);
+      continue;
+    }
+    if (!(cost > 0)) {
+      costRows.push({ id: p.id, kind: "po", state: "nothing", why: "zero" });
       continue;
     }
     billsAmount = cents(billsAmount + cost);
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
+    costRows.push({ id: p.id, kind: "po", state: "open", cost });
   }
   let returnsAmount = 0;
   let returnsCredit = 0;
@@ -339,14 +371,19 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   for (const b of input.bills ?? []) {
     const paid = Number(b.amount) || 0;
     const isReturn = isReturnBill(b.amount);
-    if (!(paid > 0) && !isReturn) continue;
     if (claimed.has(b.id)) {
-      skippedIds.push(b.id);
+      costRows.push(billedOn(b.id, "bill"));
+      if (paid > 0 || isReturn) skippedIds.push(b.id);
+      continue;
+    }
+    if (!(paid > 0) && !isReturn) {
+      costRows.push({ id: b.id, kind: "bill", state: "nothing", why: "zero" });
       continue;
     }
     // The delivery was already billed through its PO on another invoice — see UnbilledWork.poCoveredBills.
     if (typeof b.po_id === "string" && b.po_id && claimed.has(b.po_id)) {
       poCoveredBills += 1;
+      costRows.push({ id: b.id, kind: "bill", state: "nothing", why: "po_billed" });
       continue;
     }
     /**
@@ -358,10 +395,14 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
      */
     if (isReturn) {
       const back = returnCreditCost(b.amount, returnLines.get(b) ?? b.bill_line_items);
-      if (!(back > 0)) continue;
+      if (!(back > 0)) {
+        costRows.push({ id: b.id, kind: "bill", state: "nothing", why: "own_return" });
+        continue;
+      }
       returnsAmount = cents(returnsAmount + back);
       returnsCredit = cents(returnsCredit + mk(back));
       returnsCount += 1;
+      costRows.push({ id: b.id, kind: "bill", state: "open", cost: -back });
       continue;
     }
     /**
@@ -381,10 +422,14 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
      */
     const cost = billableBillCost(b.amount, b.bill_line_items);
     excluded = cents(excluded + (paid - cost));
-    if (!(cost > 0)) continue;
+    if (!(cost > 0)) {
+      costRows.push({ id: b.id, kind: "bill", state: "nothing", why: "own_cost" });
+      continue;
+    }
     billsAmount = cents(billsAmount + cost);
     billsBilled = cents(billsBilled + mk(cost));
     billsCount += 1;
+    costRows.push({ id: b.id, kind: "bill", state: "open", cost });
   }
 
   const last = input.claims.invoices[0] ?? null;
@@ -408,6 +453,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     claimedCount: skippedIds.length,
     claimedOn: claimantNumbers(input.claims, skippedIds),
     schemaReady: input.claims.schemaReady,
+    costRows,
   };
 }
 

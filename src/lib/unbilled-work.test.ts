@@ -425,3 +425,99 @@ describe("fixedBillingsToNet — what a DELTA draw still credits", () => {
     ])).toBe(0); // 2500 asked for, 2500 credited; the $250 extra never entered the netting
   });
 });
+
+describe("computeUnbilledWork.costRows — where each bill stands (the Costs tab, 2026-09-25)", () => {
+  /**
+   * 85 Whitney while INV-081 is being built: INV-061 (paid) holds three CED bills, INV-081 (a
+   * DRAFT) holds two, and the $187.64 CED paper has just been recorded as a bill no invoice holds.
+   * Beside them, a snack run that was all his own and a $0 row. Every row gets exactly one verdict,
+   * and the open ones are exactly the ones billsCount counted.
+   */
+  const inv61 = { id: "i61", invoice_number: "INV-061", status: "paid", created_at: "2026-08-29T05:03:05Z" };
+  const inv81 = { id: "i81", invoice_number: "INV-081", status: "draft", created_at: "2026-09-26T05:26:10Z" };
+  const claims = foldClaims(
+    [
+      { ...inv61, invoice_items: [{ import_key: "materials:ced", source_ids: ["bill-a", "bill-b", "bill-c"] }] },
+      { ...inv81, invoice_items: [{ import_key: "materials:ced", source_ids: ["bill-d", "bill-e"] }] },
+    ],
+    true,
+  );
+  const ownCost = {
+    id: "bill-snacks",
+    amount: 4.18,
+    po_id: null,
+    bill_line_items: [{ id: "s1", quantity: 2, unit_price: 2.09, amount: 4.18, category: "Other", billable: false }],
+  };
+  const input = {
+    claims,
+    jobEntries: [],
+    nonBillableCodes: new Set<string>(),
+    defaultRate: 0,
+    levelRate: null,
+    pos: [] as any[],
+    bills: [
+      { id: "bill-a", amount: 3034.54, po_id: null },
+      { id: "bill-b", amount: 95.27, po_id: null },
+      { id: "bill-c", amount: 376.86, po_id: null },
+      { id: "bill-d", amount: 467.37, po_id: null },
+      { id: "bill-e", amount: 1062.18, po_id: null },
+      { id: "bill-f", amount: 187.64, po_id: null },
+      ownCost,
+      { id: "bill-zero", amount: 0, po_id: null },
+    ],
+    markupPct: 25,
+  };
+
+  it("names the open row, the invoice holding each billed row (a draft included), and why the rest never bill", () => {
+    const w = computeUnbilledWork(input);
+    const state = Object.fromEntries(
+      w.costRows.map((r) => [r.id, r.state === "billed" ? r.invoice.invoice_number : r.state === "nothing" ? `nothing:${r.why}` : r.state]),
+    );
+    expect(state).toEqual({
+      "bill-a": "INV-061",
+      "bill-b": "INV-061",
+      "bill-c": "INV-061",
+      "bill-d": "INV-081",
+      "bill-e": "INV-081",
+      "bill-f": "open",
+      "bill-snacks": "nothing:own_cost",
+      "bill-zero": "nothing:zero",
+    });
+    // One decision: the open rows ARE what the card's figure counts.
+    expect(w.costRows.filter((r) => r.state === "open").length).toBe(w.billsCount);
+    expect(w.billsAmount).toBe(187.64);
+    expect(w.claimedCount).toBe(5);
+  });
+
+  it("a bill whose PO is billed never bills, and says so; an open live PO is open", () => {
+    const w = computeUnbilledWork({
+      ...input,
+      claims: claimsHolding(["po-1"]),
+      pos: [{ id: "po-1", total: 500, status: "sent" }, { id: "po-2", total: 200, status: "sent" }],
+      bills: [{ id: "bill-x", amount: 450, po_id: "po-1" }],
+    });
+    const byId = new Map(w.costRows.map((r) => [r.id, r] as const));
+    expect(byId.get("po-2")).toEqual({ id: "po-2", kind: "po", state: "open", cost: 200 });
+    expect(byId.get("bill-x")).toEqual({ id: "bill-x", kind: "bill", state: "nothing", why: "po_billed" });
+  });
+
+  it("the INV-078 return with every line switched off owes nothing and says why; one left on is open", () => {
+    const ret = (billable: boolean) => ({
+      id: billable ? "ret-on" : "ret-off",
+      amount: -51.58,
+      po_id: null,
+      bill_line_items: [
+        { id: `r1-${billable}`, quantity: -4, unit_price: -11.83, amount: -47.32, category: "Electrical", billable },
+        { id: `r2-${billable}`, quantity: 1, unit_price: -4.26, amount: -4.26, category: "Tax", billable },
+      ],
+    });
+    const w = computeUnbilledWork({ ...input, claims: foldClaims([], true), bills: [{ id: "buy", amount: 400, po_id: null }, ret(false), ret(true)] });
+    const byId = new Map(w.costRows.map((r) => [r.id, r] as const));
+    expect(byId.get("ret-off")).toEqual({ id: "ret-off", kind: "bill", state: "nothing", why: "own_return" });
+    expect(byId.get("ret-on")?.state).toBe("open");
+    expect(w.returnsCount).toBe(1);
+    // The Costs tab's Not Billed Yet total is the engine's own figure, never the bills' face value.
+    const open = w.costRows.reduce((s, r) => (r.state === "open" ? s + r.cost : s), 0);
+    expect(Math.round(open * 100) / 100).toBe(Math.round((w.billsAmount - w.returnsAmount) * 100) / 100);
+  });
+});
