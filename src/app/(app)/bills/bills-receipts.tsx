@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Upload, Camera, Loader2, FileText, Pencil } from "lucide-react";
+import { Plus, Trash2, Upload, Camera, Loader2, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -18,7 +18,8 @@ import { CameraCapture } from "@/components/camera-capture";
 import { Fold, WhyFold } from "@/components/why-fold";
 import { openFoldsTo } from "@/components/fold-opener";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
+import { createBill, addDocument, deleteDocument } from "../jobs/actions";
+import { BillRowDoors } from "@/components/bill-row-doors";
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
 import { jobLabel } from "@/lib/schedule-options";
@@ -109,6 +110,7 @@ export function BillsReceipts({
   pos,
   bills,
   docs,
+  readFailed = false,
 }: {
   orgId: string;
   jobs: JobOption[];
@@ -116,6 +118,8 @@ export function BillsReceipts({
   pos: PoRow[];
   bills: BillRow[];
   docs: DocRow[];
+  /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
+  readFailed?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -214,31 +218,6 @@ export function BillsReceipts({
     });
   }
 
-  function toggleStatus(b: BillRow) {
-    const next = b.status === "paid" ? "unpaid" : "paid";
-    start(async () => {
-      const res = await setBillStatus(b.id, next, b.job_id ?? "");
-      if (!res?.ok) { toast(res?.error ?? "Couldn't update the bill — try again.", "error"); return; }
-      toast(
-        next === "paid"
-          ? "Marked settled - it comes out of the supplier balance"
-          : "Marked on account - it goes back into the supplier balance",
-        "success",
-      );
-      router.refresh();
-    });
-  }
-
-  function removeBill(b: BillRow) {
-    if (!confirm(`Delete bill from "${b.supplier}"?`)) return;
-    start(async () => {
-      const res = await deleteBill(b.id, b.job_id ?? "");
-      if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; }
-      toast(res.warning ?? "Bill deleted", "success");
-      router.refresh();
-    });
-  }
-
   // ── Receipts upload ──
   const fileRef = useRef<HTMLInputElement>(null);
   const [docJob, setDocJob] = useState("");
@@ -295,8 +274,8 @@ export function BillsReceipts({
         open={!!spTab}
         summary={
           <span className="flex items-baseline justify-between gap-3">
-            <span className="text-base font-semibold text-slate-900">All Bills ({bills.length})</span>
-            <span className="shrink-0 text-sm tabular-nums text-slate-500">{formatCurrency(liveTotal)}</span>
+            <span className="text-base font-semibold text-slate-900">{readFailed ? "All Bills" : `All Bills (${bills.length})`}</span>
+            <span className="shrink-0 text-sm tabular-nums text-slate-500">{readFailed ? "Couldn't Read" : formatCurrency(liveTotal)}</span>
           </span>
         }
       >
@@ -398,13 +377,19 @@ export function BillsReceipts({
               </button>
             ))}
           </div>
-          <p className="mb-2 text-xs text-slate-500">
-            {shownBills.length} {shownBills.length === 1 ? "bill" : "bills"}
-            {shownSetAside > 0 ? ` (${shownSetAside} set aside as ${shownSetAside === 1 ? "a duplicate" : "duplicates"}, not added)` : ""} ·{" "}
-            {formatCurrency(totalBills)}
-          </p>
+          {!readFailed && (
+            <p className="mb-2 text-xs text-slate-500">
+              {shownBills.length} {shownBills.length === 1 ? "bill" : "bills"}
+              {shownSetAside > 0 ? ` (${shownSetAside} set aside as ${shownSetAside === 1 ? "a duplicate" : "duplicates"}, not added)` : ""} ·{" "}
+              {formatCurrency(totalBills)}
+            </p>
+          )}
 
-          {shownBills.length === 0 ? (
+          {readFailed ? (
+            <p className="py-4 text-center text-sm text-amber-800" role="alert">
+              Couldn&apos;t read your bills just now. Reload to try again.
+            </p>
+          ) : shownBills.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -450,27 +435,9 @@ export function BillsReceipts({
 
                       <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
                         <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleStatus(b)}
-                            disabled={pending}
-                            /* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19).
-                               Owed = bills not marked paid, minus payments recorded against the account,
-                               so ticking a bill a cheque already covered takes the same dollar off twice.
-                               The control stays (a counter receipt settled at the till is what it is for)
-                               and its face says how the bill was bought, never "paid". */
-                            aria-label="How this bill was bought: tap to switch between Settled and On Account"
-                            className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
-                          >
-                            <Badge tone={statusTone(b.status)}>{b.status === "paid" ? "Settled" : "On Account"}</Badge>
-                            <span>Switch</span>
-                          </button>
-                          <Button variant="outline" onClick={() => setEditBill(b)} disabled={pending}>
-                            <Pencil /> Edit
-                          </Button>
-                          <Button variant="outline" className="text-red-700" onClick={() => removeBill(b)} disabled={pending}>
-                            <Trash2 /> Delete
-                          </Button>
+                          {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
+                              three doors are BillRowDoors, one copy with the job's Costs tab. */}
+                          <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
                           {b.job_id && (
                             <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
                               Open The Job

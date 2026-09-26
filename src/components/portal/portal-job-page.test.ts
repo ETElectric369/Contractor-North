@@ -161,6 +161,23 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(h).toContain("This bill couldn't load just now.");
   });
 
+  it("a bill drawn with a piece left off (a failed read) says so above the sheet; a whole bill says nothing", () => {
+    const r = raw();
+    const docs = docsFor(r);
+    const id = String(r.invoices![0].id);
+    const whole = docs.get(id)!;
+    expect(whole.kind).toBe("ok");
+    const partial = new Map([[id, { ...(whole as Extract<InvoiceDocRead, { kind: "ok" }>), degraded: ["progress" as const] }]]);
+    const view = shapePortalJob(r, { signed, unbilled: null, now: NOW, docs: partial });
+    expect(view.invoices[0].docPartial).toBe(true);
+    expect(view.invoices[0].docFailed).toBe(false);
+    const h = text(renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" })));
+    expect(h).toContain("Part of this bill couldn't load just now.");
+    expect(h).toContain("Labor - Erik");
+    expect(shape(r, { signed, unbilled: null, now: NOW }).invoices[0].docPartial).toBe(false);
+    expect(t).not.toContain("Part of this bill");
+  });
+
   it("a sent bill with a balance keeps its /i pay door and no running-total banner", () => {
     const sent = render(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }));
     // The street rides on the end (lib/doc-place); the token alone is still the key.

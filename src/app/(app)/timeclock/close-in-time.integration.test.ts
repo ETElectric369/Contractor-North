@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0291: a running clock can be stopped, but never in the future, by anybody.
@@ -60,8 +60,7 @@ d("a running clock can be stopped, never in the future (0291)", () => {
     }
   };
   const needs = () => {
-    if (!has0291) console.warn("[close-in-time] migration 0291 is not on this database yet; apply it to exercise this case.");
-    return has0291;
+    return has0291 || notOnThisDatabase("[close-in-time] migration 0291 is not on this database yet; apply it to exercise this case.");
   };
   /** A fixture row, written as the server (a privileged writer), remembered for cleanup. */
   const entry = async (clockIn: string, clockOut: string | null): Promise<string> => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migrations 0339 and 0340 (audit v994 TL1, TL2): a row may only name a PARENT of its own org.
@@ -53,8 +53,7 @@ d("a row names only its own org's parent (0339, 0340)", () => {
     }
   };
   const needs = (applied: boolean, n: string) => {
-    if (!applied) console.warn(`[tenant-parent] migration ${n} is not on this database yet; apply it to exercise this case.`);
-    return applied;
+    return applied || notOnThisDatabase(`[tenant-parent] migration ${n} is not on this database yet; apply it to exercise this case.`);
   };
 
   beforeAll(async () => {

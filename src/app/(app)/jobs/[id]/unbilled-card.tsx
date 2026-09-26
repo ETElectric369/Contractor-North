@@ -230,6 +230,8 @@ export function UnbilledCard({
               // went out short. The importer leaves these off and says the same sentence.
               <p className="mt-1 text-sm text-amber-700">{w.stockShortsWords}</p>
             )}
+            {/* Pieces off a roll with no cost on it: the importer can't price them, so it says so. */}
+            {w.stockNoCostWords && <p className="mt-1 text-sm text-amber-700">{w.stockNoCostWords}</p>}
             {heldDraft && (workPending || returns > 0) && (
               // WHY THE BUTTON OPENS INSTEAD OF ADDS. Said, so "Open" never reads as the card
               // giving up: the server would refuse to put hours on a slice of the contract.

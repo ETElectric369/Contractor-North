@@ -39,6 +39,7 @@ import {
   type SupplierInvoiceRow as SupplierDocument,
   reversedInvoiceIds,
   reversedPurchaseIds,
+  creditArrivedFor,
 } from "./supplier-balance";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
@@ -775,6 +776,9 @@ export function invoicesNeedingBill(
    * walk back onto this list with a live button on it.
    */
   const reversed = reversedPurchaseIds(invoices ?? []);
+  // And a purchase a person said waits on a credit, whose credit has come in whichever state CED
+  // left the two (creditArrivedFor): taken back, never Record It As A Bill.
+  for (const id of creditArrivedFor(invoices ?? [])) reversed.add(id);
 
   for (const inv of invoices ?? []) {
     if (!IS_A_PURCHASE.includes(inv.kind)) continue;
@@ -1002,7 +1006,9 @@ export function shortSupplierName(name: string | null | undefined): string {
  * WAITING ON A CREDIT (0346) is not a card while it waits: a person said a credit memo is coming,
  * and there is no answer to give until it does (supplierPapersWaitingOnCredit lists those, folded
  * on /bills). After CREDIT_WAIT_DAYS with no credit paired it is a card again, by itself, saying
- * "Still no credit from CED after 30 days". A credit that pairs hides it as a reversed purchase.
+ * "Still no credit from CED after 30 days". A credit that pairs hides it as a reversed purchase,
+ * and for a waiting bill a memo for its exact total pairs whether either one is open or closed
+ * (creditArrivedFor): he pays the statement, CED closes the invoice, the memo lands open.
  */
 export function supplierPaperNeeds(
   invoices: SupplierInvoiceRow[],
@@ -1045,7 +1051,12 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
     byAccount.set(key, group);
   }
   const reversed = new Set<string>();
-  for (const group of byAccount.values()) for (const id of reversedPurchaseIds(group)) reversed.add(id);
+  for (const [key, group] of byAccount) {
+    for (const id of reversedPurchaseIds(group)) reversed.add(id);
+    // The credit a person was waiting for, paired open or closed (creditArrivedFor): the bill is
+    // taken back, never "Still no credit" with the memo on the same account. Only on an account.
+    if (key) for (const id of creditArrivedFor(group)) reversed.add(id);
+  }
   const jobById = new Map((jobs ?? []).map((j) => [j.id, j]));
   const cards: SupplierPaperCard[] = [];
   for (const inv of all) {

@@ -164,6 +164,9 @@ export default async function InvoicePage({
         supabase.from("payment_milestones").select("id").eq("job_id", (inv as any).job_id).limit(1),
       ])
     : [null, null];
+  // A draw whose progress read failed says so where the card sits (audit v1018 money-1), as /i and
+  // the portal do: a missing card reads as a draw with no estimate. The catch above is the only null.
+  const progressFailed = isDraw && fin === null;
   /* WHAT THE IMPORT ROW MAY OFFER (lib/actuals-draw, J-011). A standard invoice: everything, as
      always. A draw built from actuals (INV-078): Labor, Materials with the % box, Change Orders -
      it is refreshed exactly like a standard invoice, and it was the only one that couldn't be.
@@ -348,6 +351,14 @@ export default async function InvoicePage({
         </div>
       </div>
 
+      {progressFailed && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-3 rounded-xl border border-amber-200 bg-amber-50 px-4">
+          <p className="py-2 text-sm font-medium text-amber-900">The Progress Summary couldn&apos;t load just now.</p>
+          <a href={`/billing/${inv.id}`} className="inline-flex min-h-[44px] items-center text-sm font-medium text-amber-900 underline underline-offset-2">
+            Try Again
+          </a>
+        </div>
+      )}
       {/* No estimate, no progress to report: a progress bill on a T&M job with no quote showed
           "Estimate $0.00" here and on the customer's copy (INV-078). */}
       {fin && fin.estimate > 0 && (

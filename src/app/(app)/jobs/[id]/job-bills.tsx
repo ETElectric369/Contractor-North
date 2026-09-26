@@ -3,16 +3,16 @@
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Plus, Trash2, Pencil } from "lucide-react";
+import { ChevronRight, Plus } from "lucide-react";
 import { billedOnLabel, nothingToBillWhy, openOwnNote, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { createBill, setBillStatus, deleteBill } from "../actions";
+import { createBill } from "../actions";
+import { BillRowDoors } from "@/components/bill-row-doors";
 import { executeAction } from "@/lib/actions/execute";
 
 interface Bill {
@@ -71,7 +71,6 @@ export function JobBills({
   groupsNote?: string | null;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const [pending, start] = useTransition();
   const [adding, setAdding] = useState(false);
   const [editBill, setEditBill] = useState<Bill | null>(null);
@@ -115,50 +114,26 @@ export function JobBills({
   const billById = new Map(bills.map((b) => [b.id, b] as const));
   const poById = new Map(pos.map((p) => [p.id, p] as const));
 
+  /** A bill in a pile: what it is, then the /bills row's own doors (BillRowDoors: Settled / On
+   *  Account, Edit, Delete that asks first), each 44px, wrapping under it on a phone. */
   const billRow = (b: Bill, why?: string) => (
-    <li key={b.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-      <div className="min-w-0 flex-1">
-        <div className="font-medium text-slate-900">{b.supplier}</div>
-        <div className="text-xs text-slate-400">
-          {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
-          {b.po_id && poNumberById.has(b.po_id)
-            ? ` · pays ${poNumberById.get(b.po_id)}`
-            : ""}
+    <li key={b.id} className="px-4 py-2.5 text-sm">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-slate-900">{b.supplier}</div>
+          <div className="text-xs text-slate-400">
+            {b.bill_number ? `#${b.bill_number} · ` : ""}{b.bill_date ? formatDate(b.bill_date) : ""}
+            {b.po_id && poNumberById.has(b.po_id)
+              ? ` · pays ${poNumberById.get(b.po_id)}`
+              : ""}
+          </div>
+          {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>
-        {why && <div className="text-xs text-slate-500">{why}</div>}
+        <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
       </div>
-      <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
-      <button
-        onClick={() =>
-          start(async () => {
-            const next = b.status === "paid" ? "unpaid" : "paid";
-            const res = await setBillStatus(b.id, next, jobId);
-            if (!res?.ok) { toast(res?.error ?? "Couldn't update bill — try again.", "error"); return; }
-            toast(next === "paid" ? "Bill marked paid" : "Bill marked unpaid", "success");
-            router.refresh();
-          })
-        }
-        title="Toggle paid/unpaid"
-      >
-        <Badge tone={statusTone(b.status)}>{b.status}</Badge>
-      </button>
-      <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
-        <Pencil className="h-4 w-4" />
-      </button>
-      <button
-        onClick={() =>
-          start(async () => {
-            const res = await deleteBill(b.id, jobId);
-            if (!res?.ok) { toast(res?.error ?? "Couldn't delete bill — try again.", "error"); return; }
-            toast(res.warning ?? "Bill deleted", "success");
-            router.refresh();
-          })
-        }
-        className="text-slate-400 hover:text-red-600"
-        title="Delete"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
+      </div>
     </li>
   );
 
@@ -188,6 +163,8 @@ export function JobBills({
             <div className="font-medium text-slate-900">{t.label}</div>
             <div className="text-xs text-slate-400">Taken {formatDate(t.takenAt)}</div>
             {why && <div className="text-xs text-slate-500">{why}</div>}
+            {/* Part of the take came off a roll with no cost on it: its line bills only the rest. */}
+            {t.note && <div className="text-xs text-amber-700">{t.note}</div>}
           </div>
           <span className="font-medium text-slate-800">{formatCurrency(t.cost)}</span>
         </Link>
@@ -238,7 +215,7 @@ export function JobBills({
       <Modal
         open={adding}
         onClose={() => setAdding(false)}
-        title="Add bill"
+        title="Add Bill"
         footer={
           <ModalActions
             onCancel={() => setAdding(false)}
@@ -271,8 +248,8 @@ export function JobBills({
             <div>
               <Label htmlFor="b-status">Status</Label>
               <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="unpaid">Unpaid</option>
-                <option value="paid">Paid</option>
+                <option value="unpaid">On Account</option>
+                <option value="paid">Settled At The Counter</option>
               </Select>
             </div>
             {poOptions.length > 0 && (
@@ -432,7 +409,7 @@ function JobBillEditModal({
     <Modal
       open
       onClose={onClose}
-      title="Edit bill"
+      title="Edit Bill"
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save Changes" />}
     >
       <div className="space-y-3">
@@ -466,8 +443,8 @@ function JobBillEditModal({
           <div>
             <Label htmlFor="be-status">Status</Label>
             <Select id="be-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="unpaid">Unpaid</option>
-              <option value="paid">Paid</option>
+              <option value="unpaid">On Account</option>
+              <option value="paid">Settled At The Counter</option>
             </Select>
           </div>
           {poOptions.length > 0 && (

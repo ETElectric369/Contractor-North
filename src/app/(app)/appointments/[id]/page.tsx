@@ -25,7 +25,7 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { intakeAnswerLines } from "@/lib/inquiries/carry-intake-answers";
 import { parsePlanBrief } from "@/lib/plan-brief";
 import { isStaffRole } from "@/lib/actions/perms";
-import { jobShort } from "@/lib/appointments/visit-start";
+import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
 
@@ -355,7 +355,7 @@ export default async function AppointmentCapturePage({
                     }
                   : null
               }
-              visitStatus={a.status ?? null}
+              visitOver={visitIsOver(a, tz)}
               openEntry={viewerOpenEntry}
               linkInstead={
                 linkInstead

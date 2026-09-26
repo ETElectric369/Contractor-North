@@ -117,6 +117,7 @@ describe("groupJobCosts — takes from stock (Shop Stock, Phase 3)", () => {
     expect(g.nothing).toEqual([{ id: "stock:g3", why: "stock_no_cost" }]);
     expect(g.stock["stock:g1"]).toEqual({ label: "From Stock · 12/2 NM-B, 40 ft", cost: 28.83, takenAt: "2026-09-24T16:00:00Z" });
     expect(nothingToBillWhy("stock_no_cost")).toContain("no cost on it");
+    expect(nothingToBillWhy("stock_cost_used")).toBe("Its roll's cost was all counted on earlier takes, so there's nothing left to bill");
     expect(g.openOwn).toEqual({});
   });
 });

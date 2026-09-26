@@ -33,9 +33,10 @@ import { it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { billItemisation, excludedReceiptCost, shelfLotCost, type BillLine } from "./bill-itemisation";
-import { stockImportRows, stockShortsSentence, stockTakesOnJob, unclaimedTakes, type StockItemRow, type StockMoveRow } from "./stock-billing";
+import { stockImportRows, stockShortsSentence, stockTakesOnJob, unclaimedTakes, type StockItemRow, type StockLotRow, type StockMoveRow } from "./stock-billing";
 import { jobMaterialCostFrom } from "./job-cost";
 import { LIVE_ORGS, mintThrowawayOrg } from "./throwaway-org.db-fixture";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -102,7 +103,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
 
   it("a 250 ft roll on job A's ticket, 60 ft taken back by A and 20 ft by B: each billed once at its markup, costs exact, every other door refused", async () => {
     if (!shelfReady) {
-      console.warn("[stock-bill] the shelf (0303) is not on this database; nothing to test.");
+      notOnThisDatabase("[stock-bill] the shelf (0303) is not on this database; nothing to test.");
       return;
     }
     // ── fixtures, as the server (no table-level locks beyond rows) ──
@@ -181,7 +182,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     const plan = async (jobId: string, invoiceId: string, markup: number) => {
       const moves = (
         await c.query(
-          `select id, item_id, draw_group, kind, qty, cost, created_at::text as created_at, returns_move_id, settled_by
+          `select id, item_id, lot_id, draw_group, kind, qty, cost, created_at::text as created_at, returns_move_id, settled_by
              from public.stock_moves
             where job_id = $1 and org_id = $2 and undone_at is null and kind in ('draw', 'job_return', 'short')`,
           [jobId, orgId],
@@ -189,7 +190,9 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
       ).rows as StockMoveRow[];
       const items = (await c.query("select id, name, unit from public.inventory_items where org_id = $1 and id = any($2::uuid[])", [orgId, [...new Set(moves.map((m) => m.item_id))]]))
         .rows as StockItemRow[];
-      const { takes, shorts } = stockTakesOnJob(moves, items);
+      const lots = (await c.query("select id, cost from public.stock_lots where org_id = $1 and id = any($2::uuid[])", [orgId, [...new Set(moves.map((m) => m.lot_id).filter(Boolean))]]))
+        .rows as StockLotRow[];
+      const { takes, shorts } = stockTakesOnJob(moves, items, lots);
       const claimed = new Set<string>(
         (
           await c.query(
@@ -218,7 +221,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     const has0343 = (await one("select to_regprocedure('public.guard_stock_piece_claim()') is not null as ok")).ok;
     if (!has0343) {
       if (!opts.allowDdl) {
-        console.warn("[stock-bill] 0343 is not on this database yet, and this run may not apply DDL (never on production); nothing to test.");
+        notOnThisDatabase("[stock-bill] 0343 is not on this database yet, and this run may not apply DDL (never on production); nothing to test.");
         return;
       }
       const t0 = Date.now();

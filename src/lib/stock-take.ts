@@ -50,6 +50,9 @@ export type JobTake = {
   /** The office's door to that invoice (null for the crew). */
   billedInvoiceId: string | null;
   canUndo: boolean;
+  /** The office settled this take's short from a roll it filed (0348): the take now reaches moves
+   *  that aren't the taker's, so only the office can undo it, and the row says so. */
+  settledByOffice: boolean;
 };
 
 const num = (v: unknown) => {
@@ -99,6 +102,7 @@ export function parseTakes(raw: unknown): JobTake[] {
       partBilled: !!r.billed_on && r.part_billed === true,
       billedInvoiceId: r.billed_invoice_id ? String(r.billed_invoice_id) : null,
       canUndo: r.can_undo === true,
+      settledByOffice: r.settled_by_office === true,
     }));
 }
 
@@ -110,7 +114,7 @@ export function shortOf(onHand: number, qty: number): number {
 
 /** THE SHORT, SAID BEFORE AND AFTER THE TAP. It still saves: nobody hits a dead end in the field. */
 export function shortWords(short: number, unit: string): string {
-  return `${fmtQty(short)} ${unit} more than the shelf shows — the office will recount`;
+  return `${fmtQty(short)} ${unit} more than the shelf shows — the office will settle it`;
 }
 
 /** Pieces the shelf's count shows but no filed roll holds (a count with no roll, a roll being repriced). */
@@ -139,10 +143,23 @@ function countBefore(onHandAfter: number, qty: number): number {
   return Math.round((num(onHandAfter) + num(qty)) * 1000) / 1000;
 }
 
+/**
+ * The shelf's count left below zero by a take that recorded no short. 0347 keeps a take off the
+ * pieces an older short is waiting for, so this should not happen; if the count ever does go below
+ * zero anyway it is said, never a plain "Took 90 ft" over a shelf that now reads -10.
+ */
+export function belowZeroWords(onHandAfter: number | null | undefined, unit: string): string | null {
+  if (onHandAfter == null || !(num(onHandAfter) < 0)) return null;
+  return `The shelf now reads ${fmtQty(num(onHandAfter))} ${unit}, below zero — the office will settle it`;
+}
+
 /** The toast after Take It. `onHandAfter` (stock_draw's on_hand) says which short it was. */
 export function tookWords(t: { qty: number; unit: string; item: string; job: string; short?: number; onHandAfter?: number }): string {
   const base = `Took ${fmtQty(t.qty)} ${t.unit} of ${t.item} for ${t.job}`;
-  if (!t.short || t.short <= 0) return base;
+  if (!t.short || t.short <= 0) {
+    const below = belowZeroWords(t.onHandAfter, t.unit);
+    return below ? `${base}. ${below}.` : base;
+  }
   const past = t.onHandAfter == null ? t.short : shortOf(countBefore(t.onHandAfter, t.qty), t.qty);
   const w = takeShortWords({ short: t.short, past, unit: t.unit });
   return w ? `${base}. ${w}.` : base;
@@ -159,6 +176,12 @@ export const SHORT_FIX = "File the roll on Shop Stock, then Settle From The Shel
  */
 export function settleRefusalWords(msg: string): string {
   return msg.replace(/File the roll or count the shelf first\.?/, "A count can't settle it: file the roll on the shelf first, or Undo the take.");
+}
+
+/** Where the office's bell for a take opens: Shop Stock on the item whenever there is a short to
+ *  settle (this take's, or an older one the shelf reading below zero says is open), else the job. */
+export function officeBellOpensShelf(t: { short: number; onHandAfter: number }): boolean {
+  return t.short > 0 || num(t.onHandAfter) < 0;
 }
 
 /** THE OFFICE'S BELL, one per crew take. A short says what the shelf showed and what to do. */
@@ -178,10 +201,31 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
       body: `For ${t.job}. ${SHORT_FIX}`.slice(0, 140),
     };
   }
+  if (belowZeroWords(t.onHandAfter, t.unit)) {
+    return {
+      title: `${t.who} took ${q} of ${t.item}; the shelf now reads ${fmtQty(t.onHandAfter)} ${t.unit}`.slice(0, 140),
+      // The shelf reads below zero with no short on THIS take: an older take past the shelf is
+      // still open (its pieces are what this take used). That short is what the office settles.
+      body: `For ${t.job}. An older short on it is still open: ${SHORT_FIX}`.slice(0, 140),
+    };
+  }
   return {
     title: `${t.who} took ${q} of ${t.item} for ${t.job}`.slice(0, 140),
     body: "From stock. It counts on the job now, with Undo on the job's Materials tab until it's billed.",
   };
+}
+
+/** Said in place of the job's takes when stock_takes_for_job couldn't be read: never an empty list. */
+export const TAKES_READ_FAILED = "Couldn't read what's been taken for this job just now. Reload before taking more.";
+
+/**
+ * Take It threw, so nobody knows whether it saved. Each tap is a new take, so the words send the
+ * person to the job's takes before tapping again, but only when that list read: pointing at a list
+ * that failed would read as "it didn't save" and invite the same pieces twice.
+ */
+export function takeUnheardWords(noSignal: boolean, listRead: boolean): string {
+  const lead = noSignal ? "No signal, so Take It didn't hear back." : "Take It didn't hear back.";
+  return listRead ? `${lead} It may have saved: check Taken From Stock below before tapping again.` : `${lead} It may have saved: reload before tapping again.`;
 }
 
 /**
@@ -192,7 +236,7 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
  * says so (`part`), so this row never reads billed where the Costs tab reads open.
  */
 export function takeDoor(
-  t: Pick<JobTake, "canUndo" | "billedOn" | "back"> & { partBilled?: boolean },
+  t: Pick<JobTake, "canUndo" | "billedOn" | "back"> & { partBilled?: boolean; settledByOffice?: boolean },
 ): { kind: "undo" } | { kind: "billed"; label: string; status: string; part: boolean } | { kind: "none"; why: string | null } {
   if (t.billedOn) {
     const part = t.partBilled === true;
@@ -206,6 +250,8 @@ export function takeDoor(
   if (t.canUndo) return { kind: "undo" };
   // Nothing in the app undoes a return to the shelf yet, so this names no door that isn't there.
   if (t.back > 0) return { kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." };
+  // stock_undo refuses the crew once the office's settlement is in the take (0303): say who can.
+  if (t.settledByOffice) return { kind: "none", why: "The office settled part of this take, so ask the office to undo it." };
   return { kind: "none", why: null };
 }
 

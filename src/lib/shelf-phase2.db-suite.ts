@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { mintOrgAndStranger } from "./throwaway-org.db-fixture";
 import { excludedReceiptCost, type BillLine } from "./bill-itemisation";
 import { planShelving, restampPayload, type ShelfPick, type StoredLineLot } from "./shelf-plan";
+import { notOnThisDatabase } from "@/lib/db-guard";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -32,8 +33,7 @@ export function defineShelfPhase2Suite(connect: () => Promise<SqlClient>) {
   let ready = false;
   let appliedHere = false;
   const needs = () => {
-    if (!ready) console.warn("[shelf-phase2] 0302-0304 are not on this database; nothing to test against.");
-    return ready;
+    return ready || notOnThisDatabase("[shelf-phase2] 0302-0304 are not on this database; nothing to test against.");
   };
   let orgId = "";
   let staffId = "";

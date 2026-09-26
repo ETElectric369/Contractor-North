@@ -112,7 +112,7 @@ describe("takeFromStockAction: a count in, never a price", () => {
     member(false);
     takeFromStock.mockResolvedValue({ ok: true, drawGroup: GROUP, item: "12/2 NM-B", unit: "ft", qty: 20, short: 15, onHand: -15 });
     const r = await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 20 });
-    expect(r.ok && r.message).toBe("Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than the shelf shows — the office will recount.");
+    expect(r.ok && r.message).toBe("Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than the shelf shows — the office will settle it.");
     await afterCalls[0]();
     expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({
       title: "Brian took 20 ft of 12/2 NM-B, the shelf said 5 ft",

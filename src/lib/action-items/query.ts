@@ -13,7 +13,7 @@ import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
-import { supplierPaperActionItem } from "./supplier-paper-item";
+import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
 import {
   NEEDS_RETURN_DAYS,
@@ -139,11 +139,11 @@ async function buildActionItems(ctx: {
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A). Staff only: the cards carry
   // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
-  // instead of adding a serial wave; awaited at the end. A failure is "no cards", never a crash of
-  // the inbox, and the same papers are still on /bills.
+  // instead of adding a serial wave; awaited at the end. A failure is never a crash of the inbox,
+  // and never silent: a thrown read comes back as `failed`, which My Day says in one line.
   // The same read brings the Pay By line ("Pay CED $X By Oct 10"): one read of the supplier's papers.
   const supplierDeskP: Promise<SupplierDesk | null> = isStaff
-    ? loadSupplierDesk(supabase, userId, todayStr).catch(() => null)
+    ? loadSupplierDesk(supabase, userId, todayStr).catch((): SupplierDesk => ({ papers: null, payDue: [], failed: { papers: true, pay: true } }))
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 
@@ -1026,12 +1026,14 @@ async function buildActionItems(ctx: {
     }
   }
 
-  // RECOUNT — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
+  // SETTLE — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
   // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
   // an invoice can bill until the office files the roll and settles it (or undoes the take). ONE item
   // per short, and it stays until the short is settled or its take undone: it is a decision the app
-  // cannot defer, and it carries its date (the take's). Staff only; the shelf's record is staff-read
-  // (0303). Before 0303 is applied the read errors and the feeder is simply empty.
+  // cannot defer. It is named for the fix that works (audit v1018: it said "Recount", and a count is
+  // the one thing that can't settle it). Undated, like the supplier bills: the take's date is in the
+  // words, never a "3d overdue" nobody set. Staff only; the shelf's record is staff-read (0303).
+  // Before 0303 is applied the read errors and the feeder is simply empty.
   if (isStaff) {
     const { data: shorts, error: shortErr } = await shortsP;
     const rows = shortErr ? [] : ((shorts ?? []) as any[]);
@@ -1047,12 +1049,12 @@ async function buildActionItems(ctx: {
         items.push({
           id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
           kind: "stock_short",
-          title: `Recount ${it?.name ?? "an item"}: ${q} ${it?.unit ?? ""} taken past the shelf`.replace(/\s+/g, " "),
+          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past The Shelf · Settle It`.replace(/\s+/g, " "),
           // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
           // ways that work (SHORT_FIX, the bell's own words).
-          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. ${SHORT_FIX}`,
+          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
           who: null,
-          when: r.created_at,
+          when: null,
           urgency: 1,
           done: false,
           // Straight to the item, opened, where Settle From The Shelf is (Shop Stock opens ?item=).
@@ -1069,6 +1071,9 @@ async function buildActionItems(ctx: {
   // within two weeks, right under the papers. Staff only (the same read); gone once the deadline is.
   items.unshift(...supplierPayActionItems((await supplierDeskP)?.payDue));
   if (paperItem) items.unshift(paperItem);
+  // A read the desk needed failed: said in one undated line, never a quiet "nothing waiting".
+  const deskUnread = supplierDeskFailedItem(await supplierDeskP);
+  if (deskUnread) items.unshift(deskUnread);
 
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
 }

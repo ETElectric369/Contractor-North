@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeJobLaborBilling, laborCostForJob, noBillRateWarnings, payViewRow, withoutClaimedLabor } from "@/lib/labor-billing";
+import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, laborCostForJob, noBillRateWarnings, payViewRow, withoutClaimedLabor } from "@/lib/labor-billing";
 
 describe("laborCostForJob — pay cost (job hub == analytics)", () => {
   const prof = (hourly: number) => ({ hourly_rate: hourly });
@@ -389,5 +389,41 @@ describe("the owner's hours are hours, never a cost (0286)", () => {
     const billed = computeJobLaborBilling([e], 0).total;
     const cost = laborCostForJob([e], "J").cost;
     expect(billed - cost).toBe(1000);
+  });
+});
+
+/** A client whose every read answers from `answers[table]`; a missing table answers empty. */
+function fakeReads(answers: Record<string, { data: unknown; error: unknown }>) {
+  return {
+    from(table: string) {
+      const res = answers[table] ?? { data: [], error: null };
+      const q: Record<string, unknown> = {};
+      for (const m of ["select", "eq", "is", "in", "neq", "limit", "order"]) q[m] = () => q;
+      q.maybeSingle = () => Promise.resolve(res);
+      q.then = (ok: (v: unknown) => unknown, bad?: (e: unknown) => unknown) => Promise.resolve(res).then(ok, bad);
+      return q;
+    },
+  };
+}
+
+describe("a lost read is not an empty one (audit v1018 money-1)", () => {
+  const lost = { data: null, error: { message: "canceling statement due to lock timeout" } };
+
+  it.each(["time_entries", "job_codes", "profile_pay"])("fetchJobLaborRows throws when %s fails, never $0 of labor", async (t) => {
+    await expect(fetchJobLaborRows(fakeReads({ [t]: lost }), "job-1")).rejects.toMatchObject({ message: /lock timeout/ });
+  });
+
+  it("the service path throws on a lost rates read too", async () => {
+    await expect(fetchJobLaborRows(fakeReads({ profiles: lost }), "job-1", { orgId: "org-1" })).rejects.toMatchObject({ message: /lock timeout/ });
+  });
+
+  it("the customer's labor rate and markup throw, never fall back to the default", async () => {
+    await expect(customerLaborRateForJob(fakeReads({ jobs: lost }), "job-1")).rejects.toMatchObject({ message: /lock timeout/ });
+    await expect(customerMaterialMarkupForJob(fakeReads({ jobs: lost }), "job-1", 25)).rejects.toMatchObject({ message: /lock timeout/ });
+  });
+
+  it("a read that answers still resolves: no level is the default markup", async () => {
+    await expect(customerMaterialMarkupForJob(fakeReads({ jobs: { data: null, error: null } }), "job-1", 25)).resolves.toBe(25);
+    await expect(fetchJobLaborRows(fakeReads({}), "job-1")).resolves.toMatchObject({ jobEntries: [] });
   });
 });

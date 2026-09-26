@@ -28,6 +28,8 @@ import {
 } from "@/lib/same-purchase";
 import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
+  invoicesNeedingBill,
+  isBeforeLine,
   shortSupplierName,
   supplierPaperLine,
   supplierPaperNeeds,
@@ -261,19 +263,99 @@ export function supplierPaperFeed(input: {
   return { cards, jobs, waiting };
 }
 
+/**
+ * WHERE AN INVOICE STANDS ON /bills, by the rules the page's own lists use (audit v1018, class 14):
+ *
+ *   covered       a bill already covers it (a Record link, or a bill carrying its number)
+ *   taken_back    a credit memo took it back (reversedPurchaseIds, or the credit it waited for)
+ *   on_card       a Needs You card (supplierPaperNeeds)
+ *   waiting       set aside waiting on a credit, not back yet (its supplier's Waiting On A Credit fold)
+ *   not_in_books  listed under its supplier's Not In Your Books, where Record To Shelf is
+ *   before_books  from before his books began: counted there, never listed
+ *
+ * So a door elsewhere (Shop Stock's Record To Shelf) is offered only where the fold will hold the
+ * paper, and otherwise says why in words. Invoices only; `rows` are supplierDocumentRows' rows.
+ */
+export type SupplierPaperHome = "covered" | "taken_back" | "on_card" | "waiting" | "not_in_books" | "before_books";
+
+export function supplierPaperHomes(
+  rows: SupplierInvoiceRow[],
+  opts: { since: string | null; today?: string | null },
+): Map<string, SupplierPaperHome> {
+  const out = new Map<string, SupplierPaperHome>();
+  const cards = new Set(supplierPaperNeeds(rows, [], opts).map((c) => c.invoiceId));
+  const waiting = new Set(supplierPapersWaitingOnCredit(rows, [], opts).map((c) => c.invoiceId));
+  const byAccount = new Map<string, SupplierInvoiceRow[]>();
+  for (const r of rows ?? []) {
+    const key = String(r.supplierAccountId ?? "");
+    byAccount.set(key, [...(byAccount.get(key) ?? []), r]);
+  }
+  for (const group of byAccount.values()) {
+    const listed = new Set(invoicesNeedingBill(group, { since: opts.since }).rows.map((r) => r.id));
+    for (const r of group) {
+      if (r.kind !== "invoice") continue;
+      const id = String(r.id);
+      out.set(
+        id,
+        (Number(r.billCount) || 0) > 0
+          ? "covered"
+          : cards.has(id)
+            ? "on_card"
+            : waiting.has(id)
+              ? "waiting"
+              : listed.has(id)
+                ? "not_in_books"
+                : isBeforeLine(r.invoiceDate, opts.since)
+                  ? "before_books"
+                  : "taken_back",
+      );
+    }
+  }
+  return out;
+}
+
+/**
+ * The same reading, read: the four reads /bills makes for it, org-filtered. Throws on any failed
+ * read, so the caller says it couldn't check instead of offering a door to a fold that may not
+ * hold the paper.
+ */
+export async function readSupplierPaperHomes(supabase: any, orgId: string, today: string): Promise<Map<string, SupplierPaperHome>> {
+  const [docsRes, billsRes, linksRes, aliasRes] = await Promise.all([
+    readSupplierDocuments(supabase, orgId),
+    supabase
+      .from("bills")
+      .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, notes, bill_line_items(description)")
+      .eq("org_id", orgId)
+      .is("superseded_by_bill_id", null)
+      .limit(5000),
+    supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
+    supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
+  ]);
+  for (const r of [docsRes, billsRes, linksRes, aliasRes]) if (r?.error) throw r.error;
+  const bills = (billsRes.data ?? []) as any[];
+  const { rows } = supplierDocumentRows({ documents: docsRes.data ?? [], bills, links: linksRes.data ?? [], aliasRows: aliasRes.data ?? [] });
+  return supplierPaperHomes(rows, { since: booksBeginOn(orgId, bills), today });
+}
+
 /** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
 export interface SupplierDesk {
   /** "Hey you, here's a bill": null when nothing is waiting (or a read it needs failed). */
   papers: SupplierPaperFeed | null;
   /** "Pay CED $X By Oct 10": supplierPayDue over the same rows. Empty when nothing is due soon. */
   payDue: SupplierPayDue[];
+  /**
+   * A READ THIS NEEDS FAILED (audit v1018, class 2), and which half it cost: `papers` (the cards
+   * could not be worked out) or `pay` (the Pay By line could not). My Day says so in one line
+   * (supplierDeskFailedItem) instead of reading a failed read as "nothing waiting, no discount due".
+   */
+  failed?: { papers: boolean; pay: boolean };
 }
 
 /**
  * THE MY DAY READ. Staff only (the caller gates it: these cards carry prices, and a tech never
  * sees a price). Every read filters org_id as well as leaning on RLS: a rule at one read path is a
- * convention, not a boundary. A read that fails is "no cards" (or "no pay lines"), never a crash of
- * the inbox; the same papers and the same discount are still on /bills.
+ * convention, not a boundary. A read that fails is no cards (or no pay line) AND `failed` saying
+ * which, never a crash of the inbox and never a quiet "nothing waiting" (audit v1018, class 2).
  *
  * ONE READ, TWO LINES. The Pay By line (supplier-pay-due.ts) is worked out from the same document
  * rows the cards are, so the two never hold different copies of CED's papers. `today` is the
@@ -285,7 +367,8 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   if (!userId) return null;
   const { data: me, error: meErr } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
-  if (meErr || !orgId) return null;
+  if (meErr) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
+  if (!orgId) return null;
   const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes] = await Promise.all([
     readSupplierDocuments(supabase, orgId),
     supabase
@@ -306,8 +389,10 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
       .order("paid_on", { ascending: false })
       .limit(500),
   ]);
-  // No supplier documents (or a database without 0273): nothing to bring him.
-  if (docsRes?.error || !(docsRes?.data ?? []).length) return null;
+  // The supplier's papers unread: neither the cards nor the pay line can be worked out, and saying
+  // nothing would read as "nothing waiting". No supplier documents at all: nothing to bring him.
+  if (docsRes?.error) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
+  if (!(docsRes?.data ?? []).length) return null;
   const accounts = acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]);
   // A failed bills, links or aliases read would make covered papers look uncovered: false cards.
   const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error);
@@ -331,6 +416,12 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   // flag there is no door to open (the /bills sheet is not drawn when that read fails either).
   // A failed payments read is no pay line rather than a line that ignores a payment he made: the
   // nag this read exists to end. The same discount is still on /bills.
-  const payDue = acctRes?.error || payRes?.error ? [] : supplierPayDue({ rows, accounts, today, payments: payRes?.data ?? [] });
-  return { papers, payDue };
+  const payUnread = !!(acctRes?.error || payRes?.error);
+  const payDue = payUnread ? [] : supplierPayDue({ rows, accounts, today, payments: payRes?.data ?? [] });
+  const papersUnread = !papersReadable;
+  return {
+    papers,
+    payDue,
+    ...(papersUnread || payUnread ? { failed: { papers: papersUnread, pay: payUnread } } : {}),
+  };
 }

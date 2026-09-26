@@ -20,7 +20,9 @@ import "server-only";
  */
 
 import {
+  creditWait,
   invoicesNeedingBill,
+  shortSupplierName,
   supplierPaperNeeds,
   supplierPapersWaitingOnCredit,
   type SupplierInvoiceKind,
@@ -38,7 +40,14 @@ import { indexSupplierAliases } from "@/lib/supplier-identity";
  *  `onNeedsYou`: /bills has it on a Needs You card (onNeedsYouIds), so a link to it goes there;
  *  `waitingOnCredit`: a person set it aside for a credit (0346), so the link goes to its supplier's
  *  Waiting On A Credit fold; otherwise the link goes to the supplier's own line. */
-export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; onNeedsYou?: boolean; waitingOnCredit?: boolean };
+export type PaperDoc = SupplierInvoiceRow & {
+  accountId: string | null;
+  onNeedsYou?: boolean;
+  waitingOnCredit?: boolean;
+  /** Waiting on a credit, not back yet: the day the wait began (creditWait), and who from ("CED"). */
+  waitingSince?: string | null;
+  supplier?: string | null;
+};
 
 /**
  * WHICH PAPERS /bills HAS ON A NEEDS YOU CARD, by the cards' own rule (supplierPaperNeeds), never
@@ -120,6 +129,8 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
     return {
       id: String(r.id),
       accountId: r.supplier_account_id ?? null,
+      // The pairing rules read the account off the row itself (creditArrivedFor).
+      supplierAccountId: r.supplier_account_id ?? null,
       invoiceNumber: String(r.invoice_number ?? ""),
       kind: KINDS.includes(kind) ? kind : "invoice",
       invoiceDate: r.invoice_date ?? null,
@@ -179,5 +190,21 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string,
   const day = today || todayStrInTz(DEFAULT_TIMEZONE);
   const onCards = onNeedsYouIds(docs, since, day);
   const waiting = waitingOnCreditIds(docs, since, day);
-  return papersNamingJob(jobId, docs, mark).map((d) => ({ ...d, onNeedsYou: onCards.has(d.id), waitingOnCredit: waiting.has(d.id) }));
+  const mine = papersNamingJob(jobId, docs, mark);
+  // WAITING ON A CREDIT IS HONORED HERE TOO (audit v1018, class 4): the row says who from and since
+  // when, and offers no Record (job-paper-list). The supplier's short name is read only then; a
+  // lost read leaves "the supplier", a word, never a figure.
+  const waitingAccounts = Array.from(new Set(mine.filter((d) => waiting.has(d.id) && d.accountId).map((d) => String(d.accountId))));
+  const names = new Map<string, string>();
+  if (waitingAccounts.length) {
+    const { data: accts } = await supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).in("id", waitingAccounts);
+    for (const a of (accts ?? []) as { id: string; name: string | null }[]) names.set(String(a.id), shortSupplierName(a.name));
+  }
+  return mine.map((d) => ({
+    ...d,
+    onNeedsYou: onCards.has(d.id),
+    waitingOnCredit: waiting.has(d.id),
+    waitingSince: waiting.has(d.id) ? (creditWait(d, day)?.since ?? null) : null,
+    supplier: waiting.has(d.id) ? (names.get(String(d.accountId ?? "")) ?? null) : null,
+  }));
 }

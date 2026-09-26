@@ -21,6 +21,7 @@ import { SupplierDuplicates } from "./supplier-duplicates";
 import { Fold, WhyFold } from "@/components/why-fold";
 import { FoldOpener } from "@/components/fold-opener";
 import {
+  creditWait,
   explainKind,
   isBeforeLine,
   isUsableJobName,
@@ -29,6 +30,7 @@ import {
   type SupplierInvoiceRow as SupplierDocumentRow,
 } from "./supplier-reconcile";
 import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
+import { billsPaperDoor } from "./paper-door";
 import { BillsSearchBox } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
@@ -171,7 +173,7 @@ export default async function BillsPage({
     { data: lists },
     { data: accountRows, error: accountsErr },
     { data: aliasRows, error: aliasErr },
-    { data: paymentRows },
+    { data: paymentRows, error: paymentsErr },
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
     { data: billLinkRows, error: linksErr },
@@ -591,7 +593,9 @@ export default async function BillsPage({
   // A $0.00 ROW IS NOT A SLICE OF MONEY. He has one, and counting it would make the sentence say
   // "2 bills" over a single dollar figure that only one of them is carrying.
   const noSupplierDocument = new Map<string, { total: number; bills: number; ids: string[] }>();
-  for (const b of liveBills) {
+  // A lost links read makes every bill covered only by a Record link look uncovered: "+ $N they
+  // never sent paper for" would be false. So the slice is not named at all until the links read.
+  if (!linksErr) for (const b of liveBills) {
     const accountId = String(b.supplier_account_id ?? "");
     if (!accountId || !documentsOf.has(accountId)) continue;
     if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
@@ -636,6 +640,31 @@ export default async function BillsPage({
   // before it are counted and named, never nagged about - nothing here could have recorded them.
   // My Day's cards read the same function.
   const recordsSince = booksBeginOn(orgId, liveBills);
+
+  // ── A READ THAT FAILED SAYS SO (audit v1018, class 2) ───────────────────────────────────────
+  // Every read the supplier half of this page leans on. Any one of them failing used to read as
+  // "nothing there": Needs You vanished with no sentence, CED's balance quietly switched to the
+  // bills-less-payments model its own comments call wrong for CED, the ledger said "No bills here
+  // yet", and the search called covered papers "not in your books". Now each says it couldn't.
+  const readFailed = new Set<string>(
+    (
+      [
+        ["bills", billsErr],
+        ["accounts", accountsErr],
+        ["links", linksErr],
+        ["aliases", aliasErr],
+        ["jobs", jobsErr],
+        ["papers", invoicesErr],
+      ] as const
+    )
+      .filter(([, err]) => !!err)
+      .map(([name]) => name),
+  );
+  // What a model-A balance (bills less payments) is built from. With any of these unread its figure
+  // would be wrong without a word, so the account says it couldn't total instead (SuppliersCard).
+  // The supplier's own papers are one of them: without them an account that is counted from its
+  // supplier's papers (CED) would silently fall back to bills-less-payments.
+  const balancesUnread = !!(invoicesErr || billsErr || paymentsErr);
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" The same cards My Day shows, from the same call
   // (supplierPaperFeed), so the two screens can never disagree about which paper is waiting.
@@ -942,6 +971,9 @@ export default async function BillsPage({
   const liveBillById = new Map(liveBills.map((b: any) => [String(b.id), b]));
   const waitingPapers = new Set((paperFeed?.cards ?? []).map((c) => c.invoiceId));
   const waitingOnCredit = new Map((paperFeed?.waiting ?? []).map((c) => [c.invoiceId, c]));
+  // With the books unread, whether a paper is covered is not known: every paper says so, except one
+  // waiting on a credit, which its own stamp answers (creditWait, the same reading the feed makes).
+  const booksUnreadForSearch = paperBooksUnread || !!accountsErr;
   const searchRows: BillsSearchRow[] = [];
   for (const d of supplierDocuments) {
     const covering = [...(coveringBills.get(d.id) ?? []), ...(billsCarrying.get(d.id) ?? [])]
@@ -951,10 +983,14 @@ export default async function BillsPage({
     const account = accountNameOf.get(String(d.supplierAccountId ?? "")) ?? "";
     const supplier = shortSupplierName(account);
     const creditWaiting = waitingOnCredit.get(d.id);
+    const stampWait = !paperFeed && d.supplierAccountId ? creditWait(d, today) : null;
+    const waitSince = creditWaiting?.waitingCredit?.since ?? (stampWait && !stampWait.overdue ? stampWait.since : null);
     const where = waitingPapers.has(d.id)
       ? "waiting for you under Needs You"
-      : creditWaiting?.waitingCredit
-        ? `waiting on a credit from ${supplier || "the supplier"} since ${formatDateShort(creditWaiting.waitingCredit.since)}`
+      : waitSince
+        ? `waiting on a credit from ${supplier || "the supplier"} since ${formatDateShort(waitSince)}`
+      : booksUnreadForSearch
+        ? "couldn't check your books just now"
       : d.billCount > 0
         ? "in your books"
         : d.kind !== "invoice"
@@ -976,7 +1012,14 @@ export default async function BillsPage({
         .filter(Boolean)
         .join(" · "),
       words: wordsOf(d.invoiceNumber, d.jobNameRaw, supplier, account, moneyWords(d.total), d.invoiceDate, sayKind(d.kind), ...jobWords(jobId)),
-      href: waitingPapers.has(d.id) ? "#needs-you" : jobId ? `/jobs/${jobId}` : null,
+      // Where its own buttons are (billsPaperDoor, the routing the job page's papers use too): its
+      // Needs You card, its Waiting On A Credit fold, its job, else its supplier's own lists.
+      href: billsPaperDoor({
+        onNeedsYou: waitingPapers.has(d.id),
+        waitingOnCredit: waitingOnCredit.has(d.id),
+        accountId: !accountsErr && d.supplierAccountId && accountNameOf.has(String(d.supplierAccountId)) ? String(d.supplierAccountId) : null,
+        jobId,
+      }),
     });
   }
   for (const b of liveBills as any[]) {
@@ -1066,11 +1109,15 @@ export default async function BillsPage({
 
       {/* NEEDS YOU: the same "here's a bill, what's it for?" cards My Day shows, from the same
           call (supplierPaperFeed). The one place these decisions happen. */}
-      {!paperFeed && paperBooksUnread && !invoicesErr && !accountsErr && supplierDocuments.length > 0 && (
+      {!paperFeed && readFailed.size > 0 && (
         <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
           <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
-          <p className="mt-0.5 text-xs text-slate-500" role="status">
-            Couldn&apos;t check your books just now, so the supplier bills waiting on you aren&apos;t shown. Reload the page to try again.
+          <p className="mt-0.5 text-sm text-amber-800" role="alert">
+            {invoicesErr
+              ? "Couldn't read your suppliers' own papers just now, so what you owe them and the bills waiting on you aren't shown. Reload the page to try again."
+              : accountsErr
+                ? "Couldn't read your supplier accounts just now, so their balances and the bills waiting on you aren't shown. Reload the page to try again."
+                : "Couldn't check your books just now, so the supplier bills waiting on you aren't shown. Reload the page to try again."}
           </p>
         </Card>
       )}
@@ -1117,10 +1164,17 @@ export default async function BillsPage({
 
       <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} />
 
-      {/* ONE LINE PER SUPPLIER. Not rendered at all when the accounts read came back an error (a
-          deploy ahead of its migration): an empty card whose every button can only refuse is the
-          dead end this page exists to delete. */}
-      {!accountsErr && (
+      {/* ONE LINE PER SUPPLIER. When the accounts read came back an error, the card is its heading
+          and one sentence: no buttons that could only refuse, and a My Day ?pay= door lands on
+          words, never on nothing (audit v1018, class 2). */}
+      {accountsErr ? (
+        <Card className="mb-6 p-4" id="suppliers">
+          <h2 className="text-base font-semibold text-slate-900">Suppliers</h2>
+          <p className="mt-1 text-sm text-amber-800" role="alert">
+            Couldn&apos;t read your supplier accounts just now, so what you owe each one isn&apos;t shown and no payment can be recorded here. Reload the page to try again.
+          </p>
+        </Card>
+      ) : (
         <SuppliersCard
           accounts={supplierAccounts}
           today={today}
@@ -1132,6 +1186,13 @@ export default async function BillsPage({
           // Never folded into a balance: named, so money he does owe is not explained away.
           noSupplierDocument={Object.fromEntries(noSupplierDocument)}
           payOn={typeof payOn === "string" ? payOn : null}
+          // A lost papers, bills or payments read: a bills-less-payments figure would be wrong
+          // without a word, so those accounts say they couldn't total instead.
+          balancesUnread={balancesUnread}
+          // Each says so where its own figure would have been: "you have sent them $0.00" and
+          // "your paperwork rather than theirs" would be false without a word.
+          paymentsUnread={!!paymentsErr}
+          paperlessUnread={!!linksErr}
           actions={{
             recordPayment: recordSupplierPayment,
             voidPayment: voidSupplierPayment,
@@ -1161,6 +1222,7 @@ export default async function BillsPage({
         pos={(pos ?? []) as any}
         bills={ledgerBills as any}
         docs={docs as any}
+        readFailed={!!billsErr}
       />
 
       {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line

@@ -44,7 +44,7 @@ export type ActionKind =
   | "job_needs_return" // a job worked recently with nothing scheduled next (the forgotten return visit)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
   | "job_on_hold" // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
-  | "stock_short" // pieces taken from stock past what the shelf showed ($0, billing nothing) — Recount until settled or undone
+  | "stock_short" // pieces taken from stock past what the shelf showed ($0, billing nothing) — Settle until settled or undone
   // ── "Hey you, here's a bill, what's it for?" (Bills plan, Wave A) ──
   // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
   // person. A rollup, never one item per paper: that is how it badges +1 (the invariant above).
@@ -154,7 +154,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "Materials needed", tone: "blue" },
   job_on_hold: { label: "On hold", tone: "amber" },
-  stock_short: { label: "Recount", tone: "amber" },
+  stock_short: { label: "Settle", tone: "amber" },
   supplier_paper: { label: "Supplier Bills", tone: "amber" },
   supplier_pay: { label: "Discount", tone: "green" },
 };

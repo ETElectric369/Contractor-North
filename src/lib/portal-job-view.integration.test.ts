@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { buildJobLedger } from "./portal/stretch-ledger";
 
 /**
@@ -86,8 +86,7 @@ d("what the customer sees on a job (0300/0301)", { timeout: 30_000 }, () => {
     }
   };
   const needs = () => {
-    if (!ready) console.warn("[portal-job-view] migrations 0300/0301 are not on this database yet; apply them to exercise this case.");
-    return ready;
+    return ready || notOnThisDatabase("[portal-job-view] migrations 0300/0301 are not on this database yet; apply them to exercise this case.");
   };
   const view = async (token: string, jobId: string) => (await one("select public.portal_job_view($1, $2) as j", [token, jobId])).j;
 

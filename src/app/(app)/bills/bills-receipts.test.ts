@@ -30,10 +30,17 @@ describe("a bill's status says how it was bought, in words", () => {
     expect(SRC).not.toContain('<option value="unpaid">Unpaid</option>');
   });
 
-  /** The toggle still exists, and must: a counter receipt on an on-account supplier is real. */
+  /**
+   * The toggle still exists, and must: a counter receipt on an on-account supplier is real. It lives
+   * in BillRowDoors now, ONE copy the job's Costs tab draws too (audit v1018, class 13).
+   */
   it("keeps the control and keeps saying out loud what it moves", () => {
-    expect(SRC).toContain("const next = b.status === \"paid\" ? \"unpaid\" : \"paid\";");
-    expect(SRC).toContain("Marked settled - it comes out of the supplier balance");
-    expect(SRC).toContain("Marked on account - it goes back into the supplier balance");
+    const DOORS = readFileSync(join(process.cwd(), "src/components/bill-row-doors.tsx"), "utf8");
+    expect(SRC).toContain("<BillRowDoors bill={b}");
+    expect(DOORS).toContain("const next = bill.status === \"paid\" ? \"unpaid\" : \"paid\";");
+    expect(DOORS).toContain("Marked settled - it comes out of the supplier balance");
+    expect(DOORS).toContain("Marked on account - it goes back into the supplier balance");
+    expect(DOORS).toContain('{bill.status === "paid" ? "Settled" : "On Account"}');
+    expect(DOORS).toContain("if (!confirm(`Delete bill from");
   });
 });

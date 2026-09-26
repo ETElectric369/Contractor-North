@@ -6,11 +6,14 @@ import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { formatCurrency, sanitizeSearch } from "@/lib/utils";
+import { DEFAULT_TIMEZONE, formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
+import { readSupplierPaperHomes, type SupplierPaperHome } from "@/app/(app)/bills/supplier-papers";
+import { reportError } from "@/lib/observe";
+import { todayStrInTz } from "@/lib/tz";
 import { NewItemButton } from "./new-item-button";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
@@ -255,15 +258,32 @@ export default async function ShopStockPage({
       heldBy: heldBy.get(String(l.bill_id)) ?? (l.bills.po_id ? heldBy.get(String(l.bills.po_id)) ?? null : null),
     }));
   const linked = new Set(((docLinks.data ?? []) as any[]).map((r) => String(r.supplier_invoice_id)));
-  const stockDocuments = ((stockDocs.error ? [] : stockDocs.data) ?? [])
-    .filter((d: any) => !linked.has(String(d.id)) && companyUseWord(d.job_name_raw)?.shelf)
-    .map((d: any) => ({
-      id: String(d.id),
-      number: String(d.invoice_number ?? ""),
-      total: d.total,
-      words: String(d.job_name_raw ?? "").trim(),
-      accountId: d.supplier_account_id ? String(d.supplier_account_id) : null,
-    }));
+  const stockCandidates = ((stockDocs.error ? [] : stockDocs.data) ?? []).filter(
+    (d: any) => !linked.has(String(d.id)) && companyUseWord(d.job_name_raw)?.shelf,
+  );
+  // WHERE EACH ONE STANDS ON /bills (audit v1018, class 14), read only when there is one to place:
+  // Record To Shelf is offered only where its fold holds the paper. A paper a bill covers by its
+  // number, or a credit memo took back, is not waiting for the shelf at all. A failed read says so.
+  const homes = stockCandidates.length
+    ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(DEFAULT_TIMEZONE)).catch((e: unknown) => {
+        reportError("inventory.stock-paper-homes", e, { orgId });
+        return null;
+      })
+    : null;
+  const stockDocuments = stockCandidates.flatMap((d: any) => {
+    const home: SupplierPaperHome | "unchecked" = homes ? homes.get(String(d.id)) ?? "not_in_books" : "unchecked";
+    if (home === "covered" || home === "taken_back") return [];
+    return [
+      {
+        id: String(d.id),
+        number: String(d.invoice_number ?? ""),
+        total: d.total,
+        words: String(d.job_name_raw ?? "").trim(),
+        accountId: d.supplier_account_id ? String(d.supplier_account_id) : null,
+        home,
+      },
+    ];
+  });
   const linelessPapers = ((papers.error ? [] : papers.data) ?? []).flatMap((p: any) => {
     const marks = storedMarks(proposalOf(p));
     const word = companyUseWord(marks.po) ?? companyUseWord(marks.jobName);
@@ -352,7 +372,7 @@ export default async function ShopStockPage({
           )}
         </EmptyState>
       ) : (
-        // ?item= (a Recount item's link) opens that item, where Settle From The Shelf is.
+        // ?item= (a Settle item's link) opens that item, where Settle From The Shelf is.
         <ShopStockList items={shown} openItem={typeof openItem === "string" ? openItem : null} />
       )}
 

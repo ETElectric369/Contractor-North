@@ -1,7 +1,7 @@
 import { describe, it as vitestIt, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { PANEL_SAYS, NORT_SAYS, readerSuggestions, type ReadRow } from "./readers";
 
 /**
@@ -79,7 +79,7 @@ d("the readers' writes (0333's guard, phase 4)", () => {
     const { rows: [has] } = await client.query("select to_regclass('public.job_circuits') is not null as yes");
     if (!has.yes) {
       waiting = true;
-      console.warn("[panel readers] 0333 is not on this database yet; the suite waits for it.");
+      notOnThisDatabase("[panel readers] 0333 is not on this database yet; the suite waits for it.");
       return;
     }
     await client.query("begin");

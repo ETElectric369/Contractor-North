@@ -392,8 +392,16 @@ export async function createInvoiceForJob(
   // The customer's pricing-level markup when they have one, else the org default — the same seed
   // the manual "Materials from Costs" box uses, so a level customer can't be billed at the org
   // rate here and their negotiated rate there.
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const markup = await customerMaterialMarkupForJob(supabase, jobId, getOrgSettings((org as any)?.settings).material_markup_percent);
+  // A lost read is refused, never priced at a default (audit v1018 money-1).
+  let markup: number;
+  try {
+    const { data: org, error: orgErr } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+    if (orgErr) throw orgErr;
+    markup = await customerMaterialMarkupForJob(supabase, jobId, getOrgSettings((org as any)?.settings).material_markup_percent);
+  } catch (e) {
+    reportError("createInvoiceForJob.markup", e, { jobId });
+    return { ok: false, error: "Couldn't read this customer's pricing just now, so nothing was billed. Try again in a moment." };
+  }
 
   if (draft) {
     // THE OPEN DRAFT TAKES WHAT'S NEW, TOO. The Overview card's "Create Invoice for $X" is priced

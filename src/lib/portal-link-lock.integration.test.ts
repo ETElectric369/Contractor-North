@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintOrgAndStranger } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0298: a customer's portal link belongs to the office.
@@ -68,8 +68,7 @@ d("the portal link belongs to the office (0298)", { timeout: 30_000 }, () => {
     }
   };
   const needs = () => {
-    if (!has0298) console.warn("[portal-link-lock] migration 0298 is not on this database yet; apply it to exercise this case.");
-    return has0298;
+    return has0298 || notOnThisDatabase("[portal-link-lock] migration 0298 is not on this database yet; apply it to exercise this case.");
   };
   const portal = async (token: string) => (await one("select public.customer_portal($1) as j", [token])).j;
   const tokenOf = async (id: string) => (await one("select token from public.customer_portal_access where customer_id = $1", [id])).token as string;

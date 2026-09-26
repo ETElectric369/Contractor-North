@@ -10,7 +10,7 @@ import { createNotifications, officeRecipients } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { reportError } from "@/lib/observe";
 import { jobLabel } from "@/lib/schedule-options";
-import { officeBellWords, settleRefusalWords, tookWords, type ShelfRow } from "@/lib/stock-take";
+import { officeBellOpensShelf, officeBellWords, settleRefusalWords, tookWords, type ShelfRow } from "@/lib/stock-take";
 
 /**
  * TOOK FROM STOCK: THE SERVER DOORS (Shop Stock, Phase 3).
@@ -95,8 +95,9 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
   // needs is resolved here, in request scope.
   if (!staff) {
     const words = officeBellWords({ who: m.name, qty: res.qty, unit: res.unit, item: res.item, job: label, short: res.short, onHandAfter: res.onHand });
-    // A short opens Shop Stock on its item, where Settle From The Shelf is.
-    const url = res.short > 0 ? `/inventory?item=${input.itemId}` : `/jobs/${input.jobId}?tab=materials`;
+    // A short (this take's, or an older one the shelf below zero says is open) opens Shop Stock on
+    // its item, where Settle From The Shelf is.
+    const url = officeBellOpensShelf({ short: res.short, onHandAfter: res.onHand }) ? `/inventory?item=${input.itemId}` : `/jobs/${input.jobId}?tab=materials`;
     const actorId = m.userId;
     after(() => tellOfficeAboutTake(supabase, orgId, actorId, words, url, input.jobId));
   }
@@ -147,7 +148,7 @@ export async function undoTakeAction(drawGroup: string, jobId?: string | null): 
 }
 
 /**
- * SETTLE PIECES TAKEN PAST THE SHELF, once a roll is on it (the office's answer to a Recount item).
+ * SETTLE PIECES TAKEN PAST THE SHELF, once a roll is on it (the office's answer to a Settle item).
  * settle_short writes real draws at the roll's cost, all or nothing; until then the short costs $0
  * and bills nothing.
  */

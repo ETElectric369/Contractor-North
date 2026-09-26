@@ -529,3 +529,51 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
     expect(res.message).not.toMatch(/Tie Them|Record It Anyway|Record It As A Bill/);
   });
 });
+
+// ── WAITING ON A CREDIT IS HONORED BY THE WRITE (audit v1018, class 4) ───────────────────────────
+describe("recordSupplierInvoiceAsBill refuses a paper a person set aside for a credit", () => {
+  const ORG_TZ = { data: { settings: { timezone: "America/Los_Angeles" } }, error: null };
+  const stamped = (since: string) => ({ ...INV_ROW, data: { ...INV_ROW.data, waiting_credit_since: since } });
+
+  it("while the wait runs: nothing is read past the paper and nothing is written", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T18:00:00Z"));
+    try {
+      state.client = fakeSupabase(
+        { "profiles.select": [STAFF], "supplier_invoices.select": [stamped("2026-09-27T00:10:00+00:00")], "organizations.select": [ORG_TZ] },
+        calls,
+      );
+      const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe("8802-1104644 is waiting on a credit; press Stop Waiting on Bills first.");
+      expect(calls.some((c) => c.verb === "insert")).toBe(false);
+      expect(calls.some((c) => c.table === "bill_supplier_invoices")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("after 30 days with no credit the card is back, and it records like any card", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-28T18:00:00Z"));
+    try {
+      const script = recordScript({ "organizations.select": [ORG_TZ], "bill_supplier_invoices.insert": [{ data: [{ id: "link" }], error: null }] });
+      script["supplier_invoices.select"][0] = stamped("2026-09-27T00:10:00+00:00");
+      state.client = fakeSupabase(script, calls);
+      const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
+      expect(res.error ?? null).toBeNull();
+      expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a database without 0346 is asked again without the stamp, and nothing there is waiting", async () => {
+    const script = recordScript({ "bill_supplier_invoices.insert": [{ data: [{ id: "link" }], error: null }] });
+    (script["supplier_invoices.select"] as unknown[]).unshift({ data: null, error: { code: "42703", message: "column supplier_invoices.waiting_credit_since does not exist" } });
+    state.client = fakeSupabase(script, calls);
+    const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
+    expect(res.error ?? null).toBeNull();
+    expect(calls.some((c) => c.table === "bills" && c.verb === "insert")).toBe(true);
+  });
+});
