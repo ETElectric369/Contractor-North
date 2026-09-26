@@ -13,7 +13,7 @@ import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
-import { supplierPaperActionItem } from "./supplier-paper-item";
+import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
 import {
   NEEDS_RETURN_DAYS,
@@ -139,11 +139,11 @@ async function buildActionItems(ctx: {
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A). Staff only: the cards carry
   // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
-  // instead of adding a serial wave; awaited at the end. A failure is "no cards", never a crash of
-  // the inbox, and the same papers are still on /bills.
+  // instead of adding a serial wave; awaited at the end. A failure is never a crash of the inbox,
+  // and never silent: a thrown read comes back as `failed`, which My Day says in one line.
   // The same read brings the Pay By line ("Pay CED $X By Oct 10"): one read of the supplier's papers.
   const supplierDeskP: Promise<SupplierDesk | null> = isStaff
-    ? loadSupplierDesk(supabase, userId, todayStr).catch(() => null)
+    ? loadSupplierDesk(supabase, userId, todayStr).catch((): SupplierDesk => ({ papers: null, payDue: [], failed: { papers: true, pay: true } }))
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 
@@ -1069,6 +1069,9 @@ async function buildActionItems(ctx: {
   // within two weeks, right under the papers. Staff only (the same read); gone once the deadline is.
   items.unshift(...supplierPayActionItems((await supplierDeskP)?.payDue));
   if (paperItem) items.unshift(paperItem);
+  // A read the desk needed failed: said in one undated line, never a quiet "nothing waiting".
+  const deskUnread = supplierDeskFailedItem(await supplierDeskP);
+  if (deskUnread) items.unshift(deskUnread);
 
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
 }

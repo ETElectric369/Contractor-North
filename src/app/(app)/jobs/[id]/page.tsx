@@ -571,6 +571,8 @@ export default async function JobDetailPage({
         accountId: p.accountId,
         onNeedsYou: p.onNeedsYou === true,
         waitingOnCredit: p.waitingOnCredit === true,
+        waitingSince: p.waitingSince ?? null,
+        supplier: p.supplier ?? null,
       }))
     : null;
   const oe = openEntryRow as any;

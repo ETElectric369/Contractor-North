@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { loadSupplierDesk, supplierDocumentRows } from "./supplier-papers";
-import { sentThisCycle, supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
+import { clearTarget, sentThisCycle, supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
 import { supplierBalance, supplierNetIfPaidBy, type SupplierAccountRow } from "./supplier-balance";
 import { claimableDiscounts } from "./supplier-reconcile";
 import { supplierPayActionItems, supplierPayHref } from "@/lib/action-items/supplier-pay-item";
+import { supplierDeskFailedItem } from "@/lib/action-items/supplier-paper-item";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * "PAY CED $5,174.62 BY OCT 10 · Saves $35.50 on 7 invoices" (Erik, 2026-09-26).
@@ -214,6 +217,59 @@ describe("Paying clears the line (keyed to the cheque, never to when a paper lan
     expect(due.sent).toBe(2000);
   });
 
+  /**
+   * AUDIT v1018, CLASS 7 (reproduced with the committed functions): two September invoices, $2,500
+   * each, $20 off each by Oct 10. He sends $3,000 on Sep 28; CED applies it oldest-first (the first
+   * closed, $500 off the second) and he re-downloads on Oct 1. The line used to measure the cheque
+   * against what is LEFT ($1,980), which the applied chunk had already come off, and cleared with
+   * $2,000 and its $20 discount still open.
+   */
+  describe("the cheque is measured against what it was for, not what is left after CED applies it", () => {
+    const sept = (id: string, date: string, over: Record<string, unknown> = {}) => ({
+      id,
+      supplier_account_id: CED,
+      invoice_number: `8802-${id}`,
+      kind: "invoice",
+      invoice_date: date,
+      due_date: null,
+      job_name_raw: null,
+      job_id: null,
+      total: 2500,
+      open_balance: 2500,
+      closed: false,
+      discount_amount: 20,
+      discount_by: "2026-10-10",
+      source_file: null,
+      jobs: null,
+      ...over,
+    });
+    const before = [sept("i1", "2026-09-05"), sept("i2", "2026-09-12")];
+    const applied = [sept("i1", "2026-09-05", { closed: true, open_balance: 0 }), sept("i2", "2026-09-12", { open_balance: 2000 })];
+
+    it("before he pays, and with the $3,000 sent but not applied, the line shows", () => {
+      expect(dueWith([], "2026-09-27", before)[0]).toMatchObject({ owed: 5000, saves: 40, sent: 0 });
+      expect(dueWith([pay(3000, "2026-09-28")], "2026-09-29", before)[0]).toMatchObject({ owed: 5000, sent: 3000 });
+    });
+
+    it("applied and re-downloaded, it still shows: $2,000 and its $20 are open", () => {
+      const [due] = dueWith([pay(3000, "2026-09-28")], "2026-10-01", applied);
+      expect(due).toMatchObject({ owed: 2000, saves: 20, sent: 3000 });
+    });
+
+    it("and it goes once what was sent covers what the cheque was for ($4,960)", () => {
+      expect(dueWith([pay(3000, "2026-09-28"), pay(1960, "2026-10-02")], "2026-10-03", applied)).toEqual([]);
+      expect(dueWith([pay(4960, "2026-09-28")], "2026-10-01", [sept("i1", "2026-09-05", { closed: true, open_balance: 0 }), sept("i2", "2026-09-12", { closed: true, open_balance: 0 })])).toEqual([]);
+    });
+
+    it("clearTarget: the full cycle, however much of it CED has applied", () => {
+      expect(clearTarget(rowsOf(before), "2026-10-10", "2026-10-01")).toBe(4960);
+      expect(clearTarget(rowsOf(applied), "2026-10-10", "2026-10-01")).toBe(4960);
+      // A paper closed out of turn (newer than a purchase still open) was not this cheque's doing.
+      const outOfTurn = [sept("i1", "2026-09-05"), sept("i2", "2026-09-12", { closed: true, open_balance: 0 })];
+      expect(clearTarget(rowsOf(outOfTurn), "2026-10-10", "2026-10-01")).toBe(2480);
+    });
+  });
+
   it("a voided payment, a cheque dated before the cycle, or one after the deadline never counts", () => {
     expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T19:00:00Z")])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
     expect(dueWith([pay(5174.62, "2026-09-10")])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
@@ -301,5 +357,55 @@ describe("loadSupplierDesk: one read, the cards and the pay line", () => {
     const desk = await loadSupplierDesk(client, "user-1", TONIGHT);
     expect(desk?.papers).toBeNull();
     expect(desk?.payDue).toHaveLength(1);
+    // And it says the cards couldn't be checked (audit v1018, class 2).
+    expect(desk?.failed).toEqual({ papers: true, pay: false });
+  });
+});
+
+/**
+ * NOTHING SILENT ON MY DAY (audit v1018, class 2). On Oct 8 a failed read of any of the desk's
+ * reads used to leave no Supplier Bills line and no "Pay CED By Oct 10" line, which reads exactly
+ * like "nothing waiting, no discount due". Now the desk says which half it lost, and My Day carries
+ * one undated line pointing at /bills.
+ */
+describe("a failed supplier read says so on My Day", () => {
+  const ORG = "org-et";
+  const deskWith = (tables: Record<string, { data: unknown; error?: unknown }>) =>
+    loadSupplierDesk(fakeSupabase({ profiles: { data: { org_id: ORG } }, supplier_accounts: { data: ACCOUNTS }, ...tables }).client, "user-1", "2026-10-08");
+
+  it("the supplier's papers unread: no cards, no pay line, and both halves said", async () => {
+    const desk = await deskWith({ supplier_invoices: { data: null, error: { code: "57014", message: "timeout" } } });
+    expect(desk).toEqual({ papers: null, payDue: [], failed: { papers: true, pay: true } });
+    const item = supplierDeskFailedItem(desk)!;
+    expect(item).toMatchObject({ title: "Supplier Bills · Couldn't Check", when: null, urgency: 1, href: "/bills", kind: "supplier_paper" });
+    expect(item.subtitle).toContain("Couldn't read your supplier papers just now");
+  });
+
+  it("the payments or accounts unread: the cards stay, the pay line's absence is said", async () => {
+    const lost: Record<string, { data: unknown; error?: unknown }>[] = [
+      { supplier_payments: { data: null, error: { message: "boom" } } },
+      { supplier_accounts: { data: null, error: { message: "boom" } } },
+    ];
+    for (const t of lost) {
+      const desk = await deskWith({ supplier_invoices: { data: hisDocuments() }, ...t });
+      expect(desk?.payDue).toEqual([]);
+      expect(desk?.papers).not.toBeNull();
+      expect(desk?.failed).toEqual({ papers: false, pay: true });
+      expect(supplierDeskFailedItem(desk)?.subtitle).toContain("a discount deadline may be missing here");
+    }
+  });
+
+  it("every read answered: no such line, and no documents at all is still nothing to bring", async () => {
+    const desk = await deskWith({ supplier_invoices: { data: hisDocuments() } });
+    expect(desk?.failed).toBeUndefined();
+    expect(supplierDeskFailedItem(desk)).toBeNull();
+    expect(await deskWith({ supplier_invoices: { data: [] } })).toBeNull();
+  });
+
+  it("My Day turns a thrown desk read into the same line, never a quiet nothing", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    expect(src).not.toContain("loadSupplierDesk(supabase, userId, todayStr).catch(() => null)");
+    expect(src).toContain("failed: { papers: true, pay: true }");
+    expect(src).toContain("supplierDeskFailedItem(await supplierDeskP)");
   });
 });

@@ -150,6 +150,7 @@ export function SuppliersCard({
   needsYouIds = [],
   waitingOnCredit = [],
   payOn = null,
+  balancesUnread = false,
   actions,
 }: {
   accounts: SupplierAccountRow[];
@@ -183,6 +184,13 @@ export function SuppliersCard({
    * account's Record A Payment sheet already open. The same sheet, the same write; nothing new.
    */
   payOn?: string | null;
+  /**
+   * A READ A BALANCE IS BUILT FROM FAILED (audit v1018, class 2): the supplier's own papers, the
+   * bills, or the payments. An account counted from bills less payments then says it couldn't total
+   * instead of showing a figure built from half its rows, and an account CED's own papers would have
+   * counted never quietly switches to the other model. The payment sheet still opens, amount empty.
+   */
+  balancesUnread?: boolean;
   actions: SuppliersCardActions;
 }) {
   const router = useRouter();
@@ -235,6 +243,11 @@ export function SuppliersCard({
     return map;
   }, [canReconcile, reconcile]);
 
+  /** No figure for this account: it is counted from bills less payments and one of those reads
+   *  (or the supplier's own papers, which would have counted it instead) failed. */
+  const cantTotal = (account: SupplierAccountRow, balance: ReturnType<typeof supplierBalance>) =>
+    balancesUnread && account.onAccount && balance.model !== "supplier-invoices";
+
   // WHAT HE OWES, not a net position: an account paid ahead does not reduce the next one's bill.
   const owing = balances.filter((b) => (b.balance.owed ?? 0) > 0.005);
   const onAccountOwed = r2(owing.reduce((s, b) => s + (b.balance.owed ?? 0), 0));
@@ -257,6 +270,7 @@ export function SuppliersCard({
   const modelledExplained = r2(Math.max(0, modelledBillsUnpaid - modelledNoDocument));
 
   const payBalance = payFor ? supplierBalance(payFor, today) : null;
+  const payUnread = !!payFor && !!payBalance && cantTotal(payFor, payBalance);
   const payDirty = amount !== null || reference.trim() !== "" || note.trim() !== "" || paidOn !== today;
 
   function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string, undoPaymentId?: string | null) {
@@ -421,18 +435,27 @@ export function SuppliersCard({
       <Card className="mb-6 p-4" id="suppliers">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-base font-semibold text-slate-900">Suppliers</h2>
-          {(accounts.length > 0 || unfiled > 0.005) && (
-            <span className="text-sm font-semibold tabular-nums text-slate-900">
-              {totalOwed <= 0.005 ? "Square With Everyone" : `${formatCurrency(totalOwed)} Owed`}
-            </span>
+          {balancesUnread ? (
+            <span className="text-sm font-semibold text-amber-800">Couldn&apos;t Total Just Now</span>
+          ) : (
+            (accounts.length > 0 || unfiled > 0.005) && (
+              <span className="text-sm font-semibold tabular-nums text-slate-900">
+                {totalOwed <= 0.005 ? "Square With Everyone" : `${formatCurrency(totalOwed)} Owed`}
+              </span>
+            )
           )}
         </div>
+        {balancesUnread && (
+          <p className="mt-1 text-sm text-amber-800" role="alert">
+            Couldn&apos;t read everything your balances are made of just now, so the ones that depend on it aren&apos;t totalled. Reload the page to try again.
+          </p>
+        )}
         <WhyFold>
           <p>
             What you still owe on account, supplier by supplier. A payment is a chunk of money, not a ticket ticked
             off, so it marks no bill paid.
           </p>
-          {totalOwed > 0.005 && (
+          {totalOwed > 0.005 && !balancesUnread && (
             <p>
               {[
                 onAccountOwed > 0.005 ? `${formatCurrency(onAccountOwed)} on ${owing.length} ${owing.length === 1 ? "account" : "accounts"}.` : "",
@@ -503,6 +526,7 @@ export function SuppliersCard({
           <div className="space-y-2">
             {balances.map(({ account, balance }) => {
               const owed = balance.owed;
+              const unread = cantTotal(account, balance);
               const feed = feeds.get(account.id) ?? null;
               const fromSupplier = balance.model === "supplier-invoices";
               const discountLine = balance.supplierSays
@@ -519,6 +543,7 @@ export function SuppliersCard({
               const noDocTotal = r2(noDocBills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0));
               // MODEL A ONLY: a ticked bill and a cheque can take the same dollar off twice.
               const settledBesidePayments =
+                !unread &&
                 balance.model === "bills-minus-payments" &&
                 account.onAccount &&
                 balance.settledAtRegister > 0.005 &&
@@ -563,7 +588,9 @@ export function SuppliersCard({
                       </span>
                       <span className="shrink-0 text-right">
                         {/* A register supplier has NO running balance: a zero would read "paid up". */}
-                        {owed === null ? (
+                        {unread ? (
+                          <span className="text-sm font-semibold text-amber-800">Couldn&apos;t Total</span>
+                        ) : owed === null ? (
                           <span className="text-sm font-semibold text-slate-500">Paid At The Register</span>
                         ) : owed > 0.005 ? (
                           <span className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(owed)}</span>
@@ -574,7 +601,7 @@ export function SuppliersCard({
                         ) : (
                           <span className="text-sm font-semibold text-slate-500">Paid Up</span>
                         )}
-                        {owed !== null && (
+                        {owed !== null && !unread && (
                           <span className="mt-0.5 block max-w-[8.5rem] truncate text-[11px] text-slate-400">
                             {fromSupplier ? `${account.name} says` : "your bills less payments"}
                           </span>
@@ -611,7 +638,12 @@ export function SuppliersCard({
                         </>
                       )}
 
-                      {owed !== null && !fromSupplier && (
+                      {unread && (
+                        <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+                          Couldn&apos;t read everything this balance is made of just now, so it isn&apos;t totalled. Reload the page to try again.
+                        </p>
+                      )}
+                      {owed !== null && !fromSupplier && !unread && (
                         <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 px-3 py-2.5 text-center">
                           <div>
                             <div className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(balance.charged)}</div>
@@ -934,7 +966,9 @@ export function SuppliersCard({
                 the one thing a man sending an odd chunk of money actually wants to see. */}
             <div className="rounded-lg bg-slate-50 px-3 py-2.5">
               <div className="text-sm font-semibold text-slate-900">
-                {(payBalance.owed ?? 0) > 0.005
+                {payUnread
+                  ? "Couldn't total what you owe just now"
+                  : (payBalance.owed ?? 0) > 0.005
                   ? `You owe ${formatCurrency(payBalance.owed ?? 0)} right now`
                   : (payBalance.owed ?? 0) < -0.005
                     ? `${formatCurrency(-(payBalance.owed ?? 0))} paid ahead right now`
@@ -947,12 +981,14 @@ export function SuppliersCard({
                   one screen where he decides how much to write a cheque for. The accordion row was
                   branched for exactly this and the sheet, twelve hundred lines away, was not. */}
               <div className="mt-0.5 text-xs text-slate-500">
-                {payBalance.model === "supplier-invoices"
+                {payUnread
+                  ? "Some of what this balance is made of didn't load, so no figure is shown. What you record here is saved either way."
+                  : payBalance.model === "supplier-invoices"
                   ? `${payFor.name} says so themselves, across ${payBalance.supplierSays?.openDocuments ?? 0} open ${(payBalance.supplierSays?.openDocuments ?? 0) === 1 ? "document" : "documents"}. You have sent them ${formatCurrency(payBalance.paid)} so far, which is already inside their figure.`
                   : `${formatCurrency(payBalance.charged)} charged on ${payBalance.chargedBills} ${payBalance.chargedBills === 1 ? "bill" : "bills"}, ${formatCurrency(payBalance.paid)} paid so far.`}
                 {payFor.accountNumber ? ` Account ${payFor.accountNumber}.` : ""}
               </div>
-              {amount !== null && amount > 0 && (
+              {amount !== null && amount > 0 && !payUnread && (
                 <div className="mt-1.5 border-t border-slate-200 pt-1.5 text-sm font-medium text-slate-900">
                   {/* UNDER MODEL B THIS IS A PREDICTION, NOT A FACT, and the words have to admit
                       it: the number on the left is the supplier's, and it only moves when THEY
@@ -972,7 +1008,7 @@ export function SuppliersCard({
                   )}
                 </div>
               )}
-              {amount !== null && amount > (payBalance.owed ?? 0) + 0.005 && (
+              {amount !== null && amount > (payBalance.owed ?? 0) + 0.005 && !payUnread && (
                 <div className="mt-1 text-xs leading-relaxed text-amber-700">
                   That is {formatCurrency(r2(amount - (payBalance.owed ?? 0)))} more than this account shows owing.
                   Fine if you are paying ahead or a ticket has not been scanned yet - the extra sits on the account

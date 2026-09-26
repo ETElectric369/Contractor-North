@@ -43,6 +43,8 @@ import {
 import { indexSupplierAliases } from "@/lib/supplier-identity";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
+import { creditWait } from "./supplier-reconcile";
+import { isMissingWaitColumn } from "./supplier-papers";
 
 /**
  * PAYING A SUPPLIER, AND SAYING WHO THE SUPPLIER IS (migration 0270).
@@ -1633,14 +1635,14 @@ export async function recordSupplierInvoiceAsBill(input: {
   const invoiceId = String(input?.invoiceId ?? "");
   if (!invoiceId) return { ok: false, error: "Couldn't tell which invoice you meant." };
 
-  const { data: inv, error: readErr } = await ctx.supabase
-    .from("supplier_invoices")
-    .select(
-      "id, invoice_number, kind, invoice_date, job_id, supplier_account_id, tax, shipping, total, open_balance, closed, supplier_accounts(name), jobs(name, job_number)",
-    )
-    .eq("id", invoiceId)
-    .eq("org_id", org.orgId)
-    .maybeSingle();
+  // Waiting On A Credit's stamp (0346) rides along; a database without it answers the same read
+  // again without the column, and nothing there is waiting (readSupplierDocuments does the same).
+  const invColumns =
+    "id, invoice_number, kind, invoice_date, job_id, supplier_account_id, tax, shipping, total, open_balance, closed, supplier_accounts(name), jobs(name, job_number)";
+  const readInvoice = (cols: string) =>
+    ctx.supabase.from("supplier_invoices").select(cols).eq("id", invoiceId).eq("org_id", org.orgId).maybeSingle();
+  let { data: inv, error: readErr } = await readInvoice(`${invColumns}, waiting_credit_since`);
+  if (readErr && isMissingWaitColumn(readErr)) ({ data: inv, error: readErr } = await readInvoice(invColumns));
   if (readErr) return { ok: false, error: `Couldn't read that invoice just now, so nothing was written. ${dbError(readErr)}` };
   if (!inv) return { ok: false, error: "That invoice isn't here anymore. Reload the page." };
 
@@ -1655,6 +1657,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     total?: unknown;
     open_balance?: unknown;
     closed?: boolean | null;
+    waiting_credit_since?: string | null;
     supplier_accounts?: { name?: string | null } | null;
     jobs?: { name?: string | null; job_number?: string | null } | null;
   };
@@ -1668,6 +1671,19 @@ export async function recordSupplierInvoiceAsBill(input: {
       service_charge: `${number} is a late-payment charge from the supplier, not something you bought for a job. It belongs to the account, not to a job's costs.`,
     };
     return { ok: false, error: why[kind] ?? `${number} isn't an invoice, so it can't become a bill.` };
+  }
+
+  /**
+   * WAITING ON A CREDIT IS A PERSON'S DECISION, HONORED BY THE WRITE (audit v1018, class 4). /bills
+   * folds a waiting paper with Stop Waiting as its only door, but the job's Costs tab used to offer
+   * Record It As A Bill on it, and nothing here asked: one tap put a cost the supplier is taking
+   * back onto the customer's job. A list is a screen and this is a write, so it refuses while the
+   * wait runs. After CREDIT_WAIT_DAYS the paper is a card again by itself, and records as any card.
+   * The stamp is read with the paper itself; the org's today only when there is one.
+   */
+  const wait = row.waiting_credit_since ? creditWait({ waitingCreditSince: row.waiting_credit_since }, await orgToday(ctx.supabase)) : null;
+  if (wait && !wait.overdue) {
+    return { ok: false, error: `${number} is waiting on a credit; press Stop Waiting on Bills first.` };
   }
 
   // No job is refused BELOW the "already in your books?" checks: a purchase already on the books

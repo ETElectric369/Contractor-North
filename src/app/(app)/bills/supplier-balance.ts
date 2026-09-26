@@ -478,6 +478,65 @@ export function reversedPurchaseIds(invoices: PurchaseReversalShape[]): Set<stri
 }
 
 /**
+ * THE CREDIT HE WAS WAITING FOR HAS COME (audit v1018, class 6). ONE ACCOUNT'S documents in.
+ *
+ * reversedPurchaseIds pairs only inside the open set or inside the closed set, which is right for
+ * a purchase nobody said anything about. It is wrong for one a person stamped Waiting On A Credit
+ * (0346), and the ordinary case is exactly the mixed one: he pays the September statement, CED
+ * closes 8802-1107139 ($59.17), and the credit memo for -$59.17 lands open weeks later. The pair
+ * never matched, so the bill came back 30 days on saying "Still no credit from CED" with the
+ * credit sitting on the same account, and one tap from being recorded onto the customer's job.
+ *
+ * So, for WAIT-STAMPED purchases only: an unspent credit memo for exactly the negative of the
+ * total, open or closed, is the credit he was waiting for. "Unspent" means the memos at that cent
+ * that reversedPurchaseIds has not already paired. The stamp is what breaks the twins tie: two
+ * $150.00 invoices and one $150.00 memo stay unanswered for an unstamped pair, but when a person
+ * said which one is waiting, that one is the one. Two stamped at one cent with too few memos is
+ * still not answered: nothing says which.
+ *
+ * reversedPurchaseIds itself is unchanged (the Record button's own guard reads it). Every list
+ * that asks "is this purchase taken back?" reads both: paperCards (Needs You, My Day, the waiting
+ * fold) and invoicesNeedingBill (/bills Not In Your Books, the job's Costs tab).
+ */
+export function creditArrivedFor(
+  invoices: (PurchaseReversalShape & { supplierAccountId?: string | null; waitingCreditSince?: string | null })[],
+): Set<string> {
+  const out = new Set<string>();
+  const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
+  const kindOf = (i: PurchaseReversalShape) => String((i as { kind?: unknown })?.kind ?? "");
+  const rows = invoices ?? [];
+  const reversed = reversedPurchaseIds(rows);
+  const memos = new Map<number, number>();
+  for (const i of rows) {
+    const c = cents(i?.total);
+    const k = kindOf(i);
+    if (c < 0 && (!k || k === "credit_memo")) memos.set(-c, (memos.get(-c) ?? 0) + 1);
+  }
+  // Each pair reversedPurchaseIds made spent one memo at that cent.
+  const spent = new Map<number, number>();
+  const waiting = new Map<number, string[]>();
+  for (const i of rows) {
+    const c = cents(i?.total);
+    const k = kindOf(i);
+    if (!(c > 0) || (k && k !== "invoice")) continue;
+    const id = String((i as { id?: unknown })?.id ?? "");
+    if (!id) continue;
+    if (reversed.has(id)) {
+      spent.set(c, (spent.get(c) ?? 0) + 1);
+      continue;
+    }
+    // A wait counts only on a supplier account: the credit pairs there (paperCards says the same).
+    if (!i?.waitingCreditSince || !i?.supplierAccountId) continue;
+    waiting.set(c, [...(waiting.get(c) ?? []), id]);
+  }
+  for (const [c, ids] of waiting) {
+    const unspent = (memos.get(c) ?? 0) - (spent.get(c) ?? 0);
+    if (unspent > 0 && ids.length <= unspent) for (const id of ids) out.add(id);
+  }
+  return out;
+}
+
+/**
  * MODEL B, WORKED OUT. Pure, cents-safe at every summation the way lib/invoice-math.ts is, and
  * exported on its own so a screen that wants only the supplier's side (the reconciliation view,
  * a payment sheet's preview) does not have to build a whole account row to get it.

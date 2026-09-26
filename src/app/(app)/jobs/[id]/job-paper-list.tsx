@@ -7,8 +7,10 @@ import { FileWarning } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
+import { WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { recordSupplierInvoiceAsBill, setSupplierInvoiceJob } from "@/app/(app)/bills/supplier-actions";
+import { billsPaperDoor } from "@/app/(app)/bills/paper-door";
 
 export type JobPaperView = {
   id: string;
@@ -22,9 +24,19 @@ export type JobPaperView = {
   /** /bills has it on a Needs You card (onNeedsYouIds, the cards' own rule). A paper on no card
    *  (before the books line, reversed by a credit memo, $0.00) links to the supplier's own line. */
   onNeedsYou: boolean;
-  /** Set aside on /bills for a credit (0346): folded under its supplier's Waiting On A Credit. */
+  /** Set aside on /bills for a credit (0346): folded under its supplier's Waiting On A Credit. A
+   *  waiting paper has NO Record door here (audit v1018, class 4): a person decided on /bills. */
   waitingOnCredit?: boolean;
+  /** The day the wait began, and who the credit is from ("CED"), for its one sentence. */
+  waitingSince?: string | null;
+  supplier?: string | null;
 };
+
+/** /bills, opened where this paper's own buttons are (billsPaperDoor: one routing for every door). */
+function paperOnBills(paper: JobPaperView): string {
+  const hash = billsPaperDoor({ onNeedsYou: paper.onNeedsYou, waitingOnCredit: paper.waitingOnCredit, accountId: paper.accountId });
+  return hash ? `/bills${hash}` : "/bills";
+}
 
 /**
  * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25: "i think theres a bill missing from this").
@@ -55,17 +67,44 @@ export function JobPaperList({ jobId, papers }: { jobId: string; papers: JobPape
         </p>
       ) : (
         <>
-          <p className="px-5 pt-3 text-sm text-slate-500">
-            The supplier billed these to this job and they are on no cost list yet, so no invoice has them. Record It As A Bill files the paper on this job and puts its cost here, at the supplier&apos;s own line prices.
-          </p>
+          <WhyFold className="px-5">
+            <p>
+              The supplier billed these to this job and they are on no cost list yet, so no invoice has them. Record It As A Bill files the paper on this job and puts its cost here, at the supplier&apos;s own line prices.
+            </p>
+          </WhyFold>
           <ul className="divide-y divide-slate-100">
-            {papers.map((p) => (
-              <PaperRow key={p.id} jobId={jobId} paper={p} />
-            ))}
+            {papers.map((p) =>
+              p.waitingOnCredit ? <WaitingRow key={p.id} paper={p} /> : <PaperRow key={p.id} jobId={jobId} paper={p} />,
+            )}
           </ul>
         </>
       )}
     </Card>
+  );
+}
+
+/**
+ * A PAPER A PERSON SET ASIDE FOR A CREDIT (0346): said, with the door to where Stop Waiting is, and
+ * no Record. Recording it would put a cost the supplier is taking back onto the customer's job and
+ * undo, in one tap on another screen, what was decided on /bills (the server refuses it too).
+ */
+function WaitingRow({ paper }: { paper: JobPaperView }) {
+  const from = paper.supplier || "the supplier";
+  return (
+    <li className="px-5 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="min-w-0 flex-1">
+          <div className="font-medium text-slate-900">{paper.invoiceNumber}</div>
+          <div className="text-xs text-slate-500">
+            {`Waiting on a credit from ${from}${paper.waitingSince ? ` since ${formatDate(paper.waitingSince)}` : ""}`}
+          </div>
+        </div>
+        <span className="font-medium text-slate-800">{formatCurrency(paper.total)}</span>
+        <Link href={paperOnBills(paper)} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
+          Open It On Bills
+        </Link>
+      </div>
+    </li>
   );
 }
 
@@ -121,15 +160,7 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
               different purchase) live on its Needs You cards since Wave B. A paper no card carries
               (onNeedsYouIds says which) opens its supplier's own line instead (FoldOpener). */}
           <Link
-            href={
-              paper.onNeedsYou
-                ? "/bills#needs-you"
-                : paper.waitingOnCredit && paper.accountId
-                  ? `/bills#supplier-waiting-credit-${paper.accountId}`
-                  : paper.accountId
-                  ? `/bills#supplier-invoices-${paper.accountId}`
-                  : "/bills"
-            }
+            href={paperOnBills(paper)}
             className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
           >
             Open It On Bills

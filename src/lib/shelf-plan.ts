@@ -591,7 +591,19 @@ export function waitingForShelf(input: {
   lines: WaitingLineIn[];
   /** `accountId`: the supplier account it is on, so the door lands on that supplier's Not In Your
    *  Books list on /bills (the only home of Record To Shelf), not the top of the page. */
-  stockDocuments?: { id: string; number: string; total: unknown; words: string; accountId?: string | null }[];
+  stockDocuments?: {
+    id: string;
+    number: string;
+    total: unknown;
+    words: string;
+    accountId?: string | null;
+    /**
+     * Where it stands on /bills (supplierPaperHomes, audit v1018 class 14): Record To Shelf is only
+     * offered when the supplier's Not In Your Books fold holds it. "unchecked": that reading
+     * failed. Absent reads as the fold.
+     */
+    home?: "not_in_books" | "on_card" | "waiting" | "before_books" | "unchecked";
+  }[];
   linelessPapers?: { id: string; title: string; words: string }[];
 }): WaitingItem[] {
   const out: WaitingItem[] = [];
@@ -636,10 +648,44 @@ export function waitingForShelf(input: {
     });
   }
   for (const d of input.stockDocuments ?? []) {
+    const title = `CED ${d.number}, ${dollars(Number(d.total) || 0)}`;
+    const base = { key: `doc:${d.id}`, kind: "stock_document" as const, title };
+    // A DOOR ONLY WHERE THE BUTTON IS (audit v1018, class 14): the fold that holds Record To Shelf
+    // lists a paper only when /bills would (supplierPaperHomes). Anywhere else, the door goes where
+    // this paper's own buttons are, or the card says why there is none.
+    if (d.home === "on_card") {
+      out.push({ ...base, why: `"${d.words}" is written on it, and it's waiting under Needs You on Bills, where Shop Stock puts it on the shelf.`, href: "/bills#needs-you", door: "Open Needs You" });
+      continue;
+    }
+    if (d.home === "waiting") {
+      out.push({
+        ...base,
+        why: `"${d.words}" is written on it, and it's set aside on Bills waiting on a credit.`,
+        href: d.accountId ? `/bills#supplier-waiting-credit-${d.accountId}` : "/bills",
+        door: "Open Waiting On A Credit",
+      });
+      continue;
+    }
+    if (d.home === "before_books") {
+      out.push({
+        ...base,
+        why: `"${d.words}" is written on it, but it's from before your books here began, so Bills has no Record To Shelf for it. If its roll is still on the shelf, add the roll by hand.`,
+        href: null,
+        door: null,
+      });
+      continue;
+    }
+    if (d.home === "unchecked") {
+      out.push({
+        ...base,
+        why: `"${d.words}" is written on it. Couldn't check your books just now, so it may already be recorded; its supplier's own lists on Bills say.`,
+        href: d.accountId ? `/bills#supplier-invoices-${d.accountId}` : "/bills",
+        door: "Open It On Bills",
+      });
+      continue;
+    }
     out.push({
-      key: `doc:${d.id}`,
-      kind: "stock_document",
-      title: `CED ${d.number}, ${dollars(Number(d.total) || 0)}`,
+      ...base,
       why: `"${d.words}" is written on it, and no bill covers it yet.`,
       // Record To Shelf lives two folds deep (the supplier's line, then Not In Your Books):
       // FoldOpener opens both. With no account, the page's own top is the best it can do.
