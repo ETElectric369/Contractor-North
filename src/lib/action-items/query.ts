@@ -11,6 +11,7 @@ import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
+import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierPapers, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierPaperActionItem } from "./supplier-paper-item";
 import {
@@ -121,6 +122,19 @@ async function buildActionItems(ctx: {
   const dayAfterTomorrowStr = daysAgoStr(todayStr, -2);
 
   const empty = Promise.resolve({ data: [] as any[] });
+  // The Recount feeder's read (Shop Stock, Phase 3; used at the end), started beside the big wave
+  // below rather than after it: this union is on the app shell's path. Promise.resolve STARTS it (a
+  // query builder does nothing until something calls its then).
+  const shortsP: Promise<{ data: any[] | null; error: unknown }> = isStaff
+    ? Promise.resolve(supabase
+        .from("stock_moves")
+        .select("id, qty, created_at, created_by, job_id, item_id, inventory_items(name, unit), jobs(job_number, name)")
+        .eq("kind", "short")
+        .is("settled_by", null)
+        .is("undone_at", null)
+        .order("created_at", { ascending: true })
+        .limit(50))
+    : Promise.resolve({ data: [] as any[], error: null });
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A). Staff only: the cards carry
   // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
@@ -1009,6 +1023,42 @@ async function buildActionItems(ctx: {
     }
   }
 
+  // RECOUNT — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
+  // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
+  // an invoice can bill until the office files the roll and settles it (or undoes the take). ONE item
+  // per short, and it stays until the short is settled or its take undone: it is a decision the app
+  // cannot defer, and it carries its date (the take's). Staff only; the shelf's record is staff-read
+  // (0303). Before 0303 is applied the read errors and the feeder is simply empty.
+  if (isStaff) {
+    const { data: shorts, error: shortErr } = await shortsP;
+    const rows = shortErr ? [] : ((shorts ?? []) as any[]);
+    if (rows.length) {
+      const whoIds = [...new Set(rows.map((r) => r.created_by).filter(Boolean))];
+      const { data: people } = whoIds.length ? await supabase.from("profiles").select("id, full_name").in("id", whoIds) : { data: [] };
+      const nameOf = new Map(((people ?? []) as any[]).map((p) => [p.id, String(p.full_name ?? "").trim()]));
+      for (const r of rows) {
+        const it = Array.isArray(r.inventory_items) ? r.inventory_items[0] : r.inventory_items;
+        const jb = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
+        const q = Math.round(Number(r.qty ?? 0) * 1000) / 1000;
+        const who = nameOf.get(r.created_by) || "Someone";
+        items.push({
+          id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
+          kind: "stock_short",
+          title: `Recount ${it?.name ?? "an item"}: ${q} ${it?.unit ?? ""} taken past the shelf`.replace(/\s+/g, " "),
+          // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
+          // ways that work (SHORT_FIX, the bell's own words).
+          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. ${SHORT_FIX}`,
+          who: null,
+          when: r.created_at,
+          urgency: 1,
+          done: false,
+          // Straight to the item, opened, where Settle From The Shelf is (Shop Stock opens ?item=).
+          href: r.item_id ? `/inventory?item=${encodeURIComponent(String(r.item_id))}` : "/inventory",
+          affordances: AFFORDANCES.stock_short,
+        });
+      }
+    }
+  }
   // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because My Day
   // shows the top five and the point of the card is that the paper comes to him, not the reverse.
   const paperItem = supplierPaperActionItem(await supplierPapersP);

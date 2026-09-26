@@ -10,7 +10,15 @@
  */
 import { formatCurrency } from "./utils";
 
-export type NotBilled = { hours: number; laborAmount: number; billsCount: number; billsBilled: number };
+export type NotBilled = {
+  hours: number;
+  laborAmount: number;
+  billsCount: number;
+  billsBilled: number;
+  /** Takes from stock no invoice holds (Shop Stock, Phase 3), and what they would bill. */
+  stockCount?: number;
+  stockBilled?: number;
+};
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -19,9 +27,14 @@ export function notBilledWords(u: NotBilled | null | undefined): string | null {
   if (!u) return null;
   const hours = r2(Number(u.hours) || 0);
   const bills = Math.max(0, Math.round(Number(u.billsCount) || 0));
-  const parts = [hours > 0 ? `${hours} h` : "", bills > 0 ? `${bills} ${bills === 1 ? "bill" : "bills"}` : ""].filter(Boolean);
+  const takes = Math.max(0, Math.round(Number(u.stockCount) || 0));
+  const parts = [
+    hours > 0 ? `${hours} h` : "",
+    bills > 0 ? `${bills} ${bills === 1 ? "bill" : "bills"}` : "",
+    takes > 0 ? (takes === 1 ? "1 take from stock" : `${takes} takes from stock`) : "",
+  ].filter(Boolean);
   if (!parts.length) return null;
-  const amount = r2((Number(u.laborAmount) || 0) + (Number(u.billsBilled) || 0));
+  const amount = r2((Number(u.laborAmount) || 0) + (Number(u.billsBilled) || 0) + (Number(u.stockBilled) || 0));
   return `${parts.join(" and ")} (${formatCurrency(amount)})`;
 }
 

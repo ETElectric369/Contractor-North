@@ -28,6 +28,7 @@ import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
+import { parseShelf } from "@/lib/stock-take";
 import { readBillShelfOff } from "@/lib/job-cost";
 import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
@@ -432,8 +433,14 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inventory",
     description:
-      "List the SHOP SHELF's items by name (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record, never typed. There is no way yet to put a roll on the shelf or take pieces off it in the app (it comes in the next update), so never offer to add or adjust stock. Use for 'what's running low', 'how many breakers do I have', 'what's on the shelf'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+      "The office's view of the SHOP SHELF's items (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record, never typed; never offer to type a count over it. For what the shelf holds and what it's worth, and for anyone on the crew, use list_shelf. Pieces come off the shelf with Took From Stock (stock.take fills the card; the person taps Take It). Use for 'what's running low', 'what's below its reorder point'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
+  },
+  {
+    name: "list_shelf",
+    description:
+      "What is ON THE SHOP SHELF: each item's id, name, unit and how many are on hand (the shelf's own record, never typed). Open to everyone. For the office it also gives what each item's pieces are worth (value, from the rolls' receipts); the crew never gets a cost, and you never say one to them. Use for 'what's on the shelf', 'do we have 12/2 in stock', 'how much wire nut is left', and before stock.take when you're unsure which item they mean. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+    input_schema: { type: "object", properties: { search: { type: "string", description: "Part of the item's name, e.g. '12/2'." }, limit: { type: "integer", description: "Max rows (default 30, max 40)." } } },
   },
   {
     name: "list_petty_cash",
@@ -1157,6 +1164,56 @@ export async function runDataTool(
         }));
         if (input.low_only) rows = rows.filter((r: any) => r.low);
         return JSON.stringify({ count: rows.length, items: rows });
+      }
+
+      case "list_shelf": {
+        // THE SHELF FOR EVERYONE (Shop Stock, Phase 3). The crew's view is shelf_for_crew (0302:
+        // names, units, counts, never a cost), and it is everyone's base read here too, so the list
+        // is the same list the Took From Stock sheet shows. The office alone gets `value`: what the
+        // live rolls' pieces are worth, off their receipts (stock_lot_balance, staff-only under RLS,
+        // and read with the caller's org said out loud).
+        const lim = clampLimit(input.limit, 30);
+        const s = String(input.search ?? "").trim().toLowerCase().slice(0, 80);
+        const { data: shelfRaw, error: shelfErr } = await supabase.rpc("shelf_for_crew");
+        if (shelfErr) throw shelfErr;
+        let rows = parseShelf(shelfRaw);
+        if (s) rows = rows.filter((r) => r.name.toLowerCase().includes(s));
+        rows = rows.slice(0, lim);
+        if (!rows.length) {
+          return JSON.stringify({
+            count: 0,
+            items: [],
+            note: s ? `Nothing on the shelf matches "${sanitize(s)}". Say so; do not guess.` : "Nothing is on the shelf yet. Say so plainly; nothing here is a count.",
+          });
+        }
+        const { data: auth } = await supabase.auth.getUser();
+        const userId: string | null = auth?.user?.id ?? null;
+        const { data: me } = userId ? await supabase.from("profiles").select("role, org_id").eq("id", userId).maybeSingle() : { data: null };
+        const staff = isStaffRole((me as { role?: string } | null)?.role);
+        const orgId = (me as { org_id?: string | null } | null)?.org_id ?? null;
+        const value = new Map<string, number>();
+        if (staff && orgId) {
+          const { data: lots, error: lotErr } = await supabase
+            .from("stock_lot_balance")
+            .select("item_id, cost_left")
+            .eq("org_id", orgId)
+            .eq("live", true)
+            .in("item_id", rows.map((r) => r.id));
+          if (lotErr) throw lotErr;
+          for (const l of (lots ?? []) as { item_id: string; cost_left: unknown }[]) value.set(l.item_id, money((value.get(l.item_id) ?? 0) + Number(l.cost_left ?? 0)));
+        }
+        return JSON.stringify({
+          count: rows.length,
+          items: rows.map((r) => ({
+            item_id: r.id, // stock.take takes the item by name; this is for the office's own reads
+            name: r.name,
+            on_hand: r.onHand,
+            unit: r.unit,
+            ...(r.onHand < 0 ? { note: "More was taken than the shelf showed; the office will recount." } : {}),
+            ...(staff ? { value: value.get(r.id) ?? 0 } : {}),
+          })),
+          how_to_take: "A take is Took From Stock: call stock.take with the job and the item; it fills the card and the person taps Take It.",
+        });
       }
 
       case "list_petty_cash": {
@@ -2038,6 +2095,10 @@ export async function runDataTool(
                 // A supplier return no invoice has credited yet (INV-078): what comes OFF the
                 // customer's next bill, marked up like the parts were. `total` is already net of it.
                 ...(unbilled.returnsCount ? { returns_credit: unbilled.returnsCredit, returns_count: unbilled.returnsCount } : {}),
+                // Pieces taken from stock no invoice holds yet (one line each, same markup), and
+                // pieces taken past the shelf that can't be billed until their roll is filed.
+                ...(unbilled.stockCount ? { stock_billed: unbilled.stockBilled, stock_takes: unbilled.stockCount } : {}),
+                ...(unbilled.stockShortsWords ? { stock_not_billable_yet: unbilled.stockShortsWords } : {}),
                 total: unbilled.total,
                 last_invoice_number: unbilled.lastInvoiceNumber,
                 by_person: unbilled.laborByPerson,

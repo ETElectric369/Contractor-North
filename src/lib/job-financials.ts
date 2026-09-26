@@ -2,6 +2,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { billedWorkOnInvoices, computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
 import { readJobBillsWithLines, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { readJobStock } from "@/lib/stock-billing";
 
 export type { JobProgressFinancials };
 
@@ -25,7 +26,7 @@ export async function jobProgressFinancials(
 ): Promise<JobProgressFinancials> {
   const orgId = scope?.orgId ?? null;
   const pin = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
-  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }] =
+  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }, stock] =
     await Promise.all([
       pin(supabase.from("jobs").select("billing_type").eq("id", jobId)).maybeSingle(),
       pin(supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId)),
@@ -43,6 +44,11 @@ export async function jobProgressFinancials(
       orgId
         ? supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
         : supabase.from("organizations").select("settings").maybeSingle(),
+      // The pieces taken from stock onto the job, billed or not (Shop Stock, Phase 3): a fixed-price
+      // job's work to date is everything worked. Staff through RLS, the service role pinned to its
+      // org; a lost read throws like the receipts. (Time & Material reads them through
+      // tmWorkToDate: a billed take is its invoice line, an open one is in unbilledWorkForJob.)
+      readJobStock(supabase, jobId, scope),
     ]);
 
   // A failed receipt read is tolerated here exactly as the quotes/invoices reads beside it are
@@ -82,6 +88,7 @@ export async function jobProgressFinancials(
     bills: billsRead.data as any,
     markupPercent,
     tmWork,
+    stockTakes: stock.takes,
   });
 }
 

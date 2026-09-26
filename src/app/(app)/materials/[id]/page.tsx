@@ -14,6 +14,8 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { materialListSectionTree } from "@/lib/nav-tree";
 import { canonicalMaterialListId, deleteMaterialList } from "../actions";
+import { TookFromStock } from "../took-from-stock";
+import { jobTakes } from "@/lib/stock-ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +52,7 @@ export default async function MaterialListPage({
   // Pull the org's jobs (RLS-scoped) so the edit control can re-link this list —
   // staff only; a tech has no relink control, so his page doesn't pay for the read.
   // The canonical-list read rides the same wave rather than adding a fourth serial trip.
-  const [{ data: items }, { data: jobs }, canonical] = await Promise.all([
+  const [{ data: items }, { data: jobs }, canonical, takes] = await Promise.all([
     supabase
       .from("material_list_items")
       .select(viewerIsStaff ? "*" : TECH_ITEM_COLUMNS)
@@ -64,6 +66,8 @@ export default async function MaterialListPage({
           .limit(100)
       : Promise.resolve({ data: null }),
     jobId ? canonicalMaterialListId(jobId) : Promise.resolve({ id: null as string | null }),
+    // The job's takes from stock (0344), for the Took From Stock door under the list. No cost.
+    jobId ? jobTakes(supabase, jobId) : Promise.resolve({ takes: [], missing: true, error: null }),
   ]);
 
   // A list with no job is a quote's take-off or a work order's sheet — office paper.
@@ -199,6 +203,9 @@ export default async function MaterialListPage({
         </div>
       ) : (
         <div className="space-y-3">
+          {/* TOOK FROM STOCK (Phase 3): the job's list is a job's, so the shelf door rides here too,
+              the same button and the same takes as the job's Materials tab. */}
+          {jobId && <TookFromStock jobId={jobId} takes={takes.takes} viewerIsStaff={viewerIsStaff} />}
           {/* THE SAME editor for both roles (Erik, 2026-09-11) — viewerIsStaff only
               strips the money. My Day's "Materials" button lands a clocked-in tech
               right here, so the ask-the-office door rides under the list here too,

@@ -41,6 +41,7 @@ import { groupJobCosts } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
 import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
+import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -90,6 +91,8 @@ import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { readJobShelfNet, splitJobMaterialCost } from "@/lib/job-cost";
+import { jobTakes } from "@/lib/stock-ledger";
+import { TookFromStock } from "../../materials/took-from-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
 
@@ -183,6 +186,9 @@ export default async function JobDetailPage({
   // THE SHELF'S PART OF THIS JOB'S MATERIALS (Shop Stock, 0303), started beside the reads below.
   // Staff only through RLS: a tech reads no rows here, and reads no bills either.
   const shelfNetP = readJobShelfNet(supabase, id);
+  // THE JOB'S TAKES FROM STOCK (Phase 3, 0344): for the crew and the office, never a cost. Started
+  // here too; it needs only the job id.
+  const takesP = jobTakes(supabase, id);
 
   const [
     { data: quotes },
@@ -373,6 +379,7 @@ export default async function JobDetailPage({
     panelCount,
     tmWork,
     papers,
+    jobStock,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -500,6 +507,23 @@ export default async function JobDetailPage({
           return null;
         })
       : Promise.resolve([]),
+    // THE JOB'S TAKES FROM STOCK (Shop Stock, Phase 3), read once for two things: the pieces taken
+    // past the shelf, said before an invoice is built (New Invoice and Progress Payment carry the
+    // sentence beside the button), and the takes themselves, which are a FIXED-PRICE job's work to
+    // date exactly as the invoice page and the /print report count them (jobProgressFinancials). A
+    // Time & Material job's takes are in tmWork above (billed ones as their lines, open ones in
+    // unbilledWorkForJob), never counted a second way here. Staff only (a tech's page reads no stock
+    // and builds no invoice). A lost read is SAID (stockReadFailed below): a fixed-price job's work to
+    // date can't be totalled without it, exactly as jobProgressFinancials throws on /i and /print.
+    viewerIsStaff
+      ? readJobStock(supabase, id).then(
+          (s) => s,
+          (e) => {
+            reportError("jobs.[id].stock", e, { jobId: id });
+            return null;
+          },
+        )
+      : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -660,6 +684,9 @@ export default async function JobDetailPage({
    */
   const shelf = await shelfNetP;
   if (shelf.error) throw shelf.error;
+  // A takes read that fails leaves the list empty and is logged; the button still works.
+  const takes = await takesP;
+  if (takes.error) reportError("jobs.page.stockTakes", takes.error, { jobId: id });
   const jobMaterials = splitJobMaterialCost(
     (bills ?? []).reduce((s: number, b: any) => s + Number(b.amount ?? 0), 0),
     shelf.byJob.get(id),
@@ -685,9 +712,20 @@ export default async function JobDetailPage({
     bills: (bills ?? []) as any,
     markupPercent: materialMarkup,
     tmWork: tmWork === "failed" ? null : tmWork,
+    stockTakes: jobStock?.takes ?? [],
   });
-  // null = a T&M total that could not be read: the modal says so instead of showing a number.
-  const workedToDate: number | null = tmWork === "failed" ? null : progress.workToDate;
+  // Staff read the takes; null for staff means the read failed (a database without the shelf reads
+  // as no takes, never null). Never a smaller number in silence.
+  const stockReadFailed = viewerIsStaff && jobStock === null;
+  // null = a total that could not be read: the modal says so instead of showing a number. A T&M
+  // total is tmWork's; a fixed-price one counts the takes, so a lost stock read can't be totalled.
+  const workedToDate: number | null =
+    tmWork === "failed" || (stockReadFailed && progress.billingType !== "tm") ? null : progress.workToDate;
+  const stockShortsWords = jobStock
+    ? stockShortsSentence(jobStock.shorts)
+    : stockReadFailed
+      ? "The pieces taken from stock couldn't be read just now, so any taken past the shelf aren't named here. Reload to try again."
+      : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
@@ -1314,20 +1352,23 @@ export default async function JobDetailPage({
                       <UnbilledDoorButton jobId={j.id} work={unbilled} openDraft={openDraft} lumpToNet={lumpToNet} />
                       {/* What else the button bills, said, so its figure never reads as a typo
                           beside the bills' cost: the open time, and the markup on the bills. */}
-                      {(unbilled.hours > 0 || (unbilled.billsCount > 0 && unbilled.markupPct > 0)) && (
+                      {(unbilled.hours > 0 || ((unbilled.billsCount > 0 || unbilled.stockCount > 0) && unbilled.markupPct > 0)) && (
                         <p className="text-sm text-slate-500">
                           {[
                             unbilled.hours > 0
                               ? `Also not billed yet: ${formatDuration(unbilled.hours)} of time, ${formatCurrency(unbilled.laborAmount)}.`
                               : null,
-                            unbilled.billsCount > 0 && unbilled.markupPct > 0
-                              ? `Bills go on the invoice at +${unbilled.markupPct}%.`
+                            (unbilled.billsCount > 0 || unbilled.stockCount > 0) && unbilled.markupPct > 0
+                              ? `${unbilled.billsCount > 0 && unbilled.stockCount > 0 ? "Bills and pieces from stock go" : unbilled.stockCount > 0 ? "Pieces from stock go" : "Bills go"} on the invoice at +${unbilled.markupPct}%.`
                               : null,
                           ]
                             .filter(Boolean)
                             .join(" ")}
                         </p>
                       )}
+                      {/* Pieces taken past the shelf with no roll behind them: not in the pile and
+                          not on the next bill until settled. Said here too, never silent. */}
+                      {unbilled.stockShortsWords && <p className="text-sm text-amber-700">{unbilled.stockShortsWords}</p>}
                     </div>
                   ) : null
                 }
@@ -1450,6 +1491,10 @@ export default async function JobDetailPage({
               viewerIsStaff=false hides est_cost / vendor / is_tool / the total inside the editor,
               and a DB trigger pins those columns, so the UI is a convenience, not the boundary.
               This replaces the read-only <ul> a tech used to get. */}
+          {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
+              it who took what off the shelf for this job, with Undo until an invoice bills it. It
+              counts on the job the moment it is tapped (Erik's decision 3). No price, for anyone. */}
+          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} />
           <ItemEditor
             listId={canonicalList?.id ?? null}
             jobId={j.id}
@@ -1523,8 +1568,11 @@ export default async function JobDetailPage({
               only do Progress payment) next to the progress/payment hub. */}
           <div className="flex flex-wrap justify-end gap-2">
             {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} warning={stockShortsWords} />
           </div>
+          {/* Pieces taken past the shelf: said at the two buttons that build an invoice, BEFORE the
+              tap, because the invoice they build leaves those pieces off (Shop Stock, Phase 3). */}
+          {stockShortsWords && <p className="text-right text-sm text-amber-700">{stockShortsWords}</p>}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (

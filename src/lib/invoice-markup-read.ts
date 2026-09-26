@@ -2,7 +2,8 @@ import "server-only";
 
 import { reportError } from "@/lib/observe";
 import type { BillLine } from "@/lib/bill-itemisation";
-import { markupReading, type InvoiceCostLine, type MarkupReading } from "@/lib/invoice-markup";
+import { markupReading, type InvoiceCostLine, type MarkupReading, type StockTakeSample } from "@/lib/invoice-markup";
+import { readJobStock } from "@/lib/stock-billing";
 
 /**
  * THE READS BEHIND "WHAT IS THIS INVOICE PRICED AT", IN ONE PLACE (2026-09-25).
@@ -29,6 +30,9 @@ export type InvoiceMarkupSources = {
   bills: readonly { id: string; amount: unknown }[];
   pos: readonly { id: string; total: unknown }[];
   linesByBill: ReadonlyMap<string, BillLine[]>;
+  /** The job's takes from stock, when the caller already read them (the importer). Absent, they
+   *  are read here - and only when a line of this invoice is a take's (key stock:<group>). */
+  takes?: readonly StockTakeSample[];
 };
 
 export type InvoiceMarkupRead = { ok: true; reading: MarkupReading } | { ok: false; error: string };
@@ -136,6 +140,19 @@ export async function readInvoiceMarkup(
     };
   }
 
+  // THE TAKES FROM STOCK get a vote too (see markupReading). Read only when a line is a take's, so
+  // an invoice with no stock on it reads exactly what it read before. A lost read is not "no takes":
+  // a stock-only invoice would read "none" and be repriced at the usual, so it refuses like the rest.
+  let takes = src.takes;
+  if (!takes && lines.some((l) => String(l.import_key ?? "").startsWith("stock:"))) {
+    try {
+      takes = (await readJobStock(supabase, jobId)).takes;
+    } catch (e) {
+      reportError("invoiceMarkup.read", e, { invoiceId, jobId, what: "stock" });
+      return { ok: false, error: READ_FAILED };
+    }
+  }
+
   return {
     ok: true,
     reading: markupReading({
@@ -144,6 +161,7 @@ export async function readInvoiceMarkup(
       bills: src.bills,
       linesByBill: src.linesByBill,
       pos: src.pos,
+      takes: takes ?? [],
     }),
   };
 }

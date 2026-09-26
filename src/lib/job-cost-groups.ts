@@ -18,11 +18,16 @@
  */
 
 import type { ClaimantInvoice, CostRowVerdict, NothingToBill } from "@/lib/unbilled-work";
+import { STOCK_NO_COST_FIX } from "@/lib/stock-billing";
 import { formatCurrency } from "@/lib/utils";
 
-export type CostRow = { id: string; kind: "bill" | "po"; amount: number };
+export type CostRow = { id: string; kind: "bill" | "po" | "stock"; amount: number };
 
-export type CostPile = { ids: string[]; bills: number; pos: number; total: number };
+/** `takes`: pieces taken from stock (Shop Stock, Phase 3), one invoice line each. */
+export type CostPile = { ids: string[]; bills: number; pos: number; takes: number; total: number };
+
+/** A take from stock as the tab lists it: no bill row stands behind it, so its words ride here. */
+export type StockPileRow = { label: string; cost: number; takenAt: string };
 
 export type BilledGroup = CostPile & {
   invoice: ClaimantInvoice;
@@ -32,21 +37,24 @@ export type BilledGroup = CostPile & {
 };
 
 export type JobCostGroups = {
-  /** Its total is what the next bill picks up before markup (billsAmount − returnsAmount), not the
-   *  bills' face value: a line that is the company's own is not in it. */
+  /** Its total is what the next bill picks up before markup (billsAmount − returnsAmount +
+   *  stockAmount), not the bills' face value: a line that is the company's own is not in it. */
   open: CostPile;
   /** Open rows whose face value is more than the next bill picks up: id → dollars that stay the
    *  company's own. Said on the row, so the pile's total never reads as a typo. */
   openOwn: Record<string, number>;
   billed: BilledGroup[];
   nothing: { id: string; why: NothingToBill }[];
+  /** The takes from stock in any pile, by verdict id ("stock:<draw_group>"): their words and cost. */
+  stock: Record<string, StockPileRow>;
 };
 
 const cents = (n: number) => Math.round(n * 100) / 100;
-const pile = (): CostPile => ({ ids: [], bills: 0, pos: 0, total: 0 });
+const pile = (): CostPile => ({ ids: [], bills: 0, pos: 0, takes: 0, total: 0 });
 const add = (p: CostPile, r: CostRow, amount: number = Number(r.amount) || 0) => {
   p.ids.push(r.id);
   if (r.kind === "po") p.pos += 1;
+  else if (r.kind === "stock") p.takes += 1;
   else p.bills += 1;
   p.total = cents(p.total + amount);
 };
@@ -56,6 +64,9 @@ const add = (p: CostPile, r: CostRow, amount: number = Number(r.amount) || 0) =>
  * verdicts were read (the page reads the list and the figure side by side), so no invoice can hold
  * it yet: it is open. An ORDER with no verdict is not a live cost (a draft, a cancelled one, or one
  * a bill replaced) and belongs to no pile; the purchase orders list below still shows it.
+ *
+ * A TAKE FROM STOCK has no bill row: its verdict carries its own words and cost, so every stock
+ * verdict is a row here (open, folded under the invoice that holds it, or nothing to bill).
  */
 export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostRowVerdict[], jobId: string | null = null): JobCostGroups {
   const byId = new Map(verdicts.map((v) => [v.id, v] as const));
@@ -63,7 +74,14 @@ export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostR
   const openOwn: Record<string, number> = {};
   const billed = new Map<string, BilledGroup>();
   const nothing: JobCostGroups["nothing"] = [];
-  for (const r of rows) {
+  const stock: Record<string, StockPileRow> = {};
+  const stockRows: CostRow[] = [];
+  for (const v of verdicts) {
+    if (v.kind !== "stock") continue;
+    stock[v.id] = { label: v.label, cost: v.cost, takenAt: v.takenAt };
+    stockRows.push({ id: v.id, kind: "stock", amount: v.cost });
+  }
+  for (const r of [...rows.filter((x) => x.kind !== "stock"), ...stockRows]) {
     const v = byId.get(r.id);
     if (!v) {
       if (r.kind === "bill") add(open, r);
@@ -94,16 +112,19 @@ export function groupJobCosts(rows: readonly CostRow[], verdicts: readonly CostR
     openOwn,
     billed: [...billed.values()].sort((a, b) => b.invoice.created_at.localeCompare(a.invoice.created_at)),
     nothing,
+    stock,
   };
 }
 
-/** "3 bills", "1 PO", "2 bills · 1 PO". */
-export function pileCount(p: Pick<CostPile, "bills" | "pos">): string {
-  const bills = `${p.bills} ${p.bills === 1 ? "bill" : "bills"}`;
-  const pos = `${p.pos} ${p.pos === 1 ? "PO" : "POs"}`;
-  if (!p.pos) return bills;
-  if (!p.bills) return pos;
-  return `${bills} · ${pos}`;
+/** "3 bills", "1 PO", "2 bills · 1 PO", "1 bill · 2 from stock", "0 bills" when the pile is empty. */
+export function pileCount(p: Pick<CostPile, "bills" | "pos"> & { takes?: number }): string {
+  const takes = p.takes ?? 0;
+  const parts = [
+    p.bills || (!p.pos && !takes) ? `${p.bills} ${p.bills === 1 ? "bill" : "bills"}` : null,
+    p.pos ? `${p.pos} ${p.pos === 1 ? "PO" : "POs"}` : null,
+    takes ? `${takes} from stock` : null,
+  ];
+  return parts.filter(Boolean).join(" · ");
 }
 
 /** The invoice a Billed row is folded under: "INV-081 (draft)", "INV-058 (J-021)". */
@@ -123,5 +144,7 @@ export function nothingToBillWhy(why: NothingToBill): string {
   if (why === "po_billed") return "Its PO is already billed";
   if (why === "own_cost") return "All of it is your own cost";
   if (why === "own_return") return "A return of parts the customer was never billed for";
+  // Nothing re-costs a take once it is drawn, so the words name only the door that works.
+  if (why === "stock_no_cost") return `Its roll has no cost on it, so it isn't billed - ${STOCK_NO_COST_FIX}`;
   return "Nothing on it to bill";
 }

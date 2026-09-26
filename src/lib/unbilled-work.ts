@@ -23,6 +23,7 @@ import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkup
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { lumpDrawAmount } from "@/lib/invoice-math";
+import { markStock, readJobStock, stockCostLabel, stockKey, stockShortsSentence, stockTotals, unclaimedTakes, type StockShort, type StockTake } from "@/lib/stock-billing";
 
 /** The contract every consumer reads (job overview, Nort, the progress-draw builder). */
 export type UnbilledWork = {
@@ -58,8 +59,20 @@ export type UnbilledWork = {
   returnsCount: number;
   /** returnsAmount with markup, positive: what comes OFF the customer's next bill. */
   returnsCredit: number;
-  /** laborAmount + billsBilled − returnsCredit. Can be below zero when a return is all that is
-   *  pending: the customer is owed money, and the card says so. */
+  /** Pieces taken from stock onto this job (Took From Stock) that no invoice holds yet: how many
+   *  takes (one invoice line each), what they cost the company as the database stamped them, and
+   *  what the customer would be billed at the same markup as the bills. A short (taken past the
+   *  shelf, no roll behind it yet) is never in these: it is `stockShorts`. Staff only - a tech's
+   *  session reads no stock at all (RLS), and the page projects a tech's view to hours. */
+  stockCount: number;
+  stockAmount: number;
+  stockBilled: number;
+  /** Pieces taken past the shelf and not settled yet: not billable until a roll is filed. */
+  stockShorts: number;
+  /** The one sentence that says so, or null. Shown wherever an invoice is about to be built. */
+  stockShortsWords: string | null;
+  /** laborAmount + billsBilled + stockBilled − returnsCredit. Can be below zero when a return is
+   *  all that is pending: the customer is owed money, and the card says so. */
   total: number;
   /** The job's most recent non-void invoice (any status, drafts included), or null when there is none. */
   lastInvoiceNumber: string | null;
@@ -83,6 +96,10 @@ export type UnbilledWork = {
    *   billed   a non-void invoice claims it (a DRAFT counts: the row is on that draft)
    *   nothing  on no invoice and never going on one: its PO was billed, it is $0, every line of it
    *            is the company's own, or it is a return of parts the customer was never billed for
+   * A TAKE FROM STOCK (Shop Stock, Phase 3) gets its verdict in the same loop as the figure it is
+   * counted in (stockCount / stockAmount): open when no invoice holds it, billed on the invoice
+   * that holds any of its moves (a take bills whole), nothing when its roll has no cost on it.
+   * It carries its own words, because no bill row stands behind it on the tab.
    */
   costRows: CostRowVerdict[];
 };
@@ -94,11 +111,25 @@ export type CostRowVerdict =
    *  the row's amount when lines on it are the company's own. */
   | { id: string; kind: "bill" | "po"; state: "open"; cost: number }
   | { id: string; kind: "bill" | "po"; state: "billed"; invoice: ClaimantInvoice }
-  | { id: string; kind: "bill" | "po"; state: "nothing"; why: NothingToBill };
+  | { id: string; kind: "bill" | "po"; state: "nothing"; why: NothingToBill }
+  | StockCostVerdict;
+
+/**
+ * One take from stock on the Costs tab. `id` is its import key (stockKey: "stock:<draw_group>"), so
+ * it never collides with a bill or an order. `label` is the office's words for it ("From Stock ·
+ * 12/2 NM-B, 40 ft"), `cost` what the pieces cost the company as the database stamped them (before
+ * markup, like every other verdict's cost), `takenAt` when it came off the shelf.
+ */
+export type StockCostVerdict = { id: string; kind: "stock"; label: string; cost: number; takenAt: string } & (
+  | { state: "open" }
+  | { state: "billed"; invoice: ClaimantInvoice }
+  | { state: "nothing"; why: "stock_no_cost" }
+);
 
 /** Why a row is on no invoice and never goes on one. `own_return`: a supplier return of parts the
- *  customer was never billed for (every line switched off), so no credit is owed (INV-078). */
-export type NothingToBill = "po_billed" | "own_cost" | "own_return" | "zero";
+ *  customer was never billed for (every line switched off), so no credit is owed (INV-078).
+ *  `stock_no_cost`: a take whose roll has no cost on it, which the importer leaves off and names. */
+export type NothingToBill = "po_billed" | "own_cost" | "own_return" | "zero" | "stock_no_cost";
 
 export type ClaimantInvoice = {
   id: string;
@@ -318,6 +349,8 @@ export type UnbilledInput = {
   pos: (MaterialPo & { id: string })[];
   bills: (MaterialBill & { id: string })[];
   markupPct: number;
+  /** The job's live takes from stock and unsettled shorts (readJobStock). Absent = none. */
+  stock?: { takes: StockTake[]; shorts: StockShort[] };
 };
 
 /**
@@ -432,6 +465,26 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     costRows.push({ id: b.id, kind: "bill", state: "open", cost });
   }
 
+  // PIECES TAKEN FROM STOCK (Shop Stock, Phase 3): each take no invoice holds, at the same markup
+  // as the bills, rounded per take exactly as the importer writes one line per take. A take any of
+  // whose moves another invoice claims is billed there, whole (unclaimedTakes), and counted with the
+  // other rows another invoice already holds.
+  const takes = unclaimedTakes(input.stock?.takes ?? [], claimed);
+  const stockVerdict = (t: StockTake) => ({ id: stockKey(t.group), kind: "stock" as const, label: stockCostLabel(t), cost: t.cost, takenAt: t.takenAt });
+  for (const t of takes.held) {
+    const holder = t.moveIds.find((id) => claimed.has(id));
+    if (holder) {
+      skippedIds.push(holder);
+      costRows.push({ ...stockVerdict(t), state: "billed", invoice: input.claims.owner.get(holder)! });
+    }
+  }
+  const stock = stockTotals(takes.free, markupPct);
+  // The same test stockTotals and the importer make (markStock > 0), per take, so the open rows are
+  // exactly the ones stockCount counted and the zero-cost ones are the ones the importer names.
+  for (const t of takes.free)
+    costRows.push(markStock(t.cost, markupPct) > 0 ? { ...stockVerdict(t), state: "open" } : { ...stockVerdict(t), state: "nothing", why: "stock_no_cost" });
+  const shorts = input.stock?.shorts ?? [];
+
   const last = input.claims.invoices[0] ?? null;
   return {
     hours,
@@ -445,7 +498,12 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     returnsAmount,
     returnsCount,
     returnsCredit,
-    total: cents(laborAmount + billsBilled - returnsCredit),
+    stockCount: stock.count,
+    stockAmount: stock.cost,
+    stockBilled: stock.billed,
+    stockShorts: shorts.length,
+    stockShortsWords: stockShortsSentence(shorts),
+    total: cents(laborAmount + billsBilled + stock.billed - returnsCredit),
     lastInvoiceNumber: last?.invoice_number ?? null,
     lastInvoiceAt: last?.created_at ?? null,
     lastInvoiceStatus: last?.status ?? null,
@@ -475,7 +533,7 @@ export type CustomerUnbilled = {
   hours: number;
   laborByPerson: { name: string; hours: number; amount: number }[];
   laborAmount: number;
-  /** Materials not billed yet, at the customer's price. */
+  /** Materials not billed yet, at the customer's price: the bills and the pieces taken from stock. */
   materials: number;
   /** Supplier returns not credited yet, at the customer's price, as a positive figure. */
   returnsCredit: number;
@@ -487,7 +545,7 @@ export function customerUnbilled(u: UnbilledWork): CustomerUnbilled {
     hours: u.hours,
     laborByPerson: u.laborByPerson.map((p) => ({ name: p.name, hours: p.hours, amount: p.amount })),
     laborAmount: u.laborAmount,
-    materials: u.billsBilled,
+    materials: cents(u.billsBilled + (u.stockBilled ?? 0)),
     returnsCredit: u.returnsCredit,
     total: u.total,
   };
@@ -564,7 +622,7 @@ export async function unbilledWorkForJob(
   const orgId = scope?.orgId ?? null;
   let posQ = supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId);
   if (orgId) posQ = posQ.eq("org_id", orgId);
-  const [labor, { data: org }, levelRate, { data: pos }, billsRead] = await Promise.all([
+  const [labor, { data: org }, levelRate, { data: pos }, billsRead, stock] = await Promise.all([
     fetchJobLaborRows(supabase, jobId, scope),
     orgId
       ? supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
@@ -574,6 +632,9 @@ export async function unbilledWorkForJob(
     posQ,
     // The receipts WITH their lines — see readJobBillsWithLines.
     readJobBillsWithLines(supabase, jobId, scope),
+    // The pieces taken from stock onto the job (staff through RLS; the portal pinned to its org).
+    // A lost read throws, like the receipts: "no pieces" would be a money statement nobody made.
+    readJobStock(supabase, jobId, scope),
   ]);
   // A LOST RECEIPT READ IS NOT AN EMPTY JOB. Reporting $0 of material because a query failed is a
   // money statement nobody made, and this figure is what the draw gate bills from; the claim read
@@ -583,7 +644,12 @@ export async function unbilledWorkForJob(
   const settings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   // Claims AFTER the rows, never beside them: the read wants every candidate id so a row billed on
   // another job (moved since) is still seen as claimed. The markup resolver rides along.
-  const candidates = [...laborRowIds(labor), ...((pos ?? []) as { id: string }[]).map((p) => String(p.id)), ...bills.map((b) => String(b.id))];
+  const candidates = [
+    ...laborRowIds(labor),
+    ...((pos ?? []) as { id: string }[]).map((p) => String(p.id)),
+    ...bills.map((b) => String(b.id)),
+    ...stock.takes.flatMap((t) => t.moveIds),
+  ];
   const [claims, markupPct] = await Promise.all([
     claimedSourcesOnJob(supabase, jobId, null, candidates, scope),
     customerMaterialMarkupForJob(supabase, jobId, settings.material_markup_percent),
@@ -597,6 +663,7 @@ export async function unbilledWorkForJob(
     pos: (pos ?? []) as (MaterialPo & { id: string })[],
     bills,
     markupPct,
+    stock,
   });
 }
 
