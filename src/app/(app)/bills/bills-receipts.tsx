@@ -259,7 +259,7 @@ export function BillsReceipts({
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <div className="col-span-2 sm:col-span-1">
                   <Label htmlFor="b-supplier">Supplier *</Label>
-                  <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED" />
+                  <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Main Street Supply" />
                 </div>
                 <div>
                   <Label htmlFor="b-job">Job</Label>

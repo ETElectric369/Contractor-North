@@ -373,7 +373,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // 4-8. Housekeeping and the import -> More
   { door: /^More · /, was: "(new fold)", home: "more" },
   { door: "Import Supplier Invoices", was: "Import fold", home: "more" },
-  { door: "Choose CED PDFs", was: "Import fold", home: "more" },
+  { door: "Choose Supplier PDFs", was: "Import fold", home: "more" },
   { door: "Paste Text Instead", was: "Import fold", home: "more" },
   { door: "Import Documents", was: "Import fold", home: "more" },
   { door: /^Accept And (File Them There|Make The Account)$/, was: "Supplier Names That Look Like One Account", home: "more" },

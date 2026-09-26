@@ -554,7 +554,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_purchase_order",
     description:
-      "Read ONE PURCHASE ORDER in full — vendor, status, total, the linked job, and every line item WITH its ordered qty, received_qty, and remaining (still to be delivered). Pass a po_id (from list_purchase_orders). Use for 'what's still outstanding on that PO', 'has the CED order come in'.",
+      "Read ONE PURCHASE ORDER in full — vendor, status, total, the linked job, and every line item WITH its ordered qty, received_qty, and remaining (still to be delivered). Pass a po_id (from list_purchase_orders). Use for 'what's still outstanding on that PO', 'has the supplier order come in'.",
     input_schema: { type: "object", properties: { po_id: { type: "string", description: "The purchase order's id (from list_purchase_orders)." } }, required: ["po_id"] },
   },
   {

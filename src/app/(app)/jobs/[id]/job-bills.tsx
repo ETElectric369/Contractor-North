@@ -231,7 +231,7 @@ export function JobBills({
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
               <Label htmlFor="b-supplier">Supplier *</Label>
-              <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED" />
+              <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Main Street Supply" />
             </div>
             <div>
               <Label htmlFor="b-num">Bill #</Label>

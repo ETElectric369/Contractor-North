@@ -236,7 +236,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose CED PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose Supplier PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
       });
       continue;
     }
@@ -254,7 +254,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   if (!sources.length && !refused.length) {
     return {
       ok: false,
-      error: "Paste the text of a CED invoice first, or pick the files you downloaded from the portal.",
+      error: "Paste the text of a supplier invoice first, or pick the files you downloaded from its portal.",
       ...empty(),
     };
   }
@@ -282,7 +282,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     if (!results.length) {
       refused.push({
         invoiceNumber: null,
-        error: `${source.name ?? "That text"} has no CED invoice number in it, so there was nothing to read.`,
+        error: `${source.name ?? "That text"} has no supplier invoice number in it, so there was nothing to read.`,
       });
       continue;
     }
@@ -324,7 +324,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       ok: false,
       error: refused.length
         ? `Nothing could be read. ${sayList(refused.map((r) => r.error))}`
-        : "Nothing in that looked like a CED invoice.",
+        : "Nothing in that looked like a supplier invoice.",
       ...empty(),
       refused,
     };
@@ -684,7 +684,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     // NOTHING SILENT, AND NOT A DEAD END: the documents are in; this names the PDF that isn't, why,
     // and the way to keep it.
     detail.push(
-      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose CED PDFs to keep the PDF.`,
+      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose Supplier PDFs to keep the PDF.`,
     );
   }
   if (refused.length) {

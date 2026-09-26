@@ -142,7 +142,7 @@ export function ImportCsvModal({ open, onClose }: { open: boolean; onClose: () =
           <label className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center hover:bg-slate-50">
             <FileSpreadsheet className="h-8 w-8 text-slate-400" />
             <span className="text-sm font-medium text-slate-700">Choose a .CSV File</span>
-            <span className="text-xs text-slate-400">e.g. your CED price list export. A “kit” column groups rows into kits.</span>
+            <span className="text-xs text-slate-400">e.g. your supplier&apos;s price list export. A “kit” column groups rows into kits.</span>
             <input type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
           </label>
         ) : (

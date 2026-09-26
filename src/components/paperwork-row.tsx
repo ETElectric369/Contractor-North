@@ -803,14 +803,14 @@ export function PaperworkRow({
                 ) : (
                   <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
                     {busy === "file" ? <Loader2 className="animate-spin" /> : <Check />}{" "}
-                    {toLink.length && r.state === "ready" ? `File It And Link To CED ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It"}
+                    {toLink.length && r.state === "ready" ? `File It And Link To ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It"}
                   </Button>
                 )}
               </>
             )}
             {r.state === "supplier_documents" && (
-              <Button onClick={() => run("ced", () => addSupplierDocuments(item.id), "Added to the CED documents.")} disabled={working}>
-                {busy === "ced" ? <Loader2 className="animate-spin" /> : <BookOpen />} Add To CED Documents
+              <Button onClick={() => run("ced", () => addSupplierDocuments(item.id), "Added to the supplier documents.")} disabled={working}>
+                {busy === "ced" ? <Loader2 className="animate-spin" /> : <BookOpen />} Add To Supplier Documents
               </Button>
             )}
             {r.state === "not_read" && (

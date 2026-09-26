@@ -163,7 +163,7 @@ export async function createSupplierAccount(input: {
   if ("error" in org) return { ok: false, error: org.error };
 
   const name = text(input?.name);
-  if (!name) return { ok: false, error: "Give the supplier a name first, like CED Truckee." };
+  if (!name) return { ok: false, error: "Give the supplier a name first, like Main Street Supply." };
 
   const made = await makeAccount(ctx.supabase, org.orgId, ctx.userId, {
     name,
@@ -789,7 +789,7 @@ export async function acceptSupplierMerge(input: {
   const supabase = ctx.supabase;
 
   const name = text(input?.name);
-  if (!name) return { ok: false, error: "Give the account a name you will recognise, like CED Truckee." };
+  if (!name) return { ok: false, error: "Give the account a name you will recognise, like Main Street Supply." };
 
   const wanted = (input?.spellings ?? []).map((s) => ({ alias: String(s?.alias ?? "").trim(), branchLabel: text(s?.branchLabel) })).filter((s) => s.alias);
   if (!wanted.length) return { ok: false, error: "There are no supplier names in that suggestion. Reload the page." };

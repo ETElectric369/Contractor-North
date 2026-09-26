@@ -88,7 +88,7 @@ export default async function ShopStockPage({
     // Signal 3: CED documents whose job box names the shelf.
     supabase
       .from("supplier_invoices")
-      .select("id, supplier_account_id, invoice_number, kind, total, job_name_raw")
+      .select("id, supplier_account_id, invoice_number, kind, total, job_name_raw, supplier_accounts(name)")
       .eq("org_id", orgId)
       .eq("kind", "invoice")
       .or("job_name_raw.ilike.%stock%,job_name_raw.ilike.%inventory%")
@@ -304,6 +304,7 @@ export default async function ShopStockPage({
         total: d.total,
         words: String(d.job_name_raw ?? "").trim(),
         accountId: d.supplier_account_id ? String(d.supplier_account_id) : null,
+        supplier: d.supplier_accounts?.name ?? null,
         home,
       },
     ];
@@ -392,7 +393,7 @@ export default async function ShopStockPage({
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Put the rest of a roll on the shelf from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Shelf on a CED document. New Item is for something already on the shelf with no receipt here."
+                : "Put the rest of a roll on the shelf from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Shelf on a supplier document. New Item is for something already on the shelf with no receipt here."
           }
         >
           {(lowOnly || q) && (

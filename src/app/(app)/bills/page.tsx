@@ -1282,7 +1282,7 @@ export default async function BillsPage({
               <div className="mt-1 space-y-3">
                 <WhyFold label="What Happens?">
                   <p>
-                    Pick the PDFs from the CED payment portal, as many as you like. Each is checked against its own
+                    Pick the PDFs from your supplier&apos;s payment portal, as many as you like. Each is checked against its own
                     arithmetic before it is saved; anything that does not add up is named and left out. Loading the
                     same download twice changes nothing, and the job you filed a document on is never touched.
                   </p>

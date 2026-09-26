@@ -116,7 +116,7 @@ export function SupplierMergeReview({
     const p = accepting;
     const trimmed = name.trim();
     if (!trimmed) {
-      setSheetError("Give the account a name you will recognise, like CED Truckee.");
+      setSheetError("Give the account a name you will recognise, like Main Street Supply.");
       return;
     }
     setSheetError(null);
@@ -296,7 +296,7 @@ export function SupplierMergeReview({
                 id="merge-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. CED Truckee"
+                placeholder="e.g. Main Street Supply"
                 autoFocus
               />
               <p className="mt-1 text-xs text-slate-400">
@@ -418,7 +418,7 @@ export function SupplierCandidateReview({
     const moving = candidateMoving(q);
     const trimmed = name.trim();
     if (!q.existingAccountId && !trimmed) {
-      setSheetError("Give the account a name you will recognise, like CED Truckee.");
+      setSheetError("Give the account a name you will recognise, like Main Street Supply.");
       return;
     }
     setSheetError(null);
@@ -623,7 +623,7 @@ export function SupplierCandidateReview({
                     id="candidate-name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. CED Truckee"
+                    placeholder="e.g. Main Street Supply"
                     autoFocus
                   />
                   <p className="mt-1 text-xs text-slate-400">

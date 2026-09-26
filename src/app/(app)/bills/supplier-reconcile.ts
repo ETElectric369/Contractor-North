@@ -589,7 +589,7 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
     return {
       verdict: "stock",
       ranked: [],
-      because: "CED booked this to shop stock, not to a job.",
+      because: "The supplier booked this to shop stock, not to a job.",
     };
   }
   if (!isUsableJobName(raw)) {
@@ -598,7 +598,7 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
       // Nothing to rank on, so the order is his jobs as they were handed over. The caller sorts
       // them the way the rest of the app does; inventing an order here would look like a guess.
       ranked: all.map((job) => ({ job, score: 0 })),
-      because: "CED's copy has no job name on it, so there is nothing to go on but your own memory.",
+      because: "The supplier's copy has no job name on it, so there is nothing to go on but your own memory.",
     };
   }
 

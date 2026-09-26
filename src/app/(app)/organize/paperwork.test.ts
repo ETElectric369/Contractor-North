@@ -933,7 +933,7 @@ describe("a CED document with the same number: link it, don't make the person li
       calls,
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
-    expect(res).toEqual({ ok: true, message: "Filed. Linked to CED 8802-1108330." });
+    expect(res).toEqual({ ok: true, message: "Filed. Linked to supplier document 8802-1108330." });
     // The job the person picked is kept, and the cost is a real bill on it.
     expect(did("bills", "insert")!.payload).toMatchObject({ job_id: "job-046", amount: 653.25 });
     // No false "a person checked: a different purchase" note.
@@ -959,7 +959,7 @@ describe("a CED document with the same number: link it, don't make the person li
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Already on the books: CED document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+    expect(res.error).toContain("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
   });
@@ -1016,7 +1016,7 @@ describe("a CED document with the same number: link it, don't make the person li
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("CED 8802-1108330 was just covered by another bill");
+    expect(res.error).toContain("Supplier document 8802-1108330 was just covered by another bill");
     expect(did("bills", "delete")!.eqs).toContainEqual(["id", "bill-2"]);
     expect(lastDid("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", bill_id: null });
   });
@@ -1528,7 +1528,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     const res = await deleteOrganizedItem("oi-9");
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
-    expect(res.message).toContain("8802-2 stayed on the CED documents list");
+    expect(res.message).toContain("8802-2 stayed on the supplier documents list");
     expect(did("organized_items", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
 });
@@ -1973,7 +1973,7 @@ describe("importCedInvoices knows a PDF by its content, never its name", () => {
     const res = await importCedInvoices({ files: [{ name: "statement.txt", text: "%PDF-1.7\n1 0 obj << >>" }] });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("statement.txt reached here as raw PDF bytes");
-    expect(res.error).toContain("Choose CED PDFs");
+    expect(res.error).toContain("Choose Supplier PDFs");
   });
 });
 
@@ -2024,7 +2024,7 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
     const res = await undoPaperwork("oi-5");
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "delete")).toBeUndefined();
-    expect(res.message).toContain("8802-1101363 stayed on the CED documents list");
+    expect(res.message).toContain("8802-1101363 stayed on the supplier documents list");
     expect(all("organized_items", "select")[1].eqs).toContainEqual(["org_id", "org-1"]);
   });
 
@@ -2084,7 +2084,7 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
     const ced = did("organized_items", "insert")!.payload.proposal.ced;
     expect(ced.numbers).toEqual(["8802-1101363"]);
     expect(ced.refused).toEqual([expect.objectContaining({ number: "8802-1101999" })]);
-    expect(res.line).toMatch(/^1 CED document found in it; 1 didn't add up and won't be added: 8802-1101999/);
+    expect(res.line).toMatch(/^1 supplier document found in it; 1 didn't add up and won't be added: 8802-1101999/);
   });
 });
 

@@ -206,11 +206,11 @@ export async function addPaperwork(input: {
 function cedDropLine(p: PaperProposal | null): string {
   const n = p?.ced?.numbers.length ?? 0;
   const refused = p?.ced?.refused ?? [];
-  const found = `${n} CED ${n === 1 ? "document" : "documents"} found in it`;
+  const found = `${n} supplier ${n === 1 ? "document" : "documents"} found in it`;
   const bad = refused.length
     ? `; ${refused.length} didn't add up and won't be added: ${refused.map((r) => r.error).join("; ")}`
     : "";
-  return `${found}${bad}. Waiting below: press Add To CED Documents.`;
+  return `${found}${bad}. Waiting below: press Add To Supplier Documents.`;
 }
 
 /**
@@ -245,7 +245,7 @@ export async function updatePaperwork(
 
   const type = paperTypeOf(fields.doc_type);
   if (fields.doc_type !== undefined && !type) return { ok: false, error: "Pick what kind of paper it is." };
-  if (type === "supplier_documents") return { ok: false, error: "CED documents are recognised from the PDF itself; pick Bill instead." };
+  if (type === "supplier_documents") return { ok: false, error: "Supplier documents are recognised from the PDF itself; pick Bill instead." };
   const amount = fields.amount === null || fields.amount === undefined || (fields.amount as unknown) === "" ? null : Number(fields.amount);
   if (amount !== null && !Number.isFinite(amount)) return { ok: false, error: "The total has to be a number." };
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.item_date ?? "")) ? String(fields.item_date) : null;
@@ -355,13 +355,13 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first." };
   const p = proposalOf(item);
-  if (!p.ced?.text) return { ok: false, error: "No CED documents were found in this paper's text, so there is nothing to add." };
+  if (!p.ced?.text) return { ok: false, error: "No supplier documents were found in this paper's text, so there is nothing to add." };
 
   // THE PDF GOES WITH ITS TEXT: the importer keeps it (once, by content) where Open Bill reads it,
   // so it outlives this tray row (Delete takes the tray's own copy). A download that fails costs
   // only that: the documents still land, and Open Bill still finds this row's copy while it stands.
   const pdf = await downloadPaper(ctx.supabase, item.file_url, ctx.orgId);
-  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "CED PDF"), text: p.ced.text, pdf }] });
+  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "Supplier PDF"), text: p.ced.text, pdf }] });
   if (!result.ok) return { ok: false, error: result.error ?? "Nothing was added." };
   // MERGED, never replaced: a second Add lands nothing (the importer only reports fresh inserts),
   // and overwriting the list with [] left Undo unable to remove what this paper first added.
@@ -382,5 +382,5 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   }
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, message: result.message ?? "Added to the CED documents." };
+  return { ok: true, message: result.message ?? "Added to the supplier documents." };
 }

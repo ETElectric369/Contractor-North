@@ -361,7 +361,7 @@ describe("the self-check refuses rather than half-reads", () => {
     const result = parseCedInvoice("a photo of a receipt, some words, no invoice number anywhere");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatch(/no CED invoice number/i);
+    expect(result.error).toMatch(/no supplier invoice number/i);
     expect(parseCedDocuments("nothing here")).toEqual([]);
   });
 });

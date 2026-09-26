@@ -508,7 +508,7 @@ export function SupplierPaperLists({
                 {actions.recordToShelf && actions.shelfLines && !(invoice.samePurchase?.length && actions.tieToBill) && (
                   <div className="mt-2 space-y-1">
                     {companyUseWord(invoice.jobNameRaw)?.shelf && (
-                      <p className="text-xs text-sky-800">CED wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
+                      <p className="text-xs text-sky-800">{accountName} wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
                     )}
                     <Button variant="outline" className="h-11 w-full" disabled={pending} onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}>
                       {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Shelf"}

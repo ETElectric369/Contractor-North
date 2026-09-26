@@ -188,7 +188,7 @@ export default async function PriceListPage() {
       <PageHeader
         title="Price List"
         description={
-          "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier list (e.g. CED) via CSV." +
+          "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier's list via CSV." +
           // Only said when the tab is actually there — copy never names a control that doesn't exist.
           (optionsAvailable ? " Click any item to give it vendors (the brand or supplier, e.g. Andersen), each with its own cost and sell." : "")
         }

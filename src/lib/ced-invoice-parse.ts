@@ -576,7 +576,7 @@ function readLines(doc: string[], itemsFrom: number, totalsAt: number): CedInvoi
   const price = findLabel(doc, H_PRICE, qtyShipped?.after ?? itemsFrom);
   const extension = findLabel(doc, H_EXTENSION, price?.after ?? itemsFrom);
   if (!productCode || !qtyShipped || !price || !extension) {
-    return { error: "the line item columns are not laid out the way a CED invoice lays them out" };
+    return { error: "the line item columns are not laid out the way this reader expects a supplier invoice" };
   }
 
   const orderedTokens = tokensOf(doc, qtyOrdered.after, productCode.start).filter((t) => NUMBER.test(t));
@@ -686,7 +686,7 @@ function refuseStatement(doc: string[]): CedParseResult {
   return {
     ok: false,
     invoiceNumber: null,
-    error: `A CED monthly statement${which} is a summary of the account, not an invoice, so nothing was read from it. Every invoice it lists has its own document in the portal, and those are what to paste.`,
+    error: `A supplier's monthly statement${which} is a summary of the account, not an invoice, so nothing was read from it. Every invoice it lists has its own document in the portal, and those are what to paste.`,
   };
 }
 
@@ -939,7 +939,7 @@ export function parseCedDocuments(text: string): CedParseResult[] {
 export function parseCedInvoice(text: string): CedParseResult {
   const all = parseCedDocuments(text);
   if (!all.length) {
-    return { ok: false, invoiceNumber: null, error: "no CED invoice number was found in that text" };
+    return { ok: false, invoiceNumber: null, error: "no supplier invoice number was found in that text" };
   }
   if (all.length > 1) {
     const numbers = all.map((r) => (r.ok ? r.invoice.invoiceNumber : r.invoiceNumber ?? "?"));
