@@ -178,6 +178,12 @@ export function settleRefusalWords(msg: string): string {
   return msg.replace(/File the roll or count the shelf first\.?/, "A count can't settle it: file the roll on the shelf first, or Undo the take.");
 }
 
+/** Where the office's bell for a take opens: Shop Stock on the item whenever there is a short to
+ *  settle (this take's, or an older one the shelf reading below zero says is open), else the job. */
+export function officeBellOpensShelf(t: { short: number; onHandAfter: number }): boolean {
+  return t.short > 0 || num(t.onHandAfter) < 0;
+}
+
 /** THE OFFICE'S BELL, one per crew take. A short says what the shelf showed and what to do. */
 export function officeBellWords(t: { who: string; qty: number; unit: string; item: string; job: string; short: number; onHandAfter: number }): {
   title: string;
@@ -198,7 +204,9 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
   if (belowZeroWords(t.onHandAfter, t.unit)) {
     return {
       title: `${t.who} took ${q} of ${t.item}; the shelf now reads ${fmtQty(t.onHandAfter)} ${t.unit}`.slice(0, 140),
-      body: `For ${t.job}. The shelf is below zero: ${SHORT_FIX}`.slice(0, 140),
+      // The shelf reads below zero with no short on THIS take: an older take past the shelf is
+      // still open (its pieces are what this take used). That short is what the office settles.
+      body: `For ${t.job}. An older short on it is still open: ${SHORT_FIX}`.slice(0, 140),
     };
   }
   return {

@@ -23,7 +23,21 @@ import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkup
 import { livePurchaseOrders, type MaterialBill, type MaterialPo } from "@/lib/job-progress-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { lumpDrawAmount } from "@/lib/invoice-math";
-import { markStock, readJobStock, stockCostLabel, stockImportRows, stockKey, stockPartNoCostWords, stockShortsSentence, stockTotals, stockZeroCostSentence, unclaimedTakes, type StockShort, type StockTake } from "@/lib/stock-billing";
+import {
+  markStock,
+  readJobStock,
+  stockCostLabel,
+  stockKey,
+  stockPartNoCostPastWords,
+  stockPartNoCostSentence,
+  stockPartNoCostWords,
+  stockShortsSentence,
+  stockTotals,
+  stockWholeNoCost,
+  unclaimedTakes,
+  type StockShort,
+  type StockTake,
+} from "@/lib/stock-billing";
 
 /** The contract every consumer reads (job overview, Nort, the progress-draw builder). */
 export type UnbilledWork = {
@@ -71,9 +85,11 @@ export type UnbilledWork = {
   stockShorts: number;
   /** The one sentence that says so, or null. Shown wherever an invoice is about to be built. */
   stockShortsWords: string | null;
-  /** Unclaimed takes with pieces off a roll that has no cost on it, in the importer's own words
-   *  (stockZeroCostSentence over stockImportRows' zeroCost): left off whole, or billed only on the
-   *  priced part. Null when none. Said before the invoice is built, never discovered after. */
+  /** Unclaimed takes PART of whose pieces came off a roll with no cost on it, in the importer's own
+   *  words (stockPartNoCostSentence): the next import bills only the priced part. Null when none.
+   *  Said before the invoice is built, never discovered after, and gone once an import claims the
+   *  take. A take with NO priced piece is never imported, so it never clears: it is said on its own
+   *  Costs tab row (stock_no_cost) instead of here, where it would stand for good. */
   stockNoCostWords: string | null;
   /** laborAmount + billsBilled + stockBilled − returnsCredit. Can be below zero when a return is
    *  all that is pending: the customer is owed money, and the card says so. */
@@ -131,18 +147,21 @@ export type StockCostVerdict = {
   cost: number;
   takenAt: string;
   /** Set when part of the take came off a roll with no cost on it: the line bills only the priced
-   *  part, and this says so with what to do (stockPartNoCostWords). */
+   *  part. On an open take this says what to do (stockPartNoCostWords); on a billed one it says
+   *  the past fact with no instruction (stockPartNoCostPastWords), so it never nags for good. */
   note?: string;
 } & (
   | { state: "open" }
   | { state: "billed"; invoice: ClaimantInvoice }
-  | { state: "nothing"; why: "stock_no_cost" }
+  | { state: "nothing"; why: "stock_no_cost" | "stock_cost_used" }
 );
 
 /** Why a row is on no invoice and never goes on one. `own_return`: a supplier return of parts the
  *  customer was never billed for (every line switched off), so no credit is owed (INV-078).
- *  `stock_no_cost`: a take whose roll has no cost on it, which the importer leaves off and names. */
-export type NothingToBill = "po_billed" | "own_cost" | "own_return" | "zero" | "stock_no_cost";
+ *  `stock_no_cost`: a take whose roll has no cost on it, which the importer leaves off and names.
+ *  `stock_cost_used`: a take off a costed roll that stamped $0 because the roll's per-piece rounding
+ *  had already put all its dollars on earlier takes: nothing is missing, so nothing to add. */
+export type NothingToBill = "po_billed" | "own_cost" | "own_return" | "zero" | "stock_no_cost" | "stock_cost_used";
 
 export type ClaimantInvoice = {
   id: string;
@@ -483,22 +502,26 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
   // whose moves another invoice claims is billed there, whole (unclaimedTakes), and counted with the
   // other rows another invoice already holds.
   const takes = unclaimedTakes(input.stock?.takes ?? [], claimed);
-  const stockVerdict = (t: StockTake) => {
-    const note = stockPartNoCostWords(t);
+  const stockVerdict = (t: StockTake, open: boolean) => {
+    const note = open ? stockPartNoCostWords(t) : stockPartNoCostPastWords(t);
     return { id: stockKey(t.group), kind: "stock" as const, label: stockCostLabel(t), cost: t.cost, takenAt: t.takenAt, ...(note ? { note } : {}) };
   };
   for (const t of takes.held) {
     const holder = t.moveIds.find((id) => claimed.has(id));
     if (holder) {
       skippedIds.push(holder);
-      costRows.push({ ...stockVerdict(t), state: "billed", invoice: input.claims.owner.get(holder)! });
+      costRows.push({ ...stockVerdict(t, false), state: "billed", invoice: input.claims.owner.get(holder)! });
     }
   }
   const stock = stockTotals(takes.free, markupPct);
   // The same test stockTotals and the importer make (markStock > 0), per take, so the open rows are
   // exactly the ones stockCount counted and the zero-cost ones are the ones the importer names.
   for (const t of takes.free)
-    costRows.push(markStock(t.cost, markupPct) > 0 ? { ...stockVerdict(t), state: "open" } : { ...stockVerdict(t), state: "nothing", why: "stock_no_cost" });
+    costRows.push(
+      markStock(t.cost, markupPct) > 0
+        ? { ...stockVerdict(t, true), state: "open" }
+        : { ...stockVerdict(t, false), state: "nothing", why: stockWholeNoCost(t) ? "stock_no_cost" : "stock_cost_used" },
+    );
   const shorts = input.stock?.shorts ?? [];
 
   const last = input.claims.invoices[0] ?? null;
@@ -519,7 +542,7 @@ export function computeUnbilledWork(input: UnbilledInput): UnbilledWork {
     stockBilled: stock.billed,
     stockShorts: shorts.length,
     stockShortsWords: stockShortsSentence(shorts),
-    stockNoCostWords: stockZeroCostSentence(stockImportRows(takes.free, markupPct).zeroCost),
+    stockNoCostWords: stockPartNoCostSentence(takes.free),
     total: cents(laborAmount + billsBilled + stock.billed - returnsCredit),
     lastInvoiceNumber: last?.invoice_number ?? null,
     lastInvoiceAt: last?.created_at ?? null,

@@ -4,6 +4,7 @@ import {
   fmtQty,
   matchShelfItem,
   normUnit,
+  officeBellOpensShelf,
   officeBellWords,
   parseShelf,
   parseTakes,
@@ -147,7 +148,12 @@ describe("never silent (audit v1018)", () => {
     );
     const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 });
     expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; the shelf now reads -10 ft");
-    expect(bell.body).toBe("For Herringbone. The shelf is below zero: File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    expect(bell.body).toBe("For Herringbone. An older short on it is still open: File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    // The bell opens where its words send the office: Shop Stock, whenever there is a short to settle.
+    expect(officeBellOpensShelf({ short: 0, onHandAfter: -10 })).toBe(true);
+    expect(officeBellOpensShelf({ short: 15, onHandAfter: -15 })).toBe(true);
+    expect(officeBellOpensShelf({ short: 0, onHandAfter: 190 })).toBe(false);
+    expect(officeBellOpensShelf({ short: 0, onHandAfter: 0 })).toBe(false);
   });
 
   it("Take It that didn't hear back points at the takes list only when that list read", () => {

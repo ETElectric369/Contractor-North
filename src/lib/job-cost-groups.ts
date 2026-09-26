@@ -146,5 +146,6 @@ export function nothingToBillWhy(why: NothingToBill): string {
   if (why === "own_return") return "A return of parts the customer was never billed for";
   // Nothing re-costs a take once it is drawn, so the words name only the door that works.
   if (why === "stock_no_cost") return `Its roll has no cost on it, so it isn't billed - ${STOCK_NO_COST_FIX}`;
+  if (why === "stock_cost_used") return "Its roll's cost was all counted on earlier takes, so there's nothing left to bill";
   return "Nothing on it to bill";
 }
