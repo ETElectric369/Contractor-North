@@ -232,6 +232,16 @@ describe("the links unread", () => {
     expect(text).toContain("Couldn't check your books just now");
     expect(paper(rows, "si-1107820").sub).toContain("couldn't check your books just now");
   });
+
+  it("the Suppliers card says so too, and never calls his unpaid bills 'your paperwork rather than theirs'", async () => {
+    const { text } = await renderWith("bill_supplier_invoices");
+    expect(text).toContain("Couldn't check your bills against the papers Consolidated Electrical Distributors sent just now");
+    expect(text).toContain("Couldn't check your bills against their papers");
+    expect(text).not.toContain("your paperwork rather than theirs");
+    expect(text).toContain("Which of your unpaid bills there they never billed you for couldn't be checked just now");
+    // CED's own figure stands: the links are not in it.
+    expect(text).toContain("Consolidated Electrical Distributors says");
+  });
 });
 
 describe("the supplier accounts unread", () => {
@@ -249,5 +259,15 @@ describe("the payments unread", () => {
     expect(text).not.toContain("your bills less payments");
     expect(text).toContain("Couldn't Total");
     expect(text).toContain("Consolidated Electrical Distributors says");
+  });
+
+  it("CED never reads 'you have sent them $0.00': its payments say they couldn't be read", async () => {
+    const whole = await renderWith();
+    expect(whole.text).toContain("$100.00 you have sent them");
+    const { text } = await renderWith("supplier_payments");
+    expect(text).not.toMatch(/\$0\.00 you have sent them/);
+    expect(text).toContain("Couldn't Read you have sent them");
+    expect(text).toContain("Couldn't read your payments to Consolidated Electrical Distributors just now");
+    expect(text).toContain("Couldn't read your payments to Ace Mountain Hardware just now");
   });
 });

@@ -36,12 +36,24 @@
  * clear-off used to compare `sent` with the net of the papers' CURRENT open balances. Once CED
  * applies a chunk and he re-downloads, those balances have already dropped by it while `sent` still
  * holds it: one chunk counted twice, and a single $3,000 chunk on two $2,500 September invoices
- * cleared the line with $2,000 and its discount still open. So the target (clearTarget) puts back
- * what CED has applied to the papers riding on payBy: a closed one at its full total less its
- * discount, a part-paid one at what came off it. Only the papers CED's oldest-first application
- * could have reached (dated on or before the oldest purchase still open): a paper closed out of
- * turn was settled some other way, not by this cheque. The papers of older deadlines still count at
- * their open balance, as /bills does; the app suggests, and /bills still names every figure.
+ * cleared the line with $2,000 and its discount still open. So the target (clearTarget) counts every
+ * purchase riding on payBy at its full total less its discount, open, part-paid or closed: the
+ * cycle's own papers, whichever of them CED has applied the money to. NOT ONLY THE OLDEST (re-review,
+ * 2026-09-26): CED does not apply oldest-first. His own book has July papers still open (a $10.29
+ * residue on 8802-1103832 among them) beside August papers CED closed, so a rule that only put back
+ * papers older than the oldest one still open put back nothing, and a $3,000 chunk CED spent on the
+ * Oct 10 papers cleared the line with $2.1k and a $10.02 discount still riding on Oct 10.
+ * What is not his cash is never counted as it: a part-paid purchase whose reduction a closed credit
+ * memo matches to the cent (the return, not the cheque), and anything past `sent` itself (the
+ * cycle's cheques cannot have paid more than they came to). The papers of older deadlines still
+ * count at their open balance, as /bills does.
+ *
+ * WHAT IT CANNOT SEE, AND WHICH WAY IT LEANS. The app never learns WHEN CED closed a paper (a
+ * download stamps nothing on an old number), so a paper riding on payBy that a cheque from the LAST
+ * cycle paid, or a credit less exact than to the cent, reads as this cycle's money: the line then
+ * stays after the whole cheque, naming what he has sent, and goes when the deadline passes. That is
+ * the side it leans on purpose: a line that stays says so; one that clears early loses his discount
+ * without a word. /bills still names every figure.
  *
  * SHOWN ONLY WHILE IT CAN SAVE HIM SOMETHING SOON: the soonest deadline is today or within the
  * next PAY_CARD_WINDOW_DAYS days. Once it passes, the discount is not live, the slice moves to the
@@ -143,29 +155,45 @@ export function sentThisCycle(input: {
  *   + for each purchase whose discount rides on payBy, what CED has already applied to it: a closed
  *     one its full total less its discount (it was paid in time), a part-paid one what came off.
  *
- * Only purchases CED's oldest-first application could have reached count as applied: dated on or
- * before the oldest purchase still open (every one, once none is open). A purchase a credit memo
- * took back is never money he sends.
+ * Every such purchase, in whatever order CED closed them (it does not go oldest-first). A purchase
+ * a credit memo took back is never money he sends, and neither is a part-payment a closed credit
+ * memo matches to the cent: that was the return, not his cheque. Each memo is spent once, and the
+ * memos a closed purchase is already paired with (reversedPurchaseIds) are spent before this starts.
+ *
+ * And never more put back than `sent`: this cycle's cheques cannot have paid more than they came
+ * to, so whatever CED closed beyond that was other money, and nothing still open is asked twice.
  */
-export function clearTarget(paidAgainst: SupplierInvoiceRow[], payBy: string, today: string): number {
+export function clearTarget(paidAgainst: SupplierInvoiceRow[], payBy: string, today: string, sent = Infinity): number {
   const docs = paidAgainst ?? [];
   const taken = reversedPurchaseIds(docs);
-  const isPurchase = (d: SupplierInvoiceRow) => d.kind === "invoice" && (Number(d.total) || 0) > 0 && !taken.has(String(d.id));
-  const day = (d: SupplierInvoiceRow) => String(d.invoiceDate ?? "").slice(0, 10);
-  let frontier: string | null = null;
+  const cents = (n: unknown) => Math.round((Number(n) || 0) * 100);
+  const isPurchase = (d: SupplierInvoiceRow) => d.kind === "invoice" && cents(d.total) > 0 && !taken.has(String(d.id));
+  // Closed credit memos still unspent: one per closed pair reversedPurchaseIds made at that cent is gone.
+  const credits = new Map<number, number>();
+  for (const d of docs) if (d.closed && d.kind === "credit_memo" && cents(d.total) < 0) credits.set(-cents(d.total), (credits.get(-cents(d.total)) ?? 0) + 1);
   for (const d of docs) {
-    if (!isPurchase(d) || d.closed || !(openBalanceOf(d) > 0.005) || !day(d)) continue;
-    if (frontier === null || day(d) < frontier) frontier = day(d);
+    const c = cents(d.total);
+    if (d.closed && taken.has(String(d.id)) && (credits.get(c) ?? 0) > 0) credits.set(c, (credits.get(c) ?? 0) - 1);
   }
   let applied = 0;
   for (const d of docs) {
     if (!isPurchase(d) || String(d.discountBy ?? "").slice(0, 10) !== payBy) continue;
-    if (frontier !== null && day(d) && day(d) > frontier) continue;
     const total = r2(Number(d.total) || 0);
     const discount = Math.max(0, r2(Number(d.discountAmount) || 0));
-    applied = r2(applied + (d.closed ? total - discount : Math.max(0, total - openBalanceOf(d))));
+    if (d.closed) {
+      applied = r2(applied + total - discount);
+      continue;
+    }
+    const cameOff = Math.max(0, r2(total - openBalanceOf(d)));
+    if (!(cameOff > 0.005)) continue;
+    const memo = cents(cameOff);
+    if ((credits.get(memo) ?? 0) > 0) {
+      credits.set(memo, (credits.get(memo) ?? 0) - 1);
+      continue;
+    }
+    applied = r2(applied + cameOff);
   }
-  return r2(supplierNetIfPaidBy(docs, payBy, today).net + applied);
+  return r2(supplierNetIfPaidBy(docs, payBy, today).net + Math.min(applied, Math.max(0, sent)));
 }
 
 /**
@@ -223,7 +251,7 @@ export function supplierPayDue(input: {
         const by = String(d.discountBy ?? "").slice(0, 10);
         return !on || on <= lastPaidOn || (!!by && by <= payBy);
       });
-      if (sent >= clearTarget(paidAgainst, payBy, today) - 0.005) continue;
+      if (sent >= clearTarget(paidAgainst, payBy, today, sent) - 0.005) continue;
     }
     // The /bills figure, to the cent: a payment never comes off it here (supplierBalance's rule).
     const owed = balance.owed;

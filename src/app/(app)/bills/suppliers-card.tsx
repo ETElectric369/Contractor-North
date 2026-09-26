@@ -151,6 +151,8 @@ export function SuppliersCard({
   waitingOnCredit = [],
   payOn = null,
   balancesUnread = false,
+  paymentsUnread = false,
+  paperlessUnread = false,
   actions,
 }: {
   accounts: SupplierAccountRow[];
@@ -191,6 +193,18 @@ export function SuppliersCard({
    * counted never quietly switches to the other model. The payment sheet still opens, amount empty.
    */
   balancesUnread?: boolean;
+  /**
+   * HIS PAYMENTS UNREAD (re-review, 2026-09-26). An account counted from its supplier's papers keeps
+   * its figure (no payment is in it), but "you have sent them $0.00" and an empty payment list would
+   * be the empty lie: those say they couldn't read his payments instead.
+   */
+  paymentsUnread?: boolean;
+  /**
+   * THE BILL-TO-PAPER LINKS UNREAD: which bills the supplier never sent paper for can't be told, so
+   * no "+ $N they never sent paper for" is named, and the unpaid bills are not called "your
+   * paperwork rather than theirs" either. It says it couldn't check.
+   */
+  paperlessUnread?: boolean;
   actions: SuppliersCardActions;
 }) {
   const router = useRouter();
@@ -450,6 +464,12 @@ export function SuppliersCard({
             Couldn&apos;t read everything your balances are made of just now, so the ones that depend on it aren&apos;t totalled. Reload the page to try again.
           </p>
         )}
+        {paperlessUnread && supplierModelled.length > 0 && (
+          <p className="mt-1 text-sm text-amber-800" role="alert">
+            Couldn&apos;t check your bills against the papers {supplierModelled.map((b) => b.account.name).join(", ")} sent just now, so
+            none is named as one they never billed you for. Reload the page to try again.
+          </p>
+        )}
         <WhyFold>
           <p>
             What you still owe on account, supplier by supplier. A payment is a chunk of money, not a ticket ticked
@@ -471,7 +491,13 @@ export function SuppliersCard({
             <p>
               {supplierModelled.map((b) => b.account.name).join(", ")} {supplierModelled.length === 1 ? "is" : "are"} counted from
               their own open papers, not your bills, and your payments are not taken off again: they already did.
-              {modelledExplained > 0.005 ? ` All Bills still shows ${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.` : ""}
+              {paperlessUnread
+                ? modelledBillsUnpaid > 0.005
+                  ? " Which of your unpaid bills there they never billed you for couldn't be checked just now, so none is called your paperwork."
+                  : ""
+                : modelledExplained > 0.005
+                  ? ` All Bills still shows ${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.`
+                  : ""}
             </p>
           )}
         </WhyFold>
@@ -580,10 +606,17 @@ export function SuppliersCard({
                             {discountLine.allOnOneDate ? `, which would make it ${formatCurrency(balance.supplierSays.netIfPaidToday)}` : ""}
                           </span>
                         )}
-                        {fromSupplier && noDocTotal > 0.005 && (
+                        {fromSupplier && paperlessUnread ? (
                           <span className="block truncate text-xs font-medium text-amber-700">
-                            + {formatCurrency(noDocTotal)} they never sent paper for
+                            Couldn&apos;t check your bills against their papers
                           </span>
+                        ) : (
+                          fromSupplier &&
+                          noDocTotal > 0.005 && (
+                            <span className="block truncate text-xs font-medium text-amber-700">
+                              + {formatCurrency(noDocTotal)} they never sent paper for
+                            </span>
+                          )
                         )}
                       </span>
                       <span className="shrink-0 text-right">
@@ -620,7 +653,11 @@ export function SuppliersCard({
                               <div className="text-xs text-slate-500">{balance.supplierSays.openDocuments === 1 ? "paper open" : "papers open"}</div>
                             </div>
                             <div>
-                              <div className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(balance.paid)}</div>
+                              {paymentsUnread ? (
+                                <div className="text-sm font-semibold text-amber-800">Couldn&apos;t Read</div>
+                              ) : (
+                                <div className="text-sm font-semibold tabular-nums text-slate-900">{formatCurrency(balance.paid)}</div>
+                              )}
                               <div className="text-xs text-slate-500">you have sent them</div>
                             </div>
                             <div>
@@ -800,6 +837,11 @@ export function SuppliersCard({
                         </div>
                       )}
 
+                      {paymentsUnread && owed !== null && (
+                        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+                          Couldn&apos;t read your payments to {account.name} just now, so none is listed here. Reload the page to try again.
+                        </p>
+                      )}
                       {shownPayments.length > 0 && (
                         <div className="mt-3">
                           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Payments You Have Recorded</h3>
@@ -984,7 +1026,7 @@ export function SuppliersCard({
                 {payUnread
                   ? "Some of what this balance is made of didn't load, so no figure is shown. What you record here is saved either way."
                   : payBalance.model === "supplier-invoices"
-                  ? `${payFor.name} says so themselves, across ${payBalance.supplierSays?.openDocuments ?? 0} open ${(payBalance.supplierSays?.openDocuments ?? 0) === 1 ? "document" : "documents"}. You have sent them ${formatCurrency(payBalance.paid)} so far, which is already inside their figure.`
+                  ? `${payFor.name} says so themselves, across ${payBalance.supplierSays?.openDocuments ?? 0} open ${(payBalance.supplierSays?.openDocuments ?? 0) === 1 ? "document" : "documents"}. ${paymentsUnread ? "Couldn't read your payments to them just now." : `You have sent them ${formatCurrency(payBalance.paid)} so far, which is already inside their figure.`}`
                   : `${formatCurrency(payBalance.charged)} charged on ${payBalance.chargedBills} ${payBalance.chargedBills === 1 ? "bill" : "bills"}, ${formatCurrency(payBalance.paid)} paid so far.`}
                 {payFor.accountNumber ? ` Account ${payFor.accountNumber}.` : ""}
               </div>

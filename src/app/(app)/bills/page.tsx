@@ -1189,6 +1189,10 @@ export default async function BillsPage({
           // A lost papers, bills or payments read: a bills-less-payments figure would be wrong
           // without a word, so those accounts say they couldn't total instead.
           balancesUnread={balancesUnread}
+          // Each says so where its own figure would have been: "you have sent them $0.00" and
+          // "your paperwork rather than theirs" would be false without a word.
+          paymentsUnread={!!paymentsErr}
+          paperlessUnread={!!linksErr}
           actions={{
             recordPayment: recordSupplierPayment,
             voidPayment: voidSupplierPayment,
