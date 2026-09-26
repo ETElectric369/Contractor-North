@@ -366,7 +366,7 @@ export function ProgressInvoiceButton({
               {billMode === "actuals" ? (
                 <div className="space-y-1 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-slate-500">Work to date (labor + materials)</span>
+                    <span className="text-slate-500">Work to date</span>
                     <span className="font-medium text-slate-800">{workKnown ? formatCurrency(worked) : "Couldn't total"}</span>
                   </div>
                   <div className="flex justify-between">

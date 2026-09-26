@@ -166,6 +166,9 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(sent).toContain(`href="/i/${"a".repeat(32)}"`);
     expect(text(sent)).toContain("View And Pay INV-078 ($1,558.62 due)");
     expect(text(sent)).not.toContain("Running total, not a bill yet.");
+    // The card total is what the bills carry, never "Work To Date" (that is the Progress Summary's rule).
+    expect(text(sent)).toContain("Billed To Date $8,318.62");
+    expect(text(sent)).not.toContain("Work To Date");
   });
 
   it("never names a supplier: not in the stretches, not in the bill", () => {
@@ -215,8 +218,8 @@ describe("labor and materials apart, right at the top and in every section (Erik
   const money = html.slice(html.indexOf("data-portal-money"), html.indexOf("</dl>", html.indexOf("data-portal-money")));
   const m = text(money);
 
-  it("the money card: Labor (hours) and Materials as two lines that add up to Work To Date, then Paid and Balance", () => {
-    expect(m).toMatch(/Labor · 71\.5 hours \$6,100\.00 Materials \$2,218\.62 Work To Date \$8,318\.62 Paid \$6,760\.00 Balance \$1,558\.62/);
+  it("the money card: Labor (hours) and Materials as two lines that add up to the bills' total (a draft: Running Total), then Paid and Balance", () => {
+    expect(m).toMatch(/Labor · 71\.5 hours \$6,100\.00 Materials \$2,218\.62 Running Total \$8,318\.62 Paid \$6,760\.00 Balance \$1,558\.62/);
   });
 
   it("every stretch says Labor, Materials and Paid as separate figures", () => {

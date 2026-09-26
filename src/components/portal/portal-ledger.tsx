@@ -40,7 +40,7 @@ export function splitLabel(line: SplitLine, split: LedgerSplit): string {
 
 /**
  * Labor, Materials and any other group as their own lines, then the total they add up to. Used by
- * the money card (Work To Date) and at the foot of every stretch (Work Completed).
+ * the money card (Billed To Date, or Running Total while a bill is a draft) and at the foot of every stretch (Work Completed).
  */
 export function SplitRows({ split, total, totalLabel }: { split: LedgerSplit; total: number; totalLabel: string }) {
   return (

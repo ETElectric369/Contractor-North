@@ -22,7 +22,7 @@ import { fmtHours, portalJobStatus, siteLine } from "./portal-format";
  *
  * LABOR AND MATERIALS, APART (Erik, 2026-09-24, on Andrew's page: "there is no simple breakdown
  * separating time and material right at the top, its all mixed in"). The money card leads with
- * Labor (and its hours) and Materials as two lines that add up to Work To Date, then Paid and the
+ * Labor (and its hours) and Materials as two lines that add up to Billed To Date, then Paid and the
  * Balance; the stretches, each day, the work not billed yet and the bill itself keep the same two
  * headings (and any other kind of line under its own, only when there is one). One rule decides
  * which line is which everywhere: line-kind, from what the line stored, and for a typed line the
@@ -204,11 +204,14 @@ function MoneyCard({ view, payable, unbilledTotal }: { view: PortalJobView; paya
             </span>
           </p>
         ) : null}
-        {/* Labor and Materials first, as two lines that add up to Work To Date (any other kind of
-            line, a change order or a credit, gets its own line between them only when there is
-            one), then what was paid and what is left. */}
+        {/* Labor and Materials first, as two lines that add up to what the bills carry (any other
+            kind of line, a change order or a credit, gets its own line between them only when
+            there is one), then what was paid and what is left. The total is the BILLS' total, not
+            work to date (that is the Progress Summary's figure, tmWorkToDate): it may hold a
+            deposit or tax and leaves out work not on a bill, stated on its own line below. So it
+            never wears the work-to-date name. */}
         <dl data-portal-money className="text-base">
-          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel="Work To Date" />
+          <SplitRows split={ledger.split} total={ledger.workTotal} totalLabel={view.running ? "Running Total" : "Billed To Date"} />
           <div className="flex items-baseline justify-between gap-3 py-0.5">
             <dt className="text-slate-700">Paid</dt>
             <dd className="shrink-0 font-semibold tabular-nums text-emerald-800">{formatCurrency(ledger.paidTotal)}</dd>
