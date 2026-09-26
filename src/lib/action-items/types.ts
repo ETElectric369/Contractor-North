@@ -14,6 +14,8 @@
 // red due-chips, not through chrome. Door labels ("Everything else · N",
 // "Office · N") are browse affordances, not badges — grey inventory only.
 
+import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+
 export type ActionKind =
   // task/work_order are BADGE-EXEMPT and NO LONGER FED by getActionItems (the
   // task feeder was deleted — an undated task counted as "due now" forever,
@@ -41,7 +43,11 @@ export type ActionKind =
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
   | "job_needs_return" // a job worked recently with nothing scheduled next (the forgotten return visit)
   | "materials_needed" // unpurchased take-off items on a job the crew is about to stand on (buy before the truck rolls)
-  | "job_on_hold"; // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
+  | "job_on_hold" // a job PAUSED too long — surfaced WITH its blocker (open task / materials not ordered) so it isn't forgotten
+  // ── "Hey you, here's a bill, what's it for?" (Bills plan, Wave A) ──
+  // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
+  // person. A rollup, never one item per paper: that is how it badges +1 (the invariant above).
+  | "supplier_paper";
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -86,6 +92,7 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
   materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
   job_on_hold: "waiting", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
+  supplier_paper: "money", // a supplier bill on no job is a cost no job is carrying: money
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -110,6 +117,8 @@ export interface ActionItem {
   done: boolean; // drives the universal "sinks to the bottom" rule
   href: string; // deep link for Open
   affordances: Affordance[]; // canonical verbs valid for THIS item
+  /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
+  supplierPapers?: SupplierPaperFeed | null;
 }
 
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {
@@ -136,6 +145,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   // this one means items ARE on the take-off and still need buying.
   materials_needed: { label: "Materials needed", tone: "blue" },
   job_on_hold: { label: "On hold", tone: "amber" },
+  supplier_paper: { label: "Supplier Bills", tone: "amber" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -189,6 +199,10 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // Open the job to resume it, change status, or clear the blocker (like the other derived
   // job detectors — the decision happens on the job page, so it nags until actually acted on).
   job_on_hold: ["open"],
+  // Open-only in the verb grammar: the decision is on the cards INSIDE the rollup, each of which
+  // calls fileSupplierPaper itself (Put It On J-011 / Another Job / Shop Stock / Business Cost).
+  // The rollup id is synthetic, so no generic verb could name which paper it meant.
+  supplier_paper: ["open"],
 };
 
 /**

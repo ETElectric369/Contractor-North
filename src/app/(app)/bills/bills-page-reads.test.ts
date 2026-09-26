@@ -17,11 +17,16 @@ import { join } from "node:path";
  * projection and the two facts that now depend on it.
  */
 const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+/** The coverage reading moved here (Bills plan, Wave A) so My Day's cards read it too. */
+const PAPERS = readFileSync(join(process.cwd(), "src/app/(app)/bills/supplier-papers.ts"), "utf8");
 
 describe("the bills page asks for every column it reads", () => {
   it("selects bill_id on the supplier-invoice links it reads bill_id from", () => {
     expect(PAGE).toContain('.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id")');
-    expect(PAGE).toContain('cover(String(l.supplier_invoice_id ?? ""), String(l.bill_id ?? ""))');
+    expect(PAPERS).toContain('.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id")');
+    expect(PAPERS).toContain('cover(String(l.supplier_invoice_id ?? ""), String(l.bill_id ?? ""))');
+    // And the page hands its links to that one reading, not a copy of it.
+    expect(PAGE).toContain("links: (billLinkRows ?? []) as any[],");
   });
 
   /**

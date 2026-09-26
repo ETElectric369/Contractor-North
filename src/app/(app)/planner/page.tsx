@@ -24,6 +24,7 @@ import { WhichJob, type WhichJobResult } from "./which-job";
 import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
+import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
 import { NewTaskBox } from "../tasks/tasks-view";
@@ -1067,6 +1068,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {/* Needs action — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks
           live in Today's 6 + the doors above, never here. */}
+      {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
+          sentence and Undo; they land here instead, until he leaves the page. */}
+      <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
       {actionItems.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">

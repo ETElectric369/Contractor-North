@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { rankSix, SIX_SLOTS, OVERDUE_AUTO_CAP, type SixRankTask } from "@/lib/six-rank";
 import { KIND_STREAM, AFFORDANCES } from "@/lib/action-items/types";
+import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item";
 
 // THE BADGE INVARIANT (src/lib/action-items/types.ts): a number on chrome =
 // distinct items needing a HUMAN DECISION TODAY that the app cannot defer,
@@ -41,6 +42,20 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(AFFORDANCES.task).toContain("snooze");
     expect(AFFORDANCES.task).toContain("do");
     expect(AFFORDANCES.work_order).toContain("do");
+  });
+
+  it("the supplier bills ride as ONE rolled-up item, however many papers wait (Bills plan, Wave A)", () => {
+    // A supplier's backlog is an unbounded set; eleven CED papers must badge +1, not +11. The
+    // feeder pushes the rollup once and never an item per paper.
+    expect(querySrc).toContain("supplierPaperActionItem(await supplierPapersP)");
+    expect(querySrc).not.toContain('kind: "supplier_paper"');
+    expect(KIND_STREAM.supplier_paper).toBe("money");
+    expect(AFFORDANCES.supplier_paper).toEqual(["open"]);
+    const card = { invoiceId: "x", invoiceNumber: "8802-1", supplier: "CED", date: "2026-09-04", total: 1, closed: false, said: null, state: "needs_job" as const, verdict: "blank" as const, suggestion: null, candidates: [], onJob: null, because: "", samePurchase: [] };
+    const cards = Array.from({ length: 11 }, (_, i) => ({ ...card, invoiceId: `p${i}` }));
+    const item = supplierPaperActionItem({ cards, jobs: [] });
+    expect(item?.title).toBe("Supplier Bills · 11");
+    expect(item?.when).toBeNull(); // undated: never a red "overdue" nobody set
   });
 
   it("the dock's chrome badge display-caps at 9+", () => {

@@ -5,32 +5,30 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import {
   findDuplicateBills,
-  indexSupplierAliases,
   readBillInvoice,
   resolveSupplierAccount,
   suggestSupplierGroups,
   type BillFingerprint,
 } from "@/lib/supplier-identity";
-import {
-  billsCarryingNumber,
-  billsCoveredByDocuments,
-  namedNumbersOf,
-  samePurchaseCandidates,
-  samePurchaseSentence,
-  type LedgerBill,
-  type SupplierDoc,
-} from "@/lib/same-purchase";
 import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { AddBusinessCostButton } from "./add-business-cost";
 import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import { ReceiptBillingCard, type ReceiptForBilling } from "./receipt-billing-card";
-import type {
-  ReconcileJob,
-  SupplierInvoiceKind,
-  SupplierInvoiceRow as SupplierDocumentRow,
+import {
+  explainKind,
+  isBeforeLine,
+  isUsableJobName,
+  sayKind,
+  shortSupplierName,
+  type SupplierInvoiceRow as SupplierDocumentRow,
 } from "./supplier-reconcile";
+import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
+import { BillsSearchBox } from "./bills-search-box";
+import { SupplierPaperCards } from "@/components/supplier-paper-cards";
+import { formatCurrency, formatDateShort } from "@/lib/utils";
+import { booksBeginOn, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed, SUPPLIER_INVOICE_COLUMNS } from "./supplier-papers";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
@@ -127,9 +125,6 @@ async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   return attempt;
 }
 
-/** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
- *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
-const SUPPLIER_INVOICE_KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
 
 export default async function BillsPage({
   searchParams,
@@ -162,16 +157,16 @@ export default async function BillsPage({
   // - which reads here as "no accounts yet", exactly the state Erik is in today.
   const [
     { data: pos },
-    { data: bills },
+    { data: bills, error: billsErr },
     { data: docRows },
-    { data: jobs },
+    { data: jobs, error: jobsErr },
     { data: lists },
     { data: accountRows, error: accountsErr },
-    { data: aliasRows },
+    { data: aliasRows, error: aliasErr },
     { data: paymentRows },
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
-    { data: billLinkRows },
+    { data: billLinkRows, error: linksErr },
     { data: paperRows },
     books,
     markCtx,
@@ -195,7 +190,7 @@ export default async function BillsPage({
     // cannot file, which is a dead end wearing a dropdown.
     supabase
       .from("jobs")
-      .select("id, job_number, name, status, address")
+      .select("id, job_number, name, status, address, created_at")
       .order("created_at", { ascending: false })
       .limit(500),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
@@ -228,9 +223,9 @@ export default async function BillsPage({
     // page he had yesterday.
     supabase
       .from("supplier_invoices")
-      .select(
-        "id, supplier_account_id, invoice_number, kind, invoice_date, due_date, job_name_raw, job_id, total, open_balance, closed, discount_amount, discount_by, source_file, jobs(name)",
-      )
+      // One column list for every reader (supplier-papers.ts), so My Day's cards and this page
+      // can never be handed different documents.
+      .select(SUPPLIER_INVOICE_COLUMNS)
       .order("invoice_date", { ascending: false })
       .limit(2000),
     // Which scanned bills cover which supplier invoices. A document with no link is a purchase
@@ -535,106 +530,21 @@ export default async function BillsPage({
    * offered to record all four - and taking that offer would put the money on the job twice, once
    * inside the statement and once beside it (review, 2026-09-19).
    *
-   * readBillInvoice already reads every invoice number out of a bill's own lines and filename for
-   * the duplicate finder below; here the same reading answers "is this purchase already in here?".
-   * Held as a SET of bill ids per invoice, so a bill that is both linked and named counts once.
+   * THE READING LIVES IN supplier-papers.ts NOW (Bills plan, Wave A): My Day brings these same
+   * papers to him as cards, and a second copy of "is this paper already in his books?" on the
+   * second screen is how the two would come to disagree about which bill is waiting.
    */
-  const coveringBills = new Map<string, Set<string>>();
-  const cover = (invoiceKey: string, billId: string) => {
-    if (!invoiceKey || !billId) return;
-    const set = coveringBills.get(invoiceKey) ?? new Set<string>();
-    set.add(billId);
-    coveringBills.set(invoiceKey, set);
-  };
-  for (const l of (billLinkRows ?? []) as any[]) cover(String(l.supplier_invoice_id ?? ""), String(l.bill_id ?? ""));
-
-  /**
-   * WHICH BILLS CARRY A DOCUMENT'S NUMBER: the ONE reading every door uses (same-purchase.ts,
-   * audit v994 DB1). It used to read the number off a bill's lines, its file name and its
-   * supplier_invoice_number, and never its bill_number, which is the column the tray and the job
-   * page write. So a CED ticket filed from the tray as 8802-1109000 left CED's own 8802-1109000
-   * under Purchases Not In Your Books with a live Record button, and one press made a second bill
-   * for the same money. Now bill_number counts too, spelled one way ("#8802 1109000" is
-   * "8802-1109000"), and only on the document's own account.
-   */
-  const aliasIndex = indexSupplierAliases((aliasRows ?? []) as any[]);
-  const ledgerBills: LedgerBill[] = liveBills.map((b: any) => {
-    const named = namedNumbersOf({ notes: b.notes ?? null, line_items: b.line_items ?? [] });
-    return {
-      id: String(b.id),
-      supplier: b.supplier ?? null,
-      supplier_account_id: b.supplier_account_id ?? null,
-      bill_number: b.bill_number ?? null,
-      supplier_invoice_number: b.supplier_invoice_number ?? null,
-      amount: b.amount ?? null,
-      bill_date: b.bill_date ?? null,
-      job_id: b.job_id ?? null,
-      superseded_by_bill_id: b.superseded_by_bill_id ?? null,
-      is_statement: !!b.is_statement || named.isStatement,
-      jobs: b.jobs ?? null,
-      named_numbers: named.numbers,
-    };
+  const { rows: supplierDocuments, coveringBills, billsCarrying } = supplierDocumentRows({
+    documents: (invoiceRows ?? []) as any[],
+    bills: liveBills,
+    links: (billLinkRows ?? []) as any[],
+    aliasRows: (aliasRows ?? []) as any[],
   });
-  const ledgerDocs: SupplierDoc[] = ((invoiceRows ?? []) as any[]).map((r) => ({
-    id: String(r.id),
-    invoice_number: r.invoice_number ?? null,
-    supplier_account_id: r.supplier_account_id ?? null,
-    job_id: r.job_id ?? null,
-    total: r.total ?? null,
-    invoice_date: r.invoice_date ?? null,
-  }));
-  const billsCarrying = new Map<string, string[]>(
-    ledgerDocs.map((d) => [d.id, billsCarryingNumber(d.invoice_number, { accountId: d.supplier_account_id }, ledgerBills, aliasIndex).map((b) => b.id)]),
-  );
-  // Bills a supplier document already covers, by a link or by carrying its number: they are
-  // never offered as "maybe the same purchase" for a different document.
-  const coveredByDocs = billsCoveredByDocuments(ledgerBills, ledgerDocs, (billLinkRows ?? []) as any[], aliasIndex);
-
   const documentsOf = new Map<string, SupplierDocumentRow[]>();
-  const supplierDocuments: SupplierDocumentRow[] = ((invoiceRows ?? []) as any[]).map((r) => {
-    const id = String(r.id);
-    const kind = String(r.kind ?? "invoice") as SupplierInvoiceKind;
-    const row: SupplierDocumentRow = {
-      id,
-      invoiceNumber: String(r.invoice_number ?? ""),
-      kind: SUPPLIER_INVOICE_KINDS.includes(kind) ? kind : "invoice",
-      invoiceDate: r.invoice_date ?? null,
-      dueDate: r.due_date ?? null,
-      // RAW, AND RESOLVED BY A PERSON. See 0273's header: one road, four spellings, five jobs.
-      jobNameRaw: r.job_name_raw ?? null,
-      jobId: r.job_id ?? null,
-      total: Number(r.total) || 0,
-      // Nullable in the schema. openBalanceOf() falls back to the total, and says out loud how
-      // many documents it had to do that for - never a silent zero, which would read as settled.
-      openBalance: r.open_balance == null ? null : Number(r.open_balance),
-      closed: r.closed === true,
-      discountAmount: r.discount_amount == null ? null : Number(r.discount_amount),
-      discountBy: r.discount_by ?? null,
-      sourceFile: r.source_file ?? null,
-      jobName: r.jobs?.name ?? null,
-      // Zero covering bills means the app has no record of the purchase at all: $1,765.72 of his.
-      // A bill covers it by being LINKED to it, or by naming its number on its own lines - which
-      // is how a scanned statement covers the invoices inside it.
-      billCount: (() => {
-        const bills = new Set(coveringBills.get(id) ?? []);
-        for (const b of billsCarrying.get(id) ?? []) bills.add(b);
-        return bills.size;
-      })(),
-    };
-    // NOT IN HIS BOOKS BY NUMBER, BUT MAYBE BY MONEY (audit v994, DB1). A counter ticket carries a
-    // sales-order number CED's invoice never prints, so the bills on this account (and job) that
-    // no document covers yet, within a few dollars and days, are offered beside it: Same Purchase:
-    // Tie Them. Only offered. Nothing is tied until a person presses it, and the server re-checks.
-    if (row.billCount === 0 && row.kind === "invoice") {
-      const doc = ledgerDocs.find((d) => d.id === id);
-      const candidates = doc ? samePurchaseCandidates(doc, ledgerBills, coveredByDocs, aliasIndex) : [];
-      if (candidates.length)
-        row.samePurchase = candidates.slice(0, 3).map((c) => ({ billId: c.billId, exact: c.exact, sentence: samePurchaseSentence(c) }));
-    }
-    const accountId = String(r.supplier_account_id ?? "");
+  for (const row of supplierDocuments) {
+    const accountId = String(row.supplierAccountId ?? "");
     if (accountId) documentsOf.set(accountId, [...(documentsOf.get(accountId) ?? []), row]);
-    return row;
-  });
+  }
 
   // ── THE BILLS THE SUPPLIER HAS NO DOCUMENT FOR (review of cn-v966) ──────────────────────────
   //
@@ -714,21 +624,30 @@ export default async function BillsPage({
   });
 
   // His jobs, with enough on each to tell five Rhodesias apart.
-  const reconcileJobs: ReconcileJob[] = ((jobs ?? []) as any[]).map((j) => ({
-    id: String(j.id),
-    jobNumber: j.job_number ?? null,
-    name: String(j.name ?? ""),
-    status: j.status ?? null,
-    address: j.address ?? null,
-  }));
+  const reconcileJobs = reconcileJobsOf((jobs ?? []) as any[]);
 
-  // THE DAY THIS APP'S RECORDS BEGIN: its earliest scanned bill. Purchases the supplier made before
-  // it are counted and named, never nagged about - nothing here could have recorded them.
-  const recordsSince =
-    liveBills
-      .map((b: any) => String(b.bill_date ?? ""))
-      .filter((d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d))
-      .sort()[0] ?? null;
+  // THE DAY HIS BOOKS BEGIN (booksBeginOn): the line Erik named for ET ("june 8 is good": the day
+  // ET made its first job in North), else the earliest scanned bill. Purchases the supplier made
+  // before it are counted and named, never nagged about - nothing here could have recorded them.
+  // My Day's cards read the same function.
+  const recordsSince = booksBeginOn(orgId, liveBills);
+
+  // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" The same cards My Day shows, from the same call
+  // (supplierPaperFeed), so the two screens can never disagree about which paper is waiting.
+  //
+  // AND ONLY WHEN THE BOOKS WERE READ. A failed bills, links, aliases or jobs read makes papers his
+  // books already cover look uncovered: false "Needs You" cards on this screen while My Day
+  // (loadSupplierPapers, the same gate) shows none. So it says it couldn't check, instead.
+  const paperBooksUnread = !!(billsErr || linksErr || aliasErr || jobsErr);
+  const paperFeed =
+    invoicesErr || accountsErr || paperBooksUnread || !supplierDocuments.length
+      ? null
+      : supplierPaperFeed({
+          since: recordsSince,
+          rows: supplierDocuments,
+          jobs: reconcileJobs,
+          accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
+        });
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
   // rather than tidiness: every section of the reconcile card is built around documents CED
@@ -999,6 +918,87 @@ export default async function BillsPage({
       })
     : [];
 
+  // ── FIND ANY PAPER (Bills plan, Wave A) ─────────────────────────────────────────────────────
+  // Over what this page has ALREADY read: the supplier's documents, the bills, and the receipt
+  // files. Each row carries every way he might remember it (number, street, job, what CED wrote,
+  // the money) and says where it is. A covered paper takes its job from the bill that covers it,
+  // because its own job_id is often null and "on no job" would be false.
+  const jobById = new Map(((jobs ?? []) as any[]).map((j) => [String(j.id), j]));
+  const jobSaid = (id: string | null | undefined) => {
+    const j = id ? jobById.get(String(id)) : null;
+    return j ? [j.job_number, j.name].filter(Boolean).join(" ") : null;
+  };
+  const jobWords = (id: string | null | undefined) => {
+    const j = id ? jobById.get(String(id)) : null;
+    return j ? [j.job_number, j.name, j.address] : [];
+  };
+  const accountNameOf = new Map(((accountRows ?? []) as any[]).map((a) => [String(a.id), String(a.name ?? "")]));
+  const liveBillById = new Map(liveBills.map((b: any) => [String(b.id), b]));
+  const waitingPapers = new Set((paperFeed?.cards ?? []).map((c) => c.invoiceId));
+  const searchRows: BillsSearchRow[] = [];
+  for (const d of supplierDocuments) {
+    const covering = [...(coveringBills.get(d.id) ?? []), ...(billsCarrying.get(d.id) ?? [])]
+      .map((id) => liveBillById.get(id))
+      .filter(Boolean) as any[];
+    const jobId = d.jobId ?? covering.find((b) => b.job_id)?.job_id ?? null;
+    const account = accountNameOf.get(String(d.supplierAccountId ?? "")) ?? "";
+    const supplier = shortSupplierName(account);
+    const where = waitingPapers.has(d.id)
+      ? "waiting for you under Needs You"
+      : d.billCount > 0
+        ? "in your books"
+        : d.kind !== "invoice"
+          ? (explainKind(d.kind) ?? sayKind(d.kind))
+          : isBeforeLine(d.invoiceDate, recordsSince)
+            ? "from before your books here began"
+            : "not in your books";
+    searchRows.push({
+      key: `paper:${d.id}`,
+      kind: "paper",
+      title: `${supplier} ${sayKind(d.kind)} ${d.invoiceNumber}`,
+      sub: [
+        formatDateShort(d.invoiceDate),
+        formatCurrency(d.total),
+        isUsableJobName(d.jobNameRaw) ? `it says ${String(d.jobNameRaw).trim()}` : null,
+        jobId ? `on ${jobSaid(jobId) ?? "a job"}` : "on no job",
+        where,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      words: wordsOf(d.invoiceNumber, d.jobNameRaw, supplier, account, moneyWords(d.total), d.invoiceDate, sayKind(d.kind), ...jobWords(jobId)),
+      href: waitingPapers.has(d.id) ? "#needs-you" : jobId ? `/jobs/${jobId}` : null,
+    });
+  }
+  for (const b of liveBills as any[]) {
+    const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
+    const number = b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null;
+    searchRows.push({
+      key: `bill:${b.id}`,
+      kind: "bill",
+      title: `${b.supplier || "A bill"}${number ? ` #${number}` : ""}`,
+      sub: [
+        formatDateShort(b.bill_date),
+        formatCurrency(b.amount),
+        b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : `business cost${b.category ? `, ${b.category}` : ""}`,
+        b.status === "paid" ? "settled" : "on account",
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      words: wordsOf(number, ...(reading.numbers ?? []), b.supplier, moneyWords(b.amount), b.bill_date, b.category, b.jobs?.job_number, b.jobs?.name, ...jobWords(b.job_id), String(b.notes ?? "").split(/\r?\n/)[0]),
+      href: b.job_id ? `/jobs/${b.job_id}` : null,
+    });
+  }
+  for (const f of docs as any[]) {
+    searchRows.push({
+      key: `file:${f.id}`,
+      kind: "file",
+      title: String(f.name ?? "A file"),
+      sub: [formatDateShort(String(f.created_at ?? "").slice(0, 10) || null), f.category, f.jobs?.name ? `on ${f.jobs.name}` : null].filter(Boolean).join(" · "),
+      words: wordsOf(f.name, f.category, f.jobs?.name, ...jobWords(f.job_id)),
+      href: f.signedUrl ?? (f.job_id ? `/jobs/${f.job_id}` : null),
+    });
+  }
+
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
     // anywhere onto it, or press Drop Paperwork. Nothing is filed on drop; each paper waits in
@@ -1015,6 +1015,34 @@ export default async function BillsPage({
           <AddBusinessCostButton today={today} />
         </div>
       </PageHeader>
+
+      {/* FIND ANY PAPER: number, street, job, what CED wrote, or $ (Bills plan, Wave A). */}
+      <BillsSearchBox rows={searchRows} />
+
+      {/* NEEDS YOU: the same "here's a bill, what's it for?" cards My Day shows, from the same
+          call (supplierPaperFeed). Only where supplier documents exist; nothing waiting says so. */}
+      {!paperFeed && paperBooksUnread && !invoicesErr && !accountsErr && supplierDocuments.length > 0 && (
+        <Card className="mb-6 p-4" id="needs-you">
+          <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
+          <p className="mt-0.5 text-xs text-slate-500" role="status">
+            Couldn&apos;t check your books just now, so the supplier bills waiting on you aren&apos;t shown. Reload the page to try again.
+          </p>
+        </Card>
+      )}
+      {paperFeed && (
+        <Card className="mb-6 p-4" id="needs-you">
+          <h2 className="text-sm font-semibold text-slate-900">
+            Needs You{paperFeed.cards.length ? ` (${paperFeed.cards.length})` : ""}
+          </h2>
+          <p className="mb-3 mt-0.5 text-xs text-slate-500">
+            Supplier bills nobody has put in your books yet. The same cards are on My Day.
+          </p>
+          <SupplierPaperCards
+            feed={paperFeed}
+            emptyLabel={`Nothing waiting. Every supplier bill${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`}
+          />
+        </Card>
+      )}
 
       <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} />
 

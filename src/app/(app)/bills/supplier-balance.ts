@@ -952,4 +952,11 @@ export type SupplierActionResult = {
   message?: string;
   /** recordPayment hands back the row it wrote, so Undo voids exactly that payment. */
   paymentId?: string;
+  /** Record It As A Bill hands back the bill it wrote, so Undo takes back exactly that bill. */
+  billId?: string;
+  /**
+   * fileSupplierPaper's Undo: the bill it wrote and the job the paper had before (null for none),
+   * so Undo puts back exactly what was there. Absent when there is nothing it could undo.
+   */
+  undo?: { invoiceId: string; billId: string; jobSetTo: string | null; jobBefore: string | null };
 };
