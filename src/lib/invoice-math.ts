@@ -369,6 +369,42 @@ export function priceBookCodeKey(description: string | null | undefined): string
   return key || null;
 }
 
+const BRACKETED = /\[([^\]]+)\]/g;
+
+/**
+ * EVERY PLACE A LINE MAY NAME ITS BOOK CODE, in the order they are tried (Erik, 2026-09-25: "Also
+ * price list items I added from stock"). A line typed from the book leads with it ("TM870LA — S5A
+ * 125V 1P SWITCH"); a line copied from an estimate carries it in brackets instead (the estimate's
+ * line-map writes "<desc> [CODE]": INV-056's "Single-gang remodel box (FLEXBOX 16 cu in) [P116OW]").
+ * So the keys are, trimmed and lower-cased, deduplicated:
+ *   1. the leading code (priceBookCodeKey);
+ *   2. each bracketed token "[X]", whole, in the order they appear;
+ *   3. then the LAST word of each bracketed token with more than one word ("[RACO 936]" -> "936",
+ *      the order sheet's own idiom in materials/actions.ts), tried only after every whole token.
+ * The caller takes the FIRST key that is a code in the org's book, by exact equality: never a
+ * substring, never fuzzy. "[see note]" is a key like any other, and names nothing unless the book
+ * has a code "see note" (or "note"). The SQL twin is 0342's backfill (rank 0 / n / 1000 + n).
+ */
+export function priceBookCodeKeys(description: string | null | undefined): string[] {
+  const d = String(description ?? "");
+  const out: string[] = [];
+  const add = (k: string | null | undefined) => {
+    if (k && !out.includes(k)) out.push(k);
+  };
+  add(priceBookCodeKey(d));
+  const whole: string[] = [];
+  for (const m of d.matchAll(BRACKETED)) {
+    const k = m[1].trim().toLowerCase();
+    if (k) whole.push(k);
+  }
+  whole.forEach(add);
+  for (const k of whole) {
+    const words = k.split(/\s+/);
+    if (words.length > 1) add(words[words.length - 1]);
+  }
+  return out;
+}
+
 /** One code of the org's book, as the kind rule reads it: its unit and its supplier. */
 export type PriceBookFacts = { unit: string | null; supplier: string | null };
 
@@ -391,21 +427,22 @@ export function priceBookUnits(
 }
 
 /**
- * THE KIND A LINE GETS WHEN IT CAME FROM THE PRICE BOOK, read from its own leading code: the rule
- * the server applies when a door did not say (a typed "TM870LA — ..." line, Nort's add line, the
- * estimate's copy), and the one 0342's backfill applied to the lines already out. Null when the
- * line does not start with one of this org's codes, or its book item says neither hours nor a
- * supplier: then nobody knows, and it is read as before.
+ * THE KIND A LINE GETS WHEN IT CAME FROM THE PRICE BOOK, read from the code it names (its lead, or
+ * a bracketed "[CODE]": priceBookCodeKeys, first key in the book wins): the rule the server applies
+ * when a door did not say (a typed "TM870LA — ..." line, Nort's add line, the estimate's copy), and
+ * the one 0342's backfill applied to the lines already out. Null when the line names none of this
+ * org's codes, or the book item it names says neither hours nor a supplier: then nobody knows, and
+ * it is read as before.
  */
 export function kindFromPriceBook(
   line: { description?: string | null; unit?: string | null },
   book: ReadonlyMap<string, PriceBookFacts>,
 ): "labor" | "materials" | null {
-  const key = priceBookCodeKey(line.description);
-  if (!key) return null;
-  const facts = book.get(key);
-  if (!facts) return null;
-  return priceBookLineKind(facts.unit, line.unit, facts.supplier);
+  for (const key of priceBookCodeKeys(line.description)) {
+    const facts = book.get(key);
+    if (facts) return priceBookLineKind(facts.unit, line.unit, facts.supplier);
+  }
+  return null;
 }
 
 /**

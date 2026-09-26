@@ -5,7 +5,7 @@ import { kindFromPriceBook, priceBookUnits, type PriceBookFacts } from "@/lib/in
  * from whom (0342).
  *
  * Every server door that puts a line on an invoice without being told what the line is (a line
- * typed as "TM870LA — ...", Nort's add line, the estimate's copy) asks this, so a part from the book
+ * typed as "TM870LA — ...", Nort's add line, the estimate's copy with its "[CODE]") asks this, so a part from the book
  * (an item with a supplier) is filed under Materials however it arrived, and a book item sold by the
  * hour under Labor (kindFromPriceBook, the rule 0342's backfill ran on the lines already out). A
  * book item that says neither (installed work, a job-cost code) leaves the line saying nothing.
@@ -26,7 +26,7 @@ export async function readPriceBookUnits(supabase: any, orgId: string | null | u
   }
 }
 
-/** What each line is, when its leading code is in the book: the kind, else null (nobody knows). */
+/** What each line is, when a code it names (its lead or a bracketed "[CODE]") is in the book: the kind, else null (nobody knows). */
 export function kindsFromPriceBook<T extends { description?: string | null; unit?: string | null }>(
   lines: readonly T[],
   book: ReadonlyMap<string, PriceBookFacts>,

@@ -33,10 +33,16 @@
 --    0335's panels; invoice_document_projection carries 0301 + 0315's customer_line_words). The
 --    fragments above were copied from those bodies. Grants unchanged (service role only).
 --
--- 3. BACKFILL, CLASSIFICATION ONLY. A line with import_source null and line_kind null whose leading
---    token (the text before " — ") equals a price_list_items code IN THE SAME ORG (trimmed, case
---    ignored) and whose book item names a supplier gets 'materials' (the same rule as the app's
---    kindFromPriceBook). A line billed in hours, or whose book item is priced in hours, is left
+-- 3. BACKFILL, CLASSIFICATION ONLY. A line with import_source null and line_kind null that names a
+--    price_list_items code IN THE SAME ORG (trimmed, case ignored, exact equality) and whose book
+--    item names a supplier gets 'materials' (the same rule as the app's kindFromPriceBook /
+--    priceBookCodeKeys). A line names a code by its lead (the text before " — ", "TM870LA — S5A
+--    125V 1P SWITCH") or, copied from an estimate, in brackets (the estimate's line-map writes
+--    "<desc> [CODE]": INV-056's "... (FLEXBOX 16 cu in) [P116OW]"; Erik, 2026-09-25: "Also price
+--    list items I added from stock"). The keys are tried in one order and the FIRST that is a code
+--    in the book decides: the lead (rank 0), each bracketed token whole (rank n, in order), then the
+--    last word of a bracketed token of several words ("[RACO 936]" -> "936", rank 1000 + n).
+--    A line billed in hours, or whose book item is priced in hours, is left
 --    alone: it already reads Labor, and a stored 'materials' would make it read wrong. No words,
 --    amount, unit, order, claim, edited flag or total changes (mark_invoice_item_edited looks only
 --    at description / quantity / unit_price / unit; the claim trigger only at source_ids /
@@ -154,15 +160,38 @@ begin
      where nullif(btrim(code), '') is not null
      group by org_id, lower(btrim(code))
   )
+  , cand as (
+    -- Every code key a line names, ranked as priceBookCodeKeys orders them.
+    select it.id, it.org_id, c.key, c.rank
+      from public.invoice_items it
+      cross join lateral (
+        select lower(btrim(split_part(it.description, ' — ', 1))) as key, 0::bigint as rank
+         where position(' — ' in coalesce(it.description, '')) > 0
+        union all
+        select lower(btrim(m.t[1])), m.n
+          from regexp_matches(coalesce(it.description, ''), '\[([^\]]+)\]', 'g') with ordinality as m(t, n)
+        union all
+        select lower((regexp_match(btrim(m.t[1]), '(\S+)$'))[1]), 1000 + m.n
+          from regexp_matches(coalesce(it.description, ''), '\[([^\]]+)\]', 'g') with ordinality as m(t, n)
+         where btrim(m.t[1]) ~ '\s'
+      ) c
+     where it.import_source is null
+       and it.line_kind is null
+       and c.key <> ''
+  ), hit as (
+    -- The first key that is a code in the line's own org's book decides.
+    select distinct on (c.id) c.id, c.org_id, b.book_hours, b.book_supplied
+      from cand c
+      join book b on b.org_id = c.org_id and b.code_key = c.key
+     order by c.id, c.rank
+  )
   select it.id, it.org_id
-    from public.invoice_items it
-    join book b on b.org_id = it.org_id
-               and b.code_key = lower(btrim(split_part(it.description, ' — ', 1)))
+    from hit h
+    join public.invoice_items it on it.id = h.id and it.org_id = h.org_id
    where it.import_source is null
      and it.line_kind is null
-     and position(' — ' in coalesce(it.description, '')) > 0
-     and not b.book_hours
-     and b.book_supplied
+     and not h.book_hours
+     and h.book_supplied
      and lower(btrim(coalesce(it.unit, ''))) !~ '^(hr|hrs|hour|hours|man-?hours?)$';
 
   update public.invoice_items it

@@ -9,7 +9,8 @@ import { groupInvoiceLines } from "@/lib/invoice-math";
  *
  * Pinned against the real database, inside ONE transaction that is always rolled back:
  *   · invoice_items.line_kind takes labor / materials / other / credit or null, nothing else;
- *   · the backfill filed INV-079's three price-book lines (and only price-book lines, never an
+ *   · the backfill filed INV-079's three price-book lines and INV-056's two estimate copies that
+ *     name their code in brackets ("... [P116OW]") (and only price-book lines, never an
  *     imported line or one billed in hours) under Materials, and changed no words, amount, unit,
  *     order or edited flag; a re-run files nothing more;
  *   · the /i document (public_invoice through invoice_document_projection) and the portal job page
@@ -121,6 +122,27 @@ d("0342: a line says what it is, and every customer document reads it", () => {
     expect(now.map(({ import_source: _s, line_kind: _k, ...rest }) => rest)).toEqual(before);
   });
 
+  it("INV-056: the two lines copied from an estimate with a bracketed [CODE] are Materials (Erik: 'price list items I added from stock')", async () => {
+    if (!ready()) return;
+    const rows = (
+      await c.query(
+        `select it.description, it.line_total::text as line_total, it.import_source, it.line_kind
+           from invoice_items it join invoices i on i.id = it.invoice_id and i.org_id = it.org_id
+          where i.org_id = $1 and i.invoice_number = 'INV-056'
+            and (it.description like '%[P116OW]%' or it.description like '%[885TRW]%')
+          order by it.sort_order, it.id`,
+        [ET],
+      )
+    ).rows;
+    if (!rows.length) {
+      console.warn("[line-kind] INV-056's bracketed lines are not on this database; skipped.");
+      return;
+    }
+    expect(rows.map((r) => [r.import_source, r.line_kind])).toEqual(rows.map(() => [null, "materials"]));
+    // The first apply's per-org count, for the record (ET Electric only: no other org's book names a supplier).
+    console.warn("[line-kind] 0342 notices:", notices.filter((n) => n.startsWith("0342:")).join(" | "));
+  });
+
   it("the backfill filed only unimported, non-hourly lines whose code is in the same org's book and names a supplier; a re-run files nothing", async () => {
     if (!ready()) return;
     const wrong = await one(
@@ -132,7 +154,11 @@ d("0342: a line says what it is, and every customer document reads it", () => {
                or not exists (select 1 from price_list_items p
                                where p.org_id = it.org_id
                                  and nullif(btrim(p.supplier), '') is not null
-                                 and lower(btrim(p.code)) = lower(btrim(split_part(it.description, ' — ', 1)))))`,
+                                 and (lower(btrim(p.code)) = lower(btrim(split_part(it.description, ' — ', 1)))
+                                      or exists (select 1
+                                                   from regexp_matches(coalesce(it.description, ''), '\\[([^\\]]+)\\]', 'g') as m(t)
+                                                  where lower(btrim(p.code)) in (lower(btrim(m.t[1])),
+                                                                                 lower((regexp_match(btrim(m.t[1]), '(\\S+)$'))[1]))))))`,
     );
     expect(wrong.n).toBe(0);
     notices.length = 0;

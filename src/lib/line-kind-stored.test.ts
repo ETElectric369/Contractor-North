@@ -5,6 +5,7 @@ import {
   kindFromPriceBook,
   pickableLineKind,
   priceBookCodeKey,
+  priceBookCodeKeys,
   priceBookLineKind,
   priceBookUnits,
   storedLineKind,
@@ -150,6 +151,75 @@ describe("the price-book rule (the doors, and 0342's backfill twin)", () => {
     expect(kindFromPriceBook({ description: "NOPE123 — not in this org's book", unit: "ea" }, BOOK)).toBeNull();
     expect(kindFromPriceBook({ description: "Emergency service call", unit: "ea" }, BOOK)).toBeNull();
     expect(kindFromPriceBook({ description: "TM870LA — S5A 125V 1P SWITCH", unit: "ea" }, new Map())).toBeNull();
+  });
+
+  it("a line copied from an estimate names its code in brackets (INV-056, Erik: 'price list items I added from stock')", () => {
+    // ET's book as production holds it: both codes, supplier CED.
+    const et = priceBookUnits([
+      { code: "P116OW", unit: "ea", supplier: "CED" },
+      { code: "885TRW", unit: "ea", supplier: "CED" },
+      { code: "936", unit: "ea", supplier: "CED" },
+      { code: "TM870LA", unit: "ea", supplier: "CED" },
+      { code: "125", unit: "ea", supplier: null },
+    ]);
+    const box = "Single-gang remodel box (FLEXBOX 16 cu in) [P116OW]";
+    const rcpt = "White decora receptacle, 15A tamper-resistant (Decora) [885TRW] & faceplate";
+    expect(priceBookCodeKeys(box)).toEqual(["p116ow"]);
+    expect(priceBookCodeKeys(rcpt)).toEqual(["885trw"]);
+    expect(kindFromPriceBook({ description: box, unit: "ea" }, et)).toBe("materials");
+    expect(kindFromPriceBook({ description: rcpt, unit: "ea" }, et)).toBe("materials");
+    // Case and padding inside the brackets are ignored; the match is still exact.
+    expect(kindFromPriceBook({ description: "Box [ p116ow ]", unit: "ea" }, et)).toBe("materials");
+    expect(kindFromPriceBook({ description: "Box [P116O]", unit: "ea" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "Box [P116OW2]", unit: "ea" }, et)).toBeNull();
+    // Sold by the hour still reads Labor.
+    expect(kindFromPriceBook({ description: box, unit: "hr" }, et)).toBe("labor");
+  });
+
+  it("a bracket that is not a code names nothing", () => {
+    const et = priceBookUnits([{ code: "P116OW", unit: "ea", supplier: "CED" }]);
+    expect(priceBookCodeKeys("Move the panel [see note]")).toEqual(["see note", "note"]);
+    expect(kindFromPriceBook({ description: "Move the panel [see note]", unit: "ea" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "Unclosed [P116OW", unit: "ea" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "Empty [] and [  ]", unit: "ea" }, et)).toBeNull();
+    expect(priceBookCodeKeys("Empty [] and [  ]")).toEqual([]);
+  });
+
+  it("the estimate's last-word idiom ('[RACO 936]' -> '936') only when the whole token misses", () => {
+    const et = priceBookUnits([{ code: "936", unit: "ea", supplier: "CED" }]);
+    expect(priceBookCodeKeys("4-inch box [RACO 936]")).toEqual(["raco 936", "936"]);
+    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, et)).toBe("materials");
+    // The whole token is a code of its own and says nothing: it wins, and the last word is not tried.
+    const both = priceBookUnits([
+      { code: "RACO 936", unit: "SQ FT", supplier: null },
+      { code: "936", unit: "ea", supplier: "CED" },
+    ]);
+    expect(kindFromPriceBook({ description: "4-inch box [RACO 936]", unit: "ea" }, both)).toBeNull();
+    // Every whole token is tried before any last word.
+    const two = priceBookUnits([
+      { code: "936", unit: "hr" },
+      { code: "P116OW", unit: "ea", supplier: "CED" },
+    ]);
+    expect(priceBookCodeKeys("Kit [RACO 936] [P116OW]")).toEqual(["raco 936", "p116ow", "936"]);
+    expect(kindFromPriceBook({ description: "Kit [RACO 936] [P116OW]", unit: "ea" }, two)).toBe("materials");
+  });
+
+  it("a line with both forms: the leading code is tried first, then the brackets", () => {
+    const et = priceBookUnits([
+      { code: "TM870LA", unit: "ea", supplier: "CED" },
+      { code: "P116OW", unit: "ea", supplier: "CED" },
+      { code: "125", unit: "ea", supplier: null },
+      { code: "SVC-HR", unit: "hr" },
+    ]);
+    expect(priceBookCodeKeys("TM870LA — S5A switch [P116OW]")).toEqual(["tm870la", "p116ow"]);
+    expect(kindFromPriceBook({ description: "TM870LA — S5A switch [P116OW]", unit: "ea" }, et)).toBe("materials");
+    // A lead that is not a code falls through to the bracket.
+    expect(kindFromPriceBook({ description: "Remodel box — cut in [P116OW]", unit: "ea" }, et)).toBe("materials");
+    // A lead that IS a code decides, even when the bracket would say something else.
+    expect(kindFromPriceBook({ description: "125 — Supervision [P116OW]", unit: "ea" }, et)).toBeNull();
+    expect(kindFromPriceBook({ description: "SVC-HR — Service hour [P116OW]", unit: "ea" }, et)).toBe("labor");
+    // The same code in both places is one key.
+    expect(priceBookCodeKeys("P116OW — box [P116OW]")).toEqual(["p116ow"]);
   });
 
   it("being in the book is not being materials: installed work and job-cost codes say nothing", () => {
