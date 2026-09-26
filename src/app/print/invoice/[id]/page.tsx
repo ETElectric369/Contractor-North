@@ -27,6 +27,13 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   // A failed read is an error page, never a bill with missing lines: the PDF route stores nothing
   // from a page that did not answer 200.
   if (read.kind === "error") throw new Error("This invoice couldn't be read just now.");
+  // The /i page and the portal leave a failed piece off and redraw on the next open. This page is
+  // the stored customer copy: a bill missing its Bill To, job site, payments or Progress Summary
+  // would be kept and served with nothing saying so. Refuse it (logged by the read already), so
+  // /api/pdf stores nothing and the next open renders the whole bill.
+  if (read.degraded.length > 0) {
+    throw new Error(`This invoice couldn't be read in full just now (${read.degraded.join(", ")}).`);
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">

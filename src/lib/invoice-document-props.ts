@@ -36,11 +36,20 @@ import type { Organization } from "@/lib/types";
  * and left off: a failed payments read prints no payment list (Amount Paid still comes from the
  * invoice row), a failed customer read prints no Bill To, a failed job read prints no job site and
  * no Progress Summary, and a failed progress read prints no Progress Summary.
+ *
+ * LEFT OFF IS FOR THE LIVE PAGES ONLY. A read with a piece missing says so (`degraded`, naming the
+ * pieces). The /i page and the portal redraw on every open, so they draw what they have. The print
+ * page is the PDF, and /api/pdf stores what it renders as the customer's copy with nothing on it
+ * saying a piece is missing, so the print page refuses a degraded read (a non-200 is never stored).
  */
 export type InvoiceDocumentProps = Omit<ComponentProps<typeof InvoiceDocument>, "groupByKind">;
 
+/** A piece of the document whose read failed and was left off (see the header). */
+export type InvoiceDocPiece = "payments" | "customer" | "job" | "progress";
+
 export type InvoiceDocRead =
-  | { kind: "ok"; props: InvoiceDocumentProps }
+  /** `degraded`: the pieces left off because their read failed (empty when whole). */
+  | { kind: "ok"; props: InvoiceDocumentProps; degraded: InvoiceDocPiece[] }
   /** No such invoice for this reader (RLS, or not in the pinned org/job). */
   | { kind: "missing" }
   /** A read the document cannot be drawn without failed. Logged. */
@@ -198,7 +207,7 @@ export function assembleInvoiceDocumentProps(inp: InvoiceDocInputs): InvoiceDocu
 /** Reads shared across several bills in one page load (the portal draws every bill on a job). */
 export type InvoiceDocCache = {
   supplierNames: Map<string, Promise<{ names: ReadonlySet<string>; failed: boolean }>>;
-  progress: Map<string, Promise<JobProgressFinancials | null>>;
+  progress: Map<string, Promise<{ fin: JobProgressFinancials | null; failed: boolean }>>;
 };
 export function newInvoiceDocCache(): InvoiceDocCache {
   return { supplierNames: new Map(), progress: new Map() };
@@ -244,19 +253,22 @@ export async function readInvoiceDocumentProps(
   })();
 
   // A draw on a job carries the job's progress figures. The service role pins them to the org.
-  const progressP: Promise<JobProgressFinancials | null> =
+  const progressP: Promise<{ fin: JobProgressFinancials | null; failed: boolean }> =
     jobId && isDrawKind(inv.invoice_kind)
       ? (() => {
           const hit = cache?.progress.get(jobId);
           if (hit) return hit;
-          const p = jobProgressFinancials(db, jobId, access.kind === "service" ? { orgId } : undefined).catch((e: unknown) => {
-            reportError("invoiceDoc.progress", e, { ...ctx, jobId });
-            return null;
-          });
+          const p = jobProgressFinancials(db, jobId, access.kind === "service" ? { orgId } : undefined).then(
+            (fin) => ({ fin, failed: false }),
+            (e: unknown) => {
+              reportError("invoiceDoc.progress", e, { ...ctx, jobId });
+              return { fin: null, failed: true };
+            },
+          );
           cache?.progress.set(jobId, p);
           return p;
         })()
-      : Promise.resolve(null);
+      : Promise.resolve({ fin: null, failed: false });
 
   const [itemsR, paymentsR, customerR, jobR, orgR, names, progress] = await Promise.all([
     db.from("invoice_items").select(INVOICE_DOC_COLS.items).eq("invoice_id", invoiceId).eq("org_id", orgId).order("sort_order"),
@@ -291,8 +303,14 @@ export async function readInvoiceDocumentProps(
   if (jobR.error) reportError("invoiceDoc.job", jobR.error, ctx);
 
   const jobFailed = !!jobR.error;
+  const degraded: InvoiceDocPiece[] = [];
+  if (paymentsR.error) degraded.push("payments");
+  if (customerR.error) degraded.push("customer");
+  if (jobFailed) degraded.push("job");
+  if (progress.failed) degraded.push("progress");
   return {
     kind: "ok",
+    degraded,
     props: assembleInvoiceDocumentProps({
       invoice: inv,
       items: (itemsR.data ?? []) as Row[],
@@ -301,7 +319,7 @@ export async function readInvoiceDocumentProps(
       job: { row: jobFailed ? null : ((jobR.data ?? null) as Row | null), failed: jobFailed },
       org: orgR.data as Row,
       supplierNames: names.names,
-      progress: jobFailed ? null : progress,
+      progress: jobFailed ? null : progress.fin,
     }),
   };
 }

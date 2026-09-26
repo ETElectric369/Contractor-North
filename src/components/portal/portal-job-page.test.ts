@@ -83,6 +83,7 @@ function docsFor(r: PortalJobRaw): Map<string, InvoiceDocRead> {
     if (!i.doc) continue;
     out.set(String(i.id), {
       kind: "ok",
+      degraded: [],
       props: assembleInvoiceDocumentProps({
         invoice: { ...i.doc.invoice, status: i.status },
         items: i.doc.items,

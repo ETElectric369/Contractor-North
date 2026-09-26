@@ -141,6 +141,7 @@ describe("the portal: ledger and bill both read the customer's words", () => {
         "i1",
         {
           kind: "ok" as const,
+          degraded: [],
           props: assembleInvoiceDocumentProps({
             invoice: { invoice_number: "INV-00028", status: "draft", total: 30 },
             items: bill.doc!.items,

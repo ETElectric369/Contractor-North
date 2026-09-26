@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 // reportError writes to error_events through the service client; here it only records.
 const reported: string[] = [];
@@ -250,7 +252,7 @@ describe("what INV-080 now carries on every surface", () => {
     expect(p.items.map((i) => i.description)).toEqual(["Labor - Erik Taylor", "Materials", "Materials — Acme Supply"]);
   });
 
-  it("renders as the PDF does: tinted header, contact under Bill To, and 'Over the estimate' in words", async () => {
+  it("renders as the PDF does: tinted header, contact under Bill To, and 'Billed over the estimate' in words", async () => {
     const p = ok(await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: ORG }));
     const html = renderToStaticMarkup(createElement(InvoiceDocument, p));
     const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
@@ -259,7 +261,7 @@ describe("what INV-080 now carries on every surface", () => {
     expect(text).toContain("tao@example.com");
     expect(text).toContain("Progress summary");
     // 17,325 − 16,527.30 − 3,189.34 = −2,391.64: said in words, never as a negative.
-    expect(text).toContain("Over the estimate $2,391.64");
+    expect(text).toContain("Billed over the estimate $2,391.64");
     expect(text).not.toContain("-$2,391.64");
     expect(text).not.toContain("Balance to estimate");
     expect(text).not.toMatch(/Consolidated/);
@@ -312,6 +314,25 @@ describe("a read that fails degrades honestly", () => {
     expect(reported).toContain("invoiceDoc.progress");
   });
 
+  it("a piece left off is named (degraded), so the stored PDF can refuse it; a whole read names none", async () => {
+    const whole = await readInvoiceDocumentProps(client(), INV, { kind: "staff" });
+    expect(whole.kind === "ok" && whole.degraded).toEqual([]);
+    for (const [fail, piece] of [
+      ["payments", "payments"],
+      ["customers", "customer"],
+      ["jobs", "job"],
+      ["bills:bill_line_items", "progress"],
+    ] as const) {
+      const r = await readInvoiceDocumentProps(client({ fail: [fail] }), INV, { kind: "staff" });
+      expect(r.kind === "ok" && r.degraded, fail).toEqual([piece]);
+    }
+  });
+
+  it("the print page (the stored customer copy) throws on a degraded read, so /api/pdf stores nothing", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/print/invoice/[id]/page.tsx"), "utf8");
+    expect(src).toMatch(/if \(read\.degraded\.length > 0\) \{\s*throw new Error/);
+  });
+
   it("another org's invoice, a job the portal did not name, or a non-id is simply not there", async () => {
     expect((await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: OTHER })).kind).toBe("missing");
     expect((await readInvoiceDocumentProps(client(), INV, { kind: "service", orgId: ORG, jobId: OTHER_JOB })).kind).toBe("missing");
@@ -342,8 +363,8 @@ describe("the /i link resolves its invoice the way public_invoice gates it", () 
 
 describe("a progress balance never prints as a negative", () => {
   it("T&M over the estimate / fixed-price over the contract, each the positive amount", () => {
-    expect(progressBalanceRow(-2391.64, "tm")).toEqual({ label: "Over the estimate", value: 2391.64 });
-    expect(progressBalanceRow(-500, "fixed")).toEqual({ label: "Over the contract", value: 500 });
+    expect(progressBalanceRow(-2391.64, "tm")).toEqual({ label: "Billed over the estimate", value: 2391.64 });
+    expect(progressBalanceRow(-500, "fixed")).toEqual({ label: "Billed over the contract", value: 500 });
     expect(progressBalanceRow(1325, "tm")).toEqual({ label: "Balance to estimate", value: 1325 });
     expect(progressBalanceRow(1325, "fixed")).toEqual({ label: "Balance remaining", value: 1325 });
     expect(progressBalanceRow(-0.001, "tm")).toEqual({ label: "Balance to estimate", value: 0 });
@@ -351,8 +372,21 @@ describe("a progress balance never prints as a negative", () => {
 
   it("the card says it in words", () => {
     const fixed = renderToStaticMarkup(createElement(ProgressReportCard, { estimate: 10000, workToDate: 10500, received: 8000, thisAmount: 2500, billingType: "fixed" }));
-    expect(fixed).toContain("Over the contract");
+    expect(fixed).toContain("Billed over the contract");
     expect(fixed).toContain("$500.00");
     expect(fixed).not.toContain("-$");
+  });
+
+  it("INV-080: the billed overage is named as billed, so it never reads as a second, different work overage", () => {
+    // Estimate 17,325; work to date 18,624.14 (107%, $1,299.14 of work past it); received
+    // 16,527.30 + this request 3,189.34 = 19,716.64, which is $2,391.64 BILLED past it.
+    const html = renderToStaticMarkup(
+      createElement(ProgressReportCard, { estimate: 17325, workToDate: 18624.14, received: 16527.3, thisAmount: 3189.34, billingType: "tm" }),
+    );
+    const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+    expect(text).toContain("$18,624.14");
+    expect(text).toContain("Billed over the estimate $2,391.64");
+    expect(text).not.toMatch(/(^|[^d] )Over the estimate/);
+    expect(text).not.toContain("-$");
   });
 });
