@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
-import { assertTestDatabase } from "@/lib/db-guard";
+import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
  * Migration 0349: a job that changes retires its bills' stored PDFs (audit v1018 links-docs-1).
@@ -40,10 +40,8 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
   const warnings: string[] = [];
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
-  const ready = () => {
-    if (waiting) console.warn("[job-pdf-unstamp] 0349 is not on this database yet; apply it with scripts/test-db/rebuild.cjs.");
-    return !waiting;
-  };
+  const ready = () =>
+    !waiting || notOnThisDatabase("[job-pdf-unstamp] 0349 is not on this database yet; apply it with scripts/test-db/rebuild.cjs.");
   /** Every stored copy, stamped as a sent bill's is. */
   const stampAll = async () => {
     for (const id of [draw, standard, otherDraw]) {

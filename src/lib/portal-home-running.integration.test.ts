@@ -152,7 +152,10 @@ d("the portal home's running bills and the office's photo check (0323)", { timeo
     );
     // Only figures and the job: no bill number, no token, no pay door.
     for (const r of p.running) expect(Object.keys(r).sort()).toEqual(["amount_paid", "job_id", "job_name", "job_number", "total"]);
-    const text = JSON.stringify(p.running);
+    // The figures and names only: a random job_id can hold "999" (…-8999-…) and fail this falsely.
+    const text = JSON.stringify(
+      p.running.map((r: { job_name: string; job_number: string; total: number; amount_paid: number }) => [r.job_name, r.job_number, r.total, r.amount_paid]),
+    );
     for (const never of ["TEST-0323-B", "TEST-0323-E", "555", "444", "333", "777", "999"]) expect(text).not.toContain(never);
     // The sent bill is still in the invoice list, and the drafts are not.
     expect(p.invoices.map((i: { invoice_number: string }) => i.invoice_number)).toEqual(["TEST-0323-3"]);
