@@ -62,7 +62,7 @@ export default async function ShopStockPage({
   if (term) itemQuery = itemQuery.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,key_part.ilike.%${term}%,category.ilike.%${term}%`);
 
   // ONE BREATH: everything the page needs that depends on nothing else.
-  const [items, lots, lotRows, moves, jobs, receiptLines, stockDocs, docLinks, papers] = await Promise.all([
+  const [items, lots, lotRows, moves, jobs, receiptLines, stockDocs, docLinks, papers, exportsRead] = await Promise.all([
     itemQuery,
     supabase
       .from("stock_lot_balance")
@@ -100,7 +100,25 @@ export default async function ShopStockPage({
       .eq("org_id", orgId)
       .eq("status", "needs_review")
       .limit(300),
+    // What already went to the accountant (0350): an upkeep move a Stock Used or On Hand download
+    // carried has no Undo. Before 0350 there is no record, and nothing is frozen.
+    supabase
+      .from("accountant_exports")
+      .select("list, from_at, to_at, created_at")
+      .eq("org_id", orgId)
+      .in("list", ["stock_used", "on_hand"])
+      .order("created_at")
+      .limit(2000),
   ]);
+  const exportRows = ((exportsRead.error ? [] : exportsRead.data) ?? []) as { list: string; from_at: string | null; to_at: string; created_at: string }[];
+  /** The download that carried a move made at `at`, in words, or null (mirrors 0350's guard). */
+  const carriedBy = (at: string): string | null => {
+    const t = Date.parse(at);
+    const hit = exportRows.find(
+      (e) => Date.parse(e.created_at) > t && Date.parse(e.to_at) > t && (!e.from_at || Date.parse(e.from_at) <= t),
+    );
+    return hit ? `the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list, ${day(hit.created_at)}` : null;
+  };
 
   // A shelf ledger missing (a database before 0303) is no rolls; any other failure is said, never
   // read as a shelf worth $0.
@@ -178,6 +196,7 @@ export default async function ShopStockPage({
       // Unread bill (a failed read) is treated as a shelf ticket: no Take It Off, and the server
       // refuses a shelf ticket's roll in words either way.
       shelfTicket: l.kind !== "opening" && (!bill || bill.on_shelf === true || !bill.job_id),
+      supplier: bill?.supplier ?? null,
     };
     const arr = lotsByItem.get(String(l.item_id)) ?? [];
     arr.push(view);
@@ -194,7 +213,7 @@ export default async function ShopStockPage({
       job_return: `${qty} came back from ${job}`,
       recount_down: `Counted: ${qty} fewer than the record (written off)`,
       recount_up: `Counted: ${qty} more than the record (found, $0)`,
-      write_off: `${qty} written off`,
+      write_off: `${qty} written off (Shop Stock Lost)`,
       supplier_return: `${qty} went back to the supplier`,
     };
     const view: ShelfMoveView = {
@@ -205,6 +224,7 @@ export default async function ShopStockPage({
       undone: !!m.undone_at,
       drawGroup: m.draw_group ? String(m.draw_group) : null,
       settled: !!m.settled_by,
+      exported: ["write_off", "supplier_return", "recount_down", "recount_up"].includes(String(m.kind)) && !m.undone_at ? carriedBy(String(m.created_at)) : null,
     };
     const arr = movesByItem.get(String(m.item_id)) ?? [];
     arr.push(view);
@@ -298,6 +318,12 @@ export default async function ShopStockPage({
   return (
     <div>
       <PageHeader title="Shop Stock" description="What's on the shelf, what it cost, where every roll came from and where every piece went.">
+        <Link
+          href="/analytics/accountant"
+          className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Export For Accountant
+        </Link>
         <NewItemButton />
       </PageHeader>
 
