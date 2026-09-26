@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { loadSupplierDesk, supplierDocumentRows } from "./supplier-papers";
-import { sentSinceTheirPapers, supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
+import { sentThisCycle, supplierPayDue, PAY_CARD_WINDOW_DAYS } from "./supplier-pay-due";
 import { supplierBalance, supplierNetIfPaidBy, type SupplierAccountRow } from "./supplier-balance";
 import { claimableDiscounts } from "./supplier-reconcile";
 import { supplierPayActionItems, supplierPayHref } from "@/lib/action-items/supplier-pay-item";
@@ -160,59 +160,65 @@ describe("Pay CED By Oct 10: the line on his real documents", () => {
   });
 });
 
-describe("Paying clears the line (CED's papers cannot show a payment until the next download)", () => {
-  const LANDED = "2026-09-24T04:00:00.000Z"; // his newest CED papers, 9:00 pm Sep 23 in Chilcoot
-  const TZ = "America/Los_Angeles";
-  const docs = hisDocuments().map((d) => ({ ...d, created_at: LANDED }));
-  const pay = (amount: number, paid_on: string, created_at: string, voided_at: string | null = null) => ({
-    supplier_account_id: CED, amount, paid_on, created_at, voided_at,
-  });
-  const dueWith = (payments: ReturnType<typeof pay>[], today = "2026-10-03") =>
-    supplierPayDue({ rows: rowsOf(docs), accounts: ACCOUNTS, today, sent: sentSinceTheirPapers({ documents: docs, payments, tz: TZ }) });
+describe("Paying clears the line (keyed to the cheque, never to when a paper landed)", () => {
+  const pay = (amount: number, paid_on: string, voided_at: string | null = null) => ({ supplier_account_id: CED, amount, paid_on, voided_at });
+  const dueWith = (payments: ReturnType<typeof pay>[], today = "2026-10-03", docs = hisDocuments()) =>
+    supplierPayDue({ rows: rowsOf(docs), accounts: ACCOUNTS, today, payments });
+  // Bought Oct 4: its discount runs to Nov 10, so it is not what the Oct 10 cheque was for.
+  const october = { ...hisDocuments()[23], id: "si-oct", invoice_number: "8802-1109001", invoice_date: "2026-10-04", total: 900, open_balance: 900, discount_amount: 9, discount_by: "2026-11-10" };
 
-  it("his real payments are all older than the papers: nothing is taken off twice", () => {
-    const sent = sentSinceTheirPapers({
-      documents: docs,
-      payments: [
-        pay(1000, "2026-06-22", "2026-09-19T07:39:11Z"),
-        pay(1500, "2026-07-13", "2026-09-19T07:43:12Z"),
-        pay(2000, "2026-08-17", "2026-09-19T07:39:59Z"),
-        pay(1500, "2026-09-10", "2026-09-19T07:40:30Z"),
-      ],
-      tz: TZ,
-    });
-    expect(sent.size).toBe(0);
-    expect(dueWith([])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
+  it("his real payments are all dated on or before Sep 10, the last cycle: none is Oct 10's", () => {
+    const payments = [pay(1000, "2026-06-22"), pay(1500, "2026-07-13"), pay(2000, "2026-08-17"), pay(1500, "2026-09-10")];
+    expect(sentThisCycle({ documents: rowsOf(), payments, accountId: CED, payBy: "2026-10-10" })).toEqual({ sent: 0, lastPaidOn: null });
+    expect(dueWith(payments, TONIGHT)[0]).toMatchObject({ owed: 5174.62, sent: 0 });
   });
 
   it("paying the whole cheque on Oct 3 takes the line off My Day", () => {
-    expect(dueWith([pay(5139.12, "2026-10-03", "2026-10-03T18:00:00Z")])).toEqual([]);
-    expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T18:00:00Z")])).toEqual([]);
+    expect(dueWith([pay(5139.12, "2026-10-03")])).toEqual([]);
+    expect(dueWith([pay(5174.62, "2026-10-03")])).toEqual([]);
+    // In chunks too: the cycle's payments add up.
+    expect(dueWith([pay(2000, "2026-09-20"), pay(3139.12, "2026-10-02")])).toEqual([]);
   });
 
-  it("a $1,500 chunk comes off the figure, and the line says so", () => {
-    const [due] = dueWith([pay(1500, "2026-10-03", "2026-10-03T18:00:00Z")]);
-    expect(due).toMatchObject({ owed: 3674.62, sent: 1500, saves: 35.5 });
+  it("and it stays off when a new CED paper lands before CED has applied the cheque", () => {
+    // Paid in full Oct 2; on Oct 5 he downloads one new October invoice. The old ones are still
+    // open (CED has not applied the cheque), and the line does not come back asking again.
+    expect(dueWith([pay(5139.12, "2026-10-02")], "2026-10-05", [...hisDocuments(), october])).toEqual([]);
+  });
+
+  it("but a later purchase still riding on Oct 10 brings it back, at the /bills figure", () => {
+    const sep29 = { ...october, id: "si-929", invoice_number: "8802-1108999", invoice_date: "2026-09-29", discount_by: "2026-10-10" };
+    const [due] = dueWith([pay(5139.12, "2026-09-28")], "2026-10-03", [...hisDocuments(), sep29]);
+    expect(due).toMatchObject({ owed: 6074.62, sent: 5139.12, saves: 44.5 });
+  });
+
+  it("a $1,500 chunk leaves the figure at the /bills You Owe, and names the chunk as a fact", () => {
+    const [due] = dueWith([pay(1500, "2026-10-03")]);
+    expect(due).toMatchObject({ owed: 5174.62, sent: 1500, saves: 35.5 });
     const [item] = supplierPayActionItems([due]);
-    expect(item.title).toBe("Pay CED $3,674.62 By Oct 10");
+    expect(item.title).toBe("Pay CED $5,174.62 By Oct 10");
     expect(item.subtitle).toBe("Saves $35.50 on 7 invoices · $1,500.00 already sent");
   });
 
-  it("a voided payment, or a cheque written before the download and recorded after, never counts", () => {
-    expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T18:00:00Z", "2026-10-03T19:00:00Z")])[0].owed).toBe(5174.62);
-    expect(dueWith([pay(5174.62, "2026-09-20", "2026-10-03T18:00:00Z")])[0].owed).toBe(5174.62);
+  it("a chunk CED has applied and he re-downloaded is off the papers once, never off the figure twice", () => {
+    // $2,000 sent Oct 2; CED applies it and closes the oldest open papers; he re-downloads them (no new
+    // numbers, so nothing new landed). The figure is CED's new open balance, not $2,000 less again.
+    const applied = new Set(["8802-1104268", "8802-1104147", "8802-1104644", "8802-1104646", "8802-1103832", "9019682437", "8802-1104645", "8802-1105997", "8802-1105963", "8802-1106188", "8802-1106249", "9019994306", "8802-1107139", "8802-1107088"]);
+    const docs = hisDocuments((d) => (applied.has(String(d.invoice_number)) ? { ...d, closed: true, open_balance: 0 } : d));
+    const owedNow = supplierBalance(
+      { id: CED, name: "CED", accountNumber: null, branchCode: null, onAccount: true, note: null, aliases: [], bills: [], payments: [], supplierInvoices: rowsOf(docs) },
+      "2026-10-06",
+    ).owed;
+    const [due] = dueWith([pay(2000, "2026-10-02")], "2026-10-06", docs);
+    expect(due.owed).toBe(owedNow);
+    expect(due.sent).toBe(2000);
   });
 
-  it("the day a paper landed is the org's day, not UTC's", () => {
-    // Landed 9:00 pm Sep 23 local (Sep 24 UTC): a cheque written Sep 23 evening, recorded after, counts.
-    const sent = sentSinceTheirPapers({ documents: docs, payments: [pay(100, "2026-09-23", "2026-09-24T05:00:00Z")], tz: TZ });
-    expect(sent.get(CED)).toBe(100);
-  });
-
-  it("newer papers swallow an older payment: CED has spoken since", () => {
-    const newer = [...docs, { ...docs[0], id: "si-new", created_at: "2026-10-05T16:00:00Z" }];
-    const sent = sentSinceTheirPapers({ documents: newer, payments: [pay(1500, "2026-10-03", "2026-10-03T18:00:00Z")], tz: TZ });
-    expect(sent.size).toBe(0);
+  it("a voided payment, a cheque dated before the cycle, or one after the deadline never counts", () => {
+    expect(dueWith([pay(5174.62, "2026-10-03", "2026-10-03T19:00:00Z")])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
+    expect(dueWith([pay(5174.62, "2026-09-10")])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
+    expect(dueWith([pay(5174.62, "2026-10-11")])[0]).toMatchObject({ owed: 5174.62, sent: 0 });
+    expect(dueWith([{ ...pay(5174.62, "2026-10-03"), supplier_account_id: "acct-ace" }])[0]).toMatchObject({ sent: 0 });
   });
 });
 
@@ -253,14 +259,14 @@ describe("loadSupplierDesk: one read, the cards and the pay line", () => {
       expect(filters).toContain(`${t}.org_id=${ORG}`);
   });
 
-  it("reads his payments: a payment since the newest papers clears the line", async () => {
+  it("reads his payments: a cheque dated in this cycle clears the line", async () => {
     const { client } = fakeSupabase({
       profiles: { data: { org_id: ORG } },
-      supplier_invoices: { data: hisDocuments().map((d) => ({ ...d, created_at: "2026-09-24T04:00:00Z" })) },
+      supplier_invoices: { data: hisDocuments() },
       supplier_accounts: { data: ACCOUNTS },
-      supplier_payments: { data: [{ supplier_account_id: CED, amount: 5174.62, paid_on: "2026-10-03", created_at: "2026-10-03T18:00:00Z", voided_at: null }] },
+      supplier_payments: { data: [{ supplier_account_id: CED, amount: 5174.62, paid_on: "2026-10-03", voided_at: null }] },
     });
-    const desk = await loadSupplierDesk(client, "user-1", "2026-10-03", "America/Los_Angeles");
+    const desk = await loadSupplierDesk(client, "user-1", "2026-10-03");
     expect(desk?.payDue).toEqual([]);
   });
 

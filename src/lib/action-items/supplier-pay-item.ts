@@ -16,8 +16,9 @@ export function supplierPayHref(accountId: string): string {
  * (types.ts). The app suggests the date and the figure; he decides what to send, on the sheet.
  *
  * "Saves" is only the discount that rides on that date (supplierPayDue: claim.dueOnNext), the same
- * slice /bills names; a later deadline's discount gets its own line when its turn comes. Money he
- * has sent since CED's newest papers is already off the figure, and the line says so out loud.
+ * slice /bills names; a later deadline's discount gets its own line when its turn comes. The figure
+ * is the /bills "You owe" to the cent; a chunk he has sent toward this deadline is named beside it
+ * as a fact, never taken off it (supplierPayDue).
  */
 export function supplierPayActionItems(dues: SupplierPayDue[] | null | undefined): ActionItem[] {
   return (dues ?? []).map((d) => ({

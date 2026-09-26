@@ -15,13 +15,24 @@
  *           invoice's Nov 10 discount is not lost on Oct 10, and /bills refuses to say it is
  *           (discountDeadlineSentence). That later slice gets its own line when its turn comes.
  *
- * PAYING CLEARS IT (review, 2026-09-26). Under model B the balance is CED's own papers, and a
- * payment he records does not touch them: only the next CED download closes anything. So a
- * payment recorded AFTER the newest paper landed, and dated on or after that day, is money CED's
- * papers cannot show yet (sentSinceTheirPapers). Once it covers the cheque the line asks for (the
- * /bills net if paid by payBy) the line goes: he has done what it asked. A smaller chunk comes off
- * the figure the line names, and the line says so. The balance itself is untouched: that is
- * supplierBalance's rule, and subtracting the payments there is the $1,360.93 double-count.
+ * PAYING CLEARS IT, KEYED TO THE PAYMENT (review 2, 2026-09-26). Under model B the balance is
+ * CED's own papers, and a payment he records does not touch them. When CED applies it is not
+ * something the app can see: a download inserts only NEW invoice numbers, and a paid-in-full stamp
+ * closes an old one without touching its created_at. So a fresh paper proves nothing about his
+ * cheque, and the line never asks it to. What it reads is the cheque itself (sentThisCycle): every
+ * live payment dated inside this deadline's cycle, after the account's previous discount deadline
+ * and on or before payBy. Once that covers the /bills net-if-paid-by for the documents dated on or
+ * before the day he paid (and any later purchase still riding on payBy), the line goes and stays
+ * gone till the deadline passes, whatever else lands: an October invoice downloaded on Oct 5 is
+ * not what the Oct 10 cheque was for. A smaller chunk leaves the line as it was, naming what he
+ * has sent as a fact.
+ *
+ * THE FIGURE NEVER MOVES FOR A PAYMENT. The title is supplierBalance(account).owed to the cent, the
+ * "You owe" the door opens on. Subtracting a payment from it is a second rule for model B on a
+ * second screen, and wrong the moment CED has applied that payment: the $1,360.93 double-count.
+ * The one case the clear-off can come early: a chunk CED has already applied, re-downloaded inside
+ * the same cycle, then more chunks on top. The papers show that chunk and so does `sent`. The app
+ * suggests; /bills still names the discount and the balance.
  *
  * SHOWN ONLY WHILE IT CAN SAVE HIM SOMETHING SOON: the soonest deadline is today or within the
  * next PAY_CARD_WINDOW_DAYS days. Once it passes, the discount is not live, the slice moves to the
@@ -40,7 +51,6 @@ import {
   daysBetweenYmd,
   type SupplierAccountRow,
 } from "./supplier-balance";
-import { todayStrInTz } from "@/lib/tz";
 import { claimableDiscounts, shortSupplierName, type SupplierInvoiceRow } from "./supplier-reconcile";
 
 /** How far ahead of the deadline the line appears. Two weeks: one statement cycle's notice. */
@@ -52,13 +62,13 @@ export interface SupplierPayDue {
   accountName: string;
   /** What he calls them on a line: "CED". */
   supplier: string;
-  /** What the supplier says is owed (the /bills payment sheet's "You owe"), less `sent`. */
+  /** What the supplier says is owed: the /bills payment sheet's "You owe", to the cent. */
   owed: number;
   /** The discount that rides on `payBy`: what is lost if that day passes unpaid. */
   saves: number;
   /** How many invoices carry that slice. */
   invoices: number;
-  /** Money he recorded sending since CED's newest papers landed, which they cannot show yet. */
+  /** Live payments dated in this deadline's cycle (sentThisCycle). A fact on the line, never off `owed`. */
   sent: number;
   /** The soonest live discount deadline, "YYYY-MM-DD". */
   payBy: string;
@@ -71,50 +81,46 @@ export interface SentPaymentRow {
   supplier_account_id?: string | null;
   amount?: number | string | null;
   paid_on?: string | null;
-  created_at?: string | null;
   voided_at?: string | null;
 }
 
 /**
- * MONEY CED'S PAPERS CANNOT SHOW YET, per account. A live payment counts when it was RECORDED
- * after the account's newest document landed (supplier_invoices.created_at) and PAID on or after
- * that day in the org's timezone. A cheque written before the download is already in what CED
- * closed, even when he records it later; counting it again is the double-count model B exists to
- * stop. An account with no documents has no papers to be ahead of, so it has nothing here.
+ * WHAT HE HAS SENT TOWARD THIS DEADLINE. A live payment counts when it is DATED (paid_on, the day
+ * he wrote it) after the account's previous discount deadline and on or before payBy: a cheque
+ * written on or before Sep 10 went to the Sep 10 papers, one written Sep 11 to Oct 10 goes to Oct
+ * 10's. The previous deadline comes off his own documents, open or closed. An account whose
+ * documents name no earlier deadline starts the cycle at the first invoice riding on payBy.
+ * `lastPaidOn` is the newest of those days: the documents dated after it are not what he paid.
  */
-export function sentSinceTheirPapers(input: {
-  documents: { supplier_account_id?: string | null; created_at?: string | null }[];
+export function sentThisCycle(input: {
+  documents: SupplierInvoiceRow[];
   payments: SentPaymentRow[];
-  tz?: string | null;
-}): Map<string, number> {
-  const landed = new Map<string, string>();
+  accountId: string;
+  payBy: string;
+}): { sent: number; lastPaidOn: string | null } {
+  const ymd = (v: unknown): string => String(v ?? "").slice(0, 10);
+  const isYmd = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  let previous = "";
+  let firstOnPayBy = "";
   for (const d of input.documents ?? []) {
-    const id = String(d?.supplier_account_id ?? "");
-    const at = String(d?.created_at ?? "");
-    if (!id || !at) continue;
-    if (!landed.has(id) || at > (landed.get(id) as string)) landed.set(id, at);
+    const by = ymd(d?.discountBy);
+    if (isYmd(by) && by < input.payBy && by > previous) previous = by;
+    const on = ymd(d?.invoiceDate);
+    if (!d?.closed && by === input.payBy && isYmd(on) && (!firstOnPayBy || on < firstOnPayBy)) firstOnPayBy = on;
   }
-  const dayOf = (iso: string): string => {
-    const at = new Date(iso);
-    if (Number.isNaN(at.getTime())) return iso.slice(0, 10);
-    try {
-      return input.tz ? todayStrInTz(input.tz, at) : at.toISOString().slice(0, 10);
-    } catch {
-      return at.toISOString().slice(0, 10);
-    }
-  };
-  const out = new Map<string, number>();
+  let sent = 0;
+  let lastPaidOn: string | null = null;
   for (const p of input.payments ?? []) {
-    const id = String(p?.supplier_account_id ?? "");
-    const at = landed.get(id);
-    if (!id || !at || p?.voided_at) continue;
-    const recorded = new Date(String(p?.created_at ?? "")).getTime();
-    if (!(recorded > new Date(at).getTime())) continue;
-    if (String(p?.paid_on ?? "").slice(0, 10) < dayOf(at)) continue;
-    const amount = Number(p?.amount) || 0;
-    if (amount > 0) out.set(id, r2((out.get(id) ?? 0) + amount));
+    if (String(p?.supplier_account_id ?? "") !== input.accountId || p?.voided_at) continue;
+    const on = ymd(p?.paid_on);
+    if (!isYmd(on) || on > input.payBy) continue;
+    if (previous ? on <= previous : !firstOnPayBy || on < firstOnPayBy) continue;
+    const amount = r2(Number(p?.amount) || 0);
+    if (!(amount > 0)) continue;
+    sent = r2(sent + amount);
+    if (!lastPaidOn || on > lastPaidOn) lastPaidOn = on;
   }
-  return out;
+  return { sent, lastPaidOn };
 }
 
 /**
@@ -125,8 +131,8 @@ export function supplierPayDue(input: {
   rows: SupplierInvoiceRow[];
   accounts: { id: string; name: string | null; on_account?: boolean | null }[];
   today: string;
-  /** sentSinceTheirPapers: money recorded since CED's newest papers, by account. */
-  sent?: Map<string, number> | null;
+  /** His live supplier_payments rows (every account's): what clears a line (sentThisCycle). */
+  payments?: SentPaymentRow[] | null;
 }): SupplierPayDue[] {
   const today = input.today;
   const byAccount = new Map<string, SupplierInvoiceRow[]>();
@@ -160,11 +166,22 @@ export function supplierPayDue(input: {
     const payBy = claim.nextDeadline;
     const daysLeft = daysBetweenYmd(today, payBy);
     if (daysLeft === null || daysLeft < 0 || daysLeft > PAY_CARD_WINDOW_DAYS) continue;
-    // Already sent what the cheque dated payBy would be (the /bills figure): he has done it.
-    const sent = r2(input.sent?.get(id) ?? 0);
-    if (sent > 0.005 && sent >= supplierNetIfPaidBy(documents, payBy, today).net - 0.005) continue;
-    const owed = r2(balance.owed - sent);
-    if (!(owed > 0.005)) continue;
+    // Already sent what the cheque the /bills card names would have been: he has done what the line
+    // asked. Measured against the papers dated on or before the day he wrote it, plus any dated
+    // later whose own discount still rides on payBy (a Sep 29 purchase is Oct 10's business, and
+    // the line comes back for it). An October invoice with a Nov 10 discount is not: it lands
+    // afterwards and changes nothing here.
+    const { sent, lastPaidOn } = sentThisCycle({ documents, payments: input.payments ?? [], accountId: id, payBy });
+    if (sent > 0.005 && lastPaidOn) {
+      const paidAgainst = documents.filter((d) => {
+        const on = String(d.invoiceDate ?? "").slice(0, 10);
+        const by = String(d.discountBy ?? "").slice(0, 10);
+        return !on || on <= lastPaidOn || (!!by && by <= payBy);
+      });
+      if (sent >= supplierNetIfPaidBy(paidAgainst, payBy, today).net - 0.005) continue;
+    }
+    // The /bills figure, to the cent: a payment never comes off it here (supplierBalance's rule).
+    const owed = balance.owed;
     out.push({
       accountId: id,
       accountName: account.name,

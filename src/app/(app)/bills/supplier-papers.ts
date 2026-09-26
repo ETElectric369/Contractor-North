@@ -38,7 +38,7 @@ import {
   type SupplierInvoiceRow,
   type SupplierPaperCard,
 } from "./supplier-reconcile";
-import { sentSinceTheirPapers, supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
+import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -235,17 +235,16 @@ export interface SupplierDesk {
  * ONE READ, TWO LINES. The Pay By line (supplier-pay-due.ts) is worked out from the same document
  * rows the cards are, so the two never hold different copies of CED's papers. `today` is the
  * ORG's today: it decides whether a discount is still alive. The seventh read is his live payments:
- * one recorded since CED's newest papers is money those papers cannot show yet, and paying is what
- * clears the line (sentSinceTheirPapers). `tz` is the org's, for which day a paper landed on.
+ * one dated inside this deadline's cycle is what clears the line (supplier-pay-due.ts,
+ * sentThisCycle), keyed to the cheque, never to when a paper landed.
  */
-export async function loadSupplierDesk(supabase: any, userId: string, today: string, tz?: string | null): Promise<SupplierDesk | null> {
+export async function loadSupplierDesk(supabase: any, userId: string, today: string): Promise<SupplierDesk | null> {
   if (!userId) return null;
   const { data: me, error: meErr } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
   if (meErr || !orgId) return null;
   const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes] = await Promise.all([
-    // created_at: when each paper landed, which is what a later payment is measured against.
-    supabase.from("supplier_invoices").select(`${SUPPLIER_INVOICE_COLUMNS}, created_at`).eq("org_id", orgId).order("invoice_date", { ascending: false }).limit(2000),
+    supabase.from("supplier_invoices").select(SUPPLIER_INVOICE_COLUMNS).eq("org_id", orgId).order("invoice_date", { ascending: false }).limit(2000),
     supabase
       .from("bills")
       .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, notes, jobs(job_number, name), bill_line_items(description)")
@@ -258,10 +257,10 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
     supabase.from("supplier_accounts").select("id, name, on_account").eq("org_id", orgId).limit(500),
     supabase
       .from("supplier_payments")
-      .select("supplier_account_id, amount, paid_on, created_at, voided_at")
+      .select("supplier_account_id, amount, paid_on, voided_at")
       .eq("org_id", orgId)
       .is("voided_at", null)
-      .order("created_at", { ascending: false })
+      .order("paid_on", { ascending: false })
       .limit(500),
   ]);
   // No supplier documents (or a database without 0273): nothing to bring him.
@@ -288,7 +287,6 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   // flag there is no door to open (the /bills sheet is not drawn when that read fails either).
   // A failed payments read is no pay line rather than a line that ignores a payment he made: the
   // nag this read exists to end. The same discount is still on /bills.
-  const sent = payRes?.error ? null : sentSinceTheirPapers({ documents: docsRes.data ?? [], payments: payRes?.data ?? [], tz });
-  const payDue = acctRes?.error || !sent ? [] : supplierPayDue({ rows, accounts, today, sent });
+  const payDue = acctRes?.error || payRes?.error ? [] : supplierPayDue({ rows, accounts, today, payments: payRes?.data ?? [] });
   return { papers, payDue };
 }
