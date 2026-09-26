@@ -122,7 +122,7 @@ export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: num
   if (view.state === "loading") {
     return (
       <p className="mt-2 text-xs text-slate-500" role="status">
-        Reading What&apos;s On It…
+        Opening The Bill…
       </p>
     );
   }
@@ -494,7 +494,7 @@ export function SupplierPaperCards({
         {/* WHAT'S ON IT comes before every answer: he sees the paper, then he decides. */}
         <div className="mt-2">
           <Button type="button" variant="outline" aria-expanded={!!reading[c.invoiceId]} onClick={() => toggleContents(c)}>
-            {reading[c.invoiceId] ? "Hide What's On It" : "What's On It"}
+            {reading[c.invoiceId] ? "Close Bill" : "Open Bill"}
           </Button>
         </div>
         {reading[c.invoiceId] && contents[c.invoiceId] && (

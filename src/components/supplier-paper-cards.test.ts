@@ -52,7 +52,7 @@ const render = (cards: SupplierPaperCard[]) =>
 const allButtons = (html: string) =>
   Array.from(html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((m) => m[1].replace(/&#x27;/g, "'"));
 /** The answers on a card: every button but What's On It (pinned on its own below). */
-const buttons = (html: string) => allButtons(html).filter((b) => b !== "What's On It");
+const buttons = (html: string) => allButtons(html).filter((b) => b !== "Open Bill");
 
 describe("a supplier paper card", () => {
   it("says it the way he asked: CED Sent A Bill · $301.81 · It Says 13897 HERRINGBONE", () => {
@@ -161,10 +161,10 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
     ];
     for (const card of shapes) {
       const html = render([card]);
-      expect(allButtons(html)[0]).toBe("What's On It");
+      expect(allButtons(html)[0]).toBe("Open Bill");
       expect(html).toContain('aria-expanded="false"');
       // Nothing is read until he asks.
-      expect(html).not.toContain("Reading What");
+      expect(html).not.toContain("Opening The Bill");
     }
   });
 
@@ -211,7 +211,7 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
   });
 
   it("loading says so; a failed read says so with Try Again", () => {
-    expect(view({ state: "loading" })).toContain("Reading What&#x27;s On It");
+    expect(view({ state: "loading" })).toContain("Opening The Bill");
     const failed = view({ state: "error", error: "The connection dropped before the lines came back." });
     expect(failed).toContain("It couldn&#x27;t read what&#x27;s on this paper.");
     expect(failed).toContain('role="alert"');
