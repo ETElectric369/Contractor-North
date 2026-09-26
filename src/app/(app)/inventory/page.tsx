@@ -36,9 +36,9 @@ export const dynamic = "force-dynamic";
 export default async function ShopStockPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; low?: string; inactive?: string }>;
+  searchParams: Promise<{ q?: string; low?: string; inactive?: string; item?: string }>;
 }) {
-  const { q, low, inactive } = await searchParams;
+  const { q, low, inactive, item: openItem } = await searchParams;
   const lowOnly = low === "1";
   // Show Inactive Items: the only place an item marked inactive can be found and made active again.
   const inactiveOnly = inactive === "1";
@@ -346,7 +346,8 @@ export default async function ShopStockPage({
           )}
         </EmptyState>
       ) : (
-        <ShopStockList items={shown} />
+        // ?item= (a Recount item's link) opens that item, where Settle From The Shelf is.
+        <ShopStockList items={shown} openItem={typeof openItem === "string" ? openItem : null} />
       )}
 
       {lotsReadFailed && (

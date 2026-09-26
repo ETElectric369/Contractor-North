@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { dbError } from "@/lib/db-error";
 import { jobLabel } from "@/lib/schedule-options";
 import { quotedData } from "@/lib/org-local-time";
-import { fmtQty, matchShelfItem, normUnit, parseShelf, shortOf, shortWords, takeHref } from "@/lib/stock-take";
+import { fmtQty, matchShelfItem, normUnit, parseShelf, takeHref, takeShort, takeShortWords } from "@/lib/stock-take";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef, ActionResult } from "../types";
 
@@ -78,7 +78,8 @@ export const inventoryActions: Record<string, ActionDef> = {
 
       const qty = i.qty ?? null;
       const href = takeHref(r.id, row.id, qty);
-      const short = qty ? shortOf(row.onHand, qty) : 0;
+      const { short, past } = qty ? takeShort(row, qty) : { short: 0, past: 0 };
+      const shortSaid = takeShortWords({ short, past, unit: row.unit });
       const what = qty ? `${fmtQty(qty)} ${row.unit} of ${row.name}` : row.name;
       const onShelf = row.onHand > 0 ? `${fmtQty(row.onHand)} ${row.unit}` : "none on its record";
       return {
@@ -91,18 +92,20 @@ export const inventoryActions: Record<string, ActionDef> = {
           unit: row.unit,
           qty,
           ...(short > 0 ? { short } : {}),
-          // THE FILL ALWAYS REACHES A BUTTON: the chat route projects this card itself.
+          // THE FILL ALWAYS REACHES A BUTTON: the chat route projects this card itself. It reads as
+          // NOT DONE at a glance (fill vs execute): the eyebrow and the headline say it isn't saved,
+          // and the headline is the door, since the card's open icon only shows on hover.
           card: {
             kind: "task",
-            eyebrow: "took from stock",
-            title: `Took From Stock: ${what}`,
-            scope: `For ${label}. On the shelf: ${onShelf}.${short > 0 ? ` ${shortWords(short, row.unit)}.` : ""}`,
+            eyebrow: "not saved yet",
+            title: `Tap To Take: ${what}`,
+            scope: `Not taken yet: tap above, then Take It. For ${label}. On the shelf: ${onShelf}.${shortSaid ? ` ${shortSaid}.` : ""}`,
             href,
             next: qty ? "Open it and tap Take It to save it." : "Open it, type how many, and tap Take It.",
           },
         },
         speak: qty
-          ? `Ready: ${fmtQty(qty)} ${row.unit} of ${quotedData(row.name)} for ${quotedData(label)}.${short > 0 ? ` That's ${shortWords(short, row.unit)}.` : ""} Tap Take It to save it.`
+          ? `Ready: ${fmtQty(qty)} ${row.unit} of ${quotedData(row.name)} for ${quotedData(label)}.${shortSaid ? ` That's ${shortSaid}.` : ""} Tap Take It to save it.`
           : `Ready: ${quotedData(row.name)} for ${quotedData(label)}. How many ${row.unit}? Type it on the card and tap Take It.`,
       };
     },

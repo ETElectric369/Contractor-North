@@ -20,8 +20,8 @@ import type { JobTake, ShelfRow } from "@/lib/stock-take";
 // A row as it might arrive if a cost ever leaked into the payload: the view must not draw it.
 const LEAKY = { cost: 180.17, value: 136.93, unit_cost: 0.72 };
 const SHELF = [
-  { id: "i1", name: "12/2 NM-B", unit: "ft", onHand: 250, ...LEAKY },
-  { id: "i2", name: "Twister 341-Tan wire nut", unit: "ea", onHand: 440, ...LEAKY },
+  { id: "i1", name: "12/2 NM-B", unit: "ft", onHand: 250, takeable: 250, ...LEAKY },
+  { id: "i2", name: "Twister 341-Tan wire nut", unit: "ea", onHand: 440, takeable: 440, ...LEAKY },
 ] as unknown as ShelfRow[];
 
 const noop = () => {};
@@ -78,11 +78,18 @@ describe("the number pad", () => {
     expect(textOf(typed)).not.toMatch(/\$|180\.17|cost|price/i);
   });
   it("a take bigger than the shelf shows says so, and Take It stays open", () => {
-    const html = sheet({ step: { kind: "count", row: { ...row, onHand: 0 } }, entry: "20" });
+    const html = sheet({ step: { kind: "count", row: { ...row, onHand: 0, takeable: 0 } }, entry: "20" });
     expect(textOf(html)).toContain("20 ft more than the shelf shows — the office will recount.");
     const take = buttons(html).find((b) => b.text === "Take It")!;
     expect(take.markup).not.toMatch(/\sdisabled=""/);
     expect(sheet({ step: { kind: "count", row }, entry: "60" })).not.toContain("take-short");
+  });
+  it("warns from what a take can reach, not the bare count: a counted 100 ft with no roll behind it", () => {
+    const html = sheet({ step: { kind: "count", row: { ...row, onHand: 100, takeable: 0 } }, entry: "40" });
+    const t = textOf(html);
+    expect(t).toContain("100 ft on the shelf");
+    expect(t).toContain("40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.");
+    expect(t).not.toContain("more than the shelf shows");
   });
   it("Take It is shut until there is a count", () => {
     const take = buttons(sheet({ step: { kind: "count", row }, entry: "" })).find((b) => b.text === "Take It")!;
@@ -134,10 +141,12 @@ describe("the job's takes", () => {
     expect(undo.markup).toMatch(TARGET);
   });
 
-  it("once billed, the Undo reads Take It Off INV-078 First: plain words for the crew, the invoice's door for the office", () => {
+  it("once billed, the office gets Take It Off INV-078 First as the invoice's door; the crew a plain status", () => {
     const billed = { ...base, canUndo: false, billedOn: "INV-078", billedInvoiceId: "inv-1" };
     const crew = list([{ ...billed, billedInvoiceId: null }], false);
-    expect(textOf(crew)).toContain("Take It Off INV-078 First");
+    expect(textOf(crew)).toContain("Billed on INV-078");
+    // An instruction a tech can't follow (he can't open invoices) is never shown to him.
+    expect(textOf(crew)).not.toContain("Take It Off");
     expect(crew).not.toContain("/billing/");
     expect(buttons(crew).map((b) => b.text)).not.toContain("Undo");
     const office = list([billed], true);
@@ -147,7 +156,7 @@ describe("the job's takes", () => {
 
   it("a take past the shelf says it is waiting on a recount, never a price", () => {
     const t = textOf(list([{ ...base, qty: 20, short: 15 }], false));
-    expect(t).toContain("15 ft past the shelf, waiting on a recount");
+    expect(t).toContain("15 ft past the shelf, waiting on the office");
     expect(t).not.toMatch(/\$/);
   });
 

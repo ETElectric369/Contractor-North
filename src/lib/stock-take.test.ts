@@ -6,11 +6,14 @@ import {
   officeBellWords,
   parseShelf,
   parseTakes,
+  settleRefusalWords,
   shortOf,
   shortWords,
   takeDoor,
   takeHref,
   takeLine,
+  takeShort,
+  takeShortWords,
   tookWords,
   type ShelfRow,
 } from "./stock-take";
@@ -22,17 +25,19 @@ import {
  */
 
 const SHELF: ShelfRow[] = [
-  { id: "i-122", name: "12/2 NM-B", unit: "ft", onHand: 250 },
-  { id: "i-142", name: "14/2 NM-B", unit: "ft", onHand: 250 },
-  { id: "i-122mc", name: "12/2 MC", unit: "ft", onHand: 100 },
-  { id: "i-nut", name: "Twister 341-Tan wire nut", unit: "ea", onHand: 440 },
+  { id: "i-122", name: "12/2 NM-B", unit: "ft", onHand: 250, takeable: 250 },
+  { id: "i-142", name: "14/2 NM-B", unit: "ft", onHand: 250, takeable: 250 },
+  { id: "i-122mc", name: "12/2 MC", unit: "ft", onHand: 100, takeable: 100 },
+  { id: "i-nut", name: "Twister 341-Tan wire nut", unit: "ea", onHand: 440, takeable: 440 },
 ];
 
 describe("the shelf and the takes, as the database hands them back", () => {
   it("parses shelf_for_crew rows with numerics as strings, and keeps nothing it wasn't told to", () => {
-    const rows = parseShelf([{ id: "a", name: " 12/2 NM-B ", unit: "ft", on_hand: "190.000", cost: 136.93 }]);
-    expect(rows).toEqual([{ id: "a", name: "12/2 NM-B", unit: "ft", onHand: 190 }]);
+    const rows = parseShelf([{ id: "a", name: " 12/2 NM-B ", unit: "ft", on_hand: "190.000", takeable: "150.000", cost: 136.93 }]);
+    expect(rows).toEqual([{ id: "a", name: "12/2 NM-B", unit: "ft", onHand: 190, takeable: 150 }]);
     expect(JSON.stringify(rows)).not.toContain("136.93");
+    // A database without 0344 sends no takeable: it reads as the count, the old behaviour.
+    expect(parseShelf([{ id: "b", name: "x", unit: "ea", on_hand: "7" }])[0].takeable).toBe(7);
   });
 
   it("parses stock_takes_for_job rows, and a stray cost in the payload never reaches a take", () => {
@@ -60,19 +65,50 @@ describe("the words", () => {
     );
   });
 
+  it("pieces the count shows but no filed roll holds: the sheet, the toast and the bell all say that (0344's takeable)", () => {
+    // Count It set 12/2 to 100 ft with no roll behind it; Brian takes 40.
+    const row = { onHand: 100, takeable: 0 };
+    expect(takeShort(row, 40)).toEqual({ short: 40, past: 0 });
+    expect(takeShortWords({ ...takeShort(row, 40), unit: "ft" })).toBe("40 ft of that isn't on a filed roll yet — it still saves, and the office settles it");
+    // stock_draw hands back on_hand 60 and a 40 ft short: the toast agrees with the sheet.
+    expect(tookWords({ qty: 40, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 40, onHandAfter: 60 })).toBe(
+      "Took 40 ft of 12/2 NM-B for Herringbone. 40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.",
+    );
+    const bell = officeBellWords({ who: "Brian", qty: 40, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 40, onHandAfter: 60 });
+    expect(bell.title).toBe("Brian took 40 ft of 12/2 NM-B; 40 ft of it isn't on a filed roll");
+    expect(bell.title).not.toContain("the shelf said");
+    // Enough on filed rolls: nothing to say.
+    expect(takeShortWords({ ...takeShort({ onHand: 100, takeable: 100 }, 40), unit: "ft" })).toBeNull();
+    // Past the count as well: the count is what the crew sees, so that is what is said.
+    expect(takeShortWords({ ...takeShort({ onHand: 30, takeable: 10 }, 40), unit: "ft" })).toBe("10 ft more than the shelf shows — the office will recount");
+  });
+
+  it("never sends the office to count a short it can't settle by counting", () => {
+    const bell = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
+    expect(bell.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    expect(bell.body).not.toMatch(/count it/i);
+    expect(settleRefusalWords("Only 0 on the shelf, and 15 were taken past it. File the roll or count the shelf first.")).toBe(
+      "Only 0 on the shelf, and 15 were taken past it. A count can't settle it: file the roll on the shelf first, or Undo the take.",
+    );
+    expect(settleRefusalWords("Something else.")).toBe("Something else.");
+  });
+
   it("rings the office in the plan's words, and a short says what the shelf showed", () => {
     expect(officeBellWords({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: 190 }).title).toBe(
       "Brian took 60 ft of 12/2 NM-B for Herringbone",
     );
     const short = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
     expect(short.title).toBe("Brian took 20 ft of 12/2, the shelf said 5 ft");
-    expect(short.body).toBe("For Herringbone. Count it or file the roll.");
+    expect(short.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
     for (const w of [short.title, short.body]) expect(w).not.toMatch(/\$/);
   });
 
   it("an Undo becomes Take It Off INV-078 First once an invoice bills the take", () => {
     expect(takeDoor({ canUndo: true, billedOn: null, back: 0 })).toEqual({ kind: "undo" });
-    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 })).toEqual({ kind: "billed", label: "Take It Off INV-078 First" });
+    expect(takeDoor({ canUndo: false, billedOn: "INV-078", back: 0 })).toEqual({ kind: "billed", label: "Take It Off INV-078 First", status: "Billed on INV-078" });
+    // Brought back in part: says why there is no Undo, and names no door the app doesn't have.
+    const back = takeDoor({ canUndo: false, billedOn: null, back: 5 });
+    expect(back).toEqual({ kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." });
     expect(takeDoor({ canUndo: false, billedOn: null, back: 0 })).toEqual({ kind: "none", why: null });
     expect(takeLine({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", short: 0, back: 0 })).toBe("Brian took 60 ft of 12/2 NM-B");
   });

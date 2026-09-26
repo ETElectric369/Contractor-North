@@ -10,7 +10,7 @@ import { createNotifications, officeRecipients } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
 import { reportError } from "@/lib/observe";
 import { jobLabel } from "@/lib/schedule-options";
-import { officeBellWords, tookWords, type ShelfRow } from "@/lib/stock-take";
+import { officeBellWords, settleRefusalWords, tookWords, type ShelfRow } from "@/lib/stock-take";
 
 /**
  * TOOK FROM STOCK: THE SERVER DOORS (Shop Stock, Phase 3).
@@ -95,7 +95,8 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
   // needs is resolved here, in request scope.
   if (!staff) {
     const words = officeBellWords({ who: m.name, qty: res.qty, unit: res.unit, item: res.item, job: label, short: res.short, onHandAfter: res.onHand });
-    const url = res.short > 0 ? "/inventory" : `/jobs/${input.jobId}?tab=materials`;
+    // A short opens Shop Stock on its item, where Settle From The Shelf is.
+    const url = res.short > 0 ? `/inventory?item=${input.itemId}` : `/jobs/${input.jobId}?tab=materials`;
     const actorId = m.userId;
     after(() => tellOfficeAboutTake(supabase, orgId, actorId, words, url, input.jobId));
   }
@@ -108,7 +109,7 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
     qty: res.qty,
     short: res.short,
     onHand: res.onHand,
-    message: tookWords({ qty: res.qty, unit: res.unit, item: res.item, job: label, short: res.short }),
+    message: tookWords({ qty: res.qty, unit: res.unit, item: res.item, job: label, short: res.short, onHandAfter: res.onHand }),
   };
 }
 
@@ -157,7 +158,7 @@ export async function settleShortAction(shortId: string): Promise<{ ok: true; me
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company." };
   const { data, error } = await supabase.rpc("settle_short", { p_short: shortId });
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) return { ok: false, error: settleRefusalWords(dbError(error)) };
   if (!(data as { draw_group?: unknown } | null)?.draw_group) return { ok: false, error: "The shelf didn't settle it. Reload to see where it stands." };
   revalidatePath("/inventory");
   revalidatePath("/jobs/[id]", "page");

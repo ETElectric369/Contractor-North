@@ -116,8 +116,8 @@ describe("takeFromStockAction: a count in, never a price", () => {
     await afterCalls[0]();
     expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({
       title: "Brian took 20 ft of 12/2 NM-B, the shelf said 5 ft",
-      body: "For Herringbone. Count it or file the roll.",
-      url: "/inventory",
+      body: "For Herringbone. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.",
+      url: `/inventory?item=${ITEM}`, // opens on the item, where Settle From The Shelf is
     });
   });
 

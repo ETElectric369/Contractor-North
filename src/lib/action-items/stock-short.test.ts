@@ -25,6 +25,10 @@ describe("the Recount item", () => {
     expect(src).toMatch(/const shortsP[^=]*= isStaff/);
     expect(src).toContain('kind: "stock_short"');
     expect(src).toContain("when: r.created_at");
-    expect(src).toContain('href: "/inventory"');
+    // Straight to the item, opened (Shop Stock reads ?item=), and the words name what works.
+    expect(src).toContain("/inventory?item=${encodeURIComponent(String(r.item_id))}");
+    expect(feeder).toContain("item_id");
+    expect(src).toContain("${SHORT_FIX}");
+    expect(src).not.toContain("Count it or file the roll");
   });
 });

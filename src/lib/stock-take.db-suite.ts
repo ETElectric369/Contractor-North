@@ -359,6 +359,31 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>) {
     });
   });
 
+  it("shelf_for_crew says what a take can reach: counted pieces with no roll are on hand but not takeable", async () => {
+    if (!needs()) return;
+    await tx(async () => {
+      const it1 = await shelved();
+      const shelfRow = async () => {
+        await as(techId);
+        const r = await one("select * from public.shelf_for_crew() where id = $1", [it1]);
+        await asServer();
+        return r;
+      };
+      let row = await shelfRow();
+      expect(Object.keys(row).sort()).toEqual(["id", "name", "on_hand", "takeable", "unit"]);
+      expect([num(row.on_hand), num(row.takeable)]).toEqual([250, 250]);
+      // Count It finds 50 ft more than the roll holds: a recount_up with no roll behind it.
+      await as(staffId);
+      await c.query("select public.stock_recount($1, 300, 'TEST count') as r", [it1]);
+      await asServer();
+      row = await shelfRow();
+      expect([num(row.on_hand), num(row.takeable)]).toEqual([300, 250]);
+      // A take of 280 saves a 30 ft short: exactly what takeable predicted, not on_hand.
+      const r = await draw(techId, it1, jobB, 280);
+      expect(num(r.short)).toBe(30);
+    });
+  });
+
   it("the guard still names hours and bills the way it did before 0344", async () => {
     if (!needs()) return;
     await tx(async () => {

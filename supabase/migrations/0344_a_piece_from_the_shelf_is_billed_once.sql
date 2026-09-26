@@ -36,6 +36,16 @@
 --    supplier. A take that settled a short is folded into the take it settled, so one take reads
 --    as one row.
 --
+-- 4. shelf_for_crew() LEARNS WHAT A TAKE CAN REACH (0302's body, from production 2026-09-25, md5
+--    80768b2ecfed8cf1af2f9cab43743c05, plus one column). on_hand is the shelf's count, and it holds
+--    pieces stock_draw steps over: a Count It that found pieces with no roll behind them (recount_up,
+--    lot_id null) and a roll whose receipt changed (cost_stale). A take of those saves as a short, so
+--    a sheet that warned from on_hand said "100 ft on the shelf" with no warning and then toasted a
+--    40 ft short. `takeable` is the pieces left on live, settled rolls, the same walk stock_take_fifo
+--    makes; the sheet warns from it. A count, never a cost. The return shape changes, so the function
+--    is dropped and made again (nothing depends on it: pg_depend showed 0 dependents), with 0302's
+--    grants.
+--
 -- HOW THE TWO GUARDS ARE REWRITTEN: FROM THEIR LIVE BODIES (the 0315 / 0326 / 0335 / 0342
 -- technique). pg_get_functiondef of each, in production, 2026-09-25 (md5 70a23ca65ab3b1e6df24a22801f7690a
 -- and 7493be55854401ff06f7476a25d5d274): guard_invoice_item_claim as 0260 left it and 0290 cut
@@ -278,6 +288,33 @@ comment on function public.stock_takes_for_job(uuid) is
 revoke execute on function public.stock_takes_for_job(uuid) from public, anon;
 grant execute on function public.stock_takes_for_job(uuid) to authenticated, service_role;
 
+-- ── 4. shelf_for_crew: the count, and what a take can reach ────────────────────────────────────
+drop function if exists public.shelf_for_crew();
+create function public.shelf_for_crew()
+returns table (id uuid, name text, unit text, on_hand numeric, takeable numeric)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select i.id, i.name, i.unit, i.quantity_on_hand as on_hand,
+         -- stock_take_fifo's walk: live rolls, not being repriced, pieces left (0303/0304).
+         coalesce((select sum(greatest(b.pieces_left, 0))
+                     from public.stock_lot_balance b
+                    where b.item_id = i.id and b.org_id = i.org_id and b.live and not b.cost_stale), 0) as takeable
+    from public.inventory_items i
+   where i.org_id = public.auth_org_id()
+     and public.auth_org_id() is not null
+     and i.active
+   order by i.name, i.id;
+$$;
+
+comment on function public.shelf_for_crew() is
+  'What the crew may read from the shelf (0302, 0344): id, name, unit, on hand, and how much of it a take can reach (pieces on live, settled rolls). Never a cost, vendor or part number. Active members of the caller''s own org only.';
+
+revoke execute on function public.shelf_for_crew() from public, anon;
+grant execute on function public.shelf_for_crew() to authenticated, service_role;
+
 -- ── Self-check ──────────────────────────────────────────────────────────────────────────────────
 do $$
 declare
@@ -321,8 +358,18 @@ begin
   if has_function_privilege('anon', 'public.stock_takes_for_job(uuid)', 'execute') then
     raise exception '0344: stock_takes_for_job is callable without signing in. Nothing was changed.';
   end if;
+  -- shelf_for_crew: definer, pinned, not anon's, and its columns are counts only (never a cost).
+  if not exists (
+    select 1 from pg_proc
+     where oid = 'public.shelf_for_crew()'::regprocedure
+       and prosecdef and coalesce(proconfig::text, '') like '%search_path=public%'
+       and proargnames = array['id', 'name', 'unit', 'on_hand', 'takeable']::text[]
+  ) or has_function_privilege('anon', 'public.shelf_for_crew()', 'execute')
+    or not has_function_privilege('authenticated', 'public.shelf_for_crew()', 'execute') then
+    raise exception '0344: shelf_for_crew is not the crew''s count-only read it should be. Nothing was changed.';
+  end if;
   -- Nothing billed today reads differently: no live line claims a stock move yet.
   select count(*) into v_bad
     from public.invoice_items it join public.stock_moves m on m.id = any (it.source_ids);
-  raise notice '0344: the claim guards know stock moves (% invoice line(s) claim one today); stock_takes_for_job is in place.', v_bad;
+  raise notice '0344: the claim guards know stock moves (% invoice line(s) claim one today); stock_takes_for_job is in place; shelf_for_crew says what a take can reach.', v_bad;
 end $$;

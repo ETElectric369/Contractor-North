@@ -11,6 +11,7 @@ import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
+import { SHORT_FIX } from "@/lib/stock-take";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -125,7 +126,7 @@ async function buildActionItems(ctx: {
   const shortsP: Promise<{ data: any[] | null; error: unknown }> = isStaff
     ? Promise.resolve(supabase
         .from("stock_moves")
-        .select("id, qty, created_at, created_by, job_id, inventory_items(name, unit), jobs(job_number, name)")
+        .select("id, qty, created_at, created_by, job_id, item_id, inventory_items(name, unit), jobs(job_number, name)")
         .eq("kind", "short")
         .is("settled_by", null)
         .is("undone_at", null)
@@ -1034,12 +1035,15 @@ async function buildActionItems(ctx: {
           id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
           kind: "stock_short",
           title: `Recount ${it?.name ?? "an item"}: ${q} ${it?.unit ?? ""} taken past the shelf`.replace(/\s+/g, " "),
-          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. Count it or file the roll, then Settle.`,
+          // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
+          // ways that work (SHORT_FIX, the bell's own words).
+          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. ${SHORT_FIX}`,
           who: null,
           when: r.created_at,
           urgency: 1,
           done: false,
-          href: "/inventory",
+          // Straight to the item, opened, where Settle From The Shelf is (Shop Stock opens ?item=).
+          href: r.item_id ? `/inventory?item=${encodeURIComponent(String(r.item_id))}` : "/inventory",
           affordances: AFFORDANCES.stock_short,
         });
       }

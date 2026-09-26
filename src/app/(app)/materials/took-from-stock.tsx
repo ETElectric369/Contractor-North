@@ -7,7 +7,8 @@ import { ArrowLeft, Delete, Loader2, PackageMinus, Search } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { formatDateShort } from "@/lib/utils";
-import { fmtQty, shortOf, shortWords, takeDoor, takeLine, type JobTake, type ShelfRow } from "@/lib/stock-take";
+import { isTransportError } from "@/lib/chunk-reload";
+import { fmtQty, takeDoor, takeLine, takeShort, takeShortWords, type JobTake, type ShelfRow } from "@/lib/stock-take";
 import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions";
 
 /**
@@ -20,7 +21,8 @@ import { loadShelf, takeFromStockAction, undoTakeAction } from "./stock-actions"
  *
  * A take bigger than the shelf shows still saves, so nobody hits a dead end in the field: the pad
  * says so before the tap ("20 ft more than the shelf shows — the office will recount") and the
- * office gets a Recount item. Nort fills the same sheet (?take=<item>&qty=60 on the job's link); a
+ * office gets a Recount item. The warning is worked from what a take can REACH (filed rolls, 0344's
+ * takeable), not the bare count, so the sheet and the toast never disagree. Nort fills the same sheet (?take=<item>&qty=60 on the job's link); a
  * person taps Take It.
  *
  * Under the button, the job's takes (stock_takes_for_job, 0344): who took what and when, with Undo
@@ -76,7 +78,7 @@ export function TakeSheetView({
   if (step.kind === "count") {
     const row = step.row;
     const qty = Number(entry || "0");
-    const short = shortOf(row.onHand, qty);
+    const shortSaid = takeShortWords({ ...takeShort(row, qty), unit: row.unit });
     return (
       <div className="space-y-3">
         <button
@@ -99,9 +101,9 @@ export function TakeSheetView({
             {row.unit}
           </span>
         </div>
-        {short > 0 && (
+        {shortSaid && (
           <p data-testid="take-short" className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {shortWords(short, row.unit)}.
+            {shortSaid}.
           </p>
         )}
         <div className="grid grid-cols-3 gap-2">
@@ -217,7 +219,7 @@ export function TakesListView({
                       {door.label}
                     </Link>
                   ) : (
-                    <span className="inline-flex min-h-[44px] items-center px-3 text-sm text-slate-500">{door.label}</span>
+                    <span className="inline-flex min-h-[44px] items-center px-3 text-sm text-slate-500">{door.status}</span>
                   ))}
                 {door.kind === "none" && door.why && <span className="text-xs text-slate-400">{door.why}</span>}
               </span>
@@ -258,8 +260,15 @@ export function TookFromStock({
   const read = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const r = await loadShelf();
-    setLoading(false);
+    let r: Awaited<ReturnType<typeof loadShelf>>;
+    try {
+      r = await loadShelf();
+    } catch (e) {
+      // No signal in the truck: say so and leave the sheet usable, never "Reading the shelf…" forever.
+      r = { ok: false, error: isTransportError(e) ? "No signal, so the shelf couldn't be read. Close this and try again." : "The shelf couldn't be read. Close this and try again." };
+    } finally {
+      setLoading(false);
+    }
     if (!r.ok) {
       setError(r.error);
       return [] as ShelfRow[];
@@ -293,7 +302,13 @@ export function TookFromStock({
   const takeParam = params?.get("take") ?? "";
   const qtyParam = params?.get("qty") ?? "";
   useEffect(() => {
-    if (!takeParam || prefill.current?.item === takeParam) return;
+    // Once the words are off the address, let the next fill through, even for the same item ("make
+    // it 40, not 60"): Nort is an overlay, so this page stays mounted between two of its links.
+    if (!takeParam) {
+      prefill.current = null;
+      return;
+    }
+    if (prefill.current?.item === takeParam && prefill.current.qty === qtyParam) return;
     prefill.current = { item: takeParam, qty: qtyParam };
     void openSheet({ item: takeParam, qty: qtyParam });
     const next = new URLSearchParams(params?.toString() ?? "");
@@ -305,8 +320,19 @@ export function TookFromStock({
   const undo = useCallback(
     async (drawGroup: string) => {
       setPendingGroup(drawGroup);
-      const r = await undoTakeAction(drawGroup, jobId);
-      setPendingGroup(null);
+      let r: Awaited<ReturnType<typeof undoTakeAction>>;
+      try {
+        r = await undoTakeAction(drawGroup, jobId);
+      } catch (e) {
+        r = {
+          ok: false,
+          error: isTransportError(e)
+            ? "No signal, so the Undo didn't hear back. Check Taken From Stock once you have signal before tapping it again."
+            : "The Undo didn't go through. Reload the job to see where it stands.",
+        };
+      } finally {
+        setPendingGroup(null);
+      }
       if (r.ok) toast(r.message, "success");
       // A billed take says which invoice holds it; that sentence has to be read, not glimpsed.
       else toast(r.error, "error", undefined, { sticky: true });
@@ -325,7 +351,21 @@ export function TookFromStock({
     const itemId = step.row.id;
     startTake(async () => {
       setError(null);
-      const r = await takeFromStockAction({ itemId, jobId, qty, via });
+      let r: Awaited<ReturnType<typeof takeFromStockAction>>;
+      try {
+        r = await takeFromStockAction({ itemId, jobId, qty, via });
+      } catch (e) {
+        // A throw here would reach the page's error card and the sheet would vanish without saying
+        // whether the take saved. Each Take It is a new take, so tapping again blind could take the
+        // pieces twice: keep the sheet, say so, and show the job's takes as they stand.
+        setError(
+          isTransportError(e)
+            ? "No signal, so Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again."
+            : "Take It didn't hear back. It may have saved: check Taken From Stock below before tapping again.",
+        );
+        router.refresh();
+        return;
+      }
       if (!r.ok) {
         setError(r.error);
         return;
