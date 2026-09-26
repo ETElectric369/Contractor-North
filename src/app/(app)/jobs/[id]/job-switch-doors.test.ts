@@ -22,7 +22,12 @@ vi.mock("@/app/(app)/leads/actions", () => ({ convertInquiry: vi.fn(), suggestVi
 vi.mock("@/app/(app)/appointments/new-inspection-button", () => ({ NewInspectionButton: () => createElement("button", null, "Inspect") }));
 vi.mock("@/components/use-org-public-base", () => ({ useOrgPublicBase: () => "https://example.test" }));
 
+vi.mock("@/app/(app)/jobs/actions", () => ({ deleteDocument: vi.fn(), updateDocument: vi.fn() }));
+vi.mock("@/lib/receipt-capture", () => ({ captureReceipt: vi.fn(), prettyBytes: () => "1 KB", readReceiptDocument: vi.fn() }));
+
 import { JobTasks } from "./job-tasks";
+import { JobDocuments } from "./job-documents";
+import { TellNort } from "@/components/tell-nort";
 import { JobPermits } from "./job-permits";
 import { TookFromStock } from "../../materials/took-from-stock";
 import { RecurringRowActions } from "../../recurring/recurring-actions-ui";
@@ -90,5 +95,28 @@ describe("Estimates on a lead's row", () => {
     const html = r(ConvertMenu, { inquiryId: "i1", inquiryName: "Sarah", estimateDoor: false });
     expect(html).not.toMatch(/ Estimate<\/button>/);
     expect(html).toContain("Schedule");
+  });
+});
+
+describe("Nort off: the surfaces that stay say it without the name", () => {
+  const hear = vi.fn();
+  it("the voice fill on a walk-through keeps working, as Just Say It", () => {
+    expect(r(TellNort, { hear, answers: {}, onFilled: () => {} })).toContain("Just tell Nort");
+    const html = r(TellNort, { hear, answers: {}, onFilled: () => {}, nortOn: false });
+    expect(html).toContain("Just Say It");
+    expect(html).not.toContain("Nort");
+  });
+
+  const docs = [{ id: "d1", name: "ced.pdf", category: "Receipt", file_url: "o/j/ced.pdf", signedUrl: "https://x.test/ced.pdf", size_bytes: 10, created_at: "2026-09-20T17:00:00Z" }];
+  it("the receipt reader's tooltip on a job's documents", () => {
+    expect(r(JobDocuments, { orgId: "o1", jobId: "j1", docs })).toContain("Nort reads the receipt");
+    const html = r(JobDocuments, { orgId: "o1", jobId: "j1", docs, nortOn: false });
+    expect(html).toContain("Reads the receipt and adds it to this job");
+    expect(html).not.toContain("Nort");
+  });
+
+  it("Customer Portal off: no plans door pointing at the Customer Page tab", () => {
+    expect(r(JobDocuments, { orgId: "o1", jobId: "j1", docs, plansDoor: true })).toContain("tab=customer");
+    expect(r(JobDocuments, { orgId: "o1", jobId: "j1", docs, plansDoor: false })).not.toContain("tab=customer");
   });
 });

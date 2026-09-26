@@ -459,6 +459,7 @@ export default async function AppointmentCapturePage({
                     : null
             }
             estimateHref={estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            nortOn={featureOn(orgSettings.features, "nort")}
             // The linked lead's preliminary plan report — parsed server-side so the card is in the
             // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
             // the pending/failed lifecycle.

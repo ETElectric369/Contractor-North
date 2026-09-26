@@ -1403,7 +1403,8 @@ export default async function JobDetailPage({
               {/* The job's documents list (plans, permits, every receipt). Its cost role moved up
                   to the tab's header (Snap the Bill); a receipt uploaded here still auto-posts
                   as a job cost (same reader, idempotent), and "Record as Cost" is the retry. */}
-              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} plansDoor={viewerIsStaff} />
+              {/* The plans door points at the Customer Page tab: Customer Portal's (the switch board). */}
+              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} plansDoor={viewerIsStaff && on("customer_portal")} nortOn={on("nort")} />
             </CardContent>
           </Card>
 

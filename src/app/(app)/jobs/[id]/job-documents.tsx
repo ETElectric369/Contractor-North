@@ -76,6 +76,7 @@ export function JobDocuments({
   docs,
   portalPapers = null,
   plansDoor = false,
+  nortOn = true,
 }: {
   orgId: string;
   jobId: string;
@@ -86,6 +87,8 @@ export function JobDocuments({
   portalPapers?: Record<string, "shown" | "replaced"> | null;
   /** The viewer is office staff, so the Customer Page tab (and its plans door) exists for them. */
   plansDoor?: boolean;
+  /** The Nort switch (0352): the receipt reader still reads; its tooltip just doesn't name Nort. */
+  nortOn?: boolean;
 }) {
   const router = useRouter();
   const [category, setCategory] = useState("Receipt");
@@ -339,7 +342,7 @@ export function JobDocuments({
                     onClick={() => recordCost(d)}
                     disabled={billing === d.id}
                     className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
-                    title="Nort reads the receipt and adds it to this job's costs"
+                    title={`${nortOn ? "Nort reads" : "Reads"} the receipt and adds it to this job's costs`}
                   >
                     {billing === d.id ? (
                       <Loader2 className="h-4 w-4 shrink-0 animate-spin" />

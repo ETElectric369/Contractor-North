@@ -146,6 +146,7 @@ export function Inspector({
   initialLocation,
   linked,
   planBrief = null,
+  nortOn = true,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -167,6 +168,8 @@ export function Inspector({
   /** The lead's preliminary plan report (ready only) — server-parsed, so the card is in the
    *  initial HTML and Zone A's height never shifts after mount (the iOS keyboard law). */
   planBrief?: PlanBrief | null;
+  /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
+  nortOn?: boolean;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -1034,6 +1037,7 @@ export function Inspector({
             order it happens on a job: he talks first, and what's left over is what gets asked. */}
         {!noSheet && (
           <TellNort
+            nortOn={nortOn}
             hear={(a, said) => hearIntoPlaybook(appointmentId, templateId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
