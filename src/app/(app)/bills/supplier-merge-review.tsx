@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { WhyFold } from "@/components/why-fold";
 import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency } from "@/lib/utils";
@@ -147,12 +148,13 @@ export function SupplierMergeReview({
   return (
     <Card className="mb-6 p-4">
       <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">Supplier Names That Look Like One Account</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          The receipt reader types the supplier name fresh on every scan, so one supplier ends up spelled
-          several ways and its money gets split between them. These are suggestions. Nothing is joined until
-          you say so.
-        </p>
+        <h2 className="text-base font-semibold text-slate-900">Supplier Names That Look Like One Account ({proposals.length})</h2>
+        <WhyFold>
+          <p>
+            The receipt reader types the supplier name fresh on every scan, so one supplier ends up spelled several
+            ways and its money gets split. These are suggestions: nothing is joined until you say so.
+          </p>
+        </WhyFold>
       </div>
 
       {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -206,7 +208,8 @@ export function SupplierMergeReview({
                   The Same" is not a shrug: it gives each spelling an account of its own, which is
                   the only way a dismissal can stick in this schema. And the door that does not
                   exist is named out loud rather than left for him to go looking for. */}
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              <WhyFold label="What Does Accepting Do?" className="mt-1">
+              <p>
                 {p.existingAccountId
                   ? `Accepting files these ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} onto ${p.existingAccountName ?? "the account you already have"}, so they add up into one balance.`
                   : `Accepting makes one account and files these ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} onto it, so they add up into one balance you can pay in chunks.`}{" "}
@@ -223,6 +226,7 @@ export function SupplierMergeReview({
                   <> If they are not theirs, leave this alone. Nothing changes until you press something.</>
                 )}
               </p>
+              </WhyFold>
 
               <div className="mt-2.5 flex flex-wrap gap-2">
                 <Button onClick={() => openAccept(p)} disabled={pending}>
@@ -444,11 +448,10 @@ export function SupplierCandidateReview({
   return (
     <Card className="mb-6 p-4">
       <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">Same Supplier, Or Two?</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          These names look enough alike to be worth asking about, and not enough alike for anything here
-          to decide. Only you know which. Nothing happens until you answer.
-        </p>
+        <h2 className="text-base font-semibold text-slate-900">Same Supplier, Or Two? ({questions.length})</h2>
+        <WhyFold>
+          <p>These names look enough alike to ask about, and not enough for anything here to decide. Only you know which.</p>
+        </WhyFold>
       </div>
 
       {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -512,7 +515,8 @@ export function SupplierCandidateReview({
                   and why it will not decide. */}
               {q.because && <p className="mt-2 text-xs leading-relaxed text-slate-500">{q.because}</p>}
 
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              <WhyFold label="What Does Each Answer Do?" className="mt-1">
+              <p>
                 {q.existingAccountName
                   ? `Joining files ${movingBills === 1 ? "the bill" : `all ${movingBills} bills`} scanned as ${movingNames} onto ${q.existingAccountName}${joined !== null ? `, so you would owe them ${formatCurrency(joined)} in one place` : ""}.`
                   : `Joining makes one account out of both${joined !== null ? `, holding ${formatCurrency(joined)}` : ""}.`}{" "}
@@ -522,6 +526,7 @@ export function SupplierCandidateReview({
                 There is no button here that joins two accounts back together afterwards, so have a look at
                 the money first.
               </p>
+              </WhyFold>
 
               {/* TWO DOORS OF EQUAL WEIGHT. Neither is the "right" one: the app genuinely does not
                   know, and a primary button on one side would be it pretending otherwise. */}
@@ -724,20 +729,18 @@ export function SupplierUnfiledSpellings({
   return (
     <Card className="mb-6 p-4">
       <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">Supplier Names Not On An Account Yet</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          These came off your receipts and nothing else in your book looks like them, so there is nothing to
-          suggest. Give one an account of its own and every bill scanned under that name goes onto it, so its
-          money sits in a balance instead of outside all of them.
-          {owedHere > 0.005 ? ` ${formatCurrency(owedHere)} of what you owe is sitting out here.` : ""}
-        </p>
-        <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-          Each one goes on as a counter you pay at the till, which is what most of these are, so it carries no
-          running balance. If any of its bills are still marked unpaid, its card up top says so
-          {canSetOnAccount
-            ? " and offers to turn a running balance on."
-            : ", and you can mark those receipts paid in the bills list further down."}
-        </p>
+        <h2 className="text-base font-semibold text-slate-900">
+          Supplier Names Not On An Account Yet ({spellings.length})
+          {owedHere > 0.005 ? <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Owed</span> : null}
+        </h2>
+        <WhyFold>
+          <p>
+            Nothing else in your book looks like these, so there is nothing to suggest. Give one an account of its own
+            and every bill scanned under that name goes onto it. It goes on as a counter you pay at the till, with no
+            running balance; if any of its bills are still marked unpaid, its Suppliers line says so
+            {canSetOnAccount ? " and offers to turn a running balance on." : ", and you can mark them Settled in All Bills."}
+          </p>
+        </WhyFold>
       </div>
 
       {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

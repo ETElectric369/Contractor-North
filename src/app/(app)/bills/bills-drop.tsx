@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Check, FileUp, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { WhyFold } from "@/components/why-fold";
 import { useFileDragActive } from "@/components/drop-target";
 import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
 import { createClient } from "@/lib/supabase/client";
@@ -291,10 +292,12 @@ export function SortThese({
           </Button>
         </div>
       )}
-      <p className="mb-3 text-sm text-slate-600">
-        Nothing here is filed until you press File It. Pick a job or a business cost for each one; Undo takes it back. The same
-        file is never filed twice, and a number already on the books offers to tie them together instead of making a second bill.
-      </p>
+      <WhyFold className="mb-2">
+        <p>
+          Nothing here is filed until you press File It. Pick a job or a business cost for each one; Undo takes it back. The same
+          file is never filed twice, and a number already on the books offers to tie them together instead of making a second bill.
+        </p>
+      </WhyFold>
       <PaperworkList
         items={items}
         jobs={jobs}

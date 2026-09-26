@@ -15,6 +15,7 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { Tabs } from "@/components/tabs";
 import { useToast } from "@/components/toast";
 import { CameraCapture } from "@/components/camera-capture";
+import { Fold, WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
 import { executeAction } from "@/lib/actions/execute";
@@ -22,6 +23,8 @@ import { NewPoButton } from "../purchasing/new-po-button";
 import { jobLabel } from "@/lib/schedule-options";
 import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
+import { splitReceiptBilling } from "./receipt-billing";
+import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 
 interface JobOption {
   id: string;
@@ -47,7 +50,7 @@ interface BillLineRow {
   amount: number;
   category: string | null;
 }
-interface BillRow {
+export interface BillRow {
   id: string;
   supplier: string;
   bill_number: string | null;
@@ -58,6 +61,19 @@ interface BillRow {
   category: string | null;
   jobs?: { job_number: string; name: string } | null;
   line_items?: BillLineRow[];
+  /**
+   * THE SUPPLIER'S NUMBER ON EVERY ROW (Wave B): the typed bill number, else the number the
+   * supplier printed (supplier_invoice_number), else the one readBillInvoice finds in the PDF's
+   * name or the lines ("8802-1107820"). Worked out on the page; the ledger only prints it.
+   */
+  shownNumber?: string | null;
+  /** Set aside as the duplicate of another bill (0271): still listed, never counted. */
+  superseded?: boolean;
+  /**
+   * The receipt's per-line billing switches (0268/0272), when this bill is a live receipt on a job
+   * with lines. They live in the bill's own detail now: one place per bill, no second list.
+   */
+  receipt?: ReceiptForBilling | null;
 }
 interface DocRow {
   id: string;
@@ -71,6 +87,20 @@ interface DocRow {
   jobs?: { name: string } | null;
 }
 
+type LedgerTab = "po" | "bills" | "receipts";
+
+/**
+ * ALL BILLS: THE LEDGER, FOLDED (Bills plan, Wave B).
+ *
+ * One line on the page ("All Bills (58) · $X") that opens to the ledger. Inside, Bills comes first
+ * (it opened on the empty Purchase Orders tab), each bill is ONE ROW with the supplier's number on
+ * it, and a row opens to that bill's detail: how it was bought, Edit, Delete, and its lines. A
+ * receipt's lines carry their billing switches right there, which is where the old 46-row "What
+ * Your Customers Get Billed" box (a scroll inside a scroll on a phone) went: one bill, one place.
+ *
+ * Every tab's panel is in the page (the inactive ones `hidden`), so a link to a bill ("#bill-...",
+ * from the search box) always has somewhere to land, and FoldOpener opens the folds around it.
+ */
 export function BillsReceipts({
   orgId,
   jobs,
@@ -88,13 +118,10 @@ export function BillsReceipts({
 }) {
   const router = useRouter();
   const toast = useToast();
-  // Open straight to a tab from a deep link (?tab=po, ?tab=receipts). WITHOUT ONE IT OPENS ON
-  // BILLS (Bills plan, Wave A): it opened on Purchase Orders, which is empty for ET, so the one
-  // list he digs in greeted him with "No purchase orders yet".
+  // Open straight to a tab from a deep link (?tab=po, ?tab=receipts), and open the fold with it.
+  // WITHOUT ONE IT OPENS ON BILLS (Bills plan, Wave A).
   const spTab = useSearchParams().get("tab");
-  const [tab, setTab] = useState<"po" | "bills" | "receipts">(
-    spTab === "po" || spTab === "receipts" ? spTab : "bills",
-  );
+  const [tab, setTab] = useState<LedgerTab>(spTab === "po" || spTab === "receipts" ? spTab : "bills");
   const [pending, start] = useTransition();
 
   // ── Bills add form ──
@@ -115,13 +142,12 @@ export function BillsReceipts({
     billFilter === "all" ? bills : bills.filter((b) => (billFilter === "jobs" ? b.job_id : !b.job_id));
   const totalBills = shownBills.reduce((s, b) => s + Number(b.amount), 0);
   const totalPos = pos.reduce((s, p) => s + Number(p.total), 0);
+  const liveTotal = bills.filter((b) => !b.superseded).reduce((s, b) => s + (Number(b.amount) || 0), 0);
 
   function addBill() {
     setBillError(null);
     if (!supplier.trim()) return setBillError("Supplier is required.");
-    // A BLANK JOB IS NOT A BUSINESS COST. "Pick a job" left alone used to save a bill with no job
-    // and no category, which is how the $47.44 Home Depot row landed nowhere in particular. No job
-    // has to be said out loud, with the bucket it goes in.
+    // A BLANK JOB IS NOT A BUSINESS COST: no job has to be said out loud, with its bucket.
     if (!billJob) return setBillError("Pick a job, or pick Business Cost (No Job) and its bucket.");
     if (billJob === "__overhead" && !billCategory) return setBillError("Pick the bucket this business cost goes in.");
     start(async () => {
@@ -140,6 +166,31 @@ export function BillsReceipts({
       setBillNumber("");
       setAmount(0);
       setBillDate("");
+      router.refresh();
+    });
+  }
+
+  function toggleStatus(b: BillRow) {
+    const next = b.status === "paid" ? "unpaid" : "paid";
+    start(async () => {
+      const res = await setBillStatus(b.id, next, b.job_id ?? "");
+      if (!res?.ok) { toast(res?.error ?? "Couldn't update the bill — try again.", "error"); return; }
+      toast(
+        next === "paid"
+          ? "Marked settled - it comes out of the supplier balance"
+          : "Marked on account - it goes back into the supplier balance",
+        "success",
+      );
+      router.refresh();
+    });
+  }
+
+  function removeBill(b: BillRow) {
+    if (!confirm(`Delete bill from "${b.supplier}"?`)) return;
+    start(async () => {
+      const res = await deleteBill(b.id, b.job_id ?? "");
+      if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; }
+      toast(res.warning ?? "Bill deleted", "success");
       router.refresh();
     });
   }
@@ -194,30 +245,232 @@ export function BillsReceipts({
   }
 
   return (
-    <div>
-      <Tabs
-        activeId={tab}
-        onChange={(id) => setTab(id as "po" | "bills" | "receipts")}
-        tabs={[
-          { id: "po", label: "Purchase Orders", count: pos.length },
-          { id: "bills", label: "Bills", count: bills.length },
-          { id: "receipts", label: "Receipts", count: docs.length },
-        ]}
-      />
+    <Card className="mb-6 px-4 py-1">
+      <Fold
+        id="all-bills"
+        open={!!spTab}
+        summary={
+          <span className="flex items-baseline justify-between gap-3">
+            <span className="text-base font-semibold text-slate-900">All Bills ({bills.length})</span>
+            <span className="shrink-0 text-sm tabular-nums text-slate-500">{formatCurrency(liveTotal)}</span>
+          </span>
+        }
+      >
+        {/* The old receipt card's intro, where the switches now live. */}
+        <span id="receipt-billing" className="block scroll-mt-20" />
+        <WhyFold>
+          <p>
+            Every bill, receipt, and order across every job. Open a receipt to say which of its lines the customer
+            pays for: snacks and drinks start out on you, everything else starts out billed, and a box or a spool
+            bought whole can bill just what this job used.
+          </p>
+        </WhyFold>
+        <Tabs
+          activeId={tab}
+          onChange={(id) => setTab(id as LedgerTab)}
+          tabs={[
+            { id: "bills", label: "Bills", count: bills.length },
+            { id: "po", label: "Purchase Orders", count: pos.length },
+            { id: "receipts", label: "Receipts", count: docs.length },
+          ]}
+        />
 
-      {tab === "po" && (
-        <Card className="p-4">
+        <div hidden={tab !== "bills"} className="pb-3">
+          <Fold summary={<span className="text-sm font-medium text-brand">Add A Bill By Hand</span>}>
+            <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
+              {billError && <p className="text-sm text-red-600">{billError}</p>}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="col-span-2 sm:col-span-1">
+                  <Label htmlFor="b-supplier">Supplier *</Label>
+                  <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED" />
+                </div>
+                <div>
+                  <Label htmlFor="b-job">Job</Label>
+                  <Select id="b-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
+                    <option value="">Pick A Job</option>
+                    <option value="__overhead">Business Cost (No Job)</option>
+                    {jobs.map((j) => (
+                      <option key={j.id} value={j.id}>{jobLabel(j)}</option>
+                    ))}
+                  </Select>
+                </div>
+                {billJob === "__overhead" && (
+                  <div>
+                    <Label htmlFor="b-cat">Bucket</Label>
+                    <Select id="b-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
+                      <option value="">Pick A Bucket</option>
+                      {BUSINESS_COST_BUCKETS.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </Select>
+                  </div>
+                )}
+                <div>
+                  <Label htmlFor="b-num">Bill #</Label>
+                  <Input id="b-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="b-amt">Amount</Label>
+                  <NumberInput id="b-amt" value={amount} onValueChange={setAmount} />
+                </div>
+                <div>
+                  <Label htmlFor="b-date">Bill Date</Label>
+                  <Input id="b-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+                </div>
+                <div>
+                  <Label htmlFor="b-status">Status</Label>
+                  <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
+                    {/* HOW THE BILL WAS BOUGHT, not whether a payment exists: a cheque to a supplier
+                        is Record A Payment on its Suppliers line. */}
+                    <option value="unpaid">On Account</option>
+                    <option value="paid">Settled At The Counter</option>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={addBill} disabled={pending || !supplier.trim()}>
+                  <Plus /> Add Bill
+                </Button>
+              </div>
+            </div>
+          </Fold>
+
+          <div className="mb-2 flex flex-wrap gap-2">
+            {([
+              ["all", `All (${bills.length})`],
+              ["jobs", `Job Bills (${bills.filter((b) => b.job_id).length})`],
+              ["overhead", `Business Costs (${bills.filter((b) => !b.job_id).length})`],
+            ] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={billFilter === id}
+                onClick={() => setBillFilter(id)}
+                className={`min-h-11 rounded-full px-4 text-sm font-medium ${
+                  billFilter === id ? "seaglass-active" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                <span className="relative z-10">{label}</span>
+              </button>
+            ))}
+          </div>
+          <p className="mb-2 text-xs text-slate-500">{shownBills.length} bills · {formatCurrency(totalBills)}</p>
+
+          {shownBills.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {shownBills.map((b) => {
+                const lineCount = b.line_items?.length ?? 0;
+                const split = b.receipt ? splitReceiptBilling(b.receipt.amount, b.receipt.lines) : null;
+                const where = b.jobs?.name ?? (b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`);
+                return (
+                  <li key={b.id}>
+                    {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the
+                        search box and the shelf's "Put The Rest On The Shelf" land. */}
+                    <details id={`bill-${b.id}`} className="scroll-mt-20">
+                      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium text-slate-900">
+                            {b.supplier}
+                            {b.shownNumber ? <span className="font-normal text-slate-500"> #{b.shownNumber}</span> : null}
+                          </span>
+                          <span className="block truncate text-xs text-slate-400">
+                            {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
+                            {where}
+                            {lineCount > 0 ? ` · ${lineCount} ${lineCount === 1 ? "line" : "lines"}` : ""}
+                            {b.superseded ? " · set aside as a duplicate" : ""}
+                          </span>
+                          {split && split.notBilledCount > 0 && (
+                            <span className="block text-xs font-medium text-amber-700">
+                              {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the customer
+                            </span>
+                          )}
+                          {split && split.partBilledCount > 0 && (
+                            <span className="block text-xs font-medium text-sky-700">
+                              {split.partBilledCount} {split.partBilledCount === 1 ? "line bills" : "lines bill"} only what this job used
+                            </span>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className={`block font-medium tabular-nums ${b.superseded ? "text-slate-400 line-through" : "text-slate-800"}`}>
+                            {formatCurrency(b.amount)}
+                          </span>
+                          <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : "On Account"}</span>
+                        </span>
+                      </summary>
+
+                      <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleStatus(b)}
+                            disabled={pending}
+                            /* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19).
+                               Owed = bills not marked paid, minus payments recorded against the account,
+                               so ticking a bill a cheque already covered takes the same dollar off twice.
+                               The control stays (a counter receipt settled at the till is what it is for)
+                               and its face says how the bill was bought, never "paid". */
+                            aria-label="How this bill was bought: tap to switch between Settled and On Account"
+                            className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
+                          >
+                            <Badge tone={statusTone(b.status)}>{b.status === "paid" ? "Settled" : "On Account"}</Badge>
+                            <span>Switch</span>
+                          </button>
+                          <Button variant="outline" onClick={() => setEditBill(b)} disabled={pending}>
+                            <Pencil /> Edit
+                          </Button>
+                          <Button variant="outline" className="text-red-700" onClick={() => removeBill(b)} disabled={pending}>
+                            <Trash2 /> Delete
+                          </Button>
+                          {b.job_id && (
+                            <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
+                              Open The Job
+                            </Link>
+                          )}
+                        </div>
+                        {b.receipt ? (
+                          <div className="mt-2">
+                            <ReceiptLines receipt={b.receipt} />
+                          </div>
+                        ) : lineCount > 0 ? (
+                          <ul className="mt-2 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
+                            {b.line_items!.map((li, i) => (
+                              <li key={i} className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                                <span className="min-w-0 truncate">
+                                  {li.quantity && li.quantity !== 1 ? `${li.quantity}× ` : ""}{li.description}
+                                  {li.category ? <span className="ml-1 text-slate-400">· {li.category}</span> : null}
+                                </span>
+                                <span className="shrink-0 tabular-nums">{formatCurrency(li.amount)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    </details>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {editBill && (
+            <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />
+          )}
+        </div>
+
+        <div hidden={tab !== "po"} className="pb-3">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs text-slate-500">{pos.length} POs · {formatCurrency(totalPos)} total</span>
             <NewPoButton jobs={jobs} lists={lists} />
           </div>
           {pos.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet. Click “New PO” to create one.</p>
+            <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet.</p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
               {pos.map((p) => (
                 <li key={p.id}>
-                  <Link href={`/purchasing/${p.id}`} className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+                  <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
                     <div className="min-w-0 flex-1">
                       <div className="font-medium text-slate-900">{p.po_number} · {p.vendor}</div>
                       <div className="text-xs text-slate-400">{p.jobs?.name ?? "No job"}</div>
@@ -229,182 +482,14 @@ export function BillsReceipts({
               ))}
             </ul>
           )}
-        </Card>
-      )}
+        </div>
 
-      {tab === "bills" && (
-        <Card className="p-4">
-          <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
-            {billError && <p className="text-sm text-red-600">{billError}</p>}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <div className="col-span-2 sm:col-span-1">
-                <Label htmlFor="b-supplier">Supplier *</Label>
-                <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. CED" />
-              </div>
-              <div>
-                <Label htmlFor="b-job">Job</Label>
-                <Select id="b-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
-                  <option value="">Pick a Job</option>
-                  <option value="__overhead">Business Cost (No Job)</option>
-                  {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-                  ))}
-                </Select>
-              </div>
-              {billJob === "__overhead" && (
-                <div>
-                  <Label htmlFor="b-cat">Bucket</Label>
-                  <Select id="b-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                    <option value="">Pick a Bucket</option>
-                    {BUSINESS_COST_BUCKETS.map((c) => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </Select>
-                </div>
-              )}
-              <div>
-                <Label htmlFor="b-num">Bill #</Label>
-                <Input id="b-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="b-amt">Amount</Label>
-                <NumberInput id="b-amt" value={amount} onValueChange={setAmount} />
-              </div>
-              <div>
-                <Label htmlFor="b-date">Bill date</Label>
-                <Input id="b-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
-              </div>
-              <div>
-                <Label htmlFor="b-status">Status</Label>
-                <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                  {/* HOW THE BILL WAS BOUGHT, not whether a payment exists. A cheque to a
-                      supplier is recorded on the Suppliers card above; picking "Settled At The
-                      Counter" here takes this bill out of that balance, which is a different
-                      fact and the only one this field has ever meant. */}
-                  <option value="unpaid">On Account</option>
-                  <option value="paid">Settled At The Counter</option>
-                </Select>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500">{shownBills.length} bills · {formatCurrency(totalBills)} total</span>
-              <Button size="sm" onClick={addBill} disabled={pending || !supplier.trim()}>
-                <Plus className="h-3.5 w-3.5" /> Add Bill
-              </Button>
-            </div>
-          </div>
-
-          <div className="mb-3 flex gap-2">
-            {([
-              ["all", `All (${bills.length})`],
-              ["jobs", `Job Bills (${bills.filter((b) => b.job_id).length})`],
-              ["overhead", `Business Costs (${bills.filter((b) => !b.job_id).length})`],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setBillFilter(id)}
-                className={`rounded-full px-3 py-1 text-xs font-medium ${
-                  billFilter === id ? "seaglass-active" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <span className="relative z-10">{label}</span>
-              </button>
-            ))}
-          </div>
-
-          {shownBills.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {shownBills.map((b) => (
-                <li key={b.id} className="px-4 py-2.5 text-sm">
-                  <div className="flex items-center gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-slate-900">{b.supplier}</div>
-                      <div className="text-xs text-slate-400">
-                        {b.bill_number ? `#${b.bill_number} · ` : ""}
-                        {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                        {b.jobs?.name ? <Link href={`/jobs/${b.job_id}`} className="hover:text-brand">{b.jobs.name}</Link> : b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`}
-                        {(b.line_items?.length ?? 0) > 0 ? ` · ${b.line_items!.length} items` : ""}
-                      </div>
-                    </div>
-                    <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
-                    <button
-                      onClick={() => {
-                        const next = b.status === "paid" ? "unpaid" : "paid";
-                        start(async () => {
-                          const res = await setBillStatus(b.id, next, b.job_id ?? "");
-                          if (!res?.ok) { toast(res?.error ?? "Couldn't update the bill — try again.", "error"); return; }
-                          toast(
-                            next === "paid"
-                              ? "Marked settled - it comes out of the supplier balance"
-                              : "Marked on account - it goes back into the supplier balance",
-                            "success",
-                          );
-                          router.refresh();
-                        });
-                      }}
-                      /* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19).
-                         Owed = bills not marked paid, minus payments recorded against the account.
-                         So ticking a $456.02 CED bill here takes it out of `charged`, and recording
-                         the cheque that covered it puts the same $456.02 into `paid` - the balance
-                         falls by $912.04 for one payment. The control stays, because a counter
-                         receipt settled at the till is exactly what it is for. What changes is that
-                         it stops calling itself "paid/unpaid", which read like a second payment
-                         ledger, and says what it actually means: how this bill was bought. */
-                      title="Settled at the counter, or on account? This is how the bill was bought - the supplier balance reads it."
-                    >
-                      {/* AND THE FACE OF IT HAS TO SAY SO TOO (review of cn-v966). cn-v966 rewrote
-                          the toast and the tooltip and left the badge printing the raw column,
-                          "paid" / "unpaid" - and "paid" is the one word on this screen that
-                          invites him to tick a bill a cheque already covered. The tooltip does
-                          not exist on a 375px phone and the toast arrives after the tap, so the
-                          badge was the whole invitation. It is also a clickable, so a lowercase
-                          database word was a Title Case violation sitting inside a button. */}
-                      <Badge tone={statusTone(b.status)}>{b.status === "paid" ? "Settled" : "On Account"}</Badge>
-                    </button>
-                    <button onClick={() => setEditBill(b)} className="text-slate-400 hover:text-brand" title="Edit">
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => { if (confirm(`Delete bill from "${b.supplier}"?`)) start(async () => { const res = await deleteBill(b.id, b.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the bill — try again.", "error"); return; } toast(res.warning ?? "Bill deleted", "success"); router.refresh(); }); }}
-                      className="text-slate-400 hover:text-red-600"
-                      title="Delete"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                  {(b.line_items?.length ?? 0) > 0 && (
-                    <ul className="mt-1.5 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
-                      {b.line_items!.map((li, i) => (
-                        <li key={i} className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                          <span className="min-w-0 truncate">
-                            {li.quantity && li.quantity !== 1 ? `${li.quantity}× ` : ""}{li.description}
-                            {li.category ? <span className="ml-1 text-slate-400">· {li.category}</span> : null}
-                          </span>
-                          <span className="shrink-0 tabular-nums">{formatCurrency(li.amount)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {editBill && (
-            <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />
-          )}
-        </Card>
-      )}
-
-      {tab === "receipts" && (
-        <Card className="p-4">
+        <div hidden={tab !== "receipts"} className="pb-3">
           <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-3">
             <div className="min-w-[160px] flex-1">
               <Label htmlFor="d-job">Job *</Label>
               <Select id="d-job" value={docJob} onChange={(e) => setDocJob(e.target.value)}>
-                <option value="">— Pick a job —</option>
+                <option value="">— Pick A Job —</option>
                 {jobs.map((j) => (
                   <option key={j.id} value={j.id}>{jobLabel(j)}</option>
                 ))}
@@ -441,31 +526,34 @@ export function BillsReceipts({
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
               {docs.map((d) => (
-                <li key={d.id} className="flex items-center gap-3 px-4 py-2.5">
+                <li key={d.id} className="flex items-center gap-3 px-4 py-1">
                   <FileText className="h-4 w-4 shrink-0 text-slate-400" />
                   <div className="min-w-0 flex-1">
                     {d.signedUrl ? (
-                      <a href={d.signedUrl} target="_blank" rel="noopener noreferrer" className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</a>
+                      <a href={d.signedUrl} target="_blank" rel="noopener noreferrer" className="block truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</a>
                     ) : (
-                      <span className="truncate text-sm font-medium text-slate-900">{d.name}</span>
+                      <span className="block truncate text-sm font-medium text-slate-900">{d.name}</span>
                     )}
                     <div className="text-xs text-slate-400">{formatDate(d.created_at)} · {d.jobs?.name ?? "No job"}</div>
                   </div>
                   {d.category && <Badge tone="blue">{d.category}</Badge>}
-                  <button
-                    onClick={() => { if (confirm(`Delete "${d.name}"?`)) start(async () => { const res = await deleteDocument(d.id, d.file_url, d.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Deleted", "success"); router.refresh(); }); }}
-                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Delete ${d.name}`}
                     title="Delete"
+                    className="text-slate-400 hover:text-red-600"
+                    onClick={() => { if (confirm(`Delete "${d.name}"?`)) start(async () => { const res = await deleteDocument(d.id, d.file_url, d.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Deleted", "success"); router.refresh(); }); }}
                   >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                    <Trash2 />
+                  </Button>
                 </li>
               ))}
             </ul>
           )}
-        </Card>
-      )}
-    </div>
+        </div>
+      </Fold>
+    </Card>
   );
 }
 
@@ -535,7 +623,7 @@ function BillEditModal({
     <Modal
       open
       onClose={onClose}
-      title="Edit bill"
+      title="Edit Bill"
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!supplier.trim()} saveLabel="Save Changes" />}
     >
       <div className="space-y-3">
@@ -567,7 +655,7 @@ function BillEditModal({
             <div className="col-span-2">
               <Label htmlFor="be-cat">Bucket</Label>
               <Select id="be-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                <option value="">Pick a Bucket</option>
+                <option value="">Pick A Bucket</option>
                 {BUSINESS_COST_BUCKETS.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -583,7 +671,7 @@ function BillEditModal({
             <NumberInput id="be-amt" value={amount} onValueChange={setAmount} />
           </div>
           <div>
-            <Label htmlFor="be-date">Bill date</Label>
+            <Label htmlFor="be-date">Bill Date</Label>
             <Input id="be-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
           </div>
           <div>

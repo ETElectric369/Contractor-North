@@ -602,7 +602,7 @@ export function waitingForShelf(input: {
     const billed = l.billedAmount == null || l.billedAmount === "" ? null : Number(l.billedAmount);
     // A receipt the customer already holds: named, with no door (the receipt card has none there).
     const held = l.heldBy ? ` It's on ${l.heldBy}, which the customer already has, so it can't go on the shelf from here yet.` : "";
-    const door = (d: string) => (l.heldBy ? { href: null, door: null } : { href: "/bills#receipt-billing", door: d });
+    const door = (d: string) => (l.heldBy ? { href: null, door: null } : { href: `/bills#bill-${l.billId}`, door: d });
     if (l.billable !== false && billed != null && billed < cost) {
       out.push({
         key: `line:${l.lineId}`,

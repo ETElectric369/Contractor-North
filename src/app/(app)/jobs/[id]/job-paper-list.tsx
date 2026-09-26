@@ -112,10 +112,11 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
       {refusal && (
         <div className="mt-2 text-sm text-amber-700">
           <p>{refusal}</p>
-          {/* The questions only the /bills card answers (Same Purchase: Tie Them, Different
-              Purchase: Record It Anyway) live there, on this supplier's card. */}
+          {/* The questions only /bills answers (Same Purchase: Tie Them, or any other answer as a
+              different purchase) live on its Needs You cards since Wave B: an unrecorded paper
+              like this one is a card there. */}
           <Link
-            href={paper.accountId ? `/bills#supplier-invoices-${paper.accountId}` : "/bills"}
+            href="/bills#needs-you"
             className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
           >
             Open It On Bills
