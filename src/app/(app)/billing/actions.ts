@@ -2017,6 +2017,8 @@ async function importCostsCore(
       bills: ((bills ?? []) as any[]).map((b) => ({ id: String(b.id), amount: b.amount })),
       pos: ((pos ?? []) as any[]).map((p) => ({ id: String(p.id), total: p.total })),
       linesByBill: linesByBillId(blis.lines),
+      // Stock lines vote on the invoice's markup too, off the same takes this run prices.
+      takes: stock.takes,
     });
     if (!own.ok) return { ok: false, error: own.error };
     const found = own.reading.kind === "one" ? own.reading.pct : null;

@@ -1102,6 +1102,35 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
     expect(res.stats.summary).toContain("1 take from stock not added — on a line you edited or deleted (Start It Over rebuilds it)");
   });
 
+  it("a stock-only draft the office moved to 11% stays at 11% on the next refresh (keepInvoiceMarkup reads the stock lines)", async () => {
+    // The invoice's own lines: the three takes, priced at 11% (43.24 -> 48.00, 14.41 -> 16.00,
+    // 4.35 -> 4.83), no bills on the job. Before, a stock line never voted, the reading was
+    // "none", and the refresh repriced every one of them at the customer's 15%.
+    const own = [
+      { import_key: `stock:${G1}`, source_ids: [M1], line_total: 48.0, edited: false },
+      { import_key: `stock:${G2}`, source_ids: [M2], line_total: 16.0, edited: false },
+      { import_key: `stock:${G3}`, source_ids: [M3], line_total: 4.83, edited: false },
+    ];
+    const base = costsImportRoute({ bills: [], lines: [], landedAfter: [M1, M2, M3] });
+    state.client = fakeSupabase((q) => {
+      if (q.table === "stock_moves" && q.verb === "select") return { data: moves };
+      if (q.table === "inventory_items" && q.verb === "select") return { data: items };
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols === "import_key, source_ids, line_total, edited") return { data: own };
+      if (q.table === "invoice_items" && q.verb === "update") return { data: [{ id: "x" }] };
+      return base(q);
+    }, calls);
+    const res: any = await importCostsIntoInvoice(INV, 15, { keepInvoiceMarkup: true });
+    expect(res.ok).toBe(true);
+    const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+    const billed = (k: string) => {
+      const r = rows.find((x) => x.import_key === k);
+      return Math.round(r.quantity * r.unit_price * 100) / 100;
+    };
+    expect(billed(`stock:${G1}`)).toBe(48.0);
+    expect(billed(`stock:${G2}`)).toBe(16.0);
+    expect(billed(`stock:${G3}`)).toBe(4.83);
+  });
+
   it("a lost read of the takes imports nothing and says so", async () => {
     const base = route([]);
     state.client = fakeSupabase((q) => (q.table === "stock_moves" ? { error: { code: "57014", message: "canceling statement" } } : base(q)), calls);

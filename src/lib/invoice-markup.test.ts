@@ -58,6 +58,39 @@ describe("markupOnInvoice — the invoice's lines say what markup they were pric
   });
 });
 
+describe("markupReading — takes from stock vote too (Shop Stock, Phase 3)", () => {
+  const take = (group: string, moveIds: string[], cost: number) => ({ group, moveIds, cost });
+  const stockLine = (group: string, moveIds: string[], total: number, extra: Partial<InvoiceCostLine> = {}): InvoiceCostLine => ({
+    import_key: `stock:${group}`,
+    source_ids: moveIds,
+    line_total: total,
+    edited: false,
+    ...extra,
+  });
+  const takes = [take("g1", ["m1"], 43.24), take("g2", ["m2", "m3"], 100)];
+
+  it("a stock-only invoice at 11% reads 11, not none (so a refresh at the usual 15 keeps it)", () => {
+    const lines = [stockLine("g1", ["m1"], 48.0), stockLine("g2", ["m3", "m2"], 111)];
+    expect(markupReading({ ...base, bills: [], lines, takes })).toEqual({ kind: "one", pct: 11 });
+    // Without the takes, nothing votes: the old reading, and the trap.
+    expect(markupReading({ ...base, bills: [], lines })).toEqual({ kind: "none" });
+  });
+
+  it("an edited or deleted stock line, or one that no longer bills the take whole, has no vote", () => {
+    const edited = [stockLine("g1", ["m1"], 99, { edited: true }), stockLine("g2", ["m2", "m3"], 111)];
+    expect(markupReading({ ...base, bills: [], lines: edited, takes })).toEqual({ kind: "one", pct: 11 });
+    const tomb = [stockLine("g1", ["m1"], 99), stockLine("g2", ["m2", "m3"], 111)];
+    expect(markupReading({ ...base, bills: [], dismissed: new Set(["stock:g1"]), lines: tomb, takes })).toEqual({ kind: "one", pct: 11 });
+    const changed = [stockLine("g1", ["m1"], 48.0), stockLine("g2", ["m2"], 999)];
+    expect(markupReading({ ...base, bills: [], lines: changed, takes })).toEqual({ kind: "one", pct: 11 });
+  });
+
+  it("stock lines and bills at different markups are mixed, not one answer", () => {
+    const lines = [line("b-1", 229.4), stockLine("g2", ["m2", "m3"], 111)];
+    expect(markupReading({ ...base, lines, takes })).toEqual({ kind: "mixed" });
+  });
+});
+
 describe("markupReading — one answer, disagreeing lines, or nothing to read", () => {
   it("tells mixed apart from nothing", () => {
     expect(markupReading({ ...base, lines: [line("b-1", 229.4), line("b-2", 172.81), line("b-3", 119.59)] })).toEqual({ kind: "one", pct: 15 });

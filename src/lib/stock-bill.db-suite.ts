@@ -6,20 +6,26 @@
  * (the office), and job B takes 20 ft (a tech). Each job's invoice is built the way
  * importCostsIntoInvoice builds it - the same pure planner (stock-billing.ts) fed the same read, and
  * the same RPC - and then every door around a claimed piece is tried: a second import, a second
- * invoice, a second line, a short, an undone take, another job's take, an Undo while billed, a void
- * that releases, and the way back from void. Costs are checked to the cent and the shelf's
+ * invoice, a second line, a short, an undone take, another job's take, a jobless invoice, an Undo
+ * and a carry-back while billed, a void that releases, and the way back from void. Costs are checked to the cent and the shelf's
  * reconcile view must stay empty.
  *
- * Written once and run against any Postgres: stock-bill.integration.test.ts points it at the
- * production database inside ONE transaction that is always rolled back, so nothing it creates
- * survives. It speaks as office staff and as a tech exactly as PostgREST does (request.jwt.claims +
- * role authenticated). Every fixture is named TEST.
+ * Written once and run against any Postgres, inside ONE transaction that is always rolled back, so
+ * nothing it creates survives. It speaks as office staff and as a tech exactly as PostgREST does
+ * (request.jwt.claims + role authenticated). Every fixture is named TEST.
  *
- * 0343 NOT APPLIED YET: the case says so on the console and returns - unless STOCK_BILL_APPLY=1, in
- * which case the suite applies 0343 from supabase/migrations inside the same rolled-back
- * transaction, AFTER every fixture is written, so the triggers' table locks (invoices and
- * invoice_items: SHARE ROW EXCLUSIVE) are held for the few seconds of assertions only. Nothing it
- * applies survives either.
+ * WHOSE BOOKS IT WRITES IN (review of this branch). It used to pick "the first org with an active
+ * tech and office staff" - a live tenant (ET Electric, or Tahoe Deck on the day it was checked) -
+ * and while it ran it held that company's invoice-claim lock (cn.invoice_claim:<org>) and row locks,
+ * so every import and un-void in the real books waited on the test. It now writes ONLY in the org
+ * named by `sandboxOrgId` (TEST_SANDBOX_ORG), refuses the three live companies by id, and never
+ * picks a tenant by query. statement_timeout bounds every statement as lock_timeout bounds a wait.
+ *
+ * 0343 NOT APPLIED YET: the case says so on the console and returns. Applying it here is allowed
+ * ONLY when `allowDdl` is set, which the caller refuses for the production database: the triggers'
+ * DDL takes table locks on invoices and invoice_items that stop every company's invoicing for as
+ * long as the test's transaction is open (on 2026-09-25 at 8:35 PM that blanked the lines on a live
+ * invoice). Never apply DDL to production inside a test transaction.
  */
 import { it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
@@ -37,7 +43,21 @@ const MIGRATION = "0343_a_piece_is_billed_once.sql";
 const num = (v: unknown) => Number(v);
 const cents = (n: number) => Math.round(n * 100) / 100;
 
-export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
+/** The live companies, refused by id whatever the environment says. */
+const LIVE_ORGS = new Set([
+  "60195593-2e18-4230-bc8e-7a32d36d038d", // ET Electric
+  "7d6da1e2-c9a0-47d8-bcc1-5b4c3e412fed", // Vivian
+  "b4854fcd-50de-46de-a0cb-dff642b4b97b", // TAHOE DECK
+]);
+
+export type StockBillSuiteOptions = {
+  /** The one org this suite may write fixtures into (TEST_SANDBOX_ORG). Never a live company. */
+  sandboxOrgId: string;
+  /** May the suite apply 0343 inside its own transaction? Only ever on a non-production database. */
+  allowDdl: boolean;
+};
+
+export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: StockBillSuiteOptions) {
   let c: SqlClient;
   let shelfReady = false;
   let orgId = "";
@@ -67,20 +87,25 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
   };
 
   beforeAll(async () => {
+    const sandbox = String(opts.sandboxOrgId ?? "").trim();
+    if (!/^[0-9a-f-]{36}$/i.test(sandbox)) throw new Error("stock-bill: name the sandbox org to write in (TEST_SANDBOX_ORG). It never picks a company by query.");
+    if (LIVE_ORGS.has(sandbox.toLowerCase())) throw new Error("stock-bill: that is a live company's org. The suite writes only in a sandbox org.");
     c = await connect();
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
+    await c.query("set local statement_timeout = '15s'");
     shelfReady = (await one("select to_regclass('public.stock_moves') is not null and to_regprocedure('public.stock_draw(uuid, uuid, numeric, text, text)') is not null as ok")).ok;
     if (!shelfReady) return;
     const fx = await one(
       `select t.org_id, t.id as tech_id, s.id as staff_id
          from public.profiles t
          join public.profiles s on s.org_id = t.org_id and s.role in ('owner', 'admin', 'office') and coalesce(s.active, true)
-        where t.role = 'tech' and coalesce(t.active, true)
+        where t.org_id = $1 and t.role = 'tech' and coalesce(t.active, true)
         order by (s.role = 'owner') desc, t.id
         limit 1`,
+      [sandbox],
     );
-    if (!fx) throw new Error("stock-bill fixture: no org has both an active tech and active office staff.");
+    if (!fx) throw new Error("stock-bill fixture: the sandbox org needs an active tech and an active office person.");
     orgId = fx.org_id;
     techId = fx.tech_id;
     staffId = fx.staff_id;
@@ -208,8 +233,8 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
     // ── 0343, applied here when the database does not have it yet (after every fixture) ──
     const has0343 = (await one("select to_regprocedure('public.guard_stock_piece_claim()') is not null as ok")).ok;
     if (!has0343) {
-      if (process.env.STOCK_BILL_APPLY !== "1") {
-        console.warn("[stock-bill] 0343 is not on this database yet; set STOCK_BILL_APPLY=1 to apply it inside the test's rolled-back transaction.");
+      if (!opts.allowDdl) {
+        console.warn("[stock-bill] 0343 is not on this database yet, and this run may not apply DDL (never on production); nothing to test.");
         return;
       }
       const t0 = Date.now();
@@ -267,6 +292,13 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
     expect(onA2.held.map((t) => t.group)).toEqual([takeA.draw_group]);
 
     // ── every other door, refused in words ──
+    const jobless = (
+      await one(
+        `insert into public.invoices (org_id, job_id, customer_id, invoice_number, status, total, amount_paid)
+         values ($1, null, $2, 'TEST-SB-INV-NOJOB', 'draft', 0, 0) returning id`,
+        [orgId, cust],
+      )
+    ).id as string;
     await as(staffId);
     const claimLine = (invoiceId: string, ids: string[]) => () =>
       c.query(
@@ -283,6 +315,19 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
     expect((await refusal(() => c.query("select public.stock_undo($1)", [takeB.draw_group])))?.message).toContain(
       "TEST-SB-INV-B already bills these pieces",
     );
+    // Nor carried back to the shelf: its pieces would go back on the roll and be billed again on
+    // another job under new move ids.
+    const carryBack = (drawId: string) => () =>
+      c.query(
+        `insert into public.stock_moves (org_id, item_id, kind, qty, returns_move_id)
+         select m.org_id, m.item_id, 'job_return', 1, m.id from public.stock_moves m where m.id = $1`,
+        [drawId],
+      );
+    expect((await refusal(carryBack(moveB[0])))?.message).toContain(
+      "TEST-SB-INV-B already bills these pieces. Take them off TEST-SB-INV-B first, then bring them back",
+    );
+    // A take is billed on its own job's invoice, never on one with no job.
+    expect((await refusal(claimLine(jobless, moveB)))?.message).toContain("billed on their job's invoice");
     await asServer();
 
     // ── the customer's page: the take has a date, and nothing else from the shelf ──
@@ -325,7 +370,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>) {
     await c.query("update public.invoices set status = 'void' where id = $1", [invB]);
     expect(num((await one("select public.stock_undo($1) as r", [takeB.draw_group])).r.undone)).toBe(1);
     expect((await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invB])))?.message).toContain(
-      "went back on the shelf after it was voided",
+      "went back on the shelf, so it can't come back from void",
     );
     await c.query("update public.invoices set status = 'void' where id = $1", [invA]);
     await claimLine(invA2, moveA)(); // released: A2 may bill A's 60 ft now

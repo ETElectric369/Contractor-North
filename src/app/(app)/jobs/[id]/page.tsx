@@ -368,7 +368,7 @@ export default async function JobDetailPage({
     openDraft,
     lumpToNet,
     panelCount,
-    stockShortsWords,
+    jobStock,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -476,19 +476,23 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
-    // PIECES TAKEN PAST THE SHELF, said before an invoice is built (Shop Stock, Phase 3): New
-    // Invoice and Progress Payment carry the sentence beside the button. Staff only (a tech's page
-    // reads no stock and builds no invoice). A lost read says nothing here; the importer still
-    // leaves the pieces off and says so when the invoice is built.
+    // THE JOB'S TAKES FROM STOCK (Shop Stock, Phase 3), read once for two things: the pieces taken
+    // past the shelf, said before an invoice is built (New Invoice and Progress Payment carry the
+    // sentence beside the button), and the takes themselves, which are work to date exactly as the
+    // invoice page and the /print report count them (jobProgressFinancials). Without them a T&M
+    // job whose only unbilled work came off the shelf read $0 worked, and the Progress Payment
+    // modal could not build the draw. Staff only (a tech's page reads no stock and builds no
+    // invoice). A lost read says nothing here; the importer still reads the takes itself and
+    // refuses in words when it can't.
     viewerIsStaff
       ? readJobStock(supabase, id).then(
-          (s) => stockShortsSentence(s.shorts),
+          (s) => s,
           (e) => {
-            reportError("jobs.[id].stockShorts", e, { jobId: id });
+            reportError("jobs.[id].stock", e, { jobId: id });
             return null;
           },
         )
-      : Promise.resolve(null as string | null),
+      : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -642,8 +646,10 @@ export default async function JobDetailPage({
     pos: (pos ?? []) as any,
     bills: (bills ?? []) as any,
     markupPercent: materialMarkup,
+    stockTakes: jobStock?.takes ?? [],
   });
   const workedToDate = progress.workToDate;
+  const stockShortsWords = jobStock ? stockShortsSentence(jobStock.shorts) : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
