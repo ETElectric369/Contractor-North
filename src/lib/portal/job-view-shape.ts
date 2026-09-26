@@ -23,6 +23,7 @@ import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
 import { docFormat, isPortalDocKind, kindLabel, kindRank, type DocFormat, type PortalDocKind } from "./doc-kinds";
 import { normalizePortalPanels, type DirectoryPanel } from "@/lib/panel/directory";
+import type { InvoiceDocRead, InvoiceDocumentProps } from "@/lib/invoice-document-props";
 
 /** What portal_job_view returns (0301), as the server reads it. */
 export type PortalJobRaw = {
@@ -74,8 +75,9 @@ type RawDocument = {
   is_update: boolean | null;
 };
 
-/** The invoice document exactly as /i receives it from public_invoice (the same projection,
- *  invoice_document_projection). Rendered by the same InvoiceDocument, never re-shaped here. */
+/** The invoice document as portal_job_view returns it (invoice_document_projection). Its presence
+ *  is the gate's word that the customer may see this bill; the page draws the bill from
+ *  readInvoiceDocumentProps (the PDF's own props), never from these fields. */
 export type PublicInvoiceDoc = {
   invoice: Record<string, unknown>;
   items: Record<string, unknown>[];
@@ -109,7 +111,11 @@ export type PortalInvoice = {
   balance: number;
   /** The /i/<token> pay door: only for a bill that was sent. A draft has none (no Pay button). */
   payToken: string | null;
-  doc: PublicInvoiceDoc | null;
+  /** The bill as the PDF draws it (readInvoiceDocumentProps): null when the customer is not shown
+   *  one, or when its read failed (docFailed). */
+  doc: InvoiceDocumentProps | null;
+  /** The gate returned this bill, but its document could not be read: the page says so. */
+  docFailed: boolean;
 };
 export type PortalPick = {
   id: string;
@@ -234,6 +240,8 @@ export function shapePortalJob(
     now: Date;
     /** The org's supplier names (fetchSupplierNames, pinned to the scope's org). */
     suppliers?: ReadonlySet<string>;
+    /** Each bill's document, by invoice id (readInvoiceDocumentProps, pinned to this org and job). */
+    docs?: ReadonlyMap<string, InvoiceDocRead>;
   },
 ): PortalJobView {
   const { org_id: orgId, job_id: jobId } = raw.scope;
@@ -243,9 +251,9 @@ export function shapePortalJob(
   // and the one that holds before 0315 is applied. Same rule, same words (customerLineWords).
   const words = (l: { description?: unknown; import_source?: unknown }) =>
     customerLineWords({ description: typeof l.description === "string" ? l.description : null, import_source: typeof l.import_source === "string" ? l.import_source : null }, extra.suppliers);
-  const invoicesRaw = (raw.invoices ?? []).map((i) =>
-    i.doc && Array.isArray(i.doc.items) ? { ...i, doc: { ...i.doc, items: i.doc.items.map((it) => ({ ...it, description: words(it) })) } } : i,
-  );
+  // The bills themselves are drawn from readInvoiceDocumentProps (extra.docs), whose lines are the
+  // customer's words already; the projection's own document is only the gate's word that it shows.
+  const invoicesRaw = raw.invoices ?? [];
   const lines = (raw.lines ?? []).map((l) => ({ ...l, description: words(l) }));
 
   const ledger = buildJobLedger({
@@ -258,6 +266,7 @@ export function shapePortalJob(
 
   const invoices: PortalInvoice[] = invoicesRaw.map((i) => {
     const sent = SENT.has(i.status);
+    const read = i.doc ? extra.docs?.get(String(i.id)) : undefined;
     return {
       number: i.invoice_number ?? null,
       status: i.status,
@@ -266,7 +275,8 @@ export function shapePortalJob(
       amountPaid: num(i.amount_paid),
       balance: invoiceBalance(num(i.total), num(i.amount_paid)),
       payToken: sent ? str(i.public_token) : null,
-      doc: i.doc ?? null,
+      doc: read?.kind === "ok" ? read.props : null,
+      docFailed: !!i.doc && read?.kind !== "ok",
     };
   });
 

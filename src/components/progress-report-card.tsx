@@ -1,5 +1,5 @@
 import { formatCurrency } from "@/lib/utils";
-import { progressSummary } from "@/lib/invoice-math";
+import { progressBalanceRow, progressSummary } from "@/lib/invoice-math";
 
 /** A progress-billing summary that rides on a deposit/progress/final invoice so a
  *  payment request doubles as a progress report: the agreed estimate, billable
@@ -19,13 +19,15 @@ export function ProgressReportCard({
 }) {
   const { pctComplete: pct, balance } = progressSummary(estimate, workToDate, received, thisAmount);
   const isTM = billingType === "tm";
+  // Never a negative: a job that ran past its estimate or contract says so in words (INV-080).
+  const last = progressBalanceRow(balance, billingType);
 
   const rows: { label: string; value: number; sub?: string; strong?: boolean; top?: boolean }[] = [
     { label: isTM ? "Estimate amount" : "Contract", value: estimate },
     { label: "Work completed to date", value: workToDate, sub: estimate > 0 ? `${pct}%` : undefined },
     { label: "Received to date", value: received },
     { label: "This payment request", value: thisAmount, strong: true, top: true },
-    { label: isTM ? "Balance to estimate" : "Balance remaining", value: balance },
+    { label: last.label, value: last.value },
   ];
 
   return (

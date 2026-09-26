@@ -74,7 +74,7 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     expect(Object.keys(v.org).sort()).toEqual(["accent", "email", "license", "logoUrl", "name", "phone", "tint"]);
     expect(Object.keys(v.customer).sort()).toEqual(["companyName", "name"]);
     expect(Object.keys(v.job).sort()).toEqual(["id", "name", "number", "site", "status"]);
-    expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "isDraft", "number", "payToken", "status", "total"]);
+    expect(Object.keys(v.invoices[0]).sort()).toEqual(["amountPaid", "balance", "doc", "docFailed", "isDraft", "number", "payToken", "status", "total"]);
     expect(Object.keys(v.picks[0]).sort()).toEqual(["brand", "category", "code", "colorHex", "file", "id", "linkUrl", "location", "name", "note"]);
     expect(Object.keys(v.photos[0]).sort()).toEqual(["addedOn", "id", "url"]);
     expect(Object.keys(v.ledger).sort()).toEqual(["balance", "billedBalance", "billedTotal", "paidTotal", "reconciles", "split", "stretches", "workTotal"]);

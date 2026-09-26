@@ -3,6 +3,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { shapePortalJob, type PortalJobRaw, type PublicInvoiceDoc } from "@/lib/portal/job-view-shape";
 import { INV_078, LINES, PAYMENTS, STRETCHES } from "@/lib/portal/j011-fixture";
+import { assembleInvoiceDocumentProps, type InvoiceDocRead } from "@/lib/invoice-document-props";
+import { accentHex } from "@/lib/org-settings";
 import { PortalJobPage } from "./portal-job-page";
 import { fmtDay, fmtHours, fmtRange, fmtWeekday, portalJobStatus, seaGlassStyle, siteLine } from "./portal-format";
 
@@ -73,9 +75,32 @@ function raw(over: Partial<PortalJobRaw> = {}): PortalJobRaw {
     ...over,
   };
 }
+/** Each bill's document as readPortalJob hands it over: THE one assembly (assembleInvoiceDocumentProps,
+ *  the same the PDF and /i use), from the bill's rows. */
+function docsFor(r: PortalJobRaw): Map<string, InvoiceDocRead> {
+  const out = new Map<string, InvoiceDocRead>();
+  for (const i of r.invoices ?? []) {
+    if (!i.doc) continue;
+    out.set(String(i.id), {
+      kind: "ok",
+      props: assembleInvoiceDocumentProps({
+        invoice: { ...i.doc.invoice, status: i.status },
+        items: i.doc.items,
+        payments: i.doc.payments,
+        customer: i.doc.customer,
+        job: { row: { billing_type: "tm", address: "1 Main St", city: "Truckee", state: "CA", zip: "96161" }, failed: false },
+        org: { name: "ET Electric", settings: { glass_tint: "#006d8f" } },
+        supplierNames: new Set(),
+        progress: null,
+      }),
+    });
+  }
+  return out;
+}
+const shape = (r: PortalJobRaw, extra: Omit<Parameters<typeof shapePortalJob>[1], "docs">) => shapePortalJob(r, { ...extra, docs: docsFor(r) });
 const signed = new Map([[`${ORG}/${JOB}/100-panel.jpg`, "https://signed.example/panel?t=1"]]);
 const render = (r: PortalJobRaw) =>
-  renderToStaticMarkup(createElement(PortalJobPage, { view: shapePortalJob(r, { signed, unbilled: null, now: NOW }), homeHref: "/portal/x" }));
+  renderToStaticMarkup(createElement(PortalJobPage, { view: shape(r, { signed, unbilled: null, now: NOW }), homeHref: "/portal/x" }));
 const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
 describe("the customer's job page, drawn from the allowlisted view", () => {
@@ -116,6 +141,25 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(t).toContain("Labor - Erik");
   });
 
+  it("the letterhead wears the org's own tint, as the PDF does, never the platform green", () => {
+    const bill = html.slice(html.indexOf('class="portal-bill '));
+    // accentHex("#006d8f") = #004459: the PDF's header color. The default tint would be #115c54.
+    expect(accentHex("#006d8f")).toBe("#004459");
+    expect(accentHex(null)).toBe("#115c54");
+    expect(bill).toContain("#004459");
+    expect(bill).not.toContain("#115c54");
+  });
+
+  it("a bill whose sheet could not be read says so, never an empty sheet", () => {
+    const r = raw();
+    const view = shapePortalJob(r, { signed, unbilled: null, now: NOW, docs: new Map([[String(r.invoices![0].id), { kind: "error" }]]) });
+    expect(view.invoices[0].doc).toBeNull();
+    expect(view.invoices[0].docFailed).toBe(true);
+    const h = text(renderToStaticMarkup(createElement(PortalJobPage, { view, homeHref: "/portal/x" })));
+    expect(h).toContain("INV-078");
+    expect(h).toContain("This bill couldn't load just now.");
+  });
+
   it("a sent bill with a balance keeps its /i pay door and no running-total banner", () => {
     const sent = render(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }));
     expect(sent).toContain(`href="/i/${"a".repeat(32)}"`);
@@ -136,7 +180,7 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
   });
 
   it("while a bill is a draft, the work outside the running total is 'not added yet', not a second 'not a bill yet'", () => {
-    const view = shapePortalJob(raw(), {
+    const view = shape(raw(), {
       signed,
       unbilled: { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 0, returnsCredit: 0, total: 400 },
       now: NOW,
@@ -145,7 +189,7 @@ describe("the customer's job page, drawn from the allowlisted view", () => {
     expect(u).toContain("$400.00 of work not added to the running total yet");
     expect(u).toContain("Work Not Added Yet");
     expect(u).not.toContain("not on a bill yet");
-    const sentView = shapePortalJob(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }), {
+    const sentView = shape(raw({ invoices: [{ ...INV_078, status: "sent", sent_at: "2026-09-24T20:00:00Z", invoice_kind: "progress", public_token: "a".repeat(32), doc: DOC }] }), {
       signed,
       unbilled: view.unbilled,
       now: NOW,
@@ -201,7 +245,7 @@ describe("labor and materials apart, right at the top and in every section (Erik
   });
 
   it("the work not added yet reads under the same two headings", () => {
-    const view = shapePortalJob(raw(), {
+    const view = shape(raw(), {
       signed,
       unbilled: { hours: 4, laborByPerson: [{ name: "Erik", hours: 4, amount: 400 }], laborAmount: 400, materials: 120, returnsCredit: 20, total: 500 },
       now: NOW,
@@ -237,7 +281,7 @@ describe("the plans and drawings section (0326)", () => {
     ],
   });
   const html = renderToStaticMarkup(
-    createElement(PortalJobPage, { view: shapePortalJob(r, { signed: new Map([...signed, ...Object.entries(files)]), unbilled: null, now: NOW }), homeHref: "/portal/x" }),
+    createElement(PortalJobPage, { view: shape(r, { signed: new Map([...signed, ...Object.entries(files)]), unbilled: null, now: NOW }), homeHref: "/portal/x" }),
   );
   const t = text(html);
 

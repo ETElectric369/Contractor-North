@@ -4,6 +4,7 @@ import { billItemisation } from "@/lib/bill-itemisation";
 import { returnCreditRows } from "@/lib/supplier-returns";
 import { buildJobLedger } from "@/lib/portal/stretch-ledger";
 import { shapePortalJob, type PortalJobRaw } from "@/lib/portal/job-view-shape";
+import { assembleInvoiceDocumentProps } from "@/lib/invoice-document-props";
 
 /**
  * A CUSTOMER NEVER READS A SUPPLIER'S NAME (audit v994 PL1; the sanitize-on-read law).
@@ -131,7 +132,29 @@ describe("the portal: ledger and bill both read the customer's words", () => {
   });
 
   it("with the org's names, no ledger row and no bill line names a supplier", () => {
-    const v = shapePortalJob(raw(), { signed: new Map(), unbilled: null, now: new Date("2026-09-24T20:00:00Z"), suppliers: SUPPLIERS });
+    // The bill's document comes from THE one assembly (readInvoiceDocumentProps → assemble...),
+    // which puts the customer's words on the props themselves.
+    const r = raw();
+    const bill = r.invoices![0];
+    const docs = new Map([
+      [
+        "i1",
+        {
+          kind: "ok" as const,
+          props: assembleInvoiceDocumentProps({
+            invoice: { invoice_number: "INV-00028", status: "draft", total: 30 },
+            items: bill.doc!.items,
+            payments: [],
+            customer: null,
+            job: { row: null, failed: false },
+            org: { name: "ET", settings: {} },
+            supplierNames: SUPPLIERS,
+            progress: null,
+          }),
+        },
+      ],
+    ]);
+    const v = shapePortalJob(r, { signed: new Map(), unbilled: null, now: new Date("2026-09-24T20:00:00Z"), suppliers: SUPPLIERS, docs });
     const json = JSON.stringify(v);
     expect(json).not.toMatch(/Consolidated|CED|Home Depot|PO 7/);
     expect(v.invoices[0].doc?.items.map((i) => i.description)).toEqual(["Materials", "Returned: Other Items"]);

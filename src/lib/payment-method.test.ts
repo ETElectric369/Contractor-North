@@ -129,8 +129,11 @@ describe("every screen that shows a method shows its label", () => {
 
   it("the customer's copy never prints the office's payment note", () => {
     expect(code("src/components/invoice-document.tsx")).not.toMatch(/\.note\b/);
-    const print = code("src/app/print/invoice/[id]/page.tsx");
-    expect(print).toMatch(/from\("payments"\)\.select\("id, amount, paid_at, method"\)/);
+    // Print, /i and the portal's bill all read through the one assembly (readInvoiceDocumentProps).
+    expect(code("src/app/print/invoice/[id]/page.tsx")).toContain("readInvoiceDocumentProps(");
+    const assembly = code("src/lib/invoice-document-props.ts");
+    expect(assembly).toMatch(/payments: "id, amount, paid_at, method",/);
+    expect(assembly).toMatch(/from\("payments"\)\.select\(INVOICE_DOC_COLS\.payments\)/);
   });
 });
 

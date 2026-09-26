@@ -13,9 +13,13 @@ import { sectionLines } from "@/lib/portal/line-kind";
  * THE single invoice document body. Every read-only surface — the print/PDF page,
  * the public /i link, and the in-app preview — renders THIS, so they can never drift
  * (the old "print is inconsistent with the preview"). Page-specific chrome (back/
- * print/pay buttons, action bars) stays in each page around it. Sections that depend
- * on data a given surface doesn't have (payments, terms, progress) are conditional,
- * so each page passes what it has and the shared parts always match.
+ * print/pay buttons, action bars) stays in each page around it.
+ *
+ * ONE COMPONENT WAS NOT ENOUGH (INV-080, 2026-09-25): print and /i fed it two different prop
+ * sets, and the public one had drifted (no tint, no customer contact, no Progress Summary). The
+ * props for every real invoice now come from ONE function, readInvoiceDocumentProps
+ * (src/lib/invoice-document-props.ts): the print page, the /i link and the portal's bill all call
+ * it. Only the doc studio's sample sheet builds props by hand.
  */
 export type InvoiceDocItem = InvoiceLine & {
   id?: string;

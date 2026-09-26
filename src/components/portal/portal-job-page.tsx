@@ -2,7 +2,7 @@ import { ArrowLeft, Camera, ChevronRight, CircleDollarSign, Clock, DraftingCompa
 import { formatCurrency } from "@/lib/utils";
 import { formatDateTimeTz } from "@/lib/tz";
 import type { PortalInvoice, PortalJobView } from "@/lib/portal/job-view-shape";
-import { PublicInvoiceDocument, type PublicInvoiceData } from "@/components/public-invoice-document";
+import { InvoiceDocument } from "@/components/invoice-document";
 import { PortalSection, PortalShell } from "./portal-shell";
 import { PortalLedger, SplitRows } from "./portal-ledger";
 import { PortalKeepFresh, PortalPhotos, PortalPicks } from "./portal-media";
@@ -58,7 +58,7 @@ export function PortalJobPage({
   const site = siteLine(job.site);
   const unbilled = view.unbilled && (view.unbilled.hours > 0 || Math.abs(view.unbilled.total) > 0.005) ? view.unbilled : null;
   const payable = view.invoices.filter((i) => i.payToken && i.balance > 0.005);
-  const bills = view.invoices.filter((i) => i.doc);
+  const bills = view.invoices.filter((i) => i.doc || i.docFailed);
   const onlyAllWork = ledger.stretches.length === 1 && !ledger.stretches[0].id;
   const hasWork = ledger.stretches.some((s) => s.days.length > 0 || s.payments.length > 0);
   // Two money ideas must not share one name. While a bill is a draft, the figures above are a
@@ -313,9 +313,9 @@ function UnbilledSplit({ unbilled, totalLabel }: { unbilled: NonNullable<PortalJ
 
 /**
  * One bill, closed until tapped (the money card and the stretches already say where things stand;
- * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as /i prints it,
- * drawn by the same PublicInvoiceDocument. `.portal-bill` only changes how it sits on a phone
- * (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
+ * the full sheet is the detail). Inside, the sheet is the customer's copy exactly as the PDF and /i
+ * print it: the same InvoiceDocument, fed by the same readInvoiceDocumentProps. `.portal-bill` only
+ * changes how it sits on a phone (globals.css): the printed margins and the 11in floor come off, the letterhead and Bill To wrap,
  * and each line puts its amount beside its description, so nothing hides behind a sideways scroll.
  * `groupByKind`: the same lines, under Labor and Materials headings with a subtotal each (and any
  * other kind under its own heading only when the bill has one). Same lines, same figures, same
@@ -356,9 +356,16 @@ function BillCard({ b, explainBalance }: { b: PortalInvoice; explainBalance: boo
             </a>
           </div>
         ) : null}
-        <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
-          <PublicInvoiceDocument data={b.doc as PublicInvoiceData} groupByKind />
-        </div>
+        {b.doc ? (
+          <div className="portal-bill overflow-x-auto rounded-b-2xl sm:rounded-xl">
+            <InvoiceDocument {...b.doc} groupByKind />
+          </div>
+        ) : (
+          // The bill is there; its sheet could not be read just now. Say so, never an empty sheet.
+          <p className="px-4 py-4 text-sm text-slate-700">
+            This bill couldn&apos;t load just now. Please refresh the page in a moment.
+          </p>
+        )}
       </div>
     </details>
   );

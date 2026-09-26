@@ -267,6 +267,23 @@ export function progressSummary(
   return { pctComplete, balance };
 }
 
+/**
+ * THE LAST ROW OF A PROGRESS SUMMARY, IN WORDS (Erik, INV-080, 2026-09-25). The balance is the
+ * estimate (or contract) less what came in and what this bill asks for. When the work ran past it,
+ * that figure is negative, and "Balance to estimate -$2,391.64" is a sign a customer has to decode.
+ * So a negative never prints: a T&M job says "Over the estimate" and a fixed-price job "Over the
+ * contract", each with the positive amount. Same cents either way.
+ */
+export function progressBalanceRow(
+  balance: number,
+  billingType?: string | null,
+): { label: string; value: number } {
+  const tm = billingType === "tm";
+  const b = cents(fin(balance));
+  if (b < 0) return { label: tm ? "Over the estimate" : "Over the contract", value: cents(-b) };
+  return { label: tm ? "Balance to estimate" : "Balance remaining", value: b === 0 ? 0 : b };
+}
+
 export type InvoiceLine = {
   description?: string | null;
   line_total?: number | null;

@@ -10,23 +10,39 @@ export type { JobProgressFinancials };
  *  them up via the pure computeJobProgress() so the panel's "work to date" equals
  *  the sum of the lines importLaborIntoInvoice / importCostsIntoInvoice actually
  *  bill (labor at charge rate via computeJobLaborBilling, materials per-row markup). */
-export async function jobProgressFinancials(supabase: any, jobId: string): Promise<JobProgressFinancials> {
+export async function jobProgressFinancials(
+  supabase: any,
+  jobId: string,
+  /**
+   * THE SERVICE ROLE PINS ITS OWN ORG (the customer's /i link and portal bill, through
+   * readInvoiceDocumentProps). RLS narrows a signed-in caller; the service role reads every org, so
+   * each read below is then pinned to this org by hand (the job, its quotes, invoices, orders,
+   * receipts, hours and rates, and the organization by id: the old "the organization" read with
+   * maybeSingle would find every org and fall back to the default labor rate). The rates come from
+   * customerRateRow (fetchJobLaborRows' service path), never a pay figure.
+   */
+  scope?: { orgId: string },
+): Promise<JobProgressFinancials> {
+  const orgId = scope?.orgId ?? null;
+  const pin = (q: any) => (orgId ? q.eq("org_id", orgId) : q);
   const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }] =
     await Promise.all([
-      supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
-      supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
-      supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId),
-      fetchJobLaborRows(supabase, jobId),
+      pin(supabase.from("jobs").select("billing_type").eq("id", jobId)).maybeSingle(),
+      pin(supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId)),
+      pin(supabase.from("invoices").select("total, status, amount_paid").eq("job_id", jobId)),
+      fetchJobLaborRows(supabase, jobId, scope),
       // id + status + po_id feed the shared live-PO rule (a draft/cancelled order isn't a
       // cost, and a PO already paid by a bill is superseded by it — see livePurchaseOrders).
-      supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId),
+      pin(supabase.from("purchase_orders").select("id, total, status").eq("job_id", jobId)),
       // The job's live receipts WITH their lines, through the ONE reader the Unbilled card uses
       // (readJobBillsWithLines): a receipt counts for what it BILLS, and this panel's whole promise
       // is that its work-to-date equals the lines importCostsIntoInvoice writes. Selecting only
       // `amount` here is what put Erik's snacks, marked up, into the figure a draw is measured
       // against - the projection law, on the read that decides the reference number.
-      readJobBillsWithLines(supabase, jobId),
-      supabase.from("organizations").select("settings").maybeSingle(),
+      readJobBillsWithLines(supabase, jobId, scope),
+      orgId
+        ? supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()
+        : supabase.from("organizations").select("settings").maybeSingle(),
     ]);
 
   // A failed receipt read is tolerated here exactly as the quotes/invoices reads beside it are
