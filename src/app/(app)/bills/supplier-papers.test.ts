@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
-import { creditWait, ET_BOOKS_BEGIN, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPapersWaitingOnCredit, supplierPaperTotals } from "./supplier-reconcile";
+import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed, supplierPaperHomes } from "./supplier-papers";
+import { creditWait, ET_BOOKS_BEGIN, invoicesNeedingBill, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPapersWaitingOnCredit, supplierPaperTotals } from "./supplier-reconcile";
 import { supplierPaperActionItem, SUPPLIER_PAPERS_ITEM_ID } from "@/lib/action-items/supplier-paper-item";
+import { creditArrivedFor, reversedPurchaseIds } from "./supplier-balance";
 import { fold, searchBills, wordsOf, moneyWords, type BillsSearchRow } from "./bills-search";
 
 /**
@@ -472,6 +473,56 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     }
   });
 
+  /**
+   * AUDIT v1018, CLASS 6: the usual real sequence. He pays by Oct 10, CED closes 1107139, and the
+   * -$59.17 memo lands OPEN afterwards. The balance rule pairs only open-with-open or closed-with-
+   * closed, so on Oct 27 the card came back "Still no credit from CED after 30 days" with the memo
+   * sitting on the same account (reproduced through jiti with the committed functions).
+   */
+  it("the credit pairs with the waiting bill whichever of the two CED has closed (invoice closed, memo open)", () => {
+    const memo = (over: Record<string, unknown> = {}) =>
+      doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", job_name_raw: "13683 HILLSIDE", total: "-59.17", ...over });
+    for (const [bill, credit] of [
+      [{ closed: true, open_balance: "0" }, {}],
+      [{}, { closed: true, open_balance: "0" }],
+    ] as const) {
+      const f = feedWith([hillside({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], "2026-10-27");
+      expect(card(f, "8802-1107139")).toBeUndefined();
+      expect(f.waiting).toEqual([]);
+      // And /bills's Not In Your Books (and the job's Costs tab) count it taken back, not missing.
+      const { rows } = supplierDocumentRows({ documents: [hillside({ waiting_credit_since: TAPPED, ...bill }), memo(credit)], bills: [], links: [], aliasRows: [] });
+      const need = invoicesNeedingBill(rows, { since: null });
+      expect(need.rows.map((r) => r.id)).not.toContain("hillside");
+      expect(need.reversedRows).toBe(1);
+    }
+  });
+
+  it("the stamp breaks the twins tie: two $59.17 bills, one memo, the waiting one is the one credited", () => {
+    const twin = doc({ id: "twin", invoice_number: "8802-1107140", invoice_date: "2026-09-02", job_name_raw: "85 WHITNEY", total: "59.17" });
+    const memo = doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-12", total: "-59.17" });
+    const f = feedWith([hillside({ waiting_credit_since: TAPPED }), twin, memo], "2026-10-27");
+    expect(card(f, "8802-1107139")).toBeUndefined();
+    expect(f.waiting).toEqual([]);
+    // The one nobody said anything about is still a card: nothing says it came back.
+    expect(card(f, "8802-1107140")).toBeDefined();
+    // Two stamped twins and one memo: nothing says which, so neither is answered.
+    const f2 = feedWith([hillside({ waiting_credit_since: TAPPED }), { ...twin, waiting_credit_since: TAPPED }, memo], "2026-10-27");
+    expect(f2.cards.filter((c) => c.stillNoCredit).map((c) => c.invoiceNumber).sort()).toEqual(["8802-1107139", "8802-1107140"]);
+  });
+
+  it("creditArrivedFor never spends a memo a reversed pair already used", () => {
+    const rows = [
+      { id: "a", kind: "invoice", total: 10, openBalance: 10, closed: false },
+      { id: "m1", kind: "credit_memo", total: -10, openBalance: -10, closed: false },
+      { id: "w", kind: "invoice", total: 10, openBalance: 0, closed: true, supplierAccountId: CED, waitingCreditSince: "2026-09-01" },
+    ];
+    expect([...reversedPurchaseIds(rows)]).toEqual(["a"]);
+    expect([...creditArrivedFor(rows)]).toEqual([]);
+    expect([...creditArrivedFor([...rows, { id: "m2", kind: "credit_memo", total: -10, openBalance: -10, closed: false }])]).toEqual(["w"]);
+    // No account: nowhere for the credit to pair (paperCards says the same).
+    expect([...creditArrivedFor([{ ...rows[2], supplierAccountId: null }, rows[1]])]).toEqual([]);
+  });
+
   it("a credit memo on ANOTHER supplier's account never pairs with it", () => {
     const other = doc({ id: "other-credit", supplier_account_id: "acct-other", invoice_number: "X-1", kind: "credit_memo", total: "-59.17" });
     const f = feedWith([hillside({ waiting_credit_since: TAPPED }), other], "2026-10-26");
@@ -503,6 +554,42 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(creditWait({ waitingCreditSince: null }, "2026-10-01")).toBeNull();
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-09-30")).toEqual({ since: "2026-09-01", back: "2026-10-01", overdue: false });
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-10-01")?.overdue).toBe(true);
+  });
+});
+
+/**
+ * WHERE A STOCK PAPER STANDS ON /bills (audit v1018, class 14), so Shop Stock's Record To Shelf is
+ * offered only when Not In Your Books will actually hold it.
+ */
+describe("supplierPaperHomes: the page's own lists, read once for other screens", () => {
+  const stock = (over: Record<string, unknown>) => doc({ job_name_raw: "STOCK", invoice_date: "2026-07-21", total: "114.40", ...over });
+  const homesOf = (documents: any[], bills: any[] = []) => {
+    const { rows } = supplierDocumentRows({ documents, bills, links: [], aliasRows: [] });
+    return supplierPaperHomes(rows, { since: booksBeginOn(ET, bills), today: "2026-09-26" });
+  };
+
+  it("a STOCK paper after the June 8 line, in nobody's books, is in the fold", () => {
+    expect(homesOf([stock({ id: "s1", invoice_number: "8802-1103061" })]).get("s1")).toBe("not_in_books");
+  });
+
+  it("before the line it is counted, never listed: no Record To Shelf for it", () => {
+    expect(homesOf([stock({ id: "s2", invoice_number: "8802-1099001", invoice_date: "2026-06-01" })]).get("s2")).toBe("before_books");
+  });
+
+  it("a bill carrying its number (a scanned statement's lines) covers it", () => {
+    const statement = { id: "b-st", supplier: "CED", supplier_account_id: CED, amount: 500, bill_date: "2026-07-25", job_id: null, notes: null, bill_line_items: [{ description: "Statement (Invoice 8802-1103062)" }] };
+    expect(homesOf([stock({ id: "s3", invoice_number: "8802-1103062" })], [statement]).get("s3")).toBe("covered");
+  });
+
+  it("a credit memo that took it back, a Needs You card, and a wait each say where it is", () => {
+    const h = homesOf([
+      stock({ id: "s4", invoice_number: "8802-1103063", total: "50.00" }),
+      doc({ id: "m4", invoice_number: "8802-1103064", kind: "credit_memo", total: "-50.00", invoice_date: "2026-07-22" }),
+      stock({ id: "s5", invoice_number: "8802-1103065", job_id: "j-011" }),
+      stock({ id: "s6", invoice_number: "8802-1103066", job_id: "j-011", waiting_credit_since: "2026-09-20" }),
+    ]);
+    expect([h.get("s4"), h.get("s5"), h.get("s6")]).toEqual(["taken_back", "on_card", "waiting"]);
+    expect(h.has("m4")).toBe(false);
   });
 });
 
