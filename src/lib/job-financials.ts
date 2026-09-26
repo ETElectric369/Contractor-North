@@ -2,6 +2,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows } from "@/lib/labor-billing";
 import { computeJobProgress, type JobProgressFinancials } from "@/lib/job-progress-math";
 import { readJobBillsWithLines } from "@/lib/unbilled-work";
+import { readJobStock } from "@/lib/stock-billing";
 
 export type { JobProgressFinancials };
 
@@ -11,7 +12,7 @@ export type { JobProgressFinancials };
  *  the sum of the lines importLaborIntoInvoice / importCostsIntoInvoice actually
  *  bill (labor at charge rate via computeJobLaborBilling, materials per-row markup). */
 export async function jobProgressFinancials(supabase: any, jobId: string): Promise<JobProgressFinancials> {
-  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }] =
+  const [{ data: job }, { data: quotes }, { data: invoices }, labor, { data: pos }, billsRead, { data: org }, stock] =
     await Promise.all([
       supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
       supabase.from("quotes").select("total, status, created_at").eq("job_id", jobId),
@@ -27,6 +28,9 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
       // against - the projection law, on the read that decides the reference number.
       readJobBillsWithLines(supabase, jobId),
       supabase.from("organizations").select("settings").maybeSingle(),
+      // The pieces taken from stock onto the job, billed or not (Shop Stock, Phase 3): work to date
+      // is everything worked. Staff through RLS; a lost read throws like the receipts.
+      readJobStock(supabase, jobId),
     ]);
 
   // A failed receipt read is tolerated here exactly as the quotes/invoices reads beside it are
@@ -60,6 +64,7 @@ export async function jobProgressFinancials(supabase: any, jobId: string): Promi
     pos: (pos ?? []) as any,
     bills: billsRead.data as any,
     markupPercent,
+    stockTakes: stock.takes,
   });
 }
 

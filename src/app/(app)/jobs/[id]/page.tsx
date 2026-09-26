@@ -37,6 +37,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -372,6 +373,7 @@ export default async function JobDetailPage({
     openDraft,
     lumpToNet,
     panelCount,
+    jobStock,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -479,6 +481,23 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
+    // THE JOB'S TAKES FROM STOCK (Shop Stock, Phase 3), read once for two things: the pieces taken
+    // past the shelf, said before an invoice is built (New Invoice and Progress Payment carry the
+    // sentence beside the button), and the takes themselves, which are work to date exactly as the
+    // invoice page and the /print report count them (jobProgressFinancials). Without them a T&M
+    // job whose only unbilled work came off the shelf read $0 worked, and the Progress Payment
+    // modal could not build the draw. Staff only (a tech's page reads no stock and builds no
+    // invoice). A lost read says nothing here; the importer still reads the takes itself and
+    // refuses in words when it can't.
+    viewerIsStaff
+      ? readJobStock(supabase, id).then(
+          (s) => s,
+          (e) => {
+            reportError("jobs.[id].stock", e, { jobId: id });
+            return null;
+          },
+        )
+      : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -635,8 +654,10 @@ export default async function JobDetailPage({
     pos: (pos ?? []) as any,
     bills: (bills ?? []) as any,
     markupPercent: materialMarkup,
+    stockTakes: jobStock?.takes ?? [],
   });
   const workedToDate = progress.workToDate;
+  const stockShortsWords = jobStock ? stockShortsSentence(jobStock.shorts) : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid
   // on the job's non-void invoices, net of refunds — NOT the sum of invoice/quote
@@ -1440,8 +1461,11 @@ export default async function JobDetailPage({
               only do Progress payment) next to the progress/payment hub. */}
           <div className="flex flex-wrap justify-end gap-2">
             {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} warning={stockShortsWords} />
           </div>
+          {/* Pieces taken past the shelf: said at the two buttons that build an invoice, BEFORE the
+              tap, because the invoice they build leaves those pieces off (Shop Stock, Phase 3). */}
+          {stockShortsWords && <p className="text-right text-sm text-amber-700">{stockShortsWords}</p>}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (

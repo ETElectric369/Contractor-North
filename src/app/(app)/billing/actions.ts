@@ -42,6 +42,16 @@ import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
+import {
+  readJobStock,
+  stockImportRows,
+  stockShortsSentence,
+  stockZeroCostSentence,
+  takesWords,
+  unclaimedTakes,
+  type StockShort,
+  type StockTake,
+} from "@/lib/stock-billing";
 
 /** Post a credit/refund to the customer's account from an invoice. disposition
  *  "credit" keeps it on their account; "refund" flags accounting to pay it back. */
@@ -533,6 +543,9 @@ export type ImportStats = {
   skipped_claimed: number;
   /** The invoice numbers holding those claims, oldest first — e.g. ["INV-061"]. */
   claimed_on: string[];
+  /** Materials only: takes from stock (Took From Stock) newly on the invoice this run, one line
+   *  each. Counted apart from `pulled_in`, whose noun is "bills". */
+  stock_pulled_in?: number;
   /** The sentence, ready to show: "5 time entries pulled in · 9 already on INV-061 skipped". */
   summary: string;
   /** Money the office should look at before sending, one sentence each (materials only, so far):
@@ -1163,6 +1176,30 @@ async function upsertImportedItems(
     else removed = removedLines(present, (afterLines.data ?? []) as PresentLine[]);
   }
   return { stats, removed };
+}
+
+/**
+ * A TAKE'S LINE SAYS IT IS MATERIALS (0342's stored kind). The import RPC writes no line_kind, so
+ * the lines for these keys that carry none get 'materials' here - never over a kind the office set.
+ * Setting line_kind is not an edit (mark_invoice_item_edited reads only the words, count, unit and
+ * price) and not a claim change. Checked (the silent-write law): a failure goes to the ops log and
+ * nothing else, because the line already reads Materials from its import source everywhere.
+ */
+async function stampStockLinesMaterials(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  invoiceId: string,
+  keys: string[],
+): Promise<void> {
+  if (!keys.length) return;
+  const { error } = await supabase
+    .from("invoice_items")
+    .update({ line_kind: "materials" })
+    .eq("invoice_id", invoiceId)
+    .eq("import_source", "costs")
+    .in("import_key", keys)
+    .is("line_kind", null)
+    .select("id");
+  if (error && !isMissingColumn(error, "line_kind")) reportError("importCosts.stockLineKind", error, { invoiceId, keys: keys.length });
 }
 
 /** An imported line as the importer reads it on each side of the RPC. */
@@ -1944,6 +1981,17 @@ async function importCostsCore(
       .is("superseded_by_bill_id", null),
   ]);
   const billIds = ((bills ?? []) as any[]).map((b) => String(b.id));
+  // THE PIECES TAKEN FROM STOCK onto this job (Shop Stock, Phase 3): every live take, its pieces
+  // net of any carried back, and the shorts no roll has settled yet. Read BEFORE the claims so
+  // their move ids are looked up by id like the bills. Pinned to the office's own org as well as
+  // RLS. A lost read is not "no pieces": nothing is imported and it says so.
+  let stock: { takes: StockTake[]; shorts: StockShort[] };
+  try {
+    stock = await readJobStock(supabase, inv.job_id, ctx.orgId ? { orgId: ctx.orgId } : undefined);
+  } catch (e) {
+    reportError("importCosts.stock", e, { invoiceId });
+    return { ok: false, error: "Couldn't read the pieces taken from stock for this job just now, so nothing was imported - try again in a moment." };
+  }
   // Claims AFTER the rows, never beside them: the read looks every bill and order up BY ID as well
   // as by job, so one billed before it was moved to this job is still seen as claimed. The itemized
   // lines behind each bill ride along (the receipt-reader stores every receipt line): a bill WITH
@@ -1951,7 +1999,11 @@ async function importCostsCore(
   // instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill without lines (hand-entered)
   // still imports as its lump.
   const [claims, blis] = await Promise.all([
-    claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [...((pos ?? []) as any[]).map((p) => String(p.id)), ...billIds]),
+    claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [
+      ...((pos ?? []) as any[]).map((p) => String(p.id)),
+      ...billIds,
+      ...stock.takes.flatMap((t) => t.moveIds),
+    ]),
     readBillLines(supabase, billIds),
   ]);
   if (blis.error) return { ok: false, error: blis.error };
@@ -1965,6 +2017,8 @@ async function importCostsCore(
       bills: ((bills ?? []) as any[]).map((b) => ({ id: String(b.id), amount: b.amount })),
       pos: ((pos ?? []) as any[]).map((p) => ({ id: String(p.id), total: p.total })),
       linesByBill: linesByBillId(blis.lines),
+      // Stock lines vote on the invoice's markup too, off the same takes this run prices.
+      takes: stock.takes,
     });
     if (!own.ok) return { ok: false, error: own.error };
     const found = own.reading.kind === "one" ? own.reading.pct : null;
@@ -2119,11 +2173,27 @@ async function importCostsCore(
     // marked-up BILLABLE total — the anchor invariant), so the claim is at bill level, not per line.
     rows.push(...billRows.map((r) => ({ ...r, source_ids: [String(b.id)] })));
   }
+  /**
+   * AFTER THE BILL ROWS, ONE LINE PER TAKE FROM STOCK (Shop Stock, Phase 3; the invoice-line law:
+   * materials stay itemized, and a new take is a new line, never merged into another).
+   *
+   * "12/2 NM-B, 40 ft": the item and the count, never the shelf, a roll or a supplier. Priced at
+   * `markup` - the same figure every bill row above was priced at, after the invoice's own markup
+   * was read back (keepInvoiceMarkup) - on the pieces' stamped cost, rounded once. Claimed by the
+   * take's move ids and keyed stock:<draw_group>; 0343 lets a move be held by one live line only.
+   * A take any other invoice holds stays there, whole. A SHORT is never offered: it has no roll and
+   * no cost yet, and it is said below instead.
+   */
+  const stockSplit = unclaimedTakes(stock.takes, claims.owner);
+  const stockPlan = stockImportRows(stockSplit.free, markup);
+  const stockRows: ImportRow[] = stockPlan.rows;
+  const stockHeldIds = stockSplit.held.map((t) => t.moveIds.find((id) => claims.owner.has(id))!).filter(Boolean);
+  const stockWarnings = [stockShortsSentence(stock.shorts), stockZeroCostSentence(stockPlan.zeroCost)].filter((x): x is string => !!x);
   // A CREDIT NEVER TAKES THE INVOICE BELOW ZERO (returnsThatFit): a return lands only where the
   // invoice bills at least as much as it credits; the rest are held, unclaimed, for the next one.
   let fit: { land: typeof returnsOffered; held: typeof returnsOffered } = { land: [], held: [] };
   if (returnsOffered.length) {
-    const room = await invoiceRoomForReturns(supabase, invoiceId, rows);
+    const room = await invoiceRoomForReturns(supabase, invoiceId, [...rows, ...stockRows]);
     // A return row the office edited or dismissed does not land (its edited twin is already in the
     // base), so only the rows that WILL land count against the room.
     const landing = returnsOffered.map((r) => ({
@@ -2138,9 +2208,21 @@ async function importCostsCore(
     if (r.provisional) provisional.push(r.billId);
     rows.push(...r.rows);
   }
-  if (!rows.length) {
-    const held = [...skippedIds, ...poCovered.map((c) => c.poId)];
-    if (held.length) return { ok: false, empty: true, error: `Every bill and order on this job is already on ${joinNumbers(claimantNumbers(claims, held))} — nothing new to bill.` };
+  if (!rows.length && !stockRows.length) {
+    // Pieces taken past the shelf (no roll yet) and takes whose pieces cost nothing are never
+    // billed; an empty run still says so, beside whichever reason below it gives.
+    const stockSaid = stockWarnings.length ? ` ${stockWarnings.map((w) => w.replace(/\.$/, "")).join(". ")}.` : "";
+    const stockNote = stockWarnings.map((w) => w.replace(/\.$/, "")).join("; ");
+    const held = [...skippedIds, ...poCovered.map((c) => c.poId), ...stockHeldIds];
+    if (held.length)
+      return {
+        ok: false,
+        empty: true,
+        error: `Every bill and order on this job is already on ${joinNumbers(claimantNumbers(claims, held))} — nothing new to bill.${stockSaid}`,
+        ...(stockNote ? { emptyNote: stockNote } : {}),
+      };
+    if (stockNote && !nothingBillable.length && !returnsHeld.length && !returnsNotCredited.length)
+      return { ok: false, empty: true, error: `Nothing here to bill yet.${stockSaid}`, emptyNote: stockNote };
     // A DEAD END IS A SCREEN THAT BLAMES THE WRONG THING. There IS a receipt here; every line on
     // it is switched off. Say that, and say where the switch is, instead of "no bills yet".
     if (nothingBillable.length)
@@ -2164,9 +2246,17 @@ async function importCostsCore(
 
   // What the invoice's materials lines claim BEFORE the RPC, so the toast counts only the bills
   // and orders this tap added (withClaimStats diffs it against the read-back after).
-  const before = await landedSourceIds(supabase, invoiceId, "costs", rows);
-  const rep = await upsertImportedItems(supabase, invoiceId, "costs", rows);
+  // The bill rows and the takes go to the RPC together: one source ("costs"), one reconcile, so a
+  // take that is no longer on the job (undone, or carried back whole) comes off in the same pass
+  // and is NAMED by upsertImportedItems' removed-lines read, never dropped in silence.
+  const offered = [...rows, ...stockRows];
+  const before = await landedSourceIds(supabase, invoiceId, "costs", offered);
+  const rep = await upsertImportedItems(supabase, invoiceId, "costs", offered);
   if (rep.error) return { ok: false, error: rep.error };
+  // A take's line IS materials (0342): stored, not inferred, so every reader and the Kind chip
+  // agree. Only a line with no kind yet is set (a kind the office chose stays theirs). A failure
+  // here is logged, not raised: the line still reads Materials from its import source.
+  if (stockRows.length) await stampStockLinesMaterials(supabase, invoiceId, stockRows.map((r) => r.import_key));
   if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importCostsIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
@@ -2174,8 +2264,30 @@ async function importCostsCore(
   // in · 3 already on INV-061 skipped" is a different sentence from "Materials imported", and it is
   // the one that tells the office what this invoice now carries and what it deliberately left
   // where it was.
-  const after = await landedSourceIds(supabase, invoiceId, "costs", rows);
+  const after = await landedSourceIds(supabase, invoiceId, "costs", offered);
   const stats = withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "bills");
+  // The takes, counted the same way (new on the invoice since before the RPC), in their own noun.
+  // A take counts as landed when a move of it is on the invoice now and was not before; one whose
+  // moves are on no line after the RPC was held back by a line the office deleted (tombstoned) or
+  // edited, and is said with the door out, like a bill's.
+  const stockLanded = before && after
+    ? stockRows.filter((r) => (r.source_ids ?? []).some((id) => after.has(id) && !before.has(id))).length
+    : stockRows.length;
+  const stockHeldBack = after ? stockRows.filter((r) => !(r.source_ids ?? []).some((id) => after.has(id))).length : 0;
+  const stockParts: string[] = [];
+  if (stockLanded) stockParts.push(`${takesWords(stockLanded)} pulled in`);
+  if (stockHeldBack)
+    stockParts.push(`${takesWords(stockHeldBack)} not added — on a line you edited or deleted (Start It Over rebuilds ${stockHeldBack === 1 ? "it" : "them"})`);
+  if (stockHeldIds.length) {
+    stockParts.push(`${takesWords(stockHeldIds.length)} already on ${joinNumbers(claimantNumbers(claims, stockHeldIds)) || "another invoice"} skipped`);
+    stats.skipped_claimed += stockHeldIds.length;
+    stats.claimed_on = [...new Set([...stats.claimed_on, ...claimantNumbers(claims, stockHeldIds)])];
+  }
+  stats.stock_pulled_in = stockLanded;
+  if (stockParts.length) stats.summary = rows.length ? `${stats.summary} · ${stockParts.join(" · ")}` : stockParts.join(" · ");
+  // Money a person must look at before sending: pieces taken past the shelf that no roll covers
+  // yet, and takes whose roll has no cost on it. Neither is on the bill; both are said.
+  if (stockWarnings.length) stats.warnings = [...(stats.warnings ?? []), ...stockWarnings];
   if (poCovered.length) {
     const n = poCovered.length;
     stats.skipped_claimed += n;
@@ -2360,14 +2472,20 @@ async function refreshActualsDraw(
         bills: Math.max(0, before.billsCount - after.billsCount),
         returns: Math.max(0, before.returnsCount - after.returnsCount),
         returnsCredit: Math.max(0, r2(before.returnsCredit - after.returnsCredit)),
+        stock: Math.max(0, (before.stockCount ?? 0) - (after.stockCount ?? 0)),
       },
-      { hours: after.hours, bills: after.billsCount, returns: after.returnsCount },
+      { hours: after.hours, bills: after.billsCount, returns: after.returnsCount, stock: after.stockCount ?? 0 },
       formatCurrency,
     );
   } else {
     // The measure failed but the imports ran: speak in the importers' own counts.
     const n = (r: ImportResult) => (r.ok ? r.stats?.pulled_in ?? 0 : 0);
-    const bits = [n(lab) ? `${n(lab)} time ${n(lab) === 1 ? "entry" : "entries"}` : "", n(cos) ? `${n(cos)} ${n(cos) === 1 ? "bill" : "bills"}` : ""].filter(Boolean);
+    const takes = cos.ok ? cos.stats?.stock_pulled_in ?? 0 : 0;
+    const bits = [
+      n(lab) ? `${n(lab)} time ${n(lab) === 1 ? "entry" : "entries"}` : "",
+      n(cos) ? `${n(cos)} ${n(cos) === 1 ? "bill" : "bills"}` : "",
+      takes ? takesWords(takes) : "",
+    ].filter(Boolean);
     said = bits.length ? `Pulled ${bits.join(" and ")} into ${label}.` : `Nothing new to pull into ${label}.`;
   }
   // Money the importers want a person to look at: an edited tax row left behind (warnings), and
@@ -2380,6 +2498,8 @@ async function refreshActualsDraw(
     ...(cos.ok ? [...(cos.stats?.notes ?? []), ...(cos.stats?.warnings ?? [])] : []),
     // An "empty" costs run carries its reason in `error` (e.g. a return held, nothing else to bill).
     ...(!cos.ok && cos.empty && before && before.returnsCount > 0 && cos.error ? [cos.error.replace(/\.$/, "")] : []),
+    // ...and pieces taken past the shelf with no roll yet, which an empty run still has to say.
+    ...(!cos.ok && cos.empty && cos.emptyNote && !(before && before.returnsCount > 0) ? [cos.emptyNote] : []),
   ];
   if (extra.length) said += ` ${extra.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(". ")}.`;
   // "Final" chosen on the Progress Payment modal while this report is open: the report becomes the
@@ -2487,8 +2607,11 @@ export async function createProgressReportInvoice(
   // return outweighed it - then said "everything is already invoiced", which was false. The draw
   // bills the work; a return rides on it only when the draw still bills more than the credit
   // (importCostsIntoInvoice holds it otherwise, so the draw never goes below zero).
-  const newWork = Math.round((unbilled.laborAmount + unbilled.billsBilled) * 100) / 100;
+  const newWork = Math.round((unbilled.laborAmount + unbilled.billsBilled + (unbilled.stockBilled ?? 0)) * 100) / 100;
   if (newWork <= 0.005) {
+    // Pieces taken past the shelf are work too, just not billable yet: said, never hidden behind
+    // "nothing to bill".
+    const shorts = unbilled.stockShortsWords ? ` ${unbilled.stockShortsWords}` : "";
     const on = unbilled.claimedOn.length ? joinNumbers(unbilled.claimedOn) : unbilled.lastInvoiceNumber;
     // A return is money the customer is owed, and a refusal that talks only about hours would hide
     // it. Said, with where it goes.
@@ -2498,7 +2621,7 @@ export async function createProgressReportInvoice(
         : "";
     return {
       ok: false,
-      error: (on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.") + owed,
+      error: (on && unbilled.claimedCount ? `Everything worked so far is already on ${on}.` : "No labor or materials are logged on this job yet to bill.") + owed + shorts,
     };
   }
   // A DEPOSIT THAT STILL COVERS THE WORK IS SAID BEFORE A NUMBER IS TAKEN (review, 2026-09-24). The

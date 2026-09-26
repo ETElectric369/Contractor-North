@@ -23,6 +23,7 @@
  */
 
 import { billableBillCost, billItemisation, remainderKey, type BillLine } from "./bill-itemisation";
+import { stockKey } from "./stock-billing";
 
 export type InvoiceCostLine = {
   import_key: string | null;
@@ -43,7 +44,19 @@ export type MarkupOnInvoiceInput = {
   bills: readonly { id: string; amount: unknown }[];
   linesByBill: ReadonlyMap<string, BillLine[]>;
   pos: readonly { id: string; total: unknown }[];
+  /**
+   * The job's takes from stock (Shop Stock, Phase 3). A take's line bills exactly mark(take cost)
+   * (stockImportRows), so an untouched one says what markup it was priced at as plainly as a bill
+   * does. Without it a stock line never voted: an invoice whose untouched materials were all takes
+   * read "none", keepInvoiceMarkup fell back to the customer's usual, and the next refresh repriced
+   * every stock line the office had moved to 11% back to 15% - the INV-078 trap, for stock. Absent
+   * = none.
+   */
+  takes?: readonly StockTakeSample[];
 };
+
+/** What a take needs to vote: its key, its claim, and what its pieces cost. */
+export type StockTakeSample = { group: string; moveIds: readonly string[]; cost: unknown };
 
 /**
  * What the lines say, in the three shapes the % box has to tell apart (Erik, 2026-09-25: "i changed
@@ -101,6 +114,22 @@ export function markupReading(input: MarkupOnInvoiceInput): MarkupReading {
     );
   }
   for (const p of input.pos) read(p.id, Number(p.total), (k) => k === `po:${p.id}`);
+  // A take's line is found by its key (stock:<group>), not by source_ids[0]: a take is one line.
+  // It votes only while it still bills this take whole - the same moves the take has now - so a
+  // line written for a take that has since changed is never read as a markup.
+  for (const t of input.takes ?? []) {
+    const key = stockKey(t.group);
+    const cost = Number(t.cost);
+    const rows = input.lines.filter((l) => l.import_key === key);
+    if (!rows.length || !(cost > 0)) continue;
+    if (rows.some((r) => r.edited === true)) continue;
+    if (input.dismissed.has(key)) continue;
+    const want = [...t.moveIds].map(String).sort().join(",");
+    if (rows.some((r) => [...(r.source_ids ?? [])].map(String).sort().join(",") !== want)) continue;
+    const sell = rows.reduce((s, r) => s + (Number(r.line_total) || 0), 0);
+    if (!(sell > 0)) continue;
+    samples.push({ sell, cost });
+  }
 
   const cost = samples.reduce((s, x) => s + x.cost, 0);
   if (!(cost >= 5)) return { kind: "none" };

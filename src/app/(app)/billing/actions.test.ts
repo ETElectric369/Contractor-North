@@ -62,6 +62,9 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
     // dropped by a stale tombstone; what it removes is named). Routed here once for every test that
     // doesn't say otherwise: nothing on the invoice, so nothing stale and nothing removed.
     if (r === undefined && q.table === "invoice_items" && q.verb === "select" && q.cols === "id, import_key, description, line_total") r = { data: [] };
+    // The job's takes from stock (Shop Stock, Phase 3): an empty shelf, as every org is today,
+    // unless a test routes its own.
+    if (r === undefined && q.table === "stock_moves" && q.verb === "select") r = { data: [] };
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
     return { data: r.data ?? null, error: r.error ?? null };
   };
@@ -1015,5 +1018,125 @@ describe("settleUp — a retried Record Payment on the job's open bill records o
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/nothing was recorded/);
     expect(payments).toHaveLength(0);
+  });
+});
+
+describe("importCostsIntoInvoice — pieces taken from stock are billed once, one line per take (Shop Stock, Phase 3)", () => {
+  const G1 = "a1111111-0000-4000-8000-000000000001";
+  const G2 = "a2222222-0000-4000-8000-000000000002";
+  const G3 = "a3333333-0000-4000-8000-000000000003";
+  const M1 = "b1111111-0000-4000-8000-000000000001";
+  const M2 = "b2222222-0000-4000-8000-000000000002";
+  const M3 = "b3333333-0000-4000-8000-000000000003";
+  const S1 = "c1111111-0000-4000-8000-000000000001";
+  const moves = [
+    { id: M1, item_id: "item-122", draw_group: G1, kind: "draw", qty: "60.000", cost: "43.24", created_at: "2026-09-24T16:00:00Z", returns_move_id: null, settled_by: null },
+    { id: M2, item_id: "item-122", draw_group: G2, kind: "draw", qty: "20.000", cost: "14.41", created_at: "2026-09-25T16:00:00Z", returns_move_id: null, settled_by: null },
+    { id: M3, item_id: "item-nut", draw_group: G3, kind: "draw", qty: "25.000", cost: "4.35", created_at: "2026-09-25T17:00:00Z", returns_move_id: null, settled_by: null },
+    { id: S1, item_id: "item-122", draw_group: G3, kind: "short", qty: "15.000", cost: "0", created_at: "2026-09-25T17:00:00Z", returns_move_id: null, settled_by: null },
+  ];
+  const items = [
+    { id: "item-122", name: "12/2 NM-B", unit: "ft" },
+    { id: "item-nut", name: "Twister wire nut", unit: "ea" },
+  ];
+  /** The Waldow receipt plus three takes and a short; `heldElsewhere` = move ids another live invoice claims. */
+  const route = (landedAfter: string[], heldElsewhere: string[] = []) => {
+    const base = costsImportRoute({ bills: [{ ...WALDOW_BILL, pricing_provisional: false }], lines: WALDOW_LINES, landedAfter });
+    return (q: Q): Reply => {
+      if (q.table === "stock_moves" && q.verb === "select") return { data: moves };
+      if (q.table === "inventory_items" && q.verb === "select") return { data: items };
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols.includes("invoices!inner"))
+        return {
+          data: heldElsewhere.length
+            ? [{ import_key: `stock:${G2}`, source_ids: heldElsewhere, invoices: { id: "inv-other", invoice_number: "INV-080", status: "sent", created_at: "2026-09-25", job_id: JOB, jobs: null } }]
+            : [],
+        };
+      if (q.table === "invoice_items" && q.verb === "update") return { data: [{ id: "x" }] };
+      return base(q);
+    };
+  };
+
+  it("adds one line per take after the bill rows, at the same markup, claimed by the moves, never the short", async () => {
+    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M2, M3]), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+    const stock = rows.filter((r) => String(r.import_key).startsWith("stock:"));
+    // After every bill row, in the order the pieces were taken.
+    expect(rows.findIndex((r) => String(r.import_key).startsWith("stock:"))).toBe(rows.length - stock.length);
+    expect(stock).toEqual([
+      { import_key: `stock:${G1}`, description: "12/2 NM-B, 60 ft", quantity: 1, unit: "ea", unit_price: 49.73, source_ids: [M1] },
+      { import_key: `stock:${G2}`, description: "12/2 NM-B, 20 ft", quantity: 1, unit: "ea", unit_price: 16.57, source_ids: [M2] },
+      { import_key: `stock:${G3}`, description: "Twister wire nut, 25 ea", quantity: 25, unit: "ea", unit_price: 0.2, source_ids: [M3] },
+    ]);
+    expect(rows.some((r) => (r.source_ids ?? []).includes(S1))).toBe(false);
+    // The words a customer reads never say where a piece sat.
+    for (const r of stock) expect(String(r.description)).not.toMatch(/shelf|stock|lot|roll|CED|supplier/i);
+    // The bills are untouched by it: the receipt still bills 467.87 x 1.15 on its own rows.
+    const billRows = rows.filter((r) => !String(r.import_key).startsWith("stock:"));
+    expect(Math.round(billRows.reduce((s, r) => s + r.quantity * r.unit_price, 0) * 100) / 100).toBe(538.05);
+    // Said: the takes that landed, and the short that did not, as a warning to read before sending.
+    expect(res.stats.summary).toContain("3 takes from stock pulled in");
+    expect(res.stats.stock_pulled_in).toBe(3);
+    expect(res.stats.pulled_in).toBe(1); // the one bill, in its own noun
+    expect(res.stats.warnings.join(" ")).toContain("15 ft of 12/2 NM-B was taken from stock with no roll behind it yet");
+    // Stored as materials (0342), only where no kind is set.
+    const kind = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
+    expect(kind?.payload).toEqual({ line_kind: "materials" });
+  });
+
+  it("a take another invoice already bills stays there, whole, and is named", async () => {
+    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M3], [M2]), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(true);
+    const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+    expect(rows.map((r) => r.import_key).filter((k: string) => k.startsWith("stock:"))).toEqual([`stock:${G1}`, `stock:${G3}`]);
+    expect(res.stats.summary).toContain("1 take from stock already on INV-080 skipped");
+    expect(res.stats.claimed_on).toContain("INV-080");
+  });
+
+  it("a take the office deleted from the invoice stays off, and is said with the door out", async () => {
+    state.client = fakeSupabase(route([WALDOW_BILL.id, M1, M2]), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.stats.summary).toContain("2 takes from stock pulled in");
+    expect(res.stats.summary).toContain("1 take from stock not added — on a line you edited or deleted (Start It Over rebuilds it)");
+  });
+
+  it("a stock-only draft the office moved to 11% stays at 11% on the next refresh (keepInvoiceMarkup reads the stock lines)", async () => {
+    // The invoice's own lines: the three takes, priced at 11% (43.24 -> 48.00, 14.41 -> 16.00,
+    // 4.35 -> 4.83), no bills on the job. Before, a stock line never voted, the reading was
+    // "none", and the refresh repriced every one of them at the customer's 15%.
+    const own = [
+      { import_key: `stock:${G1}`, source_ids: [M1], line_total: 48.0, edited: false },
+      { import_key: `stock:${G2}`, source_ids: [M2], line_total: 16.0, edited: false },
+      { import_key: `stock:${G3}`, source_ids: [M3], line_total: 4.83, edited: false },
+    ];
+    const base = costsImportRoute({ bills: [], lines: [], landedAfter: [M1, M2, M3] });
+    state.client = fakeSupabase((q) => {
+      if (q.table === "stock_moves" && q.verb === "select") return { data: moves };
+      if (q.table === "inventory_items" && q.verb === "select") return { data: items };
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols === "import_key, source_ids, line_total, edited") return { data: own };
+      if (q.table === "invoice_items" && q.verb === "update") return { data: [{ id: "x" }] };
+      return base(q);
+    }, calls);
+    const res: any = await importCostsIntoInvoice(INV, 15, { keepInvoiceMarkup: true });
+    expect(res.ok).toBe(true);
+    const rows = (calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")?.payload?.p_rows ?? []) as any[];
+    const billed = (k: string) => {
+      const r = rows.find((x) => x.import_key === k);
+      return Math.round(r.quantity * r.unit_price * 100) / 100;
+    };
+    expect(billed(`stock:${G1}`)).toBe(48.0);
+    expect(billed(`stock:${G2}`)).toBe(16.0);
+    expect(billed(`stock:${G3}`)).toBe(4.83);
+  });
+
+  it("a lost read of the takes imports nothing and says so", async () => {
+    const base = route([]);
+    state.client = fakeSupabase((q) => (q.table === "stock_moves" ? { error: { code: "57014", message: "canceling statement" } } : base(q)), calls);
+    const res: any = await importCostsIntoInvoice(INV, 15);
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain("pieces taken from stock");
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
   });
 });

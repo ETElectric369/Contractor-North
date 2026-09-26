@@ -87,13 +87,16 @@ type UnbilledPicture = {
   /** Unclaimed labor rows exist, and the hours they would bill. */
   labor: boolean;
   hours: number;
-  /** Unclaimed bills / live orders exist, and how many. */
+  /** Unclaimed bills / live orders / takes from stock exist, and how many of each. */
   costs: boolean;
   billsCount: number;
+  stockCount: number;
   /** Approved change orders no non-void invoice holds — read only for a quoted job. */
   changeOrders: number;
   /** A supplier return no invoice has credited yet, marked up (positive = owed to the customer). */
   returnsCredit: number;
+  /** Pieces taken from stock with no roll behind them yet: the sentence, or null. Never billed. */
+  shortsWords: string | null;
 };
 async function unbilledPicture(supabase: SupabaseClient, jobId: string, want: { changeOrders: boolean }): Promise<UnbilledPicture | null> {
   try {
@@ -104,10 +107,12 @@ async function unbilledPicture(supabase: SupabaseClient, jobId: string, want: { 
     return {
       labor: unbilled.laborByPerson.length > 0,
       hours: unbilled.hours,
-      costs: unbilled.billsCount > 0,
+      costs: unbilled.billsCount > 0 || (unbilled.stockCount ?? 0) > 0,
       billsCount: unbilled.billsCount,
+      stockCount: unbilled.stockCount ?? 0,
       changeOrders: cos,
       returnsCredit: unbilled.returnsCount > 0 ? unbilled.returnsCredit : 0,
+      shortsWords: unbilled.stockShortsWords ?? null,
     };
   } catch (e) {
     reportError("createInvoiceForJob.unbilledPicture", e, { jobId });
@@ -156,7 +161,7 @@ async function pullNewWorkInto(
   markup: number,
 ): Promise<PulledIn> {
   const out: PulledIn = { parts: [], count: 0, missed: [], results: [] };
-  type Outcome = { ok: boolean; empty?: boolean; emptyNote?: string; error?: string; stats?: { pulled_in: number; warnings?: string[]; notes?: string[] } };
+  type Outcome = { ok: boolean; empty?: boolean; emptyNote?: string; error?: string; stats?: { pulled_in: number; stock_pulled_in?: number; warnings?: string[]; notes?: string[] } };
   const fail = (e: unknown): Outcome => ({ ok: false, error: String((e as { message?: unknown })?.message ?? e), empty: false });
   const take = (r: Outcome, noun: [string, string], what: string, tag: string) => {
     out.results.push(r);
@@ -166,6 +171,10 @@ async function pullNewWorkInto(
       const n = r.stats?.pulled_in ?? 0;
       if (n > 0) out.parts.push(`${n} ${n === 1 ? noun[0] : noun[1]}`);
       out.count += n;
+      // The materials run also counts takes from stock, in their own noun (one line per take).
+      const k = r.stats?.stock_pulled_in ?? 0;
+      if (k > 0) out.parts.push(k === 1 ? "1 take from stock" : `${k} takes from stock`);
+      out.count += k;
       return;
     }
     if (!r.empty) {
@@ -190,6 +199,14 @@ function joinAnd(parts: string[]): string {
 }
 
 const fmtHours = (h: number) => `${Math.round(h * 100) / 100} h`;
+
+/** "2 bills", "1 take from stock", "2 bills and 1 take from stock": the materials not on a bill yet. */
+function materialsWords(p: { billsCount: number; stockCount: number }): string {
+  const parts: string[] = [];
+  if (p.billsCount > 0) parts.push(`${p.billsCount} ${p.billsCount === 1 ? "bill" : "bills"}`);
+  if (p.stockCount > 0) parts.push(p.stockCount === 1 ? "1 take from stock" : `${p.stockCount} takes from stock`);
+  return joinAnd(parts);
+}
 
 /** How many approved change orders would land on a new invoice — importChangeOrdersIntoInvoice's
  *  exact predicate (approved, unclaimed by another non-void invoice, non-zero via changeOrderLines). */
@@ -406,7 +423,7 @@ export async function createInvoiceForJob(
     const still = await unbilledPicture(supabase, jobId, { changeOrders: wantChangeOrders });
     const stillOff: string[] = [];
     if (still && !quote && still.labor) stillOff.push(`${fmtHours(still.hours)} of time (Labor from Timecards pulls it in)`);
-    if (still && !quote && still.costs) stillOff.push(`${still.billsCount} ${still.billsCount === 1 ? "bill" : "bills"} (Materials from Costs pulls ${still.billsCount === 1 ? "it" : "them"} in)`);
+    if (still && !quote && still.costs) stillOff.push(`${materialsWords(still)} (Materials from Costs pulls ${still.billsCount + still.stockCount === 1 ? "it" : "them"} in)`);
     if (still && quote && still.changeOrders > 0) stillOff.push(`${still.changeOrders} approved change ${still.changeOrders === 1 ? "order" : "orders"} (Change Orders pulls ${still.changeOrders === 1 ? "it" : "them"} in)`);
     return {
       ok: true,
@@ -437,6 +454,8 @@ export async function createInvoiceForJob(
       if (picture.returnsCredit > 0.005 && (!quote || wantCosts)) {
         refusal.error += ` A supplier return of ${formatCurrency(picture.returnsCredit)} is still owed back to the customer; it comes off the next invoice on this job that bills more than it.`;
       }
+      // Pieces taken past the shelf are not "nothing": they wait for their roll, and that is said.
+      if (picture.shortsWords && (!quote || wantCosts)) refusal.error += ` ${picture.shortsWords}`;
       return refusal;
     }
   }
@@ -446,7 +465,7 @@ export async function createInvoiceForJob(
   const leftOff: string[] = [];
   if (picture && !quote && picture.labor && !wantLabor) leftOff.push(`${fmtHours(picture.hours)} of time (Labor from Timecards pulls it in)`);
   if (picture && !quote && picture.costs && !wantCosts) {
-    leftOff.push(`${picture.billsCount} ${picture.billsCount === 1 ? "bill" : "bills"} (Materials from Costs pulls ${picture.billsCount === 1 ? "it" : "them"} in)`);
+    leftOff.push(`${materialsWords(picture)} (Materials from Costs pulls ${picture.billsCount + picture.stockCount === 1 ? "it" : "them"} in)`);
   }
 
   let res: { ok: boolean; error?: string; id?: string };

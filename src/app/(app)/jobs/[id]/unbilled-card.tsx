@@ -104,12 +104,15 @@ export function UnbilledCard({
   const w = view;
   // A pending supplier return is something new: money the customer is owed back (INV-078).
   const returns = w.returnsCount ?? 0;
-  const nothingNew = w.total <= 0.005 && w.hours <= 0 && w.billsCount === 0 && returns === 0;
-  // The hours and bills on their own, before any return comes off - what an invoice built now
-  // bills at the least. A return lands on it only when it bills more than the credit
+  // Takes from stock no invoice holds yet (one line each on the next bill), and pieces taken past
+  // the shelf that wait for a roll (never billed until settled - said below, never hidden).
+  const takes = w.stockCount ?? 0;
+  const nothingNew = w.total <= 0.005 && w.hours <= 0 && w.billsCount === 0 && takes === 0 && returns === 0;
+  // The hours, bills and takes on their own, before any return comes off - what an invoice built
+  // now bills at the least. A return lands on it only when it bills more than the credit
   // (importCostsIntoInvoice holds it otherwise, because an invoice below zero loses the rest).
-  const newWork = Math.round((w.laborAmount + w.billsBilled) * 100) / 100;
-  const workPending = w.hours > 0 || w.billsCount > 0;
+  const newWork = Math.round((w.laborAmount + w.billsBilled + (w.stockBilled ?? 0)) * 100) / 100;
+  const workPending = w.hours > 0 || w.billsCount > 0 || takes > 0;
   const owedBack = returns > 0 && w.total < -0.005;
   // THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
   // open draft when there is one — one draft per job, never a second racing the first for the
@@ -246,6 +249,22 @@ export function UnbilledCard({
                     )}
                   </dd>
                 </div>
+                {/* PIECES TAKEN FROM STOCK (Took From Stock): what they cost the company, and the
+                    same markup as the bills, so the office sees both figures. One line each on the
+                    next bill. */}
+                {takes > 0 && (
+                  <div className="flex gap-2">
+                    <dt className="w-12 shrink-0 text-slate-400">Stock</dt>
+                    <dd className="text-slate-800">
+                      {takes === 1 ? "1 take" : `${takes} takes`} · {formatCurrency(w.stockAmount ?? 0)}
+                      {w.markupPct > 0 && (
+                        <span className="text-slate-500">
+                          {" "}+ {w.markupPct}% = {formatCurrency(w.stockBilled ?? 0)}
+                        </span>
+                      )}
+                    </dd>
+                  </div>
+                )}
                 {/* A SUPPLIER RETURN, IN PLAIN WORDS (INV-078). Parts went back to the supplier and
                     the customer was billed for them, so the credit is theirs - at the same markup
                     they were charged. Only the part of the return that was ever the customer's is
@@ -264,6 +283,11 @@ export function UnbilledCard({
                   </div>
                 )}
               </dl>
+            )}
+            {w.stockShortsWords && (
+              // TAKEN PAST THE SHELF: said before the invoice is built, never discovered after it
+              // went out short. The importer leaves these off and says the same sentence.
+              <p className="mt-1 text-sm text-amber-700">{w.stockShortsWords}</p>
             )}
             {heldDraft && (workPending || returns > 0) && (
               // WHY THE BUTTON OPENS INSTEAD OF ADDS. Said, so "Open" never reads as the card
