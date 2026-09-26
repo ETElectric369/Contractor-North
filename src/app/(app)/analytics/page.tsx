@@ -184,7 +184,14 @@ export default async function AnalyticsPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit." />
+      <PageHeader title="Analytics" description="How the business is actually doing — money in, money owed, win rate, job profit.">
+        <Link
+          href="/analytics/accountant"
+          className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          Export For Accountant
+        </Link>
+      </PageHeader>
 
       <MoneyChartCard
         data={chartData}

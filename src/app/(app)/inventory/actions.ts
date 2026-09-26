@@ -6,6 +6,12 @@ import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
 import { SHELF_NEEDS_0328, isMissingShelfRpc, undoTake, unshelveLot } from "@/lib/stock-ledger";
 import type { ShelfPickerItem } from "@/lib/shelf-plan";
+import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
+import { canTieToShelfReturn, shelfReturnMoney } from "@/lib/supplier-returns";
+import { formatCurrency } from "@/lib/utils";
+import { isMissingExportRecord } from "@/lib/accountant-lists";
+import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -217,24 +223,338 @@ export async function countItem(itemId: string, counted: number, note?: string |
   };
 }
 
-/** Undo a count, a write-off or a found piece: an office upkeep move. A take is undone by stock_undo. */
-export async function undoShelfMove(moveId: string): Promise<Result> {
+/**
+ * Undo an office upkeep move: a count, a found piece, a write-off or a return to the supplier. A take
+ * is undone by stock_undo. WHILE UNEXPORTED: once a Stock Used or On Hand download for the
+ * accountant has carried the move, it stays (0350's guard_stock_move_exported refuses it too); the
+ * way forward is Count It, from today.
+ */
+export async function undoShelfMove(moveId: string): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: NO_ORG };
+  const readMove = (cols: string) => supabase.from("stock_moves").select(cols).eq("id", moveId).eq("org_id", orgId).maybeSingle();
+  let moveRead = await readMove("id, kind, created_at, undone_at, credit_bill_id");
+  // Before 0350 there is no credit column, and no return is tied to a credit.
+  if (moveRead.error && isMissingCreditColumn(moveRead.error)) moveRead = await readMove("id, kind, created_at, undone_at");
+  const { data: move, error: moveErr } = moveRead;
+  if (moveErr) return { ok: false, error: dbError(moveErr) };
+  const m = move as { kind?: string; created_at?: string; undone_at?: string | null; credit_bill_id?: string | null } | null;
+  if (!m || !UPKEEP_KINDS.includes(String(m.kind)) || m.undone_at)
+    return { ok: false, error: "That's already undone, or isn't a count, a write-off or a return. Reload to see where it stands." };
+  const sent = await exportCarrying(supabase, orgId, String(m.created_at ?? ""));
+  if (sent) return { ok: false, error: sent };
   const { data, error } = await supabase
     .from("stock_moves")
     .update({ undone_at: new Date().toISOString() })
     .eq("id", moveId)
     .eq("org_id", orgId)
-    .in("kind", ["recount_down", "recount_up"])
+    .in("kind", UPKEEP_KINDS)
     .is("undone_at", null)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That count is already undone, or isn't a count. Reload to see where it stands." };
+  if (!data?.length) return { ok: false, error: "That's already undone. Reload to see where it stands." };
   revalidatePath("/inventory");
-  return { ok: true };
+  revalidatePath("/analytics");
+  let message =
+    m.kind === "write_off"
+      ? "Undone: those pieces are back on the shelf, and nothing is written off."
+      : m.kind === "supplier_return"
+        ? "Undone: those pieces are back on the shelf."
+        : "Undone: that count no longer counts.";
+  if (m.kind === "supplier_return" && m.credit_bill_id) {
+    message = `${message} ${await untieShelfCredit(supabase, orgId, String(m.credit_bill_id))}`;
+    revalidatePath("/bills");
+  }
+  return { ok: true, message };
+}
+
+/**
+ * A RETURN UNDONE LETS ITS CREDIT GO BACK. Return To CED files a job-less credit to the shelf to tie
+ * it (0350); when the last live return naming it is undone, and a return is what filed it there
+ * (stock_moves.credit_filed_by_return), it comes back off the shelf, a plain credit on Bills again
+ * that can be filed on a job. A credit someone filed to the shelf themselves stays where they put it.
+ * The words say which, and a failed step says so, never silently.
+ */
+async function untieShelfCredit(supabase: any, orgId: string, creditId: string): Promise<string> {
+  const { data: ties, error } = await supabase
+    .from("stock_moves")
+    .select("id, undone_at, credit_filed_by_return")
+    .eq("org_id", orgId)
+    .eq("kind", "supplier_return")
+    .eq("credit_bill_id", creditId)
+    .limit(1000);
+  if (error) return "Its credit is still filed to the shelf: whether to take it back off couldn't be checked just now. Reload Shop Stock and look again.";
+  const rows = (ties ?? []) as { undone_at: string | null; credit_filed_by_return: boolean | null }[];
+  if (rows.some((t) => !t.undone_at)) return "Its credit stays on the shelf: another return is still tied to it.";
+  if (!rows.some((t) => t.credit_filed_by_return === true)) return "Its credit stays on the shelf, where it was filed before the return, untied.";
+  const { data: back, error: backErr } = await supabase
+    .from("bills")
+    .update({ on_shelf: false })
+    .eq("id", creditId)
+    .eq("org_id", orgId)
+    .is("job_id", null)
+    .eq("on_shelf", true)
+    .select("id");
+  if (backErr) return `Its credit is still filed to the shelf and couldn't be taken back off: ${dbError(backErr)}`;
+  if (!back?.length) return "Its credit had already been moved, so it was left as it is.";
+  return "Its credit is off the shelf again: a plain credit on Bills, free to file on a job.";
+}
+
+/** The office's own upkeep moves: the ones Undo here reaches, and the ones an export freezes. */
+const UPKEEP_KINDS = ["recount_down", "recount_up", "write_off", "supplier_return"];
+
+/**
+ * Has an accountant download already carried a move made at `createdAt`? The sentence to say if so,
+ * or null. Mirrors 0350's guard (which is the boundary); before 0350 there is no record of
+ * downloads, so nothing is frozen, and a failed read refuses rather than guessing.
+ */
+async function exportCarrying(supabase: any, orgId: string, createdAt: string): Promise<string | null> {
+  if (!createdAt) return null;
+  const { data, error } = await supabase
+    .from("accountant_exports")
+    .select("list, from_at, to_at, created_at")
+    .eq("org_id", orgId)
+    .in("list", ["stock_used", "on_hand"])
+    .gt("created_at", createdAt)
+    .gt("to_at", createdAt)
+    .order("created_at")
+    .limit(50);
+  if (error) {
+    // Only the table missing (before 0350) means nothing is frozen; any other failure refuses.
+    if (isMissingExportRecord(error)) return null;
+    return `Couldn't check whether your accountant already has this, so nothing changed: ${dbError(error)}`;
+  }
+  const hit = ((data ?? []) as { list: string; from_at: string | null; created_at: string }[]).find(
+    (e) => !e.from_at || Date.parse(e.from_at) <= Date.parse(createdAt),
+  );
+  if (!hit) return null;
+  const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  return `This already went to your accountant in the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list downloaded ${shortDay(hit.created_at, tz)}, so it stays as it is. Count the shelf (Count It) to put it right from today.`;
+}
+
+/** "Sep 26", the company's own day (an evening download in Pacific time is still that day). */
+const shortDay = (iso: string, tz: string) => {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "earlier";
+  const ymd = todayStrInTz(tz, d);
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+};
+
+/** The roll a write-off or a return comes off, read for the office: its item, what is left, and
+ *  the supplier on its ticket. A failed read refuses. */
+async function readRoll(supabase: any, orgId: string, lotId: string) {
+  const { data: lot, error } = await supabase
+    .from("stock_lot_balance")
+    .select("lot_id, item_id, bill_id, unit, pieces_left, cost_left, live, cost_stale")
+    .eq("lot_id", lotId)
+    .eq("org_id", orgId)
+    .maybeSingle();
+  if (error) return { error: isMissingShelf(error) ? "The shelf isn't switched on for this database yet." : dbError(error) };
+  const l = lot as { item_id: string; bill_id: string | null; unit: string; pieces_left: unknown; cost_left: unknown; live: boolean; cost_stale: boolean } | null;
+  if (!l || l.live === false) return { error: "That roll isn't on the shelf any more. Reload to see where it stands." };
+  if (l.cost_stale) return { error: "That roll's receipt changed after it went on the shelf, so its cost is being worked out again. Open its receipt on Bills first." };
+  let supplier: string | null = null;
+  if (l.bill_id) {
+    const { data: bill } = await supabase.from("bills").select("supplier").eq("id", l.bill_id).eq("org_id", orgId).maybeSingle();
+    supplier = (bill as { supplier?: string | null } | null)?.supplier ?? null;
+  }
+  return { itemId: String(l.item_id), unit: String(l.unit ?? ""), left: Number(l.pieces_left) || 0, costLeft: Number(l.cost_left) || 0, supplier };
+}
+
+/**
+ * WRITE OFF (Shop Stock, Phase 4): pieces off one roll that are gone for good (ruined, lost, used on
+ * the shop). The database stamps what they cost off the roll; it shows as Shop Stock Lost in the
+ * month written off. The company eats it: a write-off has no job, so no customer is ever charged.
+ * Undo while no accountant download has carried it.
+ */
+export async function writeOffPieces(input: { lotId: string; qty: number; reason: string }): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  const qty = Math.round((Number(input.qty) || 0) * 1000) / 1000;
+  const reason = String(input.reason ?? "").trim().slice(0, 500);
+  if (!(qty > 0)) return { ok: false, error: "Say how many to write off." };
+  if (!reason) return { ok: false, error: "Say why (for example, \"ruined in the rain\"), so the write-off explains itself later." };
+  const roll = await readRoll(supabase, orgId, String(input.lotId ?? ""));
+  if ("error" in roll) return { ok: false, error: roll.error };
+  if (qty > roll.left) return { ok: false, error: `Only ${roll.left} ${roll.unit} are left on that roll.` };
+  const { data, error } = await supabase
+    .from("stock_moves")
+    .insert({ org_id: orgId, item_id: roll.itemId, lot_id: input.lotId, kind: "write_off", qty, source: "office", note: reason })
+    .select("id, cost");
+  if (error) return { ok: false, error: dbError(error) };
+  const row = (data ?? [])[0] as { id: string; cost: unknown } | undefined;
+  if (!row) return { ok: false, error: "The write-off didn't save. Nothing changed - try again." };
+  revalidatePath("/inventory");
+  revalidatePath("/analytics");
+  return {
+    ok: true,
+    id: String(row.id),
+    message: `${qty} ${roll.unit} written off at ${formatCurrency(Number(row.cost) || 0)}, what they cost off the roll. It shows as Shop Stock Lost this month. No customer is charged for it.`,
+  };
+}
+
+export type ShelfCreditOption = { id: string; supplier: string; number: string | null; date: string | null; amount: number; onShelf: boolean; tiedCost: number };
+
+/**
+ * The credits a return from the shelf may be tied to: below $0, on no job, not set aside. A credit
+ * filed on a job is left out on purpose (it would come off that job's customer bill); the sheet says
+ * so. `tiedCost` is what returns already tied to each credit cost.
+ */
+export async function shelfCredits(): Promise<
+  { ok: true; credits: ShelfCreditOption[]; onJobs: number; canTie: boolean; cantTieWhy: string | null } | { ok: false; error: string }
+> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is office-only." };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  const { data, error } = await supabase
+    .from("bills")
+    .select("id, supplier, bill_number, bill_date, amount, job_id, on_shelf, superseded_by_bill_id")
+    .eq("org_id", orgId)
+    .lt("amount", 0)
+    .is("superseded_by_bill_id", null)
+    .order("bill_date", { ascending: false })
+    .limit(200);
+  if (error) return { ok: false, error: dbError(error) };
+  const rows = (data ?? []) as any[];
+  const open = rows.filter((b) => canTieToShelfReturn(b));
+  const tied = new Map<string, number>();
+  // Before 0350 there is nothing to tie a return to: the sheet says so and offers no credit.
+  let canTie = true;
+  const { data: moves, error: movesErr } = await supabase
+    .from("stock_moves")
+    .select("credit_bill_id, cost")
+    .eq("org_id", orgId)
+    .eq("kind", "supplier_return")
+    .is("undone_at", null)
+    .in("credit_bill_id", open.length ? open.map((b) => String(b.id)) : ["00000000-0000-0000-0000-000000000000"]);
+  if (movesErr) {
+    if (!isMissingCreditColumn(movesErr) && !isMissingShelf(movesErr)) return { ok: false, error: dbError(movesErr) };
+    canTie = false;
+  }
+  for (const m of (movesErr ? [] : moves ?? []) as { credit_bill_id: string; cost: unknown }[])
+    tied.set(String(m.credit_bill_id), Math.round(((tied.get(String(m.credit_bill_id)) ?? 0) + (Number(m.cost) || 0)) * 100) / 100);
+  return {
+    ok: true,
+    canTie,
+    cantTieWhy: canTie ? null : RETURN_TIE_NEEDS_0350,
+    onJobs: rows.filter((b) => b.job_id).length,
+    credits: open.map((b) => ({
+      id: String(b.id),
+      supplier: String(b.supplier ?? "A supplier"),
+      number: b.bill_number ?? null,
+      date: b.bill_date ? String(b.bill_date).slice(0, 10) : null,
+      amount: Number(b.amount) || 0,
+      onShelf: b.on_shelf === true,
+      tiedCost: tied.get(String(b.id)) ?? 0,
+    })),
+  };
+}
+
+/** Tying a return to a credit needs 0350; before it, the return still goes, untied, and says so. */
+const RETURN_TIE_NEEDS_0350 =
+  "Tying a return to the supplier's credit needs one more database update (0350) that hasn't been applied yet. Return the pieces without a credit for now (the whole cost is written off), and Undo and return them again with the credit once the update is in.";
+
+/**
+ * RETURN TO CED (Shop Stock, Phase 4): pieces off one roll go back to the supplier. A supplier_return
+ * move lowers the roll by what they cost (the database stamps it). When the supplier's credit memo
+ * is in the books it is tied to the return and filed to the shelf (on_shelf, no job), so no job's
+ * materials import ever reads it and NO CUSTOMER IS EVER CREDITED for shelf stock. What the pieces
+ * cost minus the credit is written off as Shop Stock Lost, and the answer says so in words.
+ */
+export async function returnToSupplier(input: { lotId: string; qty: number; creditBillId?: string | null; note?: string | null }): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+  const qty = Math.round((Number(input.qty) || 0) * 1000) / 1000;
+  if (!(qty > 0)) return { ok: false, error: "Say how many went back." };
+  const roll = await readRoll(supabase, orgId, String(input.lotId ?? ""));
+  if ("error" in roll) return { ok: false, error: roll.error };
+  if (qty > roll.left) return { ok: false, error: `Only ${roll.left} ${roll.unit} are left on that roll.` };
+
+  const creditId = input.creditBillId ? String(input.creditBillId) : null;
+  let credit: { amount: number; onShelf: boolean } | null = null;
+  if (creditId) {
+    // The column first: before 0350 nothing is flipped onto the shelf for a tie that can't be written.
+    const probe = await supabase.from("stock_moves").select("credit_bill_id").eq("org_id", orgId).limit(1);
+    if (probe.error) return { ok: false, error: isMissingCreditColumn(probe.error) ? RETURN_TIE_NEEDS_0350 : dbError(probe.error) };
+    const { data: bill, error: billErr } = await supabase
+      .from("bills")
+      .select("id, amount, job_id, on_shelf, superseded_by_bill_id")
+      .eq("id", creditId)
+      .eq("org_id", orgId)
+      .maybeSingle();
+    if (billErr) return { ok: false, error: dbError(billErr) };
+    if (!bill) return { ok: false, error: "That credit isn't in the books any more. Reload and pick again." };
+    if (!canTieToShelfReturn(bill))
+      return {
+        ok: false,
+        error: (bill as { job_id?: string | null }).job_id
+          ? "That credit is filed on a job, where it would come off the customer's bill. Clear its job on Bills first if it was really for the shelf."
+          : "That isn't a credit that can be tied to a return. Pick the supplier's credit memo for these pieces.",
+      };
+    credit = { amount: Number((bill as { amount: unknown }).amount) || 0, onShelf: (bill as { on_shelf?: boolean }).on_shelf === true };
+    // FILED TO THE SHELF, so no job's import can ever read it (0350 requires it for the tie).
+    if (!credit.onShelf) {
+      const { data: flipped, error: flipErr } = await supabase
+        .from("bills")
+        .update({ on_shelf: true })
+        .eq("id", creditId)
+        .eq("org_id", orgId)
+        .is("job_id", null)
+        .select("id");
+      if (flipErr) return { ok: false, error: dbError(flipErr) };
+      if (!flipped?.length) return { ok: false, error: "That credit changed while this was open. Reload and pick again. Nothing changed." };
+    }
+  }
+
+  const { data, error } = await supabase
+    .from("stock_moves")
+    .insert({
+      org_id: orgId,
+      item_id: roll.itemId,
+      lot_id: input.lotId,
+      kind: "supplier_return",
+      qty,
+      source: "office",
+      note: String(input.note ?? "").trim().slice(0, 500) || null,
+      ...(creditId ? { credit_bill_id: creditId, credit_filed_by_return: !!credit && !credit.onShelf } : {}),
+    })
+    .select("id, cost");
+  const row = (data ?? [])[0] as { id: string; cost: unknown } | undefined;
+  if (error || !row) {
+    // Nothing went back: the credit goes back to where it was, so nothing is half done.
+    let putBack = "";
+    if (creditId && credit && !credit.onShelf) {
+      const { error: backErr } = await supabase.from("bills").update({ on_shelf: false }).eq("id", creditId).eq("org_id", orgId).select("id");
+      if (backErr) putBack = " The credit was filed to the shelf and couldn't be put back; it is on the shelf with no return tied to it.";
+    }
+    const why = error ? (isMissingCreditColumn(error) ? RETURN_TIE_NEEDS_0350 : dbError(error)) : "The return didn't save. Nothing went back - try again.";
+    return { ok: false, error: `${why}${putBack}` };
+  }
+  let others = 0;
+  if (creditId) {
+    const { data: tied } = await supabase
+      .from("stock_moves")
+      .select("id, cost")
+      .eq("org_id", orgId)
+      .eq("kind", "supplier_return")
+      .eq("credit_bill_id", creditId)
+      .is("undone_at", null)
+      .neq("id", row.id);
+    others = ((tied ?? []) as { cost: unknown }[]).reduce((s, m) => s + (Number(m.cost) || 0), 0);
+  }
+  const money = shelfReturnMoney({ qty, unit: roll.unit, supplier: roll.supplier, cost: Number(row.cost) || 0, creditAmount: credit ? credit.amount : null, otherReturnsCost: others });
+  revalidatePath("/inventory");
+  revalidatePath("/analytics");
+  revalidatePath("/bills");
+  return { ok: true, id: String(row.id), message: money.words };
 }
 
 /** Undo a take from the shelf (Phase 3's Took From Stock), until an invoice bills it. */

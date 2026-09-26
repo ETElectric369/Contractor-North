@@ -11,7 +11,8 @@ import { NumberInput } from "@/components/ui/number-input";
 import { useToast } from "@/components/toast";
 import { formatCurrency } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/types";
-import { addOpeningRoll, countItem, takeLotOffShelf, undoShelfMove, undoShelfTake } from "./actions";
+import { addOpeningRoll, countItem, returnToSupplier, shelfCredits, takeLotOffShelf, undoShelfMove, undoShelfTake, writeOffPieces, type ShelfCreditOption } from "./actions";
+import { returnDoorLabel, shelfReturnMoney } from "@/lib/supplier-returns";
 import { ItemActions } from "./item-actions";
 import { settleShortAction } from "../materials/stock-actions";
 
@@ -36,6 +37,8 @@ export type ShelfLotView = {
   /** It came in on a ticket bought for the shelf: there is no job to send it back to, so it has no
    *  Take It Off The Shelf (the ticket's Undo in the tray is the way back). */
   shelfTicket: boolean;
+  /** The supplier on its ticket (null for a roll counted in): names Return To CED. */
+  supplier: string | null;
 };
 
 export type ShelfMoveView = {
@@ -46,6 +49,8 @@ export type ShelfMoveView = {
   undone: boolean;
   drawGroup: string | null;
   settled: boolean;
+  /** "the Stock Used list, Oct 1": an accountant download already carried it, so it has no Undo (0350). */
+  exported: string | null;
 };
 
 export type ShelfItemView = {
@@ -109,6 +114,8 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
   }, [openItem]);
   const [counting, setCounting] = useState<ShelfItemView | null>(null);
   const [adding, setAdding] = useState<ShelfItemView | null>(null);
+  const [writingOff, setWritingOff] = useState<{ item: ShelfItemView; lot: ShelfLotView } | null>(null);
+  const [returning, setReturning] = useState<{ item: ShelfItemView; lot: ShelfLotView } | null>(null);
 
   function act(fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, done: string) {
     start(async () => {
@@ -218,6 +225,28 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                 Bought for the shelf, so it has no job to go back to. Undo its ticket in the tray to take it back.
                               </p>
                             )}
+                            {/* SHELF UPKEEP (Phase 4): pieces gone for good, or sent back. Each is a
+                                move with its cost stamped off this roll, and an Undo below. */}
+                            {l.piecesLeft > 0 && !l.stale && (
+                              <div className="-ml-1 flex flex-wrap gap-x-3">
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={() => setWritingOff({ item: it, lot: l })}
+                                  className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                                >
+                                  Write Off
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={() => setReturning({ item: it, lot: l })}
+                                  className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                                >
+                                  {returnDoorLabel(l.supplier)}
+                                </button>
+                              </div>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -242,7 +271,8 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                       <ul className="mt-1 space-y-1">
                         {it.moves.map((m) => {
                           const takeUndo = !m.undone && (m.kind === "draw" || m.kind === "short") && m.drawGroup;
-                          const countUndo = !m.undone && (m.kind === "recount_down" || m.kind === "recount_up");
+                          const upkeep = m.kind === "recount_down" || m.kind === "recount_up" || m.kind === "write_off" || m.kind === "supplier_return";
+                          const countUndo = !m.undone && upkeep && !m.exported;
                           return (
                             <li key={m.id} className={`flex flex-wrap items-center gap-x-2 text-sm ${m.undone ? "text-slate-400 line-through" : "text-slate-700"}`}>
                               <span>
@@ -263,11 +293,14 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                 <button
                                   type="button"
                                   disabled={pending}
-                                  onClick={() => act(() => undoShelfMove(m.id), "Undone: that count no longer counts.")}
+                                  onClick={() => act(() => undoShelfMove(m.id), "Undone.")}
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
                                   Undo
                                 </button>
+                              )}
+                              {!m.undone && upkeep && m.exported && (
+                                <span className="text-xs text-slate-400">With your accountant ({m.exported}), so it stays</span>
                               )}
                               {/* The answer to a Settle item (Phase 3): once a roll is on the shelf,
                                   the pieces taken past it are settled at that roll's cost. */}
@@ -300,6 +333,30 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
           onClose={() => setCounting(null)}
           onDone={(message) => {
             setCounting(null);
+            toast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
+      {writingOff && (
+        <WriteOff
+          item={writingOff.item}
+          lot={writingOff.lot}
+          onClose={() => setWritingOff(null)}
+          onDone={(message) => {
+            setWritingOff(null);
+            toast(message, "success");
+            router.refresh();
+          }}
+        />
+      )}
+      {returning && (
+        <ReturnToSupplier
+          item={returning.item}
+          lot={returning.lot}
+          onClose={() => setReturning(null)}
+          onDone={(message) => {
+            setReturning(null);
             toast(message, "success");
             router.refresh();
           }}
@@ -425,6 +482,205 @@ function AddOpeningRoll({ item, onClose, onDone }: { item: ShelfItemView; onClos
           <Label htmlFor={`open-note-${item.id}`}>Where it came from</Label>
           <Input id={`open-note-${item.id}`} value={note} onChange={(e) => setNote(e.target.value)} className="h-11" placeholder="Counted in the truck, 9/24" />
         </div>
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** About what `n` pieces off this roll cost: the database stamps the exact figure (the roll's rate,
+ *  or its exact remainder when they empty it). Shown before saving as "about". */
+function aboutCost(lot: ShelfLotView, n: number): number {
+  if (!(n > 0)) return 0;
+  if (n >= lot.piecesLeft) return lot.costLeft;
+  return lot.pieces > 0 ? Math.min(Math.round(((n * lot.cost) / lot.pieces) * 100) / 100, lot.costLeft) : 0;
+}
+
+/** WRITE OFF: pieces off this roll gone for good. Shop Stock Lost this month; never a customer's. */
+function WriteOff({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: ShelfLotView; onClose: () => void; onDone: (message: string) => void }) {
+  const [n, setN] = useState(lot.piecesLeft);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  function save() {
+    setSaving(true);
+    setError(null);
+    writeOffPieces({ lotId: lot.id, qty: n, reason })
+      .then((res) => {
+        setSaving(false);
+        if (!res.ok) return setError(res.error ?? "Nothing was written off.");
+        onDone(res.message ?? "Written off.");
+      })
+      .catch(() => {
+        setSaving(false);
+        setError("Nothing was written off: the connection dropped.");
+      });
+  }
+  const bad = !(n > 0) || n > lot.piecesLeft || !reason.trim();
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Write Off ${item.name}`}
+      size="sm"
+      dirty={!!reason || n !== lot.piecesLeft}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Write It Off" disabled={saving || bad} />}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          From the roll {lot.from}: {qty(lot.piecesLeft)} {lot.unit} left.
+        </p>
+        <div>
+          <Label htmlFor={`wo-n-${lot.id}`}>How many are gone ({lot.unit})</Label>
+          <NumberInput id={`wo-n-${lot.id}`} value={n} onValueChange={setN} className="h-11 w-32" />
+        </div>
+        <div>
+          <Label htmlFor={`wo-why-${lot.id}`}>Why (Required)</Label>
+          <Input
+            id={`wo-why-${lot.id}`}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="h-11"
+            placeholder="For example: ruined in the rain"
+            aria-required="true"
+          />
+          {!reason.trim() && <p className="mt-1 text-xs text-slate-500">Say why to write it off, so it explains itself later.</p>}
+        </div>
+        {n > 0 && n <= lot.piecesLeft && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            About {formatCurrency(aboutCost(lot, n))}, what they cost off the roll, shows as Shop Stock Lost this month. The company eats it: no
+            customer is charged. Undo stays until it goes to your accountant.
+          </p>
+        )}
+        {n > lot.piecesLeft && (
+          <p className="text-sm text-red-700">
+            Only {qty(lot.piecesLeft)} {lot.unit} are left on this roll.
+          </p>
+        )}
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * RETURN TO CED: pieces off this roll go back to the supplier, tied to its credit when the credit is
+ * in the books. The credit is filed to the shelf, so no customer is ever credited for shelf stock;
+ * what the pieces cost minus the credit is written off, and the sheet says the figure before saving.
+ */
+function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: ShelfLotView; onClose: () => void; onDone: (message: string) => void }) {
+  const [n, setN] = useState(lot.piecesLeft);
+  const [credits, setCredits] = useState<ShelfCreditOption[] | null>(null);
+  const [onJobs, setOnJobs] = useState(0);
+  const [cantTieWhy, setCantTieWhy] = useState<string | null>(null);
+  const [creditId, setCreditId] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    shelfCredits()
+      .then((res) => {
+        if (!live) return;
+        if (!res.ok) {
+          setCredits([]);
+          setLoadError(`${res.error} You can still send the pieces back without a credit.`);
+          return;
+        }
+        // Before 0350 no credit can be tied: none is offered, and the sheet says why.
+        setCredits(res.canTie ? res.credits : []);
+        setCantTieWhy(res.canTie ? null : res.cantTieWhy);
+        setOnJobs(res.onJobs);
+      })
+      .catch(() => {
+        if (!live) return;
+        setCredits([]);
+        setLoadError("The credits couldn't be read just now. You can still send the pieces back without one.");
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const label = returnDoorLabel(lot.supplier);
+  const picked = credits?.find((c) => c.id === creditId) ?? null;
+  const preview =
+    n > 0 && n <= lot.piecesLeft
+      ? shelfReturnMoney({
+          qty: n,
+          unit: lot.unit,
+          supplier: lot.supplier,
+          cost: aboutCost(lot, n),
+          creditAmount: picked ? picked.amount : null,
+          otherReturnsCost: picked?.tiedCost ?? 0,
+        })
+      : null;
+  function save() {
+    setSaving(true);
+    setError(null);
+    returnToSupplier({ lotId: lot.id, qty: n, creditBillId: creditId || null })
+      .then((res) => {
+        setSaving(false);
+        if (!res.ok) return setError(res.error ?? "Nothing went back.");
+        onDone(res.message ?? "Sent back.");
+      })
+      .catch(() => {
+        setSaving(false);
+        setError("Nothing went back: the connection dropped.");
+      });
+  }
+  const day = (ymd: string | null) => (ymd ? `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}` : "");
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`${label}: ${item.name}`}
+      size="sm"
+      dirty={!!creditId || n !== lot.piecesLeft}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Send It Back" disabled={saving || !(n > 0) || n > lot.piecesLeft} />}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">
+          From the roll {lot.from}: {qty(lot.piecesLeft)} {lot.unit} left.
+        </p>
+        <div>
+          <Label htmlFor={`ret-n-${lot.id}`}>How many went back ({lot.unit})</Label>
+          <NumberInput id={`ret-n-${lot.id}`} value={n} onValueChange={setN} className="h-11 w-32" />
+        </div>
+        <div>
+          <Label htmlFor={`ret-credit-${lot.id}`}>The supplier&apos;s credit for them</Label>
+          {credits == null ? (
+            <p className="text-sm text-slate-500">Reading the credits…</p>
+          ) : cantTieWhy ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{cantTieWhy}</p>
+          ) : (
+            <select
+              id={`ret-credit-${lot.id}`}
+              value={creditId}
+              onChange={(e) => setCreditId(e.target.value)}
+              className="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
+            >
+              <option value="">No Credit Yet</option>
+              {credits.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {`${c.supplier}${c.number ? ` #${c.number}` : ""}${c.date ? `, ${day(c.date)}` : ""}: ${formatCurrency(c.amount)}${c.tiedCost > 0 ? " (already tied to a return)" : ""}`}
+                </option>
+              ))}
+            </select>
+          )}
+          {!cantTieWhy && (
+            <p className="mt-1 text-xs text-slate-500">
+              Only credits filed to no job are listed, and the one you pick is filed to the shelf (Undo takes it back off).
+              {onJobs > 0 ? ` ${onJobs} credit${onJobs === 1 ? " is" : "s are"} filed on jobs and left out: those come off that job's customer bill.` : ""}
+            </p>
+          )}
+          {loadError && <p className="mt-1 text-xs text-amber-800">{loadError}</p>}
+        </div>
+        {preview && <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">About: {preview.words}</p>}
+        {n > lot.piecesLeft && (
+          <p className="text-sm text-red-700">
+            Only {qty(lot.piecesLeft)} {lot.unit} are left on this roll.
+          </p>
+        )}
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
       </div>
     </Modal>

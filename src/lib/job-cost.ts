@@ -112,6 +112,15 @@ export function isMissingShelf(err: unknown): boolean {
   );
 }
 
+/** 0350's stock_moves.credit_bill_id not on this database yet (Postgres 42703, PostgREST PGRST204).
+ *  Checked BEFORE isMissingShelf: "column stock_moves.credit_bill_id does not exist" reads as a
+ *  missing shelf too, and a reader that took it for one would drop every move with it. */
+export function isMissingCreditColumn(err: unknown): boolean {
+  const code = String((err as { code?: string } | null)?.code ?? "");
+  const msg = String((err as { message?: string } | null)?.message ?? "");
+  return code === "42703" || code === "PGRST204" || (msg.includes("credit_bill_id") && /does not exist|could not find/i.test(msg));
+}
+
 type Sb = { from: (t: string) => any };
 
 /**

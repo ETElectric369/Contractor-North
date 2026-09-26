@@ -195,13 +195,47 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(holds(m.totals)).toBe(true);
   });
 
-  it("a write-off is Shop Stock Lost in the roll's month; the draw does not move a cent", () => {
-    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, lost_cost: 36.93, live: true }];
-    const m = computeOwnerMoney(inputs([jobTicket], lots), AUG, TZ, TODAY);
-    expect(m.totals.putOnShelf).toBe(143.24);
-    expect(m.totals.shopStockLost).toBe(36.93);
-    expect(m.totals.left).toBe(800.52);
-    expect(holds(m.totals)).toBe(true);
+  it("a write-off is Shop Stock Lost in the MONTH IT WAS WRITTEN OFF, and Put On The Shelf gives it back: Left For You never moves", () => {
+    // The roll went on the shelf in August; 50 ft were written off (ruined) in September.
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }];
+    const moves = [{ id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" }];
+    const both = { ...inputs([jobTicket], lots), shelfMoves: moves };
+    const aug = computeOwnerMoney(both, AUG, TZ, TODAY);
+    expect(aug.totals.putOnShelf).toBe(180.17); // the whole roll, the month it was bought
+    expect(aug.totals.shopStockLost).toBe(0);
+    expect(aug.totals.left).toBe(800.52);
+    const sep = computeOwnerMoney(both, ownerMoneyWindow("2026-09", TODAY), TZ, TODAY);
+    expect(sep.totals.shopStockLost).toBe(36.93); // the month it was written off
+    expect(sep.totals.putOnShelf).toBe(-36.93); // off the shelf, the same month
+    expect(sep.totals.left).toBe(0); // no money moved in September
+    const year = computeOwnerMoney(both, YEAR, TZ, TODAY);
+    expect(year.totals.putOnShelf).toBe(143.24);
+    expect(year.totals.shopStockLost).toBe(36.93);
+    expect(year.totals.left).toBe(800.52);
+    for (const f of [aug.totals, sep.totals, year.totals, ...year.months]) expect(holds(f)).toBe(true);
+    // An undone write-off never happened.
+    const undone = computeOwnerMoney({ ...both, shelfMoves: [{ ...moves[0], undone_at: "2026-09-11T00:00:00Z" }] }, YEAR, TZ, TODAY);
+    expect(undone.totals.shopStockLost).toBe(0);
+    expect(undone.totals.putOnShelf).toBe(180.17);
+  });
+
+  it("a return to CED lowers the shelf; CED's credit on the shelf is money back off Shop Stock Lost, never a business bucket", () => {
+    // 50 ft ($36.03 off the roll) went back; CED credited $30.00 on a credit filed to the shelf.
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 144.14, live: true }];
+    const credit = { id: "cr1", job_id: null, on_shelf: true, amount: -30, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Credit", status: "paid" };
+    const moves = [{ id: "r1", lot_id: "L1", kind: "supplier_return", cost: 36.03, created_at: "2026-09-12T19:00:00Z", credit_bill_id: "cr1" }];
+    const m = computeOwnerMoney({ ...inputs([jobTicket, credit], lots), shelfMoves: moves }, YEAR, TZ, TODAY);
+    expect(m.totals.putOnShelf).toBe(144.14); // 180.17 bought - 36.03 went back
+    expect(m.totals.shopStockLost).toBe(6.03); // what the pieces cost minus what CED gave back
+    expect(m.totals.businessCostsTotal).toBe(0); // the credit is not a Tools & Supplies credit
+    expect(m.totals.left).toBe(830.52); // 800.52 + the $30 CED gave back
+    expect(m.onShelfNow).toBe(144.14);
+    for (const f of [m.totals, ...m.months]) expect(holds(f)).toBe(true);
+    // No credit tied (the return was written without one): the whole $36.03 is lost.
+    const noCredit = computeOwnerMoney({ ...inputs([jobTicket], lots), shelfMoves: [{ ...moves[0], credit_bill_id: null }] }, YEAR, TZ, TODAY);
+    expect(noCredit.totals.shopStockLost).toBe(36.03);
+    expect(noCredit.totals.left).toBe(800.52);
+    expect(holds(noCredit.totals)).toBe(true);
   });
 
   it("a roll taken off the shelf (unshelved) is the job's again, and an opening count is on the shelf but never a month's cost", () => {
@@ -213,6 +247,25 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(m.totals.materialsAndBills).toBe(199.48);
     expect(m.totals.putOnShelf).toBe(0);
     expect(m.onShelfNow).toBe(40);
+  });
+
+  it("an OPENING roll written off is never a month's loss: it was never a month's Put On The Shelf (review of Phase 4)", () => {
+    // Counted in at $100 with no receipt, then all of it written off in September. Nothing bought.
+    const lots = [{ lot_id: "L0", bill_id: null, kind: "opening", cost: 100, cost_left: 0, live: true }];
+    const moves = [{ id: "w0", lot_id: "L0", kind: "write_off", cost: 100, created_at: "2026-09-10T18:00:00Z" }];
+    const sep = computeOwnerMoney({ ...inputs([], lots), shelfMoves: moves }, ownerMoneyWindow("2026-09", TODAY), TZ, TODAY);
+    expect(sep.totals.putOnShelf).toBe(0);
+    expect(sep.totals.shopStockLost).toBe(0);
+    expect(sep.onShelfNow).toBe(0);
+    const year = computeOwnerMoney({ ...inputs([], lots), shelfMoves: moves }, YEAR, TZ, TODAY);
+    expect(year.totals.putOnShelf).toBe(0);
+    expect(year.totals.shopStockLost).toBe(0);
+    for (const f of [sep.totals, year.totals, ...year.months]) expect(holds(f)).toBe(true);
+    // A roll taken off the shelf is the job's again: a move on it is no month's loss either.
+    const gone = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 180.17, live: false }];
+    const off = computeOwnerMoney({ ...inputs([jobTicket], gone), shelfMoves: [{ ...moves[0], lot_id: "L1", cost: 10 }] }, YEAR, TZ, TODAY);
+    expect(off.totals.shopStockLost).toBe(0);
+    expect(off.totals.materialsAndBills).toBe(199.48);
   });
 });
 

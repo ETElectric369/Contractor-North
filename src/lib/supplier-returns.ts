@@ -313,3 +313,91 @@ export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: Retu
   }
   return parts;
 }
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   A RETURN FILED TO THE SHELF (Shop Stock, Phase 4; migration 0350).
+
+   Everything above is a return on a JOB: the pieces were the customer's, so what went back is
+   credited to the customer. Shelf stock is the other case. The pieces were never any customer's:
+   they sat on the shelf at what they cost the company (a lot, 0303). When they go back to CED:
+     · a supplier_return move lowers the roll by what those pieces cost (the database stamps it);
+     · CED's credit memo is filed to the SHELF (bills.on_shelf, no job) and tied to that move, so no
+       job's materials import can ever read it, and no customer is ever credited for it;
+     · what the pieces cost minus what CED gave back is written off (Shop Stock Lost), and said.
+   The functions below are the words and the arithmetic for that. They match the return to the
+   roll it came off, never to a job.
+   ════════════════════════════════════════════════════════════════════════════════════════════ */
+
+const CED_WORDS = /\bced\b|consolidated\s+elec|contractors\s+electrical/i;
+
+/** A supplier's credit filed to the shop shelf: below $0, on no job, and on the shelf. The one kind
+ *  of return that never reaches a customer's invoice. */
+export function isShelfCredit(bill: { amount?: unknown; job_id?: unknown; on_shelf?: unknown } | null | undefined): boolean {
+  return !!bill && isReturnBill(bill.amount) && !bill.job_id && bill.on_shelf === true;
+}
+
+/** A credit a shelf return may be tied to: a credit on no job, not set aside (one already on the
+ *  shelf, or one with no job that the return files there). A credit filed on a JOB is never offered:
+ *  it would come off that job's customer bill. */
+export function canTieToShelfReturn(bill: { amount?: unknown; job_id?: unknown; superseded_by_bill_id?: unknown } | null | undefined): boolean {
+  return !!bill && isReturnBill(bill.amount) && !bill.job_id && !bill.superseded_by_bill_id;
+}
+
+/** "Return To CED" for CED's rolls (the supplier Erik returns to), "Return To Supplier" otherwise. */
+export function returnDoorLabel(supplier: string | null | undefined): string {
+  return CED_WORDS.test(String(supplier ?? "")) ? "Return To CED" : "Return To Supplier";
+}
+
+export type ShelfReturnMoney = {
+  /** What the pieces going back cost off the roll (with any earlier returns tied to the same credit). */
+  cost: number;
+  /** What the supplier's credit gives back, as a positive figure (0 with no credit tied). */
+  credit: number;
+  /** cost - credit: written off as Shop Stock Lost. Below 0 when the supplier gave back more. */
+  lost: number;
+  /** The sentence the office reads, before and after. */
+  words: string;
+};
+
+/**
+ * WHAT A RETURN FROM THE SHELF COMES TO. `cost` is what these pieces cost off the roll (the
+ * database stamps it: pieces x the roll's cost per piece, or the roll's exact remainder when it
+ * empties it). `creditAmount` is the tied credit bill's amount (negative, as it is stored), or null
+ * with none tied. `otherReturnsCost` is what earlier returns already tied to the same credit cost:
+ * one CED memo can cover two rolls, and the difference is the memo's, not each roll's.
+ */
+export function shelfReturnMoney(input: {
+  qty: number;
+  unit: string;
+  supplier?: string | null;
+  cost: number;
+  creditAmount: number | null;
+  otherReturnsCost?: number;
+}): ShelfReturnMoney {
+  const who = CED_WORDS.test(String(input.supplier ?? "")) ? "CED" : String(input.supplier ?? "").trim() || "the supplier";
+  const qty = Math.round(Number(input.qty) * 1000) / 1000;
+  const unit = String(input.unit ?? "").trim();
+  const own = cents(Number(input.cost) || 0);
+  const others = cents(Number(input.otherReturnsCost) || 0);
+  const tail = " No customer is credited for it.";
+  if (input.creditAmount == null) {
+    return {
+      cost: own,
+      credit: 0,
+      lost: own,
+      words: `${qty} ${unit} went back to ${who}. They cost ${formatCurrency(own)} off the roll, and no credit from ${who} is tied to them, so ${formatCurrency(own)} is written off as Shop Stock Lost.${tail}`,
+    };
+  }
+  const cost = cents(own + others);
+  const credit = cents(Math.abs(Number(input.creditAmount) || 0));
+  const lost = cents(cost - credit);
+  const what = others > 0 ? `these and the pieces already returned on it cost ${formatCurrency(cost)}` : `they cost ${formatCurrency(cost)} off the roll`;
+  const head = `${qty} ${unit} went back to ${who}. ${who}'s credit gives back ${formatCurrency(credit)}, and ${what}`;
+  const words =
+    lost > 0
+      ? `${head}, so the ${formatCurrency(lost)} difference is written off as Shop Stock Lost.${tail}`
+      : lost < 0
+        ? `${head}, so ${who} gave back ${formatCurrency(-lost)} more than they cost. That counts as money back.${tail}`
+        : `${head}, so nothing is written off.${tail}`;
+  return { cost, credit, lost, words };
+}
