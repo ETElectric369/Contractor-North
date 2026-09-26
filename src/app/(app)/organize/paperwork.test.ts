@@ -2023,6 +2023,22 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
     expect(u.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["8802-1101363"] });
     expect(u.eqs).toContainEqual(["status", "needs_review"]);
   });
+
+  it("Add hands the importer the tray's own PDF bytes, so the PDF is kept where Open Bill reads it", async () => {
+    vi.mocked(importCedInvoices).mockResolvedValueOnce({ ok: true, message: "Added.", landed: [], refused: [] } as never);
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...CED_PAPER, status: "needs_review" }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    await addSupplierDocuments("oi-5");
+    const file = vi.mocked(importCedInvoices).mock.lastCall?.[0]?.files?.[0];
+    expect(file?.name).toBe("a.pdf");
+    expect(file?.pdf).toBeInstanceOf(Uint8Array);
+    expect((file?.pdf as Uint8Array).byteLength).toBe(16);
+  });
 });
 
 describe("a CED PDF with one document that doesn't add up says so", () => {

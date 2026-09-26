@@ -8,6 +8,7 @@ import { parseCedDocuments } from "@/lib/ced-invoice-parse";
 import { formatDate } from "@/lib/utils";
 import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
+import { isStoredPaperPath } from "@/lib/ced-pdf-store";
 import { cleanDocNumber, insertPaperRow, updateItemTolerant } from "./paperwork-core";
 
 /**
@@ -287,6 +288,19 @@ export async function keepPaperwork(id: string): Promise<PaperResult> {
   return { ok: true, message: "Kept in files. Find it in Organize, under Archive." };
 }
 
+/** The tray's stored file, as bytes, when it is this org's; null when it can't be read. Never throws. */
+async function downloadPaper(supabase: any, path: unknown, orgId: string | null): Promise<Uint8Array | null> {
+  const p = typeof path === "string" ? path : "";
+  if (!isStoredPaperPath(p, orgId)) return null;
+  try {
+    const { data, error } = await supabase.storage.from("documents").download(p);
+    if (error || !data) return null;
+    return new Uint8Array(await data.arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
 /**
  * ADD TO CED DOCUMENTS: a CED PDF's documents go through the same importer the paste box uses,
  * with every one of its rules (a re-import changes nothing, a job a person set is never touched,
@@ -302,7 +316,11 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   const p = proposalOf(item);
   if (!p.ced?.text) return { ok: false, error: "No CED documents were found in this paper's text, so there is nothing to add." };
 
-  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "CED PDF"), text: p.ced.text }] });
+  // THE PDF GOES WITH ITS TEXT: the importer keeps it (once, by content) where Open Bill reads it,
+  // so it outlives this tray row (Delete takes the tray's own copy). A download that fails costs
+  // only that: the documents still land, and Open Bill still finds this row's copy while it stands.
+  const pdf = await downloadPaper(ctx.supabase, item.file_url, ctx.orgId);
+  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "CED PDF"), text: p.ced.text, pdf }] });
   if (!result.ok) return { ok: false, error: result.error ?? "Nothing was added." };
   // MERGED, never replaced: a second Add lands nothing (the importer only reports fresh inserts),
   // and overwriting the list with [] left Undo unable to remove what this paper first added.

@@ -132,9 +132,12 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(res.contents.total).toBe(59.17);
     expect(res.contents.offLines).toBe(0);
     expect(offLinesWords(res.contents)).toBeNull();
-    // Only its name was kept: the card says so rather than showing a dead link.
+    // Only its name was kept (imported before the PDF was, or its upload failed): the card says
+    // so, and how to keep it, rather than showing a dead link.
     expect(res.contents.pdfUrl).toBeNull();
-    expect(res.contents.pdfNote).toBe("The PDF itself isn't kept here, only what was read from invoice_8802-1107139.pdf.");
+    expect(res.contents.pdfNote).toBe(
+      "Its PDF wasn't saved here, only what was read from invoice_8802-1107139.pdf. Choose that PDF again with Choose CED PDFs on Bills to keep it.",
+    );
   });
 
   it("opens the PDF Drop Paperwork stored for it, found by any invoice number read off it (even one pasted in first, so the drop landed nothing)", async () => {
@@ -152,6 +155,36 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(drop.filters).toContainEqual(["not", "file_url", ["is", null]]);
     const doc = calls.find((c) => c.table === "documents")!;
     expect(doc.filters).toContainEqual(["eq", "file_url", "invoice_8802-1107139.pdf"]);
+  });
+
+  it("opens the PDF the import kept, straight from source_file, with no other lookup", async () => {
+    const path = `org-1/organize/ced/${"a".repeat(64)}.pdf`;
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: path }, error: null }] }), calls, {
+      signed: { [path]: "https://signed.example/kept.pdf" },
+    });
+    const res = await supplierPaperContents(HILLSIDE.id);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.contents.pdfUrl).toBe("https://signed.example/kept.pdf");
+    expect(res.contents.pdfNote).toBeNull();
+    expect(calls.map((c) => c.table)).toEqual(["supplier_invoices", "supplier_invoice_lines"]);
+  });
+
+  it("a source_file naming ANOTHER org's folder is never signed as this paper's PDF", async () => {
+    const theirs = `org-2/organize/ced/${"b".repeat(64)}.pdf`;
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: theirs }, error: null }] }), calls, {
+      signed: { [theirs]: "https://signed.example/theirs.pdf" },
+    });
+    const res = await supplierPaperContents(HILLSIDE.id);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.contents.pdfUrl).toBeNull();
+  });
+
+  it("a kept PDF that can't be signed says it is on file, never 'read from <hash>.pdf'", async () => {
+    const path = `org-1/organize/ced/${"c".repeat(64)}.pdf`;
+    state.client = fakeSupabase(script({ supplier_invoices: [{ data: { ...HILLSIDE, source_file: path }, error: null }] }), calls);
+    const res = await supplierPaperContents(HILLSIDE.id);
+    if (!res.ok) throw new Error(res.error);
+    expect(res.contents.pdfNote).toBe("Its PDF is on file but couldn't be opened just now.");
   });
 
   it("a stored PDF that can't be signed is said, not dropped", async () => {

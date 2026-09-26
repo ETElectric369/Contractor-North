@@ -22,6 +22,8 @@ export type JobPaperView = {
   /** /bills has it on a Needs You card (onNeedsYouIds, the cards' own rule). A paper on no card
    *  (before the books line, reversed by a credit memo, $0.00) links to the supplier's own line. */
   onNeedsYou: boolean;
+  /** Set aside on /bills for a credit (0346): folded under its supplier's Waiting On A Credit. */
+  waitingOnCredit?: boolean;
 };
 
 /**
@@ -122,7 +124,9 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
             href={
               paper.onNeedsYou
                 ? "/bills#needs-you"
-                : paper.accountId
+                : paper.waitingOnCredit && paper.accountId
+                  ? `/bills#supplier-waiting-credit-${paper.accountId}`
+                  : paper.accountId
                   ? `/bills#supplier-invoices-${paper.accountId}`
                   : "/bills"
             }

@@ -19,8 +19,16 @@ import "server-only";
  *   · THE DOOR: Record It As A Bill, the /bills action, pressed by a person (JobPaperRow).
  */
 
-import { invoicesNeedingBill, supplierPaperNeeds, type SupplierInvoiceKind, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
-import { booksBeginOn } from "@/app/(app)/bills/supplier-papers";
+import {
+  invoicesNeedingBill,
+  supplierPaperNeeds,
+  supplierPapersWaitingOnCredit,
+  type SupplierInvoiceKind,
+  type SupplierInvoiceRow,
+} from "@/app/(app)/bills/supplier-reconcile";
+import { booksBeginOn, readSupplierDocuments } from "@/app/(app)/bills/supplier-papers";
+import { DEFAULT_TIMEZONE } from "@/lib/utils";
+import { todayStrInTz } from "@/lib/tz";
 import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
 import { jobFromPaperMarks } from "@/lib/paperwork";
 import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
@@ -28,8 +36,9 @@ import { indexSupplierAliases } from "@/lib/supplier-identity";
 
 /** A supplier document, as the job's list needs it: the reconcile row plus its account.
  *  `onNeedsYou`: /bills has it on a Needs You card (onNeedsYouIds), so a link to it goes there;
- *  otherwise the link goes to the supplier's own line. */
-export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; onNeedsYou?: boolean };
+ *  `waitingOnCredit`: a person set it aside for a credit (0346), so the link goes to its supplier's
+ *  Waiting On A Credit fold; otherwise the link goes to the supplier's own line. */
+export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; onNeedsYou?: boolean; waitingOnCredit?: boolean };
 
 /**
  * WHICH PAPERS /bills HAS ON A NEEDS YOU CARD, by the cards' own rule (supplierPaperNeeds), never
@@ -37,9 +46,16 @@ export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; onNeedsY
  * paper and a STOCK paper with no job are on no card either, and a link that lands on Needs You
  * for one of those lands where the paper is not. `since` is booksBeginOn, the line /bills draws.
  */
-export function onNeedsYouIds(docs: readonly PaperDoc[], since: string | null): Set<string> {
+export function onNeedsYouIds(docs: readonly PaperDoc[], since: string | null, today?: string | null): Set<string> {
   const rows = docs.map((d) => ({ ...d, supplierAccountId: d.accountId }));
-  return new Set(supplierPaperNeeds(rows, [], { since }).map((c) => c.invoiceId));
+  return new Set(supplierPaperNeeds(rows, [], { since, today }).map((c) => c.invoiceId));
+}
+
+/** WHICH ARE WAITING ON A CREDIT (0346), not back yet: folded under their supplier on /bills, by the
+ *  same rule (supplierPapersWaitingOnCredit), so the link lands on that fold. */
+export function waitingOnCreditIds(docs: readonly PaperDoc[], since: string | null, today?: string | null): Set<string> {
+  const rows = docs.map((d) => ({ ...d, supplierAccountId: d.accountId }));
+  return new Set(supplierPapersWaitingOnCredit(rows, [], { since, today }).map((c) => c.invoiceId));
 }
 
 const KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
@@ -80,14 +96,11 @@ export function papersNamingJob(jobId: string, docs: readonly PaperDoc[], mark: 
  * only when a paper naming this job has no Record link, which is the one case the number search
  * can change the answer; every other job opens with three small reads.
  */
-export async function readJobPapers(supabase: any, orgId: string, jobId: string): Promise<PaperDoc[]> {
+export async function readJobPapers(supabase: any, orgId: string, jobId: string, today?: string | null): Promise<PaperDoc[]> {
   const [docsRes, linksRes, mark] = await Promise.all([
-    supabase
-      .from("supplier_invoices")
-      .select("id, supplier_account_id, invoice_number, kind, invoice_date, due_date, job_name_raw, job_id, total, open_balance, closed, discount_amount, discount_by")
-      .eq("org_id", orgId)
-      .order("invoice_date", { ascending: false })
-      .limit(2000),
+    // /bills's own read (the wait stamp when 0346 is on, retried without it when not), so a paper
+    // waiting on a credit is linked where /bills has it, never at a Needs You card it is not on.
+    readSupplierDocuments(supabase, orgId),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     // strict: a lost jobs read would match no paper and read as "nothing missing"; it throws, and
     // the page says it couldn't check.
@@ -118,6 +131,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string)
       closed: r.closed === true,
       discountAmount: r.discount_amount == null ? null : Number(r.discount_amount),
       discountBy: r.discount_by ?? null,
+      waitingCreditSince: r.waiting_credit_since ?? null,
       jobName: null,
       billCount: linked.get(String(r.id))?.size ?? 0,
     };
@@ -162,6 +176,8 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string)
     d.billCount = billsCarryingNumber(d.invoiceNumber, { accountId: d.accountId }, ledger, aliases).length;
   }
   const since = booksBeginOn(orgId, (billsRes.data ?? []) as { bill_date?: string | null }[]);
-  const onCards = onNeedsYouIds(docs, since);
-  return papersNamingJob(jobId, docs, mark).map((d) => ({ ...d, onNeedsYou: onCards.has(d.id) }));
+  const day = today || todayStrInTz(DEFAULT_TIMEZONE);
+  const onCards = onNeedsYouIds(docs, since, day);
+  const waiting = waitingOnCreditIds(docs, since, day);
+  return papersNamingJob(jobId, docs, mark).map((d) => ({ ...d, onNeedsYou: onCards.has(d.id), waitingOnCredit: waiting.has(d.id) }));
 }

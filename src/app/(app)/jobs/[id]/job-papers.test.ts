@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { onNeedsYouIds, paperNamesJob, papersNamingJob, type PaperDoc } from "./job-papers";
+import { onNeedsYouIds, paperNamesJob, papersNamingJob, waitingOnCreditIds, type PaperDoc } from "./job-papers";
 
 /**
  * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25). CED 8802-1107820, $187.64, job name
@@ -99,6 +99,15 @@ describe("onNeedsYouIds — Open It On Bills lands where the paper is", () => {
     expect(ids.has(older.id)).toBe(false);
     expect(ids.has(returned.id)).toBe(false);
     expect(ids.has(zero.id)).toBe(false);
+  });
+
+  it("a paper waiting on a credit is on no Needs You card: it links to its supplier's Waiting On A Credit fold", () => {
+    const waiting = doc({ jobNameRaw: "13683 HILLSIDE", total: 59.17, waitingCreditSince: "2026-09-26" });
+    expect(onNeedsYouIds([waiting], null, "2026-10-01").has(waiting.id)).toBe(false);
+    expect(waitingOnCreditIds([waiting], null, "2026-10-01").has(waiting.id)).toBe(true);
+    // Thirty days with no credit: back on Needs You.
+    expect(onNeedsYouIds([waiting], null, "2026-10-26").has(waiting.id)).toBe(true);
+    expect(waitingOnCreditIds([waiting], null, "2026-10-26").has(waiting.id)).toBe(false);
   });
 
   it("pairs a credit memo only inside its own account", () => {

@@ -12,6 +12,7 @@ vi.mock("@/app/(app)/bills/supplier-actions", () => ({
 }));
 
 vi.mock("@/app/(app)/bills/paper-contents-action", () => ({ supplierPaperContents: vi.fn() }));
+vi.mock("@/app/(app)/bills/waiting-credit-actions", () => ({ waitOnCredit: vi.fn(), stopWaitingOnCredit: vi.fn() }));
 
 import {
   PaperContentsView,
@@ -51,8 +52,8 @@ const render = (cards: SupplierPaperCard[]) =>
   renderToStaticMarkup(createElement(SupplierPaperCards, { feed: { cards, jobs: [J011] }, emptyLabel: "Nothing waiting." }));
 const allButtons = (html: string) =>
   Array.from(html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((m) => m[1].replace(/&#x27;/g, "'"));
-/** The answers on a card: every button but What's On It (pinned on its own below). */
-const buttons = (html: string) => allButtons(html).filter((b) => b !== "Open Bill");
+/** The answers on a card: every button but What's On It and Waiting On A Credit (pinned on their own below). */
+const buttons = (html: string) => allButtons(html).filter((b) => !["Open Bill", "Waiting On A Credit", "Wait 30 More Days"].includes(b));
 
 describe("a supplier paper card", () => {
   it("says it the way he asked: CED Sent A Bill · $301.81 · It Says 13897 HERRINGBONE", () => {
@@ -220,5 +221,43 @@ describe("What's On It (Erik: 'i need to open the bill to see whats on it to be 
 
   it("a total that no longer matches the card says the page is stale", () => {
     expect(view({ state: "ok", contents: hillside }, 61.0)).toContain("This paper changed since the page loaded.");
+  });
+});
+
+describe("Waiting On A Credit (Erik, 2026-09-26: the Hillside switch CED will credit back)", () => {
+  it("every card on a supplier account offers it after Open Bill and before the answers, Title Case", () => {
+    const html = render([{ ...base, accountId: "acct-ced" }]);
+    expect(allButtons(html).slice(0, 3)).toEqual(["Open Bill", "Waiting On A Credit", "Put It On J-011"]);
+    expect(html).not.toContain("Still no credit");
+  });
+
+  it("a card on no supplier account has no Wait door (a credit pairs on its account, and the fold lives there)", () => {
+    const html = render([{ ...base, accountId: null }]);
+    expect(allButtons(html)).not.toContain("Waiting On A Credit");
+    expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Put It On J-011"]);
+  });
+
+  it("a card that came back by itself says so, and offers another 30 days", () => {
+    const back: SupplierPaperCard = {
+      ...base,
+      accountId: "acct-ced",
+      waitingCredit: { since: "2026-08-20", back: "2026-09-19", overdue: true },
+      stillNoCredit: "Still no credit from CED after 30 days",
+    };
+    const html = render([back]);
+    expect(html).toContain("Still no credit from CED after 30 days.");
+    expect(allButtons(html).slice(0, 2)).toEqual(["Open Bill", "Wait 30 More Days"]);
+    // The answers are all still there.
+    expect(buttons(html)).toEqual(["Put It On J-011", "Another Job", "Shop Stock", "Business Cost"]);
+  });
+
+  it("its done line carries Undo, and outlives the list like any other", () => {
+    setSupplierPaperScopeForTest("t-wait", {
+      done: { "si-1": { card: base, message: "8802-1106969 is waiting on a credit.", undoWait: { since: null, by: null } } as never },
+      live: 0,
+    });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-wait" }));
+    expect(trail).toContain("is waiting on a credit.");
+    expect(allButtons(trail)).toEqual(["Undo"]);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { booksBeginOn, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
-import { ET_BOOKS_BEGIN, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPaperTotals } from "./supplier-reconcile";
+import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
+import { creditWait, ET_BOOKS_BEGIN, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPapersWaitingOnCredit, supplierPaperTotals } from "./supplier-reconcile";
 import { supplierPaperActionItem, SUPPLIER_PAPERS_ITEM_ID } from "@/lib/action-items/supplier-paper-item";
 import { fold, searchBills, wordsOf, moneyWords, type BillsSearchRow } from "./bills-search";
 
@@ -417,5 +417,129 @@ describe("finding a paper on /bills by what he remembers", () => {
     expect(fold("$1,062.18")).toBe("1062.18");
     expect(moneyWords("1062.18")).toBe("1062.18");
     expect(fold("CUSTOMER ORDER NO.")).toBe("customer order no");
+  });
+});
+
+// ── WAITING ON A CREDIT (Erik, 2026-09-26; 0346) ─────────────────────────────────────────────────
+//
+// His real paper: 8802-1107139, $59.17, 13683 HILLSIDE, the replacement of a faulty switch that a
+// CED credit memo for the same amount will take back off. The credit hadn't come in.
+
+describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
+  const hillside = (over: Record<string, unknown> = {}) =>
+    doc({ id: "hillside", invoice_number: "8802-1107139", invoice_date: "2026-09-01", job_name_raw: "13683 HILLSIDE", total: "59.17", ...over });
+  const feedWith = (extra: any[], today: string) => {
+    const bills = hisBills();
+    const { rows } = supplierDocumentRows({ documents: [...hisDocuments(), ...extra], bills, links: LINKS, aliasRows: [] });
+    return supplierPaperFeed({ since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS, today });
+  };
+  // Tapped at 5pm in Truckee on Sep 26: still Sep 26 there, though it is Sep 27 in UTC.
+  const TAPPED = "2026-09-27T00:10:00+00:00";
+
+  it("today it is a card, suggesting J-045, with nothing waiting", () => {
+    const f = feedWith([hillside()], "2026-09-26");
+    const c = card(f, "8802-1107139")!;
+    expect(c.suggestion?.label).toBe("J-045");
+    expect(c.waitingCredit).toBeUndefined();
+    expect(f.waiting).toEqual([]);
+  });
+
+  it("waiting, it leaves the cards (My Day and Needs You) and is listed as waiting, back in 30 days", () => {
+    const f = feedWith([hillside({ waiting_credit_since: TAPPED })], "2026-10-25");
+    expect(card(f, "8802-1107139")).toBeUndefined();
+    expect(f.waiting?.map((c) => c.invoiceNumber)).toEqual(["8802-1107139"]);
+    expect(f.waiting?.[0].waitingCredit).toEqual({ since: "2026-09-26", back: "2026-10-26", overdue: false });
+    // My Day's one line counts the cards only.
+    expect(supplierPaperActionItem(f)?.title).toBe("Supplier Bills · 6");
+    // The other six are exactly where they were.
+    expect(f.cards).toHaveLength(6);
+  });
+
+  it("with no credit after 30 days it comes back by itself and says so", () => {
+    const f = feedWith([hillside({ waiting_credit_since: TAPPED })], "2026-10-26");
+    const c = card(f, "8802-1107139")!;
+    expect(c.stillNoCredit).toBe("Still no credit from CED after 30 days");
+    expect(c.waitingCredit?.overdue).toBe(true);
+    expect(f.waiting).toEqual([]);
+  });
+
+  it("once CED's credit memo for $59.17 on the same account lands, the pair is gone from both lists", () => {
+    const memo = doc({ id: "hillside-credit", invoice_number: "8802-1109999", kind: "credit_memo", invoice_date: "2026-10-02", job_name_raw: "13683 HILLSIDE", total: "-59.17" });
+    for (const today of ["2026-10-05", "2026-11-30"]) {
+      const f = feedWith([hillside({ waiting_credit_since: TAPPED }), memo], today);
+      expect(card(f, "8802-1107139")).toBeUndefined();
+      expect(f.waiting).toEqual([]);
+    }
+  });
+
+  it("a credit memo on ANOTHER supplier's account never pairs with it", () => {
+    const other = doc({ id: "other-credit", supplier_account_id: "acct-other", invoice_number: "X-1", kind: "credit_memo", total: "-59.17" });
+    const f = feedWith([hillside({ waiting_credit_since: TAPPED }), other], "2026-10-26");
+    expect(card(f, "8802-1107139")?.stillNoCredit).toBe("Still no credit from CED after 30 days");
+  });
+
+  it("the /bills read and My Day's carry the stamp through (supplierDocumentRows)", () => {
+    const { rows } = supplierDocumentRows({ documents: [hillside({ waiting_credit_since: TAPPED })], bills: [], links: [], aliasRows: [] });
+    expect(rows[0].waitingCreditSince).toBe(TAPPED);
+    expect(supplierPaperNeeds(rows, JOBS, { today: "2026-10-01" })).toEqual([]);
+    expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" }).map((c) => c.invoiceId)).toEqual(["hillside"]);
+  });
+
+  it("a stamp on a paper with no supplier account never hides it: it stays a card (nowhere to fold, nothing to pair)", () => {
+    const { rows } = supplierDocumentRows({
+      documents: [hillside({ waiting_credit_since: TAPPED, supplier_account_id: null })],
+      bills: [],
+      links: [],
+      aliasRows: [],
+    });
+    const cards = supplierPaperNeeds(rows, JOBS, { today: "2026-10-01" });
+    expect(cards.map((c) => c.invoiceId)).toEqual(["hillside"]);
+    expect(cards[0].accountId).toBeNull();
+    expect(cards[0].waitingCredit).toBeUndefined();
+    expect(supplierPapersWaitingOnCredit(rows, JOBS, { today: "2026-10-01" })).toEqual([]);
+  });
+
+  it("creditWait: no stamp is not waiting; a bare date reads as itself", () => {
+    expect(creditWait({ waitingCreditSince: null }, "2026-10-01")).toBeNull();
+    expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-09-30")).toEqual({ since: "2026-09-01", back: "2026-10-01", overdue: false });
+    expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-10-01")?.overdue).toBe(true);
+  });
+});
+
+describe("readSupplierDocuments: safe before 0346 is applied", () => {
+  const client = (answers: any[], seen: string[]) => ({
+    from: () => {
+      const chain: any = {
+        select: (cols: string) => (seen.push(cols), chain),
+        eq: (col: string, v: unknown) => (seen.push(`${col}=${v}`), chain),
+        order: () => chain,
+        limit: () => Promise.resolve(answers.shift()),
+      };
+      return chain;
+    },
+  });
+
+  it("asks for the wait stamp, org-filtered", async () => {
+    const seen: string[] = [];
+    const res = await readSupplierDocuments(client([{ data: [{ id: "a" }], error: null }], seen), ET);
+    expect(res).toEqual({ data: [{ id: "a" }], error: null, waitReady: true });
+    expect(seen[0]).toContain("waiting_credit_since");
+    expect(seen).toContain(`org_id=${ET}`);
+  });
+
+  it("without the column it asks again without it: every card is where it was", async () => {
+    const seen: string[] = [];
+    const res = await readSupplierDocuments(
+      client([{ data: null, error: { code: "42703", message: "column supplier_invoices.waiting_credit_since does not exist" } }, { data: [{ id: "a" }], error: null }], seen),
+      ET,
+    );
+    expect(res).toEqual({ data: [{ id: "a" }], error: null, waitReady: false });
+    expect(seen.filter((s) => s.startsWith("id,"))[1]).not.toContain("waiting_credit_since");
+  });
+
+  it("any other failure is a failure, never retried into a quiet empty list", async () => {
+    const res = await readSupplierDocuments(client([{ data: null, error: { code: "57014", message: "timeout" } }], []), ET);
+    expect(res.data).toBeNull();
+    expect(res.error).toEqual({ code: "57014", message: "timeout" });
   });
 });

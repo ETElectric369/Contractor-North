@@ -114,15 +114,18 @@ export function paperContents(input: {
   const lineSum = lines.reduce((s, l) => s + cents(l.amount), 0);
   const offLines = (cents(total) - lineSum - cents(tax) - cents(shipping)) / 100;
   const fileName = text(input.invoice?.source_file);
+  // A stored path (the import kept the PDF: "<org>/organize/ced/<sha>.pdf") is a file on file, never
+  // a name to quote back at him.
+  const storedPath = !!fileName && fileName.includes("/");
   const pdfUrl = text(input.pdfUrl);
   const pdfNote = pdfUrl
     ? null
-    : input.pdfUnsignable
+    : input.pdfUnsignable || storedPath
       ? "Its PDF is on file but couldn't be opened just now."
       : input.pdfCheckFailed
         ? "It couldn't check for its PDF just now."
         : fileName
-          ? `The PDF itself isn't kept here, only what was read from ${fileName}.`
+          ? `Its PDF wasn't saved here, only what was read from ${fileName}. Choose that PDF again with Choose CED PDFs on Bills to keep it.`
           : "It came in as pasted text, so there's no PDF here.";
   return { invoiceNumber: String(input.invoice?.invoice_number ?? ""), lines, tax, shipping, total, offLines, pdfUrl, pdfNote };
 }

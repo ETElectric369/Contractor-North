@@ -3,6 +3,7 @@
 import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { signDocumentUrls } from "@/lib/signed-docs";
+import { isStoredPaperPath } from "@/lib/ced-pdf-store";
 import { paperContents, type PaperContents } from "@/lib/supplier-paper-contents";
 
 export type SupplierPaperContentsResult = { ok: true; contents: PaperContents } | { ok: false; error: string };
@@ -15,8 +16,10 @@ export type SupplierPaperContentsResult = { ok: true; contents: PaperContents } 
  * as well as the id (RLS is the second lock, not the only one), and the lines come back in the
  * order CED printed them. Read-only: nothing here writes a row.
  *
- * THE PDF. The CED import keeps the file's NAME in supplier_invoices.source_file, not the file. A
- * PDF is stored only when the paper came in through Drop Paperwork: its organized_items row holds
+ * THE PDF. Since 2026-09-26 the CED import keeps the PDF itself (lib/ced-pdf-store) and
+ * supplier_invoices.source_file holds its stored path, under this org's own folder: that is read
+ * first. A row imported before then holds only the file's NAME. A PDF was then stored only when
+ * the paper came in through Drop Paperwork: its organized_items row holds
  * the file (file_url, the documents bucket, signed exactly as the Bills tray signs it) and lists
  * EVERY invoice number read off it (proposal.ced.numbers). Not proposal.filed.landed: that holds
  * only the numbers the paper added for the first time, so a PDF dropped for an invoice already
@@ -43,6 +46,9 @@ export async function supplierPaperContents(invoiceId: string): Promise<Supplier
   const row = inv as { invoice_number?: string | null; tax?: unknown; shipping?: unknown; total?: unknown; source_file?: string | null };
   const number = String(row.invoice_number ?? "").trim();
   const sourceFile = String(row.source_file ?? "").trim();
+  // Its own stored PDF (the import kept it). Only ever a path in THIS org's folder: a name, or
+  // anything naming another org's folder, is never signed as a file.
+  const ownPdf = isStoredPaperPath(sourceFile, orgId) ? sourceFile : null;
 
   const [linesRes, docRes, dropRes] = await Promise.all([
     ctx.supabase
@@ -51,10 +57,10 @@ export async function supplierPaperContents(invoiceId: string): Promise<Supplier
       .eq("org_id", orgId)
       .eq("supplier_invoice_id", id)
       .order("sort_order", { ascending: true }),
-    sourceFile
+    sourceFile && !ownPdf
       ? ctx.supabase.from("documents").select("file_url").eq("org_id", orgId).eq("file_url", sourceFile).limit(1)
       : Promise.resolve({ data: [], error: null }),
-    number
+    number && !ownPdf
       ? ctx.supabase
           .from("organized_items")
           .select("file_url")
@@ -68,6 +74,7 @@ export async function supplierPaperContents(invoiceId: string): Promise<Supplier
   if (linesRes.error) return { ok: false, error: dbError(linesRes.error) };
 
   const stored =
+    ownPdf ||
     ((docRes.data as { file_url?: string | null }[] | null)?.[0]?.file_url ?? null) ||
     ((dropRes.data as { file_url?: string | null }[] | null)?.[0]?.file_url ?? null);
   const pdfUrl = stored ? ((await signDocumentUrls(ctx.supabase, [stored])).get(stored) ?? null) : null;

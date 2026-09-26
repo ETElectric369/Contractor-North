@@ -959,4 +959,9 @@ export type SupplierActionResult = {
    * so Undo puts back exactly what was there. Absent when there is nothing it could undo.
    */
   undo?: { invoiceId: string; billId: string; jobSetTo: string | null; jobBefore: string | null };
+  /**
+   * waitOnCredit's Undo: the wait the tap replaced (0346). Both null when it wasn't waiting; a
+   * stamp when it was ("Wait 30 More Days" on a card that came back), so Undo puts that one back.
+   */
+  waitBefore?: { since: string | null; by: string | null };
 };
