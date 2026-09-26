@@ -32,7 +32,7 @@ import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
 import { BillsSearchBox } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
-import { booksBeginOn, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed, SUPPLIER_INVOICE_COLUMNS } from "./supplier-papers";
+import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
@@ -68,6 +68,7 @@ import {
   tieSupplierInvoiceToBill,
   updateSupplierAccount,
 } from "./supplier-actions";
+import { stopWaitingOnCredit } from "./waiting-credit-actions";
 
 export const dynamic = "force-dynamic";
 // Drop Paperwork reads a paper inside this page's server actions: a 12-page CED PDF gets the
@@ -228,13 +229,10 @@ export default async function BillsPage({
     // every page), and these depend on nothing above them. A database without 0273 answers both
     // with an error and a null, which reads here as "no supplier documents" - model A, exactly the
     // page he had yesterday.
-    supabase
-      .from("supplier_invoices")
-      // One column list for every reader (supplier-papers.ts), so My Day's cards and this page
-      // can never be handed different documents.
-      .select(SUPPLIER_INVOICE_COLUMNS)
-      .order("invoice_date", { ascending: false })
-      .limit(2000),
+    // One read for every reader (supplier-papers.ts), so My Day's cards and this page can never be
+    // handed different documents. It carries Waiting On A Credit's stamp when 0346 is on, and
+    // retries without it when it is not.
+    readSupplierDocuments(supabase, orgId),
     // Which scanned bills cover which supplier invoices. A document with no link is a purchase
     // the app has no record of at all, which is $1,765.72 of his tonight.
     //
@@ -654,6 +652,7 @@ export default async function BillsPage({
           rows: supplierDocuments,
           jobs: reconcileJobs,
           accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
+          today,
         });
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
@@ -942,6 +941,7 @@ export default async function BillsPage({
   const accountNameOf = new Map(((accountRows ?? []) as any[]).map((a) => [String(a.id), String(a.name ?? "")]));
   const liveBillById = new Map(liveBills.map((b: any) => [String(b.id), b]));
   const waitingPapers = new Set((paperFeed?.cards ?? []).map((c) => c.invoiceId));
+  const waitingOnCredit = new Map((paperFeed?.waiting ?? []).map((c) => [c.invoiceId, c]));
   const searchRows: BillsSearchRow[] = [];
   for (const d of supplierDocuments) {
     const covering = [...(coveringBills.get(d.id) ?? []), ...(billsCarrying.get(d.id) ?? [])]
@@ -950,8 +950,11 @@ export default async function BillsPage({
     const jobId = d.jobId ?? covering.find((b) => b.job_id)?.job_id ?? null;
     const account = accountNameOf.get(String(d.supplierAccountId ?? "")) ?? "";
     const supplier = shortSupplierName(account);
+    const creditWaiting = waitingOnCredit.get(d.id);
     const where = waitingPapers.has(d.id)
       ? "waiting for you under Needs You"
+      : creditWaiting?.waitingCredit
+        ? `waiting on a credit from ${supplier} since ${formatDateShort(creditWaiting.waitingCredit.since)}`
       : d.billCount > 0
         ? "in your books"
         : d.kind !== "invoice"
@@ -1027,6 +1030,15 @@ export default async function BillsPage({
   const openDuplicates = duplicates.filter((g) => !g.resolution);
   const moreWaiting = proposals.length + questions.length + openDuplicates.length;
   const needsYouIds = (paperFeed?.cards ?? []).map((c) => c.invoiceId);
+  // WAITING ON A CREDIT (0346): off Needs You, folded under its supplier, and pointed at from
+  // Needs You so a card he set aside never just vanishes. One line per supplier account.
+  const waitingByAccount = new Map<string, { name: string; count: number }>();
+  for (const c of paperFeed?.waiting ?? []) {
+    const accountId = String(supplierDocuments.find((d) => d.id === c.invoiceId)?.supplierAccountId ?? "");
+    if (!accountId) continue;
+    const had = waitingByAccount.get(accountId) ?? { name: c.supplier, count: 0 };
+    waitingByAccount.set(accountId, { name: had.name, count: had.count + 1 });
+  }
 
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
@@ -1069,8 +1081,21 @@ export default async function BillsPage({
           <p className="mb-3 mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
           <SupplierPaperCards
             feed={paperFeed}
-            emptyLabel={`Nothing waiting. Every supplier bill${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`}
+            emptyLabel={
+              waitingByAccount.size
+                ? "Nothing else waiting on you."
+                : `Nothing waiting. Every supplier bill${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`
+            }
           />
+          {[...waitingByAccount.entries()].map(([accountId, w]) => (
+            <a
+              key={accountId}
+              href={`#supplier-waiting-credit-${accountId}`}
+              className="mt-2 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+            >
+              {`Waiting On A Credit (${w.count}) · Under ${w.name}`}
+            </a>
+          ))}
         </Card>
       )}
       {/* The same ticket on two jobs is money on the wrong job: it is a decision, so it is pointed at
@@ -1101,6 +1126,7 @@ export default async function BillsPage({
           unassigned={unassigned}
           reconcile={reconcile}
           needsYouIds={needsYouIds}
+          waitingOnCredit={paperFeed?.waiting ?? []}
           // The slice of an account's unpaid bills the supplier's own documents do not cover.
           // Never folded into a balance: named, so money he does owe is not explained away.
           noSupplierDocument={Object.fromEntries(noSupplierDocument)}
@@ -1120,6 +1146,8 @@ export default async function BillsPage({
             // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
             shelfLines: supplierInvoiceShelfLines,
             recordToShelf: recordSupplierInvoiceToShelf,
+            // Waiting On A Credit's way back: Stop Waiting on the folded line puts it on Needs You.
+            stopWaitingOnCredit,
           }}
         />
       )}

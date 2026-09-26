@@ -19,12 +19,14 @@ import {
   undoFileSupplierPaper,
 } from "@/app/(app)/bills/supplier-actions";
 import { supplierPaperContents } from "@/app/(app)/bills/paper-contents-action";
+import { stopWaitingOnCredit, waitOnCredit } from "@/app/(app)/bills/waiting-credit-actions";
 import { offLinesWords, type PaperContents } from "@/lib/supplier-paper-contents";
 
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
 /** What's On It, per card: reading, read, or a read that failed (said, with Try Again). */
 export type PaperContentsState = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; contents: PaperContents };
-type Done = { card: SupplierPaperCard; message: string; undo?: UndoToken; error?: string };
+/** `undoWait`: the tap was Waiting On A Credit, and Undo takes the wait back off (stopWaitingOnCredit). */
+type Done = { card: SupplierPaperCard; message: string; undo?: UndoToken; undoWait?: boolean; error?: string };
 
 /** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
 const titleCase = (s: string | null | undefined) =>
@@ -349,14 +351,40 @@ export function SupplierPaperCards({
     });
   }
 
+  /**
+   * WAITING ON A CREDIT (0346): CED will take this bill back off with a credit memo that hasn't come.
+   * The card steps off the list (folded under its supplier on /bills) and comes back by itself after
+   * 30 days with no credit. Undo on the done line puts it straight back.
+   */
+  function wait(card: SupplierPaperCard) {
+    setBusy(card.invoiceId);
+    setErrors((e) => ({ ...e, [card.invoiceId]: "" }));
+    start(async () => {
+      let res: SupplierActionResult;
+      try {
+        res = await waitOnCredit(card.invoiceId);
+      } catch {
+        res = { ok: false, error: "The connection dropped before the answer came back. Reload the page to see whether it was saved." };
+      }
+      setBusy(null);
+      if (!res.ok) {
+        setErrors((e) => ({ ...e, [card.invoiceId]: res.error ?? "That didn't save. Nothing was changed." }));
+        return;
+      }
+      setOpen((o) => ({ ...o, [card.invoiceId]: undefined }));
+      setDone((d) => ({ ...d, [card.invoiceId]: { card, message: res.message ?? `${card.invoiceNumber} is waiting on a credit.`, undoWait: true } }));
+      if (refreshAfter) router.refresh();
+    });
+  }
+
   function undo(d: Done) {
-    if (!d.undo) return;
+    if (!d.undo && !d.undoWait) return;
     const token = d.undo;
     setBusy(d.card.invoiceId);
     start(async () => {
       let res: SupplierActionResult;
       try {
-        res = await undoFileSupplierPaper(token);
+        res = token ? await undoFileSupplierPaper(token) : await stopWaitingOnCredit(d.card.invoiceId);
       } catch {
         res = { ok: false, error: "The connection dropped, so nothing was undone. Try again." };
       }
@@ -379,7 +407,7 @@ export function SupplierPaperCards({
     <div key={`done-${d.card.invoiceId}`} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" role="status">
       <p className="text-sm text-emerald-900">{d.message}</p>
       {d.error && <p className="mt-1 text-xs text-red-700" role="alert">{d.error}</p>}
-      {d.undo && (
+      {(d.undo || d.undoWait) && (
         <Button type="button" variant="outline" className="mt-2" disabled={busy === d.card.invoiceId} onClick={() => undo(d)}>
           Undo
         </Button>
@@ -484,6 +512,12 @@ export function SupplierPaperCards({
           {c.invoiceNumber} · {formatDateShort(c.date)} · {c.closed ? "the supplier shows it paid" : "still open with the supplier"}
           {c.state === "record" && c.onJob ? ` · on ${[c.onJob.label, c.onJob.name].filter(Boolean).join(" ")}, with no bill yet` : ""}
         </p>
+        {/* It came back by itself: a person said a credit was coming, and 30 days went by without one. */}
+        {c.stillNoCredit && (
+          <p className="mt-1 text-xs font-medium text-amber-800" role="status">
+            {c.stillNoCredit}.
+          </p>
+        )}
         {c.state === "needs_job" && (
           <p className="mt-0.5 text-xs text-slate-400">
             {/* "The closest are first" only where the picker really has them first. */}
@@ -492,9 +526,14 @@ export function SupplierPaperCards({
         )}
 
         {/* WHAT'S ON IT comes before every answer: he sees the paper, then he decides. */}
-        <div className="mt-2">
+        {/* Then Waiting On A Credit, before the answers: the one thing to say when there is no
+            answer yet (CED is taking it back off). */}
+        <div className="mt-2 flex flex-wrap gap-2">
           <Button type="button" variant="outline" aria-expanded={!!reading[c.invoiceId]} onClick={() => toggleContents(c)}>
             {reading[c.invoiceId] ? "Close Bill" : "Open Bill"}
+          </Button>
+          <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => wait(c)}>
+            {c.waitingCredit?.overdue ? "Wait 30 More Days" : "Waiting On A Credit"}
           </Button>
         </div>
         {reading[c.invoiceId] && contents[c.invoiceId] && (

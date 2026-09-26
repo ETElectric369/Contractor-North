@@ -40,6 +40,8 @@ import {
   reversedInvoiceIds,
   reversedPurchaseIds,
 } from "./supplier-balance";
+import { DEFAULT_TIMEZONE } from "@/lib/utils";
+import { todayStrInTz } from "@/lib/tz";
 
 // ── THE CLEAR LINE: WHERE HIS BOOKS IN NORTH BEGIN ──────────────────────────────────────────────
 //
@@ -99,6 +101,11 @@ export interface SupplierInvoiceRow extends SupplierDocument {
   samePurchase?: { billId: string; exact: boolean; sentence: string }[];
   /** The supplier account it is on, so a card can say who sent it ("CED"). Absent on old callers. */
   supplierAccountId?: string | null;
+  /**
+   * When a person said this bill waits on a credit memo for the same amount (0346, Waiting On A
+   * Credit). Null or absent: not waiting (or a database without 0346).
+   */
+  waitingCreditSince?: string | null;
 }
 
 /** One of his jobs, with enough on it to tell five Rhodesias apart. */
@@ -898,6 +905,46 @@ export interface SupplierPaperCard {
   because: string;
   /** Bills that may be this very purchase (same-purchase.ts), offered as Same Purchase: Tie Them. */
   samePurchase: { billId: string; exact: boolean; sentence: string }[];
+  /**
+   * WAITING ON A CREDIT (0346): a person said a credit memo for the same amount is coming. `since`
+   * is when; `back` is the day it comes back as a card by itself; `overdue` is true once that day
+   * has come with no credit paired (a paired credit hides the paper outright). Absent: not waiting.
+   */
+  waitingCredit?: { since: string; back: string; overdue: boolean };
+  /** "Still no credit from CED after 30 days": said on a card that came back by itself. */
+  stillNoCredit?: string;
+}
+
+/** How long a bill waits on its credit before it comes back as a card by itself (Erik: 30 days). */
+export const CREDIT_WAIT_DAYS = 30;
+
+/** Today as YYYY-MM-DD in UTC: the fallback when a caller has no org day to hand over. */
+const utcToday = () => new Date().toISOString().slice(0, 10);
+
+/** "2026-10-26": the calendar day `days` after `ymd`. */
+function addDaysYmd(ymd: string, days: number): string {
+  const t = Date.parse(`${ymd}T12:00:00Z`);
+  return Number.isFinite(t) ? new Date(t + days * 86_400_000).toISOString().slice(0, 10) : ymd;
+}
+
+/**
+ * WAITING ON A CREDIT, READ ONE WAY (0346). Null: not waiting. Otherwise when it started (the day
+ * part of the stamp), the day it comes back, and whether that day has come. `today` is the ORG's
+ * today where the caller has it.
+ */
+export function creditWait(
+  inv: Pick<SupplierInvoiceRow, "waitingCreditSince">,
+  today?: string | null,
+): { since: string; back: string; overdue: boolean } | null {
+  const stamp = String(inv?.waitingCreditSince ?? "");
+  // The DAY he tapped it, in the business's day (5pm in Truckee is not tomorrow): a full stamp is
+  // read in the default timezone, a bare date as itself.
+  const at = /^\d{4}-\d{2}-\d{2}T/.test(stamp) ? new Date(stamp) : null;
+  const since = at && Number.isFinite(at.getTime()) ? todayStrInTz(DEFAULT_TIMEZONE, at) : stamp.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) return null;
+  const back = addDaysYmd(since, CREDIT_WAIT_DAYS);
+  const days = daysBetweenYmd(since, today || utcToday());
+  return { since, back, overdue: days !== null && days >= CREDIT_WAIT_DAYS };
 }
 
 /** How many candidate chips an "ask" card shows. Five Rhodesias is the worst he has. */
@@ -948,12 +995,41 @@ export function shortSupplierName(name: string | null | undefined): string {
  *
  * The matcher SUGGESTS and a person DECIDES: "one" becomes the first button, never preselected;
  * "ask" becomes chips; "weak" and "blank" say Pick A Job.
+ *
+ * WAITING ON A CREDIT (0346) is not a card while it waits: a person said a credit memo is coming,
+ * and there is no answer to give until it does (supplierPapersWaitingOnCredit lists those, folded
+ * on /bills). After CREDIT_WAIT_DAYS with no credit paired it is a card again, by itself, saying
+ * "Still no credit from CED after 30 days". A credit that pairs hides it as a reversed purchase.
  */
 export function supplierPaperNeeds(
   invoices: SupplierInvoiceRow[],
   jobs: ReconcileJob[],
-  opts: { since?: string | null; supplierName?: (accountId: string | null) => string } = {},
+  opts: PaperCardOpts = {},
 ): SupplierPaperCard[] {
+  return paperCards(invoices, jobs, opts).filter((c) => !c.waitingCredit || c.waitingCredit.overdue);
+}
+
+/**
+ * THE PAPERS WAITING ON A CREDIT, not yet back (0346): the same cards supplierPaperNeeds would
+ * draw, for the one folded "Waiting On A Credit" line under their supplier on /bills. Nothing a
+ * person set aside vanishes.
+ */
+export function supplierPapersWaitingOnCredit(
+  invoices: SupplierInvoiceRow[],
+  jobs: ReconcileJob[],
+  opts: PaperCardOpts = {},
+): SupplierPaperCard[] {
+  return paperCards(invoices, jobs, opts).filter((c) => !!c.waitingCredit && !c.waitingCredit.overdue);
+}
+
+export type PaperCardOpts = {
+  since?: string | null;
+  supplierName?: (accountId: string | null) => string;
+  /** The ORG's today (YYYY-MM-DD): it decides when a bill waiting on a credit comes back. */
+  today?: string | null;
+};
+
+function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: PaperCardOpts): SupplierPaperCard[] {
   const all = invoices ?? [];
   // ONE ACCOUNT AT A TIME, the way the Record button reads it (recordSupplierInvoiceAsBill's
   // siblings are one supplier account's documents): a credit memo from one supplier never reverses
@@ -984,10 +1060,12 @@ export function supplierPaperNeeds(
     const top = match.ranked[0]?.score ?? 0;
     const onJobRow = jobId ? jobById.get(jobId) : null;
     const accountId = inv.supplierAccountId ?? null;
+    const supplier = opts.supplierName ? opts.supplierName(accountId) : "The Supplier";
+    const wait = creditWait(inv, opts.today);
     cards.push({
       invoiceId: String(inv.id),
       invoiceNumber: String(inv.invoiceNumber ?? ""),
-      supplier: opts.supplierName ? opts.supplierName(accountId) : "The Supplier",
+      supplier,
       date: inv.invoiceDate ?? null,
       total,
       closed: !!inv.closed,
@@ -1019,6 +1097,14 @@ export function supplierPaperNeeds(
         : null,
       because: match.because,
       samePurchase: (inv.samePurchase ?? []).map((s) => ({ billId: s.billId, exact: s.exact, sentence: s.sentence })),
+      ...(wait
+        ? {
+            waitingCredit: wait,
+            ...(wait.overdue
+              ? { stillNoCredit: `Still no credit from ${supplier === "The Supplier" ? "the supplier" : supplier} after ${CREDIT_WAIT_DAYS} days` }
+              : {}),
+          }
+        : {}),
     });
   }
   return cards.sort(

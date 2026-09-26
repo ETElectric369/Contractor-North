@@ -28,6 +28,7 @@ import {
   sayKind,
   supplierSaysOpen,
   type SupplierInvoiceKind,
+  type SupplierPaperCard,
   type SupplierReconcileFeed,
 } from "./supplier-reconcile";
 
@@ -58,6 +59,8 @@ export interface SupplierInvoiceActions {
    */
   shelfLines?: (invoiceId: string) => Promise<{ ok: true; lines: ShelfCountLine[]; total: number } | { ok: false; error: string }>;
   recordToShelf?: (input: { invoiceId: string; differentPurchase?: boolean; toShelf: TicketLineChoice[] }) => Promise<SupplierActionResult>;
+  /** Waiting On A Credit's way back (0346): the bill is a Needs You card again. Absent: no button. */
+  stopWaitingOnCredit?: (invoiceId: string) => Promise<SupplierActionResult>;
 }
 
 /** How many rows a section shows before it says how many more there are. */
@@ -94,6 +97,7 @@ export function SupplierPaperLists({
   feed,
   today,
   onNeedsYou = [],
+  waitingOnCredit = [],
   actions,
 }: {
   /** The supplier account: names the Not In Your Books fold, so Shop Stock's Record To Shelf door
@@ -106,6 +110,12 @@ export function SupplierPaperLists({
   today: string;
   /** Papers answered on a Needs You card (supplierPaperFeed): never listed a second time here. */
   onNeedsYou?: string[];
+  /**
+   * WAITING ON A CREDIT (0346): papers a person set aside because a credit memo for the same amount
+   * is coming (supplierPaperFeed's `waiting`, every supplier's). This account's are one folded line
+   * here, so nothing he set aside vanishes, and they are never repeated in the lists below.
+   */
+  waitingOnCredit?: SupplierPaperCard[];
   actions: SupplierInvoiceActions;
 }) {
   const router = useRouter();
@@ -150,6 +160,13 @@ export function SupplierPaperLists({
   const invoices = useMemo(() => feed?.invoices ?? [], [feed]);
   const jobs = useMemo(() => feed?.jobs ?? [], [feed]);
   const cardIds = useMemo(() => new Set(onNeedsYou), [onNeedsYou]);
+  // This account's waiting papers (the list is every supplier's; the account's documents say which).
+  const waiting = useMemo(() => {
+    const mine = new Set(invoices.map((i) => i.id));
+    return waitingOnCredit.filter((c) => mine.has(c.invoiceId));
+  }, [invoices, waitingOnCredit]);
+  // ONE PAPER, ONE PLACE: answered on a card, or waiting on a credit, it is not listed again below.
+  const setAside = useMemo(() => new Set([...onNeedsYou, ...waiting.map((c) => c.invoiceId)]), [onNeedsYou, waiting]);
 
   const says = useMemo(() => supplierSaysOpen(invoices), [invoices]);
   const documents = useMemo(() => openDocuments(invoices), [invoices]);
@@ -164,13 +181,13 @@ export function SupplierPaperLists({
     [invoices, jobs, feed?.recordsSince],
   );
   // ONE PAPER, ONE PLACE: a paper on a Needs You card is answered there.
-  const needJob = useMemo(() => allNeedJob.filter((r) => !cardIds.has(r.invoice.id)), [allNeedJob, cardIds]);
+  const needJob = useMemo(() => allNeedJob.filter((r) => !setAside.has(r.invoice.id)), [allNeedJob, setAside]);
   const needJobTotals = useMemo(() => needsJobTotals(needJob), [needJob]);
   const needBill = useMemo(
     () => invoicesNeedingBill(invoices, { since: feed?.recordsSince ?? null }),
     [invoices, feed?.recordsSince],
   );
-  const billRows = useMemo(() => needBill.rows.filter((r) => !cardIds.has(r.id)), [needBill, cardIds]);
+  const billRows = useMemo(() => needBill.rows.filter((r) => !setAside.has(r.id)), [needBill, setAside]);
   const billRowsTotal = r2(billRows.reduce((s, r) => s + (Number(r.total) || 0), 0));
   const claimable = useMemo(() => claimableDiscounts(invoices, today), [invoices, today]);
   const missed = useMemo(() => missedDiscounts(invoices, today), [invoices, today]);
@@ -256,6 +273,55 @@ export function SupplierPaperLists({
 
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {done && <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{done}</div>}
+
+      {/* ── WAITING ON A CREDIT (0346): set aside by a person, back on its own after 30 days. ── */}
+      {waiting.length > 0 && (
+        <Fold
+          id={`supplier-waiting-credit-${accountId}`}
+          summary={listLabel("Waiting On A Credit", waiting.length, formatCurrency(r2(waiting.reduce((s, c) => s + c.total, 0))))}
+        >
+          <WhyFold>
+            <p>
+              You said {accountName} will take these back off with a credit memo for the same amount. When that credit
+              comes in, the pair drops off by itself. If none comes in 30 days, the bill is back under Needs You.
+            </p>
+          </WhyFold>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {waiting.map((c) => (
+              <li key={c.invoiceId} className="px-3 py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-slate-900">
+                      {c.said ? `“${c.said}”` : c.onJob ? c.onJob.label : "No job name on it"}
+                    </span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {c.invoiceNumber}
+                      {c.date ? ` · ${formatDate(c.date)}` : ""}
+                      {c.waitingCredit ? ` · waiting since ${formatDate(c.waitingCredit.since)}, back ${formatDate(c.waitingCredit.back)}` : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-800">{formatCurrency(c.total)}</span>
+                </div>
+                {actions.stopWaitingOnCredit && (
+                  <Button
+                    variant="outline"
+                    className="mt-2 h-11 w-full"
+                    disabled={pending}
+                    onClick={() =>
+                      run(() => actions.stopWaitingOnCredit!(c.invoiceId), `wait:${c.invoiceId}`, `${c.invoiceNumber} is back under Needs You.`)
+                    }
+                  >
+                    {busy === `wait:${c.invoiceId}` ? "Putting It Back…" : "Stop Waiting"}
+                  </Button>
+                )}
+                {failedAt === `wait:${c.invoiceId}` && error && (
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Fold>
+      )}
 
       {/* ── INVOICES WITH NO JOB, not on a card: a credit memo, a STOCK paper, a $0.00 one. ── */}
       {needJob.length > 0 && (

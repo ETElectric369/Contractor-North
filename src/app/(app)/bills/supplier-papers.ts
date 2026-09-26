@@ -31,6 +31,7 @@ import {
   shortSupplierName,
   supplierPaperLine,
   supplierPaperNeeds,
+  supplierPapersWaitingOnCredit,
   paperJob,
   type PaperJob,
   type ReconcileJob,
@@ -47,6 +48,39 @@ export const SUPPLIER_INVOICE_KINDS: SupplierInvoiceKind[] = ["invoice", "credit
 /** The columns every reader of supplier_invoices asks for. One list, so no reader is short one. */
 export const SUPPLIER_INVOICE_COLUMNS =
   "id, supplier_account_id, invoice_number, kind, invoice_date, due_date, job_name_raw, job_id, total, open_balance, closed, discount_amount, discount_by, source_file, jobs(name)";
+
+/** The same list with Waiting On A Credit's stamp (0346). Read first; see readSupplierDocuments. */
+export const SUPPLIER_INVOICE_COLUMNS_WITH_WAIT = `${SUPPLIER_INVOICE_COLUMNS}, waiting_credit_since`;
+
+/** What Waiting On A Credit says before 0346 is applied, instead of failing. */
+export const WAIT_NEEDS_UPDATE = "Waiting On A Credit needs one database update. Nothing was changed; the bill is still here.";
+
+/** The one error a select naming a not-yet-applied 0346 column fails with, and nothing else. */
+export function isMissingWaitColumn(err: unknown): boolean {
+  const code = String((err as { code?: string })?.code ?? "");
+  const msg = String((err as { message?: string })?.message ?? "");
+  return code === "42703" || code === "PGRST204" || (msg.includes("waiting_credit") && /does not exist|could not find/i.test(msg));
+}
+
+/**
+ * EVERY SUPPLIER DOCUMENT IN THE ORG, WITH ITS WAIT STAMP WHEN THE DATABASE HAS ONE. A push deploys
+ * before its migration runs: without 0346 the select naming waiting_credit_since fails whole, and
+ * that read is every card on My Day and /bills. So it is asked for first and, on exactly that
+ * error, asked again without it: nothing is waiting, and every card is where it was yesterday.
+ * `waitReady` says which read answered (the card's button says it needs one database update).
+ */
+export async function readSupplierDocuments(
+  supabase: any,
+  orgId: string,
+): Promise<{ data: any[] | null; error: unknown; waitReady: boolean }> {
+  const read = (cols: string) =>
+    supabase.from("supplier_invoices").select(cols).eq("org_id", orgId).order("invoice_date", { ascending: false }).limit(2000);
+  const first = await read(SUPPLIER_INVOICE_COLUMNS_WITH_WAIT);
+  if (!first?.error) return { data: first?.data ?? [], error: null, waitReady: true };
+  if (!isMissingWaitColumn(first.error)) return { data: null, error: first.error, waitReady: false };
+  const again = await read(SUPPLIER_INVOICE_COLUMNS);
+  return { data: again?.error ? null : (again?.data ?? []), error: again?.error ?? null, waitReady: false };
+}
 
 export interface SupplierDocumentCoverage {
   /** One reconcile row per supplier document, billCount and samePurchase filled in. */
@@ -139,6 +173,7 @@ export function supplierDocumentRows(input: {
       discountAmount: r.discount_amount == null ? null : Number(r.discount_amount),
       discountBy: r.discount_by ?? null,
       sourceFile: r.source_file ?? null,
+      waitingCreditSince: r.waiting_credit_since ?? null,
       jobName: r.jobs?.name ?? null,
       supplierAccountId: r.supplier_account_id ?? null,
       // Zero covering bills means the app has no record of the purchase at all. A bill covers it
@@ -181,6 +216,9 @@ export function reconcileJobsOf(rows: any[]): ReconcileJob[] {
 export interface SupplierPaperFeed {
   cards: SupplierPaperCard[];
   jobs: PaperJob[];
+  /** Papers a person said wait on a credit, not back yet (0346): folded under their supplier on
+   *  /bills, never a card. Absent on a feed built by hand (My Day never draws them). */
+  waiting?: SupplierPaperCard[];
 }
 
 /**
@@ -207,15 +245,20 @@ export function supplierPaperFeed(input: {
   rows: SupplierInvoiceRow[];
   jobs: ReconcileJob[];
   accounts: { id: string; name: string | null }[];
+  /** The ORG's today: a bill waiting on a credit comes back on its own after 30 days of it. */
+  today?: string | null;
 }): SupplierPaperFeed {
   const names = new Map((input.accounts ?? []).map((a) => [String(a.id), shortSupplierName(a.name)]));
-  const cards = supplierPaperNeeds(input.rows, input.jobs, {
+  const opts = {
     since: input.since,
-    supplierName: (accountId) => (accountId && names.get(accountId)) || "The Supplier",
-  });
+    today: input.today ?? null,
+    supplierName: (accountId: string | null) => (accountId && names.get(accountId)) || "The Supplier",
+  };
+  const cards = supplierPaperNeeds(input.rows, input.jobs, opts);
+  const waiting = supplierPapersWaitingOnCredit(input.rows, input.jobs, opts);
   // Cancelled jobs are never offered in a picker; the matcher still sees them, as /bills's does.
   const jobs = (input.jobs ?? []).filter((j) => j.status !== "cancelled").map(paperJob);
-  return { cards, jobs };
+  return { cards, jobs, waiting };
 }
 
 /** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
@@ -244,7 +287,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
   if (meErr || !orgId) return null;
   const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes] = await Promise.all([
-    supabase.from("supplier_invoices").select(SUPPLIER_INVOICE_COLUMNS).eq("org_id", orgId).order("invoice_date", { ascending: false }).limit(2000),
+    readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
       .select("id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, bill_date, job_id, is_statement, superseded_by_bill_id, notes, jobs(job_number, name), bill_line_items(description)")
@@ -280,6 +323,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         rows,
         jobs: reconcileJobsOf(jobsRes.data ?? []),
         accounts,
+        today,
       })
     : null;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of

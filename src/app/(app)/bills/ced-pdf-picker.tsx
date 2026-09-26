@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { readPdfText } from "@/lib/pdf-text";
 import { importCedInvoices } from "./supplier-import-actions";
 
+/** How much PDF one import sends with its text. Under the 22 MB server-action ceiling, with room. */
+const PDF_BUDGET = 16 * 1024 * 1024;
+
 /**
  * THE CED CARD TAKES THE PDFs THEMSELVES (dropbox plan, Phase 0).
  *
@@ -15,6 +18,9 @@ import { importCedInvoices } from "./supplier-import-actions";
  * uses, with every one of its rules: each document checked against its own arithmetic, a
  * re-import changes nothing, a job a person set is never touched. The documents land when he
  * picks them, exactly as the paste door does today, and the sentence below says what landed.
+ *
+ * The bytes ride along too: the importer stores each PDF once (lib/ced-pdf-store), so Open Bill on
+ * a supplier bill card can open the paper itself, not only the lines read off it.
  */
 export function CedPdfPicker() {
   const router = useRouter();
@@ -26,12 +32,33 @@ export function CedPdfPicker() {
     if (!files.length) return;
     setBusy(true);
     setSaid(null);
-    const read: { name: string; text: string }[] = [];
+    const read: { name: string; text: string; pdf?: Uint8Array }[] = [];
     const unread: string[] = [];
+    // One import carries at most this much PDF (the server takes 22 MB a request). Past it, the
+    // documents still land; those PDFs are named below so he can choose them again to keep them.
+    let budget = PDF_BUDGET;
+    const tooMany: string[] = [];
     for (const file of files) {
-      const r = await readPdfText(await file.arrayBuffer(), file.name);
-      if (r.ok) read.push({ name: file.name, text: r.text });
-      else unread.push(r.error);
+      const bytes = await file.arrayBuffer();
+      // readPdfText reads a copy, so these bytes are still whole: the importer keeps the PDF
+      // itself (once per file, by content), so Open Bill can open it.
+      const r = await readPdfText(bytes, file.name);
+      if (!r.ok) {
+        unread.push(r.error);
+        continue;
+      }
+      if (bytes.byteLength <= budget) {
+        budget -= bytes.byteLength;
+        read.push({ name: file.name, text: r.text, pdf: new Uint8Array(bytes) });
+      } else {
+        tooMany.push(file.name);
+        read.push({ name: file.name, text: r.text });
+      }
+    }
+    if (tooMany.length) {
+      unread.push(
+        `Too much PDF for one go, so these were read but not kept: ${tooMany.join(", ")}. Choose ${tooMany.length === 1 ? "it" : "them"} again to keep the PDF.`,
+      );
     }
     if (!read.length) {
       setBusy(false);

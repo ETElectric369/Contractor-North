@@ -10,6 +10,7 @@ import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
 // payroll in it, and a second copy here would drift the moment one of them learned about cents.
 import { sayMoney } from "@/lib/payroll-math";
 import { isPdfText } from "@/lib/pdf-text";
+import { isStoredPaperPath, keepCedPdf, pdfBytesOf } from "@/lib/ced-pdf-store";
 
 /**
  * LOADING THE SUPPLIER'S OWN INVOICES, SO NEXT MONTH HE DOES NOT NEED ME (Erik, 2026-09-19; 0273).
@@ -67,6 +68,13 @@ import { isPdfText } from "@/lib/pdf-text";
  * So this takes text. The CED card now extracts it in the BROWSER (lib/pdf-text, the pdfjs-dist
  * the print preview already loads) and posts `{ name, text }`. Raw PDF bytes that reach here anyway
  * are refused by their CONTENT (the %PDF- signature), never by the file's name.
+ *
+ * AND THE PDF ITSELF IS KEPT (2026-09-26). A file can carry its bytes too (`pdf`): Choose CED PDFs
+ * sends them, and Drop Paperwork's Add To CED Documents hands over the file it already stored. The
+ * bytes are stored ONCE per file, named by their SHA-256 (lib/ced-pdf-store), and every document
+ * read out of that file records the stored path in source_file, so Open Bill can open it. A PDF
+ * that doesn't save never blocks the import: its documents land with the file's name, as before,
+ * and the sentence says which PDF didn't save and how to keep it.
  */
 
 /** Cents, so a fraction of a penny can never ride into a balance. */
@@ -154,8 +162,9 @@ function orgOf(ctx: { orgId: string | null }): { orgId: string } | { error: stri
 export interface SupplierImportInput {
   /** Text pasted straight out of a PDF viewer. One document or forty; both work. */
   text?: string | null;
-  /** Files whose text has already been read. `text` is the FILE'S TEXT, not its bytes. */
-  files?: { name: string; text: string }[] | null;
+  /** Files whose text has already been read. `text` is the FILE'S TEXT, not its bytes. `pdf` is
+   *  the file's bytes, when the caller has them: stored once (by content), so Open Bill can open it. */
+  files?: { name: string; text: string; pdf?: Uint8Array | ArrayBuffer | null }[] | null;
 }
 
 export async function importCedInvoices(input: SupplierImportInput): Promise<SupplierImportResult> {
@@ -166,11 +175,11 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   const supabase = ctx.supabase;
 
   // ── WHAT WE WERE GIVEN ─────────────────────────────────────────────────────────────────────
-  const sources: { name: string | null; text: string }[] = [];
+  const sources: { name: string | null; text: string; pdf: Uint8Array | null }[] = [];
   const refused: SupplierImportResult["refused"] = [];
 
   const pasted = String(input?.text ?? "").trim();
-  if (pasted) sources.push({ name: null, text: pasted });
+  if (pasted) sources.push({ name: null, text: pasted, pdf: null });
 
   for (const file of input?.files ?? []) {
     const name = String(file?.name ?? "").trim() || "a file with no name";
@@ -187,7 +196,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       refused.push({ invoiceNumber: null, error: `${name} had no text in it.` });
       continue;
     }
-    sources.push({ name, text });
+    sources.push({ name, text, pdf: pdfBytesOf(file?.pdf) });
   }
 
   if (!sources.length && !refused.length) {
@@ -201,8 +210,8 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // ── READ THEM ──────────────────────────────────────────────────────────────────────────────
   // One downloaded PDF is routinely several invoices - his 07-11 file holds four - so every source
   // is read for ALL the documents in it.
-  const parsed = new Map<string, { invoice: CedInvoice; sourceFile: string | null }>();
-  for (const source of sources) {
+  const parsed = new Map<string, { invoice: CedInvoice; sourceFile: string | null; source: number }>();
+  for (const [sourceIndex, source] of sources.entries()) {
     const results = parseCedDocuments(source.text);
     if (!results.length) {
       refused.push({
@@ -230,7 +239,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
         }
         continue;
       }
-      parsed.set(result.invoice.invoiceNumber, { invoice: result.invoice, sourceFile: source.name });
+      parsed.set(result.invoice.invoiceNumber, { invoice: result.invoice, sourceFile: source.name, source: sourceIndex });
     }
   }
 
@@ -311,6 +320,34 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   const existing = new Map<string, ExistingRow>();
   for (const row of (existingRows ?? []) as ExistingRow[]) existing.set(String(row.invoice_number), row);
 
+  // ── THE PDFs THEMSELVES, ONCE PER FILE ─────────────────────────────────────────────────────
+  // Only a file that gave us at least one document is kept (a file that read as nothing has no
+  // row to hang it on). Stored by content: the same PDF again is the same path and is not sent
+  // twice; one PDF with four invoices is one object that all four rows name.
+  const pdfPathOf = new Map<number, string>();
+  const pdfUnsaved: string[] = [];
+  const pdfSources = [...new Set([...parsed.values()].map((p) => p.source))].filter((i) => sources[i]?.pdf);
+  if (pdfSources.length) {
+    // Paths already named by a row here: stored before, so never uploaded again. A failed read of
+    // this only costs a redundant upload, which storage refuses as "already there" anyway.
+    const known = new Set<string>();
+    for (const row of existing.values()) if (isStoredPaperPath(row.source_file, org.orgId)) known.add(String(row.source_file));
+    for (const i of pdfSources) {
+      const kept = await keepCedPdf(supabase, org.orgId, sources[i].pdf as Uint8Array, known);
+      if (kept.ok) {
+        pdfPathOf.set(i, kept.path);
+        known.add(kept.path);
+      } else {
+        pdfUnsaved.push(`${sources[i].name ?? "That PDF"} (${kept.error})`);
+        reportError("bills:importCedInvoices.pdf", new Error(kept.error), { file: sources[i].name });
+      }
+    }
+  }
+  /** What a row's source_file says: the stored PDF's path when it saved, else the file's name. */
+  const sourceFileOf = (p: { sourceFile: string | null; source: number }) => pdfPathOf.get(p.source) ?? p.sourceFile;
+  /** Documents already here that only gained their stored PDF on this import. */
+  let pdfNowKept = 0;
+
   // Which of those already carry their line items. A document is given lines ONCE.
   const existingIds = [...existing.values()].map((r) => String(r.id));
   const hasLines = new Set<string>();
@@ -336,7 +373,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // leave him with a ledger nobody could reason about.
   const fresh = [...parsed.values()].filter((p) => !existing.has(p.invoice.invoiceNumber));
   if (fresh.length) {
-    const rows = fresh.map(({ invoice, sourceFile }) => ({
+    const rows = fresh.map((p) => ({ invoice: p.invoice, sourceFile: sourceFileOf(p) })).map(({ invoice, sourceFile }) => ({
       org_id: org.orgId,
       supplier_account_id: accountFor(invoice)?.id ?? null,
       invoice_number: invoice.invoiceNumber,
@@ -401,7 +438,8 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   }
 
   // The ones already on file: written only where the paper says something the row does not.
-  for (const { invoice, sourceFile } of parsed.values()) {
+  for (const p of parsed.values()) {
+    const { invoice, sourceFile } = p;
     const row = existing.get(invoice.invoiceNumber);
     if (!row) continue;
 
@@ -414,7 +452,14 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     setIfDifferent("invoice_date", invoice.invoiceDate, row.invoice_date);
     setIfDifferent("job_name_raw", invoice.jobNameRaw, row.job_name_raw);
     setIfDifferent("discount_by", invoice.discountBy, row.discount_by);
-    setIfDifferent("source_file", sourceFile, row.source_file);
+    // THE STORED PDF IS NEVER MOVED OR UNDONE. A row that already names a stored PDF keeps it: a
+    // re-import by paste (no bytes), a PDF that didn't save this time, or a second download holding
+    // the same invoice never swaps it for a bare name or another file. A row with only a name gains
+    // the path when this import stored its PDF.
+    const storedPath = pdfPathOf.get(p.source) ?? null;
+    const alreadyStored = isStoredPaperPath(row.source_file, org.orgId);
+    if (storedPath && !alreadyStored) patch.source_file = storedPath;
+    else if (!alreadyStored) setIfDifferent("source_file", sourceFile, row.source_file);
     for (const [column, value, current] of [
       ["merchandise", invoice.merchandise, row.merchandise],
       ["tax", invoice.tax, row.tax],
@@ -467,7 +512,14 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       });
       continue;
     }
-    updated.push(said(invoice, sourceFile));
+    // Only its PDF was new: the paper says what it said before, so it is unchanged, and the
+    // sentence says the PDF is kept now.
+    if (Object.keys(patch).length === 1 && storedPath && patch.source_file === storedPath) {
+      pdfNowKept += 1;
+      unchanged.push(said(invoice, sourceFile));
+    } else {
+      updated.push(said(invoice, sourceFile));
+    }
     if (!hasLines.has(String(row.id)) && invoice.lines.length) linesToWrite.push({ invoiceId: String(row.id), invoice });
   }
 
@@ -544,6 +596,16 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   if (unfiled.length) {
     detail.push(
       `${plural(unfiled.length, "of them is", "of them are")} not on a supplier account yet, because no account here has the account number printed on them. Make the account and they will join it.`,
+    );
+  }
+  if (pdfNowKept) {
+    detail.push(`The PDF is kept now for ${plural(pdfNowKept, "document that was already here", "documents that were already here")}.`);
+  }
+  if (pdfUnsaved.length) {
+    // NOTHING SILENT, AND NOT A DEAD END: the documents are in; this names the PDF that isn't, why,
+    // and the way to keep it.
+    detail.push(
+      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose CED PDFs to keep the PDF.`,
     );
   }
   if (refused.length) {

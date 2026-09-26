@@ -22,7 +22,7 @@ import {
   type SupplierPayMethod,
 } from "./supplier-balance";
 import { SupplierPaperLists, type SupplierInvoiceActions } from "./supplier-invoices-card";
-import { type ReconcileJob, type SupplierInvoiceRow, type SupplierReconcileFeed } from "./supplier-reconcile";
+import { type ReconcileJob, type SupplierInvoiceRow, type SupplierPaperCard, type SupplierReconcileFeed } from "./supplier-reconcile";
 
 /**
  * The supplier accounts' own doors. The supplier-NAME housekeeping (merge review, the same-supplier
@@ -77,6 +77,8 @@ export interface SuppliersCardActions {
   tieToBill?: SupplierInvoiceActions["tieToBill"];
   shelfLines?: SupplierInvoiceActions["shelfLines"];
   recordToShelf?: SupplierInvoiceActions["recordToShelf"];
+  /** Stop Waiting on the folded Waiting On A Credit line (0346). */
+  stopWaitingOnCredit?: SupplierInvoiceActions["stopWaitingOnCredit"];
 }
 
 const METHOD_LABELS: Record<SupplierPayMethod, string> = {
@@ -146,6 +148,7 @@ export function SuppliersCard({
   reconcile = null,
   noSupplierDocument = {},
   needsYouIds = [],
+  waitingOnCredit = [],
   payOn = null,
   actions,
 }: {
@@ -173,6 +176,8 @@ export function SuppliersCard({
   noSupplierDocument?: Record<string, { total: number; bills: number; ids: string[] }>;
   /** Papers on a Needs You card: the supplier's own lists never repeat them. */
   needsYouIds?: string[];
+  /** Papers a person said wait on a credit (0346), not back yet: one folded line under their supplier. */
+  waitingOnCredit?: SupplierPaperCard[];
   /**
    * MY DAY'S DOOR (/bills?pay=<account>): "Pay CED $5,174.62 By Oct 10" lands here with this
    * account's Record A Payment sheet already open. The same sheet, the same write; nothing new.
@@ -832,12 +837,14 @@ export function SuppliersCard({
                           feed={feed}
                           today={today}
                           onNeedsYou={needsYouIds}
+                          waitingOnCredit={waitingOnCredit}
                           actions={{
                             setInvoiceJob: actions.setInvoiceJob!,
                             recordAsBill: actions.recordAsBill,
                             tieToBill: actions.tieToBill,
                             shelfLines: actions.shelfLines,
                             recordToShelf: actions.recordToShelf,
+                            stopWaitingOnCredit: actions.stopWaitingOnCredit,
                           }}
                         />
                       )}
