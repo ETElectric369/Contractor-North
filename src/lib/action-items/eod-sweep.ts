@@ -1,6 +1,7 @@
 import "server-only";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
 import {
   NEEDS_RETURN_DAYS,
@@ -120,7 +121,9 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     await sendPushToProfiles(staff, "day_ahead", {
       title: "Close out your day",
       body: top.join(" · ") + (more > 0 ? ` · +${more} more` : ""),
-      url: "/planner?debrief=1",
+      // Nort switched off (0352): plain My Day, whose Needs You list names the same gaps. The
+      // ?debrief=1 opener lives on Nort's button, which isn't drawn then.
+      url: featureOn(getOrgSettings(org.settings).features, "nort") ? "/planner?debrief=1" : "/planner",
     });
     counts.pushed++;
   }

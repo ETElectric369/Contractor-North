@@ -11,6 +11,7 @@
  */
 import { classifyLead, type LeadIntake, type LeadTriage } from "@/lib/lead-triage";
 import { getOrgSettings } from "@/lib/org-settings";
+import { requestHref } from "@/lib/feature-doors";
 import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles } from "@/lib/push";
@@ -334,9 +335,13 @@ async function notifyNewLead(
       // ex-employee — and if the org has no email on file, ONLY to them. `role` comes along so the
       // recipient below is chosen rather than picked at random from an unordered set.
       supabase.from("profiles").select("id, email, role").eq("org_id", orgId).eq("active", true).in("role", ["owner", "admin", "office"]),
-      supabase.from("organizations").select("email, name").eq("id", orgId).maybeSingle(),
+      // settings: where the alert lands (Leads switched off → My Day, the switch board 0352).
+      supabase.from("organizations").select("email, name, settings").eq("id", orgId).maybeSingle(),
     ]);
     const staffIds = ((staff ?? []) as { id: string }[]).map((s) => s.id);
+    // LEADS OFF, THE REQUEST STILL LANDS (rule d): the bell, the push and the email open My Day,
+    // where it waits as "New Request From …" with Call Back, instead of the switched-off list.
+    const url = requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features);
     const money = input.intake.estimateTotal
       ? `est. $${Math.round(input.intake.estimateTotal).toLocaleString()}`
       : "quote request";
@@ -346,8 +351,8 @@ async function notifyNewLead(
     const title = opts.cameBack ? `🔁 Lead came back — ${input.name}` : `🔥 New lead — ${input.name}`;
     const body = [input.intake.projectType, money, where].filter(Boolean).join(" · ") || "New quote request";
 
-    await createNotifications(orgId, staffIds, { type: "inquiry", title, body, url: "/leads" });
-    await sendPushToProfiles(staffIds, "inquiry", { title, body, url: "/leads" });
+    await createNotifications(orgId, staffIds, { type: "inquiry", title, body, url });
+    await sendPushToProfiles(staffIds, "inquiry", { title, body, url });
 
     // A DETERMINISTIC recipient. sendEmail takes one address, and `.find(Boolean)` over an
     // unordered query was a coin flip between whoever Postgres happened to return first. Order:
@@ -371,7 +376,7 @@ async function notifyNewLead(
           ${input.email ? `<p style="margin:2px 0">📧 ${esc(input.email)}</p>` : ""}
           ${input.phone ? `<p style="margin:2px 0">📞 ${esc(input.phone)}</p>` : ""}
           ${input.message ? `<p style="color:#334155;margin:12px 0;border-left:3px solid #cbd5e1;padding-left:10px">${esc(input.message)}</p>` : ""}
-          <p style="margin:18px 0"><a href="${site}/leads" style="background:#0b57c4;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block">Open the lead →</a></p>
+          <p style="margin:18px 0"><a href="${site}${url}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block">Open the lead →</a></p>
           <p style="color:#94a3b8;font-size:12px">Reach out fast — speed-to-lead wins the job.</p>
         </div>`,
       });
