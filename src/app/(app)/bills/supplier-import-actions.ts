@@ -382,8 +382,18 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       refused,
     };
   }
+  // ON FILE PER SUPPLIER ACCOUNT, NOT PER NUMBER (Wave 0; 0354 makes the table unique on
+  // org + account + number). Two suppliers can print the same bare number, and reading "already
+  // on file" by number alone skipped the second supplier's paper, or refused it as "two different
+  // totals". A paper is the row on ITS account; a row on no account yet is adopted (the account is
+  // written onto it below, as before). Never another supplier's row.
   const existing = new Map<string, ExistingRow>();
-  for (const row of (existingRows ?? []) as ExistingRow[]) existing.set(String(row.invoice_number), row);
+  const fileKey = (accountId: string | null | undefined, number: string) => `${accountId ?? ""}|${number}`;
+  for (const row of (existingRows ?? []) as ExistingRow[]) existing.set(fileKey(row.supplier_account_id, String(row.invoice_number)), row);
+  const onFile = (invoice: CedInvoice): ExistingRow | undefined => {
+    const accountId = accountFor(invoice)?.id ?? null;
+    return existing.get(fileKey(accountId, invoice.invoiceNumber)) ?? (accountId ? existing.get(fileKey(null, invoice.invoiceNumber)) : undefined);
+  };
 
   // ── THE PDFs THEMSELVES, ONCE PER FILE ─────────────────────────────────────────────────────
   // Only a file that gave us at least one document is kept (a file that read as nothing has no
@@ -439,7 +449,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // The new ones go in as ONE insert. Forty-seven separate round trips from a phone on a job site
   // is the latency class audit v921 was about, and a partial failure halfway down that list would
   // leave him with a ledger nobody could reason about.
-  const fresh = [...parsed.values()].filter((p) => !existing.has(p.invoice.invoiceNumber));
+  const fresh = [...parsed.values()].filter((p) => !onFile(p.invoice));
   if (fresh.length) {
     const rows = fresh.map((p) => ({ invoice: p.invoice, sourceFile: sourceFileOf(p) })).map(({ invoice, sourceFile }) => ({
       org_id: org.orgId,
@@ -469,7 +479,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       .select("id, invoice_number");
     if (insErr) {
       // TWO IMPORTS AT ONCE. Both read "not on file", both insert, and the unique index on
-      // (org_id, invoice_number) refuses the second batch whole - which is the index doing exactly
+      // (org_id, account, invoice_number) refuses the second batch whole - which is the index doing exactly
       // its job. Saying "try it again" is the truth: the second run finds them already there and
       // writes nothing, because that is what this importer does with a document it already holds.
       const duplicate = /duplicate key value/i.test(String((insErr as { message?: string }).message ?? ""));
@@ -508,7 +518,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // The ones already on file: written only where the paper says something the row does not.
   for (const p of parsed.values()) {
     const { invoice, sourceFile } = p;
-    const row = existing.get(invoice.invoiceNumber);
+    const row = onFile(invoice);
     if (!row) continue;
 
     const patch: Record<string, unknown> = {};
