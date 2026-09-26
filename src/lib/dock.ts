@@ -325,8 +325,9 @@ export function visibleDock({ isStaff, features }: { isStaff: boolean; features?
       const next = rest.findIndex((r) => r.header);
       return rest.slice(0, next < 0 ? undefined : next).some((r) => r.href);
     });
-    // Measured against the rows a SWITCH hid, never the ones the role hid: a tech's Office still
-    // lands on /team exactly as before, and the tech-only "You" tile (no rows at all) stays.
+    // Measured against the rows a SWITCH hid, never the ones the role hid: a tile a tech sees with
+    // fewer rows keeps its landing page exactly as before, and the tech-only "You" tile (no rows
+    // at all) stays.
     const switchedOff = s.children.filter((c) => mine(c) && !on(c.feature));
     if (switchedOff.length && !children.some((c) => c.href)) return [];
     const landingOff = switchedOff.some((c) => c.href && basePath(c.href) === basePath(s.href));

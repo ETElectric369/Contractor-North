@@ -355,10 +355,11 @@ describe("visibleDock — role and switches, one filter", () => {
     const d = visibleDock({ isStaff: true, features: off("crew_payroll") });
     for (const id of ["ma-payroll", "o-docs", "o-handbook"]) expect(rows(d)).not.toContain(id);
     expect(rows(d)).toContain("o-team");
-    // A tech loses the Handbook too (he sees it today) and keeps everything else he had.
+    // A tech keeps everything he had (Office is staff-only since Wave 0, so the Handbook was
+    // never one of his doors).
     const tech = visibleDock({ isStaff: false, features: off("crew_payroll") });
     expect(rows(tech)).not.toContain("o-handbook");
-    expect(rows(tech)).toContain("o-forms");
+    expect(rows(tech)).toEqual(rows(legacy(false)));
   });
 
   it("Recurring Billing off: the Recurring row goes; the Tax Report stays whatever Sales Tax says", () => {
@@ -368,9 +369,10 @@ describe("visibleDock — role and switches, one filter", () => {
   });
 
   it("Licenses off: the whole Liabilities group (heading included) goes; Safety Log alone takes only Safety", () => {
-    const d = visibleDock({ isStaff: false, features: off("licenses") });
+    // Office is staff-only (Wave 0: no tech tile bounces), so the Liabilities rows are the office's.
+    const d = visibleDock({ isStaff: true, features: off("licenses") });
     for (const id of ["o-liab-h", "o-comply", "o-insurance", "o-safety", "o-audits"]) expect(rows(d)).not.toContain(id);
-    const s = visibleDock({ isStaff: false, features: off("safety_log") });
+    const s = visibleDock({ isStaff: true, features: off("safety_log") });
     expect(rows(s)).not.toContain("o-safety");
     expect(rows(s)).toEqual(expect.arrayContaining(["o-liab-h", "o-comply", "o-insurance", "o-audits"]));
     // Forms is not a Safety Log door: it also holds the walk-through sheet and the intake form.

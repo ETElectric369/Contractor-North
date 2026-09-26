@@ -15,7 +15,8 @@ describe("quickAddActions", () => {
     const before = ["New Task", "New Lead", "New Customer", "New Job", "New Appointment", "New Estimate", "New Invoice"];
     expect(labels(true, ALL_ON)).toEqual(before);
     expect(labels(true)).toEqual(before);
-    expect(labels(false)).toEqual(["New Task", "New Job"]);
+    // A tech's + is New Task only: a job is made by the office (New Job is staff-only, Wave 0).
+    expect(labels(false)).toEqual(["New Task"]);
   });
 
   it("Leads off: no New Lead; Estimates off: no New Estimate; the rest stay", () => {
@@ -24,6 +25,6 @@ describe("quickAddActions", () => {
   });
 
   it("a tech gains nothing from a switch", () => {
-    expect(labels(false, off("leads", "estimates"))).toEqual(["New Task", "New Job"]);
+    expect(labels(false, off("leads", "estimates"))).toEqual(["New Task"]);
   });
 });
