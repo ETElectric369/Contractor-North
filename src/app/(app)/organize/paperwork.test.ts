@@ -1891,6 +1891,8 @@ describe("Drop Paperwork: the row a file becomes", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        // The company's own account for the number the paper prints (TR-34426).
+        "supplier_accounts.select": [{ data: [{ id: "acct-1", name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: null }], error: null }],
         "organized_items.insert": [{ data: { id: "oi-5" }, error: null }],
       },
       calls,
@@ -1899,14 +1901,32 @@ describe("Drop Paperwork: the row a file becomes", () => {
     expect(res).toMatchObject({ ok: true, id: "oi-5", needsRead: false });
     const row = did("organized_items", "insert")!.payload;
     expect(row).toMatchObject({ doc_type: "supplier_documents", doc_number: "8802-1101363", amount: 162.45, source: "bills_drop", status: "needs_review" });
+    // WHO IT IS FROM is the company's own account, shortened for the title (Wave 0), never a word
+    // the code knows.
+    expect(row).toMatchObject({ vendor: "Consolidated Electrical Distributors", title: "CED 8802-1101363" });
+    expect(did("supplier_accounts", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
     expect(row.proposal.ced.numbers).toEqual(["8802-1101363"]);
     expect(ai.systems).toHaveLength(0);
+  });
+
+  it("the same paper from a supplier the company has no account for names no vendor", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [{ id: "acct-9", name: "Main Street Supply", account_number: "MS-1", branch_code: "0101" }], error: null }],
+        "organized_items.insert": [{ data: { id: "oi-8" }, error: null }],
+      },
+      calls,
+    );
+    await addPaperwork({ ...input, pdfText: TIMBER_CREEK });
+    expect(did("organized_items", "insert")!.payload).toMatchObject({ vendor: null, title: "Supplier 8802-1101363" });
   });
 
   it("PR3: the same CED PDF dropped on ORGANIZE is read from its own text too, and says which door it came in by", async () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [], error: null }],
         "organized_items.insert": [{ data: { id: "oi-6" }, error: null }],
       },
       calls,
@@ -2047,6 +2067,7 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [], error: null }],
         "organized_items.insert": [{ data: { id: "oi-7" }, error: null }],
       },
       calls,

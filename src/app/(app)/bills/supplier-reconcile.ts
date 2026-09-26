@@ -984,20 +984,9 @@ export function paperJob(job: ReconcileJob): PaperJob {
 /** How many of the matcher's nearest jobs a "weak" card puts at the top of its picker. */
 const MAX_CLOSEST = 5;
 
-/**
- * A supplier's name, short enough to lead a card on a phone. "Consolidated Electrical
- * Distributors" is "CED" everywhere he goes; "Swigard's Hardware" is already short. A bracketed
- * short form the account itself carries ("Outdoor Supply Hardware (OSH - Cupertino)") wins.
- */
-export function shortSupplierName(name: string | null | undefined): string {
-  const raw = String(name ?? "").trim();
-  if (!raw) return "The Supplier";
-  const aside = /\(([^)]+)\)/.exec(raw)?.[1]?.trim();
-  if (aside) return aside;
-  const words = raw.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w) && !/^(inc|llc|co|corp|of|and|the)\.?,?$/i.test(w));
-  if (raw.length > 24 && words.length >= 3) return words.map((w) => w[0].toUpperCase()).join("");
-  return raw;
-}
+/** A supplier's name, short enough to lead a card on a phone (lib/supplier-name, where the shelf
+ *  and the paperwork tray read it too). */
+export { shortSupplierName } from "@/lib/supplier-name";
 
 /**
  * EVERY SUPPLIER PAPER THAT NEEDS A PERSON, newest first. The rule, in one place:

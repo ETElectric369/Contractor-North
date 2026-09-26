@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { dbError } from "@/lib/db-error";
+import { supplierAccountFor, type SupplierAccountLite } from "@/lib/supplier-name";
 import { reportError } from "@/lib/observe";
 import { requireStaff } from "@/lib/staff-guard";
 import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
@@ -341,21 +342,10 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     .select("id, name, account_number, branch_code")
     .eq("org_id", org.orgId)
     .limit(500);
-  const byAccountNumber = new Map<string, { id: string; name: string }>();
-  const byBranch = new Map<string, { id: string; name: string }>();
-  for (const a of (accountRows ?? []) as { id: string; name: string; account_number: string | null; branch_code: string | null }[]) {
-    const key = String(a.account_number ?? "").trim().toLowerCase();
-    if (key) byAccountNumber.set(key, { id: String(a.id), name: String(a.name ?? "") });
-    const branch = String(a.branch_code ?? "").trim().toLowerCase();
-    if (branch && !byBranch.has(branch)) byBranch.set(branch, { id: String(a.id), name: String(a.name ?? "") });
-  }
-  const accountFor = (invoice: CedInvoice): { id: string; name: string } | null => {
-    const number = String(invoice.accountNumber ?? "").trim().toLowerCase();
-    if (number && byAccountNumber.has(number)) return byAccountNumber.get(number) ?? null;
-    const branch = invoice.invoiceNumber.split("-")[0]?.trim().toLowerCase() ?? "";
-    if (branch && byBranch.has(branch)) return byBranch.get(branch) ?? null;
-    return null;
-  };
+  // One matcher (lib/supplier-name), shared with the paperwork tray's drop, so a dropped paper and
+  // an imported one land on the same account.
+  const accountFor = (invoice: CedInvoice): { id: string; name: string } | null =>
+    supplierAccountFor((accountRows ?? []) as SupplierAccountLite[], invoice);
 
   // ── WHAT IS ALREADY ON FILE ────────────────────────────────────────────────────────────────
   type ExistingRow = {

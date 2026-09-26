@@ -5,6 +5,7 @@ import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { isSha256 } from "@/lib/content-hash";
 import { parseCedDocuments } from "@/lib/ced-invoice-parse";
+import { shortSupplierName, supplierAccountFor, type SupplierAccountLite } from "@/lib/supplier-name";
 import { formatDate } from "@/lib/utils";
 import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
@@ -118,6 +119,16 @@ export async function addPaperwork(input: {
     const good = read.flatMap((r) => (r.ok ? [r.invoice] : []));
     const refused = read.flatMap((r) => (r.ok ? [] : [{ number: r.invoiceNumber, error: r.error }]));
     if (good.length) {
+      // WHO IT IS FROM, off the company's own supplier account (the importer's matcher: the account
+      // number it prints, else the branch in its number), never the word "CED": any distributor on
+      // the same paper layout reads here (Wave 0). No match: no vendor, and the title says Supplier.
+      const { data: accounts } = await ctx.supabase
+        .from("supplier_accounts")
+        .select("id, name, account_number, branch_code")
+        .eq("org_id", ctx.orgId)
+        .limit(500);
+      const account = supplierAccountFor((accounts ?? []) as SupplierAccountLite[], good[0]);
+      vendor = account?.name?.trim() || null;
       const total = Math.round(good.reduce((s, d) => s + d.total, 0) * 100) / 100;
       proposal = {
         ced: {
@@ -130,7 +141,6 @@ export async function addPaperwork(input: {
         },
       };
       doc_type = "supplier_documents";
-      vendor = "CED";
       amount = total;
       item_date = good[0].invoiceDate;
       doc_number = good.length === 1 ? good[0].invoiceNumber : null;
@@ -166,7 +176,7 @@ export async function addPaperwork(input: {
   }
 
   const placed = await insertPaperRow(ctx.supabase, {
-    title: doc_type ? `CED ${proposal?.ced?.numbers.join(", ")}`.slice(0, 200) : name,
+    title: doc_type ? `${vendor ? shortSupplierName(vendor) : "Supplier"} ${proposal?.ced?.numbers.join(", ")}`.slice(0, 200) : name,
     file_url: input.path,
     created_by: ctx.userId,
     content_sha256: input.sha256,
