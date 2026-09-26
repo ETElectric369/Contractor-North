@@ -107,6 +107,10 @@ export function computeJobProgress(input: {
   pos: MaterialPo[];
   bills: MaterialBill[];
   markupPercent: number;
+  /** Every live take from stock on the job (net of pieces carried back), billed or not: work to
+   *  date is everything worked. Each is marked up and rounded on its own, exactly as the importer
+   *  writes one line per take (stock-billing.ts). Absent = none. */
+  stockTakes?: { cost: number }[];
 }): JobProgressFinancials {
   const billingType: "fixed" | "tm" = input.billingTypeRaw === "tm" ? "tm" : "fixed";
 
@@ -156,7 +160,10 @@ export function computeJobProgress(input: {
     (input.bills ?? []).reduce((s, b) => {
       const back = returnCreditCost(b.amount, returnLines.get(b) ?? b.bill_line_items);
       return back > 0 ? s + mk(back) : s;
-    }, 0);
+    }, 0) +
+    // PIECES TAKEN FROM STOCK (Shop Stock, Phase 3): each take bills its stamped cost at the same
+    // markup, one line per take, so work to date moves with the lines the importer writes.
+    (input.stockTakes ?? []).reduce((s, t) => (num(t.cost) > 0 ? s + mk(num(t.cost)) : s), 0);
 
   const workToDate = cents(num(input.billableLabor) + billableMaterials);
   return { estimate, workToDate, invoiced, collected, billingType };

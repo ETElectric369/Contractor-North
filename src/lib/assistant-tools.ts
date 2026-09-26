@@ -2038,6 +2038,10 @@ export async function runDataTool(
                 // A supplier return no invoice has credited yet (INV-078): what comes OFF the
                 // customer's next bill, marked up like the parts were. `total` is already net of it.
                 ...(unbilled.returnsCount ? { returns_credit: unbilled.returnsCredit, returns_count: unbilled.returnsCount } : {}),
+                // Pieces taken from stock no invoice holds yet (one line each, same markup), and
+                // pieces taken past the shelf that can't be billed until their roll is filed.
+                ...(unbilled.stockCount ? { stock_billed: unbilled.stockBilled, stock_takes: unbilled.stockCount } : {}),
+                ...(unbilled.stockShortsWords ? { stock_not_billable_yet: unbilled.stockShortsWords } : {}),
                 total: unbilled.total,
                 last_invoice_number: unbilled.lastInvoiceNumber,
                 by_person: unbilled.laborByPerson,

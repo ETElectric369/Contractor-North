@@ -37,6 +37,7 @@ import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, type UnbilledView } from "./unbilled-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -367,6 +368,7 @@ export default async function JobDetailPage({
     openDraft,
     lumpToNet,
     panelCount,
+    stockShortsWords,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -474,6 +476,19 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
+    // PIECES TAKEN PAST THE SHELF, said before an invoice is built (Shop Stock, Phase 3): New
+    // Invoice and Progress Payment carry the sentence beside the button. Staff only (a tech's page
+    // reads no stock and builds no invoice). A lost read says nothing here; the importer still
+    // leaves the pieces off and says so when the invoice is built.
+    viewerIsStaff
+      ? readJobStock(supabase, id).then(
+          (s) => stockShortsSentence(s.shorts),
+          (e) => {
+            reportError("jobs.[id].stockShorts", e, { jobId: id });
+            return null;
+          },
+        )
+      : Promise.resolve(null as string | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -1428,8 +1443,11 @@ export default async function JobDetailPage({
               only do Progress payment) next to the progress/payment hub. */}
           <div className="flex flex-wrap justify-end gap-2">
             {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} />
+            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} warning={stockShortsWords} />
           </div>
+          {/* Pieces taken past the shelf: said at the two buttons that build an invoice, BEFORE the
+              tap, because the invoice they build leaves those pieces off (Shop Stock, Phase 3). */}
+          {stockShortsWords && <p className="text-right text-sm text-amber-700">{stockShortsWords}</p>}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (
