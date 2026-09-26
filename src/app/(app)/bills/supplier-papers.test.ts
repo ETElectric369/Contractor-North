@@ -137,6 +137,19 @@ function feedTonight(over: { documents?: any[]; bills?: any[]; links?: any[] } =
 }
 const card = (feed: ReturnType<typeof feedTonight>, number: string) => feed.cards.find((c) => c.invoiceNumber === number);
 
+describe("the Shop Stock switch on the feed (0352)", () => {
+  it("not passed or on: exactly today's feed, no new key; off: the feed says so and nothing else moves", () => {
+    const bills = hisBills();
+    const { rows } = supplierDocumentRows({ documents: hisDocuments(), bills, links: LINKS, aliasRows: [] });
+    const input = { since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS };
+    const today = supplierPaperFeed(input);
+    expect(supplierPaperFeed({ ...input, shopStock: true })).toEqual(today);
+    expect("shopStock" in supplierPaperFeed({ ...input, shopStock: true })).toBe(false);
+    const off = supplierPaperFeed({ ...input, shopStock: false });
+    expect(off).toEqual({ ...today, shopStock: false });
+  });
+});
+
 describe("the June 8 line (Erik: \"june 8 is good\")", () => {
   it("is ET's first-job day, named once, and only ET has one", () => {
     expect(ET_BOOKS_BEGIN).toBe("2026-06-08");

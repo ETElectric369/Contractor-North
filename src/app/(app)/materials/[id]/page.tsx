@@ -17,6 +17,8 @@ import { canonicalMaterialListId, deleteMaterialList } from "../actions";
 import { TookFromStock } from "../took-from-stock";
 import { jobTakes } from "@/lib/stock-ledger";
 import { reportError } from "@/lib/observe";
+import { featureOn } from "@/lib/features";
+import { readViewerFeatures } from "@/lib/viewer-features";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +55,7 @@ export default async function MaterialListPage({
   // Pull the org's jobs (RLS-scoped) so the edit control can re-link this list —
   // staff only; a tech has no relink control, so his page doesn't pay for the read.
   // The canonical-list read rides the same wave rather than adding a fourth serial trip.
-  const [{ data: items }, { data: jobs }, canonical, takes] = await Promise.all([
+  const [{ data: items }, { data: jobs }, canonical, takes, viewer] = await Promise.all([
     supabase
       .from("material_list_items")
       .select(viewerIsStaff ? "*" : TECH_ITEM_COLUMNS)
@@ -69,6 +71,8 @@ export default async function MaterialListPage({
     jobId ? canonicalMaterialListId(jobId) : Promise.resolve({ id: null as string | null }),
     // The job's takes from stock (0344), for the Took From Stock door under the list. No cost.
     jobId ? jobTakes(supabase, jobId) : Promise.resolve({ takes: [], missing: true, error: null }),
+    // The switches (0352): New PO follows Purchase Orders, Took From Stock follows Shop Stock.
+    readViewerFeatures(),
   ]);
   // A takes read that fails is logged and said in the list's place, never an empty list.
   if (takes.error) reportError("materials.page.stockTakes", takes.error, { jobId, listId: id });
@@ -143,12 +147,14 @@ export default async function MaterialListPage({
                 >
                   <ListChecks className="h-4 w-4 shrink-0" /> Pick List
                 </Link>
-                <NewPoButton
-                  jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
-                  lists={[{ id: l.id, name: l.name }]}
-                  defaultJobId={l.jobs?.id}
-                  defaultListId={l.id}
-                />
+                {featureOn(viewer.features, "purchase_orders") && (
+                  <NewPoButton
+                    jobs={l.jobs ? [{ id: l.jobs.id, job_number: l.jobs.job_number, name: l.jobs.name }] : []}
+                    lists={[{ id: l.id, name: l.name }]}
+                    defaultJobId={l.jobs?.id}
+                    defaultListId={l.id}
+                  />
+                )}
               </>
             )}
             <SectionActionsMenu
@@ -208,7 +214,15 @@ export default async function MaterialListPage({
         <div className="space-y-3">
           {/* TOOK FROM STOCK (Phase 3): the job's list is a job's, so the shelf door rides here too,
               the same button and the same takes as the job's Materials tab. */}
-          {jobId && <TookFromStock jobId={jobId} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} />}
+          {jobId && (
+            <TookFromStock
+              jobId={jobId}
+              takes={takes.takes}
+              viewerIsStaff={viewerIsStaff}
+              readFailed={!!takes.error}
+              shopStock={featureOn(viewer.features, "shop_stock")}
+            />
+          )}
           {/* THE SAME editor for both roles (Erik, 2026-09-11) — viewerIsStaff only
               strips the money. My Day's "Materials" button lands a clocked-in tech
               right here, so the ask-the-office door rides under the list here too,

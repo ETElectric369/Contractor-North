@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
+import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 // A 12-page CED PDF or a slow read runs inside this page's server actions; the reader's own time,
@@ -15,7 +17,8 @@ export default async function OrganizePage() {
 
   // The org row feeds the "already on the books" read, which rides in the same breath as the rest
   // (a serial hop on a page read is the phone-lag class, audit v921).
-  const orgRead = supabase.from("organizations").select("id").limit(1).maybeSingle();
+  // `settings` rides along for the Shop Stock switch (0352): off, and no paper here offers the shelf.
+  const orgRead = supabase.from("organizations").select("id, settings").limit(1).maybeSingle();
   const orgIdOf = (r: { data: unknown }) => (r.data as { id?: string } | null)?.id ?? null;
   const [{ data: org }, { data: items }, { data: jobs }, books, markCtx] = await Promise.all([
     orgRead,
@@ -64,6 +67,7 @@ export default async function OrganizePage() {
         items={withUrls}
         jobs={jobs ?? []}
         matches={Object.fromEntries(withUrls.filter((i) => i.status === "needs_review").map((i) => [i.id, matchesOnBooks(i, books)]))}
+        shopStock={featureOn(getOrgSettings((org as { settings?: unknown } | null)?.settings).features, "shop_stock")}
       />
     </div>
   );

@@ -10,6 +10,8 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { purchaseOrderSectionTree } from "@/lib/nav-tree";
 import { deletePurchaseOrder } from "../actions";
 import type { PurchaseOrder, PurchaseOrderItem } from "@/lib/types";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { readViewerFeatures } from "@/lib/viewer-features";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +33,7 @@ export default async function PurchaseOrderPage({
   if (!po) notFound();
   const p = po as PurchaseOrder & { jobs: any };
 
-  const [{ data: items, error: itemsErr }, { data: priceItems }, { data: jobs }] = await Promise.all([
+  const [{ data: items, error: itemsErr }, { data: priceItems }, { data: jobs }, viewer] = await Promise.all([
     supabase
       .from("purchase_order_items")
       .select("*")
@@ -55,6 +57,7 @@ export default async function PurchaseOrderPage({
       .select("id, job_number, name")
       .order("created_at", { ascending: false })
       .limit(100),
+    readViewerFeatures(),
   ]);
 
   // A REJECTED READ MUST NOT LOOK LIKE AN EMPTY PO. This error was never checked, so a query the
@@ -66,6 +69,9 @@ export default async function PurchaseOrderPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/bills?tab=po" fallbackLabel="Back to Bills" />
+      {/* Purchase Orders off (0352): a PO still opens from a link, with the Off line on top, and an
+          open PO still counts in its job's cost whatever the switch says. */}
+      <FeatureOffLine feature="purchase_orders" features={viewer.features} isOwner={viewer.isOwner} />
 
       <div className="mb-6 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">

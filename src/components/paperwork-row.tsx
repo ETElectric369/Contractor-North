@@ -259,6 +259,7 @@ export function PaperworkRow({
   matches,
   onFiled,
   showAiSuggest = false,
+  shopStock = true,
 }: {
   item: PaperRowItem;
   jobs: JobOption[];
@@ -266,6 +267,10 @@ export function PaperworkRow({
   onFiled: (filed: Filed) => void;
   /** Organize's "AI Suggest" (a second look that suggests a job or bucket; never files). */
   showAiSuggest?: boolean;
+  /** SHOP STOCK OFF (the switch board, 0352): the shelf isn't offered, and a paper marked STOCK picks
+   *  nothing; its words still show ("On the paper: STOCK") and a person picks a job or a bucket.
+   *  Absent = on. */
+  shopStock?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -277,7 +282,8 @@ export function PaperworkRow({
   // null until a person picks: until then the picker FOLLOWS what the paper names, which may arrive
   // after this row is on screen (Drop Paperwork adds the row, then reads it).
   const [picked, setDest] = useState<string | null>(null);
-  const dest = shownDestination(picked, item, jobIds);
+  const shown = shownDestination(picked, item, jobIds);
+  const dest = !shopStock && shown === "stock" ? "" : shown;
   // A PICTURE is asked what it is first (Erik, 2026-09-24). Job Photo and Something Else are
   // answered here and change nothing until a button files it; Bill Or Receipt is answered on the
   // server (readAsCost), because it changes what the row IS.
@@ -304,7 +310,8 @@ export function PaperworkRow({
   const addsUp = rowTotal !== null && Number.isFinite(rowTotal) && rowLines.length ? reconcileReceipt(rowTotal, rowLines) : null;
   // What the paper itself picked (a printed mark, matched exactly), and why; a model's guess is
   // only ever a chip beside the question.
-  const prePick = suggestedDestination(item, jobIds);
+  const paperPick = suggestedDestination(item, jobIds);
+  const prePick = !shopStock && paperPick === "stock" ? "" : paperPick;
   const because = pickedBecause(item);
   const guess = guessOf(item, jobIds);
 
@@ -512,12 +519,12 @@ export function PaperworkRow({
           onChange={(e) => setDest(e.target.value)}
           disabled={working}
           className="h-11"
-          aria-label="Or Shop Stock Or A Business Cost"
+          aria-label={shopStock ? "Or Shop Stock Or A Business Cost" : "Or A Business Cost"}
         >
-          <option value="">Or Shop Stock Or A Business Cost…</option>
+          <option value="">{shopStock ? "Or Shop Stock Or A Business Cost…" : "Or A Business Cost…"}</option>
           {/* THE SHOP SHELF, above the buckets (Shop Stock, Phase 2): a ticket bought for stock is
               never a job cost and never Tools & Supplies or Other. */}
-          <option value="stock">Shop Stock{prePick === "stock" ? " (On The Paper)" : ""}</option>
+          {shopStock && <option value="stock">Shop Stock{prePick === "stock" ? " (On The Paper)" : ""}</option>}
           {PAPER_BUCKETS.map((b) => (
             <option key={b} value={`cost:${b}`}>
               {b}
@@ -927,12 +934,15 @@ export function PaperworkList({
   matches,
   showAiSuggest = false,
   empty,
+  shopStock = true,
 }: {
   items: PaperRowItem[];
   jobs: JobOption[];
   matches: Record<string, NumberMatch[]>;
   showAiSuggest?: boolean;
   empty?: React.ReactNode;
+  /** The Shop Stock switch (0352), for every row. Absent = on. */
+  shopStock?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -978,6 +988,7 @@ export function PaperworkList({
                 jobs={jobs}
                 matches={matches[item.id] ?? []}
                 showAiSuggest={showAiSuggest}
+                shopStock={shopStock}
                 onFiled={(f) => setFiled((all) => [f, ...all.filter((x) => x.id !== f.id)])}
               />
             </li>

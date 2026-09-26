@@ -106,12 +106,15 @@ export function OrganizeManager({
   items,
   jobs,
   matches,
+  shopStock = true,
 }: {
   orgId: string;
   items: OrganizedItemRow[];
   jobs: JobOption[];
   /** "Already on the books" offers per paper, computed on the server (0295). */
   matches: Record<string, NumberMatch[]>;
+  /** The Shop Stock switch (0352): off, and no paper offers the shelf. Absent = on. */
+  shopStock?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -719,7 +722,7 @@ export function OrganizeManager({
                 <p className="py-10 text-center text-sm text-slate-400">All caught up — nothing needs your attention. 🎉</p>
               ) : (
                 <div className="space-y-3">
-                  <PaperworkList items={trayPapers} jobs={jobs} matches={matches} showAiSuggest />
+                  <PaperworkList items={trayPapers} jobs={jobs} matches={matches} showAiSuggest shopStock={shopStock} />
                   {trayNotes.length > 0 && (
                     <ul className="space-y-3">
                       {trayNotes.map((item) => <li key={item.id}><AttentionCard item={item} /></li>)}

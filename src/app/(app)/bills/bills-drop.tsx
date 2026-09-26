@@ -275,10 +275,13 @@ export function SortThese({
   items,
   jobs,
   matches,
+  shopStock = true,
 }: {
   items: PaperRowItem[];
   jobs: { id: string; job_number: string; name: string }[];
   matches: Record<string, NumberMatch[]>;
+  /** The Shop Stock switch (0352): off, and no row offers the shelf. Absent = on. */
+  shopStock?: boolean;
 }) {
   const { lines, clear, pick } = useDrop();
   if (!items.length && !lines.length) return null;
@@ -327,6 +330,7 @@ export function SortThese({
         items={items}
         jobs={jobs}
         matches={matches}
+        shopStock={shopStock}
         empty={<p className="py-4 text-center text-sm text-slate-400">Everything dropped here is sorted.</p>}
       />
     </Card>

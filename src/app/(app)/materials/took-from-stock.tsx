@@ -256,12 +256,17 @@ export function TookFromStock({
   takes,
   viewerIsStaff,
   readFailed = false,
+  shopStock = true,
 }: {
   jobId: string;
   takes: JobTake[];
   viewerIsStaff: boolean;
   /** The page's read of the job's takes failed (jobTakes' error): said in the list's place. */
   readFailed?: boolean;
+  /** SHOP STOCK OFF (the switch board, 0352): the Took From Stock button isn't drawn and Nort's
+   *  ?take= fill doesn't open the sheet. The takes already made stay listed, Undo and all, and what
+   *  is billed from them never changes. Absent = on. */
+  shopStock?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -330,7 +335,7 @@ export function TookFromStock({
   useEffect(() => {
     // Once the words are off the address, let the next fill through, even for the same item ("make
     // it 40, not 60"): Nort is an overlay, so this page stays mounted between two of its links.
-    if (!takeParam) {
+    if (!takeParam || !shopStock) {
       prefill.current = null;
       return;
     }
@@ -341,7 +346,7 @@ export function TookFromStock({
     next.delete("take");
     next.delete("qty");
     router.replace(`${pathname}${next.toString() ? `?${next}` : ""}`, { scroll: false });
-  }, [takeParam, qtyParam, openSheet, params, pathname, router]);
+  }, [takeParam, qtyParam, openSheet, params, pathname, router, shopStock]);
 
   const undo = useCallback(
     async (drawGroup: string) => {
@@ -402,13 +407,15 @@ export function TookFromStock({
 
   return (
     <div className="space-y-3">
-      <button
-        type="button"
-        onClick={() => void openSheet(null)}
-        className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
-      >
-        <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
-      </button>
+      {shopStock && (
+        <button
+          type="button"
+          onClick={() => void openSheet(null)}
+          className="btn-gloss flex min-h-[56px] w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
+        >
+          <PackageMinus className="h-5 w-5 shrink-0" /> Took From Stock
+        </button>
+      )}
       <TakesListView takes={takes} viewerIsStaff={viewerIsStaff} pendingGroup={pendingGroup} onUndo={(t) => void undo(t.drawGroup)} readFailed={readFailed} />
       <Modal open={open} onClose={() => setOpen(false)} title="Took From Stock" size="md" dirty={step.kind === "count" && entry !== ""}>
         <TakeSheetView

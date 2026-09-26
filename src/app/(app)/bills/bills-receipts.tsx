@@ -27,6 +27,8 @@ import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { splitReceiptBilling } from "./receipt-billing";
 import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { ALL_ON, featureOn, type FeatureMap } from "@/lib/features";
 
 interface JobOption {
   id: string;
@@ -111,6 +113,8 @@ export function BillsReceipts({
   bills,
   docs,
   readFailed = false,
+  features = ALL_ON,
+  isOwner = false,
 }: {
   orgId: string;
   jobs: JobOption[];
@@ -120,7 +124,16 @@ export function BillsReceipts({
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
+  /**
+   * THE SWITCHES (0352). Purchase Orders off: the tab leaves the strip but still opens from
+   * ?tab=po, under the Off line, with every PO listed and no New PO. Shop Stock off: a receipt line
+   * isn't offered to the shelf. Absent = all on, today's ledger.
+   */
+  features?: FeatureMap;
+  /** The owner sees Turn On on the Off line; anyone else, Ask The Owner. */
+  isOwner?: boolean;
 }) {
+  const posOn = featureOn(features, "purchase_orders");
   const router = useRouter();
   const toast = useToast();
   // Open straight to a tab from a deep link (?tab=po, ?tab=receipts), and open the fold with it.
@@ -293,7 +306,7 @@ export function BillsReceipts({
           onChange={(id) => setTab(id as LedgerTab)}
           tabs={[
             { id: "bills", label: "Bills", count: bills.length },
-            { id: "po", label: "Purchase Orders", count: pos.length },
+            { id: "po", label: "Purchase Orders", count: pos.length, offStrip: !posOn },
             { id: "receipts", label: "Receipts", count: docs.length },
           ]}
         />
@@ -446,7 +459,7 @@ export function BillsReceipts({
                         </div>
                         {b.receipt ? (
                           <div className="mt-2">
-                            <ReceiptLines receipt={b.receipt} />
+                            <ReceiptLines receipt={b.receipt} shopStock={featureOn(features, "shop_stock")} />
                           </div>
                         ) : lineCount > 0 ? (
                           <ul className="mt-2 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
@@ -475,9 +488,10 @@ export function BillsReceipts({
         </div>
 
         <div hidden={tab !== "po"} className="pb-3">
+          <FeatureOffLine feature="purchase_orders" features={features} isOwner={isOwner} />
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs text-slate-500">{pos.length} POs · {formatCurrency(totalPos)} total</span>
-            <NewPoButton jobs={jobs} lists={lists} />
+            {posOn && <NewPoButton jobs={jobs} lists={lists} />}
           </div>
           {pos.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet.</p>
