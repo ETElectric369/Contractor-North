@@ -154,7 +154,7 @@ export function TaxRatesManager({
         <div className="flex items-end gap-2">
           <div className="flex-1">
             <Label htmlFor="tr-name">Name</Label>
-            <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Truckee" />
+            <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. City sales tax" />
           </div>
           <div className="w-28">
             <Label htmlFor="tr-rate">Rate %</Label>

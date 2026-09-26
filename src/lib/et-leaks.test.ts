@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import * as sample from "@/app/(app)/doc-studio/sample-data";
 import { COMPANY } from "@/lib/company";
@@ -35,6 +35,24 @@ describe("a company's paper says only what the company said", () => {
   it("prints no default tagline", () => {
     expect(COMPANY.tagline).toBe("");
     expect(companyFromOrg({ name: "Main Street Builders" } as never).tagline).toBe("");
+  });
+});
+
+describe("no placeholder shows a real account, license, branch or town", () => {
+  // A user copies a placeholder as if it were a format: Erik's CED account number, his branch and
+  // his license number were sitting in empty boxes on every company's screens.
+  it("every placeholder in the app is a neutral example", () => {
+    const walk = (d: string): string[] =>
+      readdirSync(d).flatMap((n) => {
+        const p = join(d, n);
+        return statSync(p).isDirectory() ? walk(p) : p.endsWith(".tsx") ? [p] : [];
+      });
+    const hits = [...walk(join(process.cwd(), "src/app")), ...walk(join(process.cwd(), "src/components"))].flatMap((f) =>
+      (readFileSync(f, "utf8").match(/placeholder=(\{[^}]*\}|"[^"]*")/g) ?? [])
+        .filter((p) => /TR-34426|8802|Truckee|Sunnyvale|Tahoe|Washoe|NV Energy|1156091|\bCED\b/.test(p))
+        .map((p) => `${f.split("/src/")[1]}: ${p}`),
+    );
+    expect(hits).toEqual([]);
   });
 });
 

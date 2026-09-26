@@ -225,7 +225,7 @@ export function PostsManager({
                 id="post-title"
                 value={editing.title}
                 onChange={(e) => setEditing({ ...editing, title: e.target.value })}
-                placeholder="Choosing decking that survives Tahoe winters"
+                placeholder="e.g. Choosing materials that last"
               />
             </div>
             <div>

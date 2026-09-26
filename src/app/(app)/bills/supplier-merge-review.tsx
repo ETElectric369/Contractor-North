@@ -310,7 +310,7 @@ export function SupplierMergeReview({
                 id="merge-account"
                 value={accountNumber}
                 onChange={(e) => setAccountNumber(e.target.value)}
-                placeholder="e.g. TR-34426"
+                placeholder="e.g. AB-12345"
               />
               <p className="mt-1 text-xs text-slate-400">
                 The number on their statement. It is how a payment you send matches what they have on file.
@@ -637,7 +637,7 @@ export function SupplierCandidateReview({
                     id="candidate-account"
                     value={accountNumber}
                     onChange={(e) => setAccountNumber(e.target.value)}
-                    placeholder="e.g. TR-34426"
+                    placeholder="e.g. AB-12345"
                   />
                 </div>
               </>
@@ -652,7 +652,7 @@ export function SupplierCandidateReview({
                 id="candidate-branch"
                 value={branchLabel}
                 onChange={(e) => setBranchLabel(e.target.value)}
-                placeholder="e.g. Sunnyvale"
+                placeholder="e.g. Downtown"
               />
               <p className="mt-1 text-xs text-slate-400">
                 If this is the same company at a different counter, say which one. The money still adds up in

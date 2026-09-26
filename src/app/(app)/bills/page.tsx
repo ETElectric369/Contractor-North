@@ -1307,7 +1307,7 @@ export default async function BillsPage({
                       id="ced-import-text"
                       name="text"
                       rows={8}
-                      placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
+                      placeholder={"INVOICE NO.\n0000-0000000\nINVOICE DATE\n01/15/2026..."}
                       className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     />
                     <FormSubmit>Import Documents</FormSubmit>
