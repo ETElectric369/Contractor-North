@@ -32,27 +32,31 @@ export function GenerateDueButton({ count }: { count: number }) {
   );
 }
 
-export function RecurringRowActions({ id, active }: { id: string; active: boolean }) {
+/** `canGenerate` false = Recurring Billing is off (0352): Generate One Now isn't drawn, because
+ *  generateOne would refuse it. Pause and Resume stay. Absent = on. */
+export function RecurringRowActions({ id, active, canGenerate = true }: { id: string; active: boolean; canGenerate?: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const toast = useToast();
   return (
     <div className="flex items-center gap-1">
-      <button
-        onClick={() =>
-          start(async () => {
-            const res = await generateOne(id);
-            if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
-            toast("Invoice generated", "success");
-            router.refresh();
-          })
-        }
-        disabled={pending}
-        className="rounded-md p-1 text-slate-400 hover:bg-brand/10 hover:text-brand"
-        title="Generate one now"
-      >
-        <Zap className="h-4 w-4" />
-      </button>
+      {canGenerate && (
+        <button
+          onClick={() =>
+            start(async () => {
+              const res = await generateOne(id);
+              if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
+              toast("Invoice generated", "success");
+              router.refresh();
+            })
+          }
+          disabled={pending}
+          className="rounded-md p-1 text-slate-400 hover:bg-brand/10 hover:text-brand"
+          title="Generate one now"
+        >
+          <Zap className="h-4 w-4" />
+        </button>
+      )}
       <button
         onClick={() =>
           start(async () => {

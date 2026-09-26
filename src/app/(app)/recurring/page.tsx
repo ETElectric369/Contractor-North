@@ -9,6 +9,9 @@ import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { RecurringButton, type RecurringValue } from "./recurring-button";
 import { RecurringRowActions, GenerateDueButton } from "./recurring-actions-ui";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn } from "@/lib/features";
+import { readViewerFeatures } from "@/lib/viewer-features";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +22,17 @@ const FREQ_LABEL: Record<string, string> = {
 export default async function RecurringPage() {
   const supabase = await createClient();
 
-  const [{ data: templates }, { data: customers }, { data: orgRow }] = await Promise.all([
+  const [{ data: templates }, { data: customers }, { data: orgRow }, viewer] = await Promise.all([
     supabase.from("recurring_templates").select("*, customers(name)").order("next_date"),
     listCustomerOptions(supabase),
     supabase.from("organizations").select("settings").maybeSingle(),
+    readViewerFeatures(),
   ]);
+  // RECURRING BILLING OFF (the switch board, rule h): this page still opens from a link, with the Off
+  // line on top, and every template can still be read, edited or paused. What goes is Generate: the
+  // engine makes nothing for a switched-off company, and generateOne / generateDue refuse as well.
+  const generating = featureOn(viewer.features, "recurring_billing");
+  const salesTax = featureOn(viewer.features, "sales_tax");
   // "Due" is an ORG-LOCAL calendar decision (audit v921). A UTC today rolls over at ~5 PM Pacific,
   // so this page said "Generate 1 Due" while generateDueTemplates — which gates on the org's own
   // today — created nothing and the toast read "Generated 0 invoices". Same clock, both sides.
@@ -34,10 +43,11 @@ export default async function RecurringPage() {
 
   return (
     <div className="mx-auto max-w-3xl">
+      <FeatureOffLine feature="recurring_billing" features={viewer.features} isOwner={viewer.isOwner} />
       <PageHeader title="Recurring" description="Jobs, invoices, and expenses that repeat — generate them on a schedule.">
         <div className="flex items-center gap-2">
-          {dueCount > 0 && <GenerateDueButton count={dueCount} />}
-          <RecurringButton customers={custOpts} />
+          {generating && dueCount > 0 && <GenerateDueButton count={dueCount} />}
+          <RecurringButton customers={custOpts} salesTax={salesTax} />
         </div>
       </PageHeader>
 
@@ -74,8 +84,8 @@ export default async function RecurringPage() {
                       {t.kind === "invoice" ? ` · ${t.amount != null ? formatCurrency(t.amount) : "—"}${t.customers?.name ? ` · ${t.customers.name}` : ""}${t.auto_send ? " · auto-sends" : ""}` : ""}
                     </div>
                   </div>
-                  <RecurringRowActions id={t.id} active={t.active} />
-                  <RecurringButton customers={custOpts} template={value} />
+                  <RecurringRowActions id={t.id} active={t.active} canGenerate={generating} />
+                  <RecurringButton customers={custOpts} template={value} salesTax={salesTax} />
                 </li>
               );
             })}

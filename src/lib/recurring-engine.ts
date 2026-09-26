@@ -7,6 +7,7 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { bucketOf } from "@/lib/business-cost-buckets";
+import { featureOn } from "@/lib/features";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
  *  in-app "Generate" buttons (user client, RLS-scoped to one org) and the daily cron
@@ -211,6 +212,27 @@ export async function runInvoiceTemplate(
   return true;
 }
 
+/**
+ * RECURRING BILLING OFF (the switch board, 0352, rule h): a switched-off company's due template makes
+ * nothing, and its run is SKIPPED, not saved up. next_date steps past today under the same lock a
+ * claim uses (only while it still holds the value read), and last_generated_at is left alone because
+ * nothing was generated. So turning the switch back on never back-fills the runs missed while it was
+ * off: the next run is the next one due after that day. A failed step is reported and tried again on
+ * the next run, still making nothing.
+ */
+async function skipDueRun(supabase: any, t: any, today: string): Promise<void> {
+  let nd = advance(t.next_date, t.frequency);
+  let g = 0;
+  while (nd <= today && g++ < 600) nd = advance(nd, t.frequency);
+  const { error } = await supabase
+    .from("recurring_templates")
+    .update({ next_date: nd })
+    .eq("id", t.id)
+    .eq("next_date", t.next_date)
+    .select("id");
+  if (error) reportError("recurring-skip-off", error, { templateId: t.id, kind: t.kind });
+}
+
 /** Generate every active template that is due (next_date on or before today). Jobs and
  *  expenses CATCH UP multiple overdue periods (internal rows; capped at 24). Invoices
  *  generate exactly ONE per run (a customer-facing email/bill — no back-dated storm).
@@ -224,9 +246,14 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
   const { data: orgs } = await supabase.from("organizations").select("id, settings");
   const todayByOrg: Record<string, string> = {};
   const settingsByOrg: Record<string, unknown> = {};
+  // Companies with Recurring Billing switched off (0352). A company whose row can't be read is not
+  // in here: missing = ON, today's engine.
+  const switchedOff = new Set<string>();
   for (const o of orgs ?? []) {
     settingsByOrg[o.id] = o.settings;
-    todayByOrg[o.id] = todayStrInTz(getOrgSettings(o.settings).timezone);
+    const s = getOrgSettings(o.settings);
+    todayByOrg[o.id] = todayStrInTz(s.timezone);
+    if (!featureOn(s.features, "recurring_billing")) switchedOff.add(o.id);
   }
   const fallbackToday = new Date().toISOString().slice(0, 10); // template whose org row is unreadable
   const latestToday = Object.values(todayByOrg).reduce((a, b) => (b > a ? b : a), fallbackToday);
@@ -242,6 +269,10 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
     try {
       const today = todayByOrg[t.org_id] ?? fallbackToday;
       if (t.next_date > today) continue; // due in another org's tz, not this org's yet
+      if (switchedOff.has(t.org_id)) {
+        await skipDueRun(supabase, t, today);
+        continue;
+      }
       if (t.kind === "invoice") {
         const ok = await runInvoiceTemplate(supabase, t, userId ?? t.created_by ?? null, today);
         if (ok) count++;
