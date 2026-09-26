@@ -3,11 +3,10 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
+import { Fold, WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { r2, type SupplierActionResult } from "./supplier-balance";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
@@ -71,62 +70,42 @@ const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
   statement: "indigo",
 };
 
-/** "21 days", "today", "3 days ago" - a deadline read the way he would say it out loud. */
-function sayDeadline(days: number | null): string {
-  if (days === null) return "no date on it";
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  if (days > 0) return `${days} days from now`;
-  if (days === -1) return "yesterday";
-  return `${-days} days ago`;
-}
-
 /**
- * WHAT RECONCILING WITH THE SUPPLIER FOUND (Erik, 2026-09-19; migration 0273).
+ * WHAT THE SUPPLIER'S OWN PAPER SAYS, INSIDE THAT SUPPLIER'S LINE (Bills plan, Wave B).
  *
- * He got into his CED payment portal tonight and downloaded every document. Forty-seven parsed,
- * every one reconciles to the cent, and the first thing the portal said was that we were wrong:
+ * This was its own long card (0273): CED's balance a second time, then four lists of the SAME 51
+ * documents, each opening with a paragraph. Erik: "it looks like one big run-on sentence". Now it
+ * lives inside the supplier's detail on /bills, and:
  *
- *     CED says $3,845.14.    The app said $6,476.93.
+ *  · THE DECISIONS HAPPEN ON NEEDS YOU. A paper waiting there (supplierPaperFeed, the same cards
+ *    My Day shows) is not listed again here: one paper, one place to answer it. What is left in
+ *    these lists is what the cards never carry - a credit memo with no job, a paper CED booked to
+ *    STOCK (Record To Shelf), a $0.00 line - so every door this card had still has one home.
+ *  · EACH LIST IS ONE LINE until he opens it: its name, its count, its money.
+ *  · THE BALANCE IS SAID ONCE, on the supplier's line above. Its working sits in a Why? fold.
+ *  · THE DISCOUNT'S "Record A Payment" IS GONE: the supplier's own Record A Payment sits right
+ *    above these lists, and two doors to one payment sheet is one too many.
  *
- * This card is the reconciliation, on a phone, for a man standing at a counter. It holds four
- * things and decides none of them - every judgement in it comes out of supplier-reconcile.ts,
- * which is pure and has a test around it built from his real strings:
- *
- *  1. WHAT CED SAYS, and how fresh that is. Their number, not ours, because only the supplier
- *     knows which invoices a payment settled. A credit memo and a service charge sit in the same
- *     list wearing the same shape as an invoice, so each one says what it IS: a service charge is
- *     interest he paid for being late, and saying that plainly is the only thing that stops it.
- *  2. INVOICES WITH NO JOB. CED's own job name, his jobs to pick from, best guess first and NEVER
- *     preselected.
- *  3. PURCHASES NOT IN HIS BOOKS. $1,765.72 of invoices bought since the app started and recorded
- *     nowhere in it - which means a job's cost is understated, and one of those jobs is about to
- *     be invoiced.
- *  4. THE DISCOUNT STILL ON THE TABLE. $29.62 by 10 October, beside the $60.42 of late interest
- *     CED charged him while $25.99 of the same discount quietly expired.
- *
- * NOTHING HERE IS HIDDEN TO KEEP IT TIDY. Every list that is cut short says how many it cut and
- * what they hold, and the one date boundary in the whole card (purchases older than his first
- * scanned bill) says out loud what it left off and why.
+ * Every judgement still comes out of supplier-reconcile.ts, which is pure and tested.
  */
-export function SupplierInvoicesCard({
-  anchorId,
+export function SupplierPaperLists({
+  accountId,
   accountName,
   feed,
   today,
-  onRecordPayment,
+  onNeedsYou = [],
   actions,
 }: {
-  /** The id the account card upstairs links down to. */
-  anchorId: string;
+  /** The supplier account: names the Not In Your Books fold, so Shop Stock's Record To Shelf door
+   *  (shelf-plan waitingForShelf) lands on it. */
+  accountId: string;
   /** What he calls them: "CED Truckee". Used in every sentence, so it is never "the supplier". */
   accountName: string;
   feed: SupplierReconcileFeed;
   /** The ORG's today (todayStrInTz), never the browser's day: it ages every deadline on here. */
   today: string;
-  /** Opens the payment sheet on the account card above. The discount section's one action, and
-   *  the only reason this card knows the sheet exists. */
-  onRecordPayment?: () => void;
+  /** Papers answered on a Needs You card (supplierPaperFeed): never listed a second time here. */
+  onNeedsYou?: string[];
   actions: SupplierInvoiceActions;
 }) {
   const router = useRouter();
@@ -136,8 +115,6 @@ export function SupplierInvoicesCard({
   /** The last thing that happened, in the SERVER'S own words - only it knows what actually landed
    *  in the database, and a screen guessing at that is how a man trusts a number nobody wrote. */
   const [done, setDone] = useState<string | null>(null);
-  /** One row open at a time. A phone screen has room for one decision. */
-  const [openRow, setOpenRow] = useState<string | null>(null);
   /** What he has picked in an open row's picker, before he presses. Nothing is preselected, ever. */
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
@@ -169,30 +146,36 @@ export function SupplierInvoicesCard({
     });
   }
 
-  // Held steady across renders so the reads below are not redone on every keystroke in a picker -
-  // `feed` is a fresh object every time the page re-renders, and forty invoices ranked against
-  // thirty-one jobs is not work to repeat for nothing on a phone.
+  // Held steady across renders so the reads below are not redone on every keystroke in a picker.
   const invoices = useMemo(() => feed?.invoices ?? [], [feed]);
   const jobs = useMemo(() => feed?.jobs ?? [], [feed]);
+  const cardIds = useMemo(() => new Set(onNeedsYou), [onNeedsYou]);
 
   const says = useMemo(() => supplierSaysOpen(invoices), [invoices]);
   const documents = useMemo(() => openDocuments(invoices), [invoices]);
+  // ONE PAPER, ONE PLACE, in the portal mirror too: the count on the fold is everything CED has
+  // open (it matches "papers open" above), but a paper on a Needs You card is not a row here; one
+  // link line names how many are there instead.
+  const docRows = useMemo(() => documents.filter((d) => !cardIds.has(d.id)), [documents, cardIds]);
+  const docsOnCards = documents.length - docRows.length;
   // Papers a bill already covers, and papers from before his books began, ask nothing (Wave A).
-  const needJob = useMemo(
+  const allNeedJob = useMemo(
     () => invoicesNeedingJob(invoices, jobs, { since: feed?.recordsSince ?? null }),
     [invoices, jobs, feed?.recordsSince],
   );
+  // ONE PAPER, ONE PLACE: a paper on a Needs You card is answered there.
+  const needJob = useMemo(() => allNeedJob.filter((r) => !cardIds.has(r.invoice.id)), [allNeedJob, cardIds]);
   const needJobTotals = useMemo(() => needsJobTotals(needJob), [needJob]);
   const needBill = useMemo(
     () => invoicesNeedingBill(invoices, { since: feed?.recordsSince ?? null }),
     [invoices, feed?.recordsSince],
   );
+  const billRows = useMemo(() => needBill.rows.filter((r) => !cardIds.has(r.id)), [needBill, cardIds]);
+  const billRowsTotal = r2(billRows.reduce((s, r) => s + (Number(r.total) || 0), 0));
   const claimable = useMemo(() => claimableDiscounts(invoices, today), [invoices, today]);
   const missed = useMemo(() => missedDiscounts(invoices, today), [invoices, today]);
   const interest = useMemo(() => lateInterest(invoices), [invoices]);
-
-  const nothingWaiting =
-    needJob.length === 0 && needBill.rows.length === 0 && claimable.total <= 0.005;
+  const waitingOnCards = invoices.filter((i) => cardIds.has(i.id)).length;
 
   function run(fn: () => Promise<SupplierActionResult>, key: string, fallback: string) {
     setError(null);
@@ -204,24 +187,18 @@ export function SupplierInvoicesCard({
       if (!res.ok) {
         setDone(null);
         setError(res.error ?? "Nothing was saved. Try again.");
-        // AND WHERE HE WAS LOOKING WHEN IT HAPPENED (review, 2026-09-19). This card is long; a
-        // refusal rendered only at the top is a thousand pixels above the thumb that caused it,
-        // so a button un-disables, the row does not change, and the reason is off screen. The
-        // banner above stays - it is what a screen reader reaches first - and the same sentence
-        // is repeated under the row that asked.
+        // AND WHERE HE WAS LOOKING WHEN IT HAPPENED: the same sentence under the row that asked.
         setFailedAt(key);
         return;
       }
       setDone(res.message ?? fallback);
-      setOpenRow(null);
       router.refresh();
     });
   }
 
   /**
-   * A section's "Show All" switch. NOTHING IS EVER CUT SILENTLY: the button says how many rows
-   * are behind it AND what they hold, so a list that stops at six never quietly costs him a
-   * number. Pass the whole count and the money in the tail; the rest is arithmetic.
+   * A list's "Show All" switch. NOTHING IS EVER CUT SILENTLY: the button says how many rows are
+   * behind it AND what they hold.
    */
   function more(key: string, total: number, hiddenTotal: number, verb = "Holding") {
     const hidden = total - LIST_LIMIT;
@@ -239,146 +216,95 @@ export function SupplierInvoicesCard({
     );
   }
 
+  const listLabel = (name: string, count: number, money?: string) => (
+    <span className="text-sm font-semibold text-slate-900">
+      {name} ({count}){money ? <span className="font-normal text-slate-500"> · {money}</span> : null}
+    </span>
+  );
+
   return (
-    <Card id={anchorId} className="mb-6 scroll-mt-20 p-4">
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">What {accountName} Says You Owe</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          {accountName}&apos;s own documents, read off their portal. Where they disagree with your
-          bills, they are right: only your supplier knows which invoices a payment settled.
-        </p>
-      </div>
-
-      {/* THEIR NUMBER, WHOLE. Charges and credits are named underneath it rather than netted out
-          of sight - a credit memo is money coming BACK, and a man who cannot see it will not
-          chase it. */}
-      <div className="mb-3 rounded-lg bg-slate-50 px-4 py-3">
-        <div className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(says.owed)}</div>
-        <div className="mt-0.5 text-xs leading-relaxed text-slate-500">
-          {says.documents} open {says.documents === 1 ? "document" : "documents"}
-          {says.asOf ? `, the newest dated ${formatDate(says.asOf)}` : ""}.{" "}
-          {formatCurrency(says.charges)} charged
+    <div className="mt-3 space-y-1 border-t border-slate-100 pt-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{accountName}&apos;s Own Papers</p>
+      {waitingOnCards > 0 && (
+        <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+          {waitingOnCards} {waitingOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
+        </a>
+      )}
+      <WhyFold label="Where This Comes From">
+        <p>
+          Read off {accountName}&apos;s portal. Where they disagree with your bills they are right: only the
+          supplier knows which invoices a payment settled. {says.documents} open{" "}
+          {says.documents === 1 ? "document" : "documents"}
+          {says.asOf ? `, the newest dated ${formatDate(says.asOf)}` : ""}: {formatCurrency(says.charges)} charged
           {says.credits > 0.005 ? `, less ${formatCurrency(says.credits)} of credit coming back to you` : ""}.
-        </div>
-      </div>
-
-      {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {done && (
-        <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
-          {done}
-        </div>
-      )}
-
-      {nothingWaiting && (
-        <p className="mb-3 rounded-lg bg-green-50 px-4 py-2.5 text-sm text-green-800">
-          Every document {accountName} has sent is on a job, in your bills, and inside its discount
-          date. Nothing here needs you.
         </p>
-      )}
-
-      {/* ── 1. INVOICES WITH NO JOB ─────────────────────────────────────────────────────────────
-          CED prints a job name on every invoice and it very nearly matches his own. Very nearly
-          is the problem: the matcher ranks and the line under each picker says how sure it is,
-          but nothing is ever chosen for him. */}
-      {needJob.length > 0 && (
-        <section className="mb-4">
-          <h3 className="text-sm font-semibold text-slate-900">
-            Invoices With No Job ({needJob.length})
-          </h3>
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-            {formatCurrency(needJobTotals.total)} of buying that no job is carrying yet.{" "}
-            {accountName} wrote a job name on each one. Nothing below is picked for you.
-            {needJobTotals.undecided > 0
-              ? ` ${needJobTotals.undecided} of them could be more than one of your jobs, so they are yours to settle.`
-              : ""}
-            {/* SAID BEFORE HE MEETS THE ROW, not discovered when he taps one and finds no picker.
-                CED booked these to shop stock, which is never a job, so they are the one kind of
-                row on this card with nothing to decide - and a row that refuses without warning
-                is the thing this app is not allowed to do. */}
-            {needJobTotals.stock > 0
-              ? ` ${needJobTotals.stock} of them ${needJobTotals.stock === 1 ? "is" : "are"} shop stock, holding ${formatCurrency(needJobTotals.stockTotal)}, and stay as overhead.`
-              : ""}
+        {needBill.reversedRows > 0 && (
+          <p>
+            {needBill.reversedRows === 1
+              ? `One purchase, ${formatCurrency(needBill.reversedTotal)}, went straight back on a credit memo`
+              : `${needBill.reversedRows} purchases, ${formatCurrency(needBill.reversedTotal)}, went straight back on credit memos`}
+            . Nothing kept, nothing owed, so nothing to record.
           </p>
+        )}
+        {needBill.olderRows > 0 && (
+          <p>
+            {needBill.olderRows} more {needBill.olderRows === 1 ? "purchase" : "purchases"} ({formatCurrency(needBill.olderTotal)})
+            {" "}are from before your books here began{needBill.since ? ` on ${formatDate(needBill.since)}` : ""}, so they are not listed.
+          </p>
+        )}
+      </WhyFold>
 
-          <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
+      {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {done && <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{done}</div>}
+
+      {/* ── INVOICES WITH NO JOB, not on a card: a credit memo, a STOCK paper, a $0.00 one. ── */}
+      {needJob.length > 0 && (
+        <Fold summary={listLabel("Invoices With No Job", needJob.length, formatCurrency(needJobTotals.total))}>
+          <WhyFold>
+            <p>
+              Buying no job is carrying yet. {accountName} wrote a job name on each one, and nothing is picked for you.
+              {needJobTotals.stock > 0
+                ? ` ${needJobTotals.stock} ${needJobTotals.stock === 1 ? "is" : "are"} shop stock (${formatCurrency(needJobTotals.stockTotal)}) and stay as overhead.`
+                : ""}
+            </p>
+          </WhyFold>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
             {(showAll.job ? needJob : needJob.slice(0, LIST_LIMIT)).map(({ invoice, match }) => {
-              const isOpen = openRow === `job:${invoice.id}`;
               const choice = picked[invoice.id] ?? "";
               const canPick = match.verdict !== "stock" && match.ranked.length > 0;
               return (
                 <li key={invoice.id}>
-                  {/* THE WHOLE ROW IS THE TARGET. One thumb, one target, no second button inside
-                      it to mis-tap on a ladder (the payroll board's rule). */}
-                  <button
-                    type="button"
-                    onClick={() => setOpenRow(isOpen ? null : `job:${invoice.id}`)}
-                    aria-expanded={isOpen}
-                    className="flex min-h-[60px] w-full items-center justify-between gap-3 px-3 py-2.5 text-left active:bg-slate-50"
-                  >
-                    <span className="flex min-w-0 items-start gap-2">
-                      {isOpen ? (
-                        <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                      ) : (
-                        <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                      )}
+                  <details>
+                    <summary className="flex min-h-[60px] cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
                       <span className="min-w-0">
-                        {/* CED'S OWN WORDS, unless CED's own words are the form's column header.
-                            Invoice 1102291 came through with "CUSTOMER ORDER NO." where the job
-                            name should be - quoting that back at him as if it meant something is
-                            the app making him decode its input instead of reading it for him. The
-                            raw string is still shown, one line down, labelled as what it is. */}
                         <span className="block truncate text-sm font-medium text-slate-900">
-                          {isUsableJobName(invoice.jobNameRaw)
-                            ? `“${invoice.jobNameRaw!.trim()}”`
-                            : "No job name on it"}
+                          {isUsableJobName(invoice.jobNameRaw) ? `“${invoice.jobNameRaw!.trim()}”` : "No job name on it"}
                         </span>
-                        {/* EVERY WORD ON THIS LINE COSTS ONE AT THE END OF IT. At 375px the
-                            "Invoice " prefix pushed whether it was settled off the edge, and that
-                            is the fact that decides whether the money is still his to hold on to.
-                            A credit memo still says what it is, because there the word IS news. */}
                         <span className="block truncate text-xs text-slate-400">
                           {invoice.kind === "invoice" ? "" : `${sayKind(invoice.kind)} `}
                           {invoice.invoiceNumber}
                           {invoice.invoiceDate ? ` · ${formatDate(invoice.invoiceDate)}` : ""}
-                          {!isUsableJobName(invoice.jobNameRaw) && invoice.jobNameRaw?.trim()
-                            ? ` · their copy says “${invoice.jobNameRaw.trim()}”`
-                            : ""}
                         </span>
                       </span>
-                    </span>
-                    {/* SETTLED OR OPEN BELONGS BESIDE THE MONEY, not on the end of a line that
-                        truncates. At 375px it was the last thing on that line and so the first
-                        thing to vanish - and whether he has already paid for something changes
-                        what he does about it. */}
-                    <span className="shrink-0 text-right">
-                      <span className="block text-sm font-semibold tabular-nums text-slate-800">
-                        {formatCurrency(invoice.total)}
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sm font-semibold tabular-nums text-slate-800">{formatCurrency(invoice.total)}</span>
+                        <span className="block text-xs text-slate-400">{invoice.closed ? "settled" : "still open"}</span>
                       </span>
-                      <span className="block text-xs text-slate-400">
-                        {invoice.closed ? "settled" : "still open"}
-                      </span>
-                    </span>
-                  </button>
-
-                  {isOpen && (
+                    </summary>
                     <div className="border-t border-slate-100 bg-slate-50 px-3 py-3">
                       <p className="mb-2 text-xs leading-relaxed text-slate-600">{match.because}</p>
-
-                      {/* A CONTROL THAT CAN ONLY REFUSE MUST NOT RENDER. CED booked this one to
-                          STOCK, which is not a job and never will be - so there is no picker,
-                          and a sentence says why instead of a dead button. */}
+                      {/* A CONTROL THAT CAN ONLY REFUSE MUST NOT RENDER: STOCK is never a job. */}
                       {canPick ? (
                         <>
-                          <Label htmlFor={`job-${invoice.id}`}>Which job was this for?</Label>
+                          <Label htmlFor={`job-${invoice.id}`}>Which Job Was This For?</Label>
                           <Select
                             id={`job-${invoice.id}`}
                             value={choice}
+                            className="min-h-11"
                             onChange={(e) => setPicked((p) => ({ ...p, [invoice.id]: e.target.value }))}
                           >
-                            {/* NEVER PRESELECTED. The empty option is the one that is chosen when
-                                the row opens, on every row, including the ones the matcher is
-                                sure about. */}
-                            <option value="">— Pick the job —</option>
+                            {/* NEVER PRESELECTED, on every row, including the ones the matcher is sure about. */}
+                            <option value="">— Pick The Job —</option>
                             {match.ranked.map(({ job }) => (
                               <option key={job.id} value={job.id}>
                                 {jobPickerLabel(job)}
@@ -392,79 +318,43 @@ export function SupplierInvoicesCard({
                               run(
                                 () => actions.setInvoiceJob({ invoiceId: invoice.id, jobId: choice }),
                                 `job:${invoice.id}`,
-                                `Invoice ${invoice.invoiceNumber} is on ${
-                                  match.ranked.find((g) => g.job.id === choice)?.job.name ?? "that job"
-                                }.`,
+                                `Invoice ${invoice.invoiceNumber} is on ${match.ranked.find((g) => g.job.id === choice)?.job.name ?? "that job"}.`,
                               )
                             }
                           >
                             {busy === `job:${invoice.id}` ? "Filing It…" : "File It On This Job"}
                           </Button>
-                          {!choice && (
-                            <p className="mt-1.5 text-xs text-slate-500">
-                              Pick a job and this button files {formatCurrency(invoice.total)} onto its
-                              costs.
-                            </p>
-                          )}
                         </>
                       ) : (
-                        <p className="text-xs leading-relaxed text-slate-600">
-                          This is shop stock, so there is no job to put it on. It stays as overhead,
-                          which is where it belongs.
-                        </p>
+                        <p className="text-xs leading-relaxed text-slate-600">Shop stock: no job to put it on. It stays as overhead.</p>
+                      )}
+                      {failedAt === `job:${invoice.id}` && error && (
+                        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
                       )}
                     </div>
-                  )}
+                  </details>
                 </li>
               );
             })}
           </ul>
-          {more(
-            "job",
-            needJob.length,
-            r2(needJob.slice(LIST_LIMIT).reduce((s, r) => s + (Number(r.invoice.total) || 0), 0)),
-          )}
-        </section>
+          {more("job", needJob.length, r2(needJob.slice(LIST_LIMIT).reduce((s, r) => s + (Number(r.invoice.total) || 0), 0)))}
+        </Fold>
       )}
 
-      {/* ── 2. PURCHASES NOT IN HIS BOOKS ───────────────────────────────────────────────────────
-          The one that costs him real money quietly. $1,765.72 of it CED has already been paid
-          for, so nothing anywhere will ever raise it again on its own. */}
-      {needBill.rows.length > 0 && (
-        <section className="mb-4">
-          <h3 className="text-sm font-semibold text-slate-900">
-            Purchases Not In Your Books ({needBill.rows.length})
-          </h3>
-          <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-            {formatCurrency(needBill.total)} bought at {accountName} with no bill anywhere in here,
-            so the job it was bought for is not carrying the cost.
-            {needBill.settledTotal > 0.005 ? (
-              <>
-                {" "}
-                <span className="font-medium text-amber-800">
-                  {formatCurrency(needBill.settledTotal)} of it is already paid for
-                </span>
-                , which means nothing on this screen will ever raise it again. Check those jobs
-                before you invoice them.
-              </>
-            ) : (
-              ""
-            )}
-            {/* COPY MUST NOT PROMISE A BUTTON THAT ISN'T THERE, and must not promise it on rows
-                it cannot appear on. The first draft said "say which job up in Invoices With No Job
-                and Record It As A Bill appears on the row down here" - but that list and this one
-                are different sets, so he could file six jobs up there and come back to no new
-                buttons at all, and a purchase CED booked to STOCK can never be given a job in the
-                first place. It now says only what is true of the rows he is looking at. */}
-            {needBill.rows.some((r) => !r.jobId)
-              ? actions.recordAsBill
-                ? ` ${needBill.rows.filter((r) => !r.jobId).length} of them have no job on them here, and a purchase needs a job before its cost can go anywhere${actions.recordToShelf ? ", unless it is shop stock: Record To Shelf is on every row" : ""}. Each one is up in Invoices With No Job as well: answer it on THAT row, and this row gets its button.`
-                : " Most of these are on no job here either. Say which job up in Invoices With No Job and the cost can follow it there."
-              : ""}
-          </p>
-
-          <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-            {(showAll.bill ? needBill.rows : needBill.rows.slice(0, LIST_LIMIT)).map((invoice) => (
+      {/* ── NOT IN YOUR BOOKS, not on a card: mostly what CED booked to STOCK. ── */}
+      {billRows.length > 0 && (
+        <Fold
+          id={`supplier-not-in-books-${accountId}`}
+          summary={listLabel("Not In Your Books", billRows.length, formatCurrency(billRowsTotal))}
+        >
+          <WhyFold>
+            <p>
+              Bought at {accountName} with no bill anywhere in here, so no job is carrying the cost. Shop stock goes
+              in with Record To Shelf; a purchase with a job goes in with Record It As A Bill.
+            </p>
+          </WhyFold>
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {(showAll.bill ? billRows : billRows.slice(0, LIST_LIMIT)).map((invoice) => (
               <li key={invoice.id} className="px-3 py-2.5">
                 <div className="flex items-start justify-between gap-3">
                   <span className="min-w-0">
@@ -479,9 +369,6 @@ export function SupplierInvoicesCard({
                         "No job name on it"
                       )}
                     </span>
-                    {/* WHERE IT STANDS GOES ON THE SMALL LINE, not in the title. "(not on a job
-                        here yet)" hung off the end of a quoted road name and was the half that
-                        got cut on a 375px phone, which left the row saying nothing it needed to. */}
                     <span className="block truncate text-xs text-slate-400">
                       {invoice.invoiceNumber}
                       {invoice.invoiceDate ? ` · ${formatDate(invoice.invoiceDate)}` : ""}
@@ -489,23 +376,14 @@ export function SupplierInvoicesCard({
                     </span>
                   </span>
                   <span className="shrink-0 text-right">
-                    <span className="block text-sm font-semibold tabular-nums text-slate-800">
-                      {formatCurrency(invoice.total)}
-                    </span>
-                    {/* The one that stings: money that has already left his account for a job
-                        that never saw the cost. It gets the amber, on the row, every time. */}
+                    <span className="block text-sm font-semibold tabular-nums text-slate-800">{formatCurrency(invoice.total)}</span>
                     <span className={`block text-xs ${invoice.closed ? "text-amber-700" : "text-slate-400"}`}>
                       {invoice.closed ? "already paid for" : "still open"}
                     </span>
                   </span>
                 </div>
 
-                {/* MAYBE ALREADY IN HIS BOOKS (audit v994, DB1). A bill that carries this number,
-                    or a counter ticket on this account and job for the same money a few days
-                    apart, may be this very purchase. Each one is offered, with the words that
-                    matched, and a person says which it is: Same Purchase ties them and writes no
-                    money; Different Purchase records it after all. Record It As A Bill never sits
-                    beside these on its own, because one press of it was a second bill. */}
+                {/* MAYBE ALREADY IN HIS BOOKS (audit v994, DB1): a person says which it is. */}
                 {invoice.samePurchase?.length && actions.tieToBill ? (
                   <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2.5">
                     {invoice.samePurchase.map((c) => (
@@ -542,14 +420,7 @@ export function SupplierInvoicesCard({
                       >
                         {busy === `bill:${invoice.id}` ? "Recording It…" : "Different Purchase: Record It Anyway"}
                       </Button>
-                    ) : (
-                      <p className="text-xs leading-relaxed text-amber-900">
-                        If it is a different purchase, give it a job up in Invoices With No Job, and Different Purchase: Record It Anyway appears here.
-                      </p>
-                    )}
-                    {/* Shop stock is a different purchase too: the intro says Record To Shelf is on
-                        every row, so a row with a same-purchase match carries it here, as the same
-                        person's decision the Tie asks for. */}
+                    ) : null}
                     {actions.recordToShelf && actions.shelfLines && (
                       <Button
                         variant="outline"
@@ -563,29 +434,14 @@ export function SupplierInvoicesCard({
                   </div>
                 ) : null}
                 {failedAt === `tie:${invoice.id}` && error && (
-                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">
-                    {error}
-                  </p>
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">{error}</p>
                 )}
-                {/* ONE ACTION, AND ONLY WHEN THERE IS ONE TO OFFER. With recordAsBill wired it
-                    writes the cost onto the job at CED's own line prices. Without it the job name
-                    above is a link, which is the way forward for a row that HAS a job; for one
-                    that does not, the section's own intro says where to go, once, instead of the
-                    same sentence repeating down six rows of a phone screen. */}
-                {/* RECORD TO SHELF (Shop Stock, Phase 2): on any row, job or no job, because CED
-                    writing a job on it doesn't stop a person deciding it is stock. "STOCK" in its
-                    job box only says so beside the button; nothing is picked for him. */}
                 {actions.recordToShelf && actions.shelfLines && !(invoice.samePurchase?.length && actions.tieToBill) && (
                   <div className="mt-2 space-y-1">
                     {companyUseWord(invoice.jobNameRaw)?.shelf && (
                       <p className="text-xs text-sky-800">CED wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
                     )}
-                    <Button
-                      variant="outline"
-                      className="h-11 w-full"
-                      disabled={pending}
-                      onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}
-                    >
+                    <Button variant="outline" className="h-11 w-full" disabled={pending} onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}>
                       {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Shelf"}
                     </Button>
                   </div>
@@ -607,229 +463,127 @@ export function SupplierInvoicesCard({
                   </Button>
                 )}
                 {failedAt === `bill:${invoice.id}` && error && (
-                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">
-                    {error}
-                  </p>
+                  <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm leading-relaxed text-red-700">{error}</p>
                 )}
               </li>
             ))}
           </ul>
-          {more(
-            "bill",
-            needBill.rows.length,
-            r2(needBill.rows.slice(LIST_LIMIT).reduce((s, r) => s + (Number(r.total) || 0), 0)),
-          )}
-
-          {/* WHAT THIS LIST LEFT OUT, SAID OUT LOUD. These predate the first bill this app ever
-              held, so it could not have recorded them and there is nothing to fix - but money
-              that simply disappears off a screen is what makes a man stop trusting the screen. */}
-          {needBill.olderRows > 0 && (
-            <p className="mt-2 text-xs text-slate-400">
-              Another {needBill.olderRows}{" "}
-              {needBill.olderRows === 1 ? "purchase" : "purchases"} holding{" "}
-              {formatCurrency(needBill.olderTotal)} are from before your books here began
-              {needBill.since ? ` on ${formatDate(needBill.since)}` : ""}, so they were never going
-              to be in your books. They are not on this list.
-            </p>
-          )}
-        </section>
+          {more("bill", billRows.length, r2(billRows.slice(LIST_LIMIT).reduce((s, r) => s + (Number(r.total) || 0), 0)))}
+        </Fold>
       )}
 
-      {/* WHAT THE LIST ABOVE LEAVES OUT, AND WHY - OUTSIDE THE LIST, SO IT OUTLIVES IT (review,
-          2026-09-19). Nested inside `needBill.rows.length > 0` these vanished the moment he
-          finished the list, and the green "nothing here needs you" banner then said every CED
-          document was in his books while $225.47 of returned merchandise sat unaccounted for. The
-          sentence that explains an absence has to outlast the thing it was explaining. */}
-      {needBill.reversedRows > 0 && (
-        <p className="mb-3 text-xs leading-relaxed text-slate-400">
-          {needBill.reversedRows === 1
-            ? `One purchase, ${formatCurrency(needBill.reversedTotal)}, went straight back to ${accountName} on a credit memo`
-            : `${needBill.reversedRows} purchases, ${formatCurrency(needBill.reversedTotal)} between them, went straight back to ${accountName} on credit memos`}
-          . You kept nothing and you owe nothing, so there is no bill to record and they are not on
-          the list above.
-        </p>
-      )}
-
-      {/* ── 3. THE DISCOUNT STILL ON THE TABLE ──────────────────────────────────────────────────
-          A date, a number, and what it costs to miss it. The interest line beside it is the
-          argument: he has paid CED $60.42 for being late while this same discount expired. */}
+      {/* ── THE DISCOUNT: a date, a number, what missing it costs. Paying is the account's own
+             Record A Payment, just above: one door to the payment sheet. ── */}
       {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
-        <section className="mb-4">
-          <h3 className="text-sm font-semibold text-slate-900">
-            {claimable.total > 0.005 ? "Discount Still On The Table" : "The Discount You Are Missing"}
-          </h3>
-
-          {claimable.total > 0.005 ? (
-            <div className="mt-1 rounded-lg bg-green-50 px-4 py-3">
-              <div className="text-xl font-bold tabular-nums text-green-900">
-                {formatCurrency(claimable.total)}
-              </div>
-              {/* WHAT THE DATE ACTUALLY BUYS. When every live discount falls on one day the
-                  whole figure rides on it and the sentence says so; when they do not, quoting
-                  the whole amount against the soonest date would promise money that date cannot
-                  claim. Two sentences, and the screen picks the true one. */}
-              <p className="mt-0.5 text-xs leading-relaxed text-green-900">
-                {claimable.dueOnNext >= claimable.total - 0.005 ? (
-                  <>
-                    comes off if {accountName} is paid by{" "}
-                    <span className="font-semibold">{formatDate(claimable.nextDeadline)}</span>, which is{" "}
-                    {sayDeadline(claimable.daysLeft)}. It is spread across {claimable.rows.length}{" "}
-                    {claimable.rows.length === 1 ? "invoice" : "invoices"}.
-                  </>
-                ) : (
-                  <>
-                    is still on the table across {claimable.rows.length}{" "}
-                    {claimable.rows.length === 1 ? "invoice" : "invoices"}, and{" "}
-                    {formatCurrency(claimable.dueOnNext)} of it goes if {accountName} is not paid by{" "}
-                    <span className="font-semibold">{formatDate(claimable.nextDeadline)}</span>, which is{" "}
-                    {sayDeadline(claimable.daysLeft)}.
-                  </>
-                )}
-              </p>
-            </div>
-          ) : (
-            <p className="mt-0.5 text-xs leading-relaxed text-slate-500">
-              Nothing is claimable today. {accountName} takes a cut off every invoice paid by the
-              tenth of the month after you buy.
+        <Fold
+          summary={
+            // THE FIGURE IS SAID ONCE: the green sentence on the supplier's own line, just above,
+            // already says how much comes off and by when. This line is the list's name and count.
+            claimable.total > 0.005 ? (
+              listLabel("Discount Still On The Table", claimable.rows.length)
+            ) : (
+              <span className="text-sm font-semibold text-slate-900">The Discount You Are Missing</span>
+            )
+          }
+        >
+          {/* The figure and its date are on the supplier's line; the body is the invoices. */}
+          {!(claimable.total > 0.005) && (
+            <p className="text-xs leading-relaxed text-green-900">
+              Nothing is claimable today. {accountName} takes a cut off every invoice paid by the tenth of the month after you buy.
             </p>
           )}
-
           {claimable.rows.length > 0 && (
             <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {(showAll.disc ? claimable.rows : claimable.rows.slice(0, LIST_LIMIT)).map(
-                ({ invoice, reading }) => (
-                  <li key={invoice.id} className="flex items-start justify-between gap-3 px-3 py-2">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm text-slate-800">
-                        {invoice.invoiceNumber}
-                        {invoice.jobNameRaw?.trim() ? ` · ${invoice.jobNameRaw.trim()}` : ""}
-                      </span>
-                      <span className="block truncate text-xs text-slate-400">
-                        {formatCurrency(documentOpenAmount(invoice))} open · pay by{" "}
-                        {formatDate(reading.by)}
-                      </span>
+              {(showAll.disc ? claimable.rows : claimable.rows.slice(0, LIST_LIMIT)).map(({ invoice, reading }) => (
+                <li key={invoice.id} className="flex items-start justify-between gap-3 px-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-slate-800">
+                      {invoice.invoiceNumber}
+                      {invoice.jobNameRaw?.trim() ? ` · ${invoice.jobNameRaw.trim()}` : ""}
                     </span>
-                    <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">
-                      {formatCurrency(reading.amount)} off
+                    <span className="block truncate text-xs text-slate-400">
+                      {formatCurrency(documentOpenAmount(invoice))} open · pay by {formatDate(reading.by)}
                     </span>
-                  </li>
-                ),
-              )}
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">{formatCurrency(reading.amount)} off</span>
+                </li>
+              ))}
             </ul>
           )}
-          {more(
-            "disc",
-            claimable.rows.length,
-            r2(claimable.rows.slice(LIST_LIMIT).reduce((s, r) => s + r.reading.amount, 0)),
-            "Worth Another",
-          )}
-
-          {/* WHAT IT HAS COST SO FAR. Nothing can be done about either number, which is exactly
-              why they are on the screen: together they are the only honest argument for paying
-              the next batch by the tenth. */}
+          {more("disc", claimable.rows.length, r2(claimable.rows.slice(LIST_LIMIT).reduce((s, r) => s + r.reading.amount, 0)), "Worth Another")}
           {(missed.total > 0.005 || interest.charged > 0.005) && (
             <p className="mt-2 text-xs leading-relaxed text-amber-900">
-              {missed.total > 0.005
-                ? `${formatCurrency(missed.total)} of discount has already run out on invoices still sitting open. `
-                : ""}
+              {missed.total > 0.005 ? `${formatCurrency(missed.total)} of discount already ran out on invoices still open. ` : ""}
               {interest.charged > 0.005
-                ? `${accountName} has charged you ${formatCurrency(interest.charged)} of interest for paying late${
-                    interest.stillOpen > 0.005
-                      ? `, ${formatCurrency(interest.stillOpen)} of it still on this balance`
-                      : ""
-                  }.`
+                ? `${formatCurrency(interest.charged)} of late interest charged${interest.stillOpen > 0.005 ? `, ${formatCurrency(interest.stillOpen)} still open` : ""}.`
                 : ""}
             </p>
           )}
-
-          {/* THE ONE ACTION. Paying is how a discount gets claimed, and the sheet that does it is
-              on the account card above - so this opens that, rather than growing a second way to
-              record a payment that could drift from the first. */}
-          {onRecordPayment && claimable.total > 0.005 && (
-            <Button className="mt-2 h-12 w-full" disabled={pending} onClick={onRecordPayment}>
-              Record A Payment
-            </Button>
-          )}
-        </section>
+        </Fold>
       )}
 
-      {/* ── 4. THE LEDGER ───────────────────────────────────────────────────────────────────────
-          Their open documents, newest first, the way the portal lists them. A credit memo and a
-          service charge are NOT invoices, so each one says what it is and what that means. */}
-      <section>
-        <h3 className="text-sm font-semibold text-slate-900">
-          What {accountName} Has Open ({documents.length})
-        </h3>
+      {/* ── WHAT THEY HAVE OPEN: their ledger, newest first, the way the portal lists it. ── */}
+      <Fold summary={listLabel(`What ${accountName} Has Open`, documents.length)}>
         {documents.length === 0 ? (
-          <p className="mt-1 text-sm text-slate-400">
-            {accountName} has nothing open on this account.
-          </p>
+          <p className="py-2 text-sm text-slate-400">{accountName} has nothing open on this account.</p>
         ) : (
           <>
-            <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {(showAll.docs ? documents : documents.slice(0, LIST_LIMIT)).map((invoice) => {
-                const disc = discountReading(invoice, today);
-                const explain = explainKind(invoice.kind);
-                const amount = documentOpenAmount(invoice);
-                return (
-                  <li key={invoice.id} className="px-3 py-2.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="min-w-0">
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="truncate text-sm font-medium text-slate-900">
-                            {invoice.invoiceNumber}
+            {docsOnCards > 0 && (
+              <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                {docsOnCards} Of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
+              </a>
+            )}
+            {docRows.length > 0 && (
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {(showAll.docs ? docRows : docRows.slice(0, LIST_LIMIT)).map((invoice) => {
+                  const disc = discountReading(invoice, today);
+                  const explain = explainKind(invoice.kind);
+                  const amount = documentOpenAmount(invoice);
+                  return (
+                    <li key={invoice.id} className="px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-900">{invoice.invoiceNumber}</span>
+                            {invoice.kind !== "invoice" && <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>}
                           </span>
-                          {invoice.kind !== "invoice" && (
-                            <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>
+                          <span className="block truncate text-xs text-slate-400">
+                            {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
+                            {invoice.jobName
+                              ? ` · ${invoice.jobName}`
+                              : isUsableJobName(invoice.jobNameRaw)
+                                ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
+                                : ""}
+                            {(invoice.billCount ?? 0) > 0 ? " · in your books" : " · not in your books"}
+                          </span>
+                          {explain && <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className={`block text-sm font-semibold tabular-nums ${amount < 0 ? "text-green-700" : "text-slate-900"}`}>
+                            {formatCurrency(amount)}
+                          </span>
+                          {disc.state === "live" && (
+                            <span className="block text-xs text-green-700">
+                              {formatCurrency(disc.amount)} off by {formatDate(disc.by)}
+                            </span>
+                          )}
+                          {disc.state === "expired" && (
+                            <span className="block text-xs text-slate-400">
+                              {formatCurrency(disc.amount)} off expired {formatDate(disc.by)}
+                            </span>
                           )}
                         </span>
-                        <span className="block truncate text-xs text-slate-400">
-                          {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
-                          {invoice.jobName
-                            ? ` · ${invoice.jobName}`
-                            : isUsableJobName(invoice.jobNameRaw)
-                              ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
-                              : ""}
-                          {(invoice.billCount ?? 0) > 0 ? " · scanned here" : " · not in your bills"}
-                        </span>
-                        {explain && (
-                          <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>
-                        )}
-                      </span>
-                      <span className="shrink-0 text-right">
-                        <span
-                          className={`block text-sm font-semibold tabular-nums ${
-                            amount < 0 ? "text-green-700" : "text-slate-900"
-                          }`}
-                        >
-                          {formatCurrency(amount)}
-                        </span>
-                        {/* Both halves of the discount or neither: the money is useless without
-                            the day it stops. */}
-                        {disc.state === "live" && (
-                          <span className="block text-xs text-green-700">
-                            {formatCurrency(disc.amount)} off by {formatDate(disc.by)}
-                          </span>
-                        )}
-                        {disc.state === "expired" && (
-                          <span className="block text-xs text-slate-400">
-                            {formatCurrency(disc.amount)} off expired {formatDate(disc.by)}
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            {more(
-              "docs",
-              documents.length,
-              r2(documents.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)),
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
+            {more("docs", docRows.length, r2(docRows.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)))}
           </>
         )}
-      </section>
+      </Fold>
+
       {shelfSheet && actions.recordToShelf && (
         <ShelfTicketSheet
           title={`Record ${shelfSheet.number} To The Shelf`}
@@ -851,6 +605,6 @@ export function SupplierInvoicesCard({
           }}
         />
       )}
-    </Card>
+    </div>
   );
 }

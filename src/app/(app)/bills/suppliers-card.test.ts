@@ -98,10 +98,15 @@ describe("the discount sentence names one date and the money that actually rides
 const CARD = readFileSync(join(process.cwd(), "src/app/(app)/bills/suppliers-card.tsx"), "utf8");
 
 describe("the card says the things a balance cannot say for itself", () => {
-  /** The pointer at the top of the card was the one copy of this sentence with no guard on it. */
+  /**
+   * The pointer at the top of the card was the one copy of this sentence with no guard on it. Wave B
+   * retired that pointer (Needs You holds the decisions), so the one copy left is the account's own
+   * line, and it still comes from the one builder.
+   */
   it("builds every copy of the discount sentence from the one builder", () => {
-    expect(CARD).toContain("discountDeadlineSentence(waiting.claimable).sentence");
-    expect(CARD).not.toContain("comes off if they are paid by ${formatDate(waiting.claimable.by)}");
+    expect(CARD).toContain("discountDeadlineSentence({");
+    expect(CARD).not.toContain("discountDeadlineSentence(waiting.claimable)");
+    expect(CARD).not.toContain("comes off if they are paid by ${formatDate(waiting");
     expect(CARD).not.toContain("balance.supplierSays.nextDiscountAmount >=");
   });
 
@@ -113,7 +118,7 @@ describe("the card says the things a balance cannot say for itself", () => {
   it("warns when bills marked settled sit beside recorded payments on the same account", () => {
     expect(CARD).toContain('balance.model === "bills-minus-payments" &&');
     expect(CARD).toContain("const settledBesidePayments =");
-    expect(CARD).toContain("this balance is that much too low");
+    expect(CARD).toContain("balance is that much too low");
     // It names controls that exist: the bills-list badge now reads On Account, and a payment's
     // own button says Undo, not Void.
     expect(CARD).toContain("or undo that payment here");
@@ -129,8 +134,11 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).not.toContain("those receipts paid in the bills list");
     expect(CARD).not.toContain("Mark those receipts paid in the bills list");
     expect(CARD).not.toContain("is still marked unpaid.`");
-    expect(CARD).toContain("those receipts Settled in the bills list further down this page");
-    expect(CARD).toContain("is still marked On Account.`");
+    // Wave B: "further down this page" became a door that opens All Bills (FoldOpener).
+    expect(CARD).toContain("mark those receipts Settled in {toAllBills}");
+    expect(CARD).toContain('<a href="#all-bills"');
+    expect(CARD).not.toContain("further down this page");
+    expect(CARD).toContain("still marked On Account.`");
   });
 
   /** Model B: their figure cannot cover a purchase they never billed him for. */
@@ -138,7 +146,7 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).toContain("const modelledExplained =");
     expect(CARD).toContain("${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.");
     expect(CARD).not.toContain("${formatCurrency(modelledBillsUnpaid)} unpaid there");
-    expect(CARD).toContain("no document from");
+    expect(CARD).toContain("they never sent paper for");
     // And the list of his own bills stops calling itself the balance under model B.
     expect(CARD).toContain('{fromSupplier ? "Your Bills On This Account" : "What The Balance Is Made Of"}');
   });

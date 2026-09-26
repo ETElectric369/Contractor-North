@@ -1260,6 +1260,8 @@ export async function recordSupplierPayment(input: {
     : ` ${account.name} is set to pay at the register, so this is recorded but there is no running balance for it to come off.`;
 
   revalidatePath("/bills");
+  // My Day's "Pay CED $X By Oct 10" reads this payment (supplier-pay-due.ts): paying clears it.
+  revalidatePath("/planner");
   return {
     ok: true,
     paymentId: String(inserted[0].id),
@@ -1309,6 +1311,7 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
   const name = (row as { supplier_accounts?: { name?: string } | null }).supplier_accounts?.name ?? "that supplier";
 
   revalidatePath("/bills");
+  revalidatePath("/planner"); // a voided payment puts My Day's Pay By line back
   return {
     ok: true,
     message: `Voided the ${sayMoney(amount)} payment to ${name}. It stays on the list and goes back onto what you owe.`,

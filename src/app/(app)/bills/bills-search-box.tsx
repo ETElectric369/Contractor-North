@@ -59,8 +59,13 @@ export function BillsSearchBox({ rows }: { rows: BillsSearchRow[] }) {
                 return (
                   <li key={h.key}>
                     {h.href ? (
-                      h.href.startsWith("http") ? (
-                        <a href={h.href} target="_blank" rel="noopener noreferrer" className="block min-h-11 px-3 py-2 hover:bg-slate-50">
+                      h.href.startsWith("http") || h.href.startsWith("#") ? (
+                        // A file opens in a new tab; a "#bill-..." row stays on this page, where FoldOpener opens it.
+                        <a
+                          href={h.href}
+                          {...(h.href.startsWith("#") ? {} : { target: "_blank", rel: "noopener noreferrer" })}
+                          className="block min-h-11 px-3 py-2 hover:bg-slate-50"
+                        >
                           {body}
                         </a>
                       ) : (

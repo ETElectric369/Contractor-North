@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { rankSix, SIX_SLOTS, OVERDUE_AUTO_CAP, type SixRankTask } from "@/lib/six-rank";
 import { KIND_STREAM, AFFORDANCES } from "@/lib/action-items/types";
 import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item";
+import { supplierPayActionItems } from "@/lib/action-items/supplier-pay-item";
+import { PAY_CARD_WINDOW_DAYS } from "@/app/(app)/bills/supplier-pay-due";
 
 // THE BADGE INVARIANT (src/lib/action-items/types.ts): a number on chrome =
 // distinct items needing a HUMAN DECISION TODAY that the app cannot defer,
@@ -56,6 +58,24 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     const item = supplierPaperActionItem({ cards, jobs: [] });
     expect(item?.title).toBe("Supplier Bills · 11");
     expect(item?.when).toBeNull(); // undated: never a red "overdue" nobody set
+  });
+
+  it("the Pay By line is DATED, one per account, and exists only while the discount does", () => {
+    // A number on chrome needs an expiry. Each pay line carries its deadline as `when`, is one line
+    // per supplier account (never one per invoice), and supplierPayDue drops it the day after.
+    expect(querySrc).toContain("supplierPayActionItems((await supplierDeskP)?.payDue)");
+    expect(querySrc).not.toContain('kind: "supplier_pay"');
+    expect(KIND_STREAM.supplier_pay).toBe("money");
+    expect(AFFORDANCES.supplier_pay).toEqual(["open"]);
+    const due = (accountId: string, payBy: string) => ({ accountId, accountName: "X", supplier: "CED", owed: 100, saves: 1, invoices: 7, sent: 0, payBy, daysLeft: 5 });
+    const items = supplierPayActionItems([due("a", "2026-10-10"), due("b", "2026-10-12")]);
+    expect(items).toHaveLength(2);
+    for (const it of items) expect(it.when).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(new Set(items.map((i) => i.id)).size).toBe(2);
+    expect(supplierPayActionItems([])).toEqual([]);
+    expect(supplierPayActionItems(null)).toEqual([]);
+    // The window is bounded (two weeks) and ends at the deadline: nothing past it is ever counted.
+    expect(PAY_CARD_WINDOW_DAYS).toBeLessThanOrEqual(14);
   });
 
   it("the dock's chrome badge display-caps at 9+", () => {

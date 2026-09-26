@@ -48,7 +48,11 @@ export type ActionKind =
   // ── "Hey you, here's a bill, what's it for?" (Bills plan, Wave A) ──
   // ONE rolled-up item ("Supplier Bills · 11") carrying a card per supplier paper that needs a
   // person. A rollup, never one item per paper: that is how it badges +1 (the invariant above).
-  | "supplier_paper";
+  | "supplier_paper"
+  // "Pay CED $5,174.62 By Oct 10 · Saves $35.50 on 7 invoices": one per supplier account whose own
+  // open documents carry a live prompt-pay discount due within two weeks. Dated by that deadline and
+  // gone once it passes (supplier-pay-due.ts), so it badges honestly: a decision with an expiry.
+  | "supplier_pay";
 
 /** The four urgency streams the inbox renders under. Order is the render order:
  *  money first (chase the dollars), then fresh leads, then today's work, then
@@ -97,6 +101,7 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   // dollars leaking off the invoice, the same species as job_unbilled_work.
   stock_short: "money",
   supplier_paper: "money", // a supplier bill on no job is a cost no job is carrying: money
+  supplier_pay: "money", // a discount that expires unless he pays: money
 };
 
 /** The canonical verbs. Each maps to an existing server action in dispatch.ts. */
@@ -151,6 +156,7 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   job_on_hold: { label: "On hold", tone: "amber" },
   stock_short: { label: "Recount", tone: "amber" },
   supplier_paper: { label: "Supplier Bills", tone: "amber" },
+  supplier_pay: { label: "Discount", tone: "green" },
 };
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
@@ -211,6 +217,9 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   // calls fileSupplierPaper itself (Put It On J-011 / Another Job / Shop Stock / Business Cost).
   // The rollup id is synthetic, so no generic verb could name which paper it meant.
   supplier_paper: ["open"],
+  // Open-only: the door is the Record A Payment sheet on /bills (?pay=<account>). Nothing to
+  // dismiss: it is derived from the supplier's documents and goes when the discount does.
+  supplier_pay: ["open"],
 };
 
 /**

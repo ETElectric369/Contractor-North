@@ -210,19 +210,26 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
         { ...base, lineId: "tax", description: "Tax", quantity: 1, amount: 39.42, category: "Tax", billedAmount: null },
         { ...base, lineId: "done", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, hasLot: true },
       ],
-      stockDocuments: [{ id: "si", number: "8802-1103061", total: "114.40", words: "STOCK" }],
+      stockDocuments: [
+        { id: "si", number: "8802-1103061", total: "114.40", words: "STOCK", accountId: "acct-ced" },
+        { id: "si2", number: "8802-1103999", total: "10.00", words: "STOCK" },
+      ],
       linelessPapers: [{ id: "p", title: "CED ticket", words: "STOCK" }],
     });
     expect(w.map((x) => [x.key, x.kind, x.door])).toEqual([
       ["line:142", "part_billed", "Put The Rest On The Shelf"],
       ["line:tw", "container", "Put The Rest On The Shelf"],
       ["doc:si", "stock_document", "Record To Shelf"],
+      ["doc:si2", "stock_document", "Record To Shelf"],
       ["paper:p", "lineless_paper", "Read Again"],
     ]);
+    // Record To Shelf lives in the supplier's Not In Your Books fold: the door lands there.
+    expect(w[2].href).toBe("/bills#supplier-not-in-books-acct-ced");
+    expect(w[3].href).toBe("/bills");
     expect(w[0].why).toContain("None of its $111.60 is billed to the customer");
     expect(w[1].why).toContain("The ticket read 500 on it");
     expect(w[2].title).toBe("CED 8802-1103061, $114.40");
-    expect(w[3].why).toContain("Read it again so its lines come with it");
+    expect(w[4].why).toContain("Read it again so its lines come with it");
   });
   it("a receipt the customer already holds is named with NO door: the receipt card has no button there", () => {
     const w = waitingForShelf({

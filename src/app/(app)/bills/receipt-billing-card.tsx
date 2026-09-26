@@ -1,17 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, ChevronRight } from "lucide-react";
-import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { NumberInput } from "@/components/ui/number-input";
 import { SegmentedControl } from "@/components/ui/segmented";
+import { WhyFold } from "@/components/why-fold";
 import { useToast } from "@/components/toast";
 import { billedPortion } from "@/lib/bill-itemisation";
 import { isFreightLine } from "@/lib/shelf-plan";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import {
   containerHint,
   perUnitCost,
@@ -125,11 +123,10 @@ type LineOverride = Partial<Pick<ReceiptBillingLine, "billable" | "billedAmount"
  * did incur. So there is a third state now, and the card asks for it the way he says it out loud:
  * how many are in the box, and how many did you use. It never answers either question itself.
  */
-export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[] }) {
+export function ReceiptLines({ receipt: r }: { receipt: ReceiptForBilling }) {
   const router = useRouter();
   const toast = useToast();
   const [, start] = useTransition();
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   // The nudge travels WITH the line into the sheet instead of being computed a second time inside
   // it. The row already worked out whether the suggestion had any business showing - not locked,
   // still billable, not already split, not already on the shelf - and the sheet used to throw all
@@ -149,11 +146,8 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
   // server had already moved it, which is the screen-disagrees-with-the-database bug this whole
   // card exists to end.
   const signature = useMemo(
-    () =>
-      receipts
-        .map((r) => r.lines.map((l) => `${l.id}:${l.billable ? 1 : 0}:${l.billedAmount ?? ""}:${l.isStock ? 1 : 0}`).join(","))
-        .join("|"),
-    [receipts],
+    () => r.lines.map((l) => `${l.id}:${l.billable ? 1 : 0}:${l.billedAmount ?? ""}:${l.isStock ? 1 : 0}`).join(","),
+    [r],
   );
   const [overrides, setOverrides] = useState<Record<string, LineOverride>>({});
   useEffect(() => {
@@ -247,263 +241,177 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
     });
   }
 
+  const lines = r.lines.map((l) => ({ ...l, ...overrides[l.id] }));
+  const split = splitReceiptBilling(r.amount, lines);
+  // A receipt on a SENT invoice is settled: the importer skips it forever after, so neither the
+  // switch nor the split could move a dollar. A control that can only refuse does not render.
+  const locked = !!r.billedOn && r.billedOn.status !== "draft";
+
   return (
-    <Card id="receipt-billing" className="mb-6 scroll-mt-20 p-4">
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">What Your Customers Get Billed</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Every line off a scanned receipt, and whether it lands on the customer&apos;s invoice. Snacks and
-          drinks start out on you. Everything else, tools included, starts out billed. A box or a spool you
-          bought whole can bill just what this job used, and the rest is not billed to this customer.
-        </p>
-      </div>
-
-      {receipts.length === 0 ? (
-        <p className="py-3 text-sm text-slate-400">
-          Nothing to decide yet. Scan a receipt onto a job in Organize My and its lines show up here.
-        </p>
+    <div>
+      {/* WHERE THIS RECEIPT STANDS, one line, the reasoning in a Why? fold (Wave B). */}
+      {r.billedOn && r.billedOn.status === "draft" ? (
+        /* A DRAFT CLAIMANT IS NOT A WALL: its lines are still editable, and the switch still
+           governs what the NEXT import takes. */
+        <div className="mb-1 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          <p className="font-medium">On {r.billedOn.label}, Still A Draft</p>
+          <WhyFold>
+            <p>
+              Switching a line here changes what future invoices take, not the lines already on that draft. To take
+              something off it now, remove the line on the invoice itself.
+            </p>
+          </WhyFold>
+        </div>
+      ) : r.billedOn ? (
+        /* NO DEAD ENDS: a claimed receipt's switches could not move a dollar, so they are gone,
+           and the door that exists (Credit / Refund on the invoice) is named. */
+        <div className="mb-1 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <p className="font-medium">Locked: On {r.billedOn.label}, Already With The Customer</p>
+          <WhyFold>
+            <p>To take something off that bill, use Credit / Refund in the Actions menu on the invoice.</p>
+          </WhyFold>
+        </div>
       ) : (
-        /* The shoebox has no ceiling, and neither does this list — it scrolls rather than
-           truncating, because a receipt Erik cannot reach is a receipt he stops trusting. */
-        <ul className="max-h-[30rem] divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200">
-          {receipts.map((r) => {
-            const lines = r.lines.map((l) => ({ ...l, ...overrides[l.id] }));
-            const split = splitReceiptBilling(r.amount, lines);
-            const isOpen = !!open[r.id];
-            // A receipt on a SENT invoice is settled: the importer skips it forever after, so
-            // neither the switch nor the split could move a dollar. A control that can only refuse
-            // does not render at all — the paragraph below says what to do instead.
-            const locked = !!r.billedOn && r.billedOn.status !== "draft";
-            return (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => setOpen((o) => ({ ...o, [r.id]: !o[r.id] }))}
-                  aria-expanded={isOpen}
-                  className="flex min-h-11 w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50"
-                >
-                  {isOpen ? (
-                    <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
-                  ) : (
-                    <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
-                  )}
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-900">{r.supplier}</span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {r.bill_date ? `${formatDate(r.bill_date)} · ` : ""}
-                      {r.job_name ?? "No job"}
-                    </span>
-                    {/* THE ONE FACT THAT CANNOT BE TRUNCATED. This is the whole reason the card
-                        exists: Erik must be able to see, without opening anything and without a
-                        phone cutting it off mid-word, that something on this receipt is not going
-                        on the customer's bill. It gets its own line for that.
-
-                        "Not billed" and "billed in part" are two different facts and they get two
-                        different sentences — a box he split is not a snack he switched off, and
-                        one count covering both would tell him neither. */}
-                    {split.notBilledCount > 0 && (
-                      <span className="block text-xs font-medium text-amber-700">
-                        {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the
-                        customer
-                      </span>
-                    )}
-                    {split.partBilledCount > 0 && (
-                      <span className="block text-xs font-medium text-sky-700">
-                        {split.partBilledCount} {split.partBilledCount === 1 ? "line bills" : "lines bill"} only what
-                        this job used
-                      </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block text-sm font-medium tabular-nums text-slate-900">
-                      {formatCurrency(split.billed)}
-                    </span>
-                    <span className="block text-xs tabular-nums text-slate-400">
-                      of {formatCurrency(split.cost)} you paid
-                    </span>
-                  </span>
-                </button>
-
-                {isOpen && (
-                  <div className="px-3 pb-3">
-                    {r.billedOn && r.billedOn.status === "draft" ? (
-                      /* A DRAFT CLAIMANT IS NOT A WALL. Its lines are still editable, so the
-                         honest sentence points at the trash can on that invoice rather than at a
-                         credit the situation does not call for. The switch stays live: it governs
-                         what the NEXT import takes, which is a real effect and his to set. */
-                      <p className="mb-2 rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                        This receipt is on {r.billedOn.label}, which is still a draft. Switching a line here
-                        changes what future invoices take, not the lines already on that draft. To take
-                        something off it now, remove the line on the invoice itself.
-                      </p>
-                    ) : r.billedOn ? (
-                      /* NO DEAD ENDS. The importer skips a bill a live invoice already claims, so a
-                         switch here could not move a dollar. Say what happened and what he CAN do
-                         instead — the same substitution the invoice page makes on a sent bill. And
-                         name a door that EXISTS: this sentence used to offer "a credit or an
-                         adjustment", and there is no adjustment in this app, which is the exact
-                         phantom the same wave deleted from the invoice page. */
-                      <p className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                        This receipt is already on {r.billedOn.label}, which has gone to the customer, so its
-                        lines are locked. To take something off that bill, use Credit / Refund in the Actions
-                        menu on the invoice.
-                      </p>
-                    ) : (
-                      <p className="mb-2 text-xs text-slate-400">
-                        {formatCurrency(split.notBilled)} of this receipt stays on you. The rest goes onto the
-                        customer&apos;s next invoice, with your markup on top.
-                      </p>
-                    )}
-
-                    <ul className="ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
-                      {lines.map((l) => {
-                        const part = billedPortion(l.amount, l.billedAmount);
-                        const hint = containerHint(l.description, l.quantity);
-                        // The nudge is only ever a nudge, and it stands down the moment there is a
-                        // decision on the row: a suggestion that keeps arguing after he has
-                        // answered it is noise, and noise is what gets a real warning ignored.
-                        const showHint = !locked && l.billable && part == null && !l.isStock && hint.looksLikeContainer;
-                        const hintUnit = hint.count ? perUnitLabel(perUnitCost(l.amount, hint.count)) : "";
-                        return (
-                          <li key={l.id} className="py-0.5">
-                            <div className="flex items-center gap-2">
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm text-slate-700">
-                                  {l.quantity && l.quantity !== 1 ? `${l.quantity}× ` : ""}
-                                  {l.description}
-                                </span>
-                                <span className="block truncate text-xs text-slate-400">
-                                  {formatCurrency(l.amount)}
-                                  {l.category ? ` · ${l.category}` : ""} ·{" "}
-                                  {!l.billable ? (
-                                    <span className="font-medium text-amber-700">Not billed to the customer</span>
-                                  ) : part == null ? (
-                                    <span className="text-slate-400">Billed to the customer</span>
-                                  ) : part === 0 ? (
-                                    <span className="font-medium text-sky-700">{l.isStock ? "On the shelf, none billed here" : "None of it billed here"}</span>
-                                  ) : (
-                                    <span className="font-medium text-sky-700">
-                                      {formatCurrency(part)} of it billed to this job
-                                    </span>
-                                  )}
-                                </span>
-                              </span>
-                              {locked ? (
-                                <span className="shrink-0 text-xs text-slate-400">On {r.billedOn?.label}</span>
-                              ) : l.shelf ? (
-                                /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
-                                   roll without moving its pieces, so it doesn't render (the server
-                                   refuses it too). Take It Off The Shelf below is the way back. */
-                                <span className="shrink-0 text-xs text-slate-400">On the shelf</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  role="switch"
-                                  aria-checked={l.billable}
-                                  aria-label={`Bill ${l.description} to the customer`}
-                                  onClick={() => flip(l.id, !l.billable)}
-                                  className="flex h-11 shrink-0 items-center justify-center rounded-lg px-2 hover:bg-slate-100"
-                                >
-                                  <span
-                                    className={`relative block h-6 w-11 rounded-full transition-colors ${
-                                      l.billable ? "bg-brand" : "bg-slate-300"
-                                    }`}
-                                  >
-                                    <span
-                                      className={`absolute top-0.5 block h-5 w-5 rounded-full bg-white shadow transition-all ${
-                                        l.billable ? "left-[22px]" : "left-0.5"
-                                      }`}
-                                    />
-                                  </span>
-                                </button>
-                              )}
-                            </div>
-
-                            {/* THE THIRD STATE IS REACHABLE FROM EVERY LINE, not only the flagged
-                                ones. The nudge below catches a box that says "500" on it; the jar
-                                of anti-oxidant that started this says "8 oz" and nothing about a
-                                container, and it is exactly as splittable. A suggestion that was
-                                also the only door would quietly decide which lines he is allowed
-                                to split. */}
-                            {!locked && l.billable && !l.shelf && (
-                              <div className="flex flex-wrap items-center gap-x-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setEditing({ receipt: r, line: l, hint: showHint ? hint : null })}
-                                  className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
-                                >
-                                  {part == null ? "Bill Only What This Job Used" : "Change What This Job Used"}
-                                </button>
-                                {showHint && (
-                                  <span className="text-xs text-slate-400">
-                                    {hint.why}
-                                    {hintUnit ? ` That is ${hintUnit}.` : ""}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-
-                            {/* THE SHELF (Shop Stock, Phase 2). A roll from this line is on the
-                                shelf: say what went there, what it cost off this ticket and what
-                                is left of it. Otherwise any line that shipped something can put
-                                its rest there, on a receipt no customer is holding yet. */}
-                            {l.shelf ? (
-                              <div className="mt-0.5 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900">
-                                <p className="font-medium">
-                                  {r.job_name ? `${formatCurrency(l.billedAmount ?? 0)} billed to ${r.job_name}` : "None billed to a job"} ·{" "}
-                                  {l.shelf.pieces} {l.shelf.unit} on the shelf ({formatCurrency(l.shelf.cost)})
-                                </p>
-                                <p className="text-sky-800">
-                                  {l.shelf.itemName}: {l.shelf.piecesLeft} {l.shelf.unit} left, {formatCurrency(l.shelf.costLeft)}
-                                  {l.shelf.stale ? " · its receipt changed, so its cost is being worked out again" : ""}
-                                </p>
-                                {!locked && l.shelf.liveMoves === 0 && (
-                                  <button
-                                    type="button"
-                                    disabled={shelfBusy === l.id}
-                                    onClick={() => takeOff(l)}
-                                    className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
-                                  >
-                                    {shelfBusy === l.id ? "Taking It Off…" : "Take It Off The Shelf"}
-                                  </button>
-                                )}
-                                {l.shelf.liveMoves > 0 && (
-                                  <p className="text-sky-800">Pieces of it are on jobs, so it stays on the shelf as it is.</p>
-                                )}
-                              </div>
-                            ) : (
-                              !locked &&
-                              l.amount > 0 &&
-                              !/tax/i.test(String(l.category ?? "")) &&
-                              !isFreightLine(l) && (
-                                <button
-                                  type="button"
-                                  onClick={() => setShelving({ receipt: r, line: l })}
-                                  className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
-                                >
-                                  Put The Rest On The Shelf
-                                </button>
-                              )
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-
-                    {r.job_id && (
-                      <div className="mt-2">
-                        <Link href={`/jobs/${r.job_id}`} className="text-xs font-medium text-brand hover:underline">
-                          Open The Job
-                        </Link>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <p className="mb-1 text-xs text-slate-500">
+          {formatCurrency(split.billed)} billed to the customer · {formatCurrency(split.notBilled)} stays on you
+        </p>
       )}
+
+      <ul className="ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
+        {lines.map((l) => {
+          const part = billedPortion(l.amount, l.billedAmount);
+          const hint = containerHint(l.description, l.quantity);
+          // The nudge is only ever a nudge, and it stands down the moment there is a
+          // decision on the row: a suggestion that keeps arguing after he has
+          // answered it is noise, and noise is what gets a real warning ignored.
+          const showHint = !locked && l.billable && part == null && !l.isStock && hint.looksLikeContainer;
+          const hintUnit = hint.count ? perUnitLabel(perUnitCost(l.amount, hint.count)) : "";
+          return (
+            <li key={l.id} className="py-0.5">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-slate-700">
+                    {l.quantity && l.quantity !== 1 ? `${l.quantity}× ` : ""}
+                    {l.description}
+                  </span>
+                  <span className="block truncate text-xs text-slate-400">
+                    {formatCurrency(l.amount)}
+                    {l.category ? ` · ${l.category}` : ""} ·{" "}
+                    {!l.billable ? (
+                      <span className="font-medium text-amber-700">Not billed to the customer</span>
+                    ) : part == null ? (
+                      <span className="text-slate-400">Billed to the customer</span>
+                    ) : part === 0 ? (
+                      <span className="font-medium text-sky-700">{l.isStock ? "On the shelf, none billed here" : "None of it billed here"}</span>
+                    ) : (
+                      <span className="font-medium text-sky-700">
+                        {formatCurrency(part)} of it billed to this job
+                      </span>
+                    )}
+                  </span>
+                </span>
+                {locked ? (
+                  <span className="shrink-0 text-xs text-slate-400">On {r.billedOn?.label}</span>
+                ) : l.shelf ? (
+                  /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
+                     roll without moving its pieces, so it doesn't render (the server
+                     refuses it too). Take It Off The Shelf below is the way back. */
+                  <span className="shrink-0 text-xs text-slate-400">On the shelf</span>
+                ) : (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={l.billable}
+                    aria-label={`Bill ${l.description} to the customer`}
+                    onClick={() => flip(l.id, !l.billable)}
+                    className="flex h-11 shrink-0 items-center justify-center rounded-lg px-2 hover:bg-slate-100"
+                  >
+                    <span
+                      className={`relative block h-6 w-11 rounded-full transition-colors ${
+                        l.billable ? "bg-brand" : "bg-slate-300"
+                      }`}
+                    >
+                      <span
+                        className={`absolute top-0.5 block h-5 w-5 rounded-full bg-white shadow transition-all ${
+                          l.billable ? "left-[22px]" : "left-0.5"
+                        }`}
+                      />
+                    </span>
+                  </button>
+                )}
+              </div>
+
+              {/* THE THIRD STATE IS REACHABLE FROM EVERY LINE, not only the flagged
+                  ones. The nudge below catches a box that says "500" on it; the jar
+                  of anti-oxidant that started this says "8 oz" and nothing about a
+                  container, and it is exactly as splittable. A suggestion that was
+                  also the only door would quietly decide which lines he is allowed
+                  to split. */}
+              {!locked && l.billable && !l.shelf && (
+                <div className="flex flex-wrap items-center gap-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditing({ receipt: r, line: l, hint: showHint ? hint : null })}
+                    className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
+                  >
+                    {part == null ? "Bill Only What This Job Used" : "Change What This Job Used"}
+                  </button>
+                  {showHint && (
+                    <span className="text-xs text-slate-400">
+                      {hint.why}
+                      {hintUnit ? ` That is ${hintUnit}.` : ""}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* THE SHELF (Shop Stock, Phase 2). A roll from this line is on the
+                  shelf: say what went there, what it cost off this ticket and what
+                  is left of it. Otherwise any line that shipped something can put
+                  its rest there, on a receipt no customer is holding yet. */}
+              {l.shelf ? (
+                <div className="mt-0.5 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900">
+                  <p className="font-medium">
+                    {r.job_name ? `${formatCurrency(l.billedAmount ?? 0)} billed to ${r.job_name}` : "None billed to a job"} ·{" "}
+                    {l.shelf.pieces} {l.shelf.unit} on the shelf ({formatCurrency(l.shelf.cost)})
+                  </p>
+                  <p className="text-sky-800">
+                    {l.shelf.itemName}: {l.shelf.piecesLeft} {l.shelf.unit} left, {formatCurrency(l.shelf.costLeft)}
+                    {l.shelf.stale ? " · its receipt changed, so its cost is being worked out again" : ""}
+                  </p>
+                  {!locked && l.shelf.liveMoves === 0 && (
+                    <button
+                      type="button"
+                      disabled={shelfBusy === l.id}
+                      onClick={() => takeOff(l)}
+                      className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
+                    >
+                      {shelfBusy === l.id ? "Taking It Off…" : "Take It Off The Shelf"}
+                    </button>
+                  )}
+                  {l.shelf.liveMoves > 0 && (
+                    <p className="text-sky-800">Pieces of it are on jobs, so it stays on the shelf as it is.</p>
+                  )}
+                </div>
+              ) : (
+                !locked &&
+                l.amount > 0 &&
+                !/tax/i.test(String(l.category ?? "")) &&
+                !isFreightLine(l) && (
+                  <button
+                    type="button"
+                    onClick={() => setShelving({ receipt: r, line: l })}
+                    className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
+                  >
+                    Put The Rest On The Shelf
+                  </button>
+                )
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {/* Open The Job lives once, on the bill's own detail row above these lines. */}
 
       {editing && (
         <UsedOnThisJob
@@ -527,7 +435,7 @@ export function ReceiptBillingCard({ receipts }: { receipts: ReceiptForBilling[]
           }}
         />
       )}
-    </Card>
+    </div>
   );
 }
 

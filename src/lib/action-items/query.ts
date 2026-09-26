@@ -12,8 +12,9 @@ import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
-import { loadSupplierPapers, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierPaperActionItem } from "./supplier-paper-item";
+import { supplierPayActionItems } from "./supplier-pay-item";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -140,9 +141,11 @@ async function buildActionItems(ctx: {
   // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
   // instead of adding a serial wave; awaited at the end. A failure is "no cards", never a crash of
   // the inbox, and the same papers are still on /bills.
-  const supplierPapersP: Promise<SupplierPaperFeed | null> = isStaff
-    ? loadSupplierPapers(supabase, userId).catch(() => null)
+  // The same read brings the Pay By line ("Pay CED $X By Oct 10"): one read of the supplier's papers.
+  const supplierDeskP: Promise<SupplierDesk | null> = isStaff
+    ? loadSupplierDesk(supabase, userId, todayStr).catch(() => null)
     : Promise.resolve(null);
+  const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -1062,6 +1065,9 @@ async function buildActionItems(ctx: {
   // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because My Day
   // shows the top five and the point of the card is that the paper comes to him, not the reverse.
   const paperItem = supplierPaperActionItem(await supplierPapersP);
+  // PAY CED BY THE TENTH (supplier-pay-due.ts): one dated line per account whose discount runs out
+  // within two weeks, right under the papers. Staff only (the same read); gone once the deadline is.
+  items.unshift(...supplierPayActionItems((await supplierDeskP)?.payDue));
   if (paperItem) items.unshift(paperItem);
 
   return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));

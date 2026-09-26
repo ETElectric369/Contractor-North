@@ -19,14 +19,28 @@ import "server-only";
  *   · THE DOOR: Record It As A Bill, the /bills action, pressed by a person (JobPaperRow).
  */
 
-import { invoicesNeedingBill, type SupplierInvoiceKind, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
+import { invoicesNeedingBill, supplierPaperNeeds, type SupplierInvoiceKind, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
+import { booksBeginOn } from "@/app/(app)/bills/supplier-papers";
 import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
 import { jobFromPaperMarks } from "@/lib/paperwork";
 import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
 import { indexSupplierAliases } from "@/lib/supplier-identity";
 
-/** A supplier document, as the job's list needs it: the reconcile row plus its account. */
-export type PaperDoc = SupplierInvoiceRow & { accountId: string | null };
+/** A supplier document, as the job's list needs it: the reconcile row plus its account.
+ *  `onNeedsYou`: /bills has it on a Needs You card (onNeedsYouIds), so a link to it goes there;
+ *  otherwise the link goes to the supplier's own line. */
+export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; onNeedsYou?: boolean };
+
+/**
+ * WHICH PAPERS /bills HAS ON A NEEDS YOU CARD, by the cards' own rule (supplierPaperNeeds), never
+ * a copy of it: the books line is one of its reasons, but a paper a credit memo reversed, a $0.00
+ * paper and a STOCK paper with no job are on no card either, and a link that lands on Needs You
+ * for one of those lands where the paper is not. `since` is booksBeginOn, the line /bills draws.
+ */
+export function onNeedsYouIds(docs: readonly PaperDoc[], since: string | null): Set<string> {
+  const rows = docs.map((d) => ({ ...d, supplierAccountId: d.accountId }));
+  return new Set(supplierPaperNeeds(rows, [], { since }).map((c) => c.invoiceId));
+}
 
 const KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
 
@@ -147,5 +161,7 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string)
   for (const d of unlinked) {
     d.billCount = billsCarryingNumber(d.invoiceNumber, { accountId: d.accountId }, ledger, aliases).length;
   }
-  return papersNamingJob(jobId, docs, mark);
+  const since = booksBeginOn(orgId, (billsRes.data ?? []) as { bill_date?: string | null }[]);
+  const onCards = onNeedsYouIds(docs, since);
+  return papersNamingJob(jobId, docs, mark).map((d) => ({ ...d, onNeedsYou: onCards.has(d.id) }));
 }

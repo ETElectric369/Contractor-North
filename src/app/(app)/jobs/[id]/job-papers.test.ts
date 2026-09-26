@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paperNamesJob, papersNamingJob, type PaperDoc } from "./job-papers";
+import { onNeedsYouIds, paperNamesJob, papersNamingJob, type PaperDoc } from "./job-papers";
 
 /**
  * NAMED ON A PAPER, NOT RECORDED YET (Erik, 2026-09-25). CED 8802-1107820, $187.64, job name
@@ -84,5 +84,26 @@ describe("papersNamingJob — 85 Whitney before INV-081 went out", () => {
     const out = papersNamingJob("j28", [...otherAccount, filed], mark);
     // Newest first, then the bigger money.
     expect(out.map((d) => d.invoiceNumber)).toEqual(["8802-1107900", "8802-1107230", "8802-1107820"]);
+  });
+});
+
+describe("onNeedsYouIds — Open It On Bills lands where the paper is", () => {
+  it("is the Needs You cards' own rule: the books line, a reversed purchase and a $0.00 paper are on no card", () => {
+    const card = doc({ jobNameRaw: "85 WHITNEY", invoiceDate: "2026-09-16", total: 187.64 });
+    const older = doc({ jobNameRaw: "85 WHITNEY", invoiceDate: "2026-05-01", total: 50 });
+    const returned = doc({ jobNameRaw: "TTP106", invoiceDate: "2026-09-03", total: 225.47 });
+    const memo = doc({ kind: "credit_memo", jobNameRaw: "TTP106", invoiceDate: "2026-09-04", total: -225.47 });
+    const zero = doc({ jobNameRaw: "85 WHITNEY", invoiceDate: "2026-09-10", total: 0 });
+    const ids = onNeedsYouIds([card, older, returned, memo, zero], "2026-06-08");
+    expect(ids.has(card.id)).toBe(true);
+    expect(ids.has(older.id)).toBe(false);
+    expect(ids.has(returned.id)).toBe(false);
+    expect(ids.has(zero.id)).toBe(false);
+  });
+
+  it("pairs a credit memo only inside its own account", () => {
+    const bought = doc({ jobNameRaw: "85 WHITNEY", total: 80 });
+    const otherMemo = doc({ accountId: "other", kind: "credit_memo", total: -80 });
+    expect(onNeedsYouIds([bought, otherMemo], null).has(bought.id)).toBe(true);
   });
 });
