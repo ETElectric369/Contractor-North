@@ -40,8 +40,14 @@ const { ReceiptLines } = await import("./receipt-billing-card");
 const { ALL_ON } = await import("@/lib/features");
 
 const POS = [{ id: "po1", po_number: "PO-003", vendor: "A Supplier", status: "ordered", total: 3274, jobs: { name: "A Job" } }];
-const ledger = (p: Record<string, unknown> = {}) =>
-  renderToStaticMarkup(createElement(BillsReceipts as any, { orgId: "org-1", jobs: [], lists: [], pos: POS, bills: [], docs: [], ...p }));
+// The ledger takes the switches as one `switches` prop ({ features, isOwner }); left out = all on.
+const ledger = (p: { features?: Record<string, boolean>; isOwner?: boolean } = {}) =>
+  renderToStaticMarkup(
+    createElement(BillsReceipts as any, {
+      orgId: "org-1", jobs: [], lists: [], pos: POS, bills: [], docs: [],
+      ...(p.features || p.isOwner !== undefined ? { switches: { features: p.features ?? ALL_ON, isOwner: p.isOwner ?? false } } : {}),
+    }),
+  );
 
 describe("the ledger's Purchase Orders tab", () => {
   it("no switches stored / on: exactly today's ledger", () => {

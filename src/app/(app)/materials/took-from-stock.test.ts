@@ -137,12 +137,12 @@ describe("Took From Stock and the Shop Stock switch (0352)", () => {
     renderToStaticMarkup(createElement(TookFromStock, { jobId: "j1", takes: [take], viewerIsStaff: false, ...p }));
 
   it("on / not passed: today's door, the button and the takes", () => {
-    expect(door({ shopStock: true })).toBe(door());
+    expect(door({ canTake: true })).toBe(door());
     expect(buttons(door()).map((b) => b.text)).toContain("Took From Stock");
   });
 
   it("off: no Took From Stock button, and the takes already made stay listed with their Undo", () => {
-    const off = door({ shopStock: false });
+    const off = door({ canTake: false });
     expect(buttons(off).map((b) => b.text)).not.toContain("Took From Stock");
     expect(textOf(off)).toContain("Brian took 60 ft of 12/2 NM-B");
     expect(buttons(off).map((b) => b.text)).toContain("Undo");
