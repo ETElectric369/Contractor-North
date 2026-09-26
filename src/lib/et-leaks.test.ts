@@ -38,6 +38,14 @@ describe("a company's paper says only what the company said", () => {
   });
 });
 
+describe("Nort says who built it without saying it runs someone else's company", () => {
+  it("built by an electrical contractor, for contractors", async () => {
+    const { ASSISTANT_SYSTEM_PROMPT } = await import("@/lib/anthropic");
+    expect(ASSISTANT_SYSTEM_PROMPT).toContain("built by Erik Taylor, an electrical contractor, with Claude to help contractors run their business.");
+    expect(ASSISTANT_SYSTEM_PROMPT).not.toContain("to help run his contracting business");
+  });
+});
+
 describe("a purchase order names no supplier until a person does", () => {
   it("New PO starts empty, and neither the PO page nor Nort's tool falls back to CED", () => {
     expect(src("src/app/(app)/purchasing/new-po-button.tsx")).toContain('useState("")');
