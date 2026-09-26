@@ -6,7 +6,10 @@ import {
   discountLine,
   kindFromTypeWords,
   openListFromReader,
+  closeCutoff,
+  looksLikeStatementText,
   openListFromStatementText,
+  openListFromText,
   planHeadline,
   readDate,
   readMoney,
@@ -221,10 +224,36 @@ describe("date-aware closing", () => {
     expect(plan.totals.after).toBe(3344.73);
   });
 
-  it("closes a paper dated ON the list's day", () => {
-    const papers = papersOf([...APP_OPEN, ["8802-1108701", "invoice", "2026-09-26", 40, 40, null, null]]);
+  it("closes a paper dated on the newest listed paper's day, and leaves one the supplier may not have posted yet", () => {
+    // The list is saved 9/26 and its newest paper is 9/23: a paper the app has from 9/24 to 9/26
+    // (from the emailed PDF) may simply not be on the supplier's side yet.
+    const papers = papersOf([
+      ...APP_OPEN,
+      ["8802-1108700", "invoice", "2026-09-23", 40, 40, null, null],
+      ["8802-1108701", "invoice", "2026-09-26", 40, 40, null, null],
+    ]);
     const plan = reconcileOpenList(cedList(), papers, ACCOUNT);
-    expect(plan.close.map((c) => c.number)).toContain("8802-1108701");
+    expect(plan.closeBy).toBe("2026-09-23");
+    expect(plan.close.map((c) => c.number)).toContain("8802-1108700");
+    expect(plan.keepNewer.map((c) => c.number)).toEqual(["8802-1108701"]);
+  });
+
+  it("allows a week of posting, so a list of old papers still closes what was paid before it", () => {
+    // Only one old paper is still open on the supplier's side; everything up to a week before the
+    // list's date that it doesn't list was paid.
+    const list = cedList({ rows: cedList().rows.filter((r) => r.reference === "8802-1107338") });
+    expect(closeCutoff(list)).toBe("2026-09-19");
+    const plan = reconcileOpenList({ ...list, wholeList: true }, papersOf(), ACCOUNT);
+    expect(plan.close.map((c) => c.number)).toContain("8802-1108330"); // 9/17
+    expect(plan.keepNewer.map((c) => c.number)).toEqual(["8802-1108534", "8802-1108540", "8802-1108541"]); // 9/22
+  });
+
+  it("closes nothing from a list whose papers carry no dates of their own", () => {
+    const list = cedList({ rows: cedList().rows.map((r) => ({ ...r, invoiceDate: null })), wholeList: true });
+    const plan = reconcileOpenList(list, papersOf(), ACCOUNT);
+    expect(plan.closeBy).toBeNull();
+    expect(plan.close).toEqual([]);
+    expect(plan.keepUndated).toHaveLength(16);
   });
 
   it("leaves open a paper with no date, and names it", () => {
@@ -300,17 +329,29 @@ describe("any supplier's list (fixture 2)", () => {
     expect(plan.payments.map((p) => p.reference)).toEqual(["PMT-5521"]);
     expect(plan.complete).toMatchObject({ ok: true, how: "total" });
     expect(planHeadline(plan, { from: "file" }, "Tahoe Lumber", "2026-09-26")).toBe(
-      "Tahoe Lumber's open list of Sep 20: 1 paper marked paid ($300.00), 1 new, 1 changed, balance now $1,820.55.",
+      "Tahoe Lumber's open list of Sep 20: 1 paper marked paid ($300.00), 1 new, 1 changed, balance now $1,720.55 after $100.00 of payment Tahoe Lumber hasn't applied to a paper yet.",
     );
+    // The balance it leads with is the supplier's own figure, net of the unapplied payment.
+    expect(plan.totals.after).toBe(1820.55);
+    expect(plan.totals.afterNet).toBe(1720.55);
   });
 
-  it("refuses to call a list whole when its rows don't add to its printed total", () => {
+  it("refuses to call a list whole when its rows don't add to its printed total, and no one's word overrides it", () => {
     const short = parseCSV(LUMBER_CSV).filter((r) => r[0] !== "L-20460");
     const r = readOpenListTable({ table: short, from: "file", name: "yard.csv", listDate: "2026-09-20", listDateFrom: "file" });
     if (!r.ok) throw new Error("did not read");
-    const plan = reconcileOpenList(r.list, [], "yard");
-    expect(plan.complete.ok).toBe(false);
-    expect(plan.complete.said).toContain("$1,650.55");
+    const papers: OpenListPaper[] = [
+      { id: "c", invoiceNumber: "L-20399", kind: "invoice", invoiceDate: "2026-08-20", dueDate: null, total: 300, openBalance: 300, closed: false, discountAmount: null, discountBy: null, jobNameRaw: null, supplierAccountId: "yard" },
+    ];
+    for (const wholeList of [false, true]) {
+      const plan = reconcileOpenList({ ...r.list, wholeList }, papers, "yard");
+      expect(plan.complete).toMatchObject({ ok: false, overridable: false });
+      expect(plan.complete.said).toContain("$1,650.55");
+      // What it would have marked paid stays open, and is shown.
+      expect(plan.close).toEqual([]);
+      expect(plan.keepPartial.map((p) => p.number)).toEqual(["L-20399"]);
+      expect(planHeadline(plan, { from: "file" }, "Tahoe Lumber", "2026-09-26")).toContain("1 paper it doesn't list left open (it is missing papers)");
+    }
   });
 });
 
@@ -401,6 +442,71 @@ Total Due $300.55
 
   it("returns nothing for text that isn't a list", () => {
     expect(openListFromStatementText("Thanks for your business.\nCall us any time.", "x.pdf")).toBeNull();
+  });
+
+  /** Any supplier's INVOICE that mentions its statement: never read as one. */
+  const ACME_INVOICE = `ACME ELECTRIC SUPPLY
+INVOICE
+Date: 09/20/2026
+Account No: 55-0192
+Terms: Net 10th following statement
+Please remit to the address on your statement.
+Invoice Number 7731 Amount Due $229.98
+Item Description Qty Price Amount
+4471203 12/2 NM-B 250FT 2 89.99 179.98
+5512234 SINGLE POLE BREAKER 4 12.50 50.00
+Total $229.98
+`;
+  it("never reads an invoice that mentions its statement as a list, by any door", () => {
+    expect(looksLikeStatementText(ACME_INVOICE)).toBe(false);
+    for (const strict of [true, false]) {
+      expect(openListFromText(ACME_INVOICE, { name: "acme.pdf", from: "file", listDate: "2026-09-26", listDateFrom: "today", parseCsv: parseCSV, strict })).toBeNull();
+    }
+    // Even titled a statement, item lines with no date of their own are not statement rows.
+    expect(openListFromStatementText(ACME_INVOICE.replace("Item Description Qty Price Amount\n", "").replace("INVOICE", "STATEMENT"), "acme.pdf")).toBeNull();
+  });
+
+  it("knows a statement by its own title, not the bare word", () => {
+    expect(looksLikeStatementText(COLUMNS)).toBe(true);
+    expect(looksLikeStatementText(LINES)).toBe(true);
+    expect(looksLikeStatementText(LUMBER_CSV)).toBe(true);
+    expect(looksLikeStatementText("Invoice 7731\nTerms: Net 10th following statement\n")).toBe(false);
+  });
+
+  /** A statement two pages long, each page with its own labels and the statement's total. */
+  const page = (refs: string[], amts: string[], dates: string[], p: string) =>
+    `STATEMENT\nACCOUNT\nTR-34426\nDATE\n09/25/26\nPAGE\n${p}\nDATE\n${dates.join("\n")}\nCODE\n${refs.map(() => "INV").join("\n")}\nREFERENCE\n${refs.join("\n")}\nAMOUNT\n${amts.join("\n")}\nTOTAL DUE\n$60.00\n`;
+  it("reads every page of a column-wise statement", () => {
+    const text = page(["8802-1000001", "8802-1000002"], ["10.00", "20.00"], ["09-01-26", "09-02-26"], "1 of 2") + page(["8802-1000003"], ["30.00"], ["09-03-26"], "2 of 2");
+    const list = openListFromStatementText(text, "statement.pdf")!;
+    expect(list.rows.map((r) => [r.reference, r.invoiceDate, r.openBalance])).toEqual([
+      ["8802-1000001", "2026-09-01", 10],
+      ["8802-1000002", "2026-09-02", 20],
+      ["8802-1000003", "2026-09-03", 30],
+    ]);
+    expect(list.skipped).toEqual([]);
+    expect(list.listDate).toBe("2026-09-25");
+    expect(reconcileOpenList(list, [], "a").complete).toMatchObject({ ok: true, how: "total" });
+  });
+
+  it("names a page it couldn't zip, and then marks nothing paid", () => {
+    const broken = page(["8802-1000003"], ["30.00"], ["09-03-26"], "2 of 2").replace("AMOUNT\n30.00\n", "");
+    const text = page(["8802-1000001", "8802-1000002"], ["10.00", "20.00"], ["09-01-26", "09-02-26"], "1 of 2") + broken;
+    const list = openListFromStatementText(text, "statement.pdf")!;
+    expect(list.rows).toHaveLength(2);
+    expect(list.skipped).toHaveLength(1);
+    expect(list.skipped[0].why).toContain("8802-1000003");
+    const plan = reconcileOpenList({ ...list, wholeList: true }, [], "a");
+    expect(plan.complete).toMatchObject({ ok: false, overridable: false });
+  });
+
+  it("reads a statement's balance, not its original amount, when it prints both", () => {
+    const text = `STATEMENT\nACCOUNT\n55-0192\nDATE\n09/25/26\nDATE\n09-01-26\n09-02-26\nREFERENCE\nL-20417\nL-20455\nAMOUNT\n512.40\n88.15\nBALANCE\n212.40\n88.15\nTOTAL DUE\n$300.55\n`;
+    const list = openListFromStatementText(text, "yard.pdf")!;
+    expect(list.rows.map((r) => [r.reference, r.amount, r.openBalance])).toEqual([
+      ["L-20417", 512.4, 212.4],
+      ["L-20455", 88.15, 88.15],
+    ]);
   });
 
   it("takes a scanned statement a model transcribed, dated by the newest paper when none is printed", () => {

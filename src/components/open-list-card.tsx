@@ -14,6 +14,10 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  * for the user"). One sentence says what it changes, in the supplier's own name; Apply and Not Now
  * are the only buttons; the detail is folded. When the list can't be read yet, the card asks the
  * one thing it needs (whose list, or which columns) and nothing else.
+ *
+ * MARKING PAPERS PAID FROM A LIST THAT MAY BE PARTIAL is never one press: a list that prints no
+ * total or count of its own needs a person to tick "It's the whole list" first, and a list whose own
+ * total or count says it is short closes nothing at all (Apply then only adds and corrects).
  */
 
 type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
@@ -57,7 +61,8 @@ export function OpenListCard({
   working: boolean;
 }) {
   const router = useRouter();
-  const [accountPick, setAccountPick] = useState("");
+  const [accountPick, setAccountPick] = useState(view?.suggestedAccountId ?? "");
+  const [sure, setSure] = useState(false);
   const [cols, setCols] = useState<OpenListColumns>(() => view?.needs?.columns ?? {});
 
   const notNow = (
@@ -177,12 +182,15 @@ export function OpenListCard({
   }
 
   const plan = view.plan;
-  const whole = !plan.complete.ok;
+  const asks = !plan.complete.ok && plan.complete.overridable;
+  // A list its own figures call short, with nothing to add or correct: there is nothing to apply.
+  const canApply = plan.complete.ok || !plan.nothing;
+  const needsSure = asks && plan.close.length > 0;
   const apply = () =>
     run(
       "apply",
       async () => {
-        const res = await applyOpenList(itemId, { fingerprint: plan.fingerprint, wholeList: whole });
+        const res = await applyOpenList(itemId, { fingerprint: plan.fingerprint, wholeList: asks && (sure || !needsSure) });
         // The books moved under the card: the page brings the new figures.
         if (res.stale) router.refresh();
         return res;
@@ -194,10 +202,16 @@ export function OpenListCard({
     <div className="mt-2 space-y-2">
       <p className="text-sm font-medium text-slate-900">{plan.headline}</p>
       {plan.discountLine && <p className="text-xs text-slate-600">{plan.discountLine}</p>}
-      {whole && (
+      {!plan.complete.ok && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
           {plan.complete.said}
         </p>
+      )}
+      {needsSure && (
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 text-sm text-slate-800">
+          <input type="checkbox" className="h-5 w-5 shrink-0" checked={sure} onChange={(e) => setSure(e.target.checked)} disabled={working} />
+          It&apos;s The Whole List: Mark {plan.close.length === 1 ? "1 Paper" : `${plan.close.length} Papers`} Paid
+        </label>
       )}
       {plan.firstList && !plan.nothing && (
         <p className="text-xs text-slate-600">
@@ -205,16 +219,22 @@ export function OpenListCard({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button onClick={apply} disabled={working}>
-          {busy === "apply" ? <Loader2 className="animate-spin" /> : <Check />} {plan.nothing ? "Done: It Matches" : whole ? "This Is The Whole Open List: Apply" : "Apply"}
-        </Button>
+        {canApply && (
+          <Button onClick={apply} disabled={working || (needsSure && !sure)}>
+            {busy === "apply" ? <Loader2 className="animate-spin" /> : <Check />} {plan.nothing && plan.complete.ok ? "Done: It Matches" : "Apply"}
+          </Button>
+        )}
         {notNow}
       </div>
       <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
         <summary className="flex min-h-11 cursor-pointer items-center font-medium text-slate-700">See What It Changes</summary>
         <div className="mt-2 space-y-3">
           <p className="text-xs text-slate-500">
-            Dated {view.dateSaid}. Balance here before: {sayDollars(plan.before)}; after: {sayDollars(plan.after)}.
+            Dated {view.dateSaid}. Balance here before: {sayDollars(plan.before)}; after: {sayDollars(plan.after)}
+            {plan.afterNet !== plan.after ? ` in papers, ${sayDollars(plan.afterNet)} less the payment on the list` : ""}.
+            {plan.closeBy
+              ? ` Only papers dated ${plan.closeBy} or before can be marked paid: the newest paper on the list, or a week before its date, since a supplier can take days to post a paper.`
+              : " The list prints no dates on its papers, so nothing can be marked paid from it."}
             {view.accountFrom === "number" ? " Matched by the account number it prints." : view.accountFrom === "papers" ? " Matched by papers it lists that are already on that account." : ""}
           </p>
           <Papers title="Marked Paid" papers={plan.close} note="Open here, not on the list, and dated on or before it." />
@@ -248,7 +268,8 @@ export function OpenListCard({
               </ul>
             </div>
           )}
-          <Papers title="Left Open, Dated After The List" papers={plan.keepNewer} note="They may just be newer than the list." />
+          <Papers title="Left Open, List May Be Short" papers={plan.keepPartial} note="Not on the list, but the list's own figures say it is missing papers." />
+          <Papers title="Left Open, Dated After The List" papers={plan.keepNewer} note="The supplier may not have posted them yet." />
           <Papers title="Left Open, No Date" papers={plan.keepUndated} note="Nothing shows they are older than the list." />
           {plan.conflicts.length > 0 && (
             <div>
@@ -263,7 +284,9 @@ export function OpenListCard({
           {plan.payments.length > 0 && (
             <div>
               <p className="font-medium text-slate-800">Payments On The List ({plan.payments.length})</p>
-              <p className="text-xs text-slate-500">Counted in the list&apos;s total; not papers, so nothing is added for them.</p>
+              <p className="text-xs text-slate-500">
+                Counted in the list&apos;s total and taken off the balance above; not papers, so nothing is added for them, and the Pay figure still counts the papers they will pay.
+              </p>
               <ul className="mt-1 space-y-0.5">
                 {plan.payments.map((p) => (
                   <li key={p.reference} className="flex gap-x-3 text-slate-700">

@@ -30,12 +30,14 @@ const BASE: OpenListView = {
   plan: {
     headline: "Consolidated Electrical Distributors' open list of Sep 26: 16 papers marked paid ($2,070.22), 3 new, balance now $3,304.73.",
     discountLine: "After $30.79 of prompt-pay discount on the list: $3,273.94.",
-    complete: { ok: false, said: "The list doesn't print its own total, so it could be one page of several." },
+    complete: { ok: false, said: "The list doesn't print its own total, so it could be one page of several.", overridable: true },
     fingerprint: "abc",
     nothing: false,
+    closeBy: "2026-09-23",
     close: [{ id: "p1", number: "8802-1103832", date: "2026-07-22", open: 10.29 }],
     keepNewer: [],
     keepUndated: [],
+    keepPartial: [],
     add: [{ number: "8802-1108647", kind: "invoice", date: "2026-09-23", po: "13897 HERRING", open: 103.99 }],
     update: [],
     conflicts: [],
@@ -43,6 +45,7 @@ const BASE: OpenListView = {
     skipped: [],
     before: 5174.62,
     after: 3304.73,
+    afterNet: 3304.73,
     firstList: false,
   },
 };
@@ -56,20 +59,44 @@ describe("the open-list card", () => {
     const text = textOf(html);
     expect(text).toContain(BASE.plan!.headline);
     expect(text).toContain("$3,273.94");
-    expect(buttons(html).map((b) => b.text)).toEqual(["This Is The Whole Open List: Apply", "Not Now"]);
+    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
     expect(html).toContain("<details");
     expect(text).toContain("See What It Changes");
   });
 
+  it("marks nothing paid from a list with no figures of its own until a person ticks that it is whole", () => {
+    const html = render(BASE);
+    expect(textOf(html)).toContain("It's The Whole List: Mark 1 Paper Paid");
+    expect(html).toMatch(/type="checkbox"/);
+    const apply = buttons(html).find((b) => b.text === "Apply")!;
+    expect(apply.markup).toMatch(/disabled=""/);
+  });
+
   it("is just Apply when the list is known to be whole", () => {
-    const html = render({ ...BASE, plan: { ...BASE.plan!, complete: { ok: true, said: "" } } });
+    const html = render({ ...BASE, plan: { ...BASE.plan!, complete: { ok: true, said: "", overridable: false } } });
     expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
+    expect(html).not.toMatch(/type="checkbox"/);
+    expect(buttons(html)[0].markup).not.toMatch(/disabled=""/);
+  });
+
+  it("offers no override when the list's own figures say it is short", () => {
+    const short = { ...BASE.plan!, complete: { ok: false, said: "It is missing papers.", overridable: false }, close: [], keepPartial: BASE.plan!.close };
+    const html = render({ ...BASE, plan: short });
+    expect(html).not.toMatch(/type="checkbox"/);
+    expect(textOf(html)).toContain("Left Open, List May Be Short");
+    // Apply still adds and corrects what it lists; with nothing to add or correct there is no Apply.
+    expect(buttons(html).map((b) => b.text)).toEqual(["Apply", "Not Now"]);
+    const nothing = render({ ...BASE, plan: { ...short, add: [], nothing: true } });
+    expect(buttons(nothing).map((b) => b.text)).toEqual(["Not Now"]);
   });
 
   it("asks whose list it is when nothing on it names an account", () => {
     const html = render({ ...BASE, supplier: null, accountId: null, plan: null });
     expect(textOf(html)).toContain("Whose list is this?");
     expect(buttons(html).map((b) => b.text)).toEqual(["Use This Supplier", "Not Now"]);
+    // A supplier whose remembered column names read it is offered first, and still has to be pressed.
+    const suggested = render({ ...BASE, supplier: null, accountId: null, plan: null, suggestedAccountId: "a1" });
+    expect(suggested).toMatch(/<option value="a1" selected="">/);
   });
 
   it("asks for the columns once, showing the list itself", () => {

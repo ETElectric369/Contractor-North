@@ -552,7 +552,9 @@ export function tableFromText(text: string, parseCsv: (t: string) => string[][])
 const DATE_TOKEN = /\b(\d{1,2}[/-]\d{1,2}[/-](?:\d{4}|\d{2})|\d{4}-\d{2}-\d{2})\b/g;
 const MONEY_TOKEN = /\(\$?\s*[\d,]*\d\.\d{2}\)|-?\$?\s*[\d,]*\d\.\d{2}-?/g;
 
-/** The labels a statement prints over its columns, as their own lines (a column-wise text dump). */
+/** The labels a statement prints over its columns, as their own lines (a column-wise text dump).
+ *  "Amount" is the paper's amount and "Balance" what is still open on it: a statement that prints
+ *  both is read by its balance, and one that prints only an amount (CED's does) by that. */
 const STATEMENT_LABELS: Record<string, OpenListField | "age" | "total" | "account" | "date" | "page"> = {
   reference: "reference",
   "reference number": "reference",
@@ -565,9 +567,12 @@ const STATEMENT_LABELS: Record<string, OpenListField | "age" | "total" | "accoun
   po: "po",
   "po number": "po",
   "job name": "po",
-  amount: "openBalance",
+  amount: "amount",
+  "original amount": "amount",
+  "invoice amount": "amount",
   balance: "openBalance",
   "open balance": "openBalance",
+  "open amount": "openBalance",
   "amount due": "openBalance",
   "due date": "dueDate",
   date: "date",
@@ -583,63 +588,101 @@ const STATEMENT_LABELS: Record<string, OpenListField | "age" | "total" | "accoun
 
 type Block = { label: string; values: string[] };
 
+const moneyValues = (b: Block) => b.values.filter((v) => readMoney(v) !== null);
+
 /**
  * A statement whose PDF text comes out one column at a time (CED's monthly statement does: every
  * label on its own line, then that column's values). The columns are zipped back into rows only
- * when the paper number and the balance columns hold the same number of values.
+ * when the paper number and the money columns hold the same number of values. EVERY PAGE: each
+ * page repeats the labels, so each block of paper numbers is zipped with its own page's columns and
+ * the pages are put together; a page that can't be zipped is named, never dropped without a word.
  */
-function statementFromColumns(lines: readonly string[]): { rows: string[][]; header: string[]; date: string | null; account: string | null; total: number | null } | null {
-  const blocks: Block[] = [];
-  let current: Block | null = null;
-  for (const raw of lines) {
+function statementFromColumns(lines: readonly string[]): {
+  rows: string[][];
+  header: string[];
+  date: string | null;
+  account: string | null;
+  total: number | null;
+  skipped: { line: number; why: string }[];
+} | null {
+  const blocks: (Block & { line: number })[] = [];
+  let current: (Block & { line: number }) | null = null;
+  lines.forEach((raw, i) => {
     const line = raw.trim();
-    if (!line) continue;
+    if (!line) return;
     const key = headerKey(line);
     if (STATEMENT_LABELS[key]) {
-      current = { label: STATEMENT_LABELS[key] as string, values: [] };
+      current = { label: STATEMENT_LABELS[key] as string, values: [], line: i + 1 };
       blocks.push(current);
     } else if (current) {
       current.values.push(line);
     }
-  }
-  const refs = blocks.filter((b) => b.label === "reference" && b.values.filter(looksLikeReference).length > 0);
-  for (const ref of refs) {
+  });
+  const refAts = blocks.map((b, i) => (b.label === "reference" && b.values.some(looksLikeReference) ? i : -1)).filter((i) => i >= 0);
+  if (!refAts.length) return null;
+  const rows: string[][] = [];
+  const skipped: { line: number; why: string }[] = [];
+  let firstRefAt = -1;
+  let firstDates: Block | undefined;
+  let pageStart = 0;
+  refAts.forEach((refAt, k) => {
+    const ref = blocks[refAt];
     const values = ref.values.filter(looksLikeReference);
     const n = values.length;
-    // The balance column after the paper numbers, holding exactly as many money values.
-    const refAt = blocks.indexOf(ref);
-    const money = blocks.slice(refAt + 1).find((b) => b.label === "openBalance" && b.values.filter((v) => readMoney(v) !== null).length >= n);
-    if (!money) continue;
-    const amounts = money.values.filter((v) => readMoney(v) !== null).slice(0, n);
-    const near = (label: string) =>
-      [...blocks.slice(0, refAt).reverse(), ...blocks.slice(refAt + 1)].find((b) => b.label === label && b.values.length === n);
+    const pageEnd = k + 1 < refAts.length ? refAts[k + 1] : blocks.length;
+    const after = blocks.slice(refAt + 1, pageEnd);
+    // This page's money: its balance column when it prints one, else its amount column.
+    const fits = (label: string) => after.find((b) => b.label === label && moneyValues(b).length >= n);
+    const balance = fits("openBalance");
+    const amount = fits("amount");
+    const money = balance ?? amount;
+    if (!money) {
+      skipped.push({ line: ref.line, why: `${n === 1 ? "One paper" : `${n} papers`} under "Reference" (${values.slice(0, 2).join(", ")}${n > 2 ? "…" : ""}) had no balance beside ${n === 1 ? "it" : "them"} that could be read.` });
+      pageStart = refAt + 1;
+      return;
+    }
+    const opens = moneyValues(money).slice(0, n);
+    const amounts = balance && amount ? moneyValues(amount).slice(0, n) : null;
+    const before = blocks.slice(pageStart, refAt).reverse();
+    const near = (label: string) => [...before, ...after].find((b) => b.label === label && b.values.length === n);
     const dates = near("date") ?? near("invoiceDate");
     const types = near("type");
     const pos = near("po");
-    const rows = values.map((ref0, i) => [ref0, types?.values[i] ?? "", pos?.values[i] ?? "", dates?.values[i] ?? "", amounts[i]]);
-    // The statement's own date: a DATE label with one date under it, above the table.
-    const single = blocks.slice(0, refAt).find((b) => (b.label === "date" || b.label === "invoiceDate") && b.values.length >= 1 && readDate(b.values[0]) && b !== dates);
-    const acct = blocks.find((b) => b.label === "account" && b.values.length >= 1)?.values[0] ?? null;
-    const totalBlock = blocks.find((b) => b.label === "total" && b.values.length >= 1);
-    return {
-      rows,
-      header: ["Reference", "Type", "PO", "Date", "Open Balance"],
-      date: single ? readDate(single.values[0]) : null,
-      account: acct && /\d/.test(acct) ? acct.trim() : null,
-      total: totalBlock ? readMoney(totalBlock.values[0]) : null,
-    };
-  }
-  return null;
+    values.forEach((ref0, i) => rows.push([ref0, types?.values[i] ?? "", pos?.values[i] ?? "", dates?.values[i] ?? "", amounts?.[i] ?? "", opens[i]]));
+    if (firstRefAt < 0) {
+      firstRefAt = refAt;
+      firstDates = dates;
+    }
+    pageStart = blocks.indexOf(money) + 1;
+  });
+  if (!rows.length) return null;
+  // The statement's own date: a DATE label with one date under it, above the first table.
+  const single = blocks.slice(0, firstRefAt).find((b) => (b.label === "date" || b.label === "invoiceDate") && b.values.length >= 1 && readDate(b.values[0]) && b !== firstDates);
+  const acct = blocks.find((b) => b.label === "account" && b.values.length >= 1)?.values[0] ?? null;
+  // Every page prints the balance due; the last one is the statement's own.
+  const totalBlock = blocks.filter((b) => b.label === "total" && b.values.length >= 1).pop();
+  return {
+    rows,
+    header: ["Reference", "Type", "PO", "Date", "Amount", "Open Balance"],
+    date: single ? readDate(single.values[0]) : null,
+    account: acct && /\d/.test(acct) ? acct.trim() : null,
+    total: totalBlock ? readMoney(totalBlock.values[0]) : null,
+    skipped,
+  };
 }
 
-/** A statement whose text keeps each row on one line: a paper number, dates and money on it. */
+/**
+ * A statement whose text keeps each row on one line: a paper number, its date and money on it. A
+ * row with no date of its own is not a statement row (an invoice's item lines have a SKU, a
+ * quantity and a price, and no date), so it is not read.
+ */
 function statementFromLines(lines: readonly string[]): { rows: string[][]; header: string[] } | null {
   let headerAt = -1;
   for (let i = 0; i < lines.length; i++) {
     const words = headerKey(lines[i]);
     const hasRef = /\b(reference|invoice|document|ref|inv)\b/.test(words);
     const hasMoney = /\b(amount|balance|due|open|total)\b/.test(words);
-    if (hasRef && hasMoney && words.split(" ").length >= 3) {
+    if (hasRef && hasMoney && words.split(" ").length >= 3 && !isLineItemHeader(lines[i])) {
       headerAt = i;
       break;
     }
@@ -651,6 +694,7 @@ function statementFromLines(lines: readonly string[]): { rows: string[][]; heade
     const moneys = [...line.matchAll(MONEY_TOKEN)].map((m) => m[0]);
     if (!moneys.length) continue;
     const dates = [...line.matchAll(DATE_TOKEN)].map((m) => m[0]);
+    if (!dates.length) continue;
     let rest = line;
     for (const d of dates) rest = rest.replace(d, " ");
     for (const m of moneys) rest = rest.replace(m, " ");
@@ -677,11 +721,28 @@ function statementDate(lines: readonly string[]): string | null {
   return null;
 }
 
-const STATEMENT_WORDS = /\b(statement|open items|open invoices|aging|account summary|balance forward)\b/i;
+/**
+ * WHAT MAKES TEXT A STATEMENT: its own title or label on a line by itself ("STATEMENT", "Customer
+ * Statement - Open Items", "Statement Date: 09/20/26", "Open Items"), never the bare word anywhere
+ * (an invoice says "Net 10th following statement" and "remit with your statement").
+ */
+const STATEMENT_TITLE =
+  /^(?:(?:customer|account|monthly|vendor|supplier|open item|open items)\s+)?statement(?:\s+of\s+account)?(?:\s+(?:open items|open invoices|date\b.*|of\b.*))?$|^statement\s+date\b|^(?:open items|open invoices|open item list|open items list|aged? (?:receivables|payables|balance)|aging(?: report| summary)?|account aging)$/;
 
-/** Does this text read as a supplier statement or an open-items list at all? */
+/** An invoice's own item table: a quantity and a price (or description) over the same columns. */
+const QTY_WORDS = /\b(qty|quantity|ordered|shipped|ship qty|order qty|b\s*o)\b/;
+const PRICE_WORDS = /\b(price|unit|each|ext|extension|extended|description|sku|catalog)\b/;
+function isLineItemHeader(line: string): boolean {
+  const words = headerKey(line);
+  return QTY_WORDS.test(words) && PRICE_WORDS.test(words);
+}
+
+/** Does this text read as a supplier statement or an open-items list at all? Its own title, and no
+ *  invoice item table. */
 export function looksLikeStatementText(text: string): boolean {
-  return STATEMENT_WORDS.test(String(text ?? "").slice(0, 4000));
+  const lines = String(text ?? "").slice(0, 4000).replace(/\r\n?/g, "\n").split("\n");
+  if (lines.some(isLineItemHeader)) return false;
+  return lines.slice(0, 80).some((l) => STATEMENT_TITLE.test(headerKey(l)));
 }
 
 /**
@@ -709,6 +770,7 @@ export function openListFromStatementText(text: string, name: string): OpenList 
   });
   if (!read.ok) return null;
   const list = read.list;
+  if (columns?.skipped.length) list.skipped = [...columns.skipped, ...list.skipped];
   if (!list.listDate) {
     const newest = list.rows.map((r) => r.invoiceDate).filter((d): d is string => !!d).sort().pop() ?? null;
     list.listDate = newest;
@@ -798,12 +860,16 @@ export type PlanAdd = { number: string; row: OpenListRow };
 export type OpenListPlan = {
   accountId: string;
   listDate: string | null;
-  /** Open here, gone from the list, dated on or before the list: marked paid. */
+  /** The last day a paper can be dated and still be marked paid by this list (closeCutoff). */
+  closeBy: string | null;
+  /** Open here, gone from the list, dated on or before `closeBy`: marked paid. */
   close: PlanPaper[];
-  /** Open here, gone from the list, dated AFTER it: may be newer than the list. Left open. */
+  /** Open here, gone from the list, dated AFTER `closeBy`: the supplier may not have it yet. Left open. */
   keepNewer: PlanPaper[];
-  /** Open here, gone from the list, with no date: nothing proves it is older. Left open. */
+  /** Open here, gone from the list, with no date (or a list with none): nothing proves it is older. Left open. */
   keepUndated: PlanPaper[];
+  /** Open here, gone from a list whose own total or count says it is missing papers: left open. */
+  keepPartial: PlanPaper[];
   add: PlanAdd[];
   update: PlanUpdate[];
   same: string[];
@@ -823,9 +889,15 @@ export type OpenListPlan = {
     listTotal: number;
     listDiscount: number;
     listNet: number;
+    /** `after` less the payments the list carries that the supplier hasn't applied to a paper yet. */
+    afterNet: number;
   };
-  /** Whether the list is known to be the whole open list, and how. */
-  complete: { ok: boolean; how: "total" | "total_net" | "count" | "person" | null; said: string };
+  /**
+   * Whether the list is known to be the whole open list, and how. `overridable`: the list prints
+   * no total and no count of its own, so a person's word is the only check there can be. When it
+   * prints one and the rows disagree, no word overrides it: nothing is marked paid from it.
+   */
+  complete: { ok: boolean; how: "total" | "total_net" | "count" | "person" | null; said: string; overridable: boolean };
   /** Nothing would change. */
   nothing: boolean;
   fingerprint: string;
@@ -852,8 +924,36 @@ export function fingerprintOf(parts: string[]): string {
   return (h >>> 0).toString(36);
 }
 
+/** Days a supplier may take to post a paper it has already sent (its portal lags its email). */
+export const POSTING_DAYS = 7;
+
+const minusDays = (ymd: string, days: number) => {
+  const t = new Date(`${ymd}T12:00:00Z`);
+  t.setUTCDate(t.getUTCDate() - days);
+  return t.toISOString().slice(0, 10);
+};
+
+/**
+ * THE LAST DAY A PAPER CAN BE DATED AND STILL BE MARKED PAID BY THIS LIST. A supplier's list is
+ * only as new as the newest paper it carries: one the app already has from the emailed PDF may not
+ * be posted on the supplier's side yet, and its absence from the list says nothing. So the day is
+ * the newest dated paper on the list, or the list's own date less a week of posting, whichever is
+ * later, and never after the list's date. A list whose rows carry no dates of their own proves no
+ * paper older than anything, and closes nothing.
+ */
+export function closeCutoff(list: Pick<OpenList, "listDate" | "rows">): string | null {
+  if (!list.listDate) return null;
+  const dated = list.rows.filter((r) => r.kind !== "payment" && r.invoiceDate).map((r) => r.invoiceDate as string).sort();
+  if (!dated.length) return null;
+  const newest = dated[dated.length - 1];
+  const allowance = minusDays(list.listDate, POSTING_DAYS);
+  const by = newest > allowance ? newest : allowance;
+  return by > list.listDate ? list.listDate : by;
+}
+
 export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper[], accountId: string): OpenListPlan {
   const listDate = list.listDate;
+  const closeBy = closeCutoff(list);
   const byKey = new Map<string, OpenListPaper>();
   for (const p of papers) {
     const k = referenceKey(p.invoiceNumber);
@@ -916,21 +1016,35 @@ export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper
     else same.push(paper.invoiceNumber);
   }
 
-  const close: PlanPaper[] = [];
+  const listPapers = sum(list.rows.filter((r) => r.kind !== "payment").map((r) => r.openBalance));
+  const listPayments = sum(payments.map((r) => r.openBalance));
+  const listTotal = r2(listPapers + listPayments);
+  const listDiscount = sum(list.rows.map((r) => r.discountAmount ?? 0));
+  const listNet = r2(listTotal - listDiscount);
+  const complete = completeness(list, listTotal, listNet, listDiscount);
+
+  let close: PlanPaper[] = [];
   const keepNewer: PlanPaper[] = [];
   const keepUndated: PlanPaper[] = [];
+  let keepPartial: PlanPaper[] = [];
   const onAccount = papers.filter((p) => p.supplierAccountId === accountId);
   for (const p of onAccount) {
     if (p.closed || listed.has(referenceKey(p.invoiceNumber))) continue;
     const said: PlanPaper = { id: p.id, number: p.invoiceNumber, date: p.invoiceDate, open: openOf(p) };
-    if (!p.invoiceDate) keepUndated.push(said);
-    else if (listDate && p.invoiceDate > listDate) keepNewer.push(said);
-    else if (!listDate) keepUndated.push(said);
+    if (!p.invoiceDate || !closeBy) keepUndated.push(said);
+    else if (p.invoiceDate > closeBy) keepNewer.push(said);
     else close.push(said);
+  }
+  // A LIST ITS OWN FIGURES CALL SHORT marks nothing paid, and no one's word changes that: what it
+  // would have closed is shown, left open.
+  if (!complete.ok && !complete.overridable) {
+    keepPartial = close;
+    close = [];
   }
   const byDate = (a: PlanPaper, b: PlanPaper) => String(a.date ?? "").localeCompare(String(b.date ?? "")) || a.number.localeCompare(b.number);
   close.sort(byDate);
   keepNewer.sort(byDate);
+  keepPartial.sort(byDate);
 
   // THE BALANCE AFTER, by simulation: every paper on the account (and every one joining it) with
   // what Apply would write, summed the way supplier-balance sums an open paper.
@@ -953,19 +1067,14 @@ export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper
     return r2(total);
   })();
 
-  const listPapers = sum(list.rows.filter((r) => r.kind !== "payment").map((r) => r.openBalance));
-  const listPayments = sum(payments.map((r) => r.openBalance));
-  const listTotal = r2(listPapers + listPayments);
-  const listDiscount = sum(list.rows.map((r) => r.discountAmount ?? 0));
-  const listNet = r2(listTotal - listDiscount);
-
-  const complete = completeness(list, listTotal, listNet, listDiscount);
   const plan: Omit<OpenListPlan, "fingerprint"> = {
     accountId,
     listDate,
+    closeBy,
     close,
     keepNewer,
     keepUndated,
+    keepPartial,
     add,
     update,
     same,
@@ -981,6 +1090,7 @@ export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper
       listTotal,
       listDiscount,
       listNet,
+      afterNet: r2(after + listPayments),
     },
     complete,
     nothing: !close.length && !add.length && !update.length,
@@ -998,29 +1108,41 @@ export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper
 
 function completeness(list: OpenList, listTotal: number, listNet: number, listDiscount: number): OpenListPlan["complete"] {
   const skippedSaid = list.skipped.length ? ` ${list.skipped.length === 1 ? "One row" : `${list.skipped.length} rows`} didn't read.` : "";
+  const noClose = " Nothing is marked paid from it; drop the whole list (every page) to bring the books in line.";
   if (list.printedTotal !== null) {
     if (moneyCents(list.printedTotal) === moneyCents(listTotal))
-      return { ok: true, how: "total", said: `The rows add to the ${sayDollars(list.printedTotal)} the list prints.` };
+      return { ok: true, how: "total", said: `The rows add to the ${sayDollars(list.printedTotal)} the list prints.`, overridable: false };
     if (moneyCents(listDiscount) !== 0 && moneyCents(list.printedTotal) === moneyCents(listNet))
       return {
         ok: true,
         how: "total_net",
         said: `The rows add to ${sayDollars(listTotal)}; less ${sayDollars(listDiscount)} of discount that is the ${sayDollars(list.printedTotal)} the list prints.`,
+        overridable: false,
       };
-    if (!list.wholeList)
-      return {
-        ok: false,
-        how: null,
-        said: `The rows add to ${sayDollars(listTotal)}, but the list prints ${sayDollars(list.printedTotal)}, so it may be missing papers.${skippedSaid} Nothing is marked paid until you say it is the whole list.`,
-      };
+    // The supplier's own figure says papers are missing: no one's word overrides it.
+    return {
+      ok: false,
+      how: null,
+      said: `The rows add to ${sayDollars(listTotal)}, but the list prints ${sayDollars(list.printedTotal)}, so it is missing papers.${skippedSaid}${noClose}`,
+      overridable: false,
+    };
   }
-  if (list.printedCount !== null && list.printedCount === list.rows.length && !list.skipped.length)
-    return { ok: true, how: "count", said: `All ${list.printedCount} papers the list counts were read.` };
-  if (list.wholeList) return { ok: true, how: "person", said: "You said this is the whole open list." };
+  if (list.printedCount !== null) {
+    if (list.printedCount === list.rows.length && !list.skipped.length)
+      return { ok: true, how: "count", said: `All ${list.printedCount} papers the list counts were read.`, overridable: false };
+    return {
+      ok: false,
+      how: null,
+      said: `The list counts ${list.printedCount} papers, and ${list.rows.length} were read.${skippedSaid}${noClose}`,
+      overridable: false,
+    };
+  }
+  if (list.wholeList) return { ok: true, how: "person", said: "You said this is the whole open list.", overridable: true };
   return {
     ok: false,
     how: null,
     said: `The list doesn't print its own total, so it could be one page of several.${skippedSaid} If the supplier's own page shows ${sayDollars(listTotal)}${moneyCents(listDiscount) ? ` (or ${sayDollars(listNet)} after ${sayDollars(listDiscount)} of discount)` : ""}, it is the whole list.`,
+    overridable: true,
   };
 }
 
@@ -1043,12 +1165,18 @@ export function sayDay(ymd: string | null, today?: string | null): string {
 export function planHeadline(plan: OpenListPlan, list: Pick<OpenList, "from">, supplier: string, today?: string | null): string {
   const what = list.from === "statement" || list.from === "reader" ? "statement" : "open list";
   const lead = `${possessive(supplier)} ${what} of ${sayDay(plan.listDate, today)}`;
-  if (plan.nothing) return `${lead}: matches your books. Balance ${sayDollars(plan.totals.after)}.`;
+  // THE SUPPLIER'S FIGURE: a payment it hasn't applied to a paper yet comes off the balance, and is said.
+  const unapplied = plan.totals.listPayments;
+  const balance = moneyCents(unapplied)
+    ? `${sayDollars(plan.totals.afterNet)} after ${sayDollars(Math.abs(unapplied))} of payment ${String(supplier ?? "").trim() || "the supplier"} hasn't applied to a paper yet`
+    : sayDollars(plan.totals.after);
+  const partial = plan.keepPartial.length ? `, ${plural(plan.keepPartial.length, "paper", "papers")} it doesn't list left open (it is missing papers)` : "";
+  if (plan.nothing) return `${lead}: ${plan.keepPartial.length ? `nothing to change${partial}` : "matches your books"}. Balance ${balance}.`;
   const parts: string[] = [];
   if (plan.close.length) parts.push(`${plural(plan.close.length, "paper", "papers")} marked paid (${sayDollars(plan.totals.closed)})`);
   if (plan.add.length) parts.push(`${plan.add.length} new`);
   if (plan.update.length) parts.push(`${plan.update.length} changed`);
-  return `${lead}: ${parts.join(", ")}, balance now ${sayDollars(plan.totals.after)}.`;
+  return `${lead}: ${parts.join(", ")}${partial}, balance now ${balance}.`;
 }
 
 /** "Tahoe Lumber's", "Consolidated Electrical Distributors'". */
@@ -1061,7 +1189,7 @@ export function possessive(name: string): string {
 export function discountLine(plan: OpenListPlan): string | null {
   const d = plan.totals.listDiscount;
   if (!moneyCents(d)) return null;
-  return `After ${sayDollars(d)} of prompt-pay discount on the list: ${sayDollars(r2(plan.totals.after - d))}.`;
+  return `After ${sayDollars(d)} of prompt-pay discount on the list: ${sayDollars(r2(plan.totals.afterNet - d))}.`;
 }
 
 // ── WHAT THE PAPER'S ROW KEEPS ─────────────────────────────────────────────────────────────────
@@ -1072,8 +1200,9 @@ export type OpenListApplied = {
   by: string | null;
   fingerprint: string;
   headline: string;
-  /** Papers Apply added (Undo removes each one nothing has been tied to since). */
-  added: { id: string; number: string }[];
+  /** Papers Apply added, and what it wrote on each (Undo removes one only while nothing is tied to
+   *  it and it still says what Apply wrote). */
+  added: { id: string; number: string; wrote?: PaperFields }[];
   /** Papers Apply changed: what they were, and what Apply wrote (Undo restores only a paper that
    *  still says what Apply wrote). */
   changed: { id: string; number: string; prior: PaperFields; wrote: PaperFields }[];
@@ -1098,6 +1227,9 @@ export type OpenListView = {
   accountFrom: OpenList["accountFrom"];
   /** Every supplier account, for "Whose List Is This?". */
   accounts: { id: string; name: string }[];
+  /** An account whose remembered column names read this list word for word: offered first in
+   *  "Whose List Is This?", never chosen for the person. */
+  suggestedAccountId?: string | null;
   /** The columns a person still has to point at. */
   needs: null | {
     header: string[];
@@ -1110,12 +1242,14 @@ export type OpenListView = {
   plan: null | {
     headline: string;
     discountLine: string | null;
-    complete: { ok: boolean; said: string };
+    complete: { ok: boolean; said: string; overridable: boolean };
     fingerprint: string;
     nothing: boolean;
+    closeBy: string | null;
     close: PlanPaper[];
     keepNewer: PlanPaper[];
     keepUndated: PlanPaper[];
+    keepPartial: PlanPaper[];
     add: { number: string; kind: string; date: string | null; po: string | null; open: number }[];
     update: { number: string; said: string }[];
     conflicts: { number: string; why: string }[];
@@ -1123,6 +1257,8 @@ export type OpenListView = {
     skipped: { line: number; why: string }[];
     before: number;
     after: number;
+    /** `after` less the payments on the list the supplier hasn't applied yet. */
+    afterNet: number;
     firstList: boolean;
   };
   dateSaid: string;
@@ -1160,6 +1296,8 @@ export function openListFromText(
     const list = openListFromStatementText(text, opts.name);
     if (list) return { list, needs: null };
   }
+  // AN INVOICE'S ITEM TABLE (Qty, Price) is never a list of open papers, whatever its columns say.
+  if (String(text ?? "").slice(0, 4000).split(/\r?\n/).some(isLineItemHeader)) return null;
   const table = tableFromText(text, opts.parseCsv);
   if (table.length < 2) return null;
   if (opts.strict) {

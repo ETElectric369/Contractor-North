@@ -19,7 +19,7 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 
 import { applyOpenList, addOpenList, pickOpenListColumns } from "./open-list-actions";
-import { openListViews, undoOpenListCore } from "./open-list-core";
+import { openListViews, resolveAccount, undoOpenListCore } from "./open-list-core";
 import { importCedInvoices } from "./supplier-import-actions";
 import { undoPaperwork } from "@/app/(app)/organize/actions";
 import { supplierNetIfPaidBy } from "./supplier-balance";
@@ -39,6 +39,7 @@ function fakeDb() {
       let payload: any = null;
       let one: "single" | "maybe" | null = null;
       let cap = Infinity;
+      let range: [number, number] | null = null;
       const run = () => {
         if (verb === "insert") {
           // organized_items gets its org_id from the database's set_org_id trigger, as in production.
@@ -56,7 +57,8 @@ function fakeDb() {
           rows.push(...list);
           return { data: one ? list[0] : list, error: null };
         }
-        const hit = rows.filter((r) => filters.every((f) => f(r))).slice(0, cap);
+        let hit = rows.filter((r) => filters.every((f) => f(r))).slice(0, cap);
+        if (range) hit = hit.slice(range[0], range[1] + 1);
         if (verb === "update") {
           for (const r of hit) Object.assign(r, structuredClone(payload));
           return { data: hit.map((r) => ({ ...r })), error: null };
@@ -65,7 +67,8 @@ function fakeDb() {
           db[table] = rows.filter((r) => !hit.includes(r));
           return { data: hit, error: null };
         }
-        const out = hit.map((r) => structuredClone(r));
+        // PostgREST's db-max-rows: a select past it comes back cut short, with no error.
+        const out = hit.slice(0, 1000).map((r) => structuredClone(r));
         if (one) return { data: out[0] ?? null, error: null };
         return { data: out, error: null };
       };
@@ -78,6 +81,7 @@ function fakeDb() {
         in: (c: string, v: unknown[]) => (filters.push((r) => v.includes(r[c])), chain),
         order: () => chain,
         limit: (n: number) => ((cap = n), chain),
+        range: (a: number, b: number) => ((range = [a, b]), chain),
         single: () => ((one = "single"), chain),
         maybeSingle: () => ((one = "maybe"), chain),
         then: (res: any, rej: any) => Promise.resolve(run()).then(res, rej),
@@ -289,6 +293,87 @@ describe("Undo", () => {
     expect(db.supplier_invoices.some((r) => r.invoice_number === "8802-1108647")).toBe(false);
     expect(db.supplier_invoices.some((r) => r.invoice_number === "8802-1108649")).toBe(true);
   });
+
+  it("keeps an added paper a person changed since Apply", async () => {
+    const view = await viewNow();
+    await applyOpenList("item-1", { fingerprint: view.plan!.fingerprint, wholeList: true });
+    const applied = db.organized_items[0].proposal.openList.applied;
+    db.supplier_invoices.find((r) => r.invoice_number === "8802-1108647")!.open_balance = 50;
+    const down = await undoOpenListCore(state.client, "org-1", applied);
+    expect(down.ok && down.left).toEqual(["8802-1108647 (it changed since)"]);
+    expect(db.supplier_invoices.some((r) => r.invoice_number === "8802-1108647")).toBe(true);
+    expect(db.supplier_invoices.some((r) => r.invoice_number === "8802-1108648")).toBe(false);
+  });
+
+  it("removes nothing it couldn't check for ties", async () => {
+    const view = await viewNow();
+    await applyOpenList("item-1", { fingerprint: view.plan!.fingerprint, wholeList: true });
+    const applied = db.organized_items[0].proposal.openList.applied;
+    const real = state.client;
+    const failing = {
+      from(table: string) {
+        const q = real.from(table);
+        if (table !== "organized_items") return q;
+        const broken: any = { select: () => broken, eq: () => broken, in: () => broken, then: (res: any) => Promise.resolve({ data: null, error: { message: "read failed" } }).then(res) };
+        return broken;
+      },
+    };
+    const down = await undoOpenListCore(failing, "org-1", applied);
+    expect(down.ok).toBe(false);
+    expect(db.supplier_invoices.filter((r) => ["8802-1108647", "8802-1108648", "8802-1108649"].includes(r.invoice_number))).toHaveLength(3);
+  });
+});
+
+describe("whose list it is, by its papers", () => {
+  const acct = [{ id: "a", name: "A", account_number: null, on_account: true }, { id: "b", name: "B", account_number: null, on_account: true }];
+  const paper = (n: string, owner: string) => ({
+    id: n, invoiceNumber: n, kind: "invoice", invoiceDate: "2026-09-01", dueDate: null, total: 1, openBalance: 1, closed: false,
+    discountAmount: null, discountBy: null, jobNameRaw: null, supplierAccountId: owner,
+  });
+  const listOf = (refs: string[]) => ({ accountId: null, accountFrom: null, accountNumber: null, rows: refs.map((reference) => ({ reference, kind: "invoice" as const })) }) as any;
+
+  it("never decides it from one short number two stores could both print", () => {
+    expect(resolveAccount(listOf(["INV-1001", "2002", "3003"]), null, acct, [paper("1001", "a")])).toBeNull();
+    expect(resolveAccount(listOf(["1001", "1002"]), null, acct, [paper("1001", "a"), paper("1002", "a")])).toBeNull();
+  });
+
+  it("decides it when most of the list is long numbers already on one account", () => {
+    const papers = [paper("8802-1000001", "a"), paper("8802-1000002", "a")];
+    expect(resolveAccount(listOf(["8802-1000001", "8802-1000002", "8802-1000003"]), null, acct, papers)).toEqual({ id: "a", from: "papers" });
+    // One hit is not enough, and neither is a minority of the list.
+    expect(resolveAccount(listOf(["8802-1000001", "8802-9999998"]), null, acct, papers.slice(0, 1))).toBeNull();
+    expect(resolveAccount(listOf(["8802-1000001", "8802-1000002", "8802-7", "8802-8", "8802-9"].map((x, i) => (i > 1 ? `8802-900000${i}` : x))), null, acct, papers)).toBeNull();
+  });
+});
+
+describe("a short list", () => {
+  it("adds and corrects what it lists and marks nothing paid when its own total says papers are missing", async () => {
+    const short = cedList();
+    const stored: StoredOpenList = { list: { ...short, printedTotal: 9999.99 }, needs: null };
+    seed(stored);
+    const view = await viewNow();
+    expect(view.plan!.complete).toMatchObject({ ok: false, overridable: false });
+    expect(view.plan!.close).toEqual([]);
+    expect(view.plan!.keepPartial).toHaveLength(16);
+    const res = await applyOpenList("item-1", { fingerprint: view.plan!.fingerprint, wholeList: true });
+    expect(res.ok).toBe(true);
+    expect(db.supplier_invoices.filter((r) => r.org_id === "org-1" && r.closed)).toHaveLength(0);
+    expect(db.supplier_invoices.filter((r) => ["8802-1108647", "8802-1108648", "8802-1108649"].includes(r.invoice_number))).toHaveLength(3);
+  });
+});
+
+describe("a company with more papers than one read returns", () => {
+  it("finds a listed paper past the first thousand, and doesn't add it again", async () => {
+    for (let i = 0; i < 1200; i++) {
+      db.supplier_invoices.unshift({
+        id: `old-${String(i).padStart(4, "0")}`, org_id: "org-1", supplier_account_id: "acct-1", invoice_number: `7700-${1000000 + i}`, kind: "invoice",
+        invoice_date: "2025-01-01", total: 1, open_balance: 0, closed: true,
+      });
+    }
+    const view = await viewNow();
+    expect(view.plan!.add.map((a) => a.number)).toEqual(["8802-1108647", "8802-1108648", "8802-1108649"]);
+    expect(view.plan!.close).toHaveLength(16);
+  });
 });
 
 describe("the doors", () => {
@@ -334,7 +419,39 @@ describe("the doors", () => {
     const views = await openListViews(state.client, "org-1", db.organized_items as any[]);
     expect(views["item-2"].needs).toBeNull();
     expect(views["item-2"].plan).not.toBeNull();
-    expect(views["item-2"].accountFrom).toBe("columns");
+    // The columns came from memory; whose list it is came from the account number it prints.
+    expect(views["item-2"].accountFrom).toBe("number");
+  });
+
+  it("a remembered column layout reads a list, but never decides whose list it is", async () => {
+    db.organized_items = [];
+    // CED's columns were remembered for a headerless 3-column list.
+    db.supplier_accounts[0].open_list_columns = { byIndex: { reference: 0, invoiceDate: 1, openBalance: 2 }, width: 3 };
+    db.supplier_accounts.push({ id: "acct-2", org_id: "org-1", name: "Tahoe Lumber", account_number: "55-0192", on_account: true });
+    // A new supplier's headerless list of the same width: nothing on it names an account.
+    const table = parseCSV(`L-20417,09/01/26,212.40\nL-20455,09/02/26,88.15\n`);
+    await addOpenList({ name: "yard.csv", table, listDate: "2026-09-26" });
+    const view = (await openListViews(state.client, "org-1", db.organized_items as any[]))[db.organized_items[0].id];
+    expect(view.needs).toBeNull();
+    expect(view.plan).toBeNull();
+    expect(view.accountId).toBeNull();
+    expect(view.suggestedAccountId).toBeNull();
+    // Apply refuses until a person says whose it is: CED's papers are never closed by it.
+    const res = await applyOpenList(db.organized_items[0].id, { fingerprint: "x", wholeList: true });
+    expect(res).toMatchObject({ ok: false, error: "Pick whose list this is first." });
+    expect(db.supplier_invoices.filter((r) => r.closed)).toHaveLength(0);
+  });
+
+  it("remembered header words only suggest their supplier in Whose List Is This", async () => {
+    db.organized_items = [];
+    db.supplier_accounts.push({
+      id: "acct-2", org_id: "org-1", name: "Tahoe Lumber", account_number: "55-0192", on_account: true,
+      open_list_columns: { byHeader: { reference: "Doc Ref Code", openBalance: "Still Owing" }, byIndex: { reference: 0, openBalance: 1 }, width: 2 },
+    });
+    await addOpenList({ name: "yard.csv", table: parseCSV(`Doc Ref Code,Still Owing\nL-20417,212.40\nL-20455,88.15\n`), listDate: "2026-09-26" });
+    const view = (await openListViews(state.client, "org-1", db.organized_items as any[]))[db.organized_items[0].id];
+    expect(view.plan).toBeNull();
+    expect(view.suggestedAccountId).toBe("acct-2");
   });
 
   it("a statement PDF dropped anywhere is recognised from its own text, with no model", async () => {

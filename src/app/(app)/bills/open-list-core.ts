@@ -5,6 +5,8 @@ import { reportError } from "@/lib/observe";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { proposalOf, type PaperProposal } from "@/lib/paperwork";
+import { readAllPages } from "@/lib/read-all-pages";
+import { isLongNumber } from "@/lib/same-purchase";
 import {
   columnsFromRemembered,
   discountLine,
@@ -87,19 +89,27 @@ export async function loadAccounts(supabase: Db, orgId: string): Promise<Supplie
   return ((data ?? []) as SupplierAccountLite[]).map((a) => ({ ...a, id: String(a.id), name: String(a.name ?? "") }));
 }
 
-/** Every supplier paper this org holds, for matching by number and summing by account. */
+/**
+ * Every supplier paper this org holds, for matching by number and summing by account. PAGED
+ * (readAllPages, ordered by id): PostgREST cuts one select at db-max-rows and says nothing, and a
+ * paper past the cut would read as new, be inserted again, and fail the whole Apply's inserts.
+ */
 export async function loadPapers(supabase: Db, orgId: string): Promise<{ papers: OpenListPaper[]; error: string | null }> {
-  const { data, error } = await supabase.from("supplier_invoices").select(PAPER_COLUMNS).eq("org_id", orgId).limit(20000);
+  const { rows, error } = await readAllPages<PaperRow>((from, to) =>
+    supabase.from("supplier_invoices").select(PAPER_COLUMNS).eq("org_id", orgId).order("id").range(from, to),
+  );
   if (error) return { papers: [], error: dbError(error) };
-  return { papers: ((data ?? []) as PaperRow[]).map(paperOf), error: null };
+  return { papers: rows.map(paperOf), error: null };
 }
 
 const acctKey = (s: string | null | undefined) => String(s ?? "").toUpperCase().replace(/\s+/g, "");
 
 /**
  * WHOSE LIST IS THIS. Only by identifiers the supplier printed or a person chose, never by a
- * spelling: a person's pick; the account number the list prints, matched exactly; or the papers
- * it lists that are already here, when every one of them sits on the same account.
+ * spelling or a column layout: a person's pick; the account number the list prints, matched
+ * exactly; or the papers it lists that are already here, when they are numbers long enough to be
+ * one purchase on their own (isLongNumber: "1001" from two stores is two papers), at least two of
+ * them, at least half the list, and every one of them on the same account.
  */
 export function resolveAccount(
   list: Pick<OpenList, "accountId" | "accountFrom" | "accountNumber" | "rows"> | null,
@@ -117,30 +127,42 @@ export function resolveAccount(
   }
   const byKey = new Map(papers.map((p) => [referenceKey(p.invoiceNumber), p]));
   const owners = new Set<string>();
-  for (const r of list.rows) {
-    const p = byKey.get(referenceKey(r.reference));
-    if (p?.supplierAccountId) owners.add(p.supplierAccountId);
+  let hits = 0;
+  const listed = list.rows.filter((r) => r.kind !== "payment");
+  for (const r of listed) {
+    const key = referenceKey(r.reference);
+    if (!isLongNumber(key)) continue;
+    const p = byKey.get(key);
+    if (!p?.supplierAccountId) continue;
+    owners.add(p.supplierAccountId);
+    hits++;
   }
-  if (owners.size === 1) {
+  if (owners.size === 1 && hits >= 2 && hits * 2 >= listed.length) {
     const id = [...owners][0];
     if (accounts.some((a) => a.id === id)) return { id, from: "papers" };
   }
   return null;
 }
 
-/** A remembered column choice that reads this table, and whose account it is. */
+/**
+ * A REMEMBERED COLUMN CHOICE THAT READS THIS TABLE. It reads the columns and nothing more: whose
+ * list it is still comes from the account number it prints, its papers, or a person (a column
+ * layout is not an identity: two suppliers' lists can have the same width). The account a person
+ * already named is tried first; then remembered header words, which may SUGGEST their account in
+ * "Whose List Is This?"; then a headerless layout by its width, which suggests nothing.
+ */
 export function rememberedFor(
   stored: StoredOpenList,
   accounts: readonly SupplierAccountLite[],
-): { list: OpenList; accountId: string } | null {
+): { list: OpenList; suggestId: string | null } | null {
   const needs = stored.needs;
   if (!needs || !Array.isArray(needs.raw)) return null;
   const width = Math.max(0, ...needs.raw.map((r) => r.length));
-  for (const a of accounts) {
-    const rem = a.open_list_columns as RememberedColumns | null | undefined;
-    if (!rem || typeof rem !== "object") continue;
+  const chosen = needs.accountId ?? null;
+  const ordered = [...accounts].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
+  const tryWith = (a: SupplierAccountLite, rem: RememberedColumns) => {
     const columns = columnsFromRemembered(rem, needs.header ?? [], width);
-    if (!columns) continue;
+    if (!columns) return null;
     const read = readOpenListTable({
       table: needs.raw,
       from: needs.from,
@@ -150,16 +172,26 @@ export function rememberedFor(
       columns,
       headerRow: needs.headerRow,
     });
-    if (read.ok) return { list: { ...read.list, accountId: a.id, accountFrom: "columns" }, accountId: a.id };
+    if (!read.ok) return null;
+    return { ...read.list, accountId: chosen, accountFrom: chosen ? (needs.accountFrom ?? "person") : null };
+  };
+  for (const pass of ["header", "width"] as const) {
+    for (const a of ordered) {
+      const rem = a.open_list_columns as RememberedColumns | null | undefined;
+      if (!rem || typeof rem !== "object") continue;
+      const only: RememberedColumns = pass === "header" ? { byHeader: rem.byHeader } : { byIndex: rem.byIndex, width: rem.width };
+      const list = tryWith(a, only);
+      if (list) return { list, suggestId: pass === "header" && !chosen ? a.id : null };
+    }
   }
   return null;
 }
 
 export type ViewContext = { accounts: SupplierAccountLite[]; papers: OpenListPaper[]; today: string; papersError: string | null };
 
-export function viewOf(stored: StoredOpenList, ctx: ViewContext): OpenListView {
+export function viewOf(stored: StoredOpenList, ctx: ViewContext, suggestedAccountId: string | null = null): OpenListView {
   const accounts = ctx.accounts.map((a) => ({ id: a.id, name: a.name }));
-  const base = { accounts, needs: null, plan: null } as const;
+  const base = { accounts, needs: null, plan: null, suggestedAccountId } as const;
   if (!stored.list && stored.needs) {
     const n = stored.needs;
     const width = Math.max(0, ...n.raw.map((r) => r.length));
@@ -203,12 +235,14 @@ export function viewOf(stored: StoredOpenList, ctx: ViewContext): OpenListView {
     plan: {
       headline: planHeadline(plan, list, account.name, ctx.today),
       discountLine: discountLine(plan),
-      complete: { ok: plan.complete.ok, said: plan.complete.said },
+      complete: { ok: plan.complete.ok, said: plan.complete.said, overridable: plan.complete.overridable },
       fingerprint: plan.fingerprint,
       nothing: plan.nothing,
+      closeBy: plan.closeBy,
       close: plan.close,
       keepNewer: plan.keepNewer,
       keepUndated: plan.keepUndated,
+      keepPartial: plan.keepPartial,
       add: plan.add.map((a) => ({ number: a.number, kind: a.row.kind, date: a.row.invoiceDate, po: a.row.po, open: a.row.openBalance })),
       update: plan.update.map((u) => ({ number: u.number, said: u.said })),
       conflicts: plan.conflicts,
@@ -216,6 +250,7 @@ export function viewOf(stored: StoredOpenList, ctx: ViewContext): OpenListView {
       skipped: list.skipped,
       before: plan.totals.before,
       after: plan.totals.after,
+      afterNet: plan.totals.afterNet,
       firstList: !ctx.papers.some((p) => p.supplierAccountId === who.id),
     },
   };
@@ -235,7 +270,7 @@ export async function openListViews(
   for (const i of waiting) {
     const stored = proposalOf(i).openList as StoredOpenList;
     const remembered = rememberedFor(stored, accounts);
-    out[i.id] = viewOf(remembered ? { list: remembered.list, needs: null } : stored, ctx);
+    out[i.id] = viewOf(remembered ? { list: remembered.list, needs: null } : stored, ctx, remembered?.suggestId ?? null);
   }
   return out;
 }
@@ -322,7 +357,9 @@ export async function applyOpenListCore(
   if (plan.fingerprint !== opts.fingerprint) {
     return { ok: false, stale: true, error: "The books changed since this card was shown, so nothing was changed. Look again: the card has the new figures." };
   }
-  if (!plan.complete.ok) return { ok: false, error: plan.complete.said };
+  // A list with no figures of its own closes nothing without a person's word; one whose own figures
+  // call it short writes only what it lists (the plan closes nothing), and only when there is some.
+  if (!plan.complete.ok && (plan.complete.overridable || plan.nothing)) return { ok: false, error: plan.complete.said };
   const headline = planHeadline(plan, list, accountName, today);
 
   // CLAIM THE ROW, with what is about to be written, before anything is written.
@@ -361,12 +398,19 @@ export async function applyOpenListCore(
       source_file: `${accountName} list: ${list.name}`.slice(0, 300),
       created_by: who.userId,
     }));
-    const { data: inserted, error } = await supabase.from("supplier_invoices").insert(rows).select("id, invoice_number");
+    const { data: inserted, error } = await supabase
+      .from("supplier_invoices")
+      .insert(rows)
+      .select("id, invoice_number, open_balance, closed, discount_amount, discount_by, due_date, supplier_account_id");
     if (error) {
       problems.push(`The ${plan.add.length} new ${plan.add.length === 1 ? "paper wasn't" : "papers weren't"} added. ${dbError(error)}`);
       reportError("bills:applyOpenList.add", error, { itemId });
     } else {
-      for (const r of (inserted ?? []) as { id: string; invoice_number: string }[]) applied.added.push({ id: String(r.id), number: String(r.invoice_number) });
+      for (const r of (inserted ?? []) as (PaperFields & { id: string; invoice_number: string })[]) {
+        const wrote: PaperFields = {};
+        for (const k of ADDED_FIELDS) wrote[k] = (r[k] ?? null) as never;
+        applied.added.push({ id: String(r.id), number: String(r.invoice_number), wrote });
+      }
       if (applied.added.length !== plan.add.length) problems.push(`Only ${applied.added.length} of the ${plan.add.length} new papers were added.`);
     }
   }
@@ -416,6 +460,9 @@ export async function applyOpenListCore(
 
 // ── UNDO ───────────────────────────────────────────────────────────────────────────────────────
 
+/** What Apply writes on a paper it adds, and what Undo checks is still there before removing it. */
+const ADDED_FIELDS = ["open_balance", "closed", "discount_amount", "discount_by", "due_date", "supplier_account_id"] as const satisfies readonly (keyof PaperFields)[];
+
 const sameField = (key: keyof PaperFields, a: unknown, b: unknown) =>
   key === "open_balance" || key === "discount_amount"
     ? (a === null || a === undefined) === (b === null || b === undefined) && moneyCents(a as number) === moneyCents(b as number)
@@ -458,17 +505,29 @@ export async function undoOpenListCore(
       supabase.from("bill_supplier_invoices").select("supplier_invoice_id").eq("org_id", orgId).in("supplier_invoice_id", addedIds),
       supabase.from("organized_items").select("tied_supplier_invoice_id").eq("org_id", orgId).in("tied_supplier_invoice_id", addedIds),
       supabase.from("supplier_invoice_lines").select("supplier_invoice_id").eq("org_id", orgId).in("supplier_invoice_id", addedIds),
-      supabase.from("supplier_invoices").select("id, job_id").eq("org_id", orgId).in("id", addedIds),
+      supabase.from("supplier_invoices").select(`${PAPER_COLUMNS}, job_id`).eq("org_id", orgId).in("id", addedIds),
     ]);
-    const firstError = links.error ?? lines.error ?? rows.error;
+    const firstError = links.error ?? tied.error ?? lines.error ?? rows.error;
     if (firstError) return { ok: false, error: `The added papers couldn't be checked, so nothing more was undone. ${dbError(firstError)}` };
     const held = new Set<string>();
     for (const r of (links.data ?? []) as { supplier_invoice_id: string }[]) held.add(String(r.supplier_invoice_id));
     for (const r of (tied.data ?? []) as { tied_supplier_invoice_id: string }[]) held.add(String(r.tied_supplier_invoice_id));
     for (const r of (lines.data ?? []) as { supplier_invoice_id: string }[]) held.add(String(r.supplier_invoice_id));
     for (const r of (rows.data ?? []) as { id: string; job_id: string | null }[]) if (r.job_id) held.add(String(r.id));
-    const free = addedIds.filter((id) => !held.has(id));
     for (const a of applied.added) if (held.has(a.id)) left.push(`${a.number} (something is tied to it now)`);
+    // A paper a person (or a later list) changed since Apply added it is theirs now: it stays.
+    const now = new Map(((rows.data ?? []) as Record<string, unknown>[]).map((r) => [String(r.id), r]));
+    for (const a of applied.added) {
+      if (held.has(a.id) || !a.wrote) continue;
+      const cur = now.get(a.id);
+      if (!cur) continue;
+      const untouched = (Object.keys(a.wrote) as (keyof PaperFields)[]).every((k) => sameField(k, cur[k], a.wrote![k]));
+      if (!untouched) {
+        held.add(a.id);
+        left.push(`${a.number} (it changed since)`);
+      }
+    }
+    const free = addedIds.filter((id) => !held.has(id));
     if (free.length) {
       const { data: gone, error } = await supabase.from("supplier_invoices").delete().eq("org_id", orgId).in("id", free).select("id");
       if (error) return { ok: false, error: `The added papers weren't removed. ${dbError(error)}` };
