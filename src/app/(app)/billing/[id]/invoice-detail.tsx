@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
+import { taxFieldShown } from "@/lib/sales-tax-switch";
 import Link from "next/link";
 import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -154,6 +155,7 @@ export function InvoiceDetail({
   supplierNames = [],
   noBillRateIds = [],
   tz = "America/Los_Angeles",
+  salesTax = true,
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -194,6 +196,8 @@ export function InvoiceDetail({
   noBillRateIds?: string[];
   /** The org's timezone, for the "since" time on a running clock. */
   tz?: string;
+  /** The Sales Tax switch (0352). Off: an untaxed invoice draws no tax row. Absent = on. */
+  salesTax?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -1305,42 +1309,46 @@ export function InvoiceDetail({
               <span>Subtotal</span>
               <span>{formatCurrency(invoice.subtotal)}</span>
             </div>
-            <div className="flex items-center justify-between gap-2 text-slate-600">
-              {/* THE TAX RATE IS A LINE-LEVEL EDIT AND IT FOLLOWS THE SAME WORD (cn-v962).
-                  Audit 8 made this picker draft-only because a mis-tap on a PAID invoice silently
-                  re-totalled it. SILENTLY was the load-bearing half: setInvoiceTaxRate now takes any
-                  live invoice and stamps the revision (0269), so a job billed at the wrong county
-                  rate is an ordinary correction again. Leaving it on `isDraft` after that would be
-                  the other kind of dead end — a control the server would happily accept, hidden
-                  with no way forward offered, on a page whose whole left column just unlocked.
-                  Void still shows the rate as plain text, which refuses nothing. */}
-              {taxRates.length > 0 && !linesLocked ? (
-                <Select
-                  className="h-8 w-44 text-xs"
-                  // Match with a tolerance a stored fraction can actually hit (0243 widened the column to
-                  // numeric(8,6)); 1e-9 demanded an exactness the DB never promised, so a taxed draft
-                  // at a 3-decimal rate read "No tax" and a re-save could zero it (audit v921).
-                  value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 5e-7)?.id ?? ""}
-                  disabled={pending}
-                  onChange={(e) =>
-                    start(async () => {
-                      const r = taxRates.find((t) => t.id === e.target.value);
-                      const res = await setInvoiceTaxRate(invoice.id, r ? Number(r.rate) : 0);
-                      if (!res?.ok) { toast(res?.error ?? "Couldn't change the tax rate — try again.", "error"); return; }
-                      refresh();
-                    })
-                  }
-                >
-                  <option value="">No tax</option>
-                  {taxRates.map((t) => (
-                    <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>
-                  ))}
-                </Select>
-              ) : (
-                <span>Tax ({(invoice.tax_rate * 100).toFixed(2)}%)</span>
-              )}
-              <span>{formatCurrency(invoice.tax)}</span>
-            </div>
+            {/* SALES TAX OFF (the switch board, rule g): an invoice with no tax shows no tax row and no
+                picker. One that already carries tax keeps both, so its total still reads whole. */}
+            {taxFieldShown(salesTax, invoice) && (
+              <div className="flex items-center justify-between gap-2 text-slate-600">
+                {/* THE TAX RATE IS A LINE-LEVEL EDIT AND IT FOLLOWS THE SAME WORD (cn-v962).
+                    Audit 8 made this picker draft-only because a mis-tap on a PAID invoice silently
+                    re-totalled it. SILENTLY was the load-bearing half: setInvoiceTaxRate now takes any
+                    live invoice and stamps the revision (0269), so a job billed at the wrong county
+                    rate is an ordinary correction again. Leaving it on `isDraft` after that would be
+                    the other kind of dead end — a control the server would happily accept, hidden
+                    with no way forward offered, on a page whose whole left column just unlocked.
+                    Void still shows the rate as plain text, which refuses nothing. */}
+                {taxRates.length > 0 && !linesLocked ? (
+                  <Select
+                    className="h-8 w-44 text-xs"
+                    // Match with a tolerance a stored fraction can actually hit (0243 widened the column to
+                    // numeric(8,6)); 1e-9 demanded an exactness the DB never promised, so a taxed draft
+                    // at a 3-decimal rate read "No tax" and a re-save could zero it (audit v921).
+                    value={taxRates.find((t) => Math.abs(Number(t.rate) / 100 - Number(invoice.tax_rate)) < 5e-7)?.id ?? ""}
+                    disabled={pending}
+                    onChange={(e) =>
+                      start(async () => {
+                        const r = taxRates.find((t) => t.id === e.target.value);
+                        const res = await setInvoiceTaxRate(invoice.id, r ? Number(r.rate) : 0);
+                        if (!res?.ok) { toast(res?.error ?? "Couldn't change the tax rate — try again.", "error"); return; }
+                        refresh();
+                      })
+                    }
+                  >
+                    <option value="">No tax</option>
+                    {taxRates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.name} ({Number(t.rate)}%)</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <span>Tax ({(invoice.tax_rate * 100).toFixed(2)}%)</span>
+                )}
+                <span>{formatCurrency(invoice.tax)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-slate-100 pt-2 font-semibold text-slate-900">
               <span>Total</span>
               <span>{formatCurrency(invoice.total)}</span>

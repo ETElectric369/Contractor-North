@@ -10,6 +10,8 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
+import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
 import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import { reportError } from "@/lib/observe";
@@ -261,6 +263,7 @@ export async function POST(req: Request) {
    */
   const model = isStaffCaller ? modelFor("reasoning") : modelFor("routine");
   const orgS = getOrgSettings((org as any)?.settings);
+  const salesTax = featureOn(orgS.features, "sales_tax");
   const playbook = orgS.quote_playbook?.trim();
   const catalogMode = orgS.estimating_mode === "catalog";
   let systemPrompt = ASSISTANT_SYSTEM_PROMPT;
@@ -746,7 +749,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
               // LIVE prices, specs, and code while estimating — the core "do it like Claude
               // did the Tao Zhu quote" capability. Results are untrusted web text (the
               // input-is-data rule in the system prompt covers them).
-              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, QUOTE_DRAFT_TOOL, SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
+              tools: [...dataTools, ...writeTools, ...CALC_TOOLS, OPEN_MAPS_TOOL, quoteDraftToolFor(QUOTE_DRAFT_TOOL, salesTax), SHOW_CARD_TOOL, ...(isStaffCaller ? [REQUEST_CONTACT_TOOL] : []), { type: "web_search_20250305", name: "web_search", max_uses: 6 }] as any,
             },
             // Strip the directive markers from MODEL text so a prompt-injection can't forge a
             // confirm card, a maps-open, or a fake quote preview — markers are only ever emitted
@@ -825,7 +828,8 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
             // Client-intent: refresh the live quote preview. Emit it mid-stream + keep going
             // (the agent narrates as it fills the quote in). Not a DB write.
             if (tu.name === "quote_draft") {
-              emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", ...(tu.input as object) }) + DRAFT_CLOSE);
+              // Sales Tax off (0352): a rate the model sent anyway never reaches the preview.
+              emit(DRAFT_OPEN + JSON.stringify({ kind: "quote", ...quoteDraftShown(tu.input, salesTax) }) + DRAFT_CLOSE);
               results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify({ ok: true, shown: true }) });
               continue;
             }

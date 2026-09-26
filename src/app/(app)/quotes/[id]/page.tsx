@@ -9,6 +9,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import { StatusControl } from "./status-control";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { QuoteItemsEditor } from "./quote-items-editor";
 import { CircuitScheduleCard } from "./circuit-schedule-card";
 import { CustomerSelect } from "./customer-select";
@@ -246,6 +247,7 @@ export default async function QuoteDetailPage({
         priceItems={(priceItems ?? []) as never}
         kits={(kits ?? []) as never}
         defaultMarkupPct={getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).default_markup_pct}
+        salesTax={featureOn(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, "sales_tax")}
         // `?? null` and never `?? 0`: effectiveMarkupPct returns immediately on ANY finite level,
         // including 0, so a 0 here would price every customer-without-a-level at net cost — a
         // worse bug than the one this fixes.
