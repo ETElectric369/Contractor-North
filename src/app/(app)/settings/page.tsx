@@ -19,6 +19,7 @@ import {
   CreditCard,
   MessageSquare,
   Images,
+  ToggleRight,
 } from "lucide-react";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { parsePlaybook, playbookForForm } from "@/lib/playbook/parse";
@@ -38,6 +39,7 @@ import { PushSettings } from "./push-settings";
 import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
+import { FeaturesPanel } from "./features-panel";
 import { PaymentMethods } from "./payment-methods";
 import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
@@ -445,6 +447,16 @@ export default async function SettingsPage({
                 <QuotePlaybookForm settings={settings} />
               </Section>
             </div>
+          ),
+        },
+        // "Features" — THE SWITCH BOARD (0352): one row per feature, the owner's switches. Its
+        // counts are read by FeaturesPanel itself, so they run only when this cluster is open.
+        {
+          id: "features",
+          label: "Features",
+          icon: ToggleRight,
+          content: (
+            <FeaturesPanel orgId={(org as Organization).id} settings={settings} isOwner={profile?.role === "owner"} />
           ),
         },
         // "Money" — what a number becomes: tax, markup, the book it comes from, and how a
