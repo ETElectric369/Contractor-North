@@ -58,6 +58,10 @@ export type PriceItemLite = {
   unit: string;
   buy_price: number;
   markup_pct: number;
+  /** Who the item is bought from (0342). A book item with a supplier is a part, so its line files
+   *  under Materials; one without (installed work, a job-cost code) says nothing and is read by its
+   *  words. Staff screens only: the page that hands this list over is the office's. */
+  supplier?: string | null;
   /**
    * THE MAKERS UNDER THIS CODE (0282). Andrew, for Justin Vivian: "increase drop down options for
    * each item code, multiple vendors, ie. windows - mfg Andersen, mfg Milgard, mfg Marvin".
@@ -130,9 +134,10 @@ export function AddLineItems({
    *  and the same inputs as every vendor row below it. */
   const addOne = (p: PriceItemLite) => {
     const line = priceBookLine(p, pricing);
-    // A LINE FROM THE BOOK SAYS WHAT IT IS (0342): materials, or labor when the book sells it by
-    // the hour. Its words are a code and a catalog name, which the Cost Breakdown cannot read.
-    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice, kind: priceBookLineKind(p.unit, line.unit) }]);
+    // A LINE FROM THE BOOK SAYS WHAT IT IS WHEN THE BOOK DOES (0342): labor when the book sells it
+    // by the hour, materials when the item names a supplier. Neither, and it says nothing.
+    const kind = priceBookLineKind(p.unit, line.unit, p.supplier);
+    onAdd([{ description: line.description, quantity: 1, unit: line.unit, unit_price: line.unitPrice, ...(kind ? { kind } : {}) }]);
     setQuery("");
     setOpen(false);
   };
@@ -145,7 +150,8 @@ export function AddLineItems({
    * is the option's own, through the same markup ladder, never recomputed here.
    */
   const addChoice = (choice: ItemOptionChoice, item: PriceItemLite) => {
-    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice, kind: priceBookLineKind(item.unit, choice.unit) }]);
+    const kind = priceBookLineKind(item.unit, choice.unit, item.supplier);
+    onAdd([{ description: choice.description, quantity: 1, unit: choice.unit, unit_price: choice.unitPrice, ...(kind ? { kind } : {}) }]);
     setQuery("");
     setOpen(false);
     setMakersFor(null);

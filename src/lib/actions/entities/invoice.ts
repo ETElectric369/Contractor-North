@@ -84,7 +84,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Add an invoice line",
     description:
-      "Add ONE line item to any invoice that is not void - a draft, or a bill the customer already has. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. Optional kind ('labor' | 'materials' | 'other') says where the customer's Cost Breakdown files the line; leave it out and a line whose description starts with a price-list code (\"TM870LA — S5A 125V 1P SWITCH\") is filed under materials by the app. On an invoice that has already gone out this changes what the customer owes, so the app asks the user to confirm first and the invoice is recorded as revised. After adjusting, read the invoice back with get_invoice.",
+      "Add ONE line item to any invoice that is not void - a draft, or a bill the customer already has. Pass the invoice_id (from get_invoice or a create action) plus the line's description, quantity, unit, and unit_price. Optional kind ('labor' | 'materials' | 'other') says where the customer's Cost Breakdown files the line; leave it out and a line whose description starts with a price-list code (\"TM870LA — S5A 125V 1P SWITCH\") is filed by what its price-list item says: labor when sold by the hour, materials when the item names a supplier, otherwise not at all (read by its words). On an invoice that has already gone out this changes what the customer owes, so the app asks the user to confirm first and the invoice is recorded as revised. After adjusting, read the invoice back with get_invoice.",
     input: z.object({
       invoice_id: z.string(),
       description: z.string().min(1),

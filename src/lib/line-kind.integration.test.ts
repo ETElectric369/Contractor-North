@@ -121,7 +121,7 @@ d("0342: a line says what it is, and every customer document reads it", () => {
     expect(now.map(({ import_source: _s, line_kind: _k, ...rest }) => rest)).toEqual(before);
   });
 
-  it("the backfill filed only unimported, non-hourly lines whose code is in the same org's book; a re-run files nothing", async () => {
+  it("the backfill filed only unimported, non-hourly lines whose code is in the same org's book and names a supplier; a re-run files nothing", async () => {
     if (!ready()) return;
     const wrong = await one(
       `select count(*)::int as n
@@ -131,6 +131,7 @@ d("0342: a line says what it is, and every customer document reads it", () => {
                or lower(btrim(coalesce(it.unit, ''))) ~ '^(hr|hrs|hour|hours|man-?hours?)$'
                or not exists (select 1 from price_list_items p
                                where p.org_id = it.org_id
+                                 and nullif(btrim(p.supplier), '') is not null
                                  and lower(btrim(p.code)) = lower(btrim(split_part(it.description, ' — ', 1)))))`,
     );
     expect(wrong.n).toBe(0);

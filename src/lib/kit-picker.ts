@@ -24,6 +24,8 @@ export interface KitPickerRow {
    *  downstream never has to back a cost out of a sell. */
   cost?: number | null;
   price_list_item_id?: string | null;
+  /** The linked item's supplier (0342): a part bought from someone files under Materials. */
+  supplier?: string | null;
 }
 
 /** Raw kit_items shape as the pages select it (THE SHARED SELECT SHAPE, kit-line.ts). Numerics
@@ -87,6 +89,7 @@ export function kitItemsToPickerRows(items: KitItemRaw[], pricing?: KitPickerPri
         code: view.code,
         cost: view.cost,
         price_list_item_id: item?.id ?? null,
+        supplier: view.supplier,
       };
     }),
   );
@@ -105,10 +108,17 @@ export function kitSelectionToLines(kitName: string, rows: KitPickerRow[]): Draf
     unit: r.unit || "ea",
     unit_price: Number(r.unit_price) || 0,
     group: kitName,
-    // A LINKED line is a price-book line and says so (0342): materials, or labor when the book sells
-    // it by the hour. A line typed into the kit by hand says nothing, and is read by its words.
-    ...(r.linked ? { kind: priceBookLineKind(r.unit) } : {}),
+    // A LINKED line says what its book item says (0342): labor when sold by the hour, materials when
+    // the item names a supplier. A book item that says neither, or a line typed into the kit by
+    // hand, says nothing and is read by its words.
+    ...kitLineKind(r),
   }));
+}
+
+function kitLineKind(r: KitPickerRow): { kind?: "labor" | "materials" } {
+  if (!r.linked) return {};
+  const kind = priceBookLineKind(r.unit, null, r.supplier);
+  return kind ? { kind } : {};
 }
 
 /** Running subtotal of the checked rows — via THE shared rounding (subtotalTaxTotal),

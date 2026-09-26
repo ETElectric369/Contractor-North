@@ -301,8 +301,12 @@ export function isHoursUnit(unit: string | null | undefined): boolean {
  * code and a catalog name, not the word "Materials". The words cannot settle it; the door the line
  * came through can. So invoice_items.line_kind (0342) holds what the line IS, when somebody knows:
  *
- *  - a line added FROM THE PRICE BOOK is materials, or labor when the book prices it in hours
- *    (priceBookLineKind): the picker, a linked kit line, Nort's add line, the estimate's copy;
+ *  - a line added FROM THE PRICE BOOK is labor when the book prices it in hours, and materials
+ *    when the book item names a SUPPLIER (a part bought from someone: ET's CED catalog). A book
+ *    item with neither says nothing (priceBookLineKind): TAHOE DECK's "D1 — New Construction —
+ *    Deck Build" and Vivian's "1605 — Electrical - Rough In & Finish (Labor)" are installed work
+ *    and job-cost codes, not parts, so "it is in the book" is not "it is materials". The doors:
+ *    the picker, a linked kit line, Nort's add line, the estimate's copy;
  *  - the office's Kind chip on the line editor sets any line to Labor, Materials or Other;
  *  - null means nobody said, and the line is read as it always was (import_source, then the words
  *    and the unit).
@@ -332,9 +336,26 @@ export function pickableLineKind(v: unknown): PickableLineKind | null {
   return v === "labor" || v === "materials" || v === "other" ? v : null;
 }
 
-/** A price-book line is materials, unless the book (or the line) prices it in hours. */
-export function priceBookLineKind(bookUnit: string | null | undefined, lineUnit?: string | null): "labor" | "materials" {
-  return isHoursUnit(bookUnit) || isHoursUnit(lineUnit) ? "labor" : "materials";
+/** Anything but blank: the book item names who it is bought from. */
+function hasSupplier(supplier: string | null | undefined): boolean {
+  return String(supplier ?? "").trim().length > 0;
+}
+
+/**
+ * WHAT A PRICE-BOOK LINE IS, from what its book item says: labor when the book (or the line) prices
+ * it in hours; materials when the book item names a supplier, because it is a part bought from
+ * someone; otherwise null. Being in the book is NOT being materials: a book of installed work
+ * ("D1 — New Construction — Deck Build", SQ FT) or job-cost codes ("125 — Project Management &
+ * Supervision", "035 — Permits & Fees") names no supplier, and its lines are read by their words
+ * as before, with the office's Kind chip to say what they are. The app suggests, a person decides.
+ */
+export function priceBookLineKind(
+  bookUnit: string | null | undefined,
+  lineUnit?: string | null,
+  supplier?: string | null,
+): "labor" | "materials" | null {
+  if (isHoursUnit(bookUnit) || isHoursUnit(lineUnit)) return "labor";
+  return hasSupplier(supplier) ? "materials" : null;
 }
 
 /** The code a price-book line starts with: the text before " — " (lineDisplayName and
@@ -348,15 +369,23 @@ export function priceBookCodeKey(description: string | null | undefined): string
   return key || null;
 }
 
-/** The org's price book as the kind rule reads it: code key -> the book's unit. One code on two
- *  rows (an archived twin): hours on either wins, the same bool_or 0342's backfill uses. */
-export function priceBookUnits(items: Iterable<{ code?: string | null; unit?: string | null }>): Map<string, string | null> {
-  const out = new Map<string, string | null>();
+/** One code of the org's book, as the kind rule reads it: its unit and its supplier. */
+export type PriceBookFacts = { unit: string | null; supplier: string | null };
+
+/** The org's price book as the kind rule reads it: code key -> the book's unit and supplier. One
+ *  code on two rows (an archived twin): hours on either wins, and a supplier on either counts, the
+ *  same bool_or pair 0342's backfill uses. */
+export function priceBookUnits(
+  items: Iterable<{ code?: string | null; unit?: string | null; supplier?: string | null }>,
+): Map<string, PriceBookFacts> {
+  const out = new Map<string, PriceBookFacts>();
   for (const it of items) {
     const key = String(it.code ?? "").trim().toLowerCase();
     if (!key) continue;
     const prev = out.get(key);
-    out.set(key, prev !== undefined && isHoursUnit(prev) ? prev : (it.unit ?? null));
+    const unit = prev && isHoursUnit(prev.unit) ? prev.unit : (it.unit ?? null);
+    const supplier = prev && hasSupplier(prev.supplier) ? prev.supplier : hasSupplier(it.supplier) ? String(it.supplier).trim() : (prev?.supplier ?? null);
+    out.set(key, { unit, supplier });
   }
   return out;
 }
@@ -365,15 +394,18 @@ export function priceBookUnits(items: Iterable<{ code?: string | null; unit?: st
  * THE KIND A LINE GETS WHEN IT CAME FROM THE PRICE BOOK, read from its own leading code: the rule
  * the server applies when a door did not say (a typed "TM870LA — ..." line, Nort's add line, the
  * estimate's copy), and the one 0342's backfill applied to the lines already out. Null when the
- * line does not start with one of this org's codes: then nobody knows, and it is read as before.
+ * line does not start with one of this org's codes, or its book item says neither hours nor a
+ * supplier: then nobody knows, and it is read as before.
  */
 export function kindFromPriceBook(
   line: { description?: string | null; unit?: string | null },
-  book: ReadonlyMap<string, string | null>,
+  book: ReadonlyMap<string, PriceBookFacts>,
 ): "labor" | "materials" | null {
   const key = priceBookCodeKey(line.description);
-  if (!key || !book.has(key)) return null;
-  return priceBookLineKind(book.get(key), line.unit);
+  if (!key) return null;
+  const facts = book.get(key);
+  if (!facts) return null;
+  return priceBookLineKind(facts.unit, line.unit, facts.supplier);
 }
 
 /**

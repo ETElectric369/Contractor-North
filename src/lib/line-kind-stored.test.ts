@@ -32,13 +32,23 @@ const INV_079 = [
   { sort_order: 3, description: "3232TRI — 15A 125V DPLX RCPT", unit: "ea", quantity: 1, unit_price: 1.91, line_total: 1.91, import_source: null, line_kind: "materials" },
 ];
 const withoutKind = INV_079.map(({ line_kind: _k, ...rest }) => rest);
-// ET Electric's book, as far as these lines go (price_list_items: code, unit).
+// ET Electric's book, as far as these lines go (price_list_items: code, unit, supplier). Every ET
+// item names its supplier (CED): a parts catalog.
 const BOOK = priceBookUnits([
-  { code: "1597TRW", unit: "ea" },
-  { code: "TM870LA", unit: "ea" },
-  { code: "3232TRI", unit: "ea" },
+  { code: "1597TRW", unit: "ea", supplier: "CED" },
+  { code: "TM870LA", unit: "ea", supplier: "CED" },
+  { code: "3232TRI", unit: "ea", supplier: "CED" },
   { code: "SVC-HR", unit: "hr" },
-  { code: "  ", unit: "ea" },
+  { code: "  ", unit: "ea", supplier: "CED" },
+]);
+// TAHOE DECK's and Vivian Builders' books, as production holds them: installed work and job-cost
+// codes, no supplier on any item, no hours unit.
+const OTHER_BOOKS = priceBookUnits([
+  { code: "D1", unit: "SQ FT", supplier: null },
+  { code: "DS3B", unit: "lot", supplier: null },
+  { code: "1605", unit: "ea", supplier: null },
+  { code: "125", unit: "ea", supplier: "  " },
+  { code: "035", unit: "ea" },
 ]);
 
 describe("INV-079: the price-book lines file under Materials", () => {
@@ -142,14 +152,38 @@ describe("the price-book rule (the doors, and 0342's backfill twin)", () => {
     expect(kindFromPriceBook({ description: "TM870LA — S5A 125V 1P SWITCH", unit: "ea" }, new Map())).toBeNull();
   });
 
-  it("one code on two rows: hours on either wins", () => {
-    const book = priceBookUnits([{ code: "X1", unit: "hr" }, { code: "x1", unit: "ea" }]);
-    expect(kindFromPriceBook({ description: "X1 — thing", unit: "ea" }, book)).toBe("labor");
+  it("being in the book is not being materials: installed work and job-cost codes say nothing", () => {
+    for (const description of [
+      "D1 — New Construction — Deck Build",
+      "DS3B — Supplement — Permitting",
+      "1605 — Electrical - Rough In & Finish (Labor)",
+      "125 — Project Management & Supervision",
+      "035 — Permits & Fees",
+    ]) {
+      expect(kindFromPriceBook({ description, unit: "ea" }, OTHER_BOOKS)).toBeNull();
+    }
+    // Read by their words as before (both Other), never printed as Materials: the office's Kind
+    // chip is what says what they are.
+    const g = groupInvoiceLines([
+      { description: "1605 — Electrical - Rough In & Finish (Labor)", unit: "ea", line_total: 9000 },
+      { description: "D1 — New Construction — Deck Build", unit: "SQ FT", line_total: 45000 },
+    ]);
+    expect(g.materials.subtotal).toBe(0);
+    expect(g.other.subtotal).toBe(54000);
   });
 
-  it("the picker's own rule: materials, labor for an item sold by the hour", () => {
-    expect(priceBookLineKind("ea")).toBe("materials");
-    expect(priceBookLineKind("SQ FT")).toBe("materials");
+  it("one code on two rows: hours on either wins; a supplier on either counts", () => {
+    const book = priceBookUnits([{ code: "X1", unit: "hr" }, { code: "x1", unit: "ea", supplier: "CED" }]);
+    expect(kindFromPriceBook({ description: "X1 — thing", unit: "ea" }, book)).toBe("labor");
+    const twin = priceBookUnits([{ code: "Y1", unit: "ea", supplier: "CED" }, { code: "y1", unit: "ea", supplier: null }]);
+    expect(kindFromPriceBook({ description: "Y1 — thing", unit: "ea" }, twin)).toBe("materials");
+  });
+
+  it("the picker's own rule: labor by the hour, materials with a supplier, otherwise nothing", () => {
+    expect(priceBookLineKind("ea", null, "CED")).toBe("materials");
+    expect(priceBookLineKind("SQ FT", null, "Home Depot")).toBe("materials");
+    expect(priceBookLineKind("SQ FT")).toBeNull();
+    expect(priceBookLineKind("ea", "ea", "   ")).toBeNull();
     expect(priceBookLineKind("hr")).toBe("labor");
     expect(priceBookLineKind("ea", "hrs")).toBe("labor");
   });
@@ -157,13 +191,15 @@ describe("the price-book rule (the doors, and 0342's backfill twin)", () => {
 
 describe("a kit's linked lines are book lines; its typed lines say nothing", () => {
   const row = (over: Partial<KitPickerRow>): KitPickerRow => ({ description: "x", quantity: 1, unit: "ea", unit_price: 1, sort_order: 0, checked: true, ...over });
-  it("linked -> materials (labor by the hour); unlinked -> no kind", () => {
+  it("linked with a supplier -> materials; by the hour -> labor; no supplier or unlinked -> no kind", () => {
     const lines = kitSelectionToLines("Service", [
-      row({ description: "TM870LA — S5A 125V 1P SWITCH", linked: true, sort_order: 0 }),
+      row({ description: "TM870LA — S5A 125V 1P SWITCH", linked: true, supplier: "CED", sort_order: 0 }),
       row({ description: "SVC-HR — Service hour", linked: true, unit: "hr", sort_order: 1 }),
-      row({ description: "Misc. hardware", linked: false, sort_order: 2 }),
+      row({ description: "Misc. hardware", linked: false, supplier: "CED", sort_order: 2 }),
+      row({ description: "D1 — New Construction — Deck Build", linked: true, unit: "SQ FT", supplier: null, sort_order: 3 }),
     ]);
-    expect(lines.map((l) => l.kind)).toEqual(["materials", "labor", undefined]);
+    expect(lines.map((l) => l.kind)).toEqual(["materials", "labor", undefined, undefined]);
+    expect("kind" in lines[3]).toBe(false);
     // Nothing else about the line changes.
     expect(lines[0]).toMatchObject({ description: "TM870LA — S5A 125V 1P SWITCH", quantity: 1, unit: "ea", unit_price: 1, group: "Service" });
   });

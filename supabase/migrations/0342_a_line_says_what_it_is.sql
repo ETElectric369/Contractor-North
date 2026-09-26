@@ -12,8 +12,12 @@
 -- 1. invoice_items.line_kind: text, null, one of labor / materials / other / credit. NULL means
 --    "infer it as today" (import_source, then the words and unit). A stored kind is read FIRST by
 --    every reader. The app sets it where it KNOWS: a line added from the price book (the picker, a
---    linked kit line, Nort's add line, the estimate's price-book lines) is materials, or labor when
---    the book prices it in hours; the office can set any line's kind with the Kind chip. The app
+--    linked kit line, Nort's add line, the estimate's price-book lines) is labor when the book
+--    prices it in hours, and materials when the book item names a SUPPLIER (a part bought from
+--    someone). A book item with neither says nothing: TAHOE DECK's and Vivian Builders' books are
+--    installed work and job-cost codes ("D1 — New Construction — Deck Build", "1605 — Electrical -
+--    Rough In & Finish (Labor)", "035 — Permits & Fees"), none with a supplier, so being in the
+--    book is not being materials. The office can set any line's kind with the Kind chip. The app
 --    suggests, a person decides.
 --
 -- 2. The customer's documents carry it (the projection-parity law: every field the shared document
@@ -31,11 +35,12 @@
 --
 -- 3. BACKFILL, CLASSIFICATION ONLY. A line with import_source null and line_kind null whose leading
 --    token (the text before " — ") equals a price_list_items code IN THE SAME ORG (trimmed, case
---    ignored) gets 'materials'. A line billed in hours, or whose book item is priced in hours, is
---    left alone: it already reads Labor, and a stored 'materials' would make it read wrong. No
---    words, amount, unit, order, claim, edited flag or total changes (mark_invoice_item_edited
---    looks only at description / quantity / unit_price / unit; the claim trigger only at
---    source_ids / invoice_id). The count per org is RAISEd as a NOTICE.
+--    ignored) and whose book item names a supplier gets 'materials' (the same rule as the app's
+--    kindFromPriceBook). A line billed in hours, or whose book item is priced in hours, is left
+--    alone: it already reads Labor, and a stored 'materials' would make it read wrong. No words,
+--    amount, unit, order, claim, edited flag or total changes (mark_invoice_item_edited looks only
+--    at description / quantity / unit_price / unit; the claim trigger only at source_ids /
+--    invoice_id). The count per org is RAISEd as a NOTICE.
 --
 -- SELF-CHECK: every invoice document and every portal job page that opens today is read before and
 -- after. With 'line_kind' taken out, each must read byte for byte the same; every document's lines
@@ -143,7 +148,8 @@ begin
   create temp table _0342_filed on commit drop as
   with book as (
     select org_id, lower(btrim(code)) as code_key,
-           bool_or(lower(btrim(coalesce(unit, ''))) ~ '^(hr|hrs|hour|hours|man-?hours?)$') as book_hours
+           bool_or(lower(btrim(coalesce(unit, ''))) ~ '^(hr|hrs|hour|hours|man-?hours?)$') as book_hours,
+           bool_or(nullif(btrim(supplier), '') is not null) as book_supplied
       from public.price_list_items
      where nullif(btrim(code), '') is not null
      group by org_id, lower(btrim(code))
@@ -156,6 +162,7 @@ begin
      and it.line_kind is null
      and position(' — ' in coalesce(it.description, '')) > 0
      and not b.book_hours
+     and b.book_supplied
      and lower(btrim(coalesce(it.unit, ''))) !~ '^(hr|hrs|hour|hours|man-?hours?)$';
 
   update public.invoice_items it

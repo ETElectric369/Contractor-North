@@ -779,8 +779,9 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
     // "0 replacing" and never fired). Keyed identically to importQuoteItemsIntoInvoice, a
     // re-import now refreshes these rows in place.
     // AN ESTIMATE LINE PRICED FROM THE BOOK IS STILL A BOOK LINE ON THE BILL (0342): its leading
-    // code says materials (labor for a book item sold by the hour), so the customer's breakdown
-    // files it there instead of under Other. A line the book does not know says nothing.
+    // code finds its book item, which says labor (sold by the hour) or materials (it names a
+    // supplier), so the customer's breakdown files it there instead of under Other. A line the book
+    // does not know, or whose item says neither (installed work, a job-cost code), says nothing.
     const book = await readPriceBookUnits(supabase, ctx.orgId);
     let copies: Record<string, unknown>[] = items.map((it: any) => {
       const kind = kindFromPriceBook(it, book);
@@ -998,8 +999,9 @@ export async function reorderInvoiceItems(invoiceId: string, orderedIds: string[
 export async function addInvoiceItem(
   invoiceId: string,
   /** `kind`: what the line IS when the door knows (0342): the price-book picker and a linked kit
-   *  line say materials (labor for a book item sold by the hour). Omitted, the server reads the
-   *  line's leading code against this org's price book; no code, and the line says nothing. */
+   *  line say labor for a book item sold by the hour, materials for one that names a supplier.
+   *  Omitted, the server reads the line's leading code against this org's price book by the same
+   *  rule; no code, or an item that says neither, and the line says nothing. */
   item: { description: string; quantity: number; unit: string; unit_price: number; kind?: PickableLineKind | null },
 ): Promise<Result> {
   const ctx = await requireStaff();
@@ -1043,7 +1045,8 @@ export async function addInvoiceItem(
   /**
    * A PRICE-BOOK LINE SAYS WHAT IT IS (Erik, INV-079: "Other instead of materials in invoice").
    * The door's word first (the picker knows the item it priced); failing that, the line's own
-   * leading code against this org's book, the rule 0342's backfill ran on the lines already out.
+   * leading code against this org's book (hours = labor, a supplier = materials), the rule 0342's
+   * backfill ran on the lines already out.
    * Neither, and the line stores nothing and is read by its words as it always was.
    */
   const said = pickableLineKind(item.kind);
@@ -1238,9 +1241,12 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // What the invoice's estimate lines claim BEFORE the RPC, so the toast counts only what this tap
   // added (withClaimStats diffs it against the read-back after).
   const before = await landedSourceIds(supabase, invoiceId, "quote", rows);
+  // The estimate lines already on this invoice, by id: only a line this tap ADDS is filed from the
+  // book, so a line the office handed back with "Read It From The Line" stays as they left it.
+  const standing = await estimateLineIds(supabase, ctx.orgId, invoiceId);
   const rep = await upsertImportedItems(supabase, invoiceId, "quote", rows);
   if (rep.error) return { ok: false, error: rep.error };
-  await fileEstimateLinesFromBook(supabase, ctx.orgId, invoiceId);
+  await fileEstimateLinesFromBook(supabase, ctx.orgId, invoiceId, standing);
   if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importQuoteItemsIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
@@ -1251,16 +1257,35 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   return { ok: true, stats: sayRemoved(withClaimStats(rep.stats, rows, landedDiff(before, after), skippedIds, claims, "estimate lines"), rep.removed) };
 }
 
+/** The ids of the estimate lines on this invoice right now (null = the read failed). */
+async function estimateLineIds(supabase: any, orgId: string | null, invoiceId: string): Promise<Set<string> | null> {
+  if (!orgId) return null;
+  const { data, error } = await supabase
+    .from("invoice_items")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .eq("org_id", orgId)
+    .eq("import_source", "quote");
+  if (error) {
+    reportError("estimateLineIds", error, { invoiceId });
+    return null;
+  }
+  return new Set(((data ?? []) as { id: string }[]).map((r) => String(r.id)));
+}
+
 /**
  * THE ESTIMATE'S BOOK LINES, FILED (0342). From Estimate lands its lines through the import RPC,
- * which knows nothing of kinds; this reads what landed and gives each estimate line that starts
- * with one of the org's codes, and has no kind yet, the kind the book says (createInvoiceFromQuote
- * does the same as it inserts). A line somebody already filed (the Kind chip) is never touched.
+ * which knows nothing of kinds; this reads what landed and gives each estimate line THIS IMPORT
+ * ADDED (not in `standing`, the ids read before the RPC) that starts with one of the org's codes
+ * the kind its book item says (createInvoiceFromQuote does the same as it inserts). A line that was
+ * already on the invoice is never touched: its kind is whatever it landed with or a person set,
+ * and a null there may be the office's own "Read It From The Line", which a re-import must not
+ * undo. No `standing` (the read failed) files nothing: the lines then read by their words.
  * Classification only - no words, amount or order - so a failure costs the import nothing; it is
  * reported, and the line reads by its words as before.
  */
-async function fileEstimateLinesFromBook(supabase: any, orgId: string | null, invoiceId: string): Promise<void> {
-  if (!orgId) return;
+async function fileEstimateLinesFromBook(supabase: any, orgId: string | null, invoiceId: string, standing: Set<string> | null): Promise<void> {
+  if (!orgId || !standing) return;
   const { data: lines, error } = await supabase
     .from("invoice_items")
     .select("id, description, unit, line_kind")
@@ -1272,9 +1297,10 @@ async function fileEstimateLinesFromBook(supabase: any, orgId: string | null, in
     if (!isMissingColumn(error, "line_kind")) reportError("fileEstimateLinesFromBook.read", error, { invoiceId });
     return;
   }
-  if (!lines?.length) return;
+  const added = ((lines ?? []) as { id: string; description: string | null; unit: string | null }[]).filter((ln) => !standing.has(String(ln.id)));
+  if (!added.length) return;
   const book = await readPriceBookUnits(supabase, orgId);
-  for (const ln of lines as { id: string; description: string | null; unit: string | null }[]) {
+  for (const ln of added) {
     const kind = kindFromPriceBook(ln, book);
     if (!kind) continue;
     const { data: done, error: upErr } = await supabase
