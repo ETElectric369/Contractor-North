@@ -124,12 +124,21 @@ export default async function OnboardingPage({
             </div>
             <div>
               <Label htmlFor="trade">Your trade</Label>
-              <Select id="trade" name="trade" defaultValue="general">
+              {/* No default: a pre-picked "General contractor" handed everybody who didn't touch it
+                  the builder's switches. The trade is kept now (0352) and sets which features
+                  start on, so it is asked for, with a real way out for a trade that isn't listed. */}
+              <Select id="trade" name="trade" defaultValue="" required>
+                <option value="" disabled>
+                  Pick Your Trade
+                </option>
                 {TRADE_ORDER.map((t) => (
                   <option key={t} value={t}>{TRADE_PRESETS[t].label}</option>
                 ))}
+                <option value="other">Other / Not Listed</option>
               </Select>
-              <p className="mt-1 text-xs text-slate-500">Sets your starter job codes — you can change them anytime in Settings.</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Sets your starter job codes and which features start on. You can change both anytime in Settings.
+              </p>
             </div>
             <Button type="submit" size="lg" className="w-full">
               Create Company & Continue
