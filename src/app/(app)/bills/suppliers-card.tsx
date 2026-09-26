@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Undo2 } from "lucide-react";
@@ -172,6 +172,7 @@ export function SuppliersCard({
   duplicates = [],
   reconcile = null,
   noSupplierDocument = {},
+  payOn = null,
   actions,
 }: {
   accounts: SupplierAccountRow[];
@@ -211,6 +212,11 @@ export function SuppliersCard({
    * issued a document for at all. That money is real and had nowhere on the screen to be.
    */
   noSupplierDocument?: Record<string, { total: number; bills: number; ids: string[] }>;
+  /**
+   * MY DAY'S DOOR (/bills?pay=<account>): "Pay CED $5,174.62 By Oct 10" lands here with this
+   * account's Record A Payment sheet already open. The same sheet, the same write; nothing new.
+   */
+  payOn?: string | null;
   actions: SuppliersCardActions;
 }) {
   const router = useRouter();
@@ -410,6 +416,32 @@ export function SuppliersCard({
     setNote("");
     setPayFor(account);
   }
+
+  // MY DAY'S DOOR OPENS THE SHEET, ONCE. The same gate as the account row's Record A Payment button
+  // (a balance to pay down), and a door that cannot open says why instead of doing nothing. The
+  // `pay` param comes off the address afterwards so a refresh after recording does not reopen it.
+  const payOnHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (!payOn || payOnHandled.current === payOn) return;
+    payOnHandled.current = payOn;
+    const account = accounts.find((a) => a.id === payOn) ?? null;
+    if (account && supplierBalance(account, today).owed !== null) openPay(account);
+    else
+      setError(
+        account
+          ? `${account.name} is settled at the register, so there is no balance to pay here.`
+          : "That supplier account is not in your books any more, so there is no payment to record.",
+      );
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("pay");
+      window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // The address keeps its ?pay=; the sheet only ever opens once per visit either way.
+    }
+    // openPay only resets this component's own state; the door runs once per account asked for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payOn, accounts, today]);
 
   function submitPay() {
     if (!payFor || amount === null || amount <= 0) return;

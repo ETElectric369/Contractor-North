@@ -38,6 +38,7 @@ import {
   type SupplierInvoiceRow,
   type SupplierPaperCard,
 } from "./supplier-reconcile";
+import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -217,13 +218,25 @@ export function supplierPaperFeed(input: {
   return { cards, jobs };
 }
 
+/** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
+export interface SupplierDesk {
+  /** "Hey you, here's a bill": null when nothing is waiting (or a read it needs failed). */
+  papers: SupplierPaperFeed | null;
+  /** "Pay CED $X By Oct 10": supplierPayDue over the same rows. Empty when nothing is due soon. */
+  payDue: SupplierPayDue[];
+}
+
 /**
  * THE MY DAY READ. Staff only (the caller gates it: these cards carry prices, and a tech never
  * sees a price). Every read filters org_id as well as leaning on RLS: a rule at one read path is a
- * convention, not a boundary. A read that fails returns null, which is "no cards", never a crash
- * of the inbox; the same papers are still on /bills.
+ * convention, not a boundary. A read that fails is "no cards" (or "no pay lines"), never a crash of
+ * the inbox; the same papers and the same discount are still on /bills.
+ *
+ * ONE READ, TWO LINES. The Pay By line (supplier-pay-due.ts) is worked out from the same document
+ * rows the cards are, so the two never hold different copies of CED's papers. `today` is the
+ * ORG's today: it decides whether a discount is still alive.
  */
-export async function loadSupplierPapers(supabase: any, userId: string): Promise<SupplierPaperFeed | null> {
+export async function loadSupplierDesk(supabase: any, userId: string, today: string): Promise<SupplierDesk | null> {
   if (!userId) return null;
   const { data: me, error: meErr } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
@@ -239,22 +252,30 @@ export async function loadSupplierPapers(supabase: any, userId: string): Promise
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
     supabase.from("jobs").select("id, job_number, name, status, address, created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(500),
-    supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).limit(500),
+    supabase.from("supplier_accounts").select("id, name, on_account").eq("org_id", orgId).limit(500),
   ]);
   // No supplier documents (or a database without 0273): nothing to bring him.
   if (docsRes?.error || !(docsRes?.data ?? []).length) return null;
+  const accounts = acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]);
   // A failed bills, links or aliases read would make covered papers look uncovered: false cards.
-  if (billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error) return null;
+  const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error);
   const { rows } = supplierDocumentRows({
     documents: docsRes.data ?? [],
-    bills: billsRes.data ?? [],
-    links: linksRes.data ?? [],
-    aliasRows: aliasRes?.data ?? [],
+    bills: papersReadable ? (billsRes.data ?? []) : [],
+    links: papersReadable ? (linksRes.data ?? []) : [],
+    aliasRows: papersReadable ? (aliasRes?.data ?? []) : [],
   });
-  return supplierPaperFeed({
-    since: booksBeginOn(orgId, (billsRes.data ?? []) as any[]),
-    rows,
-    jobs: reconcileJobsOf(jobsRes.data ?? []),
-    accounts: acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]),
-  });
+  const papers = papersReadable
+    ? supplierPaperFeed({
+        since: booksBeginOn(orgId, (billsRes.data ?? []) as any[]),
+        rows,
+        jobs: reconcileJobsOf(jobsRes.data ?? []),
+        accounts,
+      })
+    : null;
+  // The pay line reads only the documents' own money (open balance, discount, its date), none of
+  // which a bill or a link changes. It needs the accounts read: without the name and the on-account
+  // flag there is no door to open (the /bills sheet is not drawn when that read fails either).
+  const payDue = acctRes?.error ? [] : supplierPayDue({ rows, accounts, today });
+  return { papers, payDue };
 }
