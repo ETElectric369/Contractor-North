@@ -137,7 +137,7 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(res.contents.pdfNote).toBe("The PDF itself isn't kept here, only what was read from invoice_8802-1107139.pdf.");
   });
 
-  it("opens the PDF Drop Paperwork stored for it, found by the invoice number it landed", async () => {
+  it("opens the PDF Drop Paperwork stored for it, found by any invoice number read off it (even one pasted in first, so the drop landed nothing)", async () => {
     const path = "org-1/organize/1727-ced.pdf";
     state.client = fakeSupabase(script({ organized_items: [{ data: [{ file_url: path }], error: null }] }), calls, {
       signed: { [path]: "https://signed.example/ced.pdf" },
@@ -147,7 +147,9 @@ describe("supplierPaperContents: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(res.contents.pdfUrl).toBe("https://signed.example/ced.pdf");
     expect(res.contents.pdfNote).toBeNull();
     const drop = calls.find((c) => c.table === "organized_items")!;
-    expect(drop.filters).toContainEqual(["contains", "proposal", { filed: { landed: ["8802-1107139"] } }]);
+    expect(drop.filters).toContainEqual(["contains", "proposal", { ced: { numbers: ["8802-1107139"] } }]);
+    expect(drop.filters).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(drop.filters).toContainEqual(["not", "file_url", ["is", null]]);
     const doc = calls.find((c) => c.table === "documents")!;
     expect(doc.filters).toContainEqual(["eq", "file_url", "invoice_8802-1107139.pdf"]);
   });

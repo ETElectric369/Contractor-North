@@ -18,8 +18,11 @@ export type SupplierPaperContentsResult = { ok: true; contents: PaperContents } 
  * THE PDF. The CED import keeps the file's NAME in supplier_invoices.source_file, not the file. A
  * PDF is stored only when the paper came in through Drop Paperwork: its organized_items row holds
  * the file (file_url, the documents bucket, signed exactly as the Bills tray signs it) and lists
- * the invoice numbers it added (proposal.filed.landed). A documents row whose file_url IS the
- * source_file (0326's reading) counts too. Neither found: the card says there is no PDF here.
+ * EVERY invoice number read off it (proposal.ced.numbers). Not proposal.filed.landed: that holds
+ * only the numbers the paper added for the first time, so a PDF dropped for an invoice already
+ * pasted in would go unfound. landed is always inside ced.numbers (same parser, same text). A
+ * documents row whose file_url IS the source_file (0326's reading) counts too. Neither found:
+ * the card says there is no PDF here.
  */
 export async function supplierPaperContents(invoiceId: string): Promise<SupplierPaperContentsResult> {
   const ctx = await requireStaff();
@@ -56,7 +59,7 @@ export async function supplierPaperContents(invoiceId: string): Promise<Supplier
           .from("organized_items")
           .select("file_url")
           .eq("org_id", orgId)
-          .contains("proposal", { filed: { landed: [number] } })
+          .contains("proposal", { ced: { numbers: [number] } })
           .not("file_url", "is", null)
           .limit(1)
       : Promise.resolve({ data: [], error: null }),
