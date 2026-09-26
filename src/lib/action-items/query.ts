@@ -1026,12 +1026,14 @@ async function buildActionItems(ctx: {
     }
   }
 
-  // RECOUNT — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
+  // SETTLE — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
   // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
   // an invoice can bill until the office files the roll and settles it (or undoes the take). ONE item
   // per short, and it stays until the short is settled or its take undone: it is a decision the app
-  // cannot defer, and it carries its date (the take's). Staff only; the shelf's record is staff-read
-  // (0303). Before 0303 is applied the read errors and the feeder is simply empty.
+  // cannot defer. It is named for the fix that works (audit v1018: it said "Recount", and a count is
+  // the one thing that can't settle it). Undated, like the supplier bills: the take's date is in the
+  // words, never a "3d overdue" nobody set. Staff only; the shelf's record is staff-read (0303).
+  // Before 0303 is applied the read errors and the feeder is simply empty.
   if (isStaff) {
     const { data: shorts, error: shortErr } = await shortsP;
     const rows = shortErr ? [] : ((shorts ?? []) as any[]);
@@ -1047,12 +1049,12 @@ async function buildActionItems(ctx: {
         items.push({
           id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
           kind: "stock_short",
-          title: `Recount ${it?.name ?? "an item"}: ${q} ${it?.unit ?? ""} taken past the shelf`.replace(/\s+/g, " "),
+          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past The Shelf · Settle It`.replace(/\s+/g, " "),
           // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
           // ways that work (SHORT_FIX, the bell's own words).
-          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"}. ${SHORT_FIX}`,
+          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
           who: null,
-          when: r.created_at,
+          when: null,
           urgency: 1,
           done: false,
           // Straight to the item, opened, where Settle From The Shelf is (Shop Stock opens ?item=).

@@ -403,7 +403,7 @@ describe("list_shelf — the shelf for everyone, its worth for the office only (
     expect(out.items[0]).toEqual({ item_id: "i-122", name: "12/2 NM-B", on_hand: 190, unit: "ft" });
     expect(JSON.stringify(out)).not.toMatch(/136\.93|value|cost|price/i);
     expect(reads.map((r) => r.table)).not.toContain("stock_lot_balance");
-    expect(out.items[1].note).toContain("the office will recount");
+    expect(out.items[1].note).toContain("the office will settle it");
   });
 
   it("the office gets what each item's pieces are worth, read inside its own company", async () => {

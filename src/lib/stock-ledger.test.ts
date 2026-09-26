@@ -141,6 +141,17 @@ describe("planFifoTake: the take the database stamps, worked out for a preview",
     expect(plan.cost).toBe(3.6);
   });
 
+  it("open shorts keep their pieces, as stock_draw walks since 0347: the rest of the take is its own short", () => {
+    // A 20 ft short is open; the office files a 100 ft roll; a tech takes 90. 80 come off the roll, 10 are short.
+    const plan = planFifoTake([lot("H", "2026-09-01", 100, 100)], 90, 20);
+    expect(plan.takes).toEqual([{ lotId: "H", qty: 80, cost: 80 }]);
+    expect(plan.short).toBe(10);
+    // No open short: exactly what it was.
+    expect(planFifoTake([lot("H", "2026-09-01", 100, 100)], 90)).toEqual({ takes: [{ lotId: "H", qty: 90, cost: 90 }], short: 0, cost: 90 });
+    // More open shorts than pieces: the whole take is short, and no roll is touched.
+    expect(planFifoTake([lot("H", "2026-09-01", 100, 100)], 30, 150)).toEqual({ takes: [], short: 30, cost: 0 });
+  });
+
   it("skips an emptied lot, and an empty shelf is all short", () => {
     expect(planFifoTake([lot("F", "2026-08-01", 10, 5, 0, 0)], 4)).toEqual({ takes: [], short: 4, cost: 0 });
   });

@@ -173,14 +173,18 @@ export type LotForTake = {
 export type PlannedTake = { lotId: string; qty: number; cost: number };
 
 /**
- * THE TAKE, WORKED OUT THE WAY THE DATABASE STAMPS IT (stock_draw + stamp_stock_move, 0303), for a
- * preview and for tests. Oldest lot first; one take per lot touched; a take that empties a lot
- * takes its exact remaining dollars, any other is qty x cost / pieces rounded to the cent and never
- * more than is left; what the shelf cannot cover is a SHORT at $0 - never a cost invented at the
- * newest lot's rate.
+ * THE TAKE, WORKED OUT THE WAY THE DATABASE STAMPS IT (stock_draw + stamp_stock_move, 0303; the
+ * open-shorts reach of 0347), for a preview and for tests. The item's open shorts keep their pieces:
+ * a take reaches at most (pieces left on the live lots - openShorts), and the rest is its own short.
+ * Oldest lot first; one take per lot touched; a take that empties a lot takes its exact remaining
+ * dollars, any other is qty x cost / pieces rounded to the cent and never more than is left; what
+ * the shelf cannot cover is a SHORT at $0 - never a cost invented at the newest lot's rate.
  */
-export function planFifoTake(lots: LotForTake[], qty: number): { takes: PlannedTake[]; short: number; cost: number } {
-  let rem = qty3(Number(qty) || 0);
+export function planFifoTake(lots: LotForTake[], qty: number, openShorts = 0): { takes: PlannedTake[]; short: number; cost: number } {
+  const want = qty3(Number(qty) || 0);
+  const reach = qty3(lots.reduce((s, l) => s + Math.max(qty3(l.piecesLeft), 0), 0));
+  const walk = qty3(Math.min(want, Math.max(reach - qty3(Number(openShorts) || 0), 0)));
+  let rem = walk;
   const takes: PlannedTake[] = [];
   const ordered = [...lots].sort(
     (a, b) =>
@@ -197,7 +201,8 @@ export function planFifoTake(lots: LotForTake[], qty: number): { takes: PlannedT
     takes.push({ lotId: l.id, qty: take, cost });
     rem = qty3(rem - take);
   }
-  return { takes, short: rem > 0 ? rem : 0, cost: cents(takes.reduce((s, t) => s + t.cost, 0)) };
+  const short = qty3(want - walk + (rem > 0 ? rem : 0));
+  return { takes, short: short > 0 ? short : 0, cost: cents(takes.reduce((s, t) => s + t.cost, 0)) };
 }
 
 /** A stored lot on a line, for the checks below. */

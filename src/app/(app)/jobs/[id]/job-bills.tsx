@@ -188,6 +188,8 @@ export function JobBills({
             <div className="font-medium text-slate-900">{t.label}</div>
             <div className="text-xs text-slate-400">Taken {formatDate(t.takenAt)}</div>
             {why && <div className="text-xs text-slate-500">{why}</div>}
+            {/* Part of the take came off a roll with no cost on it: its line bills only the rest. */}
+            {t.note && <div className="text-xs text-amber-700">{t.note}</div>}
           </div>
           <span className="font-medium text-slate-800">{formatCurrency(t.cost)}</span>
         </Link>

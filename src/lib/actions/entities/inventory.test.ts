@@ -105,11 +105,11 @@ describe("stock.take fills the card", () => {
     expect(r.error).toContain("is counted in ea, not feet");
   });
 
-  it("more than the shelf shows still fills, and says the office will recount", async () => {
+  it("more than the shelf shows still fills, and says the office will settle it", async () => {
     db.shelf = [{ id: "i-122", name: "12/2 NM-B", unit: "ft", on_hand: "5" }];
     const r = await run({ job_id: JOB, item: "12/2 NM-B", qty: 20 });
     expect(r.ok).toBe(true);
-    expect((r.data as any).card.scope).toContain("15 ft more than the shelf shows — the office will recount.");
+    expect((r.data as any).card.scope).toContain("15 ft more than the shelf shows — the office will settle it.");
   });
 
   it("pieces the count shows but no filed roll holds are said as that, not as 'more than the shelf shows'", async () => {

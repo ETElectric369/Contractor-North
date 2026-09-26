@@ -352,7 +352,7 @@ export default async function ShopStockPage({
           )}
         </EmptyState>
       ) : (
-        // ?item= (a Recount item's link) opens that item, where Settle From The Shelf is.
+        // ?item= (a Settle item's link) opens that item, where Settle From The Shelf is.
         <ShopStockList items={shown} openItem={typeof openItem === "string" ? openItem : null} />
       )}
 

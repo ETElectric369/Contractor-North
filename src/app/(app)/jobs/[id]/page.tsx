@@ -694,7 +694,8 @@ export default async function JobDetailPage({
    */
   const shelf = await shelfNetP;
   if (shelf.error) throw shelf.error;
-  // A takes read that fails leaves the list empty and is logged; the button still works.
+  // A takes read that fails is logged, and the list says so in its place (never an empty list:
+  // it is the list the sheet sends people to before tapping Take It again). The button still works.
   const takes = await takesP;
   if (takes.error) reportError("jobs.page.stockTakes", takes.error, { jobId: id });
   const jobMaterials = splitJobMaterialCost(
@@ -1507,7 +1508,7 @@ export default async function JobDetailPage({
           {/* TOOK FROM STOCK (Phase 3): one button, the same for the crew and the office, and under
               it who took what off the shelf for this job, with Undo until an invoice bills it. It
               counts on the job the moment it is tapped (Erik's decision 3). No price, for anyone. */}
-          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} />
+          <TookFromStock jobId={j.id} takes={takes.takes} viewerIsStaff={viewerIsStaff} readFailed={!!takes.error} />
           <ItemEditor
             listId={canonicalList?.id ?? null}
             jobId={j.id}
