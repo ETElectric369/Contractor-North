@@ -40,6 +40,8 @@ import { DocumentSettings } from "./document-settings";
 import { NumberingSettings } from "./numbering-settings";
 import { SchedulingSettings } from "./scheduling-settings";
 import { FeaturesPanel } from "./features-panel";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn, type FeatureKey } from "@/lib/features";
 import { PaymentMethods } from "./payment-methods";
 import { TapToPaySettingsSection } from "@/components/tap-to-pay/settings-section";
 import { AutomationSettings } from "./automation-settings";
@@ -927,6 +929,13 @@ export default async function SettingsPage({
   // the set-once org config leads, personal settings sit at the end (frequency law). This
   // order also fixes the default cluster: the first entry is what ?tab= falls back to.
   const clusters = isStaff ? [...adminTabs, youTab] : [youTab];
+  // THE SWITCH BOARD (0352, rule a): a switched-off feature's group leaves the side nav. A ?tab= link
+  // to it still opens it, under the Off line, so nothing saved there is ever out of reach.
+  const CLUSTER_FEATURE: Partial<Record<string, FeatureKey>> = { website: "website", content: "website" };
+  const clusterOff = (id: string) => {
+    const k = CLUSTER_FEATURE[id];
+    return !!k && !featureOn(settings.features, k);
+  };
 
   // ROUTE-DRIVEN (not client <Tabs>): the left side-tab (settings-subnav) drives which
   // cluster shows via ?tab=<id>, so its own side-tab can replace the Office list that was
@@ -943,7 +952,8 @@ export default async function SettingsPage({
   // The nav needs only id/label per cluster — the icon is resolved client-side by id in
   // SettingsSubnav. (Passing c.icon, a lucide component/function, across the server→client
   // boundary threw "Functions cannot be passed to Client Components" and crashed /settings.)
-  const navClusters = clusters.map((c) => ({ id: c.id, label: c.label }));
+  const navClusters = clusters.filter((c) => !clusterOff(c.id)).map((c) => ({ id: c.id, label: c.label }));
+  const activeOff = clusterOff(active.id) ? CLUSTER_FEATURE[active.id] : undefined;
 
   return (
     // THE NAV SITS FLUSH, THE CONTENT KEEPS ITS READING WIDTH.
@@ -965,7 +975,10 @@ export default async function SettingsPage({
           stretched to the content's full height by the default `stretch`. */}
       <div className="shell:flex shell:items-start shell:gap-6">
         <SettingsSubnav clusters={navClusters} activeTab={active.id} />
-        <div className="min-w-0 max-w-4xl flex-1">{active.content}</div>
+        <div className="min-w-0 max-w-4xl flex-1">
+          {activeOff && <FeatureOffLine feature={activeOff} features={settings.features} isOwner={profile?.role === "owner"} />}
+          {active.content}
+        </div>
       </div>
     </div>
   );

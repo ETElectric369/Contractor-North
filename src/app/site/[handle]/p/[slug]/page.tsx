@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
-import { getPublicOrgByHandle } from "@/lib/public-org";
+// publicSite: the Website switch (0352, rule e). Off, and this page is a 404 like an unpublished site.
+import { getPublicOrgByHandle, publicSite } from "@/lib/public-org";
 import { getSiteRedirect } from "@/lib/site-redirects";
 import { isLegacyCmsPath } from "@/lib/site-reserved";
 import { getPublicPageBySlug } from "@/lib/public-pages";
@@ -21,7 +22,7 @@ type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
 export async function generateMetadata({ params, searchParams }: { params: Params; searchParams: SearchParams }): Promise<Metadata> {
   const { handle, slug } = await params;
-  const org = await getPublicOrgByHandle(handle);
+  const org = publicSite(await getPublicOrgByHandle(handle));
   if (!org) return {};
   const page = await getPublicPageBySlug(org.id, slug);
   if (page) return customPageMetadata(org, page);
@@ -34,7 +35,7 @@ export async function generateMetadata({ params, searchParams }: { params: Param
 
 export default async function CustomPage({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const { handle, slug } = await params;
-  const org = await getPublicOrgByHandle(handle);
+  const org = publicSite(await getPublicOrgByHandle(handle));
   if (!org) notFound();
   const base = await handleLinkBase(handle);
   // The shared chrome's nav (Articles + builder-page links) — cache()d reads shared with the header.

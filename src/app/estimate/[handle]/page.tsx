@@ -11,6 +11,7 @@ import { DECK_ESTIMATE_CODES, buildDeckRates } from "@/lib/estimate/deck";
 import { Configurator } from "./configurator";
 import { PortfolioGallery } from "./portfolio-gallery";
 import { AskNort } from "../../site/ask-nort";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -99,7 +100,8 @@ export default async function EstimatePage({ params }: { params: Promise<{ handl
       <PortfolioGallery photos={photos} brand={brand} />
       {/* Same read-only lead-capturing assistant as the marketing site — so a visitor mid-configurator
           can ask "does this include a permit?" without bailing to the contact form. */}
-      <AskNort handle={handle} orgName={orgName} brand={brand} />
+      {/* Site Chat (0352): off removes only the bubble. The configurator above never reads a switch. */}
+      {featureOn(settings.features, "site_chat") && <AskNort handle={handle} orgName={orgName} brand={brand} />}
     </>
   );
 }

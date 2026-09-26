@@ -5,6 +5,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { extractSiteDoc } from "@/lib/site-doc";
 import { PageHeader } from "@/components/page-header";
 import { SiteStudio } from "./studio";
+import { FeatureOffLine } from "@/components/feature-off-line";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,8 @@ export default async function SiteStudioPage() {
 
   return (
     <div>
+      {/* Website off (0352): the studio still opens from a link, and says the site isn't live. */}
+      <FeatureOffLine feature="website" features={settings.features} isOwner={(me as { role?: string }).role === "owner"} />
       <PageHeader
         title="Design studio"
         description="Describe the change; a new version appears in the preview. Nothing goes live until you publish — and any older version can be published again."

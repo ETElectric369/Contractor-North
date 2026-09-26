@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPublicOrgByHandle } from "@/lib/public-org";
+import { featureOn } from "@/lib/features";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 
@@ -38,7 +39,8 @@ export async function POST(req: Request) {
   if (!file.size || file.size > MAX_BYTES) return NextResponse.json({ error: "Image must be under 4MB." }, { status: 413 });
 
   const org = await getPublicOrgByHandle(handle);
-  if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });
+  // Site Chat off (0352): this door exists only for the chat, so it goes with it.
+  if (!org || !featureOn(org.settings.features, "site_chat")) return NextResponse.json({ error: "Not available." }, { status: 404 });
 
   // Per-org daily ceiling, mirroring /api/intake/upload-url (audit v921): the per-IP limit above is
   // useless against a rotating-IP flood, and every 4MB that lands here is public storage billed to
