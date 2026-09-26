@@ -15,6 +15,10 @@ import { assertTestDatabase } from "@/lib/db-guard";
  *   · a piece taken from stock, and its undo, un-stamp the draws;
  *   · a job's site or billing model un-stamps EVERY invoice on the job; its notes do not;
  *   · another job's copies are never touched;
+ *   · the rest of what the Progress Summary reads un-stamps the draws too: a line or a payment on a
+ *     sibling bill (never the bill's own copy on its own payment), a quote, a receipt line, and the
+ *     rates (a pricing level or a person's bill rate: every draw in the org; a customer's level:
+ *     that customer's jobs);
  *   · a failing un-stamp never costs the write (0207): the hour still lands, with a warning.
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npx vitest run <this file> --no-file-parallelism
@@ -32,6 +36,7 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
   let draw = "";
   let standard = "";
   let otherDraw = "";
+  let cust = "";
   const warnings: string[] = [];
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
@@ -79,7 +84,7 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
     const minted = await mintThrowawayOrg(c, { label: "0349", techs: 1 });
     org = minted.orgId;
     tech = minted.techs[0].id;
-    const cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST 0349 cust') returning id", [org])).id;
+    cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST 0349 cust') returning id", [org])).id;
     const newJob = async (n: string) =>
       (
         await one(
@@ -178,12 +183,69 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
     expect(await served()).toEqual({ draw: false, standard: false, otherDraw: true });
   });
 
+  it("a line on a sibling bill un-stamps the job's draw; a payment on it too, never the bill's own copy", async () => {
+    if (!ready()) return;
+    await stampAll();
+    const line = (
+      await one(
+        "insert into public.invoice_items (org_id, invoice_id, description, quantity, unit_price) values ($1, $2, 'TEST 0349 labor', 2, 125) returning id",
+        [org, standard],
+      )
+    ).id;
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: true });
+    await stampAll();
+    await c.query("update public.invoice_items set unit_price = 150 where id = $1", [line]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: true });
+    await stampAll();
+    await c.query("update public.invoices set amount_paid = 100 where id = $1", [standard]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: true });
+    // The draw's own payment is recalcInvoice's to bust (its own lines and payments), not this rule's.
+    await stampAll();
+    await c.query("update public.invoices set amount_paid = 50 where id = $1", [draw]);
+    expect(await served()).toEqual(ALL);
+  });
+
+  it("a quote and a receipt line on the job un-stamp its draw", async () => {
+    if (!ready()) return;
+    await stampAll();
+    await c.query(
+      "insert into public.quotes (org_id, customer_id, job_id, quote_number, status, total) values ($1, $2, $3, 'TEST-0349-Q', 'accepted', 5000)",
+      [org, cust, job],
+    );
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: true });
+    const bill = (await one("insert into public.bills (org_id, job_id, supplier, amount) values ($1, $2, 'TEST supply', 40) returning id", [org, job])).id;
+    const bl = (await one("insert into public.bill_line_items (org_id, bill_id, description, quantity, amount) values ($1, $2, 'TEST wire', 1, 40) returning id", [org, bill])).id;
+    await stampAll();
+    await c.query("update public.bill_line_items set billable = false where id = $1", [bl]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: true });
+  });
+
+  it("a rate un-stamps the draws it prices: a level or a bill rate every draw in the org, a customer's level its jobs'", async () => {
+    if (!ready()) return;
+    const level = (await one("insert into public.pricing_levels (org_id, name, labor_rate, markup_pct) values ($1, 'TEST 0349 level', 110, 20) returning id", [org])).id;
+    await stampAll();
+    await c.query("update public.customers set pricing_level_id = $2 where id = $1", [cust, level]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: false });
+    await stampAll();
+    await c.query("update public.pricing_levels set labor_rate = 125 where id = $1", [level]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: false });
+    await stampAll();
+    await c.query("update public.pricing_levels set name = 'TEST 0349 level renamed' where id = $1", [level]);
+    expect(await served()).toEqual(ALL);
+    await c.query("update public.profiles set bill_rate = 95 where id = $1", [tech]);
+    expect(await served()).toEqual({ draw: false, standard: true, otherDraw: false });
+  });
+
   it("a failing un-stamp never costs the write: the hour lands, with a warning", async () => {
     if (!ready()) return;
     await stampAll();
     await c.query("savepoint broken_cache");
     try {
-      // Make the un-stamp itself fail: a copy may not be un-stamped at all.
+      // Make the un-stamp itself fail: a copy may not be un-stamped at all. The constraint waits for
+      // any other suite's open transaction that wrote a bill, a quote or an hour (each one touches
+      // doc_pdf_cache through these triggers), so it gets longer than 3s; the savepoint's rollback
+      // puts the 3s back.
+      await c.query("set local lock_timeout = '20s'");
       await c.query("alter table public.doc_pdf_cache add constraint test_0349_never_unstamped check (doc_status <> '') not valid");
       warnings.length = 0;
       const e = await one(

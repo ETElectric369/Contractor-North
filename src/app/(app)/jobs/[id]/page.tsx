@@ -427,8 +427,16 @@ export default async function JobDetailPage({
       .maybeSingle(),
     // The activity log — assembled from the rows themselves, see lib/story.
     storyForJob(supabase, j.id),
-    fetchJobLaborRows(supabase, id),
-    customerLaborRateForJob(supabase, id),
+    // A lost hours or rate read throws (audit v1018 money-1): logged, and a fixed-price job's Work
+    // To Date says it couldn't total (workedToDate below) instead of counting no labor.
+    fetchJobLaborRows(supabase, id).catch((e) => {
+      reportError("jobs.[id].laborRows", e, { jobId: id });
+      return null;
+    }),
+    customerLaborRateForJob(supabase, id).catch((e) => {
+      reportError("jobs.[id].levelRate", e, { jobId: id });
+      return undefined;
+    }),
     invoiceIds.length
       ? supabase.from("customer_credits").select("amount").eq("disposition", "refund").in("invoice_id", invoiceIds)
       : Promise.resolve({ data: [] as any[] }),
@@ -704,7 +712,10 @@ export default async function JobDetailPage({
   // timeclock_job_codes=false must hide EVERY code picker (cn-v517) — including the
   // Time tab's add/edit modals here, not just the /timecards mounts.
   const jobCodesEnabled = getOrgSettings((org as any)?.settings).timeclock_job_codes;
-  const billableLabor = computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate, laborRows.nonBillableCodes).total;
+  const laborReadFailed = laborRows === null || jobLevelRate === undefined;
+  const billableLabor = laborRows
+    ? computeJobLaborBilling(laborRows.jobEntries, defaultLaborRate, jobLevelRate ?? null, laborRows.nonBillableCodes).total
+    : 0;
   const progress = computeJobProgress({
     billingTypeRaw: (j as any).billing_type,
     quotes: (quotes ?? []) as any,
@@ -722,7 +733,7 @@ export default async function JobDetailPage({
   // null = a total that could not be read: the modal says so instead of showing a number. A T&M
   // total is tmWork's; a fixed-price one counts the takes, so a lost stock read can't be totalled.
   const workedToDate: number | null =
-    tmWork === "failed" || (stockReadFailed && progress.billingType !== "tm") ? null : progress.workToDate;
+    tmWork === "failed" || ((stockReadFailed || laborReadFailed) && progress.billingType !== "tm") ? null : progress.workToDate;
   const stockShortsWords = jobStock
     ? stockShortsSentence(jobStock.shorts)
     : stockReadFailed

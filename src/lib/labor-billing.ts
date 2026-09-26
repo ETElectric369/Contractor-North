@@ -268,7 +268,7 @@ export async function fetchJobLaborRows(
     entriesQ = entriesQ.eq("org_id", orgId);
     codesQ = codesQ.eq("org_id", orgId);
   }
-  const [{ data: jobEntries }, { data: codes }, { data: payRows }] = await Promise.all([
+  const [entriesRead, codesRead, payRead] = await Promise.all([
     entriesQ,
     codesQ,
     // BILL RATES COME FROM THE STAFF-SCOPED VIEW (0215/0216), not from an embed on profiles:
@@ -281,9 +281,17 @@ export async function fetchJobLaborRows(
           .from("profiles")
           .select("id, role, hourly_rate, bill_rate")
           .eq("org_id", orgId)
-          .then((r: { data: any[] | null }) => ({ data: (r.data ?? []).map(customerRateRow) }))
+          .then((r: { data: any[] | null; error: unknown }) => ({ data: (r.data ?? []).map(customerRateRow), error: r.error }))
       : supabase.from("profile_pay").select("id, hourly_rate, bill_rate"),
   ]);
+  // A LOST READ IS NOT AN EMPTY ONE (audit v1018 money-1). No hours reads as $0 of labor, no codes
+  // bills the SHOP hours, no rates bills every hour at the default: each one a figure on a customer's
+  // bill (the importer, the Unbilled card, the Progress Summary) that nobody worked out. Throw, and
+  // every caller says the job's work couldn't be read.
+  for (const r of [entriesRead, codesRead, payRead]) if (r.error) throw r.error;
+  const jobEntries = entriesRead.data;
+  const codes = codesRead.data;
+  const payRows = payRead.data;
   const rateById = new Map<string, { hourly_rate: number | null; bill_rate: number | null }>();
   for (const r of (payRows ?? []) as any[]) if (r?.id) rateById.set(String(r.id), r);
   const withRate = (prof: any) => (prof?.id ? { ...prof, ...(rateById.get(String(prof.id)) ?? {}) } : prof);
@@ -301,11 +309,14 @@ export async function fetchJobLaborRows(
  *  labor-billing consumer shares — invoice import, job work-to-date panel, and progress
  *  financials must pass the SAME value or the penny-reconcile promise breaks. */
 export async function customerLaborRateForJob(supabase: any, jobId: string): Promise<number | null> {
-  const { data } = await supabase
+  // A failed read throws (audit v1018 money-1): "no level" would bill the customer's hours at the
+  // default rate instead of the rate they were quoted.
+  const { data, error } = await supabase
     .from("jobs")
     .select("customers(pricing_levels(labor_rate))")
     .eq("id", jobId)
     .maybeSingle();
+  if (error) throw error;
   const raw = Number((data as any)?.customers?.pricing_levels?.labor_rate);
   return Number.isFinite(raw) && raw > 0 ? raw : null;
 }
@@ -321,11 +332,13 @@ export async function customerMaterialMarkupForJob(
   jobId: string,
   orgDefaultPct: number,
 ): Promise<number> {
-  const { data } = await supabase
+  // A failed read throws, like the labor rate's: the org default is not the customer's markup.
+  const { data, error } = await supabase
     .from("jobs")
     .select("customers(pricing_levels(markup_pct))")
     .eq("id", jobId)
     .maybeSingle();
+  if (error) throw error;
   const raw = Number((data as any)?.customers?.pricing_levels?.markup_pct);
   if (Number.isFinite(raw) && raw >= 0) return raw;
   const def = Number(orgDefaultPct);

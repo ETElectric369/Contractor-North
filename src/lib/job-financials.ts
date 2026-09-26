@@ -54,9 +54,11 @@ export async function jobProgressFinancials(
   // A LOST READ IS NOT AN EMPTY ONE (audit v1018 money-1). Every figure below is printed on a
   // customer's bill: a failed invoices read reads as "Received to date $0.00", a failed job read as a
   // fixed-price contract on a Time & Material job, a failed quotes read as no estimate. So each read
-  // throws, as the receipts and stock reads already did, and every caller leaves the Progress
-  // Summary off and says so (readInvoiceDocumentProps marks it degraded: the print page refuses and
-  // stores nothing, /i and the portal say part of the bill couldn't load).
+  // throws, as the receipts and stock reads already did (and the hours, rates and markup under it:
+  // fetchJobLaborRows, customerLaborRateForJob, customerMaterialMarkupForJob, unbilledWorkForJob),
+  // and every caller leaves the Progress Summary off and says so (readInvoiceDocumentProps marks it
+  // degraded: the print page refuses and stores nothing, /i and the portal say part of the bill
+  // couldn't load; the office's invoice page says the Progress Summary couldn't load).
   for (const r of [jobRead, quotesRead, invoicesRead, posRead, orgRead, billsRead]) if (r.error) throw r.error;
   const job = jobRead.data;
   const org = orgRead.data;
