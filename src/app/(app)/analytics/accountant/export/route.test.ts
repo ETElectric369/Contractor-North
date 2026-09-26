@@ -24,6 +24,7 @@ function client() {
     };
     const b: any = {
       _insert: null as any,
+      _from: undefined as number | undefined,
       select: () => b,
       eq: () => b,
       is: () => b,
@@ -31,6 +32,10 @@ function client() {
       neq: () => b,
       order: () => b,
       limit: () => b,
+      range: (from: number) => {
+        b._from = from;
+        return b;
+      },
       overlaps: () => b,
       insert: (row: any) => {
         b._insert = row;
@@ -42,7 +47,8 @@ function client() {
           state.inserted.push(b._insert);
           return Promise.resolve({ data: state.recordError ? null : [{ id: "e1" }], error: state.recordError }).then(ok, err);
         }
-        return Promise.resolve({ data: rows[table] ?? [], error: null }).then(ok, err);
+        // Paged reads: the rows once, then an empty page.
+        return Promise.resolve({ data: (b._from ?? 0) > 0 ? [] : (rows[table] ?? []), error: null }).then(ok, err);
       },
     };
     return b;
@@ -84,21 +90,43 @@ describe("GET /analytics/accountant/export", () => {
     const text = await res.text();
     expect(text.split("\r\n")[0]).toBe("Date Bought,Item,Quantity,Unit,Cost,Supplier,Ticket Number,Bought On Job,How It Came In,Note");
     expect(text).toContain("2026-09-02,12/2 NM-B,250,ft,180.17");
-    expect(state.inserted).toEqual([{ org_id: "org-et", list: "stock_bought", from_at: "2026-09-01T07:00:00.000Z", to_at: "2026-10-01T07:00:00.000Z", row_count: 1 }]);
+    expect(state.inserted).toEqual([{ org_id: "org-et", list: "stock_bought", from_at: "2026-09-01T07:00:00.000Z", to_at: expect.any(String), row_count: 1 }]);
+    // The window's end, or the download's cutoff when that is earlier (a window running past today).
+    expect(Date.parse(state.inserted[0].to_at)).toBeLessThanOrEqual(Date.parse("2026-10-01T07:00:00.000Z"));
   });
 
   it("won't hand over a list it couldn't record (a write-off in it could then be undone unseen)", async () => {
-    state.recordError = { code: "42501", message: "new row violates row-level security policy" };
-    const res = await GET(req("list=stock_used&from=2026-09-01&to=2026-09-30"));
-    expect(res.status).toBe(503);
-    expect(await res.text()).toContain("couldn't be recorded");
+    // Postgres's own words name the table: that is a refusal, never "0350 isn't applied".
+    for (const e of [
+      { code: "42501", message: 'new row violates row-level security policy for table "accountant_exports"' },
+      { code: "42501", message: "permission denied for table accountant_exports" },
+      { code: "23514", message: 'new row for relation "accountant_exports" violates check constraint "accountant_exports_window"' },
+    ]) {
+      state.recordError = e;
+      const res = await GET(req("list=stock_used&from=2026-09-01&to=2026-09-30"));
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("couldn't be recorded");
+    }
+  });
+
+  it("the record ends where the file does: a download today is cut a moment before it was asked for", async () => {
+    const before = Date.now();
+    await GET(req("list=stock_used&from=2026-09-01&to=2099-12-31"));
+    const to = Date.parse(state.inserted[0].to_at);
+    expect(to).toBeLessThanOrEqual(before);
+    expect(to).toBeGreaterThan(before - 60_000);
   });
 
   it("before 0350 (no record to keep) the download still comes", async () => {
-    state.recordError = { code: "42P01", message: 'relation "public.accountant_exports" does not exist' };
-    const res = await GET(req("list=on_hand&to=2026-09-30"));
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-disposition")).toContain("on-hand-2026-09-30.csv");
+    for (const e of [
+      { code: "42P01", message: 'relation "public.accountant_exports" does not exist' },
+      { code: "PGRST205", message: "Could not find the table 'public.accountant_exports' in the schema cache" },
+    ]) {
+      state.recordError = e;
+      const res = await GET(req("list=on_hand&to=2026-09-30"));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-disposition")).toContain("on-hand-2026-09-30.csv");
+    }
   });
 
   it("an unknown list is refused in words", async () => {

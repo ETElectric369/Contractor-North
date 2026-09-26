@@ -1,15 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Download } from "lucide-react";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { formatCurrency } from "@/lib/utils";
-import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
-import { ACCOUNTANT_LISTS, accountantList, dataRowCount, parseWindow, readAccountantInputs, toolsBilledList, type CsvTable } from "@/lib/accountant-lists";
+import { ACCOUNTANT_LISTS, accountantList, dataRowCount, isMissingExportRecord, parseWindow, readAccountantInputs, toolsBilledList } from "@/lib/accountant-lists";
+import { DownloadCsvButton } from "./download-csv-button";
 
 export const dynamic = "force-dynamic";
 
@@ -37,15 +36,12 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
     readAccountantInputs(supabase, orgId),
     supabase.from("accountant_exports").select("list, from_at, to_at, row_count, created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(8),
   ]);
-  const remembered = !exportsRead.error || !(isMissingShelf(exportsRead.error) || /accountant_exports/.test(String(exportsRead.error.message ?? "")));
+  // Only the table itself missing is "0350 isn't applied"; any other failed read is not a promise
+  // either way, so the page says the downloads are remembered (the route refuses if it can't record).
+  const remembered = !exportsRead.error || !isMissingExportRecord(exportsRead.error);
   const recent = (exportsRead.error ? [] : exportsRead.data ?? []) as { list: string; from_at: string | null; to_at: string; row_count: number; created_at: string }[];
 
   const q = (key: string) => `/analytics/accountant/export?${new URLSearchParams({ list: key, from: w.from, to: w.to }).toString()}`;
-  const sumCol = (t: CsvTable, col: number) => {
-    const total = t.rows.find((r) => r[0] === "Total");
-    return total && typeof total[col] === "number" ? (total[col] as number) : 0;
-  };
-  const moneyCol: Record<string, number> = { stock_bought: 4, stock_used: 4, on_hand: 3, tools: 4 };
   const day = (ymd: string) => `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}/${ymd.slice(0, 4)}`;
   const billed = read.ok ? toolsBilledList(read.inputs, tz) : null;
   const titleOf = (k: string) => ACCOUNTANT_LISTS.find((l) => l.key === k)?.title ?? k;
@@ -95,24 +91,18 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
                   <h2 className="text-base font-semibold text-slate-900">{l.title}</h2>
                   <p className="text-sm text-slate-500">{l.says}</p>
                   <p className="mt-0.5 text-xs text-slate-400">
-                    {n === 0 ? "Nothing in these dates." : `${n} ${n === 1 ? "row" : "rows"}, ${formatCurrency(sumCol(t, moneyCol[l.key]))} at cost.`}
+                    {n === 0 ? "Nothing in these dates." : `${n} ${n === 1 ? "row" : "rows"}, ${formatCurrency(t.total ?? 0)} at cost.`}
                     {!read.shelf && l.key !== "tools" ? " The shelf isn't switched on for this database yet." : ""}
                   </p>
                 </div>
-                <a
-                  href={q(l.key)}
-                  download
-                  className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  <Download className="h-4 w-4" /> Download CSV
-                </a>
+                <DownloadCsvButton href={q(l.key)} fallbackName={l.key === "on_hand" ? `${l.file}-${w.to}.csv` : `${l.file}-${w.from}-to-${w.to}.csv`} />
               </Card>
             );
           })}
           <p className="text-sm font-medium text-slate-700">Depreciation is your accountant&apos;s call.</p>
           <p className="text-xs text-slate-500">
             {remembered
-              ? "Every download is remembered. A write-off, a return or a count that went out in a Stock Used or On Hand download stays as it is; Count It puts things right from today."
+              ? "Every download is remembered. A write-off, a return or a count that went out in a Stock Used or On Hand download stays as it is; Count It puts things right from today. Takes onto jobs, pieces brought back, a roll taken back off the shelf and a supplier credit's amount can still change after a download; the next download carries the change."
               : "Downloads aren't remembered yet (one database update, 0350, isn't applied), so a write-off can still be undone after it went to your accountant."}
           </p>
         </div>

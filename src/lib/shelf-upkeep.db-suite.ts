@@ -22,6 +22,7 @@ import { it, expect, beforeAll, afterAll } from "vitest";
 import { shelfLotCost, type BillLine } from "./bill-itemisation";
 import { LIVE_ORGS, mintThrowawayOrg } from "./throwaway-org.db-fixture";
 import { notOnThisDatabase } from "@/lib/db-guard";
+import { isMissingExportRecord } from "@/lib/accountant-lists";
 
 export interface SqlClient {
   query: (sql: string, params?: unknown[]) => Promise<{ rows: any[] }>;
@@ -200,8 +201,21 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
     if (!needs()) return;
     await tx(async () => {
       const s = await shelved();
-      const credit = await shelfCredit(-30);
-      const r = await move(staffId, { org_id: orgId, item_id: s.itemId, lot_id: s.lotId, kind: "supplier_return", qty: 50, source: "office", credit_bill_id: credit });
+      // A job-less credit the return itself files to the shelf, as Return To CED does, and says so.
+      const credit = await shelfCredit(-30, false);
+      await as(staffId);
+      await c.query("update public.bills set on_shelf = true where id = $1 and job_id is null", [credit]);
+      await asServer();
+      const r = await move(staffId, {
+        org_id: orgId,
+        item_id: s.itemId,
+        lot_id: s.lotId,
+        kind: "supplier_return",
+        qty: 50,
+        source: "office",
+        credit_bill_id: credit,
+        credit_filed_by_return: true,
+      });
       expect(num(r.cost)).toBe(36.03);
       expect(r.job_id).toBeNull();
       const b = await balance(s.lotId);
@@ -218,9 +232,14 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
       expect(toJob?.message).toMatch(/tied to pieces returned from the shelf/);
       const gone = await refusal(() => c.query("delete from public.bills where id = $1", [credit]));
       expect(gone?.message).toMatch(/tied to pieces returned from the shelf/);
-      // Undo the return: the credit is free again.
+      // Undo the return: the credit is free again. The return filed it, so the app takes it back
+      // off the shelf (untieShelfCredit's exact write), and then it can go on a job.
       await c.query("update public.stock_moves set undone_at = now() where id = $1", [r.id]);
-      const moved = await refusal(() => c.query("update public.bills set on_shelf = false, job_id = $2 where id = $1", [credit, jobA]));
+      const filed = await one("select bool_or(credit_filed_by_return) as filed, count(*) filter (where undone_at is null)::int as live from public.stock_moves where credit_bill_id = $1", [credit]);
+      expect(filed).toMatchObject({ filed: true, live: 0 });
+      const off = (await c.query("update public.bills set on_shelf = false where id = $1 and org_id = $2 and job_id is null and on_shelf returning id", [credit, orgId])).rows;
+      expect(off).toHaveLength(1);
+      const moved = await refusal(() => c.query("update public.bills set job_id = $2 where id = $1", [credit, jobA]));
       expect(moved).toBeNull();
       await asServer();
       expect(addsUp(await balance(s.lotId))).toBe(true);
@@ -246,6 +265,11 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
         move(staffId, { org_id: orgId, item_id: s.itemId, lot_id: s.lotId, kind: "supplier_return", qty: 4, source: "office", credit_bill_id: charge }),
       );
       expect(refusedCharge?.message).toMatch(/isn't a credit/);
+      // "The return filed the credit" needs a credit to have filed.
+      const filedNothing = await refusal(() =>
+        move(staffId, { org_id: orgId, item_id: s.itemId, lot_id: s.lotId, kind: "supplier_return", qty: 1, source: "office", credit_filed_by_return: true }),
+      );
+      expect(filedNothing?.message).toMatch(/stock_moves_filed_names_its_credit/);
       // Only a return names a credit.
       const credit = await shelfCredit(-5);
       const onWriteOff = await refusal(() =>
@@ -288,7 +312,7 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
         new Date(at.getTime() + 86_400_000).toISOString(),
       ]);
       const frozen = await refusal(() => c.query("update public.stock_moves set undone_at = now() where id = $1", [wo.id]));
-      expect(frozen?.message).toMatch(/already went to your accountant in the On Hand list.*Count It/);
+      expect(frozen?.message).toMatch(/already went to your accountant in the On Hand list, so it stays.*Count It/);
       await asServer();
       // Nothing moved: the roll still adds up.
       expect(addsUp(await balance(s.lotId))).toBe(true);
@@ -320,6 +344,10 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
       await as(techId);
       const tech = await refusal(() => c.query("insert into public.accountant_exports (org_id, list, to_at) values ($1, 'stock_used', now())", [orgId]));
       expect(tech).not.toBeNull();
+      // Postgres names the table in this refusal: it must never read as "0350 isn't applied" (the
+      // route would then hand the file over unrecorded).
+      expect(tech!.message).toMatch(/accountant_exports/);
+      expect(isMissingExportRecord(tech)).toBe(false);
       expect((await c.query("select count(*)::int as n from public.accountant_exports")).rows[0].n).toBe(0);
       await as(staffId);
       const row = await one("insert into public.accountant_exports (org_id, list, to_at, created_by, created_at) values ($1, 'tools', now(), $2, '2001-01-01') returning id, created_by, created_at", [orgId, otherStaffId]);

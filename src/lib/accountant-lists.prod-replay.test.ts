@@ -32,7 +32,7 @@ d("Export For Accountant, ET, replayed read-only", () => {
       const inputs: AccountantInputs = {
         items: await q("select id::text, name, unit from public.inventory_items where org_id = $1"),
         lots: await q(
-          `select b.lot_id::text, b.item_id::text, b.kind, b.bill_id::text, b.pieces::text, b.unit, b.cost::text, b.bought_on::text, b.live, l.note
+          `select b.lot_id::text, b.item_id::text, b.kind, b.bill_id::text, b.bill_line_id::text, b.pieces::text, b.unit, b.cost::text, b.bought_on::text, b.live, l.note
              from public.stock_lot_balance b join public.stock_lots l on l.id = b.lot_id where b.org_id = $1`,
         ),
         moves: await q(

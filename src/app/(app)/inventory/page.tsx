@@ -14,6 +14,7 @@ import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { readSupplierPaperHomes, type SupplierPaperHome } from "@/app/(app)/bills/supplier-papers";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
+import { getOrgSettings } from "@/lib/org-settings";
 import { NewItemButton } from "./new-item-button";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
@@ -62,7 +63,7 @@ export default async function ShopStockPage({
   if (term) itemQuery = itemQuery.or(`name.ilike.%${term}%,part_number.ilike.%${term}%,key_part.ilike.%${term}%,category.ilike.%${term}%`);
 
   // ONE BREATH: everything the page needs that depends on nothing else.
-  const [items, lots, lotRows, moves, jobs, receiptLines, stockDocs, docLinks, papers, exportsRead] = await Promise.all([
+  const [items, lots, lotRows, moves, jobs, receiptLines, stockDocs, docLinks, papers, exportsRead, orgRow] = await Promise.all([
     itemQuery,
     supabase
       .from("stock_lot_balance")
@@ -109,7 +110,10 @@ export default async function ShopStockPage({
       .in("list", ["stock_used", "on_hand"])
       .order("created_at")
       .limit(2000),
+    // The company's own clock, for the day a download is named by.
+    supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
   ]);
+  const orgTz = getOrgSettings((orgRow.data as { settings?: unknown } | null)?.settings).timezone;
   const exportRows = ((exportsRead.error ? [] : exportsRead.data) ?? []) as { list: string; from_at: string | null; to_at: string; created_at: string }[];
   /** The download that carried a move made at `at`, in words, or null (mirrors 0350's guard). */
   const carriedBy = (at: string): string | null => {
@@ -117,7 +121,7 @@ export default async function ShopStockPage({
     const hit = exportRows.find(
       (e) => Date.parse(e.created_at) > t && Date.parse(e.to_at) > t && (!e.from_at || Date.parse(e.from_at) <= t),
     );
-    return hit ? `the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list, ${day(hit.created_at)}` : null;
+    return hit ? `the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list, ${day(todayStrInTz(orgTz, new Date(hit.created_at)))}` : null;
   };
 
   // A shelf ledger missing (a database before 0303) is no rolls; any other failure is said, never

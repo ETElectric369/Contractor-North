@@ -535,8 +535,16 @@ function WriteOff({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: Sh
           <NumberInput id={`wo-n-${lot.id}`} value={n} onValueChange={setN} className="h-11 w-32" />
         </div>
         <div>
-          <Label htmlFor={`wo-why-${lot.id}`}>Why</Label>
-          <Input id={`wo-why-${lot.id}`} value={reason} onChange={(e) => setReason(e.target.value)} className="h-11" placeholder="Ruined in the rain" />
+          <Label htmlFor={`wo-why-${lot.id}`}>Why (Required)</Label>
+          <Input
+            id={`wo-why-${lot.id}`}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="h-11"
+            placeholder="For example: ruined in the rain"
+            aria-required="true"
+          />
+          {!reason.trim() && <p className="mt-1 text-xs text-slate-500">Say why to write it off, so it explains itself later.</p>}
         </div>
         {n > 0 && n <= lot.piecesLeft && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -564,6 +572,7 @@ function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView;
   const [n, setN] = useState(lot.piecesLeft);
   const [credits, setCredits] = useState<ShelfCreditOption[] | null>(null);
   const [onJobs, setOnJobs] = useState(0);
+  const [cantTieWhy, setCantTieWhy] = useState<string | null>(null);
   const [creditId, setCreditId] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -578,7 +587,9 @@ function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView;
           setLoadError(`${res.error} You can still send the pieces back without a credit.`);
           return;
         }
-        setCredits(res.credits);
+        // Before 0350 no credit can be tied: none is offered, and the sheet says why.
+        setCredits(res.canTie ? res.credits : []);
+        setCantTieWhy(res.canTie ? null : res.cantTieWhy);
         setOnJobs(res.onJobs);
       })
       .catch(() => {
@@ -639,6 +650,8 @@ function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView;
           <Label htmlFor={`ret-credit-${lot.id}`}>The supplier&apos;s credit for them</Label>
           {credits == null ? (
             <p className="text-sm text-slate-500">Reading the credits…</p>
+          ) : cantTieWhy ? (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{cantTieWhy}</p>
           ) : (
             <select
               id={`ret-credit-${lot.id}`}
@@ -654,10 +667,12 @@ function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView;
               ))}
             </select>
           )}
-          <p className="mt-1 text-xs text-slate-500">
-            Only credits filed to no job are listed, and the one you pick is filed to the shelf.
-            {onJobs > 0 ? ` ${onJobs} credit${onJobs === 1 ? " is" : "s are"} filed on jobs and left out: those come off that job's customer bill.` : ""}
-          </p>
+          {!cantTieWhy && (
+            <p className="mt-1 text-xs text-slate-500">
+              Only credits filed to no job are listed, and the one you pick is filed to the shelf (Undo takes it back off).
+              {onJobs > 0 ? ` ${onJobs} credit${onJobs === 1 ? " is" : "s are"} filed on jobs and left out: those come off that job's customer bill.` : ""}
+            </p>
+          )}
           {loadError && <p className="mt-1 text-xs text-amber-800">{loadError}</p>}
         </div>
         {preview && <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">About: {preview.words}</p>}

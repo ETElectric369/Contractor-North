@@ -19,6 +19,10 @@
 --      foreign key: a key to bills would lock bills (share row exclusive) while it is added, and
 --      every receipt write touches bills. The trigger in 3 checks it instead, at insert; 0303's
 --      guard_stock_move already refuses any later change to a move but its undo.
+--      With it, stock_moves.credit_filed_by_return: this return is what filed the credit to the shelf
+--      (it had no job and wasn't on the shelf). When the last live return naming the credit is
+--      undone, the app takes a credit a return filed back off the shelf, so it is a plain credit on
+--      Bills again that can go on a job; one a person filed to the shelf stays where they put it.
 --   2. A write-off says why: stock_moves_write_off_has_a_reason (NOT VALID, then validated).
 --   3. stock_move_names_its_credit (BEFORE INSERT on stock_moves): the credit is this company's, a
 --      credit (below $0), filed to the shelf (on_shelf, no job) and not set aside. Only a
@@ -59,6 +63,10 @@ end $$;
 alter table public.stock_moves add column if not exists credit_bill_id uuid;
 comment on column public.stock_moves.credit_bill_id is
   'The supplier''s credit memo (a bill below $0, filed to the shelf) a supplier_return is tied to (0350). A plain uuid, checked by stock_move_names_its_credit at insert. What the pieces cost minus the credit is written off.';
+-- A constant default: no table rewrite, a moment's lock.
+alter table public.stock_moves add column if not exists credit_filed_by_return boolean not null default false;
+comment on column public.stock_moves.credit_filed_by_return is
+  'True when this supplier_return is what filed its credit to the shelf (0350). When the last live return naming the credit is undone, the app takes such a credit back off the shelf.';
 
 do $$
 begin
@@ -66,6 +74,11 @@ begin
     alter table public.stock_moves
       add constraint stock_moves_credit_only_on_a_return check (credit_bill_id is null or kind = 'supplier_return') not valid;
     alter table public.stock_moves validate constraint stock_moves_credit_only_on_a_return;
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'stock_moves_filed_names_its_credit') then
+    alter table public.stock_moves
+      add constraint stock_moves_filed_names_its_credit check (not credit_filed_by_return or credit_bill_id is not null) not valid;
+    alter table public.stock_moves validate constraint stock_moves_filed_names_its_credit;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'stock_moves_write_off_has_a_reason') then
     alter table public.stock_moves
@@ -209,13 +222,13 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare v_when timestamptz; v_list text;
+declare v_list text;
 begin
   if old.undone_at is not null or new.undone_at is null
      or old.kind not in ('write_off', 'supplier_return', 'recount_down', 'recount_up') then
     return new;
   end if;
-  select e.created_at, e.list into v_when, v_list
+  select e.list into v_list
     from public.accountant_exports e
    where e.org_id = old.org_id
      and e.list in ('stock_used', 'on_hand')
@@ -225,9 +238,10 @@ begin
    order by e.created_at
    limit 1;
   if found then
-    raise exception 'This already went to your accountant in the % list downloaded %, so it stays as it is. Count the shelf (Count It) to put it right from today.',
-      case v_list when 'stock_used' then 'Stock Used' else 'On Hand' end,
-      to_char(v_when, 'Mon FMDD')
+    -- No date in these words: the database's clock is UTC, and an evening download in the company's
+    -- own zone would read as the next day. The app names the day, in the company's zone, before this.
+    raise exception 'This already went to your accountant in the % list, so it stays as it is. Count the shelf (Count It) to put it right from today.',
+      case v_list when 'stock_used' then 'Stock Used' else 'On Hand' end
       using errcode = 'P0001';
   end if;
   return new;
@@ -242,12 +256,12 @@ create trigger guard_stock_move_exported
 do $$
 begin
   if (select count(*) from information_schema.columns
-       where table_schema = 'public' and table_name = 'stock_moves' and column_name = 'credit_bill_id') <> 1 then
-    raise exception '0350: stock_moves.credit_bill_id is missing after the migration.';
+       where table_schema = 'public' and table_name = 'stock_moves' and column_name in ('credit_bill_id', 'credit_filed_by_return')) <> 2 then
+    raise exception '0350: stock_moves.credit_bill_id or credit_filed_by_return is missing after the migration.';
   end if;
   if (select count(*) from pg_constraint
-       where conname in ('stock_moves_credit_only_on_a_return', 'stock_moves_write_off_has_a_reason') and convalidated) <> 2 then
-    raise exception '0350: the return and write-off constraints are not both in place and validated.';
+       where conname in ('stock_moves_credit_only_on_a_return', 'stock_moves_filed_names_its_credit', 'stock_moves_write_off_has_a_reason') and convalidated) <> 3 then
+    raise exception '0350: the return and write-off constraints are not all in place and validated.';
   end if;
   if (select count(*) from pg_trigger
        where not tgisinternal
@@ -257,7 +271,7 @@ begin
   if not (select relrowsecurity from pg_class where oid = 'public.accountant_exports'::regclass) then
     raise exception '0350: RLS is not on for accountant_exports.';
   end if;
-  if exists (select 1 from public.stock_moves where credit_bill_id is not null) then
+  if exists (select 1 from public.stock_moves where credit_bill_id is not null or credit_filed_by_return) then
     raise exception '0350: a move names a credit already; this migration writes none.';
   end if;
   raise notice '0350: returns can name a shelf credit, write-offs say why, and accountant downloads are remembered. No rows were written.';

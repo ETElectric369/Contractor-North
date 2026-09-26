@@ -2,13 +2,14 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
-import { isMissingShelf } from "@/lib/job-cost";
 import { reportError } from "@/lib/observe";
 import {
   ACCOUNTANT_LISTS,
   accountantList,
   dataRowCount,
+  downloadCutoff,
   exportWindow,
+  isMissingExportRecord,
   isAccountantListKey,
   parseWindow,
   readAccountantInputs,
@@ -27,7 +28,13 @@ export const dynamic = "force-dynamic";
  * EVERY DOWNLOAD IS REMEMBERED (0350's accountant_exports), because a write-off the accountant
  * already has must not be quietly undone after. If the record can't be written, the file is not
  * handed over: a list the app doesn't know it gave out is exactly the silent drift this guards.
- * Before 0350 there is no record to write, and the page says downloads aren't remembered yet.
+ * Before 0350 there is no record to write (the table itself missing, nothing else), and the page says
+ * downloads aren't remembered yet.
+ *
+ * ONE CUTOFF FOR THE FILE AND THE RECORD: the instant is taken before anything is read, the list
+ * carries only the moves made before it, and the record's to_at is that same instant. So the moves
+ * 0350 freezes are exactly the moves the accountant got; one made while the file was built is in
+ * neither, and goes in the next download.
  */
 export async function GET(req: NextRequest) {
   const ctx = await requireStaff();
@@ -43,16 +50,17 @@ export async function GET(req: NextRequest) {
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
   const w = parseWindow(sp.get("from"), sp.get("to"), todayStrInTz(tz));
 
+  const cutoffAt = downloadCutoff();
   const read = await readAccountantInputs(supabase, orgId);
   if (!read.ok) return new NextResponse(read.error, { status: 503, headers: { "content-type": "text/plain; charset=utf-8" } });
-  const table = accountantList(key, read.inputs, w, tz);
+  const table = accountantList(key, read.inputs, w, tz, cutoffAt);
 
-  const win = exportWindow(key, w, tz);
+  const win = exportWindow(key, w, tz, cutoffAt);
   const { error: recErr } = await supabase
     .from("accountant_exports")
     .insert({ org_id: orgId, list: key, from_at: win.from_at, to_at: win.to_at, row_count: dataRowCount(table) })
     .select("id");
-  if (recErr && !isMissingShelf(recErr) && !/accountant_exports/.test(String(recErr.message ?? ""))) {
+  if (recErr && !isMissingExportRecord(recErr)) {
     reportError("accountant.export.record", recErr, { orgId, key });
     return new NextResponse("The download couldn't be recorded, so it wasn't made. Try again in a moment.", {
       status: 503,

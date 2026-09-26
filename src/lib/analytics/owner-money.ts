@@ -50,6 +50,8 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  *                         Left For You does not move. A supplier's credit tied to a return (0350,
  *                         Return To CED) is money back, in the credit's own month, off Shop Stock
  *                         Lost: what the pieces cost minus the credit is what the company lost.
+ *                         Only rolls bought on a ticket: an opening count was never a month's Put
+ *                         On The Shelf, so its pieces going are never a month's loss.
  *   · business costs    = bills and petty cash with no job, in the six buckets
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
@@ -307,8 +309,9 @@ export type OwnerMoneyInputs = {
    *  shelf's part of each ticket and the shelf's value now. Absent = no lots. */
   shelfLots?: any[];
   /** stock_moves that take pieces off the shelf for good (write_off, recount_down,
-   *  supplier_return), live ones: id, kind, cost, created_at, credit_bill_id (0350; may be absent).
-   *  Shop Stock Lost counts them in the month they happened. Absent = none. */
+   *  supplier_return), live ones: id, lot_id, kind, cost, created_at, credit_bill_id (0350; may be
+   *  absent). Shop Stock Lost counts the ones off a roll bought on a ticket (a live shelfLots row
+   *  with a bill_id), in the month they happened. Absent = none. */
   shelfMoves?: any[];
   /** supplier_accounts (0270): id, name, on_account. With the two below, what each supplier is
    *  still owed, by the /bills rule (supplierBalance). Absent = no accounts. */
@@ -535,11 +538,14 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
 
   // THE SHELF'S PART OF EACH TICKET (0303): its live rolls' cost.
   const shelfByBill = new Map<string, number>();
+  /** The live rolls bought on a ticket: the only ones whose cost is ever a month's Put On The Shelf. */
+  const boughtLots = new Set<string>();
   let onShelfNow = 0;
   for (const l of inp.shelfLots ?? []) {
     if (!l || l.live === false) continue;
     onShelfNow += toCents(l.cost_left);
     if (!l.bill_id) continue;
+    boughtLots.add(String(l.lot_id));
     shelfByBill.set(String(l.bill_id), (shelfByBill.get(String(l.bill_id)) ?? 0) + toCents(l.cost));
   }
 
@@ -547,11 +553,15 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   // back to the supplier: the dollars leave Put On The Shelf and land in Shop Stock Lost, the same
   // month, so Left For You never counts the roll twice. A supplier credit tied to a return is money
   // back, taken off Shop Stock Lost in the credit's own month (below, with the bills).
+  // ONLY A ROLL BOUGHT ON A TICKET: an opening count (counted in, no receipt) was never a month's
+  // Put On The Shelf in these books, so its pieces going are never a month's loss either (the
+  // shelf's value now still drops). A credit tied to such a return is still money back.
   const tiedCredits = new Set<string>();
   for (const m of inp.shelfMoves ?? []) {
     if (!m || m.undone_at) continue;
     if (m.kind !== "write_off" && m.kind !== "recount_down" && m.kind !== "supplier_return") continue;
     if (m.kind === "supplier_return" && m.credit_bill_id) tiedCredits.add(String(m.credit_bill_id));
+    if (!boughtLots.has(String(m.lot_id ?? ""))) continue;
     const a = at(monthOfDay(recordDay(null, m.created_at, tz)));
     if (!a) continue;
     const c = toCents(m.cost);
@@ -1415,7 +1425,7 @@ async function readShelfLots(supabase: any): Promise<{ rows: any[]; problem: str
  * without it. Any other failure is a lost read.
  */
 async function readShelfLossMoves(supabase: any): Promise<{ rows: any[]; problem: string | null }> {
-  let cols = "id, kind, cost, created_at, credit_bill_id";
+  let cols = "id, lot_id, kind, cost, created_at, credit_bill_id";
   const out: any[] = [];
   for (let i = 0, from = 0; i < MAX_PAGES; i++) {
     const { data, error } = await supabase
@@ -1429,7 +1439,7 @@ async function readShelfLossMoves(supabase: any): Promise<{ rows: any[]; problem
       // The credit column first: its "column stock_moves.credit_bill_id does not exist" would also
       // read as a shelf that isn't there, and drop every write-off with it.
       if (from === 0 && cols.includes("credit_bill_id") && isMissingCreditColumn(error)) {
-        cols = "id, kind, cost, created_at";
+        cols = "id, lot_id, kind, cost, created_at";
         i -= 1;
         continue;
       }
