@@ -215,7 +215,9 @@ export default async function QuoteDetailPage({
         <div className="flex flex-wrap items-center gap-2">
           <EmailButton id={q.id} kind="quote" textReady={smsReadiness(orgRow as { settings?: unknown } | null).ready} />
           <StatusControl id={q.id} status={q.status} />
-          <DuplicateQuoteButton id={q.id} />
+          {/* Duplicate makes a new estimate: a door Estimates off takes away. The rest of the row
+              works this one, which still opens from its link under the Off line. */}
+          {featureOn(orgS.features, "estimates") && <DuplicateQuoteButton id={q.id} />}
           <SectionActionsMenu tree={quoteMap} />
         </div>
       </div>
