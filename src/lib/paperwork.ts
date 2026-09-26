@@ -17,6 +17,7 @@
 
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import type { StoredOpenList } from "@/lib/supplier-open-list";
 import { billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
@@ -49,6 +50,9 @@ export const COST_PAPER: readonly PaperType[] = ["receipt", "bill"];
 export const LATER_PAPER: readonly PaperType[] = ["statement", "credit_memo", "purchase_order"];
 
 export const NOT_FILED_YET = "Not filed: this kind of paper goes in a later update.";
+
+/** A supplier's open list is never filed as a cost or a document: its card's Apply is its door. */
+export const OPEN_LIST_NOT_FILED = "This is a supplier's list of open papers. Press Apply on its card to bring the books in line with it.";
 
 export function paperTypeOf(raw: unknown): PaperType | null {
   const s = String(raw ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -165,6 +169,13 @@ export type PaperProposal = {
     name: string;
     refused?: { number: string | null; error: string }[];
   } | null;
+  /**
+   * A SUPPLIER'S OWN OPEN LIST (a statement, a portal download, a pasted table): the rows it read,
+   * or the columns a person still has to point at, and what Apply did. The page reconciles it
+   * against that supplier's papers every time it is shown (src/lib/supplier-open-list.ts); nothing
+   * changes until a person presses Apply.
+   */
+  openList?: StoredOpenList | null;
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
   /**
@@ -201,7 +212,7 @@ export function billDeletedSaid(item: PaperItem): string | null {
  * proposal: Undo clears `filed`, and the paper goes back exactly as it was read.
  */
 export type PaperFiled = {
-  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note";
+  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note" | "open_list";
   landed?: string[];
   /** A note a person turned into a task (AI Suggest's proposal, PR2): Undo takes the task off. */
   taskId?: string | null;
@@ -345,7 +356,7 @@ export const RETURN_ON_JOB_NEEDS_LINES =
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {
   if (item.doc_type) return true;
-  if (proposalOf(item).ced) return true;
+  if (proposalOf(item).ced || proposalOf(item).openList) return true;
   // Rows read before 0295 carry what the old reader wrote, and no doc_type.
   return item.kind === "receipt" || item.kind === "note" || !!item.summary || amountOf(item) !== null;
 }
@@ -368,7 +379,7 @@ export function isPicture(item: PaperItem): boolean {
   const t = paperTypeOfItem(item);
   if (t !== "not_a_cost" && t !== "other") return false;
   const p = proposalOf(item);
-  if (p.ced) return false;
+  if (p.ced || p.openList) return false;
   return p.picture === true || String(item.category ?? "") === "Photo";
 }
 
@@ -381,6 +392,12 @@ export function describePaper(item: PaperItem): string {
   if (isPicture(item)) {
     const title = String(item.title ?? "").trim();
     return title ? `Picture, ${title}` : "Picture";
+  }
+  if (p.openList) {
+    const list = p.openList.list;
+    const who = String(item.vendor ?? "").trim();
+    const what = list?.from === "statement" || list?.from === "reader" ? "Supplier Statement" : "Supplier's Open List";
+    return [what, who || null, list ? `${list.rows.length} ${list.rows.length === 1 ? "paper" : "papers"}` : "columns to pick"].filter(Boolean).join(", ");
   }
   if (p.ced) {
     const n = p.ced.numbers.length;
@@ -402,6 +419,7 @@ export type Readiness =
   | { state: "needs_total"; sentence: string }
   | { state: "ready"; sentence: string }
   | { state: "supplier_documents"; sentence: string }
+  | { state: "open_list"; sentence: string }
   | { state: "later"; sentence: string }
   | { state: "keep"; sentence: string }
   | { state: "picture"; sentence: string }
@@ -411,6 +429,7 @@ export function readinessOf(item: PaperItem): Readiness {
   if (item.status && item.status !== "needs_review") return { state: "filed", sentence: "Filed." };
   const p = proposalOf(item);
   if (p.ced) return { state: "supplier_documents", sentence: "Ready To File: these go on the CED documents list." };
+  if (p.openList) return { state: "open_list", sentence: "Check what it changes, then Apply." };
   if (p.tooBig && !isRead(item)) return { state: "too_big", sentence: "Too big to read: fill it in yourself." };
   if (!isRead(item))
     return {
@@ -418,6 +437,12 @@ export function readinessOf(item: PaperItem): Readiness {
       sentence: p.readError ? `Not Read Yet: ${p.readError}` : "Not Read Yet.",
     };
   const t = paperTypeOfItem(item);
+  if (t === "statement")
+    return {
+      state: "later",
+      sentence:
+        "A statement, but its list of open papers couldn't be read. Drop the supplier's open list (Excel, CSV or a PDF with text) or a clearer copy, and it will show what it changes.",
+    };
   if (t && LATER_PAPER.includes(t)) return { state: "later", sentence: NOT_FILED_YET };
   if (t === "receipt" || t === "bill") {
     if (amountOf(item) === null) return { state: "needs_total", sentence: "No total was read. Fix Details and put the total in, then File It." };
@@ -1025,7 +1050,7 @@ export function rematchPaper<T extends PaperItem>(
 ): T {
   if (item.status && item.status !== "needs_review") return item;
   const p = proposalOf(item);
-  if (p.jobConflict || p.ced) return item;
+  if (p.jobConflict || p.ced || p.openList) return item;
   if (!isRead(item)) return item;
   if (markedJob(p)) {
     // A PICK A STREET MADE BEFORE FINISHED JOBS COUNTED (PR1) is asked again: if today's rules say
@@ -1091,11 +1116,13 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     // A JOB PHOTO IS NEVER A COST: only paper that is not one can go on a job's Photos.
     if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
     if (r.state === "not_read") return "This hasn't been read yet. Press Read Now first.";
+    if (r.state === "open_list") return OPEN_LIST_NOT_FILED;
     if (r.state === "picture" || r.state === "keep") return null;
     return "This was read as paper, not a picture. File it as it is, or change its type in Fix Details.";
   }
   if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
   if (r.state === "not_read") return "This hasn't been read yet. Press Read Now, or Fix Details and fill it in.";
+  if (r.state === "open_list") return OPEN_LIST_NOT_FILED;
   if (dest.type === "stock") {
     // THE SHOP SHELF (Phase 2): a receipt or bill, with its total, read line by line. A roll on
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.

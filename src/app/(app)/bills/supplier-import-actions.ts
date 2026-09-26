@@ -11,6 +11,10 @@ import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
 import { sayMoney } from "@/lib/payroll-math";
 import { isPdfText } from "@/lib/pdf-text";
 import { isCedPdfPath, isStoredPaperPath, keepCedPdf, pdfBytesOf } from "@/lib/ced-pdf-store";
+import { createHash } from "node:crypto";
+import { parseCSV } from "@/lib/csv";
+import { openListFromText } from "@/lib/supplier-open-list";
+import { createOpenListPaper, orgToday } from "./open-list-core";
 
 /**
  * LOADING THE SUPPLIER'S OWN INVOICES, SO NEXT MONTH HE DOES NOT NEED ME (Erik, 2026-09-19; 0273).
@@ -158,6 +162,45 @@ function orgOf(ctx: { orgId: string | null }): { orgId: string } | { error: stri
   return { orgId: ctx.orgId };
 }
 
+/**
+ * A SOURCE THAT IS A SUPPLIER'S LIST, put in Sort These as one card. Null when it isn't a list
+ * (the caller then says what it always said). Strict: this door mostly sees invoices, so a table
+ * counts only when its header names a paper number and money.
+ */
+async function routeList(
+  supabase: any,
+  who: { orgId: string; userId: string },
+  source: { name: string | null; text: string; pdf: Uint8Array | null; path: string | null },
+): Promise<{ said: string } | { error: string } | null> {
+  const name = source.name ?? "Pasted list";
+  const today = await orgToday(supabase, who.orgId);
+  const stored = openListFromText(source.text, {
+    name,
+    from: source.name ? "file" : "paste",
+    listDate: today,
+    listDateFrom: "today",
+    parseCsv: parseCSV,
+    strict: true,
+  });
+  if (!stored?.list) return null;
+  const shaOfPath = source.path ? /([0-9a-f]{64})\.pdf$/.exec(source.path)?.[1] ?? null : null;
+  const sha = shaOfPath ?? createHash("sha256").update(source.pdf ?? source.text).digest("hex");
+  // The same list twice is refused by 0295's one-file-per-org index, and said.
+  const placed = await createOpenListPaper(supabase, {
+    orgId: who.orgId,
+    userId: who.userId,
+    name,
+    stored,
+    sha256: sha,
+    fileUrl: source.path,
+    source: "bills_drop",
+  });
+  if ("duplicate" in placed) return { error: `${name}: Already In. This same list is already in Sort These or Organize, so nothing was added twice.` };
+  if ("error" in placed) return { error: `${name} is a supplier's list, and it wasn't added. ${placed.error}` };
+  const what = stored.list.from === "statement" ? "a supplier's statement" : "a supplier's open list";
+  return { said: `${name} is ${what}, not invoices: it is waiting in Sort These with what it changes, and nothing changes until you press Apply there.` };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // THE IMPORT
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -219,8 +262,22 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // One downloaded PDF is routinely several invoices - his 07-11 file holds four - so every source
   // is read for ALL the documents in it.
   const parsed = new Map<string, { invoice: CedInvoice; sourceFile: string | null; source: number }>();
+  /** Sources that were a supplier's statement or open list, sent to Sort These instead. */
+  const lists: string[] = [];
   for (const [sourceIndex, source] of sources.entries()) {
     const results = parseCedDocuments(source.text);
+    // A STATEMENT OR AN OPEN LIST IS NOT AN INVOICE (2026-09-26). It used to be refused here by
+    // name ("a summary of the account, not an invoice"); now it goes where every other paper waits,
+    // as one card that shows what it changes on that supplier's papers, and nothing changes until
+    // a person presses Apply there. Only a source that held no invoice at all is tried.
+    if (!results.some((r) => r.ok)) {
+      const routed = await routeList(supabase, { orgId: org.orgId, userId: ctx.userId }, source);
+      if (routed) {
+        if ("error" in routed) refused.push({ invoiceNumber: null, error: routed.error });
+        else lists.push(routed.said);
+        continue;
+      }
+    }
     if (!results.length) {
       refused.push({
         invoiceNumber: null,
@@ -251,6 +308,16 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     }
   }
 
+  if (!parsed.size && lists.length) {
+    revalidatePath("/bills");
+    revalidatePath("/organize");
+    return {
+      ok: true,
+      message: `${sayList(lists)}${refused.length ? ` ${sayList(refused.map((r) => r.error))}` : ""}`,
+      ...empty(),
+      refused,
+    };
+  }
   if (!parsed.size) {
     return {
       ok: false,
@@ -609,6 +676,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       `${plural(unfiled.length, "of them is", "of them are")} not on a supplier account yet, because no account here has the account number printed on them. Make the account and they will join it.`,
     );
   }
+  if (lists.length) detail.push(sayList(lists));
   if (pdfNowKept) {
     detail.push(`The PDF is kept now for ${plural(pdfNowKept, "document that was already here", "documents that were already here")}.`);
   }

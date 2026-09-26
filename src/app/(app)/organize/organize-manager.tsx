@@ -51,6 +51,8 @@ import {
   type OrganizedResult,
 } from "./actions";
 import { addPaperwork, fingerprintSeen } from "./paperwork-actions";
+import { addOpenList } from "@/app/(app)/bills/open-list-actions";
+import { isListFile, LIST_ACCEPT, readListFile } from "@/lib/open-list-file";
 import { isPdfBytes, readPdfText } from "@/lib/pdf-text";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
@@ -171,6 +173,31 @@ export function OrganizeManager({
         setUploads((u) => u.map((x) => (x.name === label ? { ...x, status, message } : x)));
 
       try {
+        // A SUPPLIER'S OPEN LIST (Excel, CSV, a text table), with no button of its own (Erik,
+        // 2026-09-26): read here into rows, and it waits in Needs Attention as one card saying what
+        // it changes on that supplier's papers. Nothing changes until Apply.
+        const isPdfOrImage = raw.type === "application/pdf" || /\.pdf$/i.test(raw.name) || raw.type.startsWith("image/") || /\.(heic|heif)$/i.test(raw.name);
+        if (!isPdfOrImage && isListFile(raw)) {
+          setState("reading");
+          const read = await readListFile(raw);
+          if (!read.ok) throw new Error(read.error);
+          let listSha: string | null = null;
+          try {
+            listSha = await sha256Hex(await raw.arrayBuffer());
+          } catch {
+            listSha = null;
+          }
+          const added = await addOpenList({ name: raw.name, sha256: listSha, table: read.table, listDate: read.listDate, source: "organize" });
+          if (!added.ok) {
+            if (added.already) {
+              setState("done", `${added.already} Nothing was added twice.`);
+              continue;
+            }
+            throw new Error(added.error ?? "Not added.");
+          }
+          setState("done", (added.line ?? "Waiting in Needs Attention.").replace("Waiting below", "Waiting in Needs Attention"));
+          continue;
+        }
         // THE SAME FILE ONCE (0295): fingerprinted from its ORIGINAL bytes, before any resize, and
         // checked before anything is uploaded.
         const rawBytes = await raw.arrayBuffer();
@@ -644,7 +671,7 @@ export function OrganizeManager({
             <Button onClick={takePhoto} disabled={busy}>
               <Camera className="h-4 w-4" /> Take Photo
             </Button>
-            <DropTarget onFiles={(files) => void processFiles(files)} accept="image/*,application/pdf" label="Drop Receipts">
+            <DropTarget onFiles={(files) => void processFiles(files)} accept={`image/*,application/pdf,${LIST_ACCEPT}`} label="Drop Receipts">
               <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
                 <Upload className="h-4 w-4" /> Upload
               </Button>
@@ -652,7 +679,7 @@ export function OrganizeManager({
             <Button variant={listening ? "destructive" : "outline"} onClick={voiceNote}>
               <Mic className="h-4 w-4" /> {listening ? "Stop & Save" : "Voice Note"}
             </Button>
-            <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
+            <input ref={fileRef} type="file" multiple accept={`image/*,application/pdf,${LIST_ACCEPT}`} className="hidden" onChange={onFiles} />
             <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
           </div>
           {listening && <p className="text-xs font-medium text-red-600">Listening… tap “Stop &amp; save” when done.</p>}
