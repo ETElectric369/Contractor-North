@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -16,6 +16,7 @@ import { Tabs } from "@/components/tabs";
 import { useToast } from "@/components/toast";
 import { CameraCapture } from "@/components/camera-capture";
 import { Fold, WhyFold } from "@/components/why-fold";
+import { openFoldsTo } from "@/components/fold-opener";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, setBillStatus, deleteBill, addDocument, deleteDocument } from "../jobs/actions";
 import { executeAction } from "@/lib/actions/execute";
@@ -138,11 +139,54 @@ export function BillsReceipts({
   const [billError, setBillError] = useState<string | null>(null);
   const [editBill, setEditBill] = useState<BillRow | null>(null);
 
+  // A LINK TO A BILL ALWAYS LANDS ON IT. FoldOpener opens the folds around "#bill-<id>", but the row
+  // is hidden on the Purchase Orders or Receipts tab and not rendered at all under a filter that
+  // leaves it out. So a bill link first puts the ledger on Bills, All, then opens the row once the
+  // list has re-rendered (the effect below). `n` makes the same link twice in a row land twice.
+  const [landOn, setLandOn] = useState<{ id: string; n: number } | null>(null);
+  useEffect(() => {
+    const idOf = (hash: string) => {
+      try {
+        return decodeURIComponent(hash.replace(/^#/, ""));
+      } catch {
+        return hash.replace(/^#/, "");
+      }
+    };
+    const land = (hash: string) => {
+      const id = idOf(hash);
+      if (!id.startsWith("bill-")) return;
+      setTab("bills");
+      setBillFilter("all");
+      setLandOn((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
+    };
+    land(window.location.hash);
+    const onHash = () => land(window.location.hash);
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a) return;
+      const url = new URL(a.href, window.location.href);
+      if (url.pathname === window.location.pathname && url.hash) land(url.hash);
+    };
+    window.addEventListener("hashchange", onHash);
+    document.addEventListener("click", onClick);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      document.removeEventListener("click", onClick);
+    };
+  }, []);
+  useEffect(() => {
+    if (landOn) openFoldsTo(landOn.id);
+  }, [landOn]);
+
   const shownBills =
     billFilter === "all" ? bills : bills.filter((b) => (billFilter === "jobs" ? b.job_id : !b.job_id));
-  const totalBills = shownBills.reduce((s, b) => s + Number(b.amount), 0);
+  // ONE RULE FOR EVERY TOTAL ON THIS LEDGER: a copy set aside as a duplicate is listed (struck
+  // through) but never added, so the fold's line and the list's line always say the same money.
+  const liveAmount = (list: BillRow[]) => list.filter((b) => !b.superseded).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const totalBills = liveAmount(shownBills);
+  const shownSetAside = shownBills.filter((b) => b.superseded).length;
   const totalPos = pos.reduce((s, p) => s + Number(p.total), 0);
-  const liveTotal = bills.filter((b) => !b.superseded).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const liveTotal = liveAmount(bills);
 
   function addBill() {
     setBillError(null);
@@ -354,7 +398,11 @@ export function BillsReceipts({
               </button>
             ))}
           </div>
-          <p className="mb-2 text-xs text-slate-500">{shownBills.length} bills · {formatCurrency(totalBills)}</p>
+          <p className="mb-2 text-xs text-slate-500">
+            {shownBills.length} {shownBills.length === 1 ? "bill" : "bills"}
+            {shownSetAside > 0 ? ` (${shownSetAside} set aside as ${shownSetAside === 1 ? "a duplicate" : "duplicates"}, not added)` : ""} ·{" "}
+            {formatCurrency(totalBills)}
+          </p>
 
           {shownBills.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>

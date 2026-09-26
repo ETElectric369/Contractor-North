@@ -345,10 +345,17 @@ export function SuppliersCard({
     });
   }
 
-  /** "In All Bills below", as a door that opens the ledger fold (FoldOpener), never a phantom. */
+  /** "In All Bills below", as a door that opens the ledger fold (FoldOpener), never a phantom.
+   *  Inline, so only inside a Why? fold's words; on the open screen it is seeAllInAllBills. */
   const toAllBills = (
     <a href="#all-bills" className="font-medium underline">
       All Bills
+    </a>
+  );
+  /** The same door on the open screen: its own line, 44px tall, saying what it opens. */
+  const seeAllInAllBills = (label: string) => (
+    <a href="#all-bills" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+      {label}
     </a>
   );
 
@@ -590,11 +597,8 @@ export function SuppliersCard({
                               </li>
                             ))}
                           </ul>
-                          {noDocBills.length > LIST_LIMIT && (
-                            <p className="mt-1">
-                              And {noDocBills.length - LIST_LIMIT} more in {toAllBills}.
-                            </p>
-                          )}
+                          {noDocBills.length > LIST_LIMIT &&
+                            seeAllInAllBills(`See The Other ${noDocBills.length - LIST_LIMIT} In All Bills`)}
                           <WhyFold>
                             <p>
                               Their figure cannot cover a purchase they never billed you for, so {noDocBills.length === 1 ? "it is" : "they are"} not
@@ -694,11 +698,8 @@ export function SuppliersCard({
                               </li>
                             ))}
                           </ul>
-                          {hiddenBills > 0 && (
-                            <p className="mt-1 text-xs text-slate-400">
-                              And {hiddenBills} more, {formatCurrency(hiddenBillTotal)}, in {toAllBills}.
-                            </p>
-                          )}
+                          {hiddenBills > 0 &&
+                            seeAllInAllBills(`See The Other ${hiddenBills}, ${formatCurrency(hiddenBillTotal)}, In All Bills`)}
                         </div>
                       )}
 
@@ -766,6 +767,7 @@ export function SuppliersCard({
                       {/* THE SUPPLIER'S OWN PAPERS, folded into its own detail (Wave B). */}
                       {feed && (
                         <SupplierPaperLists
+                          accountId={account.id}
                           accountName={account.name}
                           feed={feed}
                           today={today}

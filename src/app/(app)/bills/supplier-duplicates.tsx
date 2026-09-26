@@ -202,7 +202,7 @@ export function SupplierDuplicates({
                     {actions.unresolveDuplicate ? (
                       <button
                         type="button"
-                        className="font-medium text-brand hover:underline"
+                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
                         disabled={pending}
                         onClick={() =>
                           run(
@@ -215,13 +215,9 @@ export function SupplierDuplicates({
                         Change Your Mind
                       </button>
                     ) : (
-                      <>
-                        To change it, open that bill in{" "}
-                        <a href="#all-bills" className="font-medium text-brand hover:underline">
-                          All Bills
-                        </a>
-                        .
-                      </>
+                      <a href="#all-bills" className="flex min-h-11 items-center font-medium text-brand hover:underline">
+                        To Change It, Open That Bill In All Bills
+                      </a>
                     )}
                   </>
                 ) : (

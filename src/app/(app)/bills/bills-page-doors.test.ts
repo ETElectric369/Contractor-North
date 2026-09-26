@@ -414,6 +414,17 @@ describe("every door keeps exactly one home", () => {
     expect(section("all-bills")).toContain('id="bill-b-ticket"');
   });
 
+  it("the discount's figure is said once, under CED's numbers; its fold is a name and a count", () => {
+    const summaries = doors(section(`supplier-invoices-${CED}`)).filter((d) => d.startsWith("Discount Still On The Table"));
+    for (const s of summaries) expect(s).toMatch(/^Discount Still On The Table \(\d+\)$/);
+  });
+
+  it("Shop Stock's Record To Shelf door lands on the fold that holds the button (shelf-plan waitingForShelf)", () => {
+    const fold = section(`supplier-not-in-books-${CED}`);
+    expect(count(doors(fold), "Record To Shelf")).toBeGreaterThanOrEqual(1);
+    expect(section(`supplier-invoices-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
+  });
+
   it("the same ticket on two jobs is pointed at from Needs You and answered under More", () => {
     const pointer = doors(html).filter((d) => d.includes("Sort It Out"));
     expect(pointer).toHaveLength(1);

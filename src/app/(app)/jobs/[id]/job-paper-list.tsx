@@ -19,6 +19,9 @@ export type JobPaperView = {
   /** Filed on this job by a person already (supplier_invoices.job_id). */
   filed: boolean;
   accountId: string | null;
+  /** Dated on or after the day his books begin, so /bills has it on a Needs You card. A paper from
+   *  before that line is on no card: its link goes to the supplier's own line instead. */
+  onNeedsYou: boolean;
 };
 
 /**
@@ -114,9 +117,16 @@ function PaperRow({ jobId, paper }: { jobId: string; paper: JobPaperView }) {
           <p>{refusal}</p>
           {/* The questions only /bills answers (Same Purchase: Tie Them, or any other answer as a
               different purchase) live on its Needs You cards since Wave B: an unrecorded paper
-              like this one is a card there. */}
+              like this one is a card there, unless it is dated before his books began, which no
+              card carries; that one opens its supplier's own line (FoldOpener). */}
           <Link
-            href="/bills#needs-you"
+            href={
+              paper.onNeedsYou
+                ? "/bills#needs-you"
+                : paper.accountId
+                  ? `/bills#supplier-invoices-${paper.accountId}`
+                  : "/bills"
+            }
             className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
           >
             Open It On Bills

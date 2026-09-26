@@ -84,7 +84,7 @@ export default async function ShopStockPage({
     // Signal 3: CED documents whose job box names the shelf.
     supabase
       .from("supplier_invoices")
-      .select("id, invoice_number, kind, total, job_name_raw")
+      .select("id, supplier_account_id, invoice_number, kind, total, job_name_raw")
       .eq("org_id", orgId)
       .eq("kind", "invoice")
       .or("job_name_raw.ilike.%stock%,job_name_raw.ilike.%inventory%")
@@ -257,7 +257,13 @@ export default async function ShopStockPage({
   const linked = new Set(((docLinks.data ?? []) as any[]).map((r) => String(r.supplier_invoice_id)));
   const stockDocuments = ((stockDocs.error ? [] : stockDocs.data) ?? [])
     .filter((d: any) => !linked.has(String(d.id)) && companyUseWord(d.job_name_raw)?.shelf)
-    .map((d: any) => ({ id: String(d.id), number: String(d.invoice_number ?? ""), total: d.total, words: String(d.job_name_raw ?? "").trim() }));
+    .map((d: any) => ({
+      id: String(d.id),
+      number: String(d.invoice_number ?? ""),
+      total: d.total,
+      words: String(d.job_name_raw ?? "").trim(),
+      accountId: d.supplier_account_id ? String(d.supplier_account_id) : null,
+    }));
   const linelessPapers = ((papers.error ? [] : papers.data) ?? []).flatMap((p: any) => {
     const marks = storedMarks(proposalOf(p));
     const word = companyUseWord(marks.po) ?? companyUseWord(marks.jobName);

@@ -99,12 +99,16 @@ function sayDeadline(days: number | null): string {
  * Every judgement still comes out of supplier-reconcile.ts, which is pure and tested.
  */
 export function SupplierPaperLists({
+  accountId,
   accountName,
   feed,
   today,
   onNeedsYou = [],
   actions,
 }: {
+  /** The supplier account: names the Not In Your Books fold, so Shop Stock's Record To Shelf door
+   *  (shelf-plan waitingForShelf) lands on it. */
+  accountId: string;
   /** What he calls them: "CED Truckee". Used in every sentence, so it is never "the supplier". */
   accountName: string;
   feed: SupplierReconcileFeed;
@@ -344,7 +348,10 @@ export function SupplierPaperLists({
 
       {/* ── NOT IN YOUR BOOKS, not on a card: mostly what CED booked to STOCK. ── */}
       {billRows.length > 0 && (
-        <Fold summary={listLabel("Not In Your Books", billRows.length, formatCurrency(billRowsTotal))}>
+        <Fold
+          id={`supplier-not-in-books-${accountId}`}
+          summary={listLabel("Not In Your Books", billRows.length, formatCurrency(billRowsTotal))}
+        >
           <WhyFold>
             <p>
               Bought at {accountName} with no bill anywhere in here, so no job is carrying the cost. Shop stock goes
@@ -475,14 +482,10 @@ export function SupplierPaperLists({
       {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
         <Fold
           summary={
+            // THE FIGURE IS SAID ONCE: the green sentence under the supplier's numbers, just above,
+            // already says how much comes off and by when. This line is the list's name and count.
             claimable.total > 0.005 ? (
-              <span className="text-sm font-semibold text-slate-900">
-                Discount Still On The Table ·{" "}
-                <span className="text-green-800">
-                  {formatCurrency(claimable.dueOnNext >= claimable.total - 0.005 ? claimable.total : claimable.dueOnNext)} By{" "}
-                  {formatDate(claimable.nextDeadline)}
-                </span>
-              </span>
+              listLabel("Discount Still On The Table", claimable.rows.length)
             ) : (
               <span className="text-sm font-semibold text-slate-900">The Discount You Are Missing</span>
             )

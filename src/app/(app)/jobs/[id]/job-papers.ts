@@ -19,14 +19,17 @@ import "server-only";
  *   · THE DOOR: Record It As A Bill, the /bills action, pressed by a person (JobPaperRow).
  */
 
-import { invoicesNeedingBill, type SupplierInvoiceKind, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
+import { invoicesNeedingBill, isBeforeLine, type SupplierInvoiceKind, type SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
+import { booksBeginOn } from "@/app/(app)/bills/supplier-papers";
 import { loadMarkContext, type MarkContext } from "@/app/(app)/organize/paperwork-core";
 import { jobFromPaperMarks } from "@/lib/paperwork";
 import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
 import { indexSupplierAliases } from "@/lib/supplier-identity";
 
-/** A supplier document, as the job's list needs it: the reconcile row plus its account. */
-export type PaperDoc = SupplierInvoiceRow & { accountId: string | null };
+/** A supplier document, as the job's list needs it: the reconcile row plus its account.
+ *  `beforeBooks`: dated before the day his books begin (booksBeginOn, the same line /bills and My
+ *  Day draw), so it is on no Needs You card and a link to it goes to the supplier's own line. */
+export type PaperDoc = SupplierInvoiceRow & { accountId: string | null; beforeBooks?: boolean };
 
 const KINDS: SupplierInvoiceKind[] = ["invoice", "credit_memo", "service_charge", "statement"];
 
@@ -147,5 +150,6 @@ export async function readJobPapers(supabase: any, orgId: string, jobId: string)
   for (const d of unlinked) {
     d.billCount = billsCarryingNumber(d.invoiceNumber, { accountId: d.accountId }, ledger, aliases).length;
   }
-  return papersNamingJob(jobId, docs, mark);
+  const since = booksBeginOn(orgId, (billsRes.data ?? []) as { bill_date?: string | null }[]);
+  return papersNamingJob(jobId, docs, mark).map((d) => ({ ...d, beforeBooks: isBeforeLine(d.invoiceDate, since) }));
 }

@@ -589,7 +589,9 @@ const dollars = (n: number) => `$${(Math.round(n * 100) / 100).toFixed(2)}`;
  */
 export function waitingForShelf(input: {
   lines: WaitingLineIn[];
-  stockDocuments?: { id: string; number: string; total: unknown; words: string }[];
+  /** `accountId`: the supplier account it is on, so the door lands on that supplier's Not In Your
+   *  Books list on /bills (the only home of Record To Shelf), not the top of the page. */
+  stockDocuments?: { id: string; number: string; total: unknown; words: string; accountId?: string | null }[];
   linelessPapers?: { id: string; title: string; words: string }[];
 }): WaitingItem[] {
   const out: WaitingItem[] = [];
@@ -639,7 +641,9 @@ export function waitingForShelf(input: {
       kind: "stock_document",
       title: `CED ${d.number}, ${dollars(Number(d.total) || 0)}`,
       why: `"${d.words}" is written on it, and no bill covers it yet.`,
-      href: "/bills",
+      // Record To Shelf lives two folds deep (the supplier's line, then Not In Your Books):
+      // FoldOpener opens both. With no account, the page's own top is the best it can do.
+      href: d.accountId ? `/bills#supplier-not-in-books-${d.accountId}` : "/bills",
       door: "Record To Shelf",
     });
   }

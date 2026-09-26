@@ -569,6 +569,7 @@ export default async function JobDetailPage({
         total: p.total,
         filed: p.jobId === id,
         accountId: p.accountId,
+        onNeedsYou: !p.beforeBooks,
       }))
     : null;
   const oe = openEntryRow as any;
