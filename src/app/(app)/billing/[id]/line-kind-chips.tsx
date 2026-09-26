@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useToast } from "@/components/toast";
 import { groupInvoiceLines, LINE_KIND_LABEL, PICKABLE_LINE_KINDS, storedLineKind, type PickableLineKind } from "@/lib/invoice-math";
+import { countsAsWorkCompleted } from "@/lib/portal/line-kind";
 import type { InvoiceItem } from "@/lib/types";
 import { setInvoiceItemKind } from "../actions";
 
@@ -27,11 +28,14 @@ export function lineKindNow(item: Pick<InvoiceItem, "description" | "line_total"
 export function LineKindChips({
   item,
   invoiceId,
+  invoiceKind,
   disabled,
   onDone,
 }: {
   item: InvoiceItem;
   invoiceId: string;
+  /** The bill's kind: a deposit bill's own lines are never work (countsAsWorkCompleted). */
+  invoiceKind?: string | null;
   disabled?: boolean;
   onDone: () => void;
 }) {
@@ -42,6 +46,10 @@ export function LineKindChips({
   if (src === "draw_credit" || src === "milestone") return null;
   const said = storedLineKind(item.line_kind);
   const now = lineKindNow(item);
+  // NOTHING SILENT (Erik, 2026-09-26): a line that is not work completed (Other: a fee, a referral,
+  // a discount; or a credit) is left out of the Progress Summary's work completed. Say so here,
+  // where the one tap that changes it lives.
+  const notWork = !countsAsWorkCompleted(item, invoiceKind ?? null);
 
   const pick = (kind: PickableLineKind | null, undoing = false) =>
     start(async () => {
@@ -98,6 +106,7 @@ export function LineKindChips({
           : now === "credit"
             ? "Read from the line: a credit. Tap one to file it yourself."
             : `Read from the line: ${LINE_KIND_LABEL[now]}. Tap one to file it yourself.`}
+        {notWork && " Not counted as work completed."}
       </p>
     </div>
   );

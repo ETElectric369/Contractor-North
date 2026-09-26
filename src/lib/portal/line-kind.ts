@@ -90,6 +90,27 @@ export function lineGroup(
   return "other";
 }
 
+/**
+ * WHICH KINDS OF LINE ARE WORK COMPLETED (Erik, 2026-09-26: "i don't think fees, referrals and
+ * discounts would necessarily be considered work completed"). Labor, materials, change orders and
+ * lines from the estimate are work. Everything else on a bill is money around the work: Other (a
+ * card fee, a service charge, a referral, a discount), Sales Tax, Credits, a Deposit, Contract
+ * Payments. Decided by the line's KIND (lineGroup), never by its words: a word list ("fee",
+ * "referral") would only ever fit the company that wrote it. A hand line the words do not settle
+ * reads Other and is left out until the office files it (the Kind chip: Labor or Materials).
+ * Read by billedWorkOnInvoices (the T&M Progress Summary and the job page's Work To Date) and by
+ * the Kind chip, which says so out loud.
+ */
+export const WORK_COMPLETED_GROUPS: ReadonlySet<LineGroup> = new Set<LineGroup>(["labor", "materials", "change_orders", "estimate"]);
+
+/** Is this bill line work completed? (WORK_COMPLETED_GROUPS, by the line's kind.) */
+export function countsAsWorkCompleted(
+  line: { import_source?: string | null; unit?: string | null; description?: string | null; line_kind?: string | null },
+  invoiceKind?: string | null,
+): boolean {
+  return WORK_COMPLETED_GROUPS.has(lineGroup(line, invoiceKind));
+}
+
 /** Dollars (number or numeric string) to integer cents; non-numbers are 0. */
 function cents(v: unknown): number {
   const n = Number(v);
