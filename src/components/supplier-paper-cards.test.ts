@@ -11,7 +11,16 @@ vi.mock("@/app/(app)/bills/supplier-actions", () => ({
   recordSupplierInvoiceToShelf: vi.fn(),
 }));
 
-import { SupplierPaperCards, SupplierPaperDoneTrail, chipNames, setSupplierPaperScopeForTest } from "./supplier-paper-cards";
+vi.mock("@/app/(app)/bills/paper-contents-action", () => ({ supplierPaperContents: vi.fn() }));
+
+import {
+  PaperContentsView,
+  SupplierPaperCards,
+  SupplierPaperDoneTrail,
+  chipNames,
+  setSupplierPaperScopeForTest,
+} from "./supplier-paper-cards";
+import { paperContents } from "@/lib/supplier-paper-contents";
 import type { SupplierPaperCard } from "@/app/(app)/bills/supplier-reconcile";
 
 /**
@@ -40,7 +49,10 @@ const base: SupplierPaperCard = {
 };
 const render = (cards: SupplierPaperCard[]) =>
   renderToStaticMarkup(createElement(SupplierPaperCards, { feed: { cards, jobs: [J011] }, emptyLabel: "Nothing waiting." }));
-const buttons = (html: string) => Array.from(html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((m) => m[1]);
+const allButtons = (html: string) =>
+  Array.from(html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)).map((m) => m[1].replace(/&#x27;/g, "'"));
+/** The answers on a card: every button but What's On It (pinned on its own below). */
+const buttons = (html: string) => allButtons(html).filter((b) => b !== "What's On It");
 
 describe("a supplier paper card", () => {
   it("says it the way he asked: CED Sent A Bill · $301.81 · It Says 13897 HERRINGBONE", () => {
@@ -136,5 +148,77 @@ describe("review of Wave A: the card at 60mph", () => {
     expect(renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-last" }))).toBe("");
     const list = renderToStaticMarkup(createElement(SupplierPaperCards, { feed: { cards: [], jobs: [] }, scope: "t-last" }));
     expect(list).toContain("is a bill on 13897 Herringbone now.");
+  });
+});
+
+describe("What's On It (Erik: 'i need to open the bill to see whats on it to be able to approve or deny')", () => {
+  it("every card has it, before every answer, closed until he taps it", () => {
+    const shapes: SupplierPaperCard[] = [
+      base,
+      { ...base, said: null, verdict: "blank", suggestion: null },
+      { ...base, samePurchase: [{ billId: "b1", exact: false, sentence: "Maybe already on the books: a ticket." }] },
+      { ...base, state: "record", suggestion: null, onJob: { id: "j-050", label: "J-050", name: "3639 Saddle Road", status: "complete" } },
+    ];
+    for (const card of shapes) {
+      const html = render([card]);
+      expect(allButtons(html)[0]).toBe("What's On It");
+      expect(html).toContain('aria-expanded="false"');
+      // Nothing is read until he asks.
+      expect(html).not.toContain("Reading What");
+    }
+  });
+
+  const hillside = paperContents({
+    invoice: { invoice_number: "8802-1107139", tax: "4.89", shipping: "0.00", total: "59.17", source_file: "invoice_8802-1107139.pdf" },
+    lines: [
+      { description: "20A 120/277VAC SW", part_number: "PS20AC2RPL", quantity: "1.000", unit_price: "36.0000", extension: "36.00", sort_order: 0 },
+      { description: "1/2 FILLER PLATE", part_number: "TFH", quantity: "4.000", unit_price: "4.5700", extension: "18.28", sort_order: 1 },
+      { description: "TRACK LUMINAI", part_number: "H8010CSWT", quantity: "0", unit_price: "38.98", extension: "0.00", sort_order: 2 },
+    ],
+  });
+  const view = (v: Parameters<typeof PaperContentsView>[0]["view"], cardTotal = 59.17) =>
+    renderToStaticMarkup(createElement(PaperContentsView, { cardTotal, view: v, onRetry: () => {} }));
+
+  it("draws the lines, Not Shipped, Tax and the card's own Total", () => {
+    const html = view({ state: "ok", contents: hillside });
+    expect(html).toContain("1 × 20A 120/277VAC SW (PS20AC2RPL)");
+    expect(html).toContain("4 × 1/2 FILLER PLATE (TFH)");
+    expect(html).toContain("$18.28");
+    expect(html).toContain("TRACK LUMINAI (H8010CSWT)");
+    expect(html).toContain("Not Shipped");
+    expect(html).not.toContain("$38.98");
+    expect(html.indexOf("Tax")).toBeLessThan(html.indexOf("Total"));
+    expect(html).toContain("$4.89");
+    expect(html).toContain("$59.17");
+    expect(html).not.toContain("isn&#x27;t on any line");
+    expect(html).not.toContain("changed since the page loaded");
+    // No stored PDF: said, never a dead link.
+    expect(html).not.toContain("Open The PDF");
+    expect(html).toContain("only what was read from invoice_8802-1107139.pdf");
+  });
+
+  it("an Open The PDF link when one is stored, and a gap between lines and total is said", () => {
+    const html = view({ state: "ok", contents: { ...hillside, lines: hillside.lines.slice(1), offLines: 36, pdfUrl: "https://signed.example/a.pdf", pdfNote: null } });
+    expect(html).toContain('href="https://signed.example/a.pdf"');
+    expect(html).toContain("Open The PDF");
+    expect(html).toContain("$36.00 of the total isn&#x27;t on any line.");
+  });
+
+  it("a paper with no lines says so", () => {
+    const html = view({ state: "ok", contents: { ...hillside, lines: [], offLines: 54.28 } });
+    expect(html).toContain("No lines are on file for this one.");
+    expect(html).toContain("$54.28 of the total isn&#x27;t on any line.");
+  });
+
+  it("loading says so; a failed read says so with Try Again", () => {
+    expect(view({ state: "loading" })).toContain("Reading What&#x27;s On It");
+    const failed = view({ state: "error", error: "The connection dropped before the lines came back." });
+    expect(failed).toContain("It couldn&#x27;t read what&#x27;s on this paper.");
+    expect(failed).toContain('role="alert"');
+    expect(allButtons(failed)).toEqual(["Try Again"]);
+  });
+
+  it("a total that no longer matches the card says the page is stale", () => {
+    expect(view({ state: "ok", contents: hillside }, 61.0)).toContain("This paper changed since the page loaded.");
   });
 });

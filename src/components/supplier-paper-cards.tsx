@@ -18,8 +18,12 @@ import {
   tieSupplierInvoiceToBill,
   undoFileSupplierPaper,
 } from "@/app/(app)/bills/supplier-actions";
+import { supplierPaperContents } from "@/app/(app)/bills/paper-contents-action";
+import { offLinesWords, type PaperContents } from "@/lib/supplier-paper-contents";
 
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
+/** What's On It, per card: reading, read, or a read that failed (said, with Try Again). */
+export type PaperContentsState = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; contents: PaperContents };
 type Done = { card: SupplierPaperCard; message: string; undo?: UndoToken; error?: string };
 
 /** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
@@ -107,6 +111,77 @@ function saysLine(c: SupplierPaperCard): string {
 }
 
 /**
+ * WHAT'S ON IT (Erik, 2026-09-26: "i need to open the bill to see whats on it to be able to approve
+ * or deny"). The paper's own lines, drawn under the card's headline and above every answer, so he
+ * sees what CED sent before he says what it was for. Quantity and EXTENSION only (the extension is
+ * the price: CED prices per hundred and per thousand); a $0.00 line says Not Shipped. Then Tax and
+ * the Total, which is the card's own amount, and any money that is on no line is said, never
+ * hidden. A read that failed says so, with Try Again.
+ */
+export function PaperContentsView({ cardTotal, view, onRetry }: { cardTotal: number; view: PaperContentsState; onRetry: () => void }) {
+  if (view.state === "loading") {
+    return (
+      <p className="mt-2 text-xs text-slate-500" role="status">
+        Reading What&apos;s On It…
+      </p>
+    );
+  }
+  if (view.state === "error") {
+    return (
+      <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-2" role="alert">
+        <p className="text-xs text-red-700">It couldn&apos;t read what&apos;s on this paper. {view.error}</p>
+        <Button type="button" variant="outline" className="mt-2" onClick={onRetry}>
+          Try Again
+        </Button>
+      </div>
+    );
+  }
+  const c = view.contents;
+  const gap = offLinesWords(c);
+  const row = (label: string, amount: number, strong = false) => (
+    <div className={`flex items-baseline justify-between gap-3 py-1 ${strong ? "font-semibold text-slate-900" : ""}`}>
+      <span>{label}</span>
+      <span className="shrink-0 tabular-nums">{formatCurrency(amount)}</span>
+    </div>
+  );
+  return (
+    <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700">
+      {c.lines.length === 0 && <p className="py-1">No lines are on file for this one.</p>}
+      {c.lines.length > 0 && (
+        <ul className="divide-y divide-slate-200">
+          {c.lines.map((l) => (
+            <li key={l.key} className="flex items-start justify-between gap-3 py-1">
+              <span className="min-w-0 break-words">{l.what}</span>
+              {l.notShipped ? (
+                <span className="shrink-0 font-medium text-amber-700">Not Shipped</span>
+              ) : (
+                <span className="shrink-0 tabular-nums">{formatCurrency(l.amount)}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="border-t border-slate-300">
+        {c.shipping !== 0 && row("Shipping", c.shipping)}
+        {row("Tax", c.tax)}
+        {row("Total", c.total, true)}
+      </div>
+      {gap && <p className="py-1 text-amber-800">{gap}</p>}
+      {Math.round(c.total * 100) !== Math.round(cardTotal * 100) && (
+        <p className="py-1 text-amber-800">This paper changed since the page loaded. Reload the page to see it fresh.</p>
+      )}
+      {c.pdfUrl ? (
+        <a href={c.pdfUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+          Open The PDF
+        </a>
+      ) : (
+        c.pdfNote && <p className="py-1 text-slate-500">{c.pdfNote}</p>
+      )}
+    </div>
+  );
+}
+
+/**
  * "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A, 2026-09-25).
  *
  * One card per supplier paper nobody has put in the books, the same cards on My Day and on /bills
@@ -171,6 +246,31 @@ export function SupplierPaperCards({
   const [picked, setPicked] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [shelf, setShelf] = useState<{ card: SupplierPaperCard; lines: ShelfCountLine[]; total: number } | null>(null);
+  /** What's On It: which cards have it open, and what each read brought back (kept for a re-open). */
+  const [reading, setReading] = useState<Record<string, boolean>>({});
+  const [contents, setContents] = useState<Record<string, PaperContentsState>>({});
+
+  function readContents(card: SupplierPaperCard) {
+    const id = card.invoiceId;
+    setContents((c) => ({ ...c, [id]: { state: "loading" } }));
+    supplierPaperContents(id).then(
+      (res) =>
+        setContents((c) => ({
+          ...c,
+          [id]: res.ok ? { state: "ok", contents: res.contents } : { state: "error", error: res.error },
+        })),
+      () => setContents((c) => ({ ...c, [id]: { state: "error", error: "The connection dropped before the lines came back." } })),
+    );
+  }
+
+  function toggleContents(card: SupplierPaperCard) {
+    const id = card.invoiceId;
+    const opening = !reading[id];
+    setReading((r) => ({ ...r, [id]: opening }));
+    // A read that came back is kept; one that failed (or never ran) is asked again.
+    const had = contents[id]?.state;
+    if (opening && had !== "ok" && had !== "loading") readContents(card);
+  }
 
   const cards = trail ? [] : (feed?.cards ?? []);
   const jobs = feed?.jobs ?? [];
@@ -389,6 +489,16 @@ export function SupplierPaperCards({
             {/* "The closest are first" only where the picker really has them first. */}
             {c.verdict === "weak" && !(c.closest ?? []).length ? c.because.replace(/\s*The closest are first\.$/, "") : c.because}
           </p>
+        )}
+
+        {/* WHAT'S ON IT comes before every answer: he sees the paper, then he decides. */}
+        <div className="mt-2">
+          <Button type="button" variant="outline" aria-expanded={!!reading[c.invoiceId]} onClick={() => toggleContents(c)}>
+            {reading[c.invoiceId] ? "Hide What's On It" : "What's On It"}
+          </Button>
+        </div>
+        {reading[c.invoiceId] && contents[c.invoiceId] && (
+          <PaperContentsView cardTotal={c.total} view={contents[c.invoiceId]} onRetry={() => readContents(c)} />
         )}
 
         {c.samePurchase.length > 0 && (
