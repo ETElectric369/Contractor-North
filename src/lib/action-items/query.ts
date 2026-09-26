@@ -16,6 +16,8 @@ import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
+import { feederOn, inquiryActionItem } from "./switches";
+import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -40,6 +42,8 @@ export async function getActionItemsCount(ctx: {
   userId: string;
   /** ORG timezone — see getActionItems. Optional so a caller that hasn't got it yet still works. */
   tz?: string;
+  /** The switched-off features — see getActionItems. */
+  off?: string;
 }): Promise<number> {
   return (await getActionItems(ctx)).length;
 }
@@ -84,8 +88,8 @@ const QUOTE_EXPIRY_SOON_DAYS = 5;
  * reference every call — it would never hit.
  */
 const actionItemsForRequest = cache(
-  (todayStr: string, isStaff: boolean, userId: string, tz: string): Promise<ActionItem[]> =>
-    buildActionItems({ todayStr, isStaff, userId, tz: tz || undefined }),
+  (todayStr: string, isStaff: boolean, userId: string, tz: string, off: string): Promise<ActionItem[]> =>
+    buildActionItems({ todayStr, isStaff, userId, tz: tz || undefined, off }),
 );
 
 export function getActionItems(ctx: {
@@ -95,8 +99,12 @@ export function getActionItems(ctx: {
   /** ORG timezone — see the day-cut note below. Optional: without it the cuts fall back to the
    *  old session-zone (UTC) literals, which drift by up to a day. */
   tz?: string;
+  /** THE SWITCH BOARD (0352), as ONE plain string: lib/features offFeatureKey(settings.features).
+   *  A string, not the map, so the cache() key above still hits (it compares with Object.is).
+   *  Left out = everything on. */
+  off?: string;
 }): Promise<ActionItem[]> {
-  return actionItemsForRequest(ctx.todayStr, ctx.isStaff, ctx.userId, ctx.tz ?? "");
+  return actionItemsForRequest(ctx.todayStr, ctx.isStaff, ctx.userId, ctx.tz ?? "", ctx.off ?? "");
 }
 
 async function buildActionItems(ctx: {
@@ -104,8 +112,13 @@ async function buildActionItems(ctx: {
   isStaff: boolean;
   userId: string;
   tz?: string;
+  off?: string;
 }): Promise<ActionItem[]> {
   const { todayStr, isStaff, userId, tz } = ctx;
+  // A switched-off feature's nudges leave the inbox and their reads are skipped; the live
+  // obligations (a request, a sent or accepted estimate, a sent contract, a lien clock) keep
+  // coming whatever the switches say (action-items/switches).
+  const features = featuresFromOffKey(ctx.off);
   const supabase = await createClient();
   /* ONE LAW TWO CLOCKS ONE MAP (audit v921). starts_at is timestamptz and a bare `T00:00:00`
      literal is parsed in the SESSION zone — UTC on Supabase — so "before today" actually meant
@@ -168,11 +181,11 @@ async function buildActionItems(ctx: {
     // (the snooze verb writes status='contacted' + a future next_follow_up_at via
     // inquiry.contact) stays OUT until its date — pulling it straight back made
     // snooze a no-op. 'new' leads always show; contacted ones show when their
-    // follow-up is unset or due.
+    // follow-up is unset or due. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
     isStaff
       ? supabase
           .from("inquiries")
-          .select("id, name, status, next_follow_up_at, converted_at")
+          .select("id, name, phone, status, next_follow_up_at, converted_at")
           .in("status", ["new", "contacted"])
           .is("converted_at", null)
           .or(`status.eq.new,next_follow_up_at.is.null,next_follow_up_at.lte.${todayStr}`)
@@ -339,7 +352,7 @@ async function buildActionItems(ctx: {
     // estimate it earns nothing. This existed on exactly one screen (/inspections,
     // two taps deep under Sales) and on none of the surfaces a person actually opens.
     // 60 days back: older than that and it is a cold lead, not today's work.
-    isStaff
+    isStaff && feederOn("inspection_writeup", features)
       ? supabase
           .from("appointments")
           .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)")
@@ -352,7 +365,7 @@ async function buildActionItems(ctx: {
       : empty,
     // The "written up" signal — an estimate linked to the lead, the job, or (for a
     // lead-less Inspect-now) the capture's own quote id.
-    isStaff ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
+    isStaff && feederOn("inspection_writeup", features) ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
     // MONEY IS AN OUTCOME (0205): a walk-through whose job carries real billing is finished,
     // whether or not an estimate was ever written. Draft invoices don't count — a draft is
     // work in progress, not a decision.
@@ -376,7 +389,7 @@ async function buildActionItems(ctx: {
     // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off
     // every list with it — the exact DB state the Nora ringer left behind. Older than 2 days:
     // a draft he's actively building today isn't nagging material yet.
-    isStaff
+    isStaff && feederOn("quote_draft", features)
       ? supabase
           .from("quotes")
           .select("id, quote_number, title, total, created_at, customer_name_snapshot:customers(name), inquiries(name)")
@@ -439,26 +452,10 @@ async function buildActionItems(ctx: {
     });
   }
 
-  for (const q of (inqR.data ?? []) as any[]) {
-    const overdue = q.next_follow_up_at != null && q.next_follow_up_at <= todayStr;
-    items.push({
-      id: q.id,
-      kind: "inquiry",
-      title: q.name,
-      subtitle: q.status === "new" ? "New lead — reach out" : "Follow up",
-      who: null,
-      when: q.next_follow_up_at,
-      // A brand-new, uncontacted lead is the hottest thing on the board (speed-to-lead wins
-      // the job) → top urgency so it sorts to the top of the Leads stream with the red flag.
-      // An overdue follow-up is next; a contacted, on-schedule lead is normal.
-      urgency: q.status === "new" ? 2 : overdue ? 1 : 0,
-      done: false,
-      // Deep-link to THIS lead (not the bare list) so a tap on My Day scrolls to and
-      // flashes the exact row — the "new leads clickable on My Day" nerve.
-      href: `/leads?focus=${q.id}`,
-      affordances: AFFORDANCES.inquiry,
-    });
-  }
+  // One projection (action-items/switches): with Leads off the same request reads "New Request
+  // From …" and carries the number its Call Back dials.
+  const leadsOn = featureOn(features, "leads");
+  for (const q of (inqR.data ?? []) as any[]) items.push(inquiryActionItem(q, todayStr, leadsOn));
 
   // Ids claimed by the write-up feeder below, so the plain "Appointment" feeder cannot ALSO
   // emit them. A past visit that still says status=scheduled but has field notes on it counts

@@ -114,6 +114,7 @@ export function NewTaskBox({
   defaultCategory,
   todayStr,
   categories,
+  extras = true,
 }: {
   jobs: JobOption[];
   people: Person[];
@@ -122,6 +123,8 @@ export function NewTaskBox({
   todayStr?: string;
   /** Existing category values for the autocomplete datalist. */
   categories?: string[];
+  /** The To-Do Extras switch (0352): off, the box asks no priority (a new task is Normal). */
+  extras?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -234,11 +237,13 @@ export function NewTaskBox({
               </Select>
             )}
             <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
-            <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
-              {PRIORITIES.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </Select>
+            {extras && (
+              <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
+                {PRIORITIES.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </Select>
+            )}
           </div>
         )}
       </div>

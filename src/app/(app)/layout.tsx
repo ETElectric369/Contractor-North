@@ -21,7 +21,10 @@ import { NativePushBridge } from "@/components/native-push-bridge";
 import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
 import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
 import { SectionSubnav } from "@/components/section-subnav";
+import { RouteOffLine } from "@/components/route-off-line";
 import { ToastProvider } from "@/components/toast";
+import { offFeatureKey } from "@/lib/features";
+import { shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
@@ -98,7 +101,7 @@ export default async function AppLayout({
   // geofence read and hands the action-items count its timezone. So: {org, lead badge} together
   // here, {open entry, action items} together below. Each keeps its own try/catch — one failing
   // read still degrades on its own and never takes the shell down.
-  const [org, freshLeads, platformAdmin] = await Promise.all([
+  const [org, freshLeads, platformAdmin, teammates] = await Promise.all([
     (async (): Promise<OrgLite | null> => {
       try {
         const { data } = await supabase
@@ -135,9 +138,34 @@ export default async function AppLayout({
     // North's own team (0176): Bug Watch in the avatar menu, and triage inside Report A Problem.
     // In this first stage, beside the org read, so it costs no extra hop; false on any failure.
     isPlatformAdmin(supabase),
+    // CREW & PAYROLL IS QUIET UNTIL A SECOND PERSON (the switch board, rule j): how many active
+    // members aren't the owner. Anyone else looking IS one, so only the owner's view needs the
+    // read; a failed read is null, which shows the doors exactly as before.
+    (async (): Promise<number | null> => {
+      if (profile.role !== "owner") return 1;
+      try {
+        const { count, error } = await supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("org_id", profile.org_id)
+          .eq("active", true)
+          .neq("role", "owner");
+        if (error) return null;
+        return count ?? 0;
+      } catch (e) {
+        reportError("app-layout:teammates", e);
+        return null;
+      }
+    })(),
   ]);
 
   const settings = getOrgSettings((org as any)?.settings);
+  // THE SWITCH BOARD, read ONCE here and handed down (0352): `features` is the company's switches
+  // (the Off line reads them), `doors` is what the shell draws from (the same map, with Crew &
+  // Payroll quiet until a second person). No stored map = everything on = the shell as it was.
+  const features = settings.features;
+  const doors = shellDoors(features, teammates);
+  const isOwner = profile.role === "owner";
 
   // Billing gate (only when Stripe is configured): trial expired & not subscribed.
   // The operator's own house org (COMPED_ORG_IDS) is never paywalled.
@@ -242,7 +270,11 @@ export default async function AppLayout({
         tz,
         isStaff,
         userId: user.id,
+        // The switches as ONE plain string, the same one /planner passes, so the two callers
+        // share one fan-out (cache() keys on primitives) and the badge counts the list it opens.
+        off: offFeatureKey(features),
       });
+      // "/leads" dots only a Leads row that's drawn: with Leads off the dock has none to sum.
       return { "/planner": needsAction, "/leads": freshLeads };
     } catch (e) {
       reportError("app-layout:action-items", e);
@@ -263,9 +295,9 @@ export default async function AppLayout({
         } as React.CSSProperties
       }
     >
-      <Dock branding={branding} role={profile.role} badges={badges} />
+      <Dock branding={branding} role={profile.role} badges={badges} features={doors} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={!!(profile as any).onboarded_at} platformAdmin={platformAdmin} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={!!(profile as any).onboarded_at} platformAdmin={platformAdmin} features={doors} />
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${
@@ -278,8 +310,10 @@ export default async function AppLayout({
         )}
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
           <Suspense fallback={null}>
-            <SectionSubnav isStaff={isStaff} />
+            <SectionSubnav isStaff={isStaff} features={doors} />
           </Suspense>
+          {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
+          <RouteOffLine features={features} isOwner={isOwner} />
           {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
           <Suspense fallback={null}>
             <PageOpenCounter />
@@ -287,7 +321,7 @@ export default async function AppLayout({
           <ToastProvider>{children}</ToastProvider>
         </main>
       </div>
-      <CommandBar isStaff={isStaff} />
+      <CommandBar isStaff={isStaff} features={doors} />
       {/* Queued field work files itself from ANY screen, and says so (audit 9). */}
       <OfflineDrain userId={profile.id} />
       <ShellNavigationWatch />

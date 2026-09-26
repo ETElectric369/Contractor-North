@@ -33,6 +33,8 @@ import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
+import { featureOn, offFeatureKey } from "@/lib/features";
+import { FeatureOffLine } from "@/components/feature-off-line";
 
 export const dynamic = "force-dynamic";
 
@@ -129,6 +131,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     .maybeSingle();
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+  // THE SWITCH BOARD (0352): a switched-off feature's cards leave My Day (the Open Leads card,
+  // the Daily Reports card once nothing is left to review, To-Do Extras on the task box).
+  // No stored map = everything on = My Day as it was.
+  const features = getOrgSettings((orgRow as any)?.settings).features;
+  const leadsOn = featureOn(features, "leads");
 
   // ONE parallel batch for everything that only needs the tz + the user id — was three sequential
   // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
@@ -156,13 +163,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Open-leads snapshot for the staff top row: the count + the few newest
     // open inquiries (name + next follow-up). Same open-lead definition as
     // /leads; RLS keeps inquiries staff-only, so a tech simply gets zero rows.
-    supabase
-      .from("inquiries")
-      .select("id, name, next_follow_up_at", { count: "exact" })
-      .is("converted_at", null)
-      .neq("status", "lost")
-      .order("created_at", { ascending: false })
-      .limit(3),
+    // Leads off: no card, so no read (a new request still reaches Needs You below).
+    leadsOn
+      ? supabase
+          .from("inquiries")
+          .select("id, name, next_follow_up_at", { count: "exact" })
+          .is("converted_at", null)
+          .neq("status", "lost")
+          .order("created_at", { ascending: false })
+          .limit(3)
+      : Promise.resolve({ data: [] as any[], count: 0 }),
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -298,6 +308,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     name: (r.profiles?.full_name ?? "Crew member") as string,
   }));
   const reportsToReview = dailyReports.filter((r) => r.status !== "reviewed").length;
+  const reportsOn = featureOn(features, "daily_reports");
+  const isOwner = (me as any)?.role === "owner";
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
   // Options for the job-less punch's picker, labelled the way /timeclock's picker labels them
   // (its optionLabel): codes on → the job name; codes off → customer · street address.
@@ -342,7 +354,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       : Promise.resolve({ data: null }),
     // audit v921: the feeder's day cuts are calendar-day decisions — hand it the ORG tz so
     // "before today" means org midnight, not UTC's (a 5:30 PM visit surfaced a day late).
-    getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz }),
+    // `off`: the same plain string the app shell's badge passes, so both share one fan-out.
+    getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) }),
     six.length
       ? supabase
           .from("tasks")
@@ -731,8 +744,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           the MINIMAL clock (cn-v502) LEFT, the open-leads snapshot RIGHT — the
           old bottom-of-page "Owner snapshot" tile MOVED up here (count + the
           few newest open leads + follow-ups), not duplicated. Techs keep the
-          full-width clock; /leads is staff territory. */}
-      {isStaff ? (
+          full-width clock; /leads is staff territory. With Leads switched off (0352) staff
+          get the tech's full-width clock too: the card goes with the switch. */}
+      {isStaff && leadsOn ? (
         <div className="mb-4 @container">
           {/* Container query, not a viewport breakpoint: in the fine-pointer shell band
               (840-1023px) the dock + subnav leave ~500px of content while sm/md still say
@@ -800,7 +814,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           office EDITING" and the update RLS grants staff that write, but no UI anywhere edits a
           report's did_today/materials_tomorrow — this is read + check-off only. Build the edit
           affordance here if the office ever needs to correct a filed report. */}
-      {isStaff && dailyReports.length > 0 && (
+      {/* DAILY REPORTS SWITCHED OFF (0352): the card stays while a filed report still waits to be
+          reviewed (it is somebody's end-of-day, already sent), with the Off line on top; once
+          they're all checked off it goes with the switch. */}
+      {isStaff && dailyReports.length > 0 && (reportsOn || reportsToReview > 0) && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2">
@@ -813,6 +830,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               {reportsToReview > 0 ? `${reportsToReview} to review · ` : ""}last 14 days
             </span>
           </div>
+          <FeatureOffLine feature="daily_reports" features={features} isOwner={isOwner} className="mx-5 mt-3" />
           <ul className="divide-y divide-slate-100">
             {dailyReports.map((r) => {
               const reviewed = r.status === "reviewed";
@@ -1095,7 +1113,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* Quick add-a-task box — the mint door. Its toast says where the task
           landed (today's six / Office / Everything else) so capture stays honest. */}
-      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} todayStr={todayStr} />
+      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} todayStr={todayStr} extras={featureOn(features, "todo_extras")} />
 
       {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
           that view now, and overdue/draft invoices already surface as actionable

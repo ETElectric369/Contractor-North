@@ -36,11 +36,14 @@ export function SetupButton({
   initial,
   isStaff,
   onboarded,
+  nortOn = true,
 }: {
   initial: Answers;
   isStaff: boolean;
   /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
   onboarded: boolean;
+  /** The Nort switch (0352). Off, the button's words don't promise him: "a quick walk-through". */
+  nortOn?: boolean;
 }) {
   const [mode, setMode] = useState<null | "tour" | "questions" | "finish">(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -85,14 +88,14 @@ export function SetupButton({
         }}
         title={
           state === "start"
-            ? "Start here — Nort will show you around"
+            ? nortOn ? "Start here — Nort will show you around" : "Start here — a quick walk-through"
             : state === "finish"
               ? `Finish setting up — still missing: ${missing.map((n) => n.label.toLowerCase()).join(", ")}`
               : "Take the walk-through again"
         }
         aria-label={
           state === "start"
-            ? "Start here, Nort will show you around"
+            ? nortOn ? "Start here, Nort will show you around" : "Start here, a quick walk-through"
             : state === "finish"
               ? `Finish setting up, ${missing.length} question${missing.length === 1 ? "" : "s"} left`
               : "Take the walk-through again"

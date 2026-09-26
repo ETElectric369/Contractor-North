@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft } from "lucide-react";
+import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft, Phone } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
@@ -372,6 +372,17 @@ export function ActionList({
                     </button>
 
                 <div className="flex shrink-0 items-center gap-0.5">
+                  {/* CALL BACK: a request that came in while Leads is switched off (0352). The lead
+                      list is out of the way, the person asking for work is not: one tap dials
+                      them. 44px tall without growing the row (the negative margin). */}
+                  {item.phone && (
+                    <a
+                      href={`tel:${item.phone}`}
+                      className="-my-3 inline-flex h-11 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand hover:bg-brand-light/40"
+                    >
+                      <Phone className="h-3.5 w-3.5 shrink-0" /> Call Back
+                    </a>
+                  )}
                   {can("schedule") && (
                     <MoveToDay
                       label="Schedule / set a date"

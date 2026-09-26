@@ -128,6 +128,8 @@ export interface ActionItem {
   affordances: Affordance[]; // canonical verbs valid for THIS item
   /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
   supplierPapers?: SupplierPaperFeed | null;
+  /** inquiry with Leads switched off only (action-items/switches): the number Call Back dials. */
+  phone?: string | null;
 }
 
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {

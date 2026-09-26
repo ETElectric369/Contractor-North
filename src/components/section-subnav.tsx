@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { DOCK, activeSection, basePath } from "@/lib/dock";
+import { activeSection, basePath, visibleDock } from "@/lib/dock";
+import type { FeatureMap } from "@/lib/features";
 import { SectionSheet } from "./section-sheet";
 
 /** The mobile sibling nav at the top of a section's pages. It figures out which section the
@@ -21,12 +22,14 @@ import { SectionSheet } from "./section-sheet";
  *  pages, so either shape would just double it. On phones (no left rail) it's the only
  *  sibling nav, so it stays — and it persists on detail/sub-routes too (/quotes/[id],
  *  /forms/[id], /purchasing/[id]…), not just on a section's exact landing pages. */
-export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
+export function SectionSubnav({ isStaff, features }: { isStaff?: boolean; features?: FeatureMap }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
 
-  const sections = DOCK.filter((s) => isStaff || !s.staffOnly);
+  // THE ONE DOCK FILTER (lib/dock visibleDock): the same tiles and rows the dock draws, role and
+  // switches both, so the strip can never offer a page the dock has put away.
+  const sections = visibleDock({ isStaff: !!isStaff, features });
   // THE shared matcher — the same section the dock tiles light, so the strip can never
   // vanish-by-accident on detail routes again (it did on /quotes/[id] but not /billing/[id]).
   const group = activeSection(pathname, sections);
@@ -37,7 +40,7 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
   // Scoped to the jobs group only so /billing/[id], /quotes/[id] etc. keep their strips.
   // (/work-orders/[id] has no strip at all now — work orders left the dock, hub-only.)
   if (group.key === "jobs" && pathname.startsWith("/jobs/")) return null;
-  const tabs = group.children.filter((c) => c.href && (isStaff || !c.staffOnly));
+  const tabs = group.children.filter((c) => c.href);
   if (tabs.length < 2) return null;
 
   const exact = tabs.find((c) => c.href === current);
@@ -52,7 +55,7 @@ export function SectionSubnav({ isStaff }: { isStaff?: boolean }) {
     return (
       <SectionSheet
         group={group}
-        items={group.children.filter((c) => isStaff || !c.staffOnly)}
+        items={group.children}
         activeHref={activeHref}
       />
     );
