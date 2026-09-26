@@ -15,7 +15,11 @@ import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { AddBusinessCostButton } from "./add-business-cost";
 import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
-import { ReceiptBillingCard, type ReceiptForBilling } from "./receipt-billing-card";
+import type { ReceiptForBilling } from "./receipt-billing-card";
+import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "./supplier-merge-review";
+import { SupplierDuplicates } from "./supplier-duplicates";
+import { Fold, WhyFold } from "@/components/why-fold";
+import { FoldOpener } from "@/components/fold-opener";
 import {
   explainKind,
   isBeforeLine,
@@ -985,7 +989,9 @@ export default async function BillsPage({
         .filter(Boolean)
         .join(" · "),
       words: wordsOf(number, ...(reading.numbers ?? []), b.supplier, moneyWords(b.amount), b.bill_date, b.category, b.jobs?.job_number, b.jobs?.name, ...jobWords(b.job_id), String(b.notes ?? "").split(/\r?\n/)[0]),
-      href: b.job_id ? `/jobs/${b.job_id}` : null,
+      // Its own row in All Bills (FoldOpener opens the folds around it): the bill itself, with its
+      // number, its lines and its doors, rather than the job page it sits on.
+      href: `#bill-${b.id}`,
     });
   }
   for (const f of docs as any[]) {
@@ -999,19 +1005,42 @@ export default async function BillsPage({
     });
   }
 
+  // ── THE LEDGER'S ROWS (Wave B) ────────────────────────────────────────────────────────────────
+  // Each bill carries what its row prints and what its detail holds: the supplier's number on
+  // every row (typed, stored, or read off the PDF name and lines by readBillInvoice), whether it was
+  // set aside as a duplicate, and, for a live receipt on a job, its per-line billing switches.
+  const receiptById = new Map(receiptsForBilling.map((r) => [r.id, r]));
+  const ledgerBills = (billsWithLines as any[]).map((b) => {
+    const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
+    return {
+      ...b,
+      shownNumber: b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null,
+      superseded: !!b.superseded_by_bill_id,
+      receipt: receiptById.get(String(b.id)) ?? null,
+    };
+  });
+
+  // What is waiting under More, counted so its one line says so (nothing silent behind a fold).
+  const openDuplicates = duplicates.filter((g) => !g.resolution);
+  const moreWaiting = proposals.length + questions.length + openDuplicates.length;
+  const needsYouIds = (paperFeed?.cards ?? []).map((c) => c.invoiceId);
+
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
     // anywhere onto it, or press Drop Paperwork. Nothing is filed on drop; each paper waits in
     // Sort These until a person presses File It.
+    //
+    // THE ORDER (Bills plan, Wave B): the title and its two doors, the search box, Needs You, one
+    // line per supplier, All Bills, More. Everything below Needs You is folded, and every paragraph
+    // is a one-line label with a Why? fold ("it looks like one big run-on sentence"). Every door
+    // the page had keeps exactly one home (bills-page-doors.test.ts finds each one).
     <PaperworkDropZone orgId={orgId}>
-      <PageHeader
-        title="Bills & purchasing"
-        description="Purchase orders, supplier bills, and receipts across every job."
-      >
+      <FoldOpener />
+      <PageHeader title="Bills">
         <div className="flex flex-wrap items-center gap-2">
           <DropPaperworkButton />
           {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
-              without opening a tab. It saves through the same createBill as Add Bill below. */}
+              without opening anything. It saves through the same createBill as Add Bill. */}
           <AddBusinessCostButton today={today} />
         </div>
       </PageHeader>
@@ -1020,9 +1049,9 @@ export default async function BillsPage({
       <BillsSearchBox rows={searchRows} />
 
       {/* NEEDS YOU: the same "here's a bill, what's it for?" cards My Day shows, from the same
-          call (supplierPaperFeed). Only where supplier documents exist; nothing waiting says so. */}
+          call (supplierPaperFeed). The one place these decisions happen. */}
       {!paperFeed && paperBooksUnread && !invoicesErr && !accountsErr && supplierDocuments.length > 0 && (
-        <Card className="mb-6 p-4" id="needs-you">
+        <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
           <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
           <p className="mt-0.5 text-xs text-slate-500" role="status">
             Couldn&apos;t check your books just now, so the supplier bills waiting on you aren&apos;t shown. Reload the page to try again.
@@ -1030,147 +1059,164 @@ export default async function BillsPage({
         </Card>
       )}
       {paperFeed && (
-        <Card className="mb-6 p-4" id="needs-you">
+        <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
           <h2 className="text-sm font-semibold text-slate-900">
             Needs You{paperFeed.cards.length ? ` (${paperFeed.cards.length})` : ""}
           </h2>
-          <p className="mb-3 mt-0.5 text-xs text-slate-500">
-            Supplier bills nobody has put in your books yet. The same cards are on My Day.
-          </p>
+          <p className="mb-3 mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
           <SupplierPaperCards
             feed={paperFeed}
             emptyLabel={`Nothing waiting. Every supplier bill${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`}
           />
         </Card>
       )}
+      {/* The same ticket on two jobs is money on the wrong job: it is a decision, so it is pointed at
+          from here, and answered on its card under More. */}
+      {openDuplicates.length > 0 && (
+        <a
+          href="#same-ticket-two-jobs"
+          className="mb-6 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
+        >
+          <span className="min-w-0">
+            {openDuplicates.length === 1
+              ? `The Same ${formatCurrency(openDuplicates[0].amount)} Ticket Is On Two Jobs`
+              : `${openDuplicates.length} Tickets Are Each Filed More Than Once`}
+          </span>
+          <span className="shrink-0 font-medium">Sort It Out</span>
+        </a>
+      )}
 
       <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} />
 
-      {/* WHO HE OWES COMES FIRST. It is the question this screen opens on - $13,040.07 unpaid, and
-          every dollar of it one CED account wearing five spellings. A card that answers it below
-          the fold is a card he has to go looking for.
-
-          IT IS NOT RENDERED AT ALL when the accounts read came back an error, which on this page
-          means one thing: a deploy that landed ahead of its migration. An empty supplier card
-          whose every button can only refuse is the dead end this wave exists to delete, so for
-          those few minutes the page is exactly the page it was yesterday. */}
+      {/* ONE LINE PER SUPPLIER. Not rendered at all when the accounts read came back an error (a
+          deploy ahead of its migration): an empty card whose every button can only refuse is the
+          dead end this page exists to delete. */}
       {!accountsErr && (
         <SuppliersCard
           accounts={supplierAccounts}
           today={today}
           unassigned={unassigned}
-          proposals={proposals}
-          questions={questions}
-          loose={loose}
-          duplicates={duplicates}
           reconcile={reconcile}
-          // The slice of an account's unpaid bills that the supplier's own documents do not cover.
-          // Never folded into a balance - named, so $467.87 he does owe is not explained away as
-          // paperwork by a sentence written for the eleven bills beside it.
+          needsYouIds={needsYouIds}
+          // The slice of an account's unpaid bills the supplier's own documents do not cover.
+          // Never folded into a balance: named, so money he does owe is not explained away.
           noSupplierDocument={Object.fromEntries(noSupplierDocument)}
           actions={{
-            acceptMerge: acceptSupplierMerge,
-            dismissMerge: dismissSupplierMerge,
-            fileAsItsOwnAccount: fileSpellingAsItsOwnAccount,
-            resolveDuplicate: resolveDuplicateBill,
-            unresolveDuplicate: unresolveDuplicateBill,
             recordPayment: recordSupplierPayment,
             voidPayment: voidSupplierPayment,
             setOnAccount: setSupplierOnAccount,
-            // WITHOUT THIS LINE THE WHOLE RECONCILE CARD IS UNREACHABLE (review, 2026-09-19).
-            // suppliers-card gates it on `!!actions.setInvoiceJob`, so an absent action does not
-            // degrade the feature - it deletes it, silently, in every state of the data.
+            // WITHOUT THIS LINE THE SUPPLIER'S OWN PAPERS ARE UNREACHABLE (review, 2026-09-19):
+            // suppliers-card gates them on `!!actions.setInvoiceJob`.
             setInvoiceJob: setSupplierInvoiceJob,
             // The account's own details, which had no door until the audit counted one.
             updateAccount: updateSupplierAccount,
-            // AND THE SAME LINE AGAIN, FOR THE SAME CARD. "Record It As A Bill" was written,
-            // styled and gated on `actions.recordAsBill` - which nothing implemented and nothing
-            // passed, so Erik had to ask me to write his $223.29 CED invoice into his books by
-            // hand. Eleven more are sitting in that list behind this one line.
             recordAsBill: recordSupplierInvoiceAsBill,
-            // Same Purchase: Tie Them (audit v994, DB1): the answer to "maybe already in your
-            // books" on the same card, so a counter ticket and CED's invoice for it can be one.
+            // Same Purchase: Tie Them (audit v994, DB1).
             tieToBill: tieSupplierInvoiceToBill,
-            // Record To Shelf (Shop Stock, Phase 2): a CED document in as shop stock, each line
-            // counted by a person. Both halves passed, or the button does not render.
+            // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
             shelfLines: supplierInvoiceShelfLines,
             recordToShelf: recordSupplierInvoiceToShelf,
           }}
         />
       )}
 
-      {/* ── THE DOOR THE SUPPLIER'S OWN INVOICES COME IN THROUGH ────────────────────────────
-          Tonight I read forty-seven of his CED documents by hand. This is so next month is a
-          paste rather than a night: he opens the portal, opens a document, selects the text and
-          drops it in here.
-
-          IT IS A <details>, CLOSED, sitting under the money rather than on top of it. The
-          question this screen opens on is what he owes; importing is the thing he does once a
-          month, and a permanently open box of instructions above the balance would be in the way
-          eleven times out of twelve. It opens itself when there is a result to read.
-
-          IT TAKES THE PDFs THEMSELVES NOW (dropbox plan, Phase 0). Their text is read in the
-          browser (lib/pdf-text) and posted to the same importer the paste box uses; the paste is
-          kept, folded, for a document he only has open in a viewer. */}
-      <Card className="mb-6 p-5" id="ced-import">
-        {importSaid && (
-          <div
-            className={`mb-4 rounded-lg px-3 py-2 text-sm ${
-              importOk === "1" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
-            }`}
-            role={importOk === "1" ? "status" : "alert"}
-          >
-            {importSaid}
-          </div>
-        )}
-        <details open={!!importSaid}>
-          <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-semibold text-slate-900">
-            Import Supplier Invoices
-          </summary>
-          <div className="mt-3 space-y-3">
-            <p className="text-sm text-slate-600">
-              Pick the PDFs you downloaded from the CED payment portal, as many as you like. Their text is read right
-              here and each document is checked against its own arithmetic before it is saved: the line extensions have
-              to add up to merchandise, and merchandise plus tax plus shipping has to equal the total. Anything that does
-              not is named and left out rather than half read. The documents land as soon as you pick them.
-            </p>
-            <p className="text-sm text-slate-600">
-              Loading the same download twice changes nothing. A document already here keeps what it has, and the job
-              you filed it on is never touched.
-            </p>
-            <CedPdfPicker />
-            <details>
-              <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-brand">
-                Paste Text Instead
-              </summary>
-              <form action={importCedInvoicesFromForm} className="mt-2 space-y-3">
-                <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
-                  Invoice text
-                </label>
-                <textarea
-                  id="ced-import-text"
-                  name="text"
-                  rows={8}
-                  placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
-                  className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                />
-                <FormSubmit>Import Documents</FormSubmit>
-              </form>
-            </details>
-          </div>
-        </details>
-      </Card>
-
-      <ReceiptBillingCard receipts={receiptsForBilling} />
-
+      {/* ALL BILLS: the ledger, folded; a receipt's billing switches live in its own row. */}
       <BillsReceipts
         orgId={orgId}
         jobs={jobs ?? []}
         lists={lists ?? []}
         pos={(pos ?? []) as any}
-        bills={billsWithLines as any}
+        bills={ledgerBills as any}
         docs={docs as any}
       />
+
+      {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line
+          says how many things in it are waiting, so nothing waits silently behind the fold. */}
+      <Card className="mb-6 px-4 py-1">
+        <Fold
+          id="more"
+          open={!!importSaid}
+          summary={
+            <span className="text-base font-semibold text-slate-900">
+              More
+              {moreWaiting > 0 ? (
+                <span className="font-normal text-amber-800"> · {moreWaiting} To Look At</span>
+              ) : (
+                <span className="font-normal text-slate-500"> · Imports And Supplier Names</span>
+              )}
+            </span>
+          }
+        >
+          {/* ── THE DOOR THE SUPPLIER'S OWN INVOICES COME IN THROUGH ─────────────────────────────
+              Once a month: pick the CED portal PDFs (read in the browser, lib/pdf-text) or paste the
+              text. It opens itself when there is a result to read. */}
+          <div className="mb-4 scroll-mt-20" id="ced-import">
+            {importSaid && (
+              <div
+                className={`mb-3 rounded-lg px-3 py-2 text-sm ${
+                  importOk === "1" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
+                }`}
+                role={importOk === "1" ? "status" : "alert"}
+              >
+                {importSaid}
+              </div>
+            )}
+            <details open={!!importSaid}>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
+                Import Supplier Invoices
+              </summary>
+              <div className="mt-1 space-y-3">
+                <WhyFold label="What Happens?">
+                  <p>
+                    Pick the PDFs from the CED payment portal, as many as you like. Each is checked against its own
+                    arithmetic before it is saved; anything that does not add up is named and left out. Loading the
+                    same download twice changes nothing, and the job you filed a document on is never touched.
+                  </p>
+                </WhyFold>
+                <CedPdfPicker />
+                <details>
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-brand [&::-webkit-details-marker]:hidden">
+                    Paste Text Instead
+                  </summary>
+                  <form action={importCedInvoicesFromForm} className="mt-2 space-y-3">
+                    <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
+                      Invoice Text
+                    </label>
+                    <textarea
+                      id="ced-import-text"
+                      name="text"
+                      rows={8}
+                      placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
+                      className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    />
+                    <FormSubmit>Import Documents</FormSubmit>
+                  </form>
+                </details>
+              </div>
+            </details>
+          </div>
+
+          {/* SUPPLIER-NAME HOUSEKEEPING, in the order of how sure the app is: what it thinks, what
+              it cannot tell, what it has no opinion about. */}
+          <div id="supplier-names" className="scroll-mt-20">
+            <SupplierMergeReview proposals={proposals} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
+            <SupplierCandidateReview questions={questions} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
+            <SupplierUnfiledSpellings
+              spellings={loose}
+              canSetOnAccount={!accountsErr}
+              actions={{ fileAsItsOwnAccount: fileSpellingAsItsOwnAccount }}
+            />
+            {proposals.length + questions.length + loose.length === 0 && (
+              <p className="mb-4 text-sm text-slate-400">Every supplier name off your receipts is on an account.</p>
+            )}
+          </div>
+
+          <SupplierDuplicates
+            groups={duplicates}
+            actions={{ resolveDuplicate: resolveDuplicateBill, unresolveDuplicate: unresolveDuplicateBill }}
+          />
+        </Fold>
+      </Card>
     </PaperworkDropZone>
   );
 }

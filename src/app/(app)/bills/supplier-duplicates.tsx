@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { copyPlace, type DuplicateBillGroup, type SupplierActionResult } from "./supplier-balance";
 
@@ -77,12 +78,16 @@ export function SupplierDuplicates({
   return (
     <Card id="same-ticket-two-jobs" className="mb-6 scroll-mt-4 p-4">
       <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-900">The Same Ticket On Two Jobs</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          {openGroups.length > 0
-            ? "These receipts match line for line, to the penny, so one job is carrying a cost that is not its own. You say which job it belongs to. Nothing gets deleted either way."
-            : "Nothing is waiting on you here. The picks you made are below, and you can change any of them."}
-        </p>
+        <h2 className="text-base font-semibold text-slate-900">
+          The Same Ticket On Two Jobs{openGroups.length > 0 ? ` (${openGroups.length} Waiting)` : ""}
+        </h2>
+        <WhyFold>
+          <p>
+            {openGroups.length > 0
+              ? "These receipts match line for line, to the penny, so one job is carrying a cost that is not its own. You say which job it belongs to. Nothing gets deleted either way."
+              : "Nothing is waiting on you here. The picks you made are below, and you can change any of them."}
+          </p>
+        </WhyFold>
       </div>
 
       {error && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -189,7 +194,7 @@ export function SupplierDuplicates({
                 })}
               </ul>
 
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+              <div className="mt-2 text-xs leading-relaxed text-slate-500">
                 {g.resolution ? (
                   <>
                     The other copy is still on file, marked as the duplicate, so it no longer counts against that
@@ -197,7 +202,7 @@ export function SupplierDuplicates({
                     {actions.unresolveDuplicate ? (
                       <button
                         type="button"
-                        className="font-medium text-brand hover:underline"
+                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
                         disabled={pending}
                         onClick={() =>
                           run(
@@ -210,16 +215,28 @@ export function SupplierDuplicates({
                         Change Your Mind
                       </button>
                     ) : (
-                      <>To change it, open that bill in the list further down this page.</>
+                      // The set-aside copy's own row in All Bills (FoldOpener opens it), not the
+                      // top of a ledger he would have to search.
+                      <a
+                        href={(() => {
+                          const setAside = g.copies.find((c) => c.billId !== g.resolution?.keptBillId);
+                          return setAside ? `#bill-${setAside.billId}` : "#all-bills";
+                        })()}
+                        className="flex min-h-11 items-center font-medium text-brand hover:underline"
+                      >
+                        To Change It, Open That Bill In All Bills
+                      </a>
                     )}
                   </>
                 ) : (
-                  <>
-                    Picking a job marks the other copy as the duplicate so it stops counting as that job&apos;s
-                    cost. Neither one is deleted, and you can change your mind.
-                  </>
+                  <WhyFold>
+                    <p>
+                      Picking a job marks the other copy as the duplicate so it stops counting as that job&apos;s cost.
+                      Neither one is deleted, and you can change your mind.
+                    </p>
+                  </WhyFold>
                 )}
-              </p>
+              </div>
             </div>
           );
         })}
