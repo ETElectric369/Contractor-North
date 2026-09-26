@@ -71,6 +71,17 @@ describe("which face the card shows", () => {
     expect(visitStartState({ isStaff: true, job: j55, openEntry: onJ50 })).toBe("switch");
     expect(visitStartState({ isStaff: false, job: j55, openEntry: onJ55 })).toBe("here");
   });
+
+  it("a visit that is over, on a finished job, is closed: no clock, whoever looks and wherever they are", () => {
+    const done = { ...j55, status: "complete" };
+    expect(visitStartState({ isStaff: true, job: done, openEntry: null, visitStatus: "completed" })).toBe("closed");
+    expect(visitStartState({ isStaff: false, job: done, openEntry: onJ50, visitStatus: "completed" })).toBe("closed");
+    // Already on it is still said as it is.
+    expect(visitStartState({ isStaff: true, job: done, openEntry: onJ55, visitStatus: "completed" })).toBe("here");
+    // A finished job on a visit still to come, or an open job on a finished visit, keeps its clock.
+    expect(visitStartState({ isStaff: true, job: done, openEntry: null, visitStatus: "scheduled" })).toBe("linked");
+    expect(visitStartState({ isStaff: true, job: { ...j55, status: "in_progress" }, openEntry: null, visitStatus: "completed" })).toBe("linked");
+  });
 });
 
 describe("office, no job yet", () => {
@@ -137,6 +148,75 @@ describe("office, no job yet", () => {
     const h = render({ openEntry: onJ50 });
     expect(h).toContain("on the clock on J-050 since 8:00 AM");
     expect(h).toContain("Starting this job switches your clock here.");
+  });
+});
+
+describe("a visit that is over (Tom Goodman as it stands: visit completed, J-055 finished, INV-079 sent)", () => {
+  const tomDone = { ...j55, status: "complete", customer: "Tom Goodman" };
+  const buttons = (h: string) => h.match(/<button\b[^>]*>.*?<\/button>/g) ?? [];
+
+  it("leads with Link To J-055, never with Start The Job And Clock In", () => {
+    const h = render({ visitStatus: "completed", linkInstead: tomDone });
+    expect(h).toContain('data-visit-start="start"');
+    expect(h).toContain("This visit is done");
+    expect(h).toContain("made that day and finished.");
+    expect(h).toContain("Link this visit to it?");
+    const btns = buttons(h);
+    expect(btns).toHaveLength(2);
+    expect(btns[0]).toContain("Link To J-055</button>");
+    expect(btns[0]).not.toContain("Instead");
+    expect(btns[0]).toContain("bg-[rgb(var(--glass-ink))] text-white"); // the lead door
+    expect(btns[1]).toContain("Make A New Job Anyway");
+    expect(h).not.toContain("Start The Job And Clock In");
+    expect(h).not.toContain("Clock In");
+    phoneSafe(h);
+  });
+
+  it("the same on the clock somewhere else: no switch talk, since nothing here moves the clock", () => {
+    const h = render({ visitStatus: "completed", linkInstead: tomDone, openEntry: onJ50 });
+    expect(h).toContain("Link To J-055</button>");
+    expect(h).not.toContain("switches your clock");
+    expect(h).not.toContain("Start The Job And Clock In");
+  });
+
+  it("with no job to link, it offers one quiet Start A Job From This Visit, and no clock", () => {
+    const h = render({ visitStatus: "completed" });
+    expect(h).toContain("This visit is done");
+    expect(h).toContain("doesn’t start your clock");
+    const btns = buttons(h);
+    expect(btns).toHaveLength(1);
+    expect(btns[0]).toContain("Start A Job From This Visit");
+    expect(btns[0]).not.toContain("bg-[rgb(var(--glass-ink))] text-white"); // quiet: the outline door
+    expect(h).not.toContain("Start The Job And Clock In");
+    expect(h).not.toContain("Link To");
+    phoneSafe(h);
+  });
+
+  it("linked to a finished J-055, it shows Open J-055 and no Clock In or Switch", () => {
+    for (const openEntry of [null, onJ50]) {
+      for (const isStaff of [true, false]) {
+        const h = render({ isStaff, visitStatus: "completed", job: { ...j55, status: "complete" }, openEntry });
+        expect(h).toContain('data-visit-start="closed"');
+        expect(h).toContain("The visit is done and J-055 is finished");
+        expect(h).toContain('href="/jobs/job-55"');
+        expect(h).toContain("Open J-055");
+        expect(h).not.toContain("Clock In");
+        expect(h).not.toContain("Switch To");
+        expect(buttons(h)).toHaveLength(0);
+        phoneSafe(h);
+      }
+    }
+  });
+
+  it("a finished job on a visit still to come keeps its Clock In (only the pair closes the door)", () => {
+    const h = render({ visitStatus: "scheduled", job: { ...j55, status: "complete" } });
+    expect(h).toContain("Clock In On J-055");
+  });
+
+  it("before the visit is over, a finished same-day job is still offered, as Link Instead", () => {
+    const h = render({ visitStatus: "scheduled", linkInstead: tomDone });
+    expect(buttons(h)[0]).toContain("Link To J-055 Instead");
+    expect(h).toContain("made that day and finished.");
   });
 });
 

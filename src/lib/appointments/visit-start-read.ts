@@ -6,8 +6,7 @@
  * Through the CALLER's client: RLS keeps every row to the caller's org.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { linkInsteadPick, visitDay, type LinkInsteadJob } from "./visit-start";
+import { linkInsteadPick, visitDay, visitDayBounds, type LinkInsteadJob } from "./visit-start";
 
 /** Who the visit is for: its own customer, else the customer its lead already carries. */
 export async function visitCustomerId(
@@ -20,7 +19,11 @@ export async function visitCustomerId(
   return (data as { customer_id?: string | null } | null)?.customer_id ?? null;
 }
 
-/** The same customer's one open job made on the visit's day, or null (none, or more than one). */
+/**
+ * The same customer's one job made on the visit's day that is not cancelled (the one open job, else
+ * the one finished job when none is open), or null (none, or no single answer). The read is narrowed to the visit's org-local day, so a customer
+ * with a long history can never push the right job out of the page; the pick re-checks the day.
+ */
 export async function loadLinkInstead(
   supabase: SupabaseClient,
   appt: { customer_id?: string | null; inquiry_id?: string | null; starts_at?: string | null; job_id?: string | null },
@@ -29,13 +32,17 @@ export async function loadLinkInstead(
   if (appt.job_id) return null; // a linked visit keeps its link; nothing is offered over it
   const customerId = await visitCustomerId(supabase, appt);
   if (!customerId) return null;
+  const day = visitDay(appt.starts_at, tz);
+  const { start, end } = visitDayBounds(day, tz);
   const { data, error } = await supabase
     .from("jobs")
     .select("id, job_number, name, status, created_at")
     .eq("customer_id", customerId)
-    .in("status", ACTIVE_JOB_STATUSES)
+    .neq("status", "cancelled")
+    .gte("created_at", start)
+    .lt("created_at", end)
     .order("created_at", { ascending: false })
     .limit(50);
   if (error || !data) return null; // a failed read offers nothing rather than a guess
-  return linkInsteadPick(data as LinkInsteadJob[], visitDay(appt.starts_at, tz), tz);
+  return linkInsteadPick(data as LinkInsteadJob[], day, tz);
 }
