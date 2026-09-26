@@ -345,6 +345,10 @@ export interface OrgSettings {
    *  strips the key, and the guard_owner_money_visibility trigger refuses anyone else at the DB.
    *  Sanitized on read: anything but a real `false` reads as on. */
   office_sees_owner_money: boolean;
+  /** The day this company's books in North begin, "YYYY-MM-DD" (Wave 0; supplier-reconcile.ts
+   *  supplierPaperLine). A supplier paper dated before it never needs a person. Null: the company
+   *  has not named one, and its earliest scanned bill stands in. Sanitized on read. */
+  books_begin: string | null;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -450,6 +454,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   sms_from_number: "",
   calendly_url: "",
   office_sees_owner_money: true,
+  books_begin: null,
 };
 
 /** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place
@@ -631,6 +636,12 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   merged.trade = normalizeTradeKey((stored as { trade?: unknown }).trade);
   merged.features = normalizeFeatures((stored as { features?: unknown }).features, (stored as { timeclock_job_codes?: unknown }).timeclock_job_codes);
   merged.timeclock_job_codes = merged.features.job_codes;
+  // A day or nothing: a hand-edited "June 8" must not move a company's line somewhere unnamed.
+  {
+    const b = merged.books_begin;
+    const t = typeof b === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b) ? Date.parse(`${b}T12:00:00Z`) : NaN;
+    merged.books_begin = Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === b ? b : null;
+  }
   return merged;
 }
 

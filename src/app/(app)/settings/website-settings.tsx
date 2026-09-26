@@ -130,7 +130,7 @@ export function WebsiteSettings({
 
       <div>
         <Label htmlFor="ws-area">Service area</Label>
-        <Input id="ws-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
+        <Input id="ws-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Springfield & nearby towns" />
         <p className="mt-1 text-xs text-slate-400">Shown in the hero, trust bar, and footer.</p>
       </div>
 

@@ -7,6 +7,27 @@ export function qboConfigured(): boolean {
   return Boolean(process.env.QBO_CLIENT_ID && process.env.QBO_CLIENT_SECRET);
 }
 
+/**
+ * True when THIS company has connected its QuickBooks (Wave 0). qboConfigured only says North can
+ * talk to Intuit, so every company's invoice menu offered Send To QuickBooks, connected or not.
+ * accounting_connections is owner/admin-readable only (0015), and office staff may push
+ * (sendInvoiceToQuickbooks is requireStaff), so the row is read with the service client, for this
+ * org, and only whether a realm is on it comes back. Any failure answers false: no door.
+ */
+export async function qboConnected(orgId: string | null | undefined): Promise<boolean> {
+  if (!orgId || !qboConfigured()) return false;
+  try {
+    const { data, error } = await createServiceClient()
+      .from("accounting_connections")
+      .select("realm_id")
+      .eq("org_id", orgId)
+      .maybeSingle();
+    return !error && !!(data as { realm_id?: string | null } | null)?.realm_id;
+  } catch {
+    return false;
+  }
+}
+
 const ENV = process.env.QBO_ENVIRONMENT || "production"; // or "sandbox"
 const AUTH_BASE = "https://appcenter.intuit.com/connect/oauth2";
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";

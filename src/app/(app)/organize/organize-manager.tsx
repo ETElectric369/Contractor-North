@@ -253,7 +253,7 @@ export function OrganizeManager({
             throw new Error(added.error ?? "Not added.");
           }
           if (!added.needsRead) {
-            setState(added.line?.includes("didn't add up") ? "warn" : "done", added.line ?? "CED documents found in it. Waiting in Needs Attention: press Add To CED Documents.");
+            setState(added.line?.includes("didn't add up") ? "warn" : "done", added.line ?? "Supplier documents found in it. Waiting in Needs Attention: press Add To Supplier Documents.");
             continue;
           }
           setState("reading");

@@ -159,6 +159,13 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   supplier_pay: { label: "Discount", tone: "green" },
 };
 
+/** A TECH'S APPOINTMENT ROW OPENS, NOTHING MORE (Wave 0). Done and Delete dispatch to
+ *  appointment.setStatus, which is staff-only, so on a tech's row they were doors that only
+ *  refused. The appointment page itself is his to read. */
+export function appointmentAffordances(isStaff: boolean): Affordance[] {
+  return isStaff ? AFFORDANCES.appointment : ["open"];
+}
+
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
 // by both the UI (<ActionList>) and (later) the voice registry. (Assign/Convert
 // land in a follow-up step with inline pickers.)

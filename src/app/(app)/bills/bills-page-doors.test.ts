@@ -369,13 +369,11 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Take It Off The Shelf", was: "receipt card, per line", home: "all-bills", times: 1 },
   { door: "New PO", was: "Purchase Orders tab", home: "all-bills" },
   { door: /^PO-001 · CED/, was: "Purchase Orders row", home: "all-bills" },
-  { door: "Upload", was: "Receipts tab", home: "all-bills" },
-  { door: "Photo", was: "Receipts tab", home: "all-bills" },
   { door: "IMG_0412.jpg", was: "Receipts tab file link", home: "all-bills" },
   // 4-8. Housekeeping and the import -> More
   { door: /^More · /, was: "(new fold)", home: "more" },
   { door: "Import Supplier Invoices", was: "Import fold", home: "more" },
-  { door: "Choose CED PDFs", was: "Import fold", home: "more" },
+  { door: "Choose Supplier PDFs", was: "Import fold", home: "more" },
   { door: "Paste Text Instead", was: "Import fold", home: "more" },
   { door: "Import Documents", was: "Import fold", home: "more" },
   { door: /^Accept And (File Them There|Make The Account)$/, was: "Supplier Names That Look Like One Account", home: "more" },
@@ -453,6 +451,16 @@ describe("every door keeps exactly one home", () => {
     const open = ced.slice(ced.indexOf("Has Open ("));
     expect(open).not.toContain("8802-1107820");
     expect(text(open)).toMatch(/\d+ Of These (Is|Are) Waiting Under Needs You/);
+  });
+});
+
+describe("one door for papers (Wave 0)", () => {
+  // The Receipts tab's Upload / Photo / drop box filed a picture and never recorded a cost, and its
+  // drop box caught drops meant for Drop Paperwork. It is a list now; Drop Paperwork reads papers.
+  it("the Receipts tab has no Upload or Photo door, and still lists what is on file", () => {
+    expect(count(doors(html), "Upload")).toBe(0);
+    expect(count(doors(html), "Photo")).toBe(0);
+    expect(count(doors(section("all-bills")), "IMG_0412.jpg")).toBe(1);
   });
 });
 

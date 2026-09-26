@@ -132,7 +132,8 @@ describe("createPurchaseOrder — seeding from a material list", () => {
     const res = await createPurchaseOrder({ vendor: "", job_id: "job-1", source_list_id: null });
     expect(res).toEqual({ ok: true, id: "po-2" });
     const poInsert = calls.find((c) => c.table === "purchase_orders" && c.verb === "insert");
-    expect(poInsert?.payload).toMatchObject({ vendor: "CED", job_id: "job-1", source_list_id: null });
+    // A blank vendor stays blank: no company's PO is ever named for one supplier (Wave 0).
+    expect(poInsert?.payload).toMatchObject({ vendor: "", job_id: "job-1", source_list_id: null });
   });
 });
 

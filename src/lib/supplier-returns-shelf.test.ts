@@ -47,10 +47,11 @@ describe("what a return from the shelf comes to", () => {
     expect(first.lost).toBe(-119.83); // alone, the memo looks generous...
     expect(second).toMatchObject({ cost: 301.81, credit: 300, lost: 1.81 }); // ...with both rolls back, $1.81 was lost
   });
-  it("the door says CED for CED's rolls", () => {
+  it("the door names the roll's own supplier, short, for every supplier", () => {
     expect(returnDoorLabel("Consolidated Electrical Dist.")).toBe("Return To CED");
-    expect(returnDoorLabel("Contractors Electrical Distributors")).toBe("Return To CED");
-    expect(returnDoorLabel("The Home Depot")).toBe("Return To Supplier");
+    expect(returnDoorLabel("Main Street Supply")).toBe("Return To Main Street Supply");
+    expect(returnDoorLabel("The Home Depot")).toBe("Return To The Home Depot");
     expect(returnDoorLabel(null)).toBe("Return To Supplier");
+    expect(returnDoorLabel("  ")).toBe("Return To Supplier");
   });
 });

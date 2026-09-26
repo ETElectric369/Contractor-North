@@ -2,7 +2,7 @@
 import { dbError } from "@/lib/db-error";
 
 import { createClient, createServiceClient } from "@/lib/supabase/server";
-import { requireStaff } from "@/lib/staff-guard";
+import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { resolveSiteContext } from "@/lib/site-editor-guard";
 
 export type BugReport = {
@@ -67,11 +67,12 @@ export async function createBugReport(input: {
   return { ok: true };
 }
 
-/** The org's recent reports. Staff-gated in the app layer (belt) on top of the RLS staff
- *  read policy (suspenders) — this action also does a narrow service-role name lookup, so
- *  the gate must hold even if the RLS policy ever loosens. */
+/** Every company's recent reports, for North's own team (Wave 0: bug reports left the companies'
+ *  inboxes). Platform-admin gated in the app layer (belt) on top of the RLS read policy
+ *  (suspenders, 0176) — this action also does a narrow service-role name lookup, so the gate must
+ *  hold even if the RLS policy ever loosens. Anyone else gets nothing. */
 export async function listBugReports(): Promise<BugReport[]> {
-  const ctx = await requireStaff();
+  const ctx = await requirePlatformAdmin();
   if ("error" in ctx) return [];
   const supabase = ctx.supabase;
   const { data } = await supabase
@@ -136,14 +137,24 @@ export async function listBugReports(): Promise<BugReport[]> {
 const BUG_STATUSES = new Set(["open", "fixed", "wontfix"]);
 
 export async function setBugReportStatus(id: string, status: string): Promise<{ ok: boolean; error?: string }> {
-  // Defense-in-depth: app-layer staff gate ON TOP of the RLS staff policy (the same belt-and-
-  // suspenders pattern as the billing actions — RLS alone is the single-layer class we've
-  // already had to retro-fix once).
-  const ctx = await requireStaff();
+  // North's own team only (Wave 0), in the app layer AND in the function below.
+  const ctx = await requirePlatformAdmin();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   // The status column is unconstrained text; whitelist here so a stray value can't write a
   // status the /bugs tabs don't know how to surface.
   if (!BUG_STATUSES.has(status)) return { ok: false, error: "Unknown status." };
+  // ANOTHER COMPANY'S REPORT. bug_reports_staff's WITH CHECK (0176) keeps writes in the caller's
+  // own org, so a platform admin's Mark Fixed on anyone else's report was refused by RLS.
+  // platform_set_bug_status (0354) is the one narrow hole: status only, platform admins only.
+  const rpc = await ctx.supabase.rpc("platform_set_bug_status", { p_id: id, p_status: status });
+  if (!rpc.error) {
+    if (rpc.data === true) return { ok: true };
+    return { ok: false, error: "That report couldn't be updated — it may have been removed." };
+  }
+  // Before 0354 is applied the function isn't there: fall back to the direct write, which still
+  // works for the admin's own company, and say plainly when it can't.
+  const missing = rpc.error.code === "PGRST202" || rpc.error.code === "42883";
+  if (!missing) return { ok: false, error: dbError(rpc.error) };
   // THE SILENT-WRITE LAW (v800 audit): an RLS-refused UPDATE returns zero rows, not an error —
   // so the tracker reported "marked fixed" over a write that never happened, and Nort announced
   // it too. A zero-row update is a failure.
@@ -153,6 +164,8 @@ export async function setBugReportStatus(id: string, status: string): Promise<{ 
     .eq("id", id)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!upd?.length) return { ok: false, error: "That report couldn't be updated — it may have been removed." };
+  if (!upd?.length) {
+    return { ok: false, error: "Couldn't mark that one: it's another company's report, and the update that allows it isn't in yet." };
+  }
   return { ok: true };
 }

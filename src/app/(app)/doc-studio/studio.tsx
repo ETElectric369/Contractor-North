@@ -16,6 +16,7 @@ import {
   SAMPLE_INVOICE_ITEMS,
   SAMPLE_QUOTE_ITEMS,
   SAMPLE_SITE,
+  SAMPLE_TITLE,
   sampleTotals,
 } from "./sample-data";
 
@@ -363,10 +364,10 @@ export function DocStudio({
             <InvoiceDocument
               co={co}
               template={template}
-              number="INV-061"
+              number="INV-001"
               createdAt={"2026-08-29"}
               dueDate={"2026-09-28"}
-              title="85 Whitney Place — main floor lighting"
+              title={SAMPLE_TITLE}
               description={SAMPLE_DESCRIPTION}
               customer={SAMPLE_CUSTOMER}
               site={SAMPLE_SITE}
@@ -385,10 +386,10 @@ export function DocStudio({
               co={co}
               template={template}
               docLabel="Estimate"
-              number="E-030"
+              number="E-001"
               createdAt={"2026-08-29"}
               validUntil={"2026-09-28"}
-              title="85 Whitney Place — main floor lighting"
+              title={SAMPLE_TITLE}
               description={SAMPLE_DESCRIPTION}
               customer={SAMPLE_CUSTOMER}
               site={SAMPLE_SITE}

@@ -266,6 +266,24 @@ describe("parseCedInvoice - a whole invoice off the portal", () => {
     expect(invoice?.discountBy).toBe("2026-07-10");
   });
 
+  // THE PAPER'S DAY, NOT CED'S (Wave 0): another supplier's terms name another day, or none.
+  it("takes the claim-by day from the paper's own words", () => {
+    const on15th = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 15TH"));
+    expect(on15th.ok && on15th.invoice.discountBy).toBe("2026-07-15");
+    const on1st = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 1ST"));
+    expect(on1st.ok && on1st.invoice.discountBy).toBe("2026-07-01");
+    // A day past the month's end is its last day (July has 31; "the 31st" of a 30-day month is the 30th).
+    const mayPaper = parseCedInvoice(TIMBER_CREEK.replace("PAID BY THE 10TH", "PAID BY THE 31ST").replace("INVOICE DATE\n06/15/2026", "INVOICE DATE\n05/15/2026"));
+    expect(mayPaper.ok && mayPaper.invoice.invoiceDate).toBe("2026-05-15");
+    expect(mayPaper.ok && mayPaper.invoice.discountBy).toBe("2026-06-30");
+    // Terms with no day of the month: the discount stands, with no date invented for it.
+    const within = parseCedInvoice(
+      TIMBER_CREEK.replace("IF PAID BY THE 10TH\nOF THE MONTH FOLLOWING PURCHASE", "IF PAID WITHIN 10 DAYS"),
+    );
+    expect(within.ok && within.invoice.discountAmount).toBe(1.38);
+    expect(within.ok && within.invoice.discountBy).toBeNull();
+  });
+
   it("does not claim the supplier called it paid when the supplier did not", () => {
     expect(invoice?.paidInFull).toBe(false);
   });
@@ -343,7 +361,7 @@ describe("the self-check refuses rather than half-reads", () => {
     const result = parseCedInvoice("a photo of a receipt, some words, no invoice number anywhere");
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatch(/no CED invoice number/i);
+    expect(result.error).toMatch(/no supplier invoice number/i);
     expect(parseCedDocuments("nothing here")).toEqual([]);
   });
 });

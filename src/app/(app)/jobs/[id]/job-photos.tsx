@@ -21,6 +21,13 @@ interface Doc {
   size_bytes: number | null;
   created_at: string;
   signedUrl: string | null;
+  uploaded_by?: string | null;
+}
+
+/** deleteDocument's rule, said before the tap: staff may delete any photo, anyone else only the
+ *  ones they uploaded. A trash that would only be refused doesn't render (Wave 0). */
+export function canDeletePhoto(d: { uploaded_by?: string | null }, viewerId: string | null, viewerIsStaff: boolean): boolean {
+  return viewerIsStaff || (!!viewerId && d.uploaded_by === viewerId);
 }
 
 const isImage = (d: Doc) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
@@ -51,10 +58,15 @@ export function JobPhotos({
   docs,
   sharedIds = null,
   staleIds = [],
+  viewerId = null,
+  viewerIsStaff = false,
 }: {
   orgId: string;
   jobId: string;
   docs: Doc[];
+  /** Who is looking, for the per-photo delete rule (canDeletePhoto). */
+  viewerId?: string | null;
+  viewerIsStaff?: boolean;
   sharedIds?: string[] | null;
   /** Shown photos whose file changed after they were shown: the customer's page hides them. */
   staleIds?: string[];
@@ -207,14 +219,16 @@ export function JobPhotos({
                   <img src={d.signedUrl} alt={d.name} className="h-full w-full object-cover" />
                 )}
               </button>
-              <button
-                onClick={() => remove(d)}
-                disabled={pending}
-                className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                title="Delete"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              {canDeletePhoto(d, viewerId, viewerIsStaff) && (
+                <button
+                  onClick={() => remove(d)}
+                  disabled={pending}
+                  className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
               {sharedIds && d.category === "Photo" && shown.has(d.id) && stale.has(d.id) ? (
                 <div className="absolute inset-x-1 bottom-1 space-y-1">
                   <button

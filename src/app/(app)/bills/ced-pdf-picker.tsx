@@ -95,7 +95,7 @@ export function CedPdfPicker({ orgId }: { orgId: string }) {
         }}
       />
       <Button onClick={() => inputRef.current?.click()} disabled={busy}>
-        {busy ? <Loader2 className="animate-spin" /> : <FileText />} {busy ? "Reading The PDFs…" : "Choose CED PDFs"}
+        {busy ? <Loader2 className="animate-spin" /> : <FileText />} {busy ? "Reading The PDFs…" : "Choose Supplier PDFs"}
       </Button>
       {said && (
         <p

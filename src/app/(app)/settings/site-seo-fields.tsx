@@ -169,7 +169,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
           id="seo-area"
           value={areaSeo}
           onChange={(e) => setAreaSeo(e.target.value)}
-          placeholder="Truckee, Tahoe City, Sierraville, Graeagle, Chilcoot, Quincy"
+          placeholder="e.g. Springfield, Riverside, Lakeview, Fairview"
         />
         <p className="mt-1 text-xs text-slate-500">
           Separate with commas. This is what Google reads — it should match the service area on your Business Profile.
@@ -195,7 +195,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       </div>
       <div>
         <Label htmlFor="seo-area">Service area</Label>
-        <Input id="seo-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
+        <Input id="seo-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Springfield & nearby towns" />
       </div>
       {/* Staff-only (collaborators can't write these keys). Whether to publish an address, and how
           much of one, is the OWNER'S decision — a shop or a yard is worth listing in full; a truck

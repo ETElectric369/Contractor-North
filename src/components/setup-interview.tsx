@@ -182,7 +182,7 @@ export function SetupInterview({
             answers={answers}
             hint={open[0]?.ask}
             label="Tell Nort about your business"
-            placeholder="I'm Justin Vivian, general contractor out of Truckee — I sub out electrical and plumbing, I cover Nevada County, and I bill 150 an hour."
+            placeholder="I'm Sam Rivera, a general contractor — I sub out electrical and plumbing, I cover the whole county, and I bill 150 an hour."
             onFilled={(next) => {
               setAnswers(next);
               setDirty(true);

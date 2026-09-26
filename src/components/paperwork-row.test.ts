@@ -125,13 +125,13 @@ describe("PaperworkRow", () => {
         kind: "supplier_invoice",
         supplierInvoiceId: "si-1",
         invoiceNumber: "8802-1108330",
-        sentence: "On the CED documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.",
+        sentence: "On the supplier documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.",
       },
     ]);
     expect(html).not.toContain("Same Purchase: Tie Them");
     expect(html).not.toContain("Different Purchase");
-    expect(html).toContain("File It And Link To CED 8802-1108330");
-    expect(html).toContain("On the CED documents list with no bill yet");
+    expect(html).toContain("File It And Link To 8802-1108330");
+    expect(html).toContain("On the supplier documents list with no bill yet");
   });
 
   it("a bucket a model liked is a guess too: offered, never picked", () => {
@@ -186,8 +186,8 @@ describe("PaperworkRow", () => {
       kind: "job_document",
       proposal: { ced: { numbers: ["8802-1101363"], total: 162.45, kinds: ["invoice"], text: "x", name: "a.pdf" } },
     });
-    expect(html).toContain("Add To CED Documents");
-    expect(html).toContain("CED document, 8802-1101363, $162.45");
+    expect(html).toContain("Add To Supplier Documents");
+    expect(html).toContain("Supplier document, 8802-1101363, $162.45");
   });
 
   // ── Paper A (audit v994): PO "TOOLS", the reader's bucket, read before marks were kept ──────

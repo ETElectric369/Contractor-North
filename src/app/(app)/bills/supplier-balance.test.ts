@@ -525,10 +525,28 @@ describe("what one open document holds", () => {
     expect(supplierSaysBalance(CED, TODAY)?.creditMemos).toBe(2);
   });
 
-  it("never lets a negative discount amount ADD to a cheque", () => {
+  it("never lets a negative discount amount on an INVOICE add to a cheque", () => {
     const odd = [open("1106999", 100, { discountAmount: -5, discountBy: "2026-10-10" })];
     expect(supplierNetIfPaidBy(odd, "2026-10-10", TODAY).net).toBe(100);
     expect(supplierSaysBalance(odd, TODAY)?.discountStillClaimable).toBe(0);
+  });
+
+  // The supplier counts a credit memo's printed negative discount in its own Total Balance (CED's
+  // open tab of 9/26: -$0.47 on 8802-1108648), so the app does too: model B is the supplier's word.
+  it("counts a credit memo's negative discount, the way the supplier does", () => {
+    const docs = [
+      open("1108534", 873.66, { discountAmount: 10.02, discountBy: "2026-10-10" }),
+      open("1108648", -51.58, { kind: "credit_memo", discountAmount: -0.47, discountBy: "2026-10-10" }),
+    ];
+    expect(supplierNetIfPaidBy(docs, "2026-10-10", TODAY)).toMatchObject({ gross: 822.08, discount: 9.55, net: 812.53, forfeited: 0 });
+    const says = supplierSaysBalance(docs, TODAY)!;
+    expect(says).toMatchObject({ discountStillClaimable: 9.55, nextDiscountBy: "2026-10-10", nextDiscountAmount: 9.55, netIfPaidToday: 812.53 });
+    // Once the day has gone, a memo's take-back is not discount he lost.
+    expect(supplierSaysBalance(docs, "2026-10-11")!.discountExpiredUnclaimed).toBe(10.02);
+    // A memo's take-back alone never names a day to pay by.
+    const memoOnly = supplierSaysBalance([docs[1]], TODAY)!;
+    expect(memoOnly.nextDiscountBy).toBeNull();
+    expect(memoOnly.nextDiscountAmount).toBe(0);
   });
 });
 

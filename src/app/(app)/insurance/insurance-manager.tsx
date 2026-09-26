@@ -31,7 +31,9 @@ async function uploadCertificate(orgId: string, file: File): Promise<string> {
   return path;
 }
 
-export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; orgId: string }) {
+/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render;
+ *  the certificate View links stay (a tech on site may need to show one). */
+export function InsuranceManager({ items, orgId, canEdit }: { items: InsuranceItem[]; orgId: string; canEdit: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -136,12 +138,14 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <ImportDocsButton orgId={orgId} page="Insurance" />
-        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Policy</Button>
-      </div>
+      {canEdit && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ImportDocsButton orgId={orgId} page="Insurance" />
+          <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Policy</Button>
+        </div>
+      )}
 
-      {adding && (
+      {canEdit && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -177,7 +181,7 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
 
       {items.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
-          Track your policies — workers' comp, general liability, auto — with renewal alerts so coverage never lapses.
+          Track your policies — workers&apos; comp, general liability, auto — and when each one renews.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -195,15 +199,17 @@ export function InsuranceManager({ items, orgId }: { items: InsuranceItem[]; org
                       {c.type}{c.policy_number ? ` · #${c.policy_number}` : ""}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                    <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this policy?" done="Policy deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
-                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
+                      <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this policy?" done="Policy deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <Badge tone={b.tone}>{b.label}</Badge>
                   {c.expires_date && <span>Renews {formatDate(c.expires_date)}</span>}
-                  {Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
+                  {canEdit && Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
                   {c.signedUrl && (
                     <a href={c.signedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
                       <FileText className="h-3.5 w-3.5" /> Certificate

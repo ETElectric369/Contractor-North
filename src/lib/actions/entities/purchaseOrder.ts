@@ -13,8 +13,8 @@ export const purchaseOrderActions: Record<string, ActionDef> = {
     group: "purchaseorder",
     label: "Edit purchase order",
     description:
-      "Edit a PURCHASE ORDER's header — its vendor and/or the job it's charged to. Resolve the PO's id first and pass ONLY the fields to change: vendor (blank falls back to CED) and/or job_id (resolve with list_jobs; an explicit null clears it, omitting it leaves it alone). Reversible header edit.",
-    // A true PATCH: the old defaults reset the vendor to CED and UNLINKED the job on
+      "Edit a PURCHASE ORDER's header — its vendor and/or the job it's charged to. Resolve the PO's id first and pass ONLY the fields to change: vendor (blank leaves the PO with no vendor) and/or job_id (resolve with list_jobs; an explicit null clears it, omitting it leaves it alone). Reversible header edit.",
+    // A true PATCH: the old defaults reset the vendor and UNLINKED the job on
     // any edit that didn't repeat them. Omitted = untouched.
     input: z.object({
       id: z.string(),

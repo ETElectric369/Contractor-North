@@ -150,7 +150,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
       </div>
       <div>
         <Label htmlFor="sp-cred">Below-contact lines (one per line)</Label>
-        <Textarea id="sp-cred" rows={3} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder={"Serving Tahoe · Truckee · Sierra Valley, CA\nLicensed · Bonded · Insured\nCA C-10 License #1156091"} />
+        <Textarea id="sp-cred" rows={3} value={credentials} onChange={(e) => setCredentials(e.target.value)} placeholder={"e.g. Serving the county and nearby towns\nLicensed · Bonded · Insured\nLicense #000000"} />
       </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}

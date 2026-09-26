@@ -94,7 +94,7 @@ export function DocHeader({
           <Mark co={co} onColor />
           <div>
             <div className="text-xl font-bold">{co.name}</div>
-            <div className="text-xs text-white/80">{co.tagline}</div>
+            {co.tagline && <div className="text-xs text-white/80">{co.tagline}</div>}
             <ContactBlock co={co} accent="rgba(255,255,255,0.6)" onColor />
           </div>
         </div>
@@ -148,7 +148,7 @@ export function DocHeader({
         <Mark co={co} />
         <div>
           <div className="text-xl font-bold text-slate-900">{co.name}</div>
-          <div className="text-xs text-slate-500">{co.tagline}</div>
+          {co.tagline && <div className="text-xs text-slate-500">{co.tagline}</div>}
           <ContactBlock co={co} accent={co.brand} />
         </div>
       </div>

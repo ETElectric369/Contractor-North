@@ -27,6 +27,7 @@ import {
   isUsableJobName,
   sayKind,
   shortSupplierName,
+  supplierPaperLine,
   type SupplierInvoiceRow as SupplierDocumentRow,
 } from "./supplier-reconcile";
 import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
@@ -37,6 +38,7 @@ import { formatCurrency, formatDateShort } from "@/lib/utils";
 import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
+import { BooksBeginLine } from "./books-begin-line";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import { openListViews } from "./open-list-core";
 import type { OpenListView } from "@/lib/supplier-open-list";
@@ -157,10 +159,12 @@ export default async function BillsPage({
   } = await supabase.auth.getUser();
   const { data: profile } = await supabase
     .from("profiles")
-    .select("org_id")
+    .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   const orgId = profile?.org_id ?? "";
+  // Company settings (books_begin among them) are owner/admin writes (organizations_update).
+  const canChangeSettings = profile?.role === "owner" || profile?.role === "admin";
 
   // EVERYTHING THIS PAGE NEEDS, IN ONE BREATH. The supplier reads (0270) join the existing five
   // rather than hanging off them, because a serial hop added to a page read is the phone-lag class
@@ -276,7 +280,8 @@ export default async function BillsPage({
     // The items' names, for the same sentence (a view embed is PostgREST's guess; this is not).
     supabase.from("inventory_items").select("id, name").limit(5000),
   ]);
-  const today = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+  const orgTz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const today = todayStrInTz(orgTz);
 
   // Sort each bill's embedded line items by sort_order for display.
   const billsWithLines = (bills ?? []).map((b: any) => ({
@@ -647,11 +652,13 @@ export default async function BillsPage({
   // His jobs, with enough on each to tell five Rhodesias apart.
   const reconcileJobs = reconcileJobsOf((jobs ?? []) as any[]);
 
-  // THE DAY HIS BOOKS BEGIN (booksBeginOn): the line Erik named for ET ("june 8 is good": the day
-  // ET made its first job in North), else the earliest scanned bill. Purchases the supplier made
+  // THE DAY THE COMPANY'S BOOKS BEGIN (booksBeginOn): the day it named (settings.books_begin; ET's
+  // is June 8, "june 8 is good"), else the earliest scanned bill. Purchases the supplier made
   // before it are counted and named, never nagged about - nothing here could have recorded them.
   // My Day's cards read the same function.
-  const recordsSince = booksBeginOn(orgId, liveBills);
+  const orgSettingsRaw = (orgRow as { settings?: unknown } | null)?.settings;
+  const recordsSince = booksBeginOn(orgSettingsRaw, liveBills);
+  const booksNamed = supplierPaperLine(orgSettingsRaw);
 
   // ── A READ THAT FAILED SAYS SO (audit v1018, class 2) ───────────────────────────────────────
   // Every read the supplier half of this page leans on. Any one of them failing used to read as
@@ -694,6 +701,7 @@ export default async function BillsPage({
           jobs: reconcileJobs,
           accounts: ((accountRows ?? []) as any[]).map((a) => ({ id: String(a.id), name: a.name ?? null })),
           today,
+          tz: orgTz,
         });
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
@@ -995,7 +1003,7 @@ export default async function BillsPage({
     const account = accountNameOf.get(String(d.supplierAccountId ?? "")) ?? "";
     const supplier = shortSupplierName(account);
     const creditWaiting = waitingOnCredit.get(d.id);
-    const stampWait = !paperFeed && d.supplierAccountId ? creditWait(d, today) : null;
+    const stampWait = !paperFeed && d.supplierAccountId ? creditWait(d, today, orgTz) : null;
     const waitSince = creditWaiting?.waitingCredit?.since ?? (stampWait && !stampWait.overdue ? stampWait.since : null);
     const where = waitingPapers.has(d.id)
       ? "waiting for you under Needs You"
@@ -1138,7 +1146,8 @@ export default async function BillsPage({
           <h2 className="text-sm font-semibold text-slate-900">
             Needs You{paperFeed.cards.length ? ` (${paperFeed.cards.length})` : ""}
           </h2>
-          <p className="mb-3 mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
+          <p className="mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
+          <BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />
           <SupplierPaperCards
             feed={paperFeed}
             emptyLabel={
@@ -1275,7 +1284,7 @@ export default async function BillsPage({
               <div className="mt-1 space-y-3">
                 <WhyFold label="What Happens?">
                   <p>
-                    Pick the PDFs from the CED payment portal, as many as you like. Each is checked against its own
+                    Pick the PDFs from your supplier&apos;s payment portal, as many as you like. Each is checked against its own
                     arithmetic before it is saved; anything that does not add up is named and left out. Loading the
                     same download twice changes nothing, and the job you filed a document on is never touched.
                   </p>
@@ -1298,7 +1307,7 @@ export default async function BillsPage({
                       id="ced-import-text"
                       name="text"
                       rows={8}
-                      placeholder={"INVOICE NO.\n8802-1103832\nINVOICE DATE\n07/22/2026..."}
+                      placeholder={"INVOICE NO.\n0000-0000000\nINVOICE DATE\n01/15/2026..."}
                       className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                     />
                     <FormSubmit>Import Documents</FormSubmit>

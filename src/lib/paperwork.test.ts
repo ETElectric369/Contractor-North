@@ -58,7 +58,7 @@ describe("describePaper: one line, what was read", () => {
   it("CED documents found in a PDF", () => {
     expect(
       describePaper(receipt({ doc_type: "supplier_documents", proposal: { ced: { numbers: ["8802-1108330"], total: 653.25, kinds: ["invoice"], text: "x", name: "a.pdf" } } })),
-    ).toBe("CED document, 8802-1108330, $653.25");
+    ).toBe("Supplier document, 8802-1108330, $653.25");
   });
 });
 
@@ -669,7 +669,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
     );
     expect(m).toEqual([expect.objectContaining({ kind: "supplier_invoice", supplierInvoiceId: "si-1", invoiceNumber: "8802-1108330" })]);
     // Not a cost, so nothing to tie to: File It links the bill it makes.
-    expect(m[0].sentence).toBe("On the CED documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.");
+    expect(m[0].sentence).toBe("On the supplier documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.");
   });
 
   it("a CED document a bill already covers IS that bill's purchase: offered as a tie to the covering bill", () => {
@@ -689,7 +689,7 @@ describe("findSameNumber: the same purchase already on the books", () => {
       aliases,
     );
     expect(m).toEqual([expect.objectContaining({ kind: "bill", billId: "bill-7", jobId: "job-046" })]);
-    expect(m[0].sentence).toBe("Already on the books: CED document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+    expect(m[0].sentence).toBe("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
   });
 
   it("a covering bill that also carries the number is found once, not twice", () => {

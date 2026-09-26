@@ -20,6 +20,9 @@ import {
   type OpenList,
   type OpenListPaper,
 } from "./supplier-open-list";
+import { r2, supplierNetIfPaidBy, supplierSaysBalance } from "@/app/(app)/bills/supplier-balance";
+import { supplierPayDue } from "@/app/(app)/bills/supplier-pay-due";
+import type { SupplierInvoiceRow } from "@/app/(app)/bills/supplier-reconcile";
 
 /**
  * FIXTURE 1: a CED portal Open tab, 2026-09-26 (account TR-34426, Total Balance $3,273.94, 11
@@ -209,6 +212,26 @@ describe("the CED portal's Open tab (fixture 1)", () => {
     const again = reconcileOpenList(cedList(), after, ACCOUNT);
     expect(again.nothing).toBe(true);
     expect(again.totals.after).toBe(3304.73);
+  });
+
+  // THE PAY CARD LANDS ON CED'S TOTAL BALANCE TO THE CENT (Wave 0): the supplier counts the -$0.47
+  // on credit memo 8802-1108648, and the app used to floor it at 0 and say $3,273.47.
+  it("puts the Pay card on CED's own Total Balance once the list is applied", () => {
+    const papers = papersOf();
+    const plan = reconcileOpenList(cedList(), papers, ACCOUNT);
+    const closedIds = new Set(plan.close.map((c) => c.id));
+    const rows: SupplierInvoiceRow[] = [
+      ...papers.map((p) => ({ ...p, kind: p.kind as SupplierInvoiceRow["kind"], jobId: null, jobName: null, billCount: 0, ...(closedIds.has(p.id) ? { closed: true, openBalance: 0 } : {}) })),
+      ...plan.add.map((a, i) => ({
+        id: `n${i}`, invoiceNumber: a.number, kind: a.row.kind as SupplierInvoiceRow["kind"], invoiceDate: a.row.invoiceDate, dueDate: a.row.dueDate, total: a.row.openBalance ?? 0,
+        openBalance: a.row.openBalance, closed: false, discountAmount: a.row.discountAmount, discountBy: a.row.discountBy, jobNameRaw: a.row.po, jobId: null, jobName: null, billCount: 0, supplierAccountId: ACCOUNT,
+      })),
+    ];
+    expect(supplierNetIfPaidBy(rows, "2026-10-10", "2026-09-26")).toMatchObject({ gross: 3304.73, discount: 30.79, net: 3273.94 });
+    expect(supplierSaysBalance(rows, "2026-09-26")).toMatchObject({ gross: 3304.73, discountStillClaimable: 30.79, netIfPaidToday: 3273.94 });
+    const [due] = supplierPayDue({ rows, accounts: [{ id: ACCOUNT, name: "Consolidated Electrical Distributors" }], today: "2026-09-26" });
+    expect(due).toMatchObject({ owed: 3304.73, saves: 30.79, invoices: 6, payBy: "2026-10-10" });
+    expect(r2(due.owed - due.saves)).toBe(3273.94);
   });
 });
 

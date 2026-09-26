@@ -960,7 +960,7 @@ export function SuppliersCard({
                 id="acct-number"
                 value={editNumber}
                 onChange={(e) => setEditNumber(e.target.value)}
-                placeholder="TR-34426"
+                placeholder="e.g. AB-12345"
               />
               <p className="mt-1 text-xs text-slate-400">
                 Theirs, not yours. It is how a payment you sent gets matched when they ask about it.
@@ -972,7 +972,7 @@ export function SuppliersCard({
                 id="acct-branch"
                 value={editBranch}
                 onChange={(e) => setEditBranch(e.target.value)}
-                placeholder="8802 Truckee"
+                placeholder="e.g. 0101 Downtown"
               />
               <p className="mt-1 text-xs text-slate-400">
                 Which counter this account is yours at. The money rolls up here whichever branch a ticket came from.

@@ -1,8 +1,9 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES, KIND_STREAM } from "./types";
+import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
 import { bucketInspections } from "@/lib/inspections";
+import { isPlatformAdmin } from "@/lib/platform-admin";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -275,14 +276,19 @@ async function buildActionItems(ctx: {
           .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
           .limit(100)
       : empty,
-    // Open bug reports — the owner's "is CIB on watch for bugs" surface. Staff only.
+    // Open bug reports — North's own triage, not a company's (Wave 0): only a platform admin
+    // (0176) gets the rollup. Asked only for staff, so a tech's inbox never pays the round trip.
     isStaff
-      ? supabase
-          .from("bug_reports")
-          .select("id, note, page, created_at")
-          .eq("status", "open")
-          .order("created_at", { ascending: false })
-          .limit(50)
+      ? isPlatformAdmin(supabase).then(async (admin): Promise<{ data: any[] | null }> =>
+          admin
+            ? await supabase
+                .from("bug_reports")
+                .select("id, note, page, created_at")
+                .eq("status", "open")
+                .order("created_at", { ascending: false })
+                .limit(50)
+            : { data: [] },
+        )
       : empty,
     // ── The end-of-day money-leak sweep feeders (staff only) ──
     // Every open clock, whatever its age — a handful of rows at most; the stray
@@ -512,7 +518,7 @@ async function buildActionItems(ctx: {
       // very same screen — tapping an inspection here still dumped you on the calendar
       // grid to hunt for the row you just tapped. Open the appointment itself.
       href: `/appointments/${a.id}`,
-      affordances: AFFORDANCES.appointment,
+      affordances: appointmentAffordances(isStaff),
     });
   }
 

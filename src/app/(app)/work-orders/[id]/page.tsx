@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { Briefcase, User, Calendar, Printer } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { listActiveTechs } from "@/lib/schedule-options";
 import { Card, CardContent } from "@/components/ui/card";
@@ -37,7 +38,10 @@ export default async function WorkOrderDetailPage({
   if (!wo) notFound();
   const w = wo as any;
 
-  const [{ data: jobs }, { data: techs }, tz] = await Promise.all([
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const [{ data: jobs }, { data: techs }, tz, { data: me }] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -47,7 +51,10 @@ export default async function WorkOrderDetailPage({
     listActiveTechs(supabase),
     // The org's clock, for the Scheduled For box and its display (audit v994 TZ2).
     orgTimezone(supabase),
+    supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
   ]);
+  // Status, Edit and Delete are requireStaff: a tech reads the work order and prints it.
+  const viewerIsStaff = isStaffRole((me as { role?: string } | null)?.role);
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -74,8 +81,8 @@ export default async function WorkOrderDetailPage({
           >
             <Printer className="h-4 w-4 shrink-0" /> Print / PDF
           </Link>
-          <WoStatusControl id={w.id} status={w.status} />
-          <SectionActionsMenu
+          {viewerIsStaff && <WoStatusControl id={w.id} status={w.status} />}
+          {viewerIsStaff && <SectionActionsMenu
             tree={workOrderSectionTree(
               w.wo_number,
               { quoteId: (w as any).quote_id ?? null },
@@ -86,7 +93,7 @@ export default async function WorkOrderDetailPage({
             )}
           >
             <WoEditButton menuItem wo={w} jobs={jobs ?? []} techs={techs ?? []} scheduledLocal={tzLocalInputValue(w.scheduled_for, tz)} />
-          </SectionActionsMenu>
+          </SectionActionsMenu>}
         </div>
       </div>
 

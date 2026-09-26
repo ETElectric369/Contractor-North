@@ -55,7 +55,6 @@ import { ReviewsManager } from "./reviews-manager";
 import { PostsManager } from "./posts-manager";
 import { PagesManager } from "./pages-manager";
 import { CollaboratorsManager } from "./collaborators-manager";
-import { AiStatus } from "./ai-status";
 import { QuotePlaybookForm } from "./quote-playbook-form";
 import { AvatarUpload } from "./avatar-upload";
 import { CodeTemplatesManager } from "./code-templates-manager";
@@ -661,7 +660,7 @@ export default async function SettingsPage({
                     )}
                   </div>
                 ) : (
-                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t configured yet. Add your Stripe keys (STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET) to enable subscriptions.</p>
+                  <p className="mt-3 text-sm text-slate-400">Billing isn&apos;t turned on yet.</p>
                 )}
               </Section>
             </div>
@@ -841,14 +840,17 @@ export default async function SettingsPage({
           ),
         },
         // "Connections" — everything that talks to something outside this app. QuickBooks joins
-        // the AI key and the calendar: it was under Money, but connecting an accounting login is
-        // the same errand as connecting a calendar, not the same errand as setting a tax rate.
+        // the calendar: it was under Money, but connecting an accounting login is the same errand
+        // as connecting a calendar, not the same errand as setting a tax rate. NO DEVELOPER TEXT
+        // (Wave 0): QuickBooks shows only once North itself can connect to it, and the AI key's
+        // status is North's business, so it lives on the platform page (/bugs), not here.
         {
           id: "integrations",
           label: "Connections",
           icon: Plug,
           content: (
             <div className="space-y-6">
+              {qboConfigured() && (
               <Section title="QuickBooks">
                 {qbo === "connected" && (
                   <div className="mb-3 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">Connected to QuickBooks Online.</div>
@@ -862,9 +864,7 @@ export default async function SettingsPage({
                 {qbo_error && (
                   <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{qbo_error}</div>
                 )}
-                {!qboConfigured() ? (
-                  <p className="text-sm text-slate-400">Not configured yet. Add QBO_CLIENT_ID, QBO_CLIENT_SECRET, and QBO_ENVIRONMENT to enable syncing.</p>
-                ) : qboConn?.realm_id ? (
+                {qboConn?.realm_id ? (
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge tone="green">Connected</Badge>
                     <span className="text-sm text-slate-500">Send invoices to QuickBooks from any invoice page.</span>
@@ -895,6 +895,7 @@ export default async function SettingsPage({
                   </div>
                 )}
               </Section>
+              )}
               <Section title="Google Calendar">
                 <GcalCard
                   configured={gcalConfigured()}
@@ -909,12 +910,6 @@ export default async function SettingsPage({
                   }
                   lastSyncedAt={(gcalSync as { last_synced_at?: string | null } | null)?.last_synced_at ?? null}
                   needsReauth={connectionNeedsReauth(gcalSync)}
-                />
-              </Section>
-              <Section title="AI assistant">
-                <AiStatus
-                  configured={!!process.env.ANTHROPIC_API_KEY}
-                  model={process.env.ANTHROPIC_MODEL || "claude-opus-4-8"}
                 />
               </Section>
             </div>

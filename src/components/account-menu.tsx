@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { LogOut, Settings } from "lucide-react";
+import { Bug, LogOut, Settings } from "lucide-react";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { ShareQrButton } from "@/components/share-qr-button";
@@ -36,9 +36,12 @@ import type { Profile } from "@/lib/types";
 export function AccountMenu({
   profile,
   lang,
+  platformAdmin = false,
 }: {
   profile: Profile | null;
   lang?: string;
+  /** North's own team only: Bug Watch, every company's reports and the AI status (Wave 0). */
+  platformAdmin?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   // The TOUR opened it, not the user. While that's true, outside-clicks must not close it: the
@@ -158,6 +161,15 @@ export function AccountMenu({
           >
             <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
           </Link>
+          {platformAdmin && (
+            <Link
+              href="/bugs"
+              onClick={() => setOpen(false)}
+              className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+            >
+              <Bug className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Bug Watch
+            </Link>
+          )}
           <div className="relative z-10 my-1 border-t border-white/50" />
           <form action={signOutAfterUnbindingPush}>
             <SignOutButton />

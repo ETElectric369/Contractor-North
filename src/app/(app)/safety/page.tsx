@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
 import { SafetyManager } from "./safety-manager";
 
@@ -6,6 +7,12 @@ export const dynamic = "force-dynamic";
 
 export default async function SafetyPage() {
   const supabase = await createClient();
+  // A tech reads; every write here is requireStaff, so its doors don't render for him.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const canEdit = isStaffRole(me?.role);
   const [{ data: records }, { data: employees }, { data: jobs }] = await Promise.all([
     supabase
       .from("safety_records")
@@ -19,7 +26,7 @@ export default async function SafetyPage() {
   return (
     <div>
       <PageHeader title="Safety / OSHA" description="Log incidents (OSHA recordables) and toolbox-talk safety meetings." />
-      <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} />
+      <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} canEdit={canEdit} />
     </div>
   );
 }

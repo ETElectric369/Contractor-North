@@ -16,12 +16,13 @@ import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 // /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
 // user on a list and make them find the + again.
 // staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
-// was silently redirected to /planner by the staff gate; techs create tasks + jobs.
-const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean }[] = [
+// was silently redirected to /planner by the staff gate. Techs create tasks; a job is made by
+// the office (createJob is requireStaff, so a tech's New Job failed on Save).
+export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean }[] = [
   { label: "New Task", href: "/tasks?new=1", icon: ListTodo },
   { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
   { label: "New Customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
-  { label: "New Job", href: "/jobs?new=1", icon: Briefcase },
+  { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
   { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
   { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
   { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },

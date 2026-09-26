@@ -1200,10 +1200,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         .insert({ org_id: ctx.orgId, bill_id: billId, supplier_invoice_id: si.id })
         .select("id");
       if (linkErr && String((linkErr as { code?: string }).code ?? "") === "23505")
-        return backToTray(`CED ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
+        return backToTray(`Supplier document ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
       if (linkErr || !linked?.length) {
         reportError("organize:fileItem.link", linkErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, supplierInvoiceId: si.id });
-        linkNote = ` The link to CED ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
+        linkNote = ` The link to supplier document ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
       }
     }
   }
@@ -1241,7 +1241,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   revalidatePath("/inventory");
-  const linkedSaid = linkTo.length && !linkNote ? ` Linked to CED ${linkTo.map((l) => l.number).join(", ")}.` : "";
+  const linkedSaid = linkTo.length && !linkNote ? ` Linked to supplier document ${linkTo.map((l) => l.number).join(", ")}.` : "";
   if (shelfSaid) return { ok: true, message: `Filed on the shop shelf.${shelfSaid}${linkedSaid}${linkNote}` };
   return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
@@ -1379,7 +1379,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
       (keptLines ? keptChoicesSaid(keptLines) : "") +
       papersBackSaid(torn?.papersBack ?? []) +
-      (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""),
+      (kept.length ? ` ${kept.join(", ")} stayed on the supplier documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""),
   };
 }
 
@@ -1425,7 +1425,7 @@ export async function tiePaperwork(id: string, target: { billId: string }): Prom
   revalidatePath("/organize");
   revalidatePath("/bills");
   const against = hit.sentence
-    .replace(/^(Maybe )?[Aa]lready on the (books|CED documents list): /, "Filed against ")
+    .replace(/^(Maybe )?[Aa]lready on the (books|CED documents list|supplier documents list): /, "Filed against ")
     .replace(/ It carries this number, but the supplier is spelled another way.*$/, "");
   return { ok: true, message: `Tied. ${against} Nothing new was added.` };
 }
@@ -1497,7 +1497,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   const said =
     (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +
     papersBackSaid(torn.papersBack) +
-    (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
+    (kept.length ? ` ${kept.join(", ")} stayed on the supplier documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
     (listPutBack
       ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
       : "");

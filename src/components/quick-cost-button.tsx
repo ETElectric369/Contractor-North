@@ -655,7 +655,7 @@ export function QuickCostButton({
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
             <Label htmlFor="qc-supplier">Paid to / supplier{receipt ? "" : " *"}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? "Nort reads it off the receipt" : "e.g. CED, Home Depot"} autoFocus={!snapTop} disabled={costSaved || useReader} />
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? "Nort reads it off the receipt" : "e.g. Main Street Supply"} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

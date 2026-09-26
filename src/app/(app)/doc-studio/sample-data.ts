@@ -1,8 +1,9 @@
 /**
- * SAMPLE PAPER for the Document studio — realistic rows (the shape of a real ET Electric
- * invoice: labor by name, fixture bundles with quantities, the supplies-&-tax remainder) so
- * what Erik styles is what his documents actually look like, not lorem. Pure data, no fetch:
- * the studio must render instantly and identically for every org.
+ * SAMPLE PAPER for the Document studio — realistic rows (the shape of a real invoice: labor by
+ * person, material lines with quantities, the supplies-&-tax remainder) so what a company styles
+ * is what its documents actually look like, not lorem. Pure data, no fetch: the studio must render
+ * instantly and identically for every org, so nothing here names a real crew, customer, supplier
+ * or town (Wave 0: every company's staff sees this page; the letterhead is already its own).
  */
 
 export interface SampleItem {
@@ -25,14 +26,14 @@ const line = (
 ): SampleItem => ({ id, description, quantity, unit, unit_price, line_total: Math.round(quantity * unit_price * 100) / 100, import_source });
 
 export const SAMPLE_INVOICE_ITEMS: SampleItem[] = [
-  line("s1", "Labor — Erik", 17, "hr", 111, "labor"),
-  line("s2", "Labor — Brian", 17, "hr", 75, "labor"),
+  line("s1", "Labor — Lead", 17, "hr", 111, "labor"),
+  line("s2", "Labor — Helper", 17, "hr", 75, "labor"),
   line("s3", "5/6 in RL, 900/1200LM 5CCT D2W", 50, "ea", 32.11, "costs"),
   line("s4", "Adjustable Gimball 5/6 inch LED", 6, "ea", 43.53, "costs"),
   line("s5", "4 in RL 600/900LM 5CCT D2W", 2, "ea", 29.81, "costs"),
   line("s6", "15A 125V GFCI RCPT", 1, "ea", 21.04, "costs"),
   line("s7", "SP 3WY WHT BXD DMR", 1, "ea", 34.95, "costs"),
-  line("s8", "Supplies & tax — Consolidated Electrical Distributors, Inc.", 1, "ea", 264.43, "costs"),
+  line("s8", "Supplies & tax — Your Supplier", 1, "ea", 264.43, "costs"),
 ];
 
 export const SAMPLE_QUOTE_ITEMS: SampleItem[] = [
@@ -51,21 +52,24 @@ export function sampleTotals(items: SampleItem[]) {
 }
 
 export const SAMPLE_CUSTOMER = {
-  name: "Nora & Fermin Arnoso",
+  name: "Sample Customer",
   company_name: null,
-  address: "85 Whitney Place",
+  address: "123 Main St",
   unit: null,
-  city: "Truckee",
-  state: "CA",
-  zip: "96161",
+  city: "Anytown",
+  state: "ST",
+  zip: "12345",
 };
 
+/** The job site the sample paper prints, and its title. */
+export const SAMPLE_TITLE = "123 Main St — main floor";
+
 export const SAMPLE_SITE = {
-  address: "85 Whitney Place",
+  address: "123 Main St",
   unit: null,
-  city: "Truckee",
-  state: "CA",
-  zip: "96161",
+  city: "Anytown",
+  state: "ST",
+  zip: "12345",
   source: "job",
   complete: true,
 } as const;

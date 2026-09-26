@@ -74,7 +74,7 @@ export function paperTypeLabel(t: PaperType | null | undefined): string {
     case "not_a_cost":
       return "Not A Cost";
     case "supplier_documents":
-      return "CED Documents";
+      return "Supplier Documents";
     case "statement":
       return "Statement";
     case "credit_memo":
@@ -401,7 +401,7 @@ export function describePaper(item: PaperItem): string {
   }
   if (p.ced) {
     const n = p.ced.numbers.length;
-    return `CED ${n === 1 ? "document" : `${n} documents`}, ${p.ced.numbers.slice(0, 3).join(", ")}${n > 3 ? "…" : ""}, ${money(p.ced.total)}`;
+    return `Supplier ${n === 1 ? "document" : `${n} documents`}, ${p.ced.numbers.slice(0, 3).join(", ")}${n > 3 ? "…" : ""}, ${money(p.ced.total)}`;
   }
   const t = paperTypeOfItem(item);
   const parts: string[] = [paperTypeLabel(t)];
@@ -428,7 +428,7 @@ export type Readiness =
 export function readinessOf(item: PaperItem): Readiness {
   if (item.status && item.status !== "needs_review") return { state: "filed", sentence: "Filed." };
   const p = proposalOf(item);
-  if (p.ced) return { state: "supplier_documents", sentence: "Ready To File: these go on the CED documents list." };
+  if (p.ced) return { state: "supplier_documents", sentence: "Ready To File: these go on the supplier documents list." };
   if (p.openList) return { state: "open_list", sentence: "Check what it changes, then Apply." };
   if (p.tooBig && !isRead(item)) return { state: "too_big", sentence: "Too big to read: fill it in yourself." };
   if (!isRead(item))
@@ -1128,7 +1128,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
     if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
     if (r.state === "later") return NOT_FILED_YET;
-    if (r.state === "supplier_documents") return "These are CED documents. Press Add To CED Documents, then Record To Shelf from there.";
+    if (r.state === "supplier_documents") return "These are supplier documents. Press Add To Supplier Documents, then Record To Shelf from there.";
     const st = paperTypeOfItem(item);
     if (st !== "receipt" && st !== "bill") return "Only a receipt or a bill can go on the shelf. Change its type in Fix Details if it is one.";
     if (r.state === "needs_total") return r.sentence;
@@ -1139,7 +1139,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   }
   if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
   if (r.state === "later") return NOT_FILED_YET;
-  if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are CED documents. Press Add To CED Documents.";
+  if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are supplier documents. Press Add To Supplier Documents.";
   const t = paperTypeOfItem(item);
   const isCost = t === "receipt" || t === "bill";
   if (isCost && dest.type === "keep") return "This is a cost. File it on a job or as a business cost, or change its type in Fix Details.";
@@ -1252,7 +1252,7 @@ export function findSameNumber(
         kind: "bill",
         billId: cover.id,
         jobId: cover.job_id ?? null,
-        sentence: `Already on the books: CED document ${said}, covered by a bill on ${job}.`,
+        sentence: `Already on the books: supplier document ${said}, covered by a bill on ${job}.`,
       });
       continue;
     }
@@ -1260,7 +1260,7 @@ export function findSameNumber(
       kind: "supplier_invoice",
       supplierInvoiceId: si.id,
       invoiceNumber: si.invoice_number,
-      sentence: `On the CED documents list with no bill yet: ${said}. File It makes the bill and links it to that document.`,
+      sentence: `On the supplier documents list with no bill yet: ${said}. File It makes the bill and links it to that document.`,
     });
   }
   for (const p of books.papers ?? []) {

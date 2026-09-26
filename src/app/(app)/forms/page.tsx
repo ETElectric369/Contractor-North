@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { FileSpreadsheet, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { NewFormButton } from "./new-form-button";
@@ -9,6 +10,12 @@ export const dynamic = "force-dynamic";
 
 export default async function FormsPage() {
   const supabase = await createClient();
+  // A tech fills forms (0195) but can't build one: New Form is staff-only.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const isStaff = isStaffRole(me?.role);
 
   const { data: forms } = await supabase
     .from("forms")
@@ -24,14 +31,14 @@ export default async function FormsPage() {
         title="Forms"
         description="Field forms — safety checklists, inspections, sign-offs."
       >
-        <NewFormButton />
+        {isStaff && <NewFormButton />}
       </PageHeader>
 
       {list.length === 0 ? (
         <EmptyState
           icon={FileSpreadsheet}
           title="No forms yet"
-          description="Build a custom form your crew can fill out in the field — New Form above."
+          description={isStaff ? "Build a custom form your crew can fill out in the field — New Form above." : "The office builds these."}
         />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

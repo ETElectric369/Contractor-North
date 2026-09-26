@@ -359,11 +359,22 @@ export function openBalanceOf(invoice: InvoiceBalanceShape): number {
 const openInvoices = (invoices: SupplierInvoiceRow[] | null | undefined): SupplierInvoiceRow[] =>
   (invoices ?? []).filter((i) => !i?.closed);
 
-/** The discount on one document, or 0 - never a negative, which would ADD to a cheque. */
-const discountOf = (invoice: SupplierInvoiceRow): number => {
+/**
+ * THE DISCOUNT ON ONE DOCUMENT, AS THE SUPPLIER COUNTS IT (Wave 0, 2026-09-26).
+ *
+ * On an invoice it is never a negative, which would ADD to a cheque beyond what the paper says.
+ * On a CREDIT MEMO the supplier prints a negative one: the prompt-pay cut it gave on the goods that
+ * came back, taken back off the credit if he pays by the same day. The supplier is the truth about
+ * its own balance (model B), and its Total Balance counts it: CED's open tab of 9/26 is $3,304.73
+ * gross less $30.79 of discount, -$0.47 on memo 8802-1108648 among it, = $3,273.94. Flooring that
+ * memo at 0 put the Pay card 47 cents under CED's own figure.
+ */
+export const documentDiscount = (invoice: Pick<SupplierInvoiceRow, "kind" | "discountAmount">): number => {
   const d = r2(Number(invoice?.discountAmount) || 0);
-  return d > 0 ? d : 0;
+  if (d > 0) return d;
+  return d < 0 && String(invoice?.kind ?? "") === "credit_memo" ? d : 0;
 };
+const discountOf = documentDiscount;
 
 /**
  * A DISCOUNT ON AN INVOICE A CREDIT MEMO HAS ALREADY REVERSED IS NOT A DISCOUNT (review, 2026-09-19).
@@ -562,6 +573,7 @@ export function supplierSaysBalance(
   let nextDiscountBy: string | null = null;
   let nextDiscountAmount = 0;
   let oldestOpen: string | null = null;
+  const live: { by: string; amount: number }[] = [];
 
   // Discounts on invoices a credit memo has already reversed do not count - see reversedInvoiceIds.
   // Hoisted out of the loop: it was being paired afresh on every iteration (twenty times over his
@@ -579,23 +591,24 @@ export function supplierSaysBalance(
     if (isYmd(invoice.invoiceDate) && (!oldestOpen || invoice.invoiceDate < oldestOpen)) oldestOpen = invoice.invoiceDate;
 
     const discount = reversed.has(String((invoice as { id?: unknown })?.id ?? "")) ? 0 : discountOf(invoice);
-    if (discount <= 0) continue;
+    if (discount === 0) continue;
     if (!isYmd(invoice.discountBy)) {
-      discountUndated = r2(discountUndated + discount);
+      if (discount > 0) discountUndated = r2(discountUndated + discount);
     } else if (invoice.discountBy >= today) {
+      // A credit memo's negative discount rides here too: it is what the supplier takes back off
+      // the credit on the same day, so the cheque it names is the supplier's own figure.
       discountStillClaimable = r2(discountStillClaimable + discount);
-      // The soonest deadline still ahead. Ties add up: two invoices due the same day are one
-      // decision, and naming half of it would be naming the wrong number.
-      if (!nextDiscountBy || invoice.discountBy < nextDiscountBy) {
-        nextDiscountBy = invoice.discountBy;
-        nextDiscountAmount = discount;
-      } else if (invoice.discountBy === nextDiscountBy) {
-        nextDiscountAmount = r2(nextDiscountAmount + discount);
-      }
-    } else {
+      live.push({ by: invoice.discountBy, amount: discount });
+    } else if (discount > 0) {
+      // A memo's take-back that has passed is not money he lost, so only a real discount lands here.
       discountExpiredUnclaimed = r2(discountExpiredUnclaimed + discount);
     }
   }
+  // The soonest deadline still ahead, named by a real discount (a memo's take-back alone is not a
+  // reason to pay by a date). Ties add up, memos on that day included: two invoices due the same
+  // day are one decision, and naming half of it would be naming the wrong number.
+  for (const l of live) if (l.amount > 0 && (!nextDiscountBy || l.by < nextDiscountBy)) nextDiscountBy = l.by;
+  for (const l of live) if (l.by === nextDiscountBy) nextDiscountAmount = r2(nextDiscountAmount + l.amount);
 
   return {
     gross,
@@ -640,10 +653,11 @@ export function supplierNetIfPaidBy(
   for (const invoice of openInvoices(invoices)) {
     gross = r2(gross + openBalanceOf(invoice));
     const amount = reversed.has(String((invoice as { id?: unknown })?.id ?? "")) ? 0 : discountOf(invoice);
-    if (amount <= 0 || !isYmd(invoice.discountBy)) continue;
+    if (amount === 0 || !isYmd(invoice.discountBy)) continue;
     if (isYmd(payBy) && invoice.discountBy >= payBy) {
+      // A credit memo's negative discount counts: the supplier takes it back off the credit.
       discount = r2(discount + amount);
-    } else if (isYmd(today) && invoice.discountBy >= today) {
+    } else if (amount > 0 && isYmd(today) && invoice.discountBy >= today) {
       // Alive today, dead by the day he is thinking of paying. This is the money the late-interest
       // story is made of, and it is worth nothing unless the screen names it before the day passes.
       forfeited = r2(forfeited + amount);
