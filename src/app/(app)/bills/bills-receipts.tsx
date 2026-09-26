@@ -88,10 +88,12 @@ export function BillsReceipts({
 }) {
   const router = useRouter();
   const toast = useToast();
-  // Open straight to a tab from a deep link (the quick-add "New cost" → ?tab=bills).
+  // Open straight to a tab from a deep link (?tab=po, ?tab=receipts). WITHOUT ONE IT OPENS ON
+  // BILLS (Bills plan, Wave A): it opened on Purchase Orders, which is empty for ET, so the one
+  // list he digs in greeted him with "No purchase orders yet".
   const spTab = useSearchParams().get("tab");
   const [tab, setTab] = useState<"po" | "bills" | "receipts">(
-    spTab === "bills" || spTab === "receipts" ? spTab : "po",
+    spTab === "po" || spTab === "receipts" ? spTab : "bills",
   );
   const [pending, start] = useTransition();
 

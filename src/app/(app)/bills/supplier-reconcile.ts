@@ -41,6 +41,36 @@ import {
   reversedPurchaseIds,
 } from "./supplier-balance";
 
+// ── THE CLEAR LINE: WHERE HIS BOOKS IN NORTH BEGIN ──────────────────────────────────────────────
+//
+// "june 8 is good" (Erik, 2026-09-25). ET Electric made its first job in North on 2026-06-08
+// (J-002 Tao Zhu, 03:06 in Truckee). A supplier paper dated BEFORE that day was bought before
+// there was anywhere to put it: it never makes a card and never counts anywhere as needing a
+// person. That drops the two 5/28 Saddle Rd papers already on J-050 and the two 5/28 Rhodesia ones.
+//
+// A CONSTANT FOR ET, NOT DERIVED, AND WHY. "The org's first job" reads as 2026-06-08 tonight, but
+// J-001 is already gone: jobs get deleted, and deleting J-002 would quietly move the line to
+// June 11 and hide three days of real CED paper with nothing said. A date Erik named cannot drift.
+// Another org gets no line (every paper counts) until it names one; per-org is a later wave.
+
+/** ET Electric's org id. */
+const ET_ELECTRIC_ORG_ID = "60195593-2e18-4230-bc8e-7a32d36d038d";
+
+/** The day ET made its first job in North. Supplier paper dated before it never needs a person. */
+export const ET_BOOKS_BEGIN = "2026-06-08";
+
+/** The day an org's books in North begin, or null when it has not named one (every paper counts). */
+export function supplierPaperLine(orgId: string | null | undefined): string | null {
+  return orgId === ET_ELECTRIC_ORG_ID ? ET_BOOKS_BEGIN : null;
+}
+
+/** Dated before the line. An undated paper is never "before": not knowing when is not a reason to
+ *  stop counting money. */
+export function isBeforeLine(date: string | null | undefined, line: string | null | undefined): boolean {
+  const d = String(date ?? "").slice(0, 10);
+  return !!line && /^\d{4}-\d{2}-\d{2}$/.test(d) && d < line;
+}
+
 // ── WHAT WE HOLD ────────────────────────────────────────────────────────────────────────────────
 
 /** The four kinds migration 0273 allows. A credit memo and a service charge are NOT invoices. */
@@ -67,6 +97,8 @@ export interface SupplierInvoiceRow extends SupplierDocument {
    * never tied by the app. Absent when there are none.
    */
   samePurchase?: { billId: string; exact: boolean; sentence: string }[];
+  /** The supplier account it is on, so a card can say who sent it ("CED"). Absent on old callers. */
+  supplierAccountId?: string | null;
 }
 
 /** One of his jobs, with enough on it to tell five Rhodesias apart. */
@@ -608,10 +640,29 @@ export interface NeedsJobRow {
  *
  * Ordered by the money, biggest first. A $1,062.18 invoice on the wrong job moves a margin; a
  * $2.30 one does not, and he is reading this on a phone.
+ *
+ * A PAPER A BILL ALREADY COVERS IS NOT ASKING ANYTHING (Bills plan, Wave A, 2026-09-25). 19 of the
+ * 33 rows this list led with were CED papers already inside a bill on a job (linked, or the number
+ * carried on a scanned statement): 8802-1105868 $2,950.17 sits in the $3,034.54 statement on J-028.
+ * The paper's own job_id was simply null; the job is the covering bill's, and asking again was
+ * nagging. So billCount > 0 is out, here at the source, for every screen that reads this list.
+ *
+ * AND NOTHING FROM BEFORE HIS BOOKS BEGAN (`since`, the June 8 line): it could not have been
+ * recorded. invoicesNeedingBill names what it left off, so the money still has a sentence.
  */
-export function invoicesNeedingJob(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[]): NeedsJobRow[] {
+export function invoicesNeedingJob(
+  invoices: SupplierInvoiceRow[],
+  jobs: ReconcileJob[],
+  opts: { since?: string | null } = {},
+): NeedsJobRow[] {
   return (invoices ?? [])
-    .filter((inv) => !inv.jobId && BELONGS_TO_A_JOB.includes(inv.kind))
+    .filter(
+      (inv) =>
+        !inv.jobId &&
+        BELONGS_TO_A_JOB.includes(inv.kind) &&
+        !((Number(inv.billCount) || 0) > 0) &&
+        !isBeforeLine(inv.invoiceDate, opts.since),
+    )
     .map((invoice) => ({ invoice, match: matchJobName(invoice.jobNameRaw, jobs) }))
     .sort(
       (a, b) =>
@@ -777,7 +828,7 @@ export function reconcileSummary(
   today: string,
   opts: { since?: string | null } = {},
 ): ReconcileSummary {
-  const needsJobRows = invoicesNeedingJob(invoices, jobs);
+  const needsJobRows = invoicesNeedingJob(invoices, jobs, opts);
   const jobTotals = needsJobTotals(needsJobRows);
   const bill = invoicesNeedingBill(invoices, opts);
   const claim = claimableDiscounts(invoices, today);
@@ -791,6 +842,154 @@ export function reconcileSummary(
     interest: lateInterest(invoices),
     anyOpenQuestions: jobTotals.rows > 0 || bill.rows.length > 0 || claim.total > 0.005,
   };
+}
+
+// ── "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A, 2026-09-25) ──────────────────
+//
+// The app brings the paper to him; he never digs. One card per supplier paper that needs a person,
+// on My Day AND on /bills, and both call THIS function: a second copy of the rule is how two
+// screens come to disagree about which bill is waiting.
+
+/** One of his jobs, the way a card's button says it: "J-011", with the name for the picker. */
+export interface PaperJob {
+  id: string;
+  /** What the button says: the job number, or the name when there is no number. */
+  label: string;
+  name: string;
+  /** "in progress", "complete": the one thing that tells five 5659 Rhodesias apart on a chip. */
+  status: string | null;
+}
+
+export interface SupplierPaperCard {
+  invoiceId: string;
+  invoiceNumber: string;
+  /** Who sent it, short enough for a phone: "CED". */
+  supplier: string;
+  date: string | null;
+  total: number;
+  /** The supplier already shows it paid. */
+  closed: boolean;
+  /** CED's job name, verbatim, when it wrote one: "13897 HERRINGBONE". Null when there is none. */
+  said: string | null;
+  /**
+   * needs_job: nothing says which job it is for yet.
+   * record:    a person put it on a job already; only the bill is missing (the 3639 Saddle pair).
+   */
+  state: "needs_job" | "record";
+  verdict: JobNameVerdict;
+  /** The matcher's one clear guess, offered as the first button. NEVER preselected. */
+  suggestion: PaperJob | null;
+  /** "ask": the jobs that match just as well, offered as chips. Empty otherwise. */
+  candidates: PaperJob[];
+  /** state "record": the job a person already put it on. */
+  onJob: PaperJob | null;
+  /** The matcher's sentence, the grey line on the card. */
+  because: string;
+  /** Bills that may be this very purchase (same-purchase.ts), offered as Same Purchase: Tie Them. */
+  samePurchase: { billId: string; exact: boolean; sentence: string }[];
+}
+
+/** How many candidate chips an "ask" card shows. Five Rhodesias is the worst he has. */
+const MAX_CHIPS = 5;
+
+export function paperJob(job: ReconcileJob): PaperJob {
+  const name = String(job.name ?? "").trim();
+  return { id: job.id, label: String(job.jobNumber ?? "").trim() || name || "That Job", name, status: sayStatus(job.status) || null };
+}
+
+/**
+ * A supplier's name, short enough to lead a card on a phone. "Consolidated Electrical
+ * Distributors" is "CED" everywhere he goes; "Swigard's Hardware" is already short. A bracketed
+ * short form the account itself carries ("Outdoor Supply Hardware (OSH - Cupertino)") wins.
+ */
+export function shortSupplierName(name: string | null | undefined): string {
+  const raw = String(name ?? "").trim();
+  if (!raw) return "The Supplier";
+  const aside = /\(([^)]+)\)/.exec(raw)?.[1]?.trim();
+  if (aside) return aside;
+  const words = raw.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w) && !/^(inc|llc|co|corp|of|and|the)\.?,?$/i.test(w));
+  if (raw.length > 24 && words.length >= 3) return words.map((w) => w[0].toUpperCase()).join("");
+  return raw;
+}
+
+/**
+ * EVERY SUPPLIER PAPER THAT NEEDS A PERSON, newest first. The rule, in one place:
+ *
+ *   · An INVOICE (a purchase). Interest, statements and credit memos are never a "here's a bill"
+ *     card: the one tap records a bill, and those three are not a bill for a job.
+ *   · No bill covers it yet (billCount 0: not linked, and no bill carries its number). The 19
+ *     papers his books already cover never appear.
+ *   · Not a purchase a credit memo took straight back (the reversed pair 8802-1107230/1107337).
+ *   · Not shop stock with no job: CED booked it to STOCK, which is never a job.
+ *   · Money on it. A $0.00 paper means nothing shipped.
+ *   · Dated on or after the line (`since`, June 8 for ET). Undated counts.
+ *
+ * The matcher SUGGESTS and a person DECIDES: "one" becomes the first button, never preselected;
+ * "ask" becomes chips; "weak" and "blank" say Pick A Job.
+ */
+export function supplierPaperNeeds(
+  invoices: SupplierInvoiceRow[],
+  jobs: ReconcileJob[],
+  opts: { since?: string | null; supplierName?: (accountId: string | null) => string } = {},
+): SupplierPaperCard[] {
+  const all = invoices ?? [];
+  const reversed = reversedPurchaseIds(all);
+  const jobById = new Map((jobs ?? []).map((j) => [j.id, j]));
+  const cards: SupplierPaperCard[] = [];
+  for (const inv of all) {
+    if (inv.kind !== "invoice") continue;
+    if ((Number(inv.billCount) || 0) > 0) continue;
+    if (reversed.has(String(inv.id))) continue;
+    const total = r2(Number(inv.total) || 0);
+    if (!(total > 0.005)) continue;
+    if (isBeforeLine(inv.invoiceDate, opts.since)) continue;
+
+    const match = matchJobName(inv.jobNameRaw, jobs);
+    const jobId = inv.jobId ?? null;
+    if (!jobId && match.verdict === "stock") continue;
+
+    const top = match.ranked[0]?.score ?? 0;
+    const onJobRow = jobId ? jobById.get(jobId) : null;
+    const accountId = inv.supplierAccountId ?? null;
+    cards.push({
+      invoiceId: String(inv.id),
+      invoiceNumber: String(inv.invoiceNumber ?? ""),
+      supplier: opts.supplierName ? opts.supplierName(accountId) : "The Supplier",
+      date: inv.invoiceDate ?? null,
+      total,
+      closed: !!inv.closed,
+      // Verbatim (spaces tidied): "TTP56" stays TTP56. It is CED's word, quoted, not our reading.
+      said: isUsableJobName(inv.jobNameRaw) ? String(inv.jobNameRaw ?? "").trim().replace(/\s+/g, " ") : null,
+      state: jobId ? "record" : "needs_job",
+      verdict: match.verdict,
+      suggestion: !jobId && match.verdict === "one" && match.ranked[0] ? paperJob(match.ranked[0].job) : null,
+      candidates:
+        !jobId && match.verdict === "ask"
+          ? match.ranked
+              .filter((g) => top - g.score < DECISIVE_MARGIN)
+              .slice(0, MAX_CHIPS)
+              .map((g) => paperJob(g.job))
+          : [],
+      onJob: jobId
+        ? onJobRow
+          ? paperJob(onJobRow)
+          : { id: jobId, label: String(inv.jobName ?? "").trim() || "Its Job", name: String(inv.jobName ?? "").trim(), status: null }
+        : null,
+      because: match.because,
+      samePurchase: (inv.samePurchase ?? []).map((s) => ({ billId: s.billId, exact: s.exact, sentence: s.sentence })),
+    });
+  }
+  return cards.sort(
+    (a, b) =>
+      String(b.date ?? "").localeCompare(String(a.date ?? "")) || b.total - a.total || a.invoiceNumber.localeCompare(b.invoiceNumber),
+  );
+}
+
+/** What the waiting pile adds up to, for the one rolled-up line ("Supplier Bills · 11"). */
+export function supplierPaperTotals(cards: SupplierPaperCard[]): { count: number; total: number } {
+  let total = 0;
+  for (const c of cards ?? []) total = r2(total + c.total);
+  return { count: (cards ?? []).length, total };
 }
 
 /**

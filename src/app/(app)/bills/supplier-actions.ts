@@ -41,6 +41,8 @@ import {
   type SupplierDoc,
 } from "@/lib/same-purchase";
 import { indexSupplierAliases } from "@/lib/supplier-identity";
+import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 
 /**
  * PAYING A SUPPLIER, AND SAYING WHO THE SUPPLIER IS (migration 0270).
@@ -1593,8 +1595,18 @@ export async function recordSupplierInvoiceAsBill(input: {
    * counted line becomes a roll in the same press. Without it, this is Record It As A Bill.
    */
   toShelf?: TicketLineChoice[] | null;
+  /**
+   * BUSINESS COST (Bills plan, Wave A): a person says this paper is the company's own, in one of
+   * the six buckets. The bill has no job and carries the bucket as its category, exactly the shape
+   * Add Business Cost writes. Anything that is not one of the six is refused, never guessed at.
+   */
+  businessCost?: string | null;
 }): Promise<SupplierActionResult> {
   const toShelf = Array.isArray(input?.toShelf) ? input.toShelf : null;
+  const wantsBucket = input?.businessCost != null && String(input.businessCost).trim() !== "";
+  if (wantsBucket && !isBusinessCostBucket(input.businessCost))
+    return { ok: false, error: `Pick one of the six business-cost buckets: ${BUSINESS_COST_BUCKETS.join(", ")}. Nothing was written.` };
+  const bucket: BusinessCostBucket | null = wantsBucket && !toShelf ? (input.businessCost as BusinessCostBucket) : null;
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const org = orgOf(ctx);
@@ -1748,7 +1760,7 @@ export async function recordSupplierInvoiceAsBill(input: {
       id: invoiceId,
       invoice_number: text(row.invoice_number),
       supplier_account_id: accountId,
-      job_id: toShelf ? null : jobId,
+      job_id: toShelf || bucket ? null : jobId,
       total: row.total as any,
       invoice_date: text(row.invoice_date),
     });
@@ -1763,7 +1775,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     }
   }
 
-  if (!jobId && !toShelf) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
+  if (!jobId && !toShelf && !bucket) return { ok: false, error: `Say which job ${number} belongs to first, then record it.` };
 
   // ── THE LINES ───────────────────────────────────────────────────────────────────────────────
   const { data: lineRows, error: lineErr } = await ctx.supabase
@@ -1810,7 +1822,8 @@ export async function recordSupplierInvoiceAsBill(input: {
     .insert({
       org_id: org.orgId,
       // A document recorded to the shelf is the shelf's, never a job's (0303's check says so too).
-      job_id: toShelf ? null : jobId,
+      // A business cost is the company's own: no job, whatever job the paper itself names.
+      job_id: toShelf || bucket ? null : jobId,
       ...(toShelf ? { on_shelf: true } : {}),
       supplier: accountName,
       supplier_account_id: accountId,
@@ -1821,7 +1834,7 @@ export async function recordSupplierInvoiceAsBill(input: {
       // exists (0273). `closed` is their answer, read out of their own portal.
       status: row.closed ? "paid" : "unpaid",
       bill_date: text(row.invoice_date),
-      category: toShelf ? "Shop Stock" : "Invoice",
+      category: toShelf ? "Shop Stock" : bucket ?? "Invoice",
       // WHAT THE SUPPLIER SAYS IS STILL OWED, when it is not simply all of it. `bills.status` has
       // two states and a part-paid invoice is neither: recorded as unpaid it shows at full value
       // on his Unpaid filter while the card directly above says the supplier is owed ten dollars
@@ -1959,9 +1972,18 @@ export async function recordSupplierInvoiceAsBill(input: {
   if (toShelf) return shelveRecordedBill(ctx.supabase, org.orgId, billId, number, total, toShelf, lineNote, !!row.closed);
 
   revalidatePath("/bills");
+  revalidatePath("/planner");
+  if (bucket) {
+    return {
+      ok: true,
+      billId,
+      message: `${number} is a business cost now, under ${bucket}: ${sayMoney(total)}${row.closed ? ", which the supplier already shows as paid" : ""}.${lineNote}`,
+    };
+  }
   revalidatePath(`/jobs/${jobId}`);
   return {
     ok: true,
+    billId,
     message: `${number} is a bill on ${jobLabel} now: ${sayMoney(total)}${row.closed ? ", which the supplier already shows as paid" : ""}.${lineNote}`,
   };
 }
@@ -2028,6 +2050,183 @@ async function shelveRecordedBill(
       (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies.` : "") +
       lineNote,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" - the card's one tap (Bills plan, Wave A, 2026-09-25)
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ONE TAP: PUT THE PAPER ON A JOB AND RECORD IT, or record it as a business cost.
+ *
+ * Before this, CED's 8802-1107820 ("85 WHITNEY", $187.64) took about eight taps across two lists
+ * on /bills: pick J-028 in Invoices With No Job, press File It, scroll to Purchases Not In Your
+ * Books, find the row again, Record It As A Bill. The card on My Day asks the one question and the
+ * answer does both halves, by calling the two actions that already do each half and already say
+ * what they did (setSupplierInvoiceJob, then recordSupplierInvoiceAsBill). No third copy of either
+ * write.
+ *
+ * THE JOB COMES BACK OFF IF THE RECORD FAILS. A paper left on a job with no bill is the half-done
+ * state this card exists to end, and the sentence would be a lie ("nothing changed"). So when the
+ * record refuses (maybe already in your books, a failed read, a lost race) the job this call put on
+ * is taken back off, guarded on still being the job it put on, and the sentence says so.
+ *
+ * The person decided: `jobId` is the button he pressed. Nothing here picks a job.
+ */
+export async function fileSupplierPaper(input: {
+  invoiceId: string;
+  jobId?: string | null;
+  businessCost?: string | null;
+  /** He read "maybe already in your books" on the card and pressed a job anyway. */
+  differentPurchase?: boolean;
+}): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+
+  const invoiceId = String(input?.invoiceId ?? "");
+  const jobId = text(input?.jobId);
+  const bucket = text(input?.businessCost);
+  if (!invoiceId) return { ok: false, error: "Couldn't tell which paper you meant. Nothing was filed." };
+  if (!jobId === !bucket) return { ok: false, error: "Pick a job for it, or Business Cost. Nothing was filed." };
+
+  const { data: inv, error: readErr } = await ctx.supabase
+    .from("supplier_invoices")
+    .select("id, invoice_number, kind, job_id")
+    .eq("id", invoiceId)
+    .eq("org_id", org.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: `Couldn't read that paper just now, so nothing was filed. ${dbError(readErr)}` };
+  if (!inv) return { ok: false, error: "That paper isn't here anymore. Reload the page." };
+  const number = text((inv as any).invoice_number) ?? "That paper";
+  // Asked BEFORE the job goes on: a statement, a credit memo or interest can't become a bill, and
+  // putting one on a job first would leave it there after the record refused.
+  if (String((inv as any).kind ?? "invoice") !== "invoice")
+    return { ok: false, error: `${number} isn't a purchase, so there is no bill to record from it. Nothing was filed.` };
+  const jobBefore = text((inv as any).job_id);
+  const differentPurchase = input?.differentPurchase === true;
+
+  if (bucket) {
+    const rec = await recordSupplierInvoiceAsBill({ invoiceId, businessCost: bucket, differentPurchase });
+    if (!rec.ok) return { ok: false, error: rec.error };
+    return { ...rec, undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo: null, jobBefore } : undefined };
+  }
+
+  let jobSetTo: string | null = null;
+  if (jobBefore !== jobId) {
+    const set = await setSupplierInvoiceJob({ invoiceId, jobId: jobId! });
+    if (!set.ok) return { ok: false, error: set.error };
+    jobSetTo = jobId;
+  }
+
+  const rec = await recordSupplierInvoiceAsBill({ invoiceId, differentPurchase });
+  if (!rec.ok) {
+    if (!jobSetTo) return { ok: false, error: rec.error };
+    const { data: back, error: backErr } = await ctx.supabase
+      .from("supplier_invoices")
+      .update({ job_id: jobBefore })
+      .eq("id", invoiceId)
+      .eq("org_id", org.orgId)
+      .eq("job_id", jobSetTo)
+      .select("id");
+    revalidatePath("/bills");
+    if (backErr || !back?.length) {
+      reportError("bills:fileSupplierPaper.rollback", backErr ?? new Error("job rollback wrote no rows"), { invoiceId, jobSetTo });
+      return {
+        ok: false,
+        error: `${rec.error ?? `${number} didn't record.`} ${number} is still on that job with no bill, though: taking the job back off didn't save. Its card stays until it is recorded.`,
+      };
+    }
+    return { ok: false, error: `${rec.error ?? `${number} didn't record.`} The job was taken back off it, so nothing changed.` };
+  }
+  return { ...rec, undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo, jobBefore } : undefined };
+}
+
+/**
+ * UNDO THE ONE TAP: the bill it wrote comes back out, and the job it put on comes back off.
+ *
+ * ONLY WHILE NO CUSTOMER INVOICE HAS CLAIMED THE BILL. Once INV-078 bills it, taking it out would
+ * leave Andrew's invoice charging for a receipt that no longer exists; the claim is read first so
+ * the sentence can name the invoice, and 0278's guard_billed_bill refuses the delete anyway if a
+ * claim lands in between. A copy set aside against it, or a line on the shop shelf, refuses the
+ * same way the Bills page's Delete does (standingRefusal).
+ */
+export async function undoFileSupplierPaper(input: {
+  invoiceId: string;
+  billId: string;
+  jobSetTo?: string | null;
+  jobBefore?: string | null;
+}): Promise<SupplierActionResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const org = orgOf(ctx);
+  if ("error" in org) return { ok: false, error: org.error };
+  const invoiceId = String(input?.invoiceId ?? "");
+  const billId = String(input?.billId ?? "");
+  const jobSetTo = text(input?.jobSetTo);
+  const jobBefore = text(input?.jobBefore);
+  if (!invoiceId || !billId) return { ok: false, error: "Couldn't tell what to undo. Nothing was changed." };
+
+  // The bill has to be the one this paper's tap wrote: a client's say-so deletes nothing.
+  const [{ data: link, error: linkErr }, { data: bill, error: billErr }] = await Promise.all([
+    ctx.supabase.from("bill_supplier_invoices").select("bill_id").eq("org_id", org.orgId).eq("supplier_invoice_id", invoiceId).limit(1),
+    ctx.supabase.from("bills").select("id, supplier_invoice_number, job_id").eq("id", billId).eq("org_id", org.orgId).maybeSingle(),
+  ]);
+  if (linkErr || billErr) return { ok: false, error: `Couldn't check that bill just now, so nothing was undone. ${dbError(linkErr ?? billErr)}` };
+  if (!bill) return { ok: false, error: "That bill isn't here anymore, so there is nothing to undo." };
+  const number = text((bill as any).supplier_invoice_number) ?? "That paper";
+  if (String((link?.[0] as { bill_id?: string } | undefined)?.bill_id ?? "") !== billId)
+    return { ok: false, error: `${number} isn't tied to that bill anymore, so Undo left both alone.` };
+
+  const { data: claims, error: claimErr } = await ctx.supabase
+    .from("invoice_items")
+    .select("import_key, source_ids, invoices!inner(invoice_number, status)")
+    .or(`import_key.eq.bill:${billId},source_ids.cs.{${billId}}`)
+    .neq("invoices.status", "void")
+    .limit(5);
+  if (claimErr) return { ok: false, error: `Couldn't check whether an invoice bills ${number}, so nothing was undone. ${dbError(claimErr)}` };
+  const holder = ((claims ?? []) as any[]).find((c) => claimedIdsOfLines([c]).includes(billId));
+  if (holder) {
+    const on = text(holder?.invoices?.invoice_number) ?? "An invoice";
+    return {
+      ok: false,
+      error: `${on} already bills ${number}, so Undo can't take it back. Take its materials lines off ${on} first, or leave it: the cost is on the right job.`,
+    };
+  }
+
+  const standing = await readBillStanding(ctx.supabase, org.orgId, billId);
+  if (standing && "error" in standing) return { ok: false, error: standing.error };
+  if (standing) {
+    const no = standingRefusal(standing, "press Undo again", "Nothing was undone.");
+    if (no) return { ok: false, error: no };
+  }
+
+  const { data: gone, error: delErr } = await ctx.supabase.from("bills").delete().eq("id", billId).eq("org_id", org.orgId).select("id");
+  // 0278's guard raises its own sentence ("INV-078 already bills this receipt..."): handed back.
+  if (delErr) return { ok: false, error: `Undo didn't go through. ${dbError(delErr)}` };
+  if (!gone?.length) return { ok: false, error: `Undo didn't go through: ${number}'s bill is still in your books. Reload the page.` };
+
+  const billJob = text((bill as any).job_id);
+  revalidatePath("/bills");
+  revalidatePath("/planner");
+  if (billJob) revalidatePath(`/jobs/${billJob}`);
+
+  if (jobSetTo) {
+    const { data: back, error: backErr } = await ctx.supabase
+      .from("supplier_invoices")
+      .update({ job_id: jobBefore })
+      .eq("id", invoiceId)
+      .eq("org_id", org.orgId)
+      .eq("job_id", jobSetTo)
+      .select("id");
+    if (backErr || !back?.length) {
+      reportError("bills:undoFileSupplierPaper.job", backErr ?? new Error("job put-back wrote no rows"), { invoiceId, jobSetTo });
+      return { ok: true, message: `${number}'s bill is gone, but the paper is still on that job. Its card is back so you can pick again.` };
+    }
+  }
+  const jobWords = !jobSetTo ? "" : jobBefore ? " and the paper is back on the job it was on" : " and the paper is on no job again";
+  return { ok: true, message: `Undone: ${number}'s bill is gone${jobWords}. Its card is back.` };
 }
 
 /** Record To Shelf: Record It As A Bill with a person's answer for every line (Shop Stock, Phase 2). */
