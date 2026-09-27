@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { voiceGate } from "@/lib/voice-gate";
+import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -12,14 +13,18 @@ export const maxDuration = 30;
  * voice, so transcription works with NO new setup. OpenAI Whisper is the fallback if an OPENAI_API_KEY
  * happens to be set. (The original version only used Whisper, so on a deploy with just the ElevenLabs
  * key it 503'd → "transcription error".)
+ *
+ * PLAIN WORDS OUT (Wave 0): the person talking sees `error` (use-dictation shows it), so it never
+ * names a provider, a key or a status code. The provider's own reply goes to reportError instead.
  */
+const HEAR_FAIL = "Couldn't hear that. Try again, or type it instead.";
 export async function POST(req: Request) {
   const gate = await voiceGate("stt", 90);
   if (gate) return gate;
   const elKey = process.env.ELEVENLABS_API_KEY;
   const oaKey = process.env.OPENAI_API_KEY;
   if (!elKey && !oaKey) {
-    return NextResponse.json({ error: "Transcription not configured (no ElevenLabs or OpenAI key)." }, { status: 503 });
+    return NextResponse.json({ error: "Voice isn't available right now. Type it instead." }, { status: 503 });
   }
 
   let audio: Blob | null = null;
@@ -51,10 +56,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ text: String(j?.text ?? "").trim() });
       }
       const t = await r.text().catch(() => "");
-      if (!oaKey) return NextResponse.json({ error: `ElevenLabs STT ${r.status}: ${t.slice(0, 160)}` }, { status: 502 });
+      reportError("transcribe.elevenlabs", new Error(`ElevenLabs STT ${r.status}: ${t.slice(0, 160)}`));
+      if (!oaKey) return NextResponse.json({ error: HEAR_FAIL }, { status: 502 });
       // else fall through to OpenAI
     } catch (e: any) {
-      if (!oaKey) return NextResponse.json({ error: `ElevenLabs STT: ${e?.message ?? "error"}` }, { status: 502 });
+      reportError("transcribe.elevenlabs", e);
+      if (!oaKey) return NextResponse.json({ error: HEAR_FAIL }, { status: 502 });
     }
   }
 
@@ -73,14 +80,16 @@ export async function POST(req: Request) {
       });
       if (!r.ok) {
         const t = await r.text().catch(() => "");
-        return NextResponse.json({ error: `Whisper ${r.status}: ${t.slice(0, 160)}` }, { status: 502 });
+        reportError("transcribe.whisper", new Error(`Whisper ${r.status}: ${t.slice(0, 160)}`));
+        return NextResponse.json({ error: HEAR_FAIL }, { status: 502 });
       }
       const j = await r.json();
       return NextResponse.json({ text: String(j?.text ?? "").trim() });
     } catch (e: any) {
-      return NextResponse.json({ error: e?.message ?? "Transcribe error." }, { status: 502 });
+      reportError("transcribe.whisper", e);
+      return NextResponse.json({ error: HEAR_FAIL }, { status: 502 });
     }
   }
 
-  return NextResponse.json({ error: "Transcription failed." }, { status: 502 });
+  return NextResponse.json({ error: HEAR_FAIL }, { status: 502 });
 }

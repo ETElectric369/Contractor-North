@@ -161,7 +161,7 @@ export default async function InspectionsPage({
         <EmptyState
           icon={ClipboardCheck}
           title="No open inspections"
-          description="Start one from a lead, schedule one, or tap Inspect now when you're already onsite."
+          description={leadsOn ? "Start one from a lead, schedule one, or tap Inspect now when you're already onsite." : "Nothing open right now."}
         >
           {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
         </EmptyState>

@@ -75,12 +75,12 @@ describe("Shop Stock: Took From Stock", () => {
 describe("Recurring Billing: a template's row", () => {
   it("on (the default): Generate One Now and Pause", () => {
     const html = r(RecurringRowActions, { id: "r1", active: true });
-    expect(html).toContain('title="Generate one now"');
+    expect(html).toContain('title="Generate One Now"');
     expect(html).toContain('title="Pause"');
   });
   it("off: nothing is made, so no Generate; Pause stays", () => {
     const html = r(RecurringRowActions, { id: "r1", active: true, canGenerate: false });
-    expect(html).not.toContain("Generate one now");
+    expect(html).not.toContain("Generate One Now");
     expect(html).toContain('title="Pause"');
   });
 });

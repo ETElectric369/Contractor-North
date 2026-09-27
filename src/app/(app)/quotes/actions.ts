@@ -1642,7 +1642,7 @@ function estimatorError(e: any) {
   return {
     ok: false as const,
     error: e?.message?.includes("ANTHROPIC_API_KEY")
-      ? "Add your ANTHROPIC_API_KEY to enable AI drafting."
+      ? "AI isn't available right now. Try again later."
       : `Estimator failed: ${e?.message ?? "unknown error"}`,
   };
 }
@@ -2123,7 +2123,7 @@ export async function generateCircuitSchedule(
     return {
       ok: false,
       error: e?.message?.includes("ANTHROPIC_API_KEY")
-        ? "Add your ANTHROPIC_API_KEY to enable this."
+        ? "AI isn't available right now. Try again later."
         : `Circuit schedule failed: ${e?.message ?? "unknown error"}`,
     };
   }

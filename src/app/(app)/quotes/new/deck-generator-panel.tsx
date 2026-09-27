@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Wand2, ChevronDown, ChevronRight } from "lucide-react";
-import { computeDeckEstimate, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
+import { computeDeckEstimate, deckAsksTrpa, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -209,9 +209,11 @@ export function DeckGeneratorPanel({
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={f.wrapAround} onChange={(e) => set("wrapAround", e.target.checked)} /> Wrap-around
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input type="checkbox" checked={f.trpa} onChange={(e) => set("trpa", e.target.checked)} /> TRPA (Tahoe basin)
-            </label>
+            {deckAsksTrpa(rates) && (
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" checked={f.trpa} onChange={(e) => set("trpa", e.target.checked)} /> TRPA (Tahoe basin)
+              </label>
+            )}
           </div>
           <div className="flex items-center justify-between rounded-lg bg-slate-50 px-4 py-3">
             <div className="text-sm text-slate-600">

@@ -558,7 +558,7 @@ export function SupplierPaperLists({
           {/* The figure and its date are on the supplier's line; the body is the invoices. */}
           {!(claimable.total > 0.005) && (
             <p className="text-xs leading-relaxed text-green-900">
-              Nothing is claimable today. {accountName} takes a cut off every invoice paid by the tenth of the month after you buy.
+              Nothing is claimable today.
             </p>
           )}
           {claimable.rows.length > 0 && (

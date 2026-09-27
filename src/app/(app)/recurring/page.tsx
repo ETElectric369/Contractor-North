@@ -85,7 +85,7 @@ export default async function RecurringPage() {
                       {t.kind === "invoice" ? ` · ${t.amount != null ? formatCurrency(t.amount) : "—"}${t.customers?.name ? ` · ${t.customers.name}` : ""}${t.auto_send ? " · auto-sends" : ""}` : ""}
                     </div>
                   </div>
-                  <RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn || t.kind !== "invoice"} />
+                  <RecurringRowActions id={t.id} active={t.active} kind={t.kind} canGenerate={recurringOn || t.kind !== "invoice"} />
                   <RecurringButton customers={custOpts} template={value} salesTax={salesTax} />
                 </li>
               );

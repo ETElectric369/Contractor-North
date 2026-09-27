@@ -321,6 +321,26 @@ export async function createTriagedInquiry(
  * Extracted (audit v921) so a lead that came back can use the identical fan-out under its own
  * headline instead of a second copy drifting away from this one.
  */
+/**
+ * THE ALERT'S WORDS FOLLOW WHERE IT LANDS (the switch board, 0352). With Leads on it is a lead and
+ * opens the lead list, word for word as always. With Leads off it opens My Day, where the card
+ * reads "New Request From …", so the bell, the push and the email call it a request and the
+ * email's button names My Day instead of a lead list that isn't there.
+ */
+export function requestAlertWords(lands: "/leads" | "/planner", cameBack = false) {
+  const lead = lands === "/leads";
+  const noun = lead ? "lead" : "request";
+  const Noun = lead ? "Lead" : "Request";
+  const headline = cameBack ? `${Noun} came back` : `New ${noun}`;
+  return {
+    /** "🔥 New lead" / "🔁 Lead came back": the bell's and push's title, and the email's heading. */
+    head: `${cameBack ? "🔁" : "🔥"} ${headline}`,
+    subject: headline,
+    button: lead ? "Open the lead →" : "Open My Day →",
+    footer: lead ? "Reach out fast — speed-to-lead wins the job." : "Reach out fast — a quick reply wins the job.",
+  };
+}
+
 async function notifyNewLead(
   supabase: SupabaseClient,
   orgId: string,
@@ -348,7 +368,8 @@ async function notifyNewLead(
     const where = [input.city, input.state].filter(Boolean).join(", ");
     // The office needs to know WHICH this is: a fresh lead, or the same person back with new
     // answers on the lead they already have.
-    const title = opts.cameBack ? `🔁 Lead came back — ${input.name}` : `🔥 New lead — ${input.name}`;
+    const words = requestAlertWords(url, !!opts.cameBack);
+    const title = `${words.head} — ${input.name}`;
     const body = [input.intake.projectType, money, where].filter(Boolean).join(" · ") || "New quote request";
 
     await createNotifications(orgId, staffIds, { type: "inquiry", title, body, url });
@@ -369,15 +390,15 @@ async function notifyNewLead(
       await sendEmail({
         to,
         fromName: (orgRow as { name?: string } | null)?.name || undefined,
-        subject: `${opts.cameBack ? "Lead came back" : "New lead"}: ${input.name}${input.intake.estimateTotal ? ` (est. $${Math.round(input.intake.estimateTotal).toLocaleString()})` : ""}`,
+        subject: `${words.subject}: ${input.name}${input.intake.estimateTotal ? ` (est. $${Math.round(input.intake.estimateTotal).toLocaleString()})` : ""}`,
         html: `<div style="font-family:ui-sans-serif,system-ui,Arial,sans-serif;max-width:520px;color:#0f172a">
-          <h2 style="margin:0 0 6px">${opts.cameBack ? "🔁 Lead came back" : "🔥 New lead"} — ${esc(input.name)}</h2>
+          <h2 style="margin:0 0 6px">${words.head} — ${esc(input.name)}</h2>
           <p style="color:#475569;margin:0 0 12px">${esc(body)}</p>
           ${input.email ? `<p style="margin:2px 0">📧 ${esc(input.email)}</p>` : ""}
           ${input.phone ? `<p style="margin:2px 0">📞 ${esc(input.phone)}</p>` : ""}
           ${input.message ? `<p style="color:#334155;margin:12px 0;border-left:3px solid #cbd5e1;padding-left:10px">${esc(input.message)}</p>` : ""}
-          <p style="margin:18px 0"><a href="${site}${url}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block">Open the lead →</a></p>
-          <p style="color:#94a3b8;font-size:12px">Reach out fast — speed-to-lead wins the job.</p>
+          <p style="margin:18px 0"><a href="${site}${url}" style="background:#0b57c4;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;display:inline-block">${words.button}</a></p>
+          <p style="color:#94a3b8;font-size:12px">${words.footer}</p>
         </div>`,
       });
     }

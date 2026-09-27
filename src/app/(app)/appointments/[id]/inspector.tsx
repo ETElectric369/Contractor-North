@@ -159,7 +159,7 @@ export function Inspector({
   initialPhotos: CapturePhoto[];
   orgId: string;
   userId: string | null;
-  /** Where "Start the estimate" goes — built by the page so the capture/lead ids ride along. null =
+  /** Where "Start The Estimate" goes — built by the page so the capture/lead ids ride along. null =
    *  Estimates is switched off (0352), and the button isn't drawn. */
   estimateHref: string | null;
   /** appointments.location — the address, which is the fact that names everything downstream. */
@@ -171,7 +171,7 @@ export function Inspector({
   planBrief?: PlanBrief | null;
   /** A tech reads the walk-through; every save here is requireStaff (0227 made appointments
    *  staff-writable). Controls go quiet under one disabled fieldset, and the doors that would
-   *  only fail (Take, Add, Save, Start the estimate, set up questions) don't render. */
+   *  only fail (Take, Add, Save, Start The Estimate, set up questions) don't render. */
   readOnly?: boolean;
   /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
   nortOn?: boolean;
@@ -470,7 +470,7 @@ export function Inspector({
   // opposite: it guaranteed the pending write never happened. Nine hundred milliseconds is a long
   // time in the field, and the two ways out of this page both land inside it:
   //
-  //   · "Start the estimate" sits six pixels from Save in the same sticky bar. Type "run 140 ft",
+  //   · "Start The Estimate" sits six pixels from Save in the same sticky bar. Type "run 140 ft",
   //     tap it, and the measurement is gone — on the page whose whole promise is that it saves
   //     itself, at the moment the number is about to be turned into money.
   //   · Backgrounding the PWA on iOS, which may never resume this page-life at all.
@@ -1314,7 +1314,7 @@ export function Inspector({
         <div>
           <div className="flex items-center justify-between">
             <SectionLabel>Photos &amp; documents</SectionLabel>
-            {!readOnly && <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos or PDFs" className="shrink-0">
+            {!readOnly && <DropTarget onFiles={upload} accept="image/*,application/pdf" label="Drop Photos Or PDFs" className="shrink-0">
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" disabled={uploading} onClick={() => captureRef.current?.click()}>
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />} Take
@@ -1487,7 +1487,7 @@ export function Inspector({
           </Button>
           {estimateHref && (
             <Link href={estimateHref}>
-              <Button type="button">Start the estimate</Button>
+              <Button type="button">Start The Estimate</Button>
             </Link>
           )}
         </div>

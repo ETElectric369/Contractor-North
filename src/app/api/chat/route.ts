@@ -619,7 +619,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
     client = getAnthropic();
   } catch {
     return new Response(
-      "AI is not configured. Add ANTHROPIC_API_KEY to your environment.",
+      "Nort isn't available right now. Try again later.",
       { status: 503 },
     );
   }

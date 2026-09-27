@@ -1289,7 +1289,7 @@ export default async function JobDetailPage({
               used to be a slot away (Erik: "combine costs with add cost on that upper button
               and get rid of it below… make it able to take a photo of a bill"). Snap the Bill
               runs the receipt reader per photo and the Supplier bills list below refreshes. */}
-          <JobCostCapture orgId={j.org_id} jobId={j.id} billsTotal={billsCost} />
+          <JobCostCapture orgId={j.org_id} jobId={j.id} billsTotal={billsCost} nortOn={on("nort")} />
           {/* OPEN FIRST (Erik, 2026-09-25: "in costs i need to know what is open more than i need
               to know all the totals because i think theres a bill missing from this but i cant
               even tell as they are all mixed together"). The bills lead: Not Billed Yet with the

@@ -449,6 +449,7 @@ export default async function SettingsPage({
                     lessonKey="why-lines"
                     seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
                     initial={{}}
+                    nortOn={on("nort")}
                   />
                   <p className="mb-4 text-sm text-slate-500">
                     {on("leads")
@@ -522,7 +523,7 @@ export default async function SettingsPage({
                   >
                     <div className="flex items-center gap-2 font-medium text-slate-800">
                       <Layers className="h-4 w-4 text-slate-400" />
-                      Open kits &amp; job lists
+                      Open Kits &amp; Job Lists
                     </div>
                     <p className="mt-1 text-sm text-slate-500">
                       Build the lists you pick from when you write an estimate — and set which lines size
@@ -800,7 +801,7 @@ export default async function SettingsPage({
                       </p>
                       <a
                         href="/print/business-card"
-                        className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                        className="inline-flex min-h-11 items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
                       >
                         Print Business Cards →
                       </a>
@@ -836,9 +837,9 @@ export default async function SettingsPage({
                     </p>
                     <Link
                       href="/site-studio"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                     >
-                      Open the Design Studio
+                      Open The Design Studio
                     </Link>
                   </Section>
                   <Section title="Homepage">

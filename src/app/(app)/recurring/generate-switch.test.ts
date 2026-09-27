@@ -51,10 +51,29 @@ describe("Generate One Now on each row", () => {
   const row = (p: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(RecurringRowActions as any, { id: "t1", active: true, ...p }));
   it("on / not passed: today's row; off: no Generate button, Pause still there", () => {
     expect(row({ canGenerate: true })).toBe(row());
-    expect(row()).toContain('title="Generate one now"');
+    expect(row()).toContain('title="Generate One Now"');
     const off = row({ canGenerate: false });
-    expect(off).not.toContain('title="Generate one now"');
+    expect(off).not.toContain('title="Generate One Now"');
     expect(off).toContain('title="Pause"');
+  });
+});
+
+describe("the toast says what was made", () => {
+  it("Generate One Now: a job is created, an expense added, an invoice generated", async () => {
+    const { madeWords } = await import("./recurring-actions-ui");
+    expect(madeWords("invoice")).toBe("Invoice generated");
+    expect(madeWords("job")).toBe("Job created");
+    expect(madeWords("expense")).toBe("Expense added");
+  });
+
+  it("each row is told its kind, and Generate Due counts recurring items, not invoices", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = join(process.cwd(), "src/app/(app)/recurring");
+    expect(readFileSync(join(dir, "page.tsx"), "utf8")).toContain("<RecurringRowActions id={t.id} active={t.active} kind={t.kind}");
+    const ui = readFileSync(join(dir, "recurring-actions-ui.tsx"), "utf8");
+    expect(ui).not.toMatch(/Generated \$\{n\} invoices|Generated 1 invoice"/);
+    expect(ui).toContain("`Generated ${n} recurring items`");
   });
 });
 

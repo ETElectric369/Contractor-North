@@ -267,9 +267,9 @@ export default async function AppointmentCapturePage({
   return (
     <div className="mx-auto max-w-2xl">
       {viewerIsStaff ? (
-        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
+        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back To Schedule" />
       ) : (
-        <BackLink fallback="/planner" fallbackLabel="Back to My Day" />
+        <BackLink fallback="/planner" fallbackLabel="Back To My Day" />
       )}
 
       <div className="mb-5">

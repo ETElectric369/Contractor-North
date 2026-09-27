@@ -577,11 +577,11 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // the bad one silently gets no invoices and no reminders. One tenant, three tenants broken.
   //
   // SANITIZED ON READ, not on write, which is this project's own doctrine and the only version
-  // that actually closes it: settings/actions.ts has TWO writers, and the second (updateOrgSettings)
-  // merges a caller-supplied patch and strips only custom_domain / public_handle /
-  // lead_inbound_secret — so a write-side whitelist on the first would have left the easier bypass
-  // wide open. Fixing it here also heals any row already poisoned, and covers every writer added
-  // later without anyone remembering to.
+  // that actually closes it: settings has MANY writers (updateOrgSettings merges a caller-supplied
+  // patch and strips only its protected keys; the guarded setters, the switch board, the site
+  // studio and the analytics toggle each write it too), so a write-side whitelist on any one of
+  // them would leave the others open. Fixing it here also heals any row already poisoned, and
+  // covers every writer added later without anyone remembering to.
   if (!isValidTz(merged.timezone)) merged.timezone = DEFAULT_SETTINGS.timezone;
   // SANITIZE THE LEVER FIELDS ON READ (same doctrine as the timezone heal above): the studio
   // write path clamps via site-doc, but settings has other writers — a hostile or drifted

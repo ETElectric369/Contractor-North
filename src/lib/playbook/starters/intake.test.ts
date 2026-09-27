@@ -136,3 +136,11 @@ describe("which starter a new door gets", () => {
     expect(intakeStarterForTrade("Redeckorating", INTAKE_STARTER)).toBe(INTAKE_STARTER);
   });
 });
+
+describe("no seed asks about one company's region (Wave 0)", () => {
+  it("the deck seed has no Tahoe basin question; a company that needs one adds its own", () => {
+    expect(DECK_INTAKE.needs.map((n) => n.key)).not.toContain("trpa");
+    expect(JSON.stringify(DECK_INTAKE)).not.toMatch(/Tahoe|TRPA/);
+    expect(JSON.stringify(ELECTRICAL_INTAKE)).not.toMatch(/Tahoe|TRPA|Truckee/);
+  });
+});

@@ -72,7 +72,7 @@ export function prettyBytes(n: number | null | undefined): string {
 }
 
 const TYPED_DOOR = "or type it in with Add Cost.";
-const RETRY_DOOR = "Filed on the job under Receipts & Documents — Record as Cost there once it's fixed, " + TYPED_DOOR;
+const RETRY_DOOR = "Filed on the job under Receipts & Documents — Record As Cost there once it's fixed, " + TYPED_DOOR;
 
 /**
  * Prep → upload → file. Returns the documents row's id (what the reader and the bill link need).
@@ -106,15 +106,18 @@ export async function readReceiptDocument(
   docId: string,
   /** What the PERSON stated on the form (paid, category, date) — attestation beats inference. */
   stated?: { paid?: boolean; category?: string | null; billDate?: string | null; differentPurchase?: boolean },
+  /** The Nort switch (0352, rule k): the reader works either way; off, it isn't called Nort. */
+  nortOn = true,
 ): Promise<ReceiptOutcome> {
+  const unread = nortOn ? "Nort couldn't read it." : "Couldn't read it.";
   let res: Awaited<ReturnType<typeof billJobReceipt>>;
   try {
     res = await billJobReceipt(docId, stated);
   } catch (e: any) {
-    res = { ok: false, error: e?.message ?? "Nort couldn't read it." };
+    res = { ok: false, error: e?.message ?? unread };
   }
   if (!res.ok) {
-    return { kind: "filed", docId, tone: "warn", why: "refused", sentence: `${res.error ?? "Nort couldn't read it."} ${RETRY_DOOR}` };
+    return { kind: "filed", docId, tone: "warn", why: "refused", sentence: `${res.error ?? unread} ${RETRY_DOOR}` };
   }
   if (res.already && res.sameAs) {
     // Every door that shows this outcome renders the button beside it (samePurchase: true).
@@ -152,6 +155,8 @@ export async function captureReceipt(o: {
   /** Ask the reader to write the bill. False for paper that isn't a cost (a Plan, a Permit). */
   read: boolean;
   stated?: { paid?: boolean; category?: string | null; billDate?: string | null };
+  /** The Nort switch (0352, rule k). Absent = on. */
+  nortOn?: boolean;
 }): Promise<CaptureOutcome> {
   const filed = await fileReceiptDocument(o);
   if (!filed.ok) return { kind: "lost", tone: "fail", sentence: `${filed.error[0].toUpperCase()}${filed.error.slice(1)} — try again, ${TYPED_DOOR}` };
@@ -162,8 +167,8 @@ export async function captureReceipt(o: {
       docId: filed.docId,
       tone: "warn",
       why: "over_cap",
-      sentence: `Filed on the job, but not read — it's ${prettyBytes(filed.size)} and Nort reads receipts up to ${RECEIPT_READ_MAX_LABEL}. Shrink it and tap Record as Cost under Receipts & Documents, ${TYPED_DOOR}`,
+      sentence: `Filed on the job, but not read — it's ${prettyBytes(filed.size)} and ${o.nortOn === false ? "receipts are read" : "Nort reads receipts"} up to ${RECEIPT_READ_MAX_LABEL}. Shrink it and tap Record As Cost under Receipts & Documents, ${TYPED_DOOR}`,
     };
   }
-  return readReceiptDocument(filed.docId, o.stated);
+  return readReceiptDocument(filed.docId, o.stated, o.nortOn !== false);
 }

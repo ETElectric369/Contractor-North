@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeDeckEstimate, buildDeckRates, buildDeckRatesWithMarkup, type DeckAnswers } from "@/lib/estimate/deck";
+import { computeDeckEstimate, buildDeckRates, buildDeckRatesWithMarkup, deckAsksTrpa, type DeckAnswers } from "@/lib/estimate/deck";
 
 // Chris's real Tahoe Deck / GiddyUp catalog rates (by his reference code), so the math is his math.
 const RATES: Record<string, number> = {
@@ -232,5 +232,15 @@ describe("computeDeckEstimate — robustness", () => {
     expect(e.total).toBe(7500 + 5250 + 6000 + 800 + 6000);
     expect(e.lines.some((l) => l.description.includes("TRPA"))).toBe(true);
     expect(e.lines.some((l) => l.description.includes("Demo"))).toBe(true);
+  });
+});
+
+describe("the region question is the company's own (Wave 0)", () => {
+  it("asked only where the company priced its own TRPA line", () => {
+    expect(deckAsksTrpa(RATES)).toBe(true);
+    const { DS3C: _gone, ...noRegion } = RATES;
+    expect(deckAsksTrpa(noRegion)).toBe(false);
+    expect(deckAsksTrpa({ ...RATES, DS3C: 0 })).toBe(false);
+    expect(deckAsksTrpa({})).toBe(false);
   });
 });

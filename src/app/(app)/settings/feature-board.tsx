@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
-import { FEATURES, FEATURE_BY_KEY, featureChildren, type FeatureDef, type FeatureKey, type FeatureMap } from "@/lib/features";
+import { FEATURES, FEATURE_BY_KEY, featureChildren, featureOn, type FeatureDef, type FeatureKey, type FeatureMap } from "@/lib/features";
 import { setFeature } from "./features-actions";
 
 /**
@@ -16,7 +16,10 @@ import { setFeature } from "./features-actions";
  * A switch hides doors only, and the page says so where it matters:
  *   - off with saved records: "Off · 3 saved" (nothing was deleted, and it all opens by link);
  *   - turning one off asks first, in one line naming what stops (the website names its address,
- *     Recurring Billing counts its repeat invoices, the rest hide their buttons);
+ *     Recurring Billing counts its repeat invoices, Customer Portal says its links stop opening,
+ *     the rest hide their buttons);
+ *   - a sub-switch whose parent is off reads Off to everyone but the owner (featureOn); the owner's
+ *     switch keeps the stored value, so turning the parent back on brings it back as it was;
  *   - every flip comes back with Undo (the NOT-annoying law: no save game, an undo trail).
  */
 export type FeatureBoardProps = {
@@ -35,8 +38,20 @@ export type FeatureBoardProps = {
 
 export function stopsLine(key: FeatureKey, siteName: string | null, repeatInvoices: number | undefined): string {
   if (key === "website" && siteName) return `Unpublishes ${siteName}.`;
-  if (key === "recurring_billing" && repeatInvoices)
-    return `Stops ${repeatInvoices} repeat invoice${repeatInvoices === 1 ? "" : "s"}.`;
+  // The engine skips only repeat INVOICES while this is off (recurring-engine skipDueRun); repeat
+  // jobs and expenses keep running. An unknown count still names what stops, never "nothing".
+  if (key === "recurring_billing") {
+    const stops =
+      repeatInvoices === undefined
+        ? "Stops repeat invoices."
+        : repeatInvoices > 0
+          ? `Stops ${repeatInvoices} repeat invoice${repeatInvoices === 1 ? "" : "s"}.`
+          : "Hides its buttons.";
+    return `${stops} Repeat jobs and expenses keep running.`;
+  }
+  // Off shuts every portal link (lib/portal/access, before any sign-in) and drops the portal link
+  // from invoice emails (lib/invoice-email). Invoice and pay links never read the switch.
+  if (key === "customer_portal") return "Your customers' portal links stop opening. Invoice and pay links still work.";
   return "Hides its buttons. Nothing is deleted.";
 }
 
@@ -160,7 +175,9 @@ function Row({
   onFlip: (next: boolean) => void;
   nested?: boolean;
 }) {
-  const isOn = on[f.key];
+  // The owner moves the STORED value; everyone else reads what the app does (a sub-switch is off
+  // while its parent is off, whatever is stored).
+  const isOn = canMove ? on[f.key] : featureOn(on, f.key);
   const saved = !isOn && count ? ` · ${count} saved` : "";
   return (
     <div className={`flex min-h-11 items-center gap-3 px-4 py-3 ${nested ? "pl-10 bg-slate-50/60" : ""}`}>

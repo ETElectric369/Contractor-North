@@ -60,6 +60,7 @@ export function ActionList({
   emptyLabel = "All caught up.",
   todayStr,
   tz = DEFAULT_TIMEZONE,
+  leadsOn = true,
 }: {
   items: ActionItem[];
   people?: { id: string; full_name: string | null }[];
@@ -70,6 +71,9 @@ export function ActionList({
   /** The ORG's timezone — must be the same clock todayStr was computed in, or a chip can
    *  read "Today · 9:00 PM" for an item the day math already counted as tomorrow. */
   tz?: string;
+  /** The Leads switch (0352). Off, a request lands here as a request: its section reads Requests
+   *  and its chip Request, not a lead list the company switched off. Absent = on, as always. */
+  leadsOn?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -320,7 +324,7 @@ export function ActionList({
       {groups.map(({ stream, items: groupItems }) => (
         <div key={stream} className="space-y-1.5">
           <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {STREAM_LABEL[stream]}
+            {stream === "leads" && !leadsOn ? "Requests" : STREAM_LABEL[stream]}
           </div>
           {groupItems.map((item) => {
             const can = (v: Affordance) => item.affordances.includes(v);
@@ -366,7 +370,7 @@ export function ActionList({
                   </button>
                   <div className="mt-0.5 flex items-center gap-1.5">
                     <button onClick={() => router.push(item.href)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-slate-500">
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
+                      <Badge tone={meta.tone}>{item.kind === "inquiry" && !leadsOn ? "Request" : meta.label}</Badge>
                       {item.subtitle && <span className="truncate">{item.subtitle}</span>}
                       {item.who && <span className="truncate">· {item.who}</span>}
                     </button>

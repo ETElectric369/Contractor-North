@@ -119,7 +119,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" className="pl-9" />
         </div>
-        {canEdit && <Button size="sm" onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add Contact</Button>}
+        {canEdit && <Button onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add Contact</Button>}
       </div>
 
       {canEdit && (adding || editingId) && (
@@ -165,8 +165,8 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
                       {r.contact_name && <div className="text-xs text-slate-400">{r.contact_name}</div>}
                     </div>
                     {canEdit && <div className="flex shrink-0 items-center gap-2">
-                      <button onClick={() => startEdit(r)} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
-                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { const res = await deleteResource(r.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Contact deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => startEdit(r)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-brand" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { const res = await deleteResource(r.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Contact deleted", "success"); router.refresh(); }); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
                     </div>}
                   </div>
                   <div className="mt-2 space-y-1 text-sm">

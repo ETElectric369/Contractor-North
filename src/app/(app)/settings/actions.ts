@@ -260,7 +260,7 @@ export async function createInvitation(formData: FormData): Promise<Result & { l
   // mail whose only button goes nowhere. Refuse to send a broken invite rather than record one.
   const base = process.env.NEXT_PUBLIC_SITE_URL || "";
   if (!/^https?:\/\//i.test(base)) {
-    return { ok: false, error: "Invites can't be sent yet — this install has no site address configured (NEXT_PUBLIC_SITE_URL)." };
+    return { ok: false, error: "Invites can't be sent right now. Try again later." };
   }
 
   const { error } = await supabase.from("invitations").insert({
@@ -368,7 +368,7 @@ export async function createEmployee(input: {
   if (!adminConfigured()) {
     return {
       ok: false,
-      error: "Direct employee creation needs SUPABASE_SERVICE_ROLE_KEY set on the server. Use an email invite instead, or add the key in Vercel.",
+      error: "Adding someone directly isn't available right now. Send them an email invite instead.",
     };
   }
 
@@ -420,7 +420,7 @@ export async function importCrew(rows: CrewImportRow[], requireReset = true): Pr
   if (!me || !["owner", "admin"].includes(me.role) || me.active === false) return { ok: false, error: "Not allowed." };
   if (!me.org_id) return { ok: false, error: "No organization." };
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
-  if (!adminConfigured()) return { ok: false, error: "Crew import needs SUPABASE_SERVICE_ROLE_KEY set on the server (it is, in production)." };
+  if (!adminConfigured()) return { ok: false, error: "Crew import isn't available right now. Send each person an email invite instead." };
   const admin = createAdminClient();
 
   const results: CrewImportResult[] = [];
@@ -732,7 +732,7 @@ export async function updateMemberAuth(
 
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
   if (!adminConfigured()) {
-    return { ok: false, error: "Changing logins needs SUPABASE_SERVICE_ROLE_KEY on the server. Add it in Vercel, then redeploy." };
+    return { ok: false, error: "Changing a login isn't available right now. Try again later." };
   }
   const attrs: Record<string, unknown> = {};
   if (patch.email?.trim()) attrs.email = patch.email.trim().toLowerCase();
@@ -806,7 +806,7 @@ export async function setMemberActive(id: string, active: boolean): Promise<Resu
     if (!adminConfigured()) {
       // No service key means nobody was ever banned, so a reactivate has nothing to undo — but a
       // deactivate must not claim a lockout it can't deliver.
-      if (!active) throw new Error("SUPABASE_SERVICE_ROLE_KEY isn't set on the server.");
+      if (!active) throw new Error("The server has no admin key, so the sign-in can't be ended.");
     } else {
       const admin = createAdminClient();
       // 876000h ≈ 100 years: banned until someone reactivates them.
@@ -883,7 +883,7 @@ export async function removeMember(id: string): Promise<Result> {
 
   const { adminConfigured, createAdminClient } = await import("@/lib/supabase/admin");
   if (!adminConfigured()) {
-    return { ok: false, error: "Removing an account needs SUPABASE_SERVICE_ROLE_KEY on the server. Deactivate them instead." };
+    return { ok: false, error: "Removing an account isn't available right now. Deactivate them instead." };
   }
   const admin = createAdminClient();
   // Delete the profile first (org-scoped), then the auth user. If the auth delete fails,
@@ -958,6 +958,9 @@ export async function updateMemberRate(
   return { ok: true };
 }
 
+/** What a settings write that matched no row says: RLS lets only an owner or admin change them. */
+const SETTINGS_NOT_SAVED = "That didn't save — your role can't change company settings. Ask an owner or admin.";
+
 /** Set the org's public website handle (its address at /site/<handle>). Slugified, and checked
  *  unique across ALL orgs via the service client — RLS would hide other orgs, so a plain query
  *  could never catch a collision. Empty handle takes the public site down. */
@@ -997,10 +1000,12 @@ export async function setPublicHandle(
 
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), public_handle: handle };
-  const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
-  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
-  if (!error) await bustOrgPdfs(orgId);
+  const { data: wrote, error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // A ZERO-ROW WRITE IS A 204, NOT A SAVE (the silent-write law): a seat RLS won't let write settings.
+  if (!wrote?.length) return { ok: false, error: SETTINGS_NOT_SAVED };
+  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
+  await bustOrgPdfs(orgId);
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true, handle };
@@ -1048,10 +1053,12 @@ export async function setCustomDomain(
 
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const merged = { ...(org?.settings ?? {}), custom_domain: domain };
-  const { error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId);
-  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
-  if (!error) await bustOrgPdfs(orgId);
+  const { data: wrote, error } = await supabase.from("organizations").update({ settings: merged }).eq("id", orgId).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // A ZERO-ROW WRITE IS A 204, NOT A SAVE (the silent-write law): a seat RLS won't let write settings.
+  if (!wrote?.length) return { ok: false, error: SETTINGS_NOT_SAVED };
+  // Letterhead-level settings render on every stored customer PDF — drop them all (audit 7).
+  await bustOrgPdfs(orgId);
   revalidatePath("/settings");
   revalidatePath("/", "layout");
   return { ok: true, domain };
@@ -1123,8 +1130,7 @@ export async function updateOrgSettings(
     .eq("id", ctx.orgId)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!wrote?.length)
-    return { ok: false, error: "That didn't save — your role can't change company settings. Ask an owner or admin." };
+  if (!wrote?.length) return { ok: false, error: SETTINGS_NOT_SAVED };
   // DOC-STYLE, TERMS AND FOOTER RIDE ON EVERY STORED PDF (audit v921 high). doc_style (0239),
   // invoice_terms/quote_terms/document_footer all render into the customer's document; changing
   // them here left the cached PDFs (0198) untouched, so a customer's Download kept handing out the
@@ -1174,11 +1180,14 @@ export async function saveNumbering(
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).single();
   const settings = (org?.settings ?? {}) as Record<string, unknown>;
   const mergedPrefixes = { ...((settings.doc_prefixes as Record<string, string>) ?? {}), ...clean };
-  const { error: upErr } = await supabase
+  const { data: wrote, error: upErr } = await supabase
     .from("organizations")
     .update({ settings: { ...settings, doc_prefixes: mergedPrefixes } })
-    .eq("id", orgId);
-  if (upErr) return { ok: false, error: upErr.message };
+    .eq("id", orgId)
+    .select("id");
+  if (upErr) return { ok: false, error: dbError(upErr) };
+  // Nothing written means nothing saved: say so before any counter moves (the silent-write law).
+  if (!wrote?.length) return { ok: false, error: SETTINGS_NOT_SAVED };
 
   // Apply any changed next-numbers via the staff-gated, org-scoped RPC.
   for (const [type, next] of Object.entries(nextNumbers)) {
@@ -1186,7 +1195,7 @@ export async function saveNumbering(
     const { error } = await supabase.rpc("set_doc_counter", { p_type: type, p_next: Math.floor(next) });
     if (error) {
       if (error.code === "PGRST202" || /set_doc_counter/i.test(error.message)) {
-        return { ok: false, error: "Prefixes saved. The next-number control needs migration 0088 applied to take effect." };
+        return { ok: false, error: "Prefixes saved. The next number can't be changed yet." };
       }
       return { ok: false, error: dbError(error) };
     }

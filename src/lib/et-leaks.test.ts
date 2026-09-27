@@ -92,4 +92,38 @@ describe("sign-up, sign-in and Settings carry North's mark and plain labels", ()
     expect(src("src/app/(app)/settings/org-settings-form.tsx")).not.toContain("TECL");
     expect(src("src/app/(app)/settings/splash-settings.tsx")).not.toMatch(ET_WORDS);
   });
+
+  it("the Sales Tax card's example names no real town", () => {
+    const s = src("src/app/(app)/settings/tax-rates-manager.tsx");
+    expect(s).not.toMatch(ET_WORDS);
+    expect(s).not.toMatch(/\bReno\b/);
+  });
+
+  it("the Playbook starters say what they are, not whose they are", async () => {
+    const { PLAYBOOK_STARTERS } = await import("@/lib/playbook/starters");
+    for (const st of PLAYBOOK_STARTERS) expect(st.blurb, st.key).not.toMatch(/Whitney|Truckee|Tahoe|\bErik|\bChris|\bhis\b/);
+  });
+});
+
+describe("a supplier's terms are the supplier's own", () => {
+  it("the supplier card never states one supplier's discount day as every supplier's", () => {
+    // The parser reads the day printed on each paper (ced-invoice-parse dayOfFollowingMonth); a
+    // sentence naming "the tenth" told a 15th-of-the-month supplier, or one with no discount, CED's terms.
+    const s = src("src/app/(app)/bills/supplier-invoices-card.tsx");
+    expect(s).not.toMatch(/tenth of the month|takes a cut off every invoice/);
+  });
+});
+
+describe("a deck company's customers are asked about a region only when the company priced one", () => {
+  it("the configurator, the office generator and the site chat gate the TRPA question on deckAsksTrpa", () => {
+    const conf = src("src/app/estimate/[handle]/configurator.tsx");
+    expect(conf.indexOf("deckAsksTrpa(rates) &&")).toBeGreaterThan(-1);
+    expect(conf.indexOf("deckAsksTrpa(rates) &&")).toBeLessThan(conf.indexOf("Lake Tahoe basin"));
+    const gen = src("src/app/(app)/quotes/new/deck-generator-panel.tsx");
+    expect(gen.indexOf("deckAsksTrpa(rates) &&")).toBeGreaterThan(-1);
+    expect(gen.indexOf("deckAsksTrpa(rates) &&")).toBeLessThan(gen.indexOf("Tahoe basin"));
+    const chat = src("src/app/api/site-chat/route.ts");
+    expect(chat).toContain("deckTool(asksTrpa)");
+    expect(chat).toContain('${asksTrpa ? ", and whether it\'s in the Tahoe/TRPA basin" : ""}');
+  });
 });

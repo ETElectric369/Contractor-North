@@ -75,11 +75,12 @@ const COMMON: Need[] = [
 /**
  * DECKS — TAHOE DECK.
  *
- * project_type, material, shape, wrap_around and trpa are lifted key-for-key and option-for-option
- * from TAHOE_DECK, so all five carry onto Chris's walk-through. Between them they pick the base
- * rate (D1 vs DS8), the composite upgrade (DS2), the cutting-and-waste rate (DS6C), the corner
- * framing (DS6D) and the permitting package (DS3C) — which is to say a customer filling this in
- * has already answered most of what moves the number, without being asked to hold a tape.
+ * project_type, material, shape and wrap_around are lifted key-for-key and option-for-option
+ * from TAHOE_DECK, so all four carry onto Chris's walk-through. Between them they pick the base
+ * rate (D1 vs DS8), the composite upgrade (DS2), the cutting-and-waste rate (DS6C) and the corner
+ * framing (DS6D) — which is to say a customer filling this in has already answered most of what
+ * moves the number, without being asked to hold a tape. The walk-through's `trpa` (a region) is
+ * deliberately not asked here: see below.
  *
  * The dimensions are deliberately absent. They are `measured` on the walk-through and would be
  * refused on arrival; asking a homeowner to guess at a depth only to throw it away is worse than
@@ -132,14 +133,9 @@ export const DECK_INTAKE: Playbook = {
       slot: { type: "select", options: ["Yes", "No"] },
       when: [{ key: "project_type", known: true }],
     },
-    {
-      key: "trpa",
-      label: "TRPA basin",
-      // Plainer than the walk-through's wording — Chris knows what the basin is, a customer in
-      // Reno may not. The KEY and the answers are identical, which is what has to match.
-      ask: "Is the property inside the Tahoe basin? (If you're not sure, say No and we'll check.)",
-      slot: { type: "select", options: ["Yes", "No"] },
-    },
+    // NO REGION QUESTION (Wave 0). The Tahoe basin is one company's region, and this seed is every
+    // deck company's public form. A company that works under a regional rule adds its own question;
+    // Tahoe Deck's form already carries its `trpa`, since the seed only runs when no form exists.
     {
       key: "site_notes",
       label: "Anything else",

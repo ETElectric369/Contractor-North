@@ -81,6 +81,15 @@ describe("the Off line on every record page", () => {
     expect(src).toMatch(/\{walkThrough && \(\s*<FeatureOffLine feature="leads"/);
   });
 
+  it("the walk-throughs list with Leads off names no button it doesn't draw", () => {
+    // NewInspectionButton (Inspect now) renders only with Leads on, so the empty state's words follow it.
+    const src = readFileSync(join(ROOT, "inspections/page.tsx"), "utf8");
+    const at = src.indexOf('title="No open inspections"');
+    const block = src.slice(at, src.indexOf("</EmptyState>", at));
+    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Inspect now[^"]*" : "Nothing open right now\."\}/);
+    expect(block).toContain("{leadsOn && <NewInspectionButton");
+  });
+
   it("a safety form carries Safety Log's line; a walk-through sheet or the website's form does not", () => {
     const src = readFileSync(join(ROOT, "forms/[id]/page.tsx"), "utf8");
     const at = src.indexOf('<FeatureOffLineFor feature="safety_log"');

@@ -118,7 +118,7 @@ export function TaxRatesManager({
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-900">Tax rates</h4>
           <p className="mb-3 text-sm text-slate-500">
-            Add named rates for the areas you work (e.g. Reno vs Truckee). The default applies to new quotes & invoices.
+            Add named rates for the areas you work (e.g. City vs County). The default applies to new quotes & invoices.
           </p>
           {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           {taxRates.length > 0 && (
@@ -132,24 +132,26 @@ export function TaxRatesManager({
                   ) : (
                     <button
                       onClick={() => start(async () => { await setDefaultTaxRate(t.id); router.refresh(); })}
-                      className="text-slate-400 hover:text-amber-500"
-                      title="Make default"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-amber-500"
+                      title="Make Default"
+                      aria-label="Make Default"
                     >
                       <Star className="h-4 w-4" />
                     </button>
                   )}
                   <button
                     onClick={() => editRate(t)}
-                    className="text-slate-400 hover:text-brand"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-brand"
                     title="Edit"
-                    aria-label="Edit tax rate"
+                    aria-label="Edit Tax Rate"
                   >
                     <Pencil className="h-4 w-4" />
                   </button>
                   <button
                     onClick={() => { if (confirm("Delete this tax rate?")) start(async () => { await deleteTaxRate(t.id); if (editingId === t.id) cancelEdit(); router.refresh(); }); }}
-                    className="text-slate-400 hover:text-red-600"
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-red-600"
                     title="Delete"
+                    aria-label="Delete"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -166,11 +168,11 @@ export function TaxRatesManager({
               <Label htmlFor="tr-rate">Rate %</Label>
               <NumberInput id="tr-rate" value={rate} onValueChange={setRate} />
             </div>
-            <Button size="sm" onClick={add} disabled={pending || !name.trim()}>
+            <Button onClick={add} disabled={pending || !name.trim()}>
               {editingId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}
             </Button>
             {editingId && (
-              <Button size="sm" variant="outline" onClick={cancelEdit} disabled={pending} title="Cancel edit">
+              <Button size="icon" variant="outline" onClick={cancelEdit} disabled={pending} title="Cancel Edit" aria-label="Cancel Edit">
                 <X className="h-3.5 w-3.5" />
               </Button>
             )}

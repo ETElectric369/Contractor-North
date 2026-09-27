@@ -1154,7 +1154,7 @@ export type ReadResult =
     }
   | (Fail & { readsLeft?: number | null });
 
-const AI_NOT_SET_UP = "Reading isn't set up on this server yet. Add the circuits by hand with Add A Circuit.";
+const AI_NOT_SET_UP = "Reading isn't available right now. Add the circuits by hand with Add A Circuit.";
 const SPENT = "This month's AI budget is used up. Add the circuits by hand with Add A Circuit; it resets next month.";
 
 /** The model's failure as plain words: a missing key is the server's, anything else is one read. */

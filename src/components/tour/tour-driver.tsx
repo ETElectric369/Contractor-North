@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TourSpotlight } from "./tour-spotlight";
 import { useDictation } from "@/lib/use-dictation";
-import { TOUR, sayOf, type TourCtx } from "@/lib/onboarding/tour";
+import { TOUR, sayOf, stepWords, type TourCtx } from "@/lib/onboarding/tour";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { speakSmart, stopSpeaking, unlockAudio } from "@/lib/tts";
 import { saveSetup, talkSetup } from "@/app/(app)/setup-actions";
@@ -40,6 +40,7 @@ export function TourDriver({
   onClose,
   steps = TOUR,
   storageKey = KEY,
+  nortOn = true,
 }: {
   initial: Answers;
   /** They've finished before — this is a revisit, not an introduction. */
@@ -53,6 +54,10 @@ export function TourDriver({
   /** Resume position is per-script: a lesson interrupted mid-way must not resume the setup tour
    *  at step 3 of a different list. */
   storageKey?: string;
+  /** The Nort switch (0352, rule k). Off, a lesson reads its neutral words (TourStep.plain): no
+   *  "I", no Nort, and no card pointing at his top-bar button, which isn't drawn. The setup tour
+   *  itself never runs with Nort off (SetupButton opens the questions instead). */
+  nortOn?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -108,7 +113,8 @@ export function TourDriver({
   };
 
   const step = steps[i];
-  const line = sayOf(step.say, ctx);
+  const words = stepWords(step, nortOn);
+  const line = sayOf(words.say, ctx);
   const need = step.ask ? SETUP_PLAYBOOK.needs.find((n) => n.key === step.ask) : undefined;
   const known = step.ask ? answers[step.ask] : undefined;
   const answered = known !== null && known !== undefined && String(known).trim() !== "";
@@ -311,7 +317,7 @@ export function TourDriver({
   const asksAnything = steps.some((st) => st.ask);
   if (!started)
     return (
-      <TourSpotlight anchor="nort" title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
+      <TourSpotlight anchor={nortOn ? "nort" : undefined} title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
         <p className="text-sm leading-relaxed text-slate-600">
           {asksAnything ? (
             <>
@@ -319,7 +325,7 @@ export function TourDriver({
               <strong className="font-medium text-slate-900">state your name and your business</strong>.
             </>
           ) : (
-            <>Two minutes — I&rsquo;ll talk you through it, nothing to answer.</>
+            <>{nortOn ? <>Two minutes — I&rsquo;ll talk you through it, nothing to answer.</> : <>Two minutes, read out loud. Nothing to answer.</>}</>
           )}
         </p>
         <Button
@@ -346,7 +352,7 @@ export function TourDriver({
     );
 
   return (
-    <TourSpotlight anchor={step.anchor} title={step.title} onExit={exit} step={i + 1} total={steps.length}>
+    <TourSpotlight anchor={step.anchor} title={words.title} onExit={exit} step={i + 1} total={steps.length}>
       <p className="text-sm leading-relaxed text-slate-600">{line}</p>
 
       {need && (
@@ -475,8 +481,8 @@ export function TourDriver({
               speakSmart(line);
             }
           }}
-          aria-label={muted ? "Let Nort speak" : "Mute Nort"}
-          title={muted ? "Let Nort speak" : "Mute Nort"}
+          aria-label={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn The Sound On" : "Mute"}
+          title={nortOn ? (muted ? "Let Nort speak" : "Mute Nort") : muted ? "Turn The Sound On" : "Mute"}
           className="rounded-md p-2 text-slate-400 hover:bg-slate-100"
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
