@@ -93,6 +93,7 @@ export function SameDayShiftsList({
               {door ? (
                 <Button
                   type="button"
+                  variant="outline"
                   size="md"
                   className="h-auto min-h-11 max-w-full whitespace-normal py-2 text-left"
                   onClick={() => onPut?.(s)}

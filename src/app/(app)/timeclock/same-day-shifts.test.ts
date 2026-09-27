@@ -125,7 +125,12 @@ describe("one tap, one entry", () => {
     expect(company).toMatch(/try \{\s*r = await fileShiftAsCompanyTime\([^)]*\);\s*\} catch \{\s*toast\("No connection/);
     expect(company).toMatch(/\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) =>\s*toast\(\s*`No connection/);
   });
-  it("Log Hours on the job shows the day's shifts too", () => {
-    expect(src("../jobs/[id]/job-time-button.tsx")).toContain("<SameDayShifts");
+  it("Log Hours on the job shows the day's shifts too, once hours are being logged (not on every Clock In)", () => {
+    const s = src("../jobs/[id]/job-time-button.tsx");
+    expect(s).toContain("<SameDayShifts");
+    expect(s).toMatch(/\{\(hours > 0 \|\| workDate !== todayStrInTz\(tz\)\) && \(\s*<SameDayShifts/);
+  });
+  it("the door is an outline button, never a second primary beside the form's own", () => {
+    expect(render([punch], { id: "j28", label: "85 Whitney" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This On 85 Whitney<\/button>/);
   });
 });
