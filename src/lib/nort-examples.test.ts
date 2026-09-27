@@ -36,16 +36,27 @@ const ANY_EXAMPLE_WORD = new RegExp(EXAMPLE_WORDS.source, "i");
  *  - a first-name dictionary that happens to contain "brian".
  */
 const FIXTURE = [/\/__fixtures__\//, /-fixture\.ts$/, /^src\/test\//];
-const ALLOWED: Record<string, RegExp> = {
-  "src/lib/playbook/starters/et-electric.ts": /./,
-  "src/lib/electrical-calc.ts": /^romex$/i,
-  "src/app/(app)/tools/tools-view.tsx": /^romex$/i,
-  "src/app/(app)/jobs/[id]/circuit-edit-sheet.tsx": /^12\/2$/,
-  "src/app/(app)/quotes/[id]/circuit-schedule-card.tsx": /^12\/2$/,
-  // The circuit schedule's model instructions (Panel Map): its wire column's own format.
-  "src/app/(app)/quotes/actions.ts": /^(12\/2|14\/2|10\/3)$/,
-  "src/app/(app)/price-list/vendor-import-math.ts": /^brian$/i,
+/**
+ * An allowance: which words, in which file, and (when the file also holds strings every trade gets)
+ * only inside the one string that carries `within`. A file-wide allowance in quotes/actions.ts let
+ * "(wire e.g. 12/2 NM-B)" into the estimator prompt every trade gets, and the guard still passed.
+ */
+type Allowance = { words: RegExp; within?: string };
+const ALLOWED: Record<string, Allowance> = {
+  "src/lib/playbook/starters/et-electric.ts": { words: /./ },
+  "src/lib/electrical-calc.ts": { words: /^romex$/i },
+  "src/app/(app)/tools/tools-view.tsx": { words: /^romex$/i },
+  "src/app/(app)/jobs/[id]/circuit-edit-sheet.tsx": { words: /^12\/2$/ },
+  "src/app/(app)/quotes/[id]/circuit-schedule-card.tsx": { words: /^12\/2$/ },
+  // The circuit schedule's model instructions (Panel Map): its wire column's own format, in that
+  // prompt only. The same file builds the estimator prompt every trade gets.
+  "src/app/(app)/quotes/actions.ts": { words: /^(12\/2|14\/2|10\/3)$/, within: "ckt = circuit position" },
+  "src/app/(app)/price-list/vendor-import-math.ts": { words: /^brian$/i },
 };
+
+function allows(a: Allowance | undefined, word: string, s: string): boolean {
+  return !!a && a.words.test(word) && (!a.within || s.includes(a.within));
+}
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -77,12 +88,19 @@ function strayExamples(): string[] {
     if (FIXTURE.some((r) => r.test(file))) continue;
     const text = readFileSync(abs, "utf8");
     if (!ANY_EXAMPLE_WORD.test(text)) continue; // cheap pre-check before parsing
-    const allowed = ALLOWED[file];
-    for (const s of strings(file, text)) {
-      for (const m of s.matchAll(EXAMPLE_WORDS)) {
-        if (allowed?.test(m[0])) continue;
-        hits.push(`${file}: "${m[0]}" in "${s.replace(/\s+/g, " ").slice(0, 120)}"`);
-      }
+    hits.push(...strayIn(file, text));
+  }
+  return hits;
+}
+
+/** The hits in one file's strings that its allowance doesn't cover. */
+function strayIn(file: string, text: string): string[] {
+  const allowed = ALLOWED[file];
+  const hits: string[] = [];
+  for (const s of strings(file, text)) {
+    for (const m of s.matchAll(EXAMPLE_WORDS)) {
+      if (allows(allowed, m[0], s)) continue;
+      hits.push(`${file}: "${m[0]}" in "${s.replace(/\s+/g, " ").slice(0, 120)}"`);
     }
   }
   return hits;
@@ -104,11 +122,21 @@ describe("no screen and no Nort instruction carries another company's or another
   });
 
   it("every allowance still has something to allow (a stale one is a hole)", () => {
-    for (const [file, rx] of Object.entries(ALLOWED)) {
+    for (const [file, a] of Object.entries(ALLOWED)) {
       const text = readFileSync(join(ROOT, file), "utf8");
-      const used = strings(file, text).some((s) => [...s.matchAll(EXAMPLE_WORDS)].some((m) => rx.test(m[0])));
+      const used = strings(file, text).some((s) => [...s.matchAll(EXAMPLE_WORDS)].some((m) => allows(a, m[0], s)));
       expect(used, `${file} no longer needs its allowance`).toBe(true);
     }
+  });
+
+  it("an allowance scoped to one string covers only that string, not the rest of its file", () => {
+    const file = "src/app/(app)/quotes/actions.ts";
+    const schedule = `const a = 'ckt = circuit position ("1","2"…). wire = e.g. "12/2","14/2","10/3".';`;
+    const estimator = `const b = "You are an estimator. Price the wire (e.g. 12/2 NM-B) by the foot.";`;
+    expect(strayIn(file, schedule)).toEqual([]);
+    expect(strayIn(file, `${schedule}\n${estimator}`)).toEqual([
+      `${file}: "12/2" in "You are an estimator. Price the wire (e.g. 12/2 NM-B) by the foot."`,
+    ]);
   });
 });
 
