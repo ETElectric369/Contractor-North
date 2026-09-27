@@ -35,15 +35,18 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).toContain("(await getActionItems(ctx)).length");
   });
 
-  it("keeps task/work_order in the verb grammar (dispatch + the six's sheet reuse them)", () => {
-    // Amendment 6: the KINDS survive even though the feeder died — dispatch.ts
-    // resolve() maps (task|work_order, verb) onto the action registry, and the
-    // six-slot card's "…" sheet drives snooze/complete through that grammar.
-    expect(KIND_STREAM.task).toBeDefined();
-    expect(KIND_STREAM.work_order).toBeDefined();
-    expect(AFFORDANCES.task).toContain("snooze");
-    expect(AFFORDANCES.task).toContain("do");
-    expect(AFFORDANCES.work_order).toContain("do");
+  it("tasks are gone from Needs You's grammar entirely, and so is the Convert verb (Wave 1, W1-16)", () => {
+    // A job's tasks live on its Tasks chip and a person's Reminders in Today's 6 (0358): no task or
+    // work_order kind, no stream for one, and no Convert sheet on any row. (The registry keeps
+    // task.* and inquiry.convert for Nort; Needs You reaches neither.)
+    expect(Object.keys(KIND_STREAM)).not.toContain("task");
+    expect(Object.keys(KIND_STREAM)).not.toContain("work_order");
+    expect(Object.keys(AFFORDANCES)).toEqual(Object.keys(KIND_STREAM));
+    for (const [kind, verbs] of Object.entries(AFFORDANCES)) expect(verbs as string[], kind).not.toContain("convert");
+    const dispatchSrc = src("lib/action-items/dispatch.ts");
+    expect(dispatchSrc).not.toContain('"convert"');
+    expect(dispatchSrc).not.toContain("ConvertTarget");
+    expect(dispatchSrc).not.toContain("isTask");
   });
 
   it("the supplier bills ride as ONE rolled-up item, however many papers wait (Bills plan, Wave A)", () => {
